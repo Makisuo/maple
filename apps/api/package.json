@@ -7,8 +7,8 @@
   },
   "scripts": {
     "db:migrate": "mkdir -p .data && bun run --cwd ../../packages/db db:migrate",
-    "dev": "bun run --watch src/index.ts",
-    "start": "bun run src/index.ts",
+    "dev": "bun run --env-file ../../.env.local --watch src/index.ts",
+    "start": "bun run --env-file ../../.env.local src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "tinybird:dev": "tinybird dev",

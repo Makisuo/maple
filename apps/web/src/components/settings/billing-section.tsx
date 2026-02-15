@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 import { useCustomer } from "autumn-js/react"
-import { PricingTable } from "autumn-js/react"
+import { PricingCards } from "./pricing-cards"
 import { format } from "date-fns"
 
 import { Skeleton } from "@/components/ui/skeleton"
@@ -94,7 +94,7 @@ export function BillingSection() {
               <Skeleton className="h-32 w-full" />
             </div>
           ) : (
-            <PricingTable />
+            <PricingCards />
           )}
         </CardContent>
       </Card>
