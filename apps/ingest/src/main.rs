@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
@@ -18,6 +18,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
 use libsql::{params, Builder, Database};
+use metrics::{counter, gauge, histogram};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -28,7 +29,7 @@ use reqwest::Client;
 use serde::Serialize;
 use sha2::Sha256;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{error, info};
+use tracing::{debug, error, info, warn, Span};
 
 const INGEST_SOURCE: &str = "maple-ingest-gateway";
 
@@ -134,6 +135,7 @@ struct AppState {
     config: AppConfig,
     http_client: Client,
     resolver: IngestKeyResolver,
+    metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
 }
 
 #[derive(Clone)]
@@ -172,6 +174,19 @@ impl Signal {
             Self::Logs => "logs",
             Self::Metrics => "metrics",
         }
+    }
+}
+
+struct EnrichResult {
+    payload: Vec<u8>,
+    item_count: usize,
+}
+
+struct InFlightGuard;
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        gauge!("ingest_requests_in_flight").decrement(1.0);
     }
 }
 
@@ -239,6 +254,10 @@ async fn main() {
         .compact()
         .init();
 
+    let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .install_recorder()
+        .expect("Failed to install metrics recorder");
+
     let config = match AppConfig::from_env() {
         Ok(config) => config,
         Err(error) => {
@@ -270,6 +289,7 @@ async fn main() {
         },
         http_client,
         config: config.clone(),
+        metrics_handle: prometheus_handle,
     });
 
     let cors = CorsLayer::new()
@@ -284,6 +304,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/metrics", get(serve_metrics))
         .route("/v1/traces", post(handle_traces))
         .route("/v1/logs", post(handle_logs))
         .route("/v1/metrics", post(handle_metrics))
@@ -303,6 +324,7 @@ async fn main() {
         port = config.port,
         forward_endpoint = %config.forward_endpoint,
         require_tls = config.require_tls,
+        max_body_bytes = config.max_request_body_bytes,
         "Maple ingest server listening"
     );
 
@@ -314,6 +336,10 @@ async fn main() {
 
 async fn health() -> &'static str {
     "OK"
+}
+
+async fn serve_metrics(State(state): State<Arc<AppState>>) -> String {
+    state.metrics_handle.render()
 }
 
 async fn handle_traces(
@@ -346,33 +372,100 @@ async fn handle_signal(
     body: Bytes,
     signal: Signal,
 ) -> Response {
-    match handle_signal_inner(state, headers, body, signal).await {
-        Ok(response) => response,
-        Err(error) => error.into_response(),
+    let start = Instant::now();
+    let body_bytes = body.len();
+
+    gauge!("ingest_requests_in_flight").increment(1.0);
+    let _guard = InFlightGuard;
+
+    let span = tracing::info_span!(
+        "ingest",
+        signal = signal.path(),
+        body_bytes,
+        org_id = tracing::field::Empty,
+        key_type = tracing::field::Empty,
+    );
+    let _enter = span.enter();
+
+    let result = handle_signal_inner(&state, &headers, body, signal).await;
+    let duration = start.elapsed();
+    let duration_ms = duration.as_millis() as u64;
+
+    match result {
+        Ok((response, item_count, _org_id)) => {
+            let status_code = response.status().as_u16();
+            histogram!("ingest_request_duration_seconds", "signal" => signal.path(), "status" => "ok")
+                .record(duration.as_secs_f64());
+            counter!("ingest_requests_total", "signal" => signal.path(), "status" => "ok", "error_kind" => "none")
+                .increment(1);
+            info!(
+                status = status_code,
+                duration_ms,
+                item_count,
+                "Request processed"
+            );
+            response
+        }
+        Err((error, error_kind)) => {
+            histogram!("ingest_request_duration_seconds", "signal" => signal.path(), "status" => "error")
+                .record(duration.as_secs_f64());
+            counter!("ingest_requests_total", "signal" => signal.path(), "status" => "error", "error_kind" => error_kind)
+                .increment(1);
+            error.into_response()
+        }
     }
 }
 
+/// Returns Ok((response, item_count, org_id)) or Err((ApiError, error_kind_label))
 async fn handle_signal_inner(
-    state: Arc<AppState>,
-    headers: HeaderMap,
+    state: &AppState,
+    headers: &HeaderMap,
     body: Bytes,
     signal: Signal,
-) -> Result<Response, ApiError> {
-    let ingest_key = extract_ingest_key(&headers)
-        .ok_or_else(|| ApiError::unauthorized("Missing ingest key"))?;
+) -> Result<(Response, usize, String), (ApiError, &'static str)> {
+    // --- Auth ---
+    let ingest_key = extract_ingest_key(headers).ok_or_else(|| {
+        warn!("Missing ingest key");
+        (ApiError::unauthorized("Missing ingest key"), "auth")
+    })?;
 
+    let key_resolve_start = Instant::now();
     let resolved_key = state
         .resolver
         .resolve_ingest_key(&ingest_key)
         .await
         .map_err(|error| {
             error!(error = %error, "Ingest key resolution failed");
-            ApiError::service_unavailable("Ingest authentication unavailable")
+            (
+                ApiError::service_unavailable("Ingest authentication unavailable"),
+                "auth",
+            )
         })?
-        .ok_or_else(|| ApiError::unauthorized("Invalid ingest key"))?;
+        .ok_or_else(|| {
+            warn!("Unknown ingest key");
+            (ApiError::unauthorized("Invalid ingest key"), "auth")
+        })?;
+    histogram!("ingest_key_resolution_duration_seconds")
+        .record(key_resolve_start.elapsed().as_secs_f64());
 
+    Span::current().record("org_id", &resolved_key.org_id.as_str());
+    Span::current().record("key_type", resolved_key.key_type.as_str());
+    debug!(
+        resolve_ms = key_resolve_start.elapsed().as_millis() as u64,
+        "Authenticated"
+    );
+
+    // --- Payload validation ---
     if body.len() > state.config.max_request_body_bytes {
-        return Err(ApiError::payload_too_large("Request body too large"));
+        warn!(
+            body_bytes = body.len(),
+            max_bytes = state.config.max_request_body_bytes,
+            "Payload too large"
+        );
+        return Err((
+            ApiError::payload_too_large("Request body too large"),
+            "payload_too_large",
+        ));
     }
 
     let content_type = headers
@@ -381,7 +474,10 @@ async fn handle_signal_inner(
         .unwrap_or("application/x-protobuf")
         .to_ascii_lowercase();
 
-    let payload_format = detect_payload_format(&content_type)?;
+    let payload_format = detect_payload_format(&content_type).map_err(|e| {
+        warn!(content_type = %content_type, "Unsupported content type");
+        (e, "unsupported_media")
+    })?;
 
     let content_encoding = headers
         .get(CONTENT_ENCODING)
@@ -389,14 +485,50 @@ async fn handle_signal_inner(
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty() && value != "identity");
 
-    let decoded_payload = decode_payload(&body, content_encoding.as_deref())?;
+    histogram!("ingest_request_body_bytes", "signal" => signal.path())
+        .record(body.len() as f64);
 
-    let enriched_payload = enrich_payload(signal, payload_format, &decoded_payload, &resolved_key)?;
+    // --- Decode ---
+    let decoded_payload = decode_payload(&body, content_encoding.as_deref()).map_err(|e| {
+        warn!(body_bytes = body.len(), "Failed to decode payload");
+        (e, "decode")
+    })?;
 
-    let outbound_body = encode_payload(&enriched_payload, content_encoding.as_deref())?;
+    let encoding_label = content_encoding.as_deref().unwrap_or("identity");
+    debug!(
+        decoded_bytes = decoded_payload.len(),
+        encoding = encoding_label,
+        "Payload decoded"
+    );
+    histogram!("ingest_decoded_body_bytes", "signal" => signal.path())
+        .record(decoded_payload.len() as f64);
 
-    forward_to_collector(
-        &state,
+    // --- Enrich ---
+    let enrich_result =
+        enrich_payload(signal, payload_format, &decoded_payload, &resolved_key).map_err(|e| {
+            warn!(
+                format = payload_format.label(),
+                "Invalid OTLP payload"
+            );
+            (e, "enrich")
+        })?;
+
+    debug!(item_count = enrich_result.item_count, "Payload enriched");
+    counter!(
+        "ingest_items_total",
+        "signal" => signal.path(),
+        "org_id" => resolved_key.org_id.clone()
+    )
+    .increment(enrich_result.item_count as u64);
+
+    // --- Encode & Forward ---
+    let outbound_body =
+        encode_payload(&enrich_result.payload, content_encoding.as_deref()).map_err(|e| {
+            (e, "encode")
+        })?;
+
+    let response = forward_to_collector(
+        state,
         signal,
         payload_format.content_type(),
         content_encoding.as_deref(),
@@ -404,6 +536,9 @@ async fn handle_signal_inner(
         &resolved_key,
     )
     .await
+    .map_err(|e| (e, "forward"))?;
+
+    Ok((response, enrich_result.item_count, resolved_key.org_id.clone()))
 }
 
 fn extract_ingest_key(headers: &HeaderMap) -> Option<String> {
@@ -435,6 +570,13 @@ impl PayloadFormat {
         match self {
             Self::Protobuf => "application/x-protobuf",
             Self::Json => "application/json",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Protobuf => "protobuf",
+            Self::Json => "json",
         }
     }
 }
@@ -493,48 +635,84 @@ fn enrich_payload(
     payload_format: PayloadFormat,
     payload: &[u8],
     resolved_key: &ResolvedIngestKey,
-) -> Result<Vec<u8>, ApiError> {
+) -> Result<EnrichResult, ApiError> {
     match (signal, payload_format) {
         (Signal::Traces, PayloadFormat::Protobuf) => {
             let mut request = ExportTraceServiceRequest::decode(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP traces protobuf payload"))?;
             enrich_trace_request(&mut request, resolved_key);
-            Ok(request.encode_to_vec())
+            let item_count = count_trace_items(&request);
+            Ok(EnrichResult { payload: request.encode_to_vec(), item_count })
         }
         (Signal::Logs, PayloadFormat::Protobuf) => {
             let mut request = ExportLogsServiceRequest::decode(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP logs protobuf payload"))?;
             enrich_logs_request(&mut request, resolved_key);
-            Ok(request.encode_to_vec())
+            let item_count = count_log_items(&request);
+            Ok(EnrichResult { payload: request.encode_to_vec(), item_count })
         }
         (Signal::Metrics, PayloadFormat::Protobuf) => {
             let mut request = ExportMetricsServiceRequest::decode(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP metrics protobuf payload"))?;
             enrich_metrics_request(&mut request, resolved_key);
-            Ok(request.encode_to_vec())
+            let item_count = count_metric_items(&request);
+            Ok(EnrichResult { payload: request.encode_to_vec(), item_count })
         }
         (Signal::Traces, PayloadFormat::Json) => {
             let mut request: ExportTraceServiceRequest = serde_json::from_slice(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP traces JSON payload"))?;
             enrich_trace_request(&mut request, resolved_key);
-            serde_json::to_vec(&request)
-                .map_err(|_| ApiError::service_unavailable("Failed to serialize traces payload"))
+            let item_count = count_trace_items(&request);
+            let payload = serde_json::to_vec(&request)
+                .map_err(|_| ApiError::service_unavailable("Failed to serialize traces payload"))?;
+            Ok(EnrichResult { payload, item_count })
         }
         (Signal::Logs, PayloadFormat::Json) => {
             let mut request: ExportLogsServiceRequest = serde_json::from_slice(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP logs JSON payload"))?;
             enrich_logs_request(&mut request, resolved_key);
-            serde_json::to_vec(&request)
-                .map_err(|_| ApiError::service_unavailable("Failed to serialize logs payload"))
+            let item_count = count_log_items(&request);
+            let payload = serde_json::to_vec(&request)
+                .map_err(|_| ApiError::service_unavailable("Failed to serialize logs payload"))?;
+            Ok(EnrichResult { payload, item_count })
         }
         (Signal::Metrics, PayloadFormat::Json) => {
             let mut request: ExportMetricsServiceRequest = serde_json::from_slice(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP metrics JSON payload"))?;
             enrich_metrics_request(&mut request, resolved_key);
-            serde_json::to_vec(&request)
-                .map_err(|_| ApiError::service_unavailable("Failed to serialize metrics payload"))
+            let item_count = count_metric_items(&request);
+            let payload = serde_json::to_vec(&request)
+                .map_err(|_| ApiError::service_unavailable("Failed to serialize metrics payload"))?;
+            Ok(EnrichResult { payload, item_count })
         }
     }
+}
+
+fn count_trace_items(request: &ExportTraceServiceRequest) -> usize {
+    request
+        .resource_spans
+        .iter()
+        .flat_map(|rs| &rs.scope_spans)
+        .map(|ss| ss.spans.len())
+        .sum()
+}
+
+fn count_log_items(request: &ExportLogsServiceRequest) -> usize {
+    request
+        .resource_logs
+        .iter()
+        .flat_map(|rl| &rl.scope_logs)
+        .map(|sl| sl.log_records.len())
+        .sum()
+}
+
+fn count_metric_items(request: &ExportMetricsServiceRequest) -> usize {
+    request
+        .resource_metrics
+        .iter()
+        .flat_map(|rm| &rm.scope_metrics)
+        .map(|sm| sm.metrics.len())
+        .sum()
 }
 
 fn enrich_trace_request(request: &mut ExportTraceServiceRequest, resolved_key: &ResolvedIngestKey) {
@@ -597,10 +775,13 @@ async fn forward_to_collector(
     resolved_key: &ResolvedIngestKey,
 ) -> Result<Response, ApiError> {
     let url = format!("{}/v1/{}", state.config.forward_endpoint, signal.path());
+    let outbound_bytes = body.len();
+
+    debug!(url = %url, outbound_bytes, "Forwarding to collector");
 
     let mut request_builder = state
         .http_client
-        .request(Method::POST, url)
+        .request(Method::POST, &url)
         .header(CONTENT_TYPE, content_type)
         .body(body);
 
@@ -608,23 +789,55 @@ async fn forward_to_collector(
         request_builder = request_builder.header(CONTENT_ENCODING, content_encoding);
     }
 
+    let forward_start = Instant::now();
     let response = request_builder.send().await.map_err(|error| {
+        let forward_duration = forward_start.elapsed();
+        histogram!("ingest_forward_duration_seconds", "signal" => signal.path())
+            .record(forward_duration.as_secs_f64());
+        counter!("ingest_forward_responses_total", "signal" => signal.path(), "upstream_status" => "error")
+            .increment(1);
         error!(
             error = %error,
             signal = signal.path(),
             org_id = %resolved_key.org_id,
             key_id = %resolved_key.key_id,
+            url = %url,
             "Collector forwarding failed"
         );
         ApiError::service_unavailable("Telemetry backend unavailable")
     })?;
 
+    let forward_duration = forward_start.elapsed();
+    histogram!("ingest_forward_duration_seconds", "signal" => signal.path())
+        .record(forward_duration.as_secs_f64());
+
+    let upstream_status_code = response.status().as_u16();
+    let status_bucket = match upstream_status_code {
+        200..=299 => "2xx",
+        400..=499 => "4xx",
+        500..=599 => "5xx",
+        _ => "other",
+    };
+    counter!("ingest_forward_responses_total", "signal" => signal.path(), "upstream_status" => status_bucket)
+        .increment(1);
+
+    debug!(
+        upstream_status = upstream_status_code,
+        forward_ms = forward_duration.as_millis() as u64,
+        "Collector response"
+    );
+
     if response.status().is_server_error() {
+        error!(
+            upstream_status = upstream_status_code,
+            signal = signal.path(),
+            org_id = %resolved_key.org_id,
+            "Collector returned error"
+        );
         return Err(ApiError::service_unavailable("Telemetry backend unavailable"));
     }
 
-    let status = StatusCode::from_u16(response.status().as_u16())
-        .unwrap_or(StatusCode::BAD_GATEWAY);
+    let status = StatusCode::from_u16(upstream_status_code).unwrap_or(StatusCode::BAD_GATEWAY);
 
     let upstream_content_type = response.headers().get(CONTENT_TYPE).cloned();
     let upstream_body = response.bytes().await.map_err(|error| {
