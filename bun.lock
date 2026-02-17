@@ -39,6 +39,7 @@
     "apps/docs": {
       "name": "docs",
       "dependencies": {
+        "@fontsource-variable/geist-mono": "^5.1.1",
         "@tanstack/react-router": "1.159.5",
         "@tanstack/react-router-devtools": "1.159.5",
         "@tanstack/react-start": "1.159.5",

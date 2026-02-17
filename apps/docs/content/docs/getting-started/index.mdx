@@ -1,0 +1,55 @@
+---
+title: Getting Started
+description: Architecture overview, ingest endpoints, and authentication for Maple.
+icon: Rocket
+---
+
+## Architecture
+
+Maple consists of the following components:
+
+| Component | Default Port | Description |
+|-----------|-------------|-------------|
+| **Ingest Gateway** | `3474` | Receives OTLP telemetry, authenticates requests, and forwards to the collector |
+| **OTel Collector** | `4317` (gRPC), `4318` (HTTP) | Processes and exports telemetry to Tinybird |
+| **Dashboard** | `3471` | Web UI for exploring traces, logs, and metrics |
+| **API** | `3472` | Backend API for the dashboard |
+
+Your services send telemetry to the **Ingest Gateway** (port `3474`), not directly to the collector.
+
+## Ingest Endpoints
+
+The ingest gateway exposes standard OTLP/HTTP endpoints:
+
+| Endpoint | Signal |
+|----------|--------|
+| `POST /v1/traces` | Traces (spans) |
+| `POST /v1/logs` | Logs |
+| `POST /v1/metrics` | Metrics |
+
+## Authentication
+
+Every request to the ingest gateway must include an ingest key. You can pass it in one of two ways:
+
+```bash
+# Option 1: Authorization header (recommended)
+Authorization: Bearer maple_pk_your_key_here
+
+# Option 2: Custom header
+x-maple-ingest-key: maple_pk_your_key_here
+```
+
+Ingest keys are created in the Maple dashboard under **Settings**. Keys use the prefix `maple_pk_` (public) or `maple_sk_` (private).
+
+## Supported Formats
+
+The gateway accepts the following content types:
+
+- **Protobuf** (default) — `application/x-protobuf`
+- **JSON** — `application/json`
+- **gzip** — Set `Content-Encoding: gzip` to send compressed payloads
+
+<Cards>
+  <Card title="Quickstart" href="/docs/getting-started/quickstart" description="Send a test trace with curl in under 2 minutes." />
+  <Card title="Node.js Integration" href="/docs/integrations/node-js" description="Full guide for instrumenting Node.js apps." />
+</Cards>

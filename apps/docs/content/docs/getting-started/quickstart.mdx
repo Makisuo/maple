@@ -1,0 +1,70 @@
+---
+title: Quickstart
+description: Send your first trace to Maple in under 2 minutes using curl.
+icon: Zap
+---
+
+This guide walks you through sending a test trace to Maple using `curl`. No SDK required.
+
+## Step 1: Get your ingest key
+
+Open the Maple dashboard and navigate to **Settings**. Create or copy an ingest key (it starts with `maple_pk_` or `maple_sk_`).
+
+## Step 2: Set environment variables
+
+```bash
+export MAPLE_INGEST_URL="http://localhost:3474"
+export MAPLE_INGEST_KEY="maple_pk_your_key_here"
+```
+
+Replace `localhost:3474` with your Maple ingest gateway address if running remotely.
+
+## Step 3: Send a test trace
+
+Send a minimal OTLP JSON trace:
+
+```bash
+curl -X POST "$MAPLE_INGEST_URL/v1/traces" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MAPLE_INGEST_KEY" \
+  -d '{
+    "resourceSpans": [{
+      "resource": {
+        "attributes": [{
+          "key": "service.name",
+          "value": { "stringValue": "test-service" }
+        }]
+      },
+      "scopeSpans": [{
+        "scope": { "name": "quickstart" },
+        "spans": [{
+          "traceId": "'"$(openssl rand -hex 16)"'",
+          "spanId": "'"$(openssl rand -hex 8)"'",
+          "name": "hello-maple",
+          "kind": 1,
+          "startTimeUnixNano": "'"$(date +%s)000000000"'",
+          "endTimeUnixNano": "'"$(( $(date +%s) + 1 ))000000000"'",
+          "status": { "code": 1 }
+        }]
+      }]
+    }]
+  }'
+```
+
+You should receive an empty `200` response (or a protobuf response body depending on your setup).
+
+## Step 4: Verify in the dashboard
+
+Open the Maple dashboard at `http://localhost:3471` and navigate to:
+
+1. **Traces** — You should see a trace for `hello-maple`
+2. **Services** — `test-service` should appear in the service list
+
+It may take a few seconds for data to propagate through the collector to Tinybird.
+
+## Next steps
+
+<Cards>
+  <Card title="Node.js Integration" href="/docs/integrations/node-js" description="Full auto-instrumentation for Node.js apps." />
+  <Card title="Integrations" href="/docs/integrations" description="Browse all language integrations." />
+</Cards>

@@ -1,31 +1,28 @@
 ---
-title: Hello World
-description: Your favourite docs framework.
-icon: Rocket
+title: Maple Documentation
+description: Open-source OpenTelemetry observability platform. Collect, store, and visualize traces, logs, and metrics from your distributed systems.
+icon: BookOpen
 ---
 
-Hey there! Fumadocs is the docs framework that also works on Tanstack Start!
+Maple is an open-source observability platform built on [OpenTelemetry](https://opentelemetry.io/). It collects traces, logs, and metrics from your services via standard OTLP and gives you a real-time dashboard to understand what's happening in your system.
 
-## Heading
+## How it works
 
-Hello World!
-
-<Cards>
-  <Card title="Learn more about Tanstack Start" href="https://tanstack.com/start" />
-  <Card title="Learn more about Fumadocs" href="https://fumadocs.dev" />
-</Cards>
-
-### CodeBlock
-
-```ts
-console.log('Hello World');
+```
+Your Service          Ingest Gateway          OTel Collector          Tinybird          Dashboard
+   │                      │                       │                    │                  │
+   ├─── OTLP/HTTP ───────►│                       │                    │                  │
+   │                      ├── auth + enrich ──────►│                    │                  │
+   │                      │                       ├──── store ─────────►│                  │
+   │                      │                       │                    ├─── query ────────►│
 ```
 
-#### Table
+1. **Instrument** your app with any OpenTelemetry SDK
+2. **Send** telemetry to Maple's ingest gateway over OTLP/HTTP
+3. **Store** data in Tinybird via the OpenTelemetry Collector
+4. **Visualize** traces, logs, and metrics in the Maple dashboard
 
-| Head                            | Description                         |
-| ------------------------------- | ----------------------------------- |
-| `hello`                         | Hello World                         |
-| very **important**              | Hey                                 |
-| _Surprisingly_                  | Fumadocs                            |
-| very long text that looks weird | hello world hello world hello world |
+<Cards>
+  <Card title="Getting Started" href="/docs/getting-started" description="Set up Maple and send your first trace." />
+  <Card title="Integrations" href="/docs/integrations" description="Language-specific guides for OpenTelemetry SDKs." />
+</Cards>

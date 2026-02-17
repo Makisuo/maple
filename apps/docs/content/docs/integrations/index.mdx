@@ -1,0 +1,40 @@
+---
+title: Integrations
+description: Connect any OpenTelemetry-compatible SDK to Maple.
+icon: Blocks
+---
+
+Maple accepts standard [OTLP/HTTP](https://opentelemetry.io/docs/specs/otlp/) telemetry, which means **any OpenTelemetry SDK** can send data to it. You just need to configure the OTLP exporter to point at your Maple ingest gateway.
+
+The general pattern for any language is:
+
+1. Install the OpenTelemetry SDK and OTLP exporter for your language
+2. Set the exporter endpoint to your Maple ingest gateway (`http://localhost:3474`)
+3. Add the authorization header with your ingest key
+4. Run your app
+
+## Language Guides
+
+<Cards>
+  <Card title="Node.js" href="/docs/integrations/node-js" description="Auto-instrumentation for Express, Fastify, Next.js, and more." />
+</Cards>
+
+### Coming Soon
+
+- **Python** — Django, Flask, FastAPI
+- **Go** — net/http, gRPC, Gin
+- **Java** — Spring Boot, Quarkus
+- **Rust** — tracing + opentelemetry crate
+
+## Generic OTLP Configuration
+
+For any language, you can configure the standard OpenTelemetry environment variables:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:3474"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer maple_pk_your_key_here"
+export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
+export OTEL_SERVICE_NAME="my-service"
+```
+
+Most OpenTelemetry SDKs will pick these up automatically.

@@ -1,0 +1,176 @@
+---
+title: Node.js
+description: Instrument your Node.js application with OpenTelemetry and send traces, logs, and metrics to Maple.
+icon: FileCode
+---
+
+This guide covers how to instrument a Node.js application with OpenTelemetry and send telemetry data to Maple. It works with any Node.js framework — Express, Fastify, Hono, Next.js, NestJS, etc.
+
+## Prerequisites
+
+- Node.js 18 or later
+- A running Maple instance with an ingest key (see [Getting Started](/docs/getting-started))
+
+## Install packages
+
+```bash
+npm install @opentelemetry/sdk-node \
+  @opentelemetry/auto-instrumentations-node \
+  @opentelemetry/exporter-trace-otlp-proto \
+  @opentelemetry/exporter-logs-otlp-proto \
+  @opentelemetry/exporter-metrics-otlp-proto
+```
+
+These packages provide:
+
+| Package | Purpose |
+|---------|---------|
+| `@opentelemetry/sdk-node` | Core SDK for Node.js |
+| `@opentelemetry/auto-instrumentations-node` | Automatic instrumentation for HTTP, Express, pg, redis, etc. |
+| `@opentelemetry/exporter-trace-otlp-proto` | Exports traces via OTLP/HTTP (protobuf) |
+| `@opentelemetry/exporter-logs-otlp-proto` | Exports logs via OTLP/HTTP (protobuf) |
+| `@opentelemetry/exporter-metrics-otlp-proto` | Exports metrics via OTLP/HTTP (protobuf) |
+
+## Create `instrumentation.ts`
+
+Create an `instrumentation.ts` file in your project root:
+
+```ts title="instrumentation.ts"
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
+
+const MAPLE_INGEST_URL = process.env.MAPLE_INGEST_URL || "http://localhost:3474";
+const MAPLE_INGEST_KEY = process.env.MAPLE_INGEST_KEY || "";
+
+const headers = {
+  Authorization: `Bearer ${MAPLE_INGEST_KEY}`,
+};
+
+const sdk = new NodeSDK({
+  serviceName: process.env.OTEL_SERVICE_NAME || "my-node-app",
+  traceExporter: new OTLPTraceExporter({
+    url: `${MAPLE_INGEST_URL}/v1/traces`,
+    headers,
+  }),
+  metricReader: new PeriodicExportingMetricReader({
+    exporter: new OTLPMetricExporter({
+      url: `${MAPLE_INGEST_URL}/v1/metrics`,
+      headers,
+    }),
+  }),
+  logRecordProcessor: new BatchLogRecordProcessor(
+    new OTLPLogExporter({
+      url: `${MAPLE_INGEST_URL}/v1/logs`,
+      headers,
+    })
+  ),
+  instrumentations: [getNodeAutoInstrumentations()],
+});
+
+sdk.start();
+
+process.on("SIGTERM", () => {
+  sdk.shutdown().then(() => process.exit(0));
+});
+```
+
+This configures the OpenTelemetry SDK to:
+
+- Export **traces**, **logs**, and **metrics** to your Maple ingest gateway
+- Automatically instrument common libraries (HTTP, Express, database drivers, etc.)
+- Gracefully flush on shutdown
+
+## Environment variables
+
+Set the following before running your app:
+
+```bash
+export MAPLE_INGEST_URL="http://localhost:3474"
+export MAPLE_INGEST_KEY="maple_pk_your_key_here"
+export OTEL_SERVICE_NAME="my-node-app"
+```
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MAPLE_INGEST_URL` | Maple ingest gateway URL | `http://localhost:3474` |
+| `MAPLE_INGEST_KEY` | Your Maple ingest key | — |
+| `OTEL_SERVICE_NAME` | Name shown in Maple dashboard | `my-node-app` |
+
+## Run the app
+
+Load the instrumentation file before your app code using Node's `--import` flag:
+
+```bash
+node --import ./instrumentation.ts app.ts
+```
+
+If you're using CommonJS or a compiled setup:
+
+```bash
+node --require ./instrumentation.js app.js
+```
+
+For `tsx` or `ts-node`:
+
+```bash
+tsx --import ./instrumentation.ts app.ts
+```
+
+## Alternative: env-var-only setup
+
+If you prefer zero code configuration, you can use environment variables with the OpenTelemetry auto-instrumentation register module:
+
+```bash
+npm install @opentelemetry/auto-instrumentations-node
+```
+
+Then run your app with:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:3474"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer maple_pk_your_key_here"
+export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
+export OTEL_SERVICE_NAME="my-node-app"
+
+node --require @opentelemetry/auto-instrumentations-node/register app.js
+```
+
+This approach uses the standard OpenTelemetry environment variables and requires no instrumentation file. It exports traces and metrics automatically, though log export requires the programmatic setup above.
+
+## Verify in Maple
+
+After running your app and generating some traffic, open the Maple dashboard:
+
+1. **Traces** — Look for spans from your service. Click a trace to see the full span waterfall.
+2. **Services** — Your service name should appear in the service list with request rate and error rate.
+3. **Logs** — If using the programmatic setup with log export, logs will appear here.
+
+Data typically appears within a few seconds of being generated.
+
+## Troubleshooting
+
+### No data appearing
+
+- **Check the ingest URL** — Make sure `MAPLE_INGEST_URL` points to the ingest gateway (port `3474`), not the dashboard (`3471`) or collector (`4317`/`4318`).
+- **Check the ingest key** — Verify your key is correct and active in Settings.
+- **Check network connectivity** — Run `curl -v $MAPLE_INGEST_URL/v1/traces` to verify the gateway is reachable.
+
+### "Unsupported media type" errors
+
+The gateway expects `application/x-protobuf` (default) or `application/json`. If you're using a different exporter format, switch to the `-proto` or `-http` exporter packages.
+
+### Missing spans or high latency
+
+- The auto-instrumentation batches spans before export. By default this flushes every 5 seconds or when the batch reaches 512 spans.
+- For development, you can use `SimpleSpanProcessor` instead of the default `BatchSpanProcessor` for immediate export, but this is not recommended for production.
+
+### Framework-specific notes
+
+- **Next.js** — Place `instrumentation.ts` at the project root. Next.js automatically loads it via the [instrumentation hook](https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation).
+- **NestJS** — Import the instrumentation file at the top of `main.ts` before any other imports.
+- **Express/Fastify** — The auto-instrumentation handles these automatically. No additional setup needed.
