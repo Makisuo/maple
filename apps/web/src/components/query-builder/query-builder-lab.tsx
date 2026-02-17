@@ -35,6 +35,7 @@ import {
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 import {
   getLogsFacetsResultAtom,
+  getQueryBuilderTimeseriesResultAtom,
   getTracesFacetsResultAtom,
   listMetricsResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
@@ -42,7 +43,7 @@ import {
   type FormulaDraft,
   type TimeseriesPoint,
 } from "@/components/query-builder/formula-results"
-import { getQueryBuilderTimeseries } from "@/api/tinybird/query-builder-timeseries"
+import { type QueryBuilderTimeseriesInput } from "@/api/tinybird/query-builder-timeseries"
 import {
   AGGREGATIONS_BY_SOURCE,
   createFormulaDraft,
@@ -60,16 +61,6 @@ type DataSource = QueryBuilderDataSource
 type QueryDraft = QueryBuilderQueryDraft
 type MetricType = QueryBuilderMetricType
 type AddOnKey = keyof QueryDraft["addOns"]
-
-interface LabRunResult {
-  queryId: string
-  queryName: string
-  source: string
-  status: "success" | "error"
-  error: string | null
-  warnings: string[]
-  data: TimeseriesPoint[]
-}
 
 interface MetricOption {
   value: string
@@ -175,6 +166,96 @@ function debugWarnings(debug: unknown): string[] {
   return warnings
 }
 
+function QueryBuilderAtomResults({
+  input,
+}: {
+  input: QueryBuilderTimeseriesInput
+}) {
+  const result = useAtomValue(
+    getQueryBuilderTimeseriesResultAtom({ data: input }),
+  )
+
+  return (
+    <>
+      {Result.builder(result)
+        .onInitial(() => (
+          <p className="text-xs text-muted-foreground">Running query...</p>
+        ))
+        .onError((error) => (
+          <div className="space-y-2 border p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="font-mono">
+                Combined result
+              </Badge>
+              <Badge variant="destructive">error</Badge>
+              <span className="text-[11px] text-muted-foreground">query_engine</span>
+            </div>
+            <p className="text-[11px] text-destructive">{error.message}</p>
+          </div>
+        ))
+        .onSuccess((response) => {
+          const data = toRunPoints(response.data)
+          const warnings = debugWarnings(response.debug)
+          const seriesKeys = Array.from(
+            new Set(data.flatMap((point) => Object.keys(point.series))),
+          ).slice(0, 6)
+
+          return (
+            <div className="space-y-2 border p-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="font-mono">
+                  Combined result
+                </Badge>
+                <Badge variant="secondary">success</Badge>
+                <span className="text-[11px] text-muted-foreground">query_engine</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {data.length} buckets
+                </span>
+              </div>
+
+              {warnings.length > 0 && (
+                <div className="space-y-1">
+                  {warnings.map((warning, index) => (
+                    <p key={`w-${index}`} className="text-[11px] text-muted-foreground">
+                      - {warning}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {data.length > 0 && (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>bucket</TableHead>
+                      {seriesKeys.map((key) => (
+                        <TableHead key={key}>{key}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.slice(0, 12).map((point) => (
+                      <TableRow key={point.bucket}>
+                        <TableCell className="font-mono text-[11px]">
+                          {point.bucket}
+                        </TableCell>
+                        {seriesKeys.map((key) => (
+                          <TableCell key={`${point.bucket}-${key}`} className="font-mono text-[11px]">
+                            {point.series[key] ?? 0}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          )
+        })}
+    </>
+  )
+}
+
 export function QueryBuilderLab({
   startTime,
   endTime,
@@ -187,8 +268,8 @@ export function QueryBuilderLab({
     createFormula(0, ["A", "B"]),
   ])
   const [lastRunAt, setLastRunAt] = React.useState<string | null>(null)
-  const [isRunning, setIsRunning] = React.useState(false)
-  const [runResults, setRunResults] = React.useState<LabRunResult[]>([])
+  const [submittedInput, setSubmittedInput] = React.useState<QueryBuilderTimeseriesInput | null>(null)
+  const [noQueriesError, setNoQueriesError] = React.useState<string | null>(null)
 
   const queryNames = React.useMemo(
     () => queries.map((query) => query.name),
@@ -402,82 +483,18 @@ export function QueryBuilderLab({
     )
   }, [])
 
-  const runQueries = React.useCallback(async () => {
-    setIsRunning(true)
+  const runQueries = React.useCallback(() => {
+    const enabledQueries = queries.filter((query) => query.enabled)
 
-    try {
-      const enabledQueries = queries.filter((query) => query.enabled)
-
-      if (enabledQueries.length === 0) {
-        setRunResults([
-          {
-            queryId: "none",
-            queryName: "-",
-            source: "query_engine",
-            status: "error",
-            error: "No enabled queries to run",
-            warnings: [],
-            data: [],
-          },
-        ])
-        return
-      }
-
-      const response = await getQueryBuilderTimeseries({
-        data: {
-          startTime,
-          endTime,
-          queries,
-          formulas,
-          debug: true,
-        },
-      })
-
-      if (response.error) {
-        setRunResults([
-          {
-            queryId: "combined",
-            queryName: "Combined result",
-            source: "query_engine",
-            status: "error",
-            error: response.error,
-            warnings: [],
-            data: [],
-          },
-        ])
-        return
-      }
-
-      setRunResults([
-        {
-          queryId: "combined",
-          queryName: "Combined result",
-          source: "query_engine",
-          status: "success",
-          error: null,
-          warnings: debugWarnings(response.debug),
-          data: toRunPoints(response.data),
-        },
-      ])
-      setLastRunAt(new Date().toLocaleTimeString())
-    } catch (error) {
-      setRunResults([
-        {
-          queryId: "combined",
-          queryName: "Combined result",
-          source: "query_engine",
-          status: "error",
-          error:
-            error instanceof Error
-              ? error.message
-              : "Query execution failed",
-          warnings: [],
-          data: [],
-        },
-      ])
-    } finally {
-      setIsRunning(false)
+    if (enabledQueries.length === 0) {
+      setNoQueriesError("No enabled queries to run")
+      setSubmittedInput(null)
+      return
     }
+
+    setNoQueriesError(null)
+    setSubmittedInput({ startTime, endTime, queries, formulas, debug: true })
+    setLastRunAt(new Date().toLocaleTimeString())
   }, [endTime, formulas, queries, startTime])
 
   return (
@@ -514,9 +531,9 @@ export function QueryBuilderLab({
               last run: {lastRunAt}
             </span>
           )}
-          <Button size="sm" onClick={runQueries} disabled={isRunning}>
+          <Button size="sm" onClick={runQueries}>
             <MagnifierIcon size={14} />
-            {isRunning ? "Running..." : "Run Query"}
+            Run Query
           </Button>
         </div>
       </CardFooter>
@@ -528,82 +545,21 @@ export function QueryBuilderLab({
               <CardTitle className="text-xs">Execution Results</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {runResults.length === 0 ? (
+              {noQueriesError ? (
+                <div className="space-y-2 border p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="font-mono">-</Badge>
+                    <Badge variant="destructive">error</Badge>
+                    <span className="text-[11px] text-muted-foreground">query_engine</span>
+                  </div>
+                  <p className="text-[11px] text-destructive">{noQueriesError}</p>
+                </div>
+              ) : submittedInput ? (
+                <QueryBuilderAtomResults input={submittedInput} />
+              ) : (
                 <p className="text-xs text-muted-foreground">
                   Run query to fetch Tinybird data.
                 </p>
-              ) : (
-                runResults.map((result) => {
-                  const seriesKeys = Array.from(
-                    new Set(result.data.flatMap((point) => Object.keys(point.series))),
-                  ).slice(0, 6)
-
-                  return (
-                    <div key={result.queryId} className="space-y-2 border p-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className="font-mono">
-                          {result.queryName}
-                        </Badge>
-                        <Badge
-                          variant={
-                            result.status === "success" ? "secondary" : "destructive"
-                          }
-                        >
-                          {result.status}
-                        </Badge>
-                        <span className="text-[11px] text-muted-foreground">
-                          {result.source}
-                        </span>
-                        {result.status === "success" && (
-                          <span className="text-[11px] text-muted-foreground">
-                            {result.data.length} buckets
-                          </span>
-                        )}
-                      </div>
-
-                      {result.error && (
-                        <p className="text-[11px] text-destructive">{result.error}</p>
-                      )}
-
-                      {result.warnings.length > 0 && (
-                        <div className="space-y-1">
-                          {result.warnings.map((warning, index) => (
-                            <p key={`${result.queryId}-w-${index}`} className="text-[11px] text-muted-foreground">
-                              - {warning}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-
-                      {result.status === "success" && result.data.length > 0 && (
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>bucket</TableHead>
-                              {seriesKeys.map((key) => (
-                                <TableHead key={key}>{key}</TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {result.data.slice(0, 12).map((point) => (
-                              <TableRow key={`${result.queryId}-${point.bucket}`}>
-                                <TableCell className="font-mono text-[11px]">
-                                  {point.bucket}
-                                </TableCell>
-                                {seriesKeys.map((key) => (
-                                  <TableCell key={`${point.bucket}-${key}`} className="font-mono text-[11px]">
-                                    {point.series[key] ?? 0}
-                                  </TableCell>
-                                ))}
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      )}
-                    </div>
-                  )
-                })
               )}
             </CardContent>
           </Card>
@@ -1070,7 +1026,7 @@ export function QueryBuilderLab({
                   endTime,
                   queries,
                   formulas,
-                  runResults,
+                  submittedInput,
                 },
                 null,
                 2,

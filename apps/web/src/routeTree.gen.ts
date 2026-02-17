@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as QuickStartRouteImport } from './routes/quick-start'
 import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
 import { Route as OrgRequiredRouteImport } from './routes/org-required'
 import { Route as MetricsRouteImport } from './routes/metrics'
@@ -37,6 +38,11 @@ const SignInRoute = SignInRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuickStartRoute = QuickStartRouteImport.update({
+  id: '/quick-start',
+  path: '/quick-start',
   getParentRoute: () => rootRouteImport,
 } as any)
 const QueryBuilderLabRoute = QueryBuilderLabRouteImport.update({
@@ -103,6 +109,7 @@ export interface FileRoutesByFullPath {
   '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
+  '/quick-start': typeof QuickStartRoute
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
@@ -119,6 +126,7 @@ export interface FileRoutesByTo {
   '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
+  '/quick-start': typeof QuickStartRoute
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
@@ -136,6 +144,7 @@ export interface FileRoutesById {
   '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
+  '/quick-start': typeof QuickStartRoute
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
@@ -154,6 +163,7 @@ export interface FileRouteTypes {
     | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
+    | '/quick-start'
     | '/settings'
     | '/sign-in'
     | '/sign-up'
@@ -170,6 +180,7 @@ export interface FileRouteTypes {
     | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
+    | '/quick-start'
     | '/settings'
     | '/sign-in'
     | '/sign-up'
@@ -186,6 +197,7 @@ export interface FileRouteTypes {
     | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
+    | '/quick-start'
     | '/settings'
     | '/sign-in'
     | '/sign-up'
@@ -203,6 +215,7 @@ export interface RootRouteChildren {
   MetricsRoute: typeof MetricsRoute
   OrgRequiredRoute: typeof OrgRequiredRoute
   QueryBuilderLabRoute: typeof QueryBuilderLabRoute
+  QuickStartRoute: typeof QuickStartRoute
   SettingsRoute: typeof SettingsRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
@@ -233,6 +246,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quick-start': {
+      id: '/quick-start'
+      path: '/quick-start'
+      fullPath: '/quick-start'
+      preLoaderRoute: typeof QuickStartRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/query-builder-lab': {
@@ -323,6 +343,7 @@ const rootRouteChildren: RootRouteChildren = {
   MetricsRoute: MetricsRoute,
   OrgRequiredRoute: OrgRequiredRoute,
   QueryBuilderLabRoute: QueryBuilderLabRoute,
+  QuickStartRoute: QuickStartRoute,
   SettingsRoute: SettingsRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,

@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
-import { useAtomSet } from "@effect-atom/atom-react"
-import { Exit } from "effect"
 import { toast } from "sonner"
+import { motion, AnimatePresence } from "motion/react"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import {
@@ -19,22 +18,16 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from "@/components/ui/accordion"
 import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import {
   CheckIcon,
   CopyIcon,
   CircleCheckIcon,
+  RocketIcon,
   HouseIcon,
   PulseIcon,
   FileIcon,
-  LoaderIcon,
 } from "@/components/icons"
 import { CodeBlock } from "@/components/quick-start/code-block"
 import { sdkSnippets, type FrameworkId } from "@/components/quick-start/sdk-snippets"
@@ -71,14 +64,32 @@ function StepIndicator({
   stepNumber: number
   isComplete: boolean
 }) {
-  return isComplete ? (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
-      <CheckIcon size={14} />
-    </span>
-  ) : (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-xs font-medium text-muted-foreground">
-      {stepNumber}
-    </span>
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      {isComplete ? (
+        <motion.span
+          key="complete"
+          initial={{ scale: 0, rotate: -90 }}
+          animate={{ scale: 1, rotate: 0 }}
+          exit={{ scale: 0 }}
+          transition={{ type: "spring", stiffness: 500, damping: 25 }}
+          className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500"
+        >
+          <CheckIcon size={14} />
+        </motion.span>
+      ) : (
+        <motion.span
+          key="number"
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          exit={{ scale: 0 }}
+          transition={{ type: "spring", stiffness: 500, damping: 25 }}
+          className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-xs font-medium text-muted-foreground"
+        >
+          {stepNumber}
+        </motion.span>
+      )}
+    </AnimatePresence>
   )
 }
 
@@ -118,63 +129,13 @@ function CopyableInput({
             title={copied ? "Copied!" : "Copy"}
           >
             {copied ? (
-              <CheckIcon size={14} className="text-emerald-500" />
+              <CheckIcon size={14} className="text-emerald-500 animate-in zoom-in-50 duration-200" />
             ) : (
               <CopyIcon size={14} />
             )}
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>
-    </div>
-  )
-}
-
-function StepCopyCredentials({
-  onComplete,
-}: {
-  onComplete: () => void
-}) {
-  const [apiKey, setApiKey] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const getKeysMutation = useAtomSet(
-    MapleApiAtomClient.mutation("ingestKeys", "get"),
-    { mode: "promiseExit" },
-  )
-
-  useEffect(() => {
-    let cancelled = false
-
-    const load = async () => {
-      setIsLoading(true)
-      const result = await getKeysMutation({})
-      if (cancelled) return
-
-      if (Exit.isSuccess(result)) {
-        setApiKey(result.value.publicKey)
-      }
-      setIsLoading(false)
-    }
-
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [getKeysMutation])
-
-  const displayKey = isLoading ? "Loading..." : (apiKey ?? "Unable to load key")
-
-  return (
-    <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
-        You'll need your ingest endpoint and API key to configure your SDK.
-      </p>
-      <div className="space-y-3">
-        <CopyableInput value={ingestUrl} label="Ingest Endpoint" />
-        <CopyableInput value={displayKey} label="API Key (Public)" />
-      </div>
-      <Button size="sm" variant="outline" onClick={onComplete}>
-        I've copied my credentials
-      </Button>
     </div>
   )
 }
@@ -199,14 +160,23 @@ function FrameworkPills({
               type="button"
               onClick={() => onSelect(snippet.language)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                "relative inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
                 isActive
-                  ? "border-foreground/20 bg-muted text-foreground"
-                  : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <Icon size={14} />
-              {snippet.label}
+              {isActive && (
+                <motion.div
+                  layoutId="framework-pill-bg"
+                  className="absolute inset-0 rounded-full border border-foreground/20 bg-muted"
+                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                />
+              )}
+              <span className="relative z-10 inline-flex items-center gap-1.5">
+                <Icon size={14} />
+                {snippet.label}
+              </span>
             </button>
           )
         })}
@@ -217,31 +187,24 @@ function FrameworkPills({
 
 function StepSetupApp({
   selectedFramework,
+  onSelectFramework,
   onComplete,
+  isComplete,
 }: {
   selectedFramework: FrameworkId | null
+  onSelectFramework: (id: FrameworkId) => void
   onComplete: () => void
+  isComplete: boolean
 }) {
-  const [apiKey, setApiKey] = useState<string | null>(null)
-  const getKeysMutation = useAtomSet(
-    MapleApiAtomClient.mutation("ingestKeys", "get"),
-    { mode: "promiseExit" },
+  const keysResult = useAtomValue(
+    MapleApiAtomClient.query("ingestKeys", "get", {}),
   )
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      const result = await getKeysMutation({})
-      if (cancelled) return
-      if (Exit.isSuccess(result)) {
-        setApiKey(result.value.publicKey)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [getKeysMutation])
+  const displayKey = Result.builder(keysResult)
+    .onSuccess((v) => v.publicKey)
+    .orElse(() => "Loading...")
+
+  const apiKey = Result.isSuccess(keysResult) ? keysResult.value.publicKey : null
 
   function interpolate(template: string) {
     return template
@@ -251,30 +214,42 @@ function StepSetupApp({
 
   const snippet = sdkSnippets.find((s) => s.language === selectedFramework)
 
-  if (!snippet) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Pick a framework above to see setup instructions.
-      </p>
-    )
-  }
-
   return (
     <div className="space-y-5">
-      <div className="space-y-2">
-        <h4 className="text-xs font-medium text-muted-foreground">1. Install dependencies</h4>
-        <CodeBlock code={snippet.install} language="shell" />
+      <FrameworkPills selected={selectedFramework} onSelect={onSelectFramework} />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <CopyableInput value={ingestUrl} label="Ingest Endpoint" />
+        <CopyableInput value={displayKey} label="API Key" />
       </div>
-      <div className="space-y-2">
-        <h4 className="text-xs font-medium text-muted-foreground">2. Add instrumentation</h4>
-        <CodeBlock
-          code={interpolate(snippet.instrument)}
-          language={snippet.label.toLowerCase()}
-        />
-      </div>
-      <Button size="sm" variant="outline" onClick={onComplete}>
-        Done — I've set up my app
-      </Button>
+
+      {snippet ? (
+        <>
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-muted-foreground">1. Install dependencies</h4>
+            <CodeBlock code={snippet.install} language="shell" />
+          </div>
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-muted-foreground">2. Add instrumentation</h4>
+            <CodeBlock
+              code={interpolate(snippet.instrument)}
+              language={snippet.label.toLowerCase()}
+            />
+          </div>
+          {!isComplete && (
+            <Button size="sm" variant="outline" onClick={onComplete}>
+              Mark as done
+              <CheckIcon size={14} />
+            </Button>
+          )}
+        </>
+      ) : (
+        <div className="flex items-center justify-center border border-dashed border-border rounded-md py-8">
+          <p className="text-xs text-muted-foreground">
+            Select a framework above to see setup instructions.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -319,12 +294,23 @@ function StepVerifyData({
 
   if (isComplete) {
     return (
-      <div className="space-y-3">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ type: "spring", stiffness: 400, damping: 25 }}
+        className="space-y-3"
+      >
         <div className="flex items-center gap-2 text-emerald-500">
-          <CircleCheckIcon size={16} />
+          <motion.span
+            initial={{ scale: 0, rotate: -90 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 500, damping: 25, delay: 0.15 }}
+          >
+            <CircleCheckIcon size={16} />
+          </motion.span>
           <span className="text-xs font-medium">Data detected! Your telemetry is flowing.</span>
         </div>
-      </div>
+      </motion.div>
     )
   }
 
@@ -334,7 +320,11 @@ function StepVerifyData({
         Run your instrumented application. We'll automatically detect when data arrives.
       </p>
       <div className="flex items-center gap-2 text-muted-foreground">
-        <LoaderIcon size={14} className="animate-spin" />
+        <div className="flex items-center gap-1">
+          <span className="pulse-dot size-1.5 rounded-full bg-current" />
+          <span className="pulse-dot size-1.5 rounded-full bg-current" />
+          <span className="pulse-dot size-1.5 rounded-full bg-current" />
+        </div>
         <span className="text-xs">Waiting for data...</span>
       </div>
       <Button size="sm" variant="ghost" onClick={onComplete}>
@@ -357,9 +347,12 @@ function StepExplore({ onComplete }: { onComplete: () => void }) {
         Start exploring your observability data.
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
-        {links.map((link) => (
+        {links.map((link, i) => (
           <Link key={link.href} to={link.href} onClick={onComplete}>
-            <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
+            <Card
+              className="hover:bg-muted/50 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards"
+              style={{ animationDelay: `${i * 75}ms`, animationDuration: "400ms" }}
+            >
               <CardHeader className="p-3">
                 <div className="flex items-center gap-2">
                   <link.icon size={14} className="text-muted-foreground" />
@@ -383,19 +376,14 @@ const STEPS: {
   description: string
 }[] = [
   {
-    id: "copy-credentials",
-    title: "Copy your credentials",
-    description: "Get your ingest endpoint and API key",
-  },
-  {
     id: "setup-app",
     title: "Set up your app",
-    description: "Install the SDK and add instrumentation",
+    description: "Choose your framework, grab your credentials, and add instrumentation",
   },
   {
     id: "verify-data",
     title: "Verify data is flowing",
-    description: "We'll auto-detect when your first telemetry arrives",
+    description: "Run your app — we'll auto-detect when telemetry arrives",
   },
   {
     id: "explore",
@@ -424,7 +412,7 @@ function QuickStartPage() {
     <DashboardLayout
       breadcrumbs={[{ label: "Quick Start" }]}
       title="Quick Start"
-      description="Get your first traces flowing in minutes."
+      description="Get your first traces flowing."
       headerActions={
         <div className="flex items-center gap-2">
           {!isDismissed ? (
@@ -453,77 +441,107 @@ function QuickStartPage() {
           </div>
         )}
 
-        {isComplete && (
-          <Card className="border-emerald-500/30 bg-emerald-500/5">
-            <CardContent className="flex items-center gap-3 p-4">
-              <CircleCheckIcon size={20} className="shrink-0 text-emerald-500" />
-              <div>
-                <p className="text-sm font-medium">You're all set!</p>
-                <p className="text-xs text-muted-foreground">
-                  All steps completed. Head to the{" "}
-                  <Link to="/" className="underline underline-offset-2 hover:text-foreground">
-                    Overview
-                  </Link>{" "}
-                  to see your data.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <AnimatePresence>
+          {isComplete && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ type: "spring", stiffness: 400, damping: 25 }}
+            >
+              <Card className="border-emerald-500/30 bg-emerald-500/5">
+                <CardContent className="flex items-center gap-3 p-4">
+                  <motion.span
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 25, delay: 0.2 }}
+                  >
+                    <RocketIcon size={20} className="shrink-0 text-emerald-500" />
+                  </motion.span>
+                  <div>
+                    <p className="text-sm font-medium">You're all set!</p>
+                    <p className="text-xs text-muted-foreground">
+                      All steps completed. Head to the{" "}
+                      <Link to="/" className="underline underline-offset-2 hover:text-foreground">
+                        Overview
+                      </Link>{" "}
+                      to see your data.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        <Progress value={progressPercent}>
-          <ProgressLabel>Setup progress</ProgressLabel>
-          <ProgressValue>
-            {() => `${completedCount} of ${totalSteps} completed`}
-          </ProgressValue>
-        </Progress>
+        <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 fill-mode-backwards">
+          <Progress value={progressPercent}>
+            <ProgressLabel>Setup progress</ProgressLabel>
+            <ProgressValue>
+              {() => `${completedCount} of ${totalSteps} completed`}
+            </ProgressValue>
+          </Progress>
+        </div>
 
-        <FrameworkPills selected={selectedFramework} onSelect={setSelectedFramework} />
-
-        <Accordion>
-          {STEPS.map((step, index) => (
-            <AccordionItem key={step.id} value={step.id}>
-              <AccordionTrigger>
-                <div className="flex items-center gap-3">
-                  <StepIndicator
-                    stepNumber={index + 1}
-                    isComplete={isStepComplete(step.id)}
-                  />
-                  <div className="text-left">
-                    <div className="text-xs font-medium">{step.title}</div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {step.description}
+        <div>
+          {STEPS.map((step, index) => {
+            const complete = isStepComplete(step.id)
+            const isLast = index === STEPS.length - 1
+            return (
+              <div
+                key={step.id}
+                className="grid grid-cols-[24px_1fr] gap-x-3 animate-in fade-in slide-in-from-bottom-2 duration-400 fill-mode-backwards"
+                style={{ animationDelay: `${(index + 1) * 75}ms` }}
+              >
+                {/* Col 1: indicator + vertical connector */}
+                <div className="flex flex-col items-center">
+                  <StepIndicator stepNumber={index + 1} isComplete={complete} />
+                  {!isLast && (
+                    <div className="relative mt-2 flex-1 w-px min-h-4">
+                      <div className="absolute inset-0 bg-border" />
+                      {complete && (
+                        <motion.div
+                          className="absolute inset-0 bg-emerald-500/40"
+                          initial={{ scaleY: 0 }}
+                          animate={{ scaleY: 1 }}
+                          style={{ transformOrigin: "top" }}
+                          transition={{ duration: 0.4, ease: "easeOut" }}
+                        />
+                      )}
                     </div>
+                  )}
+                </div>
+
+                {/* Col 2: header + content */}
+                <div className={cn("pb-8", isLast && "pb-0")}>
+                  <h3 className="text-sm font-medium">{step.title}</h3>
+                  <p className="text-xs text-muted-foreground mb-4">{step.description}</p>
+                  <div className={cn("transition-opacity duration-300", complete && "opacity-50")}>
+                    {step.id === "setup-app" && (
+                      <StepSetupApp
+                        selectedFramework={selectedFramework}
+                        onSelectFramework={setSelectedFramework}
+                        onComplete={() => completeStep("setup-app")}
+                        isComplete={isStepComplete("setup-app")}
+                      />
+                    )}
+                    {step.id === "verify-data" && (
+                      <StepVerifyData
+                        isComplete={isStepComplete("verify-data")}
+                        onComplete={() => completeStep("verify-data")}
+                      />
+                    )}
+                    {step.id === "explore" && (
+                      <StepExplore
+                        onComplete={() => completeStep("explore")}
+                      />
+                    )}
                   </div>
                 </div>
-              </AccordionTrigger>
-              <AccordionContent className="pl-9">
-                {step.id === "copy-credentials" && (
-                  <StepCopyCredentials
-                    onComplete={() => completeStep("copy-credentials")}
-                  />
-                )}
-                {step.id === "setup-app" && (
-                  <StepSetupApp
-                    selectedFramework={selectedFramework}
-                    onComplete={() => completeStep("setup-app")}
-                  />
-                )}
-                {step.id === "verify-data" && (
-                  <StepVerifyData
-                    isComplete={isStepComplete("verify-data")}
-                    onComplete={() => completeStep("verify-data")}
-                  />
-                )}
-                {step.id === "explore" && (
-                  <StepExplore
-                    onComplete={() => completeStep("explore")}
-                  />
-                )}
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+              </div>
+            )
+          })}
+        </div>
 
         <div className="pt-2">
           <button

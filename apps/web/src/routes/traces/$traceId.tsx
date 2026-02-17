@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
+import { Result, useAtomValue } from "@effect-atom/atom-react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -13,234 +14,220 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { formatDuration } from "@/lib/format"
-import { getSpanHierarchy, type Span, type SpanNode, type SpanHierarchyResponse } from "@/api/tinybird/traces"
+import { type Span, type SpanNode } from "@/api/tinybird/traces"
+import { getSpanHierarchyResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 
 export const Route = createFileRoute("/traces/$traceId")({
   component: TraceDetailPage,
-  loader: async ({ params }) => {
-    return getSpanHierarchy({ data: { traceId: params.traceId } })
-  },
-  pendingComponent: TraceDetailPending,
-  errorComponent: TraceDetailError,
 })
-
-function TraceDetailPending() {
-  return (
-    <DashboardLayout
-      breadcrumbs={[
-        { label: "Traces", href: "/traces" },
-        { label: "Loading..." },
-      ]}
-      title="Loading trace..."
-      description="Loading trace details..."
-    >
-      <div className="space-y-4">
-        <div className="flex gap-2">
-          <Skeleton className="h-5 w-20" />
-          <Skeleton className="h-5 w-20" />
-          <Skeleton className="h-5 w-20" />
-        </div>
-        <div className="rounded-md border">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-2 border-b p-3">
-              <Skeleton className="h-4 w-4" />
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-4 w-16" />
-              <Skeleton className="h-4 flex-1" />
-              <Skeleton className="h-2 w-32" />
-              <Skeleton className="h-4 w-16" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </DashboardLayout>
-  )
-}
-
-function TraceDetailError({ error }: { error: Error }) {
-  return (
-    <DashboardLayout
-      breadcrumbs={[
-        { label: "Traces", href: "/traces" },
-        { label: "Error" },
-      ]}
-      title="Error"
-      description="Failed to load trace"
-    >
-      <div className="rounded-md border border-red-500/50 bg-red-500/10 p-8">
-        <p className="font-medium text-red-600">Failed to load trace details</p>
-        <pre className="mt-2 text-xs text-red-500 whitespace-pre-wrap">
-          {error.message}
-        </pre>
-      </div>
-    </DashboardLayout>
-  )
-}
 
 function TraceDetailPage() {
   const { traceId } = Route.useParams()
-  const data = Route.useLoaderData() as SpanHierarchyResponse
+  const result = useAtomValue(getSpanHierarchyResultAtom({ data: { traceId } }))
   const [selectedSpan, setSelectedSpan] = useState<SpanNode | null>(null)
 
-  if (data.spans.length === 0) {
-    return (
+  return Result.builder(result)
+    .onInitial(() => (
       <DashboardLayout
         breadcrumbs={[
           { label: "Traces", href: "/traces" },
-          { label: traceId.slice(0, 8) },
+          { label: "Loading..." },
         ]}
-        title="Trace not found"
-        description="This trace could not be found. It may have expired or not been ingested yet."
+        title="Loading trace..."
+        description="Loading trace details..."
       >
-        <div className="flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
-          <p className="text-sm text-muted-foreground">Trace ID</p>
-          <Badge
-            variant="outline"
-            className="mt-1 font-mono text-xs cursor-pointer hover:bg-muted"
-            onClick={() => {
-              navigator.clipboard.writeText(traceId)
-              toast.success("Trace ID copied to clipboard")
-            }}
-          >
-            {traceId}
-          </Badge>
-          <a
-            href="/traces"
-            className="mt-6 text-sm text-primary underline underline-offset-4 hover:text-primary/80"
-          >
-            Back to Traces
-          </a>
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-5 w-20" />
+          </div>
+          <div className="rounded-md border">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2 border-b p-3">
+                <Skeleton className="h-4 w-4" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-4 flex-1" />
+                <Skeleton className="h-2 w-32" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+            ))}
+          </div>
         </div>
       </DashboardLayout>
-    )
-  }
-
-  // Get unique services from spans
-  const services = [...new Set(data.spans.map((s: Span) => s.serviceName))]
-
-  // Get deployment info from the first root span's resource attributes
-  const rootSpan = data.rootSpans[0]
-  const deploymentEnv = rootSpan?.resourceAttributes?.["deployment.environment"]
-  const commitSha = rootSpan?.resourceAttributes?.["deployment.commit_sha"]
-
-  // Check if any span has an error (either OpenTelemetry StatusCode or HTTP 5xx server error)
-  const hasError = data.spans.some((s: Span) => {
-    if (s.statusCode === "Error") return true
-    const httpStatus = s.spanAttributes?.["http.status_code"]
-    if (httpStatus) {
-      const code = typeof httpStatus === "string" ? parseInt(httpStatus) : httpStatus
-      if (code >= 500) return true
-    }
-    return false
-  })
-
-  // Get the earliest start time from spans
-  const traceStartTime = data.spans.length > 0
-    ? data.spans.reduce((earliest, span) =>
-        new Date(span.startTime) < new Date(earliest.startTime) ? span : earliest
-      ).startTime
-    : new Date().toISOString()
-
-  return (
-    <DashboardLayout
-      breadcrumbs={[
-        { label: "Traces", href: "/traces" },
-        { label: traceId.slice(0, 8) },
-      ]}
-      title={rootSpan?.spanName ?? "Unknown Trace"}
-      description={`${data.spans.length} spans across ${services.length} service${services.length !== 1 ? "s" : ""}`}
-      headerActions={
-        <Badge
-          variant="outline"
-          className="font-mono text-xs cursor-pointer hover:bg-muted"
-          onClick={() => {
-            navigator.clipboard.writeText(traceId)
-            toast.success("Trace ID copied to clipboard")
-          }}
-        >
-          {traceId.slice(0, 8)}...
-        </Badge>
-      }
-    >
-      <div className="flex flex-1 flex-col space-y-3 min-h-0">
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <span className="text-xs text-muted-foreground">Services:</span>
-          {services.map((service: string) => (
-            <Badge key={service} variant="outline" className="font-mono text-xs">
-              {service}
-            </Badge>
-          ))}
-
-          <span className="ml-4 text-xs text-muted-foreground">Duration:</span>
-          <Badge variant="secondary" className="font-mono text-xs">
-            {formatDuration(data.totalDurationMs)}
-          </Badge>
-
-          <span className="ml-4 text-xs text-muted-foreground">Status:</span>
-          <Badge
-            variant="secondary"
-            className={
-              hasError
-                ? "bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400"
-                : "bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
-            }
+    ))
+    .onError((error) => (
+      <DashboardLayout
+        breadcrumbs={[
+          { label: "Traces", href: "/traces" },
+          { label: "Error" },
+        ]}
+        title="Error"
+        description="Failed to load trace"
+      >
+        <div className="rounded-md border border-red-500/50 bg-red-500/10 p-8">
+          <p className="font-medium text-red-600">Failed to load trace details</p>
+          <pre className="mt-2 text-xs text-red-500 whitespace-pre-wrap">
+            {error.message}
+          </pre>
+        </div>
+      </DashboardLayout>
+    ))
+    .onSuccess((data) => {
+      if (data.spans.length === 0) {
+        return (
+          <DashboardLayout
+            breadcrumbs={[
+              { label: "Traces", href: "/traces" },
+              { label: traceId.slice(0, 8) },
+            ]}
+            title="Trace not found"
+            description="This trace could not be found. It may have expired or not been ingested yet."
           >
-            {hasError ? "Error" : "OK"}
-          </Badge>
+            <div className="flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
+              <p className="text-sm text-muted-foreground">Trace ID</p>
+              <Badge
+                variant="outline"
+                className="mt-1 font-mono text-xs cursor-pointer hover:bg-muted"
+                onClick={() => {
+                  navigator.clipboard.writeText(traceId)
+                  toast.success("Trace ID copied to clipboard")
+                }}
+              >
+                {traceId}
+              </Badge>
+              <a
+                href="/traces"
+                className="mt-6 text-sm text-primary underline underline-offset-4 hover:text-primary/80"
+              >
+                Back to Traces
+              </a>
+            </div>
+          </DashboardLayout>
+        )
+      }
 
-          {deploymentEnv && (
-            <>
-              <span className="ml-4 text-xs text-muted-foreground">Environment:</span>
+      const services = [...new Set(data.spans.map((s: Span) => s.serviceName))]
+      const rootSpan = data.rootSpans[0]
+      const deploymentEnv = rootSpan?.resourceAttributes?.["deployment.environment"]
+      const commitSha = rootSpan?.resourceAttributes?.["deployment.commit_sha"]
+      const hasError = data.spans.some((s: Span) => {
+        if (s.statusCode === "Error") return true
+        const httpStatus = s.spanAttributes?.["http.status_code"]
+        if (httpStatus) {
+          const code = typeof httpStatus === "string" ? parseInt(httpStatus) : httpStatus
+          if (code >= 500) return true
+        }
+        return false
+      })
+      const traceStartTime = data.spans.length > 0
+        ? data.spans.reduce((earliest, span) =>
+            new Date(span.startTime) < new Date(earliest.startTime) ? span : earliest
+          ).startTime
+        : new Date().toISOString()
+
+      return (
+        <DashboardLayout
+          breadcrumbs={[
+            { label: "Traces", href: "/traces" },
+            { label: traceId.slice(0, 8) },
+          ]}
+          title={rootSpan?.spanName ?? "Unknown Trace"}
+          description={`${data.spans.length} spans across ${services.length} service${services.length !== 1 ? "s" : ""}`}
+          headerActions={
+            <Badge
+              variant="outline"
+              className="font-mono text-xs cursor-pointer hover:bg-muted"
+              onClick={() => {
+                navigator.clipboard.writeText(traceId)
+                toast.success("Trace ID copied to clipboard")
+              }}
+            >
+              {traceId.slice(0, 8)}...
+            </Badge>
+          }
+        >
+          <div className="flex flex-1 flex-col space-y-3 min-h-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <span className="text-xs text-muted-foreground">Services:</span>
+              {services.map((service: string) => (
+                <Badge key={service} variant="outline" className="font-mono text-xs">
+                  {service}
+                </Badge>
+              ))}
+
+              <span className="ml-4 text-xs text-muted-foreground">Duration:</span>
+              <Badge variant="secondary" className="font-mono text-xs">
+                {formatDuration(data.totalDurationMs)}
+              </Badge>
+
+              <span className="ml-4 text-xs text-muted-foreground">Status:</span>
               <Badge
                 variant="secondary"
                 className={
-                  deploymentEnv === "production"
-                    ? "bg-orange-500/10 text-orange-600 dark:bg-orange-400/10 dark:text-orange-400"
-                    : "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
+                  hasError
+                    ? "bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400"
+                    : "bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
                 }
               >
-                {deploymentEnv}
+                {hasError ? "Error" : "OK"}
               </Badge>
-            </>
-          )}
 
-          {commitSha && (
-            <>
-              <span className="ml-4 text-xs text-muted-foreground">Commit:</span>
-              <Badge variant="outline" className="font-mono text-xs">
-                {commitSha.slice(0, 7)}
-              </Badge>
-            </>
-          )}
-        </div>
+              {deploymentEnv && (
+                <>
+                  <span className="ml-4 text-xs text-muted-foreground">Environment:</span>
+                  <Badge
+                    variant="secondary"
+                    className={
+                      deploymentEnv === "production"
+                        ? "bg-orange-500/10 text-orange-600 dark:bg-orange-400/10 dark:text-orange-400"
+                        : "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
+                    }
+                  >
+                    {deploymentEnv}
+                  </Badge>
+                </>
+              )}
 
-        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0 rounded-md border overflow-hidden">
-          <ResizablePanel defaultSize={selectedSpan ? 60 : 100} minSize={40}>
-            <TraceViewTabs
-              rootSpans={data.rootSpans}
-              spans={data.spans}
-              totalDurationMs={data.totalDurationMs}
-              traceStartTime={traceStartTime}
-              services={services}
-              defaultExpandDepth={2}
-              selectedSpanId={selectedSpan?.spanId}
-              onSelectSpan={setSelectedSpan}
-            />
-          </ResizablePanel>
+              {commitSha && (
+                <>
+                  <span className="ml-4 text-xs text-muted-foreground">Commit:</span>
+                  <Badge variant="outline" className="font-mono text-xs">
+                    {commitSha.slice(0, 7)}
+                  </Badge>
+                </>
+              )}
+            </div>
 
-          {selectedSpan && (
-            <>
-              <ResizableHandle withHandle />
-              <ResizablePanel defaultSize={40} minSize={25}>
-                <SpanDetailPanel
-                  span={selectedSpan}
-                  onClose={() => setSelectedSpan(null)}
+            <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0 rounded-md border overflow-hidden">
+              <ResizablePanel defaultSize={selectedSpan ? 60 : 100} minSize={40}>
+                <TraceViewTabs
+                  rootSpans={data.rootSpans}
+                  spans={data.spans}
+                  totalDurationMs={data.totalDurationMs}
+                  traceStartTime={traceStartTime}
+                  services={services}
+                  defaultExpandDepth={2}
+                  selectedSpanId={selectedSpan?.spanId}
+                  onSelectSpan={setSelectedSpan}
                 />
               </ResizablePanel>
-            </>
-          )}
-        </ResizablePanelGroup>
-      </div>
-    </DashboardLayout>
-  )
+
+              {selectedSpan && (
+                <>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel defaultSize={40} minSize={25}>
+                    <SpanDetailPanel
+                      span={selectedSpan}
+                      onClose={() => setSelectedSpan(null)}
+                    />
+                  </ResizablePanel>
+                </>
+              )}
+            </ResizablePanelGroup>
+          </div>
+        </DashboardLayout>
+      )
+    })
 }

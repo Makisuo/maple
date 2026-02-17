@@ -11,6 +11,8 @@ import {
   GearIcon,
   LogoutIcon,
   ChevronUpIcon,
+  RocketIcon,
+  CheckIcon,
 } from "@/components/icons"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
 import {
@@ -31,11 +33,13 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
+import { useQuickStart } from "@/hooks/use-quick-start"
 
 const navItems = [
   {
@@ -160,7 +164,7 @@ function UserMenu() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link to="/settings" search={{ tab: "general" }} />}>
+          <DropdownMenuItem render={<Link to="/settings" search={{ tab: "ingestion" }} />}>
             <GearIcon size={16} />
             Settings
           </DropdownMenuItem>
@@ -206,7 +210,7 @@ function GuestMenu() {
         className="min-w-56"
       >
         <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link to="/settings" search={{ tab: "general" }} />}>
+          <DropdownMenuItem render={<Link to="/settings" search={{ tab: "ingestion" }} />}>
             <GearIcon size={16} />
             Settings
           </DropdownMenuItem>
@@ -226,6 +230,7 @@ function GuestMenu() {
 export function AppSidebar() {
   const routerState = useRouterState()
   const currentPath = routerState.location.pathname
+  const { isDismissed, isComplete, progressPercent } = useQuickStart()
 
   return (
     <Sidebar collapsible="icon">
@@ -233,6 +238,32 @@ export function AppSidebar() {
         <OrgSwitcher />
       </SidebarHeader>
       <SidebarContent>
+        {!isDismissed && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Get Started</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link to="/quick-start" />}
+                    tooltip="Quick Start"
+                    isActive={currentPath === "/quick-start"}
+                  >
+                    <RocketIcon size={16} />
+                    <span>Quick Start</span>
+                  </SidebarMenuButton>
+                  <SidebarMenuBadge>
+                    {isComplete ? (
+                      <CheckIcon size={12} className="text-emerald-500" />
+                    ) : (
+                      <span className="text-[10px]">{progressPercent}%</span>
+                    )}
+                  </SidebarMenuBadge>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>

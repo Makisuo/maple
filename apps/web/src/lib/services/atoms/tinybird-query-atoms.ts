@@ -21,6 +21,7 @@ import {
   getServicesFacets,
 } from "@/api/tinybird/services"
 import { getSpanHierarchy, getTracesFacets, listTraces } from "@/api/tinybird/traces"
+import { getQueryBuilderTimeseries } from "@/api/tinybird/query-builder-timeseries"
 type AsyncQuery<Input, Output> = (input: Input) => Promise<Output>
 
 interface QueryAtomOptions {
@@ -197,6 +198,13 @@ export const getOverviewTimeSeriesResultAtom = makeQueryAtomFamily(getOverviewTi
 
 export const getCustomChartTimeSeriesResultAtom = makeQueryAtomFamily(
   getCustomChartTimeSeries,
+  {
+    staleTime: 30_000,
+  },
+)
+
+export const getQueryBuilderTimeseriesResultAtom = makeQueryAtomFamily(
+  getQueryBuilderTimeseries,
   {
     staleTime: 30_000,
   },

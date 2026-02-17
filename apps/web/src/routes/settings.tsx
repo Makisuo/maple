@@ -1,9 +1,8 @@
-import { useAtomSet } from "@effect-atom/atom-react"
-import { useEffect, useMemo, useState } from "react"
+import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { useMemo, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { Exit } from "effect"
+import { Exit, Schema } from "effect"
 import { toast } from "sonner"
-import { z } from "zod"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import {
@@ -47,13 +46,16 @@ import { BillingSection } from "@/components/settings/billing-section"
 import { ScrapeTargetsSection } from "@/components/settings/scrape-targets-section"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
-const settingsSearchSchema = z.object({
-  tab: z.enum(["general", "api-keys", "connectors", "billing"]).optional().default("general"),
+const SettingsSearch = Schema.Struct({
+  tab: Schema.optionalWith(
+    Schema.Literal("ingestion", "api-keys", "connectors", "billing"),
+    { default: () => "ingestion" as const }
+  ),
 })
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
-  validateSearch: (search) => settingsSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(SettingsSearch),
 })
 
 function maskKey(key: string): string {
@@ -61,11 +63,6 @@ function maskKey(key: string): string {
   const prefix = key.slice(0, 14)
   const suffix = key.slice(-4)
   return `${prefix}${"•".repeat(key.length - 18)}${suffix}`
-}
-
-interface SettingsKeys {
-  readonly publicKey: string
-  readonly privateKey: string
 }
 
 interface ApiKeyRowProps {
@@ -165,7 +162,7 @@ function ApiKeyRow({
   )
 }
 
-function GeneralSettings({
+function IngestionSettings({
   publicKey,
   privateKey,
   publicKeyVisible,
@@ -239,7 +236,7 @@ function GeneralSettings({
 
       <Card>
         <CardHeader>
-          <CardTitle>API Keys</CardTitle>
+          <CardTitle>Ingest Keys</CardTitle>
           <CardDescription>
             Use these keys to authenticate telemetry ingestion. The public key
             is safe for client-side use. Keep your private key secret and never
@@ -281,8 +278,6 @@ function GeneralSettings({
 function SettingsPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
-  const [keys, setKeys] = useState<SettingsKeys | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
   const [publicKeyVisible, setPublicKeyVisible] = useState(false)
   const [privateKeyVisible, setPrivateKeyVisible] = useState(false)
   const [copiedKey, setCopiedKey] = useState<"public" | "private" | null>(null)
@@ -295,49 +290,22 @@ function SettingsPage() {
   >(null)
   const [endpointCopied, setEndpointCopied] = useState(false)
 
-  const getKeysMutation = useAtomSet(MapleApiAtomClient.mutation("ingestKeys", "get"), { mode: "promiseExit" })
+  const keysQueryAtom = MapleApiAtomClient.query("ingestKeys", "get", {})
+  const keysResult = useAtomValue(keysQueryAtom)
+  const refreshKeys = useAtomRefresh(keysQueryAtom)
+
   const rerollPublicMutation = useAtomSet(MapleApiAtomClient.mutation("ingestKeys", "rerollPublic"), { mode: "promiseExit" })
   const rerollPrivateMutation = useAtomSet(MapleApiAtomClient.mutation("ingestKeys", "rerollPrivate"), { mode: "promiseExit" })
 
-  useEffect(() => {
-    let cancelled = false
-
-    const loadIngestKeys = async () => {
-      setIsLoading(true)
-
-      const result = await getKeysMutation({})
-      if (cancelled) return
-
-      if (Exit.isSuccess(result)) {
-        setKeys({
-          publicKey: result.value.publicKey,
-          privateKey: result.value.privateKey,
-        })
-      } else {
-        toast.error("Unable to complete request")
-      }
-
-      if (!cancelled) {
-        setIsLoading(false)
-      }
-    }
-
-    void loadIngestKeys()
-
-    return () => {
-      cancelled = true
-    }
-  }, [getKeysMutation])
-
   const isBusy = useMemo(
-    () => isLoading || submittingKeyType !== null || keys === null,
-    [isLoading, keys, submittingKeyType],
+    () => !Result.isSuccess(keysResult) || submittingKeyType !== null,
+    [keysResult, submittingKeyType],
   )
 
   async function handleCopy(keyType: "public" | "private") {
-    if (!keys) return
+    if (!Result.isSuccess(keysResult)) return
 
-    const key = keyType === "public" ? keys.publicKey : keys.privateKey
+    const key = keyType === "public" ? keysResult.value.publicKey : keysResult.value.privateKey
 
     try {
       await navigator.clipboard.writeText(key)
@@ -378,10 +346,7 @@ function SettingsPage() {
         : await rerollPrivateMutation({})
 
     if (Exit.isSuccess(result)) {
-      setKeys({
-        publicKey: result.value.publicKey,
-        privateKey: result.value.privateKey,
-      })
+      refreshKeys()
       setCopiedKey(null)
 
       toast.success(
@@ -396,10 +361,14 @@ function SettingsPage() {
     setRegenerateKeyType(null)
   }
 
-  const publicKey = keys?.publicKey ?? "Loading..."
-  const privateKey = keys?.privateKey ?? "Loading..."
+  const publicKey = Result.builder(keysResult)
+    .onSuccess((v) => v.publicKey)
+    .orElse(() => "Loading...")
+  const privateKey = Result.builder(keysResult)
+    .onSuccess((v) => v.privateKey)
+    .orElse(() => "Loading...")
 
-  const generalSettingsProps = {
+  const ingestionSettingsProps = {
     publicKey,
     privateKey,
     publicKeyVisible,
@@ -424,17 +393,17 @@ function SettingsPage() {
         <Tabs
           value={search.tab}
           onValueChange={(tab) =>
-            navigate({ search: { tab: tab as "general" | "api-keys" | "connectors" | "billing" } })
+            navigate({ search: { tab: tab as "ingestion" | "api-keys" | "connectors" | "billing" } })
           }
         >
           <TabsList variant="line">
-            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="ingestion">Ingestion</TabsTrigger>
             <TabsTrigger value="api-keys">API Keys</TabsTrigger>
             <TabsTrigger value="connectors">Connectors</TabsTrigger>
             <TabsTrigger value="billing">Usage & Billing</TabsTrigger>
           </TabsList>
-          <TabsContent value="general" className="pt-4">
-            <GeneralSettings {...generalSettingsProps} />
+          <TabsContent value="ingestion" className="pt-4">
+            <IngestionSettings {...ingestionSettingsProps} />
           </TabsContent>
           <TabsContent value="api-keys" className="pt-4">
             <ApiKeysSection />
@@ -456,16 +425,16 @@ function SettingsPage() {
         <Tabs
           value={search.tab}
           onValueChange={(tab) =>
-            navigate({ search: { tab: tab as "general" | "api-keys" | "connectors" } })
+            navigate({ search: { tab: tab as "ingestion" | "api-keys" | "connectors" } })
           }
         >
           <TabsList variant="line">
-            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="ingestion">Ingestion</TabsTrigger>
             <TabsTrigger value="api-keys">API Keys</TabsTrigger>
             <TabsTrigger value="connectors">Connectors</TabsTrigger>
           </TabsList>
-          <TabsContent value="general" className="pt-4">
-            <GeneralSettings {...generalSettingsProps} />
+          <TabsContent value="ingestion" className="pt-4">
+            <IngestionSettings {...ingestionSettingsProps} />
           </TabsContent>
           <TabsContent value="api-keys" className="pt-4">
             <ApiKeysSection />
