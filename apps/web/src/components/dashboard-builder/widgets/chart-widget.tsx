@@ -1,4 +1,4 @@
-import { Suspense } from "react"
+import { memo, Suspense } from "react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { getChartById } from "@/components/charts/registry"
@@ -18,7 +18,7 @@ interface ChartWidgetProps {
   editPanel?: React.ReactNode
 }
 
-export function ChartWidget({
+export const ChartWidget = memo(function ChartWidget({
   dataState,
   display,
   mode,
@@ -68,4 +68,4 @@ export function ChartWidget({
       )}
     </WidgetShell>
   )
-}
+})

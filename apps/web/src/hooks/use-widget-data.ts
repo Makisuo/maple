@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { Atom, Result, useAtomValue } from "@effect-atom/atom-react"
 import { Effect, Schedule, Schema } from "effect"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
@@ -310,11 +311,15 @@ export function useWidgetData(widget: DashboardWidget) {
       : disabledResultAtom(),
   )
 
-  const dataState: WidgetDataState = Result.builder(result)
-    .onInitial(() => ({ status: "loading" } as const))
-    .onError(() => ({ status: "error" } as const))
-    .onSuccess((data) => ({ status: "ready", data } as const))
-    .orElse(() => ({ status: "error" } as const))
+  const dataState: WidgetDataState = useMemo(
+    () =>
+      Result.builder(result)
+        .onInitial(() => ({ status: "loading" } as const))
+        .onError(() => ({ status: "error" } as const))
+        .onSuccess((data) => ({ status: "ready", data } as const))
+        .orElse(() => ({ status: "error" } as const)),
+    [result]
+  )
 
   return {
     dataState,

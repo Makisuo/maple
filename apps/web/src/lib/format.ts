@@ -72,6 +72,74 @@ export function inferBucketSeconds(data: Array<{ bucket: string }>): number | un
   return diffMs / 1000
 }
 
+/**
+ * Parse a bucket value to a millisecond timestamp.
+ */
+export function parseBucketMs(value: unknown): number | null {
+  if (typeof value !== "string") return null
+  const parsed = new Date(value).getTime()
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+/**
+ * Infer the total time range in milliseconds from an array of data points with a `bucket` key.
+ */
+export function inferRangeMs(data: Array<Record<string, unknown>>): number {
+  const bucketTimes = data
+    .map((row) => parseBucketMs(row.bucket))
+    .filter((value): value is number => value != null)
+
+  if (bucketTimes.length < 2) return 0
+  return Math.max(...bucketTimes) - Math.min(...bucketTimes)
+}
+
+/**
+ * Format a bucket timestamp label that adapts based on the overall time range:
+ * - >= 24h with daily buckets: "Feb 14"
+ * - >= 24h with sub-day buckets: "Feb 14, 02:00 PM"
+ * - 30min - 24h: "02:00 PM"
+ * - <= 30min: "02:00:30 PM"
+ */
+export function formatBucketLabel(
+  value: unknown,
+  context: { rangeMs: number; bucketSeconds: number | undefined },
+  mode: "tick" | "tooltip",
+): string {
+  if (typeof value !== "string") return ""
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  const includeDate = context.rangeMs >= 24 * 60 * 60 * 1000 || (context.bucketSeconds ?? 0) >= 24 * 60 * 60
+  const includeSeconds = context.rangeMs <= 30 * 60 * 1000 && !includeDate
+
+  if (mode === "tooltip") {
+    return date.toLocaleString(undefined, {
+      year: includeDate ? "numeric" : undefined,
+      month: includeDate ? "short" : undefined,
+      day: includeDate ? "numeric" : undefined,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: includeSeconds ? "2-digit" : undefined,
+    })
+  }
+
+  if (includeDate) {
+    if ((context.bucketSeconds ?? 0) >= 24 * 60 * 60) {
+      return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    }
+    return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+  }
+
+  return date
+    .toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: includeSeconds ? "2-digit" : undefined,
+    })
+    .replace(/^24:/, "00:")
+}
+
 const bucketLabelMap: Record<number, string> = {
   60: "/min",
   300: "/5min",

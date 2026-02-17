@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -45,7 +46,7 @@ export function formatCellValue(value: unknown, unit?: string): string {
   }
 }
 
-export function TableWidget({
+export const TableWidget = memo(function TableWidget({
   dataState,
   display,
   mode,
@@ -146,4 +147,4 @@ export function TableWidget({
       )}
     </WidgetShell>
   )
-}
+})

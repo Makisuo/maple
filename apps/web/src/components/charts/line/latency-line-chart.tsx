@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "@/components/charts/_shared/chart-types"
@@ -10,7 +11,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
-import { formatLatency } from "@/lib/format"
+import { formatLatency, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "@/lib/format"
 
 const chartConfig = {
   p99LatencyMs: { label: "P99", color: "var(--chart-1)" },
@@ -18,22 +19,27 @@ const chartConfig = {
   p50LatencyMs: { label: "P50", color: "var(--chart-3)" },
 } satisfies ChartConfig
 
-function formatBucketTime(value: string) {
-  const date = new Date(value)
-  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-}
-
 export function LatencyLineChart({ data, className, legend, tooltip }: BaseChartProps) {
+  const chartData = data ?? latencyTimeSeriesData
+
+  const axisContext = useMemo(
+    () => ({
+      rangeMs: inferRangeMs(chartData as Array<Record<string, unknown>>),
+      bucketSeconds: inferBucketSeconds(chartData as Array<{ bucket: string }>),
+    }),
+    [chartData],
+  )
+
   return (
     <ChartContainer config={chartConfig} className={className}>
-      <LineChart data={data ?? latencyTimeSeriesData} accessibilityLayer>
+      <LineChart data={chartData} accessibilityLayer>
         <CartesianGrid vertical={false} />
         <XAxis
           dataKey="bucket"
           tickLine={false}
           axisLine={false}
           tickMargin={8}
-          tickFormatter={formatBucketTime}
+          tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
         />
         <YAxis
           tickLine={false}
@@ -47,7 +53,7 @@ export function LatencyLineChart({ data, className, legend, tooltip }: BaseChart
               <ChartTooltipContent
                 labelFormatter={(_, payload) => {
                   if (!payload?.[0]?.payload?.bucket) return ""
-                  return new Date(payload[0].payload.bucket).toLocaleString()
+                  return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
                 }}
                 formatter={(value, name) => {
                   const config = chartConfig[name as keyof typeof chartConfig]

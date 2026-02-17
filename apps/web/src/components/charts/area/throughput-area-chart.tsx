@@ -12,22 +12,27 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
-import { inferBucketSeconds, bucketIntervalLabel, formatThroughput } from "@/lib/format"
-
-function formatBucketTime(value: string) {
-  const date = new Date(value)
-  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-}
+import { inferBucketSeconds, inferRangeMs, formatBucketLabel, bucketIntervalLabel, formatThroughput } from "@/lib/format"
 
 export function ThroughputAreaChart({ data, className, legend, tooltip }: BaseChartProps) {
   const id = useId()
   const gradientId = `throughputGradient-${id.replace(/:/g, "")}`
   const chartData = data ?? throughputTimeSeriesData
 
-  const rateLabel = useMemo(() => {
-    const seconds = inferBucketSeconds(chartData as Array<{ bucket: string }>)
-    return bucketIntervalLabel(seconds)
-  }, [chartData])
+  const bucketSeconds = useMemo(
+    () => inferBucketSeconds(chartData as Array<{ bucket: string }>),
+    [chartData],
+  )
+
+  const rateLabel = useMemo(() => bucketIntervalLabel(bucketSeconds), [bucketSeconds])
+
+  const axisContext = useMemo(
+    () => ({
+      rangeMs: inferRangeMs(chartData as Array<Record<string, unknown>>),
+      bucketSeconds,
+    }),
+    [chartData, bucketSeconds],
+  )
 
   const chartConfig = useMemo(
     () =>
@@ -52,7 +57,7 @@ export function ThroughputAreaChart({ data, className, legend, tooltip }: BaseCh
           tickLine={false}
           axisLine={false}
           tickMargin={8}
-          tickFormatter={formatBucketTime}
+          tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
         />
         <YAxis
           tickLine={false}
@@ -66,7 +71,7 @@ export function ThroughputAreaChart({ data, className, legend, tooltip }: BaseCh
               <ChartTooltipContent
                 labelFormatter={(_, payload) => {
                   if (!payload?.[0]?.payload?.bucket) return ""
-                  return new Date(payload[0].payload.bucket).toLocaleString()
+                  return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
                 }}
                 formatter={(value) => (
                   <span className="flex items-center gap-2">

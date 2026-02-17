@@ -1,3 +1,4 @@
+import { memo, useCallback, useMemo } from "react"
 import {
   Responsive,
   useContainerWidth,
@@ -48,29 +49,55 @@ const visualizationRegistry: Record<
   table: TableWidget,
 }
 
-function WidgetRenderer({
+const WidgetRenderer = memo(function WidgetRenderer({
   widget,
   mode,
-  onRemove,
-  onConfigure,
+  onRemoveWidget,
+  onConfigureWidget,
   onUpdateWidgetDisplay,
 }: {
   widget: DashboardWidget
   mode: WidgetMode
-  onRemove: () => void
-  onConfigure?: () => void
-  onUpdateWidgetDisplay?: (display: Partial<WidgetDisplayConfig>) => void
+  onRemoveWidget: (widgetId: string) => void
+  onConfigureWidget?: (widgetId: string) => void
+  onUpdateWidgetDisplay?: (
+    widgetId: string,
+    display: Partial<WidgetDisplayConfig>
+  ) => void
 }) {
   const { dataState } = useWidgetData(widget)
   const Visualization =
     visualizationRegistry[widget.visualization] ?? visualizationRegistry.chart
 
-  const editPanel = onUpdateWidgetDisplay ? (
-    <WidgetEditPanel
-      widget={widget}
-      onUpdateDisplay={onUpdateWidgetDisplay}
-    />
-  ) : undefined
+  const onRemove = useCallback(
+    () => onRemoveWidget(widget.id),
+    [onRemoveWidget, widget.id]
+  )
+
+  const onConfigure = useMemo(
+    () =>
+      onConfigureWidget
+        ? () => onConfigureWidget(widget.id)
+        : undefined,
+    [onConfigureWidget, widget.id]
+  )
+
+  const handleUpdateDisplay = useCallback(
+    (display: Partial<WidgetDisplayConfig>) =>
+      onUpdateWidgetDisplay?.(widget.id, display),
+    [onUpdateWidgetDisplay, widget.id]
+  )
+
+  const editPanel = useMemo(
+    () =>
+      onUpdateWidgetDisplay ? (
+        <WidgetEditPanel
+          widget={widget}
+          onUpdateDisplay={handleUpdateDisplay}
+        />
+      ) : undefined,
+    [widget, onUpdateWidgetDisplay, handleUpdateDisplay]
+  )
 
   return (
     <Visualization
@@ -82,7 +109,7 @@ function WidgetRenderer({
       editPanel={editPanel}
     />
   )
-}
+})
 
 export function DashboardCanvas({
   widgets,
@@ -144,17 +171,9 @@ export function DashboardCanvas({
               <WidgetRenderer
                 widget={widget}
                 mode={mode}
-                onRemove={() => onRemoveWidget(widget.id)}
-                onConfigure={
-                  onConfigureWidget
-                    ? () => onConfigureWidget(widget.id)
-                    : undefined
-                }
-                onUpdateWidgetDisplay={
-                  onUpdateWidgetDisplay
-                    ? (display) => onUpdateWidgetDisplay(widget.id, display)
-                    : undefined
-                }
+                onRemoveWidget={onRemoveWidget}
+                onConfigureWidget={onConfigureWidget}
+                onUpdateWidgetDisplay={onUpdateWidgetDisplay}
               />
             </div>
           ))}

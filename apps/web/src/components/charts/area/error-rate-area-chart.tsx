@@ -1,4 +1,4 @@
-import { useId } from "react"
+import { useId, useMemo } from "react"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "@/components/charts/_shared/chart-types"
@@ -12,24 +12,28 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
-import { formatErrorRate } from "@/lib/format"
+import { formatErrorRate, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "@/lib/format"
 
 const chartConfig = {
   errorRate: { label: "Error Rate", color: "var(--color-destructive, #ef4444)" },
 } satisfies ChartConfig
 
-function formatBucketTime(value: string) {
-  const date = new Date(value)
-  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-}
-
 export function ErrorRateAreaChart({ data, className, legend, tooltip }: BaseChartProps) {
   const id = useId()
   const gradientId = `errorRateGradient-${id.replace(/:/g, "")}`
+  const chartData = data ?? errorRateTimeSeriesData
+
+  const axisContext = useMemo(
+    () => ({
+      rangeMs: inferRangeMs(chartData as Array<Record<string, unknown>>),
+      bucketSeconds: inferBucketSeconds(chartData as Array<{ bucket: string }>),
+    }),
+    [chartData],
+  )
 
   return (
     <ChartContainer config={chartConfig} className={className}>
-      <AreaChart data={data ?? errorRateTimeSeriesData} accessibilityLayer>
+      <AreaChart data={chartData} accessibilityLayer>
         <defs>
           <VerticalGradient id={gradientId} color="var(--color-errorRate)" />
         </defs>
@@ -39,7 +43,7 @@ export function ErrorRateAreaChart({ data, className, legend, tooltip }: BaseCha
           tickLine={false}
           axisLine={false}
           tickMargin={8}
-          tickFormatter={formatBucketTime}
+          tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
         />
         <YAxis
           tickLine={false}
@@ -53,7 +57,7 @@ export function ErrorRateAreaChart({ data, className, legend, tooltip }: BaseCha
               <ChartTooltipContent
                 labelFormatter={(_, payload) => {
                   if (!payload?.[0]?.payload?.bucket) return ""
-                  return new Date(payload[0].payload.bucket).toLocaleString()
+                  return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
                 }}
                 formatter={(value) => (
                   <span className="flex items-center gap-2">

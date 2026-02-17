@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
 import type {
@@ -65,7 +66,7 @@ function getThresholdColor(
   return undefined
 }
 
-export function StatWidget({
+export const StatWidget = memo(function StatWidget({
   dataState,
   display,
   mode,
@@ -101,4 +102,4 @@ export function StatWidget({
       )}
     </WidgetShell>
   )
-}
+})
