@@ -1,5 +1,4 @@
 import {
-  optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
   requiredStringParam,
@@ -9,6 +8,7 @@ import { queryTinybird } from "../lib/query-tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { defaultTimeRange } from "../lib/time"
 import { formatDurationMs, truncate } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerErrorDetailTool(server: McpToolRegistrar) {
   server.tool(
@@ -21,13 +21,14 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
       service: optionalStringParam("Filter by service name"),
       limit: optionalNumberParam("Max sample traces (default 5)"),
     },
-    async ({ error_type, start_time, end_time, service, limit }) => {
-      try {
+    ({ error_type, start_time, end_time, service, limit }) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = start_time ?? startTime
         const et = end_time ?? endTime
         const lim = limit ?? 5
-        const tracesResult = await queryTinybird("error_detail_traces", {
+
+        const tracesResult = yield* queryTinybird("error_detail_traces", {
           error_type,
           start_time: st,
           end_time: et,
@@ -43,10 +44,11 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 
         // Fetch logs for the first few trace IDs
         const traceIds = traces.slice(0, 3).map((t) => t.traceId)
-        const logsResults = await Promise.all(
+        const logsResults = yield* Effect.all(
           traceIds.map((tid) =>
             queryTinybird("list_logs", { trace_id: tid, limit: 10 }),
           ),
+          { concurrency: "unbounded" },
         )
 
         const lines: string[] = [
@@ -93,12 +95,6 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
         }
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

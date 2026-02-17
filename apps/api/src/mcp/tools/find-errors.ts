@@ -1,14 +1,13 @@
 import {
-  optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
-  requiredStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { defaultTimeRange } from "../lib/time"
 import { formatNumber, formatTable } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerFindErrorsTool(server: McpToolRegistrar) {
   server.tool(
@@ -20,12 +19,13 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
       service: optionalStringParam("Filter to a specific service"),
       limit: optionalNumberParam("Max results (default 20)"),
     },
-    async ({ start_time, end_time, service, limit }) => {
-      try {
+    ({ start_time, end_time, service, limit }) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = start_time ?? startTime
         const et = end_time ?? endTime
-        const result = await queryTinybird("errors_by_type", {
+
+        const result = yield* queryTinybird("errors_by_type", {
           start_time: st,
           end_time: et,
           services: service,
@@ -54,12 +54,6 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
         lines.push(``, `Total: ${result.data.length} error types`)
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

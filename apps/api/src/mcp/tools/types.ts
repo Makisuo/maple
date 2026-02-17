@@ -1,3 +1,4 @@
+import type { Effect } from "effect"
 import * as Schema from "effect/Schema"
 
 export interface McpToolResult {
@@ -10,7 +11,7 @@ export interface McpToolRegistrar {
     name: string,
     description: string,
     schema: TFields,
-    handler: (params: Schema.Struct.Type<TFields>) => Promise<McpToolResult>,
+    handler: (params: Schema.Struct.Type<TFields>) => Effect.Effect<McpToolResult>,
   ): void
 }
 

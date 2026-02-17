@@ -1,13 +1,11 @@
 import {
-  optionalBooleanParam,
-  optionalNumberParam,
   optionalStringParam,
-  requiredStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { defaultTimeRange } from "../lib/time"
 import { formatDurationFromMs, formatPercent, formatNumber, formatTable } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerServiceOverviewTool(server: McpToolRegistrar) {
   server.tool(
@@ -17,21 +15,25 @@ export function registerServiceOverviewTool(server: McpToolRegistrar) {
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
     },
-    async ({ start_time, end_time }) => {
-      try {
+    ({ start_time, end_time }) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = start_time ?? startTime
         const et = end_time ?? endTime
-        const [servicesResult, usageResult] = await Promise.all([
-          queryTinybird("service_overview", {
-            start_time: st,
-            end_time: et,
-          }),
-          queryTinybird("get_service_usage", {
-            start_time: st,
-            end_time: et,
-          }),
-        ])
+
+        const [servicesResult, usageResult] = yield* Effect.all(
+          [
+            queryTinybird("service_overview", {
+              start_time: st,
+              end_time: et,
+            }),
+            queryTinybird("get_service_usage", {
+              start_time: st,
+              end_time: et,
+            }),
+          ],
+          { concurrency: "unbounded" },
+        )
 
         // Aggregate by service name (collapse environment/commit dimensions)
         const serviceMap = new Map<string, {
@@ -119,12 +121,6 @@ export function registerServiceOverviewTool(server: McpToolRegistrar) {
         }
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

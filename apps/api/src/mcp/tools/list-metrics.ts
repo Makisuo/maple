@@ -1,13 +1,12 @@
 import {
-  optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
-  requiredStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { defaultTimeRange } from "../lib/time"
 import { formatNumber, formatTable } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerListMetricsTool(server: McpToolRegistrar) {
   server.tool(
@@ -21,26 +20,30 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
       metric_type: optionalStringParam("Filter by type (sum, gauge, histogram, exponential_histogram)"),
       limit: optionalNumberParam("Max results (default 50)"),
     },
-    async ({ start_time, end_time, service, search, metric_type, limit }) => {
-      try {
+    ({ start_time, end_time, service, search, metric_type, limit }) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = start_time ?? startTime
         const et = end_time ?? endTime
-        const [metricsResult, summaryResult] = await Promise.all([
-          queryTinybird("list_metrics", {
-            start_time: st,
-            end_time: et,
-            service,
-            search,
-            metric_type,
-            limit: limit ?? 50,
-          }),
-          queryTinybird("metrics_summary", {
-            start_time: st,
-            end_time: et,
-            service,
-          }),
-        ])
+
+        const [metricsResult, summaryResult] = yield* Effect.all(
+          [
+            queryTinybird("list_metrics", {
+              start_time: st,
+              end_time: et,
+              service,
+              search,
+              metric_type,
+              limit: limit ?? 50,
+            }),
+            queryTinybird("metrics_summary", {
+              start_time: st,
+              end_time: et,
+              service,
+            }),
+          ],
+          { concurrency: "unbounded" },
+        )
 
         const metrics = metricsResult.data
         const summary = summaryResult.data
@@ -79,12 +82,6 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
         lines.push(formatTable(headers, rows))
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

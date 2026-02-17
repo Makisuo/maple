@@ -1,13 +1,12 @@
 import {
-  optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
-  requiredStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { defaultTimeRange } from "../lib/time"
 import { formatDurationMs, formatDurationFromMs, formatTable } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerFindSlowTracesTool(server: McpToolRegistrar) {
   server.tool(
@@ -19,27 +18,29 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
       service: optionalStringParam("Filter by service name"),
       limit: optionalNumberParam("Max results (default 10)"),
     },
-    async ({ start_time, end_time, service, limit }) => {
-      try {
+    ({ start_time, end_time, service, limit }) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = start_time ?? startTime
         const et = end_time ?? endTime
         const lim = limit ?? 10
-        const [tracesResult, statsResult] = await Promise.all([
-          queryTinybird("list_traces", {
-            start_time: st,
-            end_time: et,
-            service,
-            limit: lim,
-            // No built-in sort by duration, but traces come ordered by startTime DESC
-            // We'll sort client-side
-          }),
-          queryTinybird("traces_duration_stats", {
-            start_time: st,
-            end_time: et,
-            service,
-          }),
-        ])
+
+        const [tracesResult, statsResult] = yield* Effect.all(
+          [
+            queryTinybird("list_traces", {
+              start_time: st,
+              end_time: et,
+              service,
+              limit: lim,
+            }),
+            queryTinybird("traces_duration_stats", {
+              start_time: st,
+              end_time: et,
+              service,
+            }),
+          ],
+          { concurrency: "unbounded" },
+        )
 
         const stats = statsResult.data[0]
         const traces = [...tracesResult.data].sort(
@@ -81,12 +82,6 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
         lines.push(formatTable(headers, rows))
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

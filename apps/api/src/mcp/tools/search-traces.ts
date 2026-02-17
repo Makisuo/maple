@@ -2,12 +2,12 @@ import {
   optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
-  requiredStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { defaultTimeRange } from "../lib/time"
 import { formatDurationMs, formatTable } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerSearchTracesTool(server: McpToolRegistrar) {
   server.tool(
@@ -24,12 +24,13 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
       span_name: optionalStringParam("Filter by root span name"),
       limit: optionalNumberParam("Max results (default 20)"),
     },
-    async (params) => {
-      try {
+    (params) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = params.start_time ?? startTime
         const et = params.end_time ?? endTime
-        const result = await queryTinybird("list_traces", {
+
+        const result = yield* queryTinybird("list_traces", {
           start_time: st,
           end_time: et,
           service: params.service,
@@ -65,12 +66,6 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
         lines.push(formatTable(headers, rows))
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

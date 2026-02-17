@@ -1,14 +1,12 @@
 import {
-  optionalBooleanParam,
-  optionalNumberParam,
   optionalStringParam,
-  requiredStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { defaultTimeRange } from "../lib/time"
 import { formatPercent, formatDurationFromMs, formatNumber } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerSystemHealthTool(server: McpToolRegistrar) {
   server.tool(
@@ -18,28 +16,32 @@ export function registerSystemHealthTool(server: McpToolRegistrar) {
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
     },
-    async ({ start_time, end_time }) => {
-      try {
+    ({ start_time, end_time }) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = start_time ?? startTime
         const et = end_time ?? endTime
-        const [summaryResult, servicesResult, errorsResult] = await Promise.all([
-          queryTinybird("errors_summary", {
-            start_time: st,
-            end_time: et,
-            exclude_spam_patterns: getSpamPatternsParam(),
-          }),
-          queryTinybird("service_overview", {
-            start_time: st,
-            end_time: et,
-          }),
-          queryTinybird("errors_by_type", {
-            start_time: st,
-            end_time: et,
-            limit: 5,
-            exclude_spam_patterns: getSpamPatternsParam(),
-          }),
-        ])
+
+        const [summaryResult, servicesResult, errorsResult] = yield* Effect.all(
+          [
+            queryTinybird("errors_summary", {
+              start_time: st,
+              end_time: et,
+              exclude_spam_patterns: getSpamPatternsParam(),
+            }),
+            queryTinybird("service_overview", {
+              start_time: st,
+              end_time: et,
+            }),
+            queryTinybird("errors_by_type", {
+              start_time: st,
+              end_time: et,
+              limit: 5,
+              exclude_spam_patterns: getSpamPatternsParam(),
+            }),
+          ],
+          { concurrency: "unbounded" },
+        )
 
         const summary = summaryResult.data[0]
         const services = servicesResult.data
@@ -47,7 +49,6 @@ export function registerSystemHealthTool(server: McpToolRegistrar) {
 
         const serviceCount = new Set(services.map((s) => s.serviceName)).size
 
-        // Compute aggregate latency (weighted by throughput)
         let totalThroughput = 0
         let weightedP50 = 0
         let weightedP95 = 0
@@ -86,12 +87,6 @@ export function registerSystemHealthTool(server: McpToolRegistrar) {
         }
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

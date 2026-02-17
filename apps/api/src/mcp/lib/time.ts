@@ -1,11 +1,13 @@
-import { format, subHours } from "date-fns"
+import * as DateTime from "effect/DateTime"
 
-const TINYBIRD_FORMAT = "yyyy-MM-dd HH:mm:ss"
+const formatUtc = (dt: DateTime.DateTime): string =>
+  DateTime.formatIso(dt).replace("T", " ").slice(0, 19)
 
 export function defaultTimeRange(hours = 1) {
-  const now = new Date()
+  const now = DateTime.unsafeNow()
+  const start = DateTime.subtract(now, { hours })
   return {
-    startTime: format(subHours(now, hours), TINYBIRD_FORMAT),
-    endTime: format(now, TINYBIRD_FORMAT),
+    startTime: formatUtc(start),
+    endTime: formatUtc(now),
   }
 }

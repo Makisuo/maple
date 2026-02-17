@@ -19,7 +19,7 @@ interface ToolDefinition {
   readonly name: string
   readonly description: string
   readonly schema: Schema.Struct.Fields
-  readonly handler: (params: unknown) => Promise<McpToolResult>
+  readonly handler: (params: unknown) => Effect.Effect<McpToolResult>
 }
 
 const toErrorMessage = (error: unknown): string => {
@@ -49,7 +49,7 @@ const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
         name,
         description,
         schema,
-        handler: handler as (params: unknown) => Promise<McpToolResult>,
+        handler: handler as (params: unknown) => Effect.Effect<McpToolResult>,
       })
     },
   }
@@ -98,16 +98,17 @@ export const McpToolsLive = Layer.effectDiscard(
             )
           }
 
-          return Effect.promise(async () => {
-            try {
-              return toCallToolResult(await definition.handler(decoded.right))
-            } catch (error) {
-              return toCallToolResult({
-                isError: true,
-                content: [{ type: "text", text: `Error: ${toErrorMessage(error)}` }],
-              })
-            }
-          })
+          return definition.handler(decoded.right).pipe(
+            Effect.map(toCallToolResult),
+            Effect.catchAllDefect((error) =>
+              Effect.succeed(
+                toCallToolResult({
+                  isError: true,
+                  content: [{ type: "text", text: `Error: ${toErrorMessage(error)}` }],
+                }),
+              ),
+            ),
+          )
         },
       })
     }

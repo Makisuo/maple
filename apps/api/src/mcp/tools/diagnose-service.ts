@@ -1,6 +1,4 @@
 import {
-  optionalBooleanParam,
-  optionalNumberParam,
   optionalStringParam,
   requiredStringParam,
   type McpToolRegistrar,
@@ -9,6 +7,7 @@ import { queryTinybird } from "../lib/query-tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { defaultTimeRange } from "../lib/time"
 import { formatDurationFromMs, formatPercent, formatNumber, truncate } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
   server.tool(
@@ -19,45 +18,44 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
     },
-    async ({ service_name, start_time, end_time }) => {
-      try {
+    ({ service_name, start_time, end_time }) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = start_time ?? startTime
         const et = end_time ?? endTime
-        const [
-          overviewResult,
-          errorsResult,
-          logsResult,
-          tracesResult,
-          apdexResult,
-        ] = await Promise.all([
-          queryTinybird("service_overview", { start_time: st, end_time: et }),
-          queryTinybird("errors_by_type", {
-            start_time: st,
-            end_time: et,
-            services: service_name,
-            limit: 10,
-            exclude_spam_patterns: getSpamPatternsParam(),
-          }),
-          queryTinybird("list_logs", {
-            start_time: st,
-            end_time: et,
-            service: service_name,
-            limit: 15,
-          }),
-          queryTinybird("list_traces", {
-            start_time: st,
-            end_time: et,
-            service: service_name,
-            limit: 5,
-          }),
-          queryTinybird("service_apdex_time_series", {
-            service_name,
-            start_time: st,
-            end_time: et,
-            bucket_seconds: 300,
-          }),
-        ])
+
+        const [overviewResult, errorsResult, logsResult, tracesResult, apdexResult] =
+          yield* Effect.all(
+            [
+              queryTinybird("service_overview", { start_time: st, end_time: et }),
+              queryTinybird("errors_by_type", {
+                start_time: st,
+                end_time: et,
+                services: service_name,
+                limit: 10,
+                exclude_spam_patterns: getSpamPatternsParam(),
+              }),
+              queryTinybird("list_logs", {
+                start_time: st,
+                end_time: et,
+                service: service_name,
+                limit: 15,
+              }),
+              queryTinybird("list_traces", {
+                start_time: st,
+                end_time: et,
+                service: service_name,
+                limit: 5,
+              }),
+              queryTinybird("service_apdex_time_series", {
+                service_name,
+                start_time: st,
+                end_time: et,
+                bucket_seconds: 300,
+              }),
+            ],
+            { concurrency: "unbounded" },
+          )
 
         // Aggregate service overview rows for this service
         const svcRows = overviewResult.data.filter(
@@ -140,12 +138,6 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
         }
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

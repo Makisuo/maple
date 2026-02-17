@@ -1,12 +1,10 @@
 import {
-  optionalBooleanParam,
-  optionalNumberParam,
-  optionalStringParam,
   requiredStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { formatDurationFromMs, truncate } from "../lib/format"
+import { Effect } from "effect"
 
 interface SpanNode {
   spanId: string
@@ -26,12 +24,15 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
     {
       trace_id: requiredStringParam("The trace ID to inspect"),
     },
-    async ({ trace_id }) => {
-      try {
-        const [spansResult, logsResult] = await Promise.all([
-          queryTinybird("span_hierarchy", { trace_id }),
-          queryTinybird("list_logs", { trace_id, limit: 50 }),
-        ])
+    ({ trace_id }) =>
+      Effect.gen(function* () {
+        const [spansResult, logsResult] = yield* Effect.all(
+          [
+            queryTinybird("span_hierarchy", { trace_id }),
+            queryTinybird("list_logs", { trace_id, limit: 50 }),
+          ],
+          { concurrency: "unbounded" },
+        )
 
         const spans = spansResult.data
         if (spans.length === 0) {
@@ -63,7 +64,6 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
           }
         }
 
-        // Compute trace-level stats
         const serviceSet = new Set(spans.map((s) => s.serviceName))
         const rootDuration = roots[0]?.durationMs ?? 0
 
@@ -72,18 +72,17 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
           ``,
         ]
 
-        // Render tree
         function renderNode(node: SpanNode, prefix: string, isLast: boolean) {
-          const connector = prefix === "" ? "" : isLast ? "└── " : "├── "
+          const connector = prefix === "" ? "" : isLast ? "\u2514\u2500\u2500 " : "\u251C\u2500\u2500 "
           const status = node.statusCode === "Error" ? " [Error]" : node.statusCode === "Ok" ? " [Ok]" : ""
           lines.push(
             `${prefix}${connector}${node.spanName} — ${node.serviceName} (${formatDurationFromMs(node.durationMs)})${status}`,
           )
           if (node.statusCode === "Error" && node.statusMessage) {
-            const childPrefix = prefix + (prefix === "" ? "" : isLast ? "    " : "│   ")
+            const childPrefix = prefix + (prefix === "" ? "" : isLast ? "    " : "\u2502   ")
             lines.push(`${childPrefix}    Status: "${truncate(node.statusMessage, 100)}"`)
           }
-          const childPrefix = prefix + (prefix === "" ? "" : isLast ? "    " : "│   ")
+          const childPrefix = prefix + (prefix === "" ? "" : isLast ? "    " : "\u2502   ")
           node.children.forEach((child, i) => {
             renderNode(child, childPrefix, i === node.children.length - 1)
           })
@@ -93,7 +92,6 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
           renderNode(root, "", true)
         }
 
-        // Related logs
         const logs = logsResult.data
         if (logs.length > 0) {
           lines.push(``, `Related Logs (${logs.length}):`)
@@ -111,12 +109,6 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
         }
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }

@@ -1,13 +1,12 @@
 import {
-  optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
-  requiredStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { defaultTimeRange } from "../lib/time"
 import { truncate, formatNumber } from "../lib/format"
+import { Effect } from "effect"
 
 export function registerSearchLogsTool(server: McpToolRegistrar) {
   server.tool(
@@ -22,31 +21,35 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
       trace_id: optionalStringParam("Filter by trace ID"),
       limit: optionalNumberParam("Max results (default 30)"),
     },
-    async ({ start_time, end_time, service, severity, search, trace_id, limit }) => {
-      try {
+    ({ start_time, end_time, service, severity, search, trace_id, limit }) =>
+      Effect.gen(function* () {
         const { startTime, endTime } = defaultTimeRange(1)
         const st = start_time ?? startTime
         const et = end_time ?? endTime
         const lim = limit ?? 30
-        const [logsResult, countResult] = await Promise.all([
-          queryTinybird("list_logs", {
-            start_time: st,
-            end_time: et,
-            service,
-            severity,
-            search,
-            trace_id,
-            limit: lim,
-          }),
-          queryTinybird("logs_count", {
-            start_time: st,
-            end_time: et,
-            service,
-            severity,
-            search,
-            trace_id,
-          }),
-        ])
+
+        const [logsResult, countResult] = yield* Effect.all(
+          [
+            queryTinybird("list_logs", {
+              start_time: st,
+              end_time: et,
+              service,
+              severity,
+              search,
+              trace_id,
+              limit: lim,
+            }),
+            queryTinybird("logs_count", {
+              start_time: st,
+              end_time: et,
+              service,
+              severity,
+              search,
+              trace_id,
+            }),
+          ],
+          { concurrency: "unbounded" },
+        )
 
         const total = countResult.data[0] ? Number(countResult.data[0].total) : 0
         const logs = logsResult.data
@@ -84,12 +87,6 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
         }
 
         return { content: [{ type: "text", text: lines.join("\n") }] }
-      } catch (error) {
-        return {
-          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
-          isError: true,
-        }
-      }
-    },
+      }),
   )
 }
