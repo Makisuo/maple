@@ -1,18 +1,26 @@
 import { SignIn } from "@clerk/clerk-react"
 import { FormEvent, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
+import { Schema } from "effect"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { setSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 
+const SignInSearch = Schema.Struct({
+  redirect_url: Schema.optional(Schema.String),
+})
+
 export const Route = createFileRoute("/sign-in")({
   component: SignInPage,
+  validateSearch: Schema.standardSchemaV1(SignInSearch),
 })
 
 export const redirectToDashboard = () => {
-  window.location.assign("/")
+  const params = new URLSearchParams(window.location.search)
+  const redirectUrl = params.get("redirect_url") || "/"
+  window.location.assign(redirectUrl)
 }
 
 function getErrorMessage(error: unknown): string {

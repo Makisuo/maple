@@ -1,9 +1,15 @@
 import { OrganizationSwitcher, useAuth } from "@clerk/clerk-react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { Schema } from "effect"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+
+const OrgRequiredSearch = Schema.Struct({
+  redirect_url: Schema.optional(Schema.String),
+})
 
 export const Route = createFileRoute("/org-required")({
   component: OrgRequiredPage,
+  validateSearch: Schema.standardSchemaV1(OrgRequiredSearch),
 })
 
 function OrgRequiredPage() {
@@ -16,17 +22,18 @@ function OrgRequiredPage() {
 
 function OrgRequiredPageClerk() {
   const { isLoaded, isSignedIn, orgId } = useAuth()
+  const { redirect_url } = Route.useSearch()
 
   if (!isLoaded) {
     return null
   }
 
   if (!isSignedIn) {
-    return <Navigate to="/sign-in" replace />
+    return <Navigate to="/sign-in" search={{ redirect_url }} replace />
   }
 
   if (orgId) {
-    return <Navigate to="/" replace />
+    return <Navigate to={redirect_url || "/"} replace />
   }
 
   return (

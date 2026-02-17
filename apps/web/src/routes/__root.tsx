@@ -10,12 +10,20 @@ export const Route = createRootRouteWithContext<{ auth: RouterAuthContext }>()({
   beforeLoad: ({ context, location }) => {
     if (PUBLIC_PATHS.has(location.pathname)) return
 
+    const redirectUrl = location.pathname + (location.searchStr ?? "")
+
     if (!context.auth?.isAuthenticated) {
-      throw redirect({ to: "/sign-in" })
+      throw redirect({
+        to: "/sign-in",
+        search: { redirect_url: redirectUrl } as Record<string, string>,
+      })
     }
 
     if (!context.auth.orgId) {
-      throw redirect({ to: "/org-required" })
+      throw redirect({
+        to: "/org-required",
+        search: { redirect_url: redirectUrl } as Record<string, string>,
+      })
     }
   },
   component: RootComponent,
@@ -30,18 +38,27 @@ function AppFrame() {
   )
 }
 
+function getRedirectTarget(searchStr: string): string {
+  const params = new URLSearchParams(searchStr)
+  const target = params.get("redirect_url")
+  return target?.startsWith("/") ? target : "/"
+}
+
 function ClerkReverseRedirects() {
-  const pathname = useRouterState({
-    select: (state) => state.location.pathname,
+  const { pathname, searchStr } = useRouterState({
+    select: (state) => ({
+      pathname: state.location.pathname,
+      searchStr: state.location.searchStr,
+    }),
   })
   const { isSignedIn, orgId } = useAuth()
 
   if (isSignedIn && (pathname === "/sign-in" || pathname === "/sign-up")) {
-    return <Navigate to="/" replace />
+    return <Navigate to={getRedirectTarget(searchStr)} replace />
   }
 
   if (isSignedIn && orgId && pathname === "/org-required") {
-    return <Navigate to="/" replace />
+    return <Navigate to={getRedirectTarget(searchStr)} replace />
   }
 
   return <AppFrame />

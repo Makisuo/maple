@@ -1,7 +1,7 @@
 import { ClerkProvider, useAuth } from "@clerk/clerk-react"
 import { AutumnProvider } from "autumn-js/react"
 import { RegistryContext } from "@effect-atom/atom-react"
-import { StrictMode, useCallback, useEffect, useState } from "react"
+import { StrictMode, useCallback, useEffect, useRef, useState } from "react"
 import ReactDOM from "react-dom/client"
 import { RouterProvider } from "@tanstack/react-router"
 
@@ -44,14 +44,62 @@ function AutumnProviderWithClerk({ children }: { children: React.ReactNode }) {
   )
 }
 
-function ClerkInnerApp() {
+const AUTH_SETTLE_TIMEOUT_MS = 2000
+const PUBLIC_PATHS = ["/sign-in", "/sign-up", "/org-required"]
+
+/**
+ * Wait for Clerk's auth state to settle before rendering the router.
+ *
+ * On hard refresh Clerk may briefly report `isSignedIn = false` while the
+ * session token is being refreshed. If we render the router in that window,
+ * `beforeLoad` redirects to `/sign-in` and the original URL is lost.
+ *
+ * This hook delays rendering until either:
+ * - `isSignedIn` becomes `true` (token refresh completed), or
+ * - the safety timeout expires (user is genuinely unauthenticated).
+ */
+function useClerkAuthSettled() {
   const { isLoaded, isSignedIn, orgId } = useAuth()
+  const [settled, setSettled] = useState(false)
+  const hasRenderedRouter = useRef(false)
+
+  useEffect(() => {
+    if (!isLoaded) return
+
+    if (isSignedIn) {
+      setSettled(true)
+      return
+    }
+
+    if (PUBLIC_PATHS.includes(window.location.pathname)) {
+      setSettled(true)
+      return
+    }
+
+    if (hasRenderedRouter.current) {
+      setSettled(true)
+      return
+    }
+
+    const timer = setTimeout(() => setSettled(true), AUTH_SETTLE_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [isLoaded, isSignedIn])
+
+  useEffect(() => {
+    if (settled) hasRenderedRouter.current = true
+  }, [settled])
+
+  return { settled, isSignedIn, orgId }
+}
+
+function ClerkInnerApp() {
+  const { settled, isSignedIn, orgId } = useClerkAuthSettled()
 
   useEffect(() => {
     router.invalidate()
   }, [isSignedIn, orgId])
 
-  if (!isLoaded) return null
+  if (!settled) return null
 
   return (
     <RouterProvider
