@@ -27,6 +27,7 @@ import type {
   MetricTimeSeriesSumOutput,
   MetricsSummaryOutput,
   ServiceApdexTimeSeriesOutput,
+  ServiceDependenciesOutput,
   ServiceOverviewOutput,
   ServicesFacetsOutput,
   SpanHierarchyOutput,
@@ -79,6 +80,8 @@ export type {
   MetricsSummaryOutput,
   ServiceApdexTimeSeriesParams,
   ServiceApdexTimeSeriesOutput,
+  ServiceDependenciesParams,
+  ServiceDependenciesOutput,
   ServiceOverviewParams,
   ServiceOverviewOutput,
   ServicesFacetsParams,
@@ -165,6 +168,8 @@ const query = {
     queryTinybird<CustomLogsBreakdownOutput>("custom_logs_breakdown", params),
   custom_metrics_breakdown: (params?: Record<string, unknown>) =>
     queryTinybird<CustomMetricsBreakdownOutput>("custom_metrics_breakdown", params),
+  service_dependencies: (params?: Record<string, unknown>) =>
+    queryTinybird<ServiceDependenciesOutput>("service_dependencies", params),
 }
 
 export function createTinybird() {

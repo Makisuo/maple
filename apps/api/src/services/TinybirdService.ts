@@ -44,6 +44,7 @@ import {
   metricTimeSeriesSum,
   metricsSummary,
   serviceApdexTimeSeries,
+  serviceDependencies,
   serviceOverview,
   servicesFacets,
   spanHierarchy,
@@ -89,6 +90,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
         custom_logs_timeseries: customLogsTimeseries,
         custom_logs_breakdown: customLogsBreakdown,
         custom_metrics_breakdown: customMetricsBreakdown,
+        service_dependencies: serviceDependencies,
       },
     })
 

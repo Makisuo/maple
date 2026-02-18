@@ -13,6 +13,7 @@ import {
   ChevronUpIcon,
   RocketIcon,
   CheckIcon,
+  NetworkNodesIcon,
 } from "@/components/icons"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
 import {
@@ -51,6 +52,11 @@ const navItems = [
     title: "Services",
     href: "/services",
     icon: ServerIcon,
+  },
+  {
+    title: "Service Map",
+    href: "/service-map",
+    icon: NetworkNodesIcon,
   },
   {
     title: "Errors",

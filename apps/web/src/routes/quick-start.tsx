@@ -30,6 +30,7 @@ import {
   FileIcon,
 } from "@/components/icons"
 import { CodeBlock } from "@/components/quick-start/code-block"
+import { PackageManagerCodeBlock } from "@/components/quick-start/package-manager-code-block"
 import { sdkSnippets, type FrameworkId } from "@/components/quick-start/sdk-snippets"
 import {
   NextjsIcon,
@@ -227,7 +228,11 @@ function StepSetupApp({
         <>
           <div className="space-y-2">
             <h4 className="text-xs font-medium text-muted-foreground">1. Install dependencies</h4>
-            <CodeBlock code={snippet.install} language="shell" />
+            {typeof snippet.install === "string" ? (
+              <CodeBlock code={snippet.install} language="shell" />
+            ) : (
+              <PackageManagerCodeBlock packages={snippet.install.packages} />
+            )}
           </div>
           <div className="space-y-2">
             <h4 className="text-xs font-medium text-muted-foreground">2. Add instrumentation</h4>

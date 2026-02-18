@@ -2354,3 +2354,121 @@ export const customMetricsBreakdown = defineEndpoint("custom_metrics_breakdown",
 
 export type CustomMetricsBreakdownParams = InferParams<typeof customMetricsBreakdown>;
 export type CustomMetricsBreakdownOutput = InferOutputRow<typeof customMetricsBreakdown>;
+
+/**
+ * Service dependencies endpoint - derive service-to-service edges from trace data
+ */
+export const serviceDependencies = defineEndpoint("service_dependencies", {
+  description: "Get service-to-service dependency edges derived from span parent-child relationships.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().optional().describe("Start of time range"),
+    end_time: p.dateTime().optional().describe("End of time range"),
+    deployment_env: p.string().optional().describe("Filter by deployment environment"),
+  },
+  nodes: [
+    node({
+      name: "peer_service_edges",
+      sql: `
+        SELECT
+          ServiceName AS sourceService,
+          SpanAttributes['peer.service'] AS targetService,
+          count() AS callCount,
+          countIf(StatusCode = 'Error') AS errorCount,
+          avg(Duration / 1000000) AS avgDurationMs,
+          quantile(0.95)(Duration / 1000000) AS p95DurationMs
+        FROM traces
+        WHERE OrgId = {{String(org_id, "")}}
+          AND SpanKind = 'SPAN_KIND_CLIENT'
+          AND SpanAttributes['peer.service'] != ''
+        {% if defined(start_time) %}
+          AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+        {% end %}
+        {% if defined(end_time) %}
+          AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+        {% end %}
+        {% if defined(deployment_env) %}
+          AND ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
+        {% end %}
+        GROUP BY sourceService, targetService
+      `,
+    }),
+    node({
+      name: "join_edges",
+      sql: `
+        SELECT
+          p.ServiceName AS sourceService,
+          c.ServiceName AS targetService,
+          count() AS callCount,
+          countIf(c.StatusCode = 'Error') AS errorCount,
+          avg(c.Duration / 1000000) AS avgDurationMs,
+          quantile(0.95)(c.Duration / 1000000) AS p95DurationMs
+        FROM (
+          SELECT TraceId, SpanId, ServiceName
+          FROM traces
+          WHERE OrgId = {{String(org_id, "")}}
+            AND SpanKind IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')
+            AND SpanAttributes['peer.service'] = ''
+          {% if defined(start_time) %}
+            AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+          {% end %}
+          {% if defined(end_time) %}
+            AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+          {% end %}
+          {% if defined(deployment_env) %}
+            AND ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
+          {% end %}
+        ) AS p
+        INNER JOIN (
+          SELECT TraceId, ParentSpanId, ServiceName, Duration, StatusCode
+          FROM traces
+          WHERE OrgId = {{String(org_id, "")}}
+            AND ParentSpanId != ''
+          {% if defined(start_time) %}
+            AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+          {% end %}
+          {% if defined(end_time) %}
+            AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+          {% end %}
+          {% if defined(deployment_env) %}
+            AND ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
+          {% end %}
+        ) AS c
+        ON p.SpanId = c.ParentSpanId AND p.TraceId = c.TraceId
+        WHERE p.ServiceName != c.ServiceName
+        GROUP BY sourceService, targetService
+      `,
+    }),
+    node({
+      name: "merged_edges",
+      sql: `
+        SELECT
+          sourceService,
+          targetService,
+          sum(callCount) AS callCount,
+          sum(errorCount) AS errorCount,
+          avg(avgDurationMs) AS avgDurationMs,
+          max(p95DurationMs) AS p95DurationMs
+        FROM (
+          SELECT * FROM peer_service_edges
+          UNION ALL
+          SELECT * FROM join_edges
+        )
+        GROUP BY sourceService, targetService
+        ORDER BY callCount DESC
+        LIMIT 200
+      `,
+    }),
+  ],
+  output: {
+    sourceService: t.string(),
+    targetService: t.string(),
+    callCount: t.uint64(),
+    errorCount: t.uint64(),
+    avgDurationMs: t.float64(),
+    p95DurationMs: t.float64(),
+  },
+});
+
+export type ServiceDependenciesParams = InferParams<typeof serviceDependencies>;
+export type ServiceDependenciesOutput = InferOutputRow<typeof serviceDependencies>;

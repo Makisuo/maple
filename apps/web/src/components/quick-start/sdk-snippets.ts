@@ -5,7 +5,7 @@ export interface SdkSnippet {
   label: string
   description: string
   iconKey: FrameworkId
-  install: string
+  install: string | { packages: string[] }
   instrument: string
 }
 
@@ -15,9 +15,7 @@ export const sdkSnippets: SdkSnippet[] = [
     label: "Next.js",
     description: "React framework",
     iconKey: "nextjs",
-    install: `npm install @vercel/otel \\
-  @opentelemetry/sdk-logs \\
-  @opentelemetry/exporter-logs-otlp-http`,
+    install: { packages: ["@vercel/otel", "@opentelemetry/sdk-logs", "@opentelemetry/exporter-logs-otlp-http"] },
     instrument: `// instrumentation.ts (project root)
 import { registerOTel } from "@vercel/otel";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
@@ -42,10 +40,7 @@ export function register() {
     label: "Node.js",
     description: "JavaScript runtime",
     iconKey: "nodejs",
-    install: `npm install @opentelemetry/sdk-node \\
-  @opentelemetry/auto-instrumentations-node \\
-  @opentelemetry/exporter-trace-otlp-http \\
-  @opentelemetry/exporter-logs-otlp-http`,
+    install: { packages: ["@opentelemetry/sdk-node", "@opentelemetry/auto-instrumentations-node", "@opentelemetry/exporter-trace-otlp-http", "@opentelemetry/exporter-logs-otlp-http"] },
     instrument: `// tracing.js — run with: node --require ./tracing.js app.js
 const { NodeSDK } = require("@opentelemetry/sdk-node");
 const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
@@ -148,8 +143,7 @@ func main() {
     label: "Effect",
     description: "TypeScript toolkit",
     iconKey: "effect",
-    install: `npm install effect @effect/opentelemetry \\
-  @effect/platform @opentelemetry/sdk-trace-node`,
+    install: { packages: ["effect", "@effect/opentelemetry", "@effect/platform", "@opentelemetry/sdk-trace-node"] },
     instrument: `// telemetry.ts
 import * as Otlp from "@effect/opentelemetry/Otlp"
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient"
