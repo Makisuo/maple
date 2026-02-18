@@ -1,5 +1,6 @@
 import { createRouter as createTanStackRouter } from "@tanstack/react-router"
 
+import { NotFoundError, RouteError } from "./components/route-error"
 import { routeTree } from "./routeTree.gen"
 
 export interface RouterAuthContext {
@@ -11,6 +12,8 @@ export const router = createTanStackRouter({
   routeTree,
   scrollRestoration: true,
   defaultPreloadStaleTime: 0,
+  defaultErrorComponent: RouteError,
+  defaultNotFoundComponent: NotFoundError,
   context: {
     auth: undefined!,
   },
