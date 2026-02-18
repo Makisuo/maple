@@ -129,6 +129,7 @@ export async function provisionRailwayStack(
     environment: environmentId,
     service: otelService,
     variables: {
+      RAILWAY_RUN_UID: "0",
       TINYBIRD_HOST: reqEnv("TINYBIRD_HOST"),
       TINYBIRD_TOKEN: reqEnv("TINYBIRD_TOKEN"),
       SD_API_HOST: apiPrivateHost,

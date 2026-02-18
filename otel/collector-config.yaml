@@ -70,7 +70,7 @@ exporters:
 
 extensions:
   file_storage/queue:
-    directory: /tmp/otelcol/file_storage
+    directory: /var/lib/otelcol/file_storage
     create_directory: true
     timeout: 10s
     compaction:
