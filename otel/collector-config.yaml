@@ -71,6 +71,7 @@ exporters:
 extensions:
   file_storage/queue:
     directory: /var/lib/otelcol/file_storage
+    create_directory: true
     timeout: 10s
     compaction:
       on_start: true
@@ -109,3 +110,5 @@ service:
   telemetry:
     logs:
       level: info
+    metrics:
+      address: 0.0.0.0:8888
