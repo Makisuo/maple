@@ -1,6 +1,6 @@
 FROM otel/opentelemetry-collector-contrib:latest
 
-USER root
+USER 0
 RUN mkdir -p /var/lib/otelcol/file_storage && chown -R 10001:10001 /var/lib/otelcol
 USER 10001
 
