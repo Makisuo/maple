@@ -11,10 +11,16 @@ import {
   GearIcon,
   LogoutIcon,
   ChevronUpIcon,
+  ChevronRightIcon,
   RocketIcon,
   CheckIcon,
   NetworkNodesIcon,
 } from "@/components/icons"
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
 import {
   DropdownMenu,
@@ -42,12 +48,15 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { useQuickStart } from "@/hooks/use-quick-start"
 
-const navItems = [
+const mainNavItems = [
   {
     title: "Overview",
     href: "/",
     icon: HouseIcon,
   },
+]
+
+const observabilityNavItems = [
   {
     title: "Services",
     href: "/services",
@@ -78,6 +87,9 @@ const navItems = [
     href: "/metrics",
     icon: ChartLineIcon,
   },
+]
+
+const toolsNavItems = [
   {
     title: "Query Lab",
     href: "/query-builder-lab",
@@ -271,15 +283,68 @@ export function AppSidebar() {
           </SidebarGroup>
         )}
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
-                const isActive =
-                  item.href === "/"
-                    ? currentPath === "/"
-                    : currentPath.startsWith(item.href)
+              {mainNavItems.map((item) => {
+                const isActive = currentPath === item.href
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      render={<Link to={item.href} />}
+                      tooltip={item.title}
+                      isActive={isActive}
+                    >
+                      <item.icon size={16} />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
+        <Collapsible defaultOpen={true} className="group/collapsible">
+          <SidebarGroup>
+            <SidebarGroupLabel render={<CollapsibleTrigger />}>
+              Observability
+              <ChevronRightIcon
+                size={16}
+                className="ml-auto transition-transform group-data-[open]/collapsible:rotate-90"
+              />
+            </SidebarGroupLabel>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {observabilityNavItems.map((item) => {
+                    const isActive = currentPath.startsWith(item.href)
+                    return (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton
+                          render={<Link to={item.href} />}
+                          tooltip={item.title}
+                          isActive={isActive}
+                        >
+                          <item.icon size={16} />
+                          <span>{item.title}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+
+        <div className="flex-1" />
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Tools</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {toolsNavItems.map((item) => {
+                const isActive = currentPath.startsWith(item.href)
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
