@@ -117,7 +117,7 @@ function TraceDetailPage() {
         const httpStatus = s.spanAttributes?.["http.status_code"]
         if (httpStatus) {
           const code = typeof httpStatus === "string" ? parseInt(httpStatus) : httpStatus
-          if (code >= 500) return true
+          if (typeof code === "number" && code >= 500) return true
         }
         return false
       })
@@ -230,4 +230,5 @@ function TraceDetailPage() {
         </DashboardLayout>
       )
     })
+    .render()
 }
