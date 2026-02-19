@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 import { useRef, useEffect } from "react"
-import { z } from "zod"
+import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TimeRangePicker } from "@/components/time-range-picker"
@@ -25,16 +25,16 @@ import {
   getServicesFacetsResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
 
-const dashboardSearchSchema = z.object({
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-  timePreset: z.string().optional(),
-  environment: z.string().optional(),
+const dashboardSearchSchema = Schema.Struct({
+  startTime: Schema.optional(Schema.String),
+  endTime: Schema.optional(Schema.String),
+  timePreset: Schema.optional(Schema.String),
+  environment: Schema.optional(Schema.String),
 })
 
 export const Route = createFileRoute("/")({
   component: DashboardPage,
-  validateSearch: (search) => dashboardSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(dashboardSearchSchema),
 })
 
 interface OverviewChartConfig {

@@ -47,6 +47,8 @@ import {
   serviceDependencies,
   serviceOverview,
   servicesFacets,
+  spanAttributeKeys,
+  spanAttributeValues,
   spanHierarchy,
   tracesDurationStats,
   tracesFacets,
@@ -91,6 +93,8 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
         custom_logs_breakdown: customLogsBreakdown,
         custom_metrics_breakdown: customMetricsBreakdown,
         service_dependencies: serviceDependencies,
+        span_attribute_keys: spanAttributeKeys,
+        span_attribute_values: spanAttributeValues,
       },
     })
 

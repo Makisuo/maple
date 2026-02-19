@@ -228,46 +228,35 @@ function encodeKey(value: unknown): string {
   return JSON.stringify(normalized === undefined ? null : normalized)
 }
 
-async function parseErrorField<Output>(output: Output): Promise<Output> {
-  if (output && typeof output === "object" && "error" in output) {
-    const errorValue = (output as { error?: unknown }).error
-    if (typeof errorValue === "string" && errorValue.length > 0) {
-      throw new WidgetDataAtomError({
-        message: errorValue,
-      })
-    }
-  }
-
-  return output
-}
-
 const widgetDataResultFamily = Atom.family((key: string) =>
   Atom.make(
-    Effect.tryPromise({
-      try: async () => {
-        const {
-          endpoint,
-          params,
-          transform,
-        } = JSON.parse(key) as {
+    Effect.try({
+      try: () =>
+        JSON.parse(key) as {
           endpoint: DashboardWidget["dataSource"]["endpoint"]
           params: Record<string, unknown>
           transform: WidgetDataSource["transform"]
-        }
-
-        const serverFn = serverFunctionMap[endpoint]
-        if (!serverFn) {
-          throw new WidgetDataAtomError({
-            message: `Unknown endpoint: ${endpoint}`,
-          })
-        }
-
-        const response = await parseErrorField(await serverFn({ data: params }))
-        const rawData = response?.data ?? response
-        return applyTransform(rawData, transform)
-      },
+        },
       catch: toWidgetDataAtomError,
     }).pipe(
+      Effect.flatMap(({ endpoint, params, transform }) => {
+        const serverFn = serverFunctionMap[endpoint]
+        if (!serverFn) {
+          return Effect.fail(
+            new WidgetDataAtomError({
+              message: `Unknown endpoint: ${endpoint}`,
+            }),
+          )
+        }
+
+        return serverFn({ data: params }).pipe(
+          Effect.map((response) => {
+            const rawData = response?.data ?? response
+            return applyTransform(rawData, transform)
+          }),
+        )
+      }),
+      Effect.mapError(toWidgetDataAtomError),
       Effect.retry(Schedule.recurs(1)),
     ),
   ).pipe(Atom.setIdleTTL(30_000)),

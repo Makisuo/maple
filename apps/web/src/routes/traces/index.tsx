@@ -1,30 +1,30 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
+import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TracesTable } from "@/components/traces/traces-table"
 import { TracesFilterSidebar } from "@/components/traces/traces-filter-sidebar"
 import { TimeRangePicker } from "@/components/time-range-picker"
 
-const tracesSearchSchema = z.object({
-  services: z.array(z.string()).optional(),
-  spanNames: z.array(z.string()).optional(),
-  hasError: z.boolean().optional(),
-  minDurationMs: z.number().optional(),
-  maxDurationMs: z.number().optional(),
-  httpMethods: z.array(z.string()).optional(),
-  httpStatusCodes: z.array(z.string()).optional(),
-  deploymentEnvs: z.array(z.string()).optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-  rootOnly: z.boolean().optional(),
+const tracesSearchSchema = Schema.Struct({
+  services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  spanNames: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  hasError: Schema.optional(Schema.Boolean),
+  minDurationMs: Schema.optional(Schema.Number),
+  maxDurationMs: Schema.optional(Schema.Number),
+  httpMethods: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  httpStatusCodes: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  deploymentEnvs: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  startTime: Schema.optional(Schema.String),
+  endTime: Schema.optional(Schema.String),
+  rootOnly: Schema.optional(Schema.Boolean),
 })
 
-export type TracesSearchParams = z.infer<typeof tracesSearchSchema>
+export type TracesSearchParams = Schema.Schema.Type<typeof tracesSearchSchema>
 
 export const Route = createFileRoute("/traces/")({
   component: TracesPage,
-  validateSearch: (search) => tracesSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(tracesSearchSchema),
 })
 
 function TracesPage() {

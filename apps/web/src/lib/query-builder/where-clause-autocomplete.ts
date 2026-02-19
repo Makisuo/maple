@@ -17,6 +17,8 @@ export interface WhereClauseAutocompleteValues {
   commitShas?: string[]
   severities?: string[]
   metricTypes?: QueryBuilderMetricType[]
+  attributeKeys?: string[]
+  attributeValues?: string[]
 }
 
 export interface WhereClauseAutocompleteSuggestion {
@@ -570,7 +572,47 @@ function buildValueSuggestions(
     )
   }
 
+  if (normalizedKey === "attr.*" && values?.attributeValues) {
+    return uniqueValues(values.attributeValues).map((value) =>
+      toStringValueSuggestion(value, "attr"),
+    )
+  }
+
   return []
+}
+
+const NOISY_ATTR_PREFIXES = [
+  "http.request.header.",
+  "http.response.header.",
+]
+
+function isNoisyAttributeKey(key: string): boolean {
+  return NOISY_ATTR_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
+function buildAttributeKeySuggestions(
+  attributeKeys: string[],
+): WhereClauseAutocompleteSuggestion[] {
+  const clean: WhereClauseAutocompleteSuggestion[] = []
+  const noisy: WhereClauseAutocompleteSuggestion[] = []
+
+  for (const key of attributeKeys) {
+    const suggestion: WhereClauseAutocompleteSuggestion = {
+      id: `key:attr.${key}`,
+      kind: "key",
+      label: `attr.${key}`,
+      insertText: `attr.${key}`,
+      description: "Span attribute",
+    }
+
+    if (isNoisyAttributeKey(key)) {
+      noisy.push(suggestion)
+    } else {
+      clean.push(suggestion)
+    }
+  }
+
+  return [...clean, ...noisy]
 }
 
 function buildSuggestions(
@@ -580,6 +622,19 @@ function buildSuggestions(
   maxSuggestions: number,
 ): WhereClauseAutocompleteSuggestion[] {
   if (parsed.context === "key") {
+    const query = parsed.query.toLowerCase()
+
+    // When typing attr., show dynamic attribute keys instead of static definitions
+    if (
+      dataSource === "traces" &&
+      query.startsWith("attr.") &&
+      values?.attributeKeys &&
+      values.attributeKeys.length > 0
+    ) {
+      const attrSuggestions = buildAttributeKeySuggestions(values.attributeKeys)
+      return filterAndRankSuggestions(attrSuggestions, query, maxSuggestions)
+    }
+
     const keySuggestions = KEY_DEFINITIONS[dataSource].map((keyDef) =>
       toSuggestion(
         {
@@ -691,7 +746,9 @@ export function applyWhereClauseSuggestion({
   }
 
   const shouldAddLeadingSpace = before.length > 0 && !/\s$/.test(before)
-  const shouldAddTrailingSpace = after.length === 0 || !/^\s/.test(after)
+  const isPrefix = suggestion.insertText.endsWith(".")
+  const shouldAddTrailingSpace =
+    !isPrefix && (after.length === 0 || !/^\s/.test(after))
   const insertion = `${shouldAddLeadingSpace ? " " : ""}${
     suggestion.insertText
   }${shouldAddTrailingSpace ? " " : ""}`

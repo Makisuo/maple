@@ -1,40 +1,48 @@
-import { z } from "zod";
-import { getTinybird } from "@/lib/tinybird";
+import { Effect, Schema } from "effect"
+import { getTinybird } from "@/lib/tinybird"
+import {
+  TinybirdDateTimeString,
+  decodeInput,
+  runTinybirdQuery,
+} from "@/api/tinybird/effect-utils"
 
 export interface ErrorRateByService {
-  serviceName: string;
-  totalLogs: number;
-  errorLogs: number;
-  errorRatePercent: number;
+  serviceName: string
+  totalLogs: number
+  errorLogs: number
+  errorRatePercent: number
 }
 
 export interface ErrorRateByServiceResponse {
-  data: ErrorRateByService[];
-  error: string | null;
+  data: ErrorRateByService[]
 }
 
-const GetErrorRateByServiceInput = z.object({
-  startTime: z.string().datetime().optional(),
-  endTime: z.string().datetime().optional(),
-});
+const GetErrorRateByServiceInput = Schema.Struct({
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+})
 
-export type GetErrorRateByServiceInput = z.infer<
-  typeof GetErrorRateByServiceInput
->;
+export type GetErrorRateByServiceInput = Schema.Schema.Type<typeof GetErrorRateByServiceInput>
 
-export async function getErrorRateByService({
-  data,
-}: {
-  data: GetErrorRateByServiceInput
-}): Promise<ErrorRateByServiceResponse> {
-  data = GetErrorRateByServiceInput.parse(data ?? {})
+export const getErrorRateByService = Effect.fn("Tinybird.getErrorRateByService")(
+  function* ({
+    data,
+  }: {
+    data: GetErrorRateByServiceInput
+  }) {
+    const input = yield* decodeInput(
+      GetErrorRateByServiceInput,
+      data ?? {},
+      "getErrorRateByService",
+    )
 
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.error_rate_by_service({
-      start_time: data.startTime,
-      end_time: data.endTime,
-    });
+    const tinybird = getTinybird()
+    const result = yield* runTinybirdQuery("error_rate_by_service", () =>
+      tinybird.query.error_rate_by_service({
+        start_time: input.startTime,
+        end_time: input.endTime,
+      }),
+    )
 
     return {
       data: result.data.map((row) => ({
@@ -43,16 +51,6 @@ export async function getErrorRateByService({
         errorLogs: Number(row.errorLogs),
         errorRatePercent: Number(row.errorRatePercent),
       })),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getErrorRateByService failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch error rates",
-    };
-  }
-}
+    }
+  },
+)

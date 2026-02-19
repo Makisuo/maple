@@ -1,7 +1,5 @@
-import { z } from "zod"
 import { Effect, Schema } from "effect"
 import { QueryEngineExecuteRequest, type QuerySpec } from "@maple/domain"
-import { runtime } from "@/lib/services/common/runtime"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { formatForTinybird } from "@/lib/time-utils"
 import {
@@ -14,10 +12,14 @@ import {
   buildTimeseriesQuerySpec,
   type QueryBuilderMetricType,
 } from "@/lib/query-builder/model"
+import {
+  decodeInput,
+  TinybirdApiError as TinybirdApiErrorClass,
+} from "@/api/tinybird/effect-utils"
 
-const dateTimeString = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "Invalid datetime format")
+const dateTimeString = Schema.String.pipe(
+  Schema.pattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/),
+)
 
 const METRIC_TYPES_TUPLE = [
   "sum",
@@ -34,61 +36,63 @@ const DEFAULT_STRATEGY = {
   maxFallbackRangeSeconds: 31 * 24 * 60 * 60,
 } as const
 
-const QueryDraftSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  enabled: z.boolean(),
-  dataSource: z.enum(["traces", "logs", "metrics"]),
-  signalSource: z.enum(["default", "meter"]),
-  metricName: z.string(),
-  metricType: z.enum(METRIC_TYPES_TUPLE),
-  whereClause: z.string(),
-  aggregation: z.string(),
-  stepInterval: z.string(),
-  orderByDirection: z.enum(["desc", "asc"]),
-  addOns: z.object({
-    groupBy: z.boolean(),
-    having: z.boolean(),
-    orderBy: z.boolean(),
-    limit: z.boolean(),
-    legend: z.boolean(),
+const QueryDraftSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  enabled: Schema.Boolean,
+  dataSource: Schema.Literal("traces", "logs", "metrics"),
+  signalSource: Schema.Literal("default", "meter"),
+  metricName: Schema.String,
+  metricType: Schema.Literal(...METRIC_TYPES_TUPLE),
+  whereClause: Schema.String,
+  aggregation: Schema.String,
+  stepInterval: Schema.String,
+  orderByDirection: Schema.Literal("desc", "asc"),
+  addOns: Schema.Struct({
+    groupBy: Schema.Boolean,
+    having: Schema.Boolean,
+    orderBy: Schema.Boolean,
+    limit: Schema.Boolean,
+    legend: Schema.Boolean,
   }),
-  groupBy: z.string(),
-  having: z.string(),
-  orderBy: z.string(),
-  limit: z.string(),
-  legend: z.string(),
+  groupBy: Schema.String,
+  having: Schema.String,
+  orderBy: Schema.String,
+  limit: Schema.String,
+  legend: Schema.String,
 })
 
-const FormulaSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  expression: z.string(),
-  legend: z.string(),
+const FormulaSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  expression: Schema.String,
+  legend: Schema.String,
 })
 
-const ComparisonSchema = z.object({
-  mode: z.enum(COMPARISON_MODES).default("none"),
-  includePercentChange: z.boolean().default(true),
+const ComparisonSchema = Schema.Struct({
+  mode: Schema.optional(Schema.Literal(...COMPARISON_MODES)),
+  includePercentChange: Schema.optional(Schema.Boolean),
 })
 
-const StrategySchema = z.object({
-  enableEmptyRangeFallback: z.boolean().optional(),
-  fallbackWindowSeconds: z.array(z.number().int().positive()).optional(),
-  maxFallbackRangeSeconds: z.number().int().positive().optional(),
+const StrategySchema = Schema.Struct({
+  enableEmptyRangeFallback: Schema.optional(Schema.Boolean),
+  fallbackWindowSeconds: Schema.optional(
+    Schema.mutable(Schema.Array(Schema.Number.pipe(Schema.int(), Schema.greaterThan(0)))),
+  ),
+  maxFallbackRangeSeconds: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.greaterThan(0))),
 })
 
-const QueryBuilderTimeseriesInput = z.object({
+const QueryBuilderTimeseriesInputSchema = Schema.Struct({
   startTime: dateTimeString,
   endTime: dateTimeString,
-  queries: z.array(QueryDraftSchema).min(1),
-  formulas: z.array(FormulaSchema).optional(),
-  comparison: ComparisonSchema.optional(),
-  strategy: StrategySchema.optional(),
-  debug: z.boolean().optional(),
+  queries: Schema.mutable(Schema.Array(QueryDraftSchema)),
+  formulas: Schema.optional(Schema.mutable(Schema.Array(FormulaSchema))),
+  comparison: Schema.optional(ComparisonSchema),
+  strategy: Schema.optional(StrategySchema),
+  debug: Schema.optional(Schema.Boolean),
 })
 
-export type QueryBuilderTimeseriesInput = z.infer<typeof QueryBuilderTimeseriesInput>
+export type QueryBuilderTimeseriesInput = Schema.Schema.Type<typeof QueryBuilderTimeseriesInputSchema>
 
 interface QueryExecutionAttempt {
   startTime: string
@@ -131,7 +135,6 @@ interface QueryBuilderTimeseriesDebug {
 
 export interface QueryBuilderTimeseriesResponse {
   data: Array<Record<string, string | number>>
-  error: string | null
   debug?: QueryBuilderTimeseriesDebug
 }
 
@@ -302,11 +305,8 @@ async function executeTimeseriesQuery(
     query: spec,
   })
 
-  const response = await runtime.runPromise(
-    Effect.gen(function* () {
-      const client = yield* MapleApiAtomClient
-      return yield* client.queryEngine.execute({ payload })
-    }),
+  const response = await Effect.runPromise(
+    executeTimeseriesQueryEffect(payload).pipe(Effect.provide(MapleApiAtomClient.layer)),
   )
 
   if (response.result.kind !== "timeseries") {
@@ -318,6 +318,13 @@ async function executeTimeseriesQuery(
     series: { ...point.series },
   }))
 }
+
+const executeTimeseriesQueryEffect = Effect.fn("Tinybird.executeTimeseriesQuery")(
+  function* (payload: QueryEngineExecuteRequest) {
+    const client = yield* MapleApiAtomClient
+    return yield* client.queryEngine.execute({ payload })
+  },
+)
 
 async function executeTimeseriesQueryWithFallback(
   startTime: string,
@@ -733,12 +740,9 @@ export const __testables = {
   appendPercentChangeSeries,
 }
 
-export async function getQueryBuilderTimeseries({
-  data,
-}: {
-  data: QueryBuilderTimeseriesInput
-}): Promise<QueryBuilderTimeseriesResponse> {
-  const input = QueryBuilderTimeseriesInput.parse(data)
+async function getQueryBuilderTimeseriesInternal(
+  input: QueryBuilderTimeseriesInput,
+): Promise<QueryBuilderTimeseriesResponse> {
 
   const formulas: FormulaDraft[] = (input.formulas ?? []).map((formula) => ({
     id: formula.id,
@@ -754,10 +758,7 @@ export async function getQueryBuilderTimeseries({
 
   const enabledQueries = input.queries.filter((query) => query.enabled)
   if (enabledQueries.length === 0) {
-    return {
-      data: [],
-      error: "No enabled queries to run",
-    }
+    throw new Error("No enabled queries to run")
   }
 
   try {
@@ -771,10 +772,7 @@ export async function getQueryBuilderTimeseries({
     )
     const successfulQueryCount = countSuccessfulQuerySeries(currentWindow.queryResults)
     if (successfulQueryCount === 0) {
-      return {
-        data: [],
-        error: noQueryDataMessage(currentWindow.queryResults),
-      }
+      throw new Error(noQueryDataMessage(currentWindow.queryResults))
     }
 
     const allResults = currentWindow.allResults
@@ -785,10 +783,7 @@ export async function getQueryBuilderTimeseries({
 
     if (successfulCount === 0) {
       const firstError = allResults.find((result) => result.error)?.error
-      return {
-        data: [],
-        error: firstError ?? "No successful query results",
-      }
+      throw new Error(firstError ?? "No successful query results")
     }
 
     const displayNameById = toDisplayNameById([
@@ -881,17 +876,45 @@ export async function getQueryBuilderTimeseries({
 
     return {
       data: mergedRows,
-      error: null,
       ...(input.debug === true ? { debug: debugInfo } : {}),
     }
   } catch (error) {
-    console.error("[QueryBuilder] getQueryBuilderTimeseries failed:", error)
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch query-builder timeseries",
-    }
+    throw error instanceof Error ? error : new Error("Failed to fetch query-builder timeseries")
   }
 }
+
+export function getQueryBuilderTimeseries({
+  data,
+}: {
+  data: QueryBuilderTimeseriesInput
+}) {
+  return getQueryBuilderTimeseriesEffect({ data })
+}
+
+const getQueryBuilderTimeseriesEffect = Effect.fn("Tinybird.getQueryBuilderTimeseries")(
+  function* ({
+    data,
+  }: {
+    data: QueryBuilderTimeseriesInput
+  }) {
+    const input = yield* decodeInput(
+      QueryBuilderTimeseriesInputSchema,
+      data,
+      "getQueryBuilderTimeseries",
+    )
+
+    return yield* Effect.tryPromise({
+      try: () => getQueryBuilderTimeseriesInternal(input),
+      catch: (cause) =>
+        new TinybirdApiErrorClass({
+          operation: "getQueryBuilderTimeseries",
+          stage: "query",
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "Failed to fetch query-builder timeseries",
+          cause,
+        }),
+    })
+  },
+)

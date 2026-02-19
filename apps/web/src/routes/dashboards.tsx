@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
+import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { DashboardList } from "@/components/dashboard-builder/list/dashboard-list"
@@ -21,13 +21,13 @@ import type {
 } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 
-const dashboardsSearchSchema = z.object({
-  dashboardId: z.string().optional(),
+const dashboardsSearchSchema = Schema.Struct({
+  dashboardId: Schema.optional(Schema.String),
 })
 
 export const Route = createFileRoute("/dashboards")({
   component: DashboardsPage,
-  validateSearch: (search) => dashboardsSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(dashboardsSearchSchema),
 })
 
 function DashboardsPage() {

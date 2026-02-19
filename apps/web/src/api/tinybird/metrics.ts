@@ -1,33 +1,51 @@
-import { z } from "zod";
-import { getTinybird, type ListMetricsOutput, type MetricTimeSeriesSumOutput, type MetricsSummaryOutput } from "@/lib/tinybird";
+import { Effect, Schema } from "effect"
+import {
+  getTinybird,
+  type ListMetricsOutput,
+  type MetricTimeSeriesSumOutput,
+  type MetricsSummaryOutput,
+} from "@/lib/tinybird"
+import {
+  TinybirdDateTimeString,
+  decodeInput,
+  invalidTinybirdInput,
+  runTinybirdQuery,
+} from "@/api/tinybird/effect-utils"
 
-// Input validation schemas
-const ListMetricsInput = z.object({
-  limit: z.number().min(1).max(1000).optional(),
-  offset: z.number().min(0).optional(),
-  service: z.string().optional(),
-  metricType: z.enum(["sum", "gauge", "histogram", "exponential_histogram"]).optional(),
-  startTime: z.string().datetime().optional(),
-  endTime: z.string().datetime().optional(),
-  search: z.string().optional(),
-});
+const MetricTypeSchema = Schema.Literal(
+  "sum",
+  "gauge",
+  "histogram",
+  "exponential_histogram",
+)
 
-export type ListMetricsInput = z.infer<typeof ListMetricsInput>;
+const ListMetricsInputSchema = Schema.Struct({
+  limit: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1), Schema.lessThanOrEqualTo(1000)),
+  ),
+  offset: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0))),
+  service: Schema.optional(Schema.String),
+  metricType: Schema.optional(MetricTypeSchema),
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  search: Schema.optional(Schema.String),
+})
+
+export type ListMetricsInput = Schema.Schema.Type<typeof ListMetricsInputSchema>
 
 export interface Metric {
-  metricName: string;
-  metricType: string;
-  serviceName: string;
-  metricDescription: string;
-  metricUnit: string;
-  dataPointCount: number;
-  firstSeen: string;
-  lastSeen: string;
+  metricName: string
+  metricType: string
+  serviceName: string
+  metricDescription: string
+  metricUnit: string
+  dataPointCount: number
+  firstSeen: string
+  lastSeen: string
 }
 
 export interface MetricsResponse {
-  data: Metric[];
-  error: string | null;
+  data: Metric[]
 }
 
 function transformMetric(raw: ListMetricsOutput): Metric {
@@ -40,67 +58,67 @@ function transformMetric(raw: ListMetricsOutput): Metric {
     dataPointCount: Number(raw.dataPointCount),
     firstSeen: String(raw.firstSeen),
     lastSeen: String(raw.lastSeen),
-  };
-}
-
-export async function listMetrics({
-  data,
-}: {
-  data: ListMetricsInput
-}): Promise<MetricsResponse> {
-  data = ListMetricsInput.parse(data ?? {})
-
-  try {
-    const tinybird = getTinybird();
-
-    const result = await tinybird.query.list_metrics({
-      limit: data.limit,
-      offset: data.offset,
-      service: data.service,
-      metric_type: data.metricType,
-      start_time: data.startTime,
-      end_time: data.endTime,
-      search: data.search,
-    });
-
-    return {
-      data: result.data.map(transformMetric),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] listMetrics failed:", error);
-    return {
-      data: [],
-      error: error instanceof Error ? error.message : "Failed to fetch metrics",
-    };
   }
 }
 
-// Time series input
-const GetMetricTimeSeriesInput = z.object({
-  metricName: z.string(),
-  metricType: z.enum(["sum", "gauge", "histogram", "exponential_histogram"]),
-  service: z.string().optional(),
-  startTime: z.string().datetime().optional(),
-  endTime: z.string().datetime().optional(),
-  bucketSeconds: z.number().min(1).optional(),
-});
+export function listMetrics({
+  data,
+}: {
+  data: ListMetricsInput
+}) {
+  return listMetricsEffect({ data })
+}
 
-export type GetMetricTimeSeriesInput = z.infer<typeof GetMetricTimeSeriesInput>;
+const listMetricsEffect = Effect.fn("Tinybird.listMetrics")(function* ({
+  data,
+}: {
+  data: ListMetricsInput
+}) {
+    const input = yield* decodeInput(ListMetricsInputSchema, data ?? {}, "listMetrics")
+    const tinybird = getTinybird()
+
+    const result = yield* runTinybirdQuery("list_metrics", () =>
+      tinybird.query.list_metrics({
+        limit: input.limit,
+        offset: input.offset,
+        service: input.service,
+        metric_type: input.metricType,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        search: input.search,
+      }),
+    )
+
+    return {
+      data: result.data.map(transformMetric),
+    }
+})
+
+const GetMetricTimeSeriesInputSchema = Schema.Struct({
+  metricName: Schema.String,
+  metricType: MetricTypeSchema,
+  service: Schema.optional(Schema.String),
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  bucketSeconds: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1)),
+  ),
+})
+
+export type GetMetricTimeSeriesInput = Schema.Schema.Type<typeof GetMetricTimeSeriesInputSchema>
 
 export interface MetricTimeSeriesPoint {
-  bucket: string;
-  serviceName: string;
-  avgValue: number;
-  minValue: number;
-  maxValue: number;
-  sumValue: number;
-  dataPointCount: number;
+  bucket: string
+  serviceName: string
+  avgValue: number
+  minValue: number
+  maxValue: number
+  sumValue: number
+  dataPointCount: number
 }
 
 export interface MetricTimeSeriesResponse {
-  data: MetricTimeSeriesPoint[];
-  error: string | null;
+  data: MetricTimeSeriesPoint[]
 }
 
 function transformTimeSeriesPoint(raw: MetricTimeSeriesSumOutput): MetricTimeSeriesPoint {
@@ -112,79 +130,116 @@ function transformTimeSeriesPoint(raw: MetricTimeSeriesSumOutput): MetricTimeSer
     maxValue: raw.maxValue,
     sumValue: raw.sumValue,
     dataPointCount: Number(raw.dataPointCount),
-  };
-}
-
-export async function getMetricTimeSeries({
-  data,
-}: {
-  data: GetMetricTimeSeriesInput
-}): Promise<MetricTimeSeriesResponse> {
-  data = GetMetricTimeSeriesInput.parse(data)
-
-  try {
-    const tinybird = getTinybird();
-
-    const params = {
-      metric_name: data.metricName,
-      service: data.service,
-      start_time: data.startTime,
-      end_time: data.endTime,
-      bucket_seconds: data.bucketSeconds,
-    };
-
-    let result;
-    switch (data.metricType) {
-      case "sum":
-        result = await tinybird.query.metric_time_series_sum(params);
-        break;
-      case "gauge":
-        result = await tinybird.query.metric_time_series_gauge(params);
-        break;
-      case "histogram":
-        result = await tinybird.query.metric_time_series_histogram(params);
-        break;
-      case "exponential_histogram":
-        result = await tinybird.query.metric_time_series_exp_histogram(params);
-        break;
-      default:
-        return {
-          data: [],
-          error: `Unknown metric type: ${data.metricType}`,
-        };
-    }
-
-    return {
-      data: result.data.map(transformTimeSeriesPoint),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getMetricTimeSeries failed:", error);
-    return {
-      data: [],
-      error: error instanceof Error ? error.message : "Failed to fetch metric time series",
-    };
   }
 }
 
-// Summary input
-const GetMetricsSummaryInput = z.object({
-  service: z.string().optional(),
-  startTime: z.string().datetime().optional(),
-  endTime: z.string().datetime().optional(),
-});
+export function getMetricTimeSeries({
+  data,
+}: {
+  data: GetMetricTimeSeriesInput
+}) {
+  return getMetricTimeSeriesEffect({ data })
+}
 
-export type GetMetricsSummaryInput = z.infer<typeof GetMetricsSummaryInput>;
+const getMetricTimeSeriesEffect = Effect.fn("Tinybird.getMetricTimeSeries")(function* ({
+  data,
+}: {
+  data: GetMetricTimeSeriesInput
+}) {
+    const input = yield* decodeInput(
+      GetMetricTimeSeriesInputSchema,
+      data,
+      "getMetricTimeSeries",
+    )
+
+    const tinybird = getTinybird()
+    const params = {
+      metric_name: input.metricName,
+      service: input.service,
+      start_time: input.startTime,
+      end_time: input.endTime,
+      bucket_seconds: input.bucketSeconds,
+    }
+
+    let operation = ""
+    let execute:
+      | (() => Effect.Effect<{ data: MetricTimeSeriesSumOutput[] }, unknown, any>)
+      | null = null
+
+    switch (input.metricType) {
+      case "sum":
+        operation = "metric_time_series_sum"
+        execute = () =>
+          tinybird.query.metric_time_series_sum(params) as Effect.Effect<
+            { data: MetricTimeSeriesSumOutput[] },
+            unknown,
+            any
+          >
+        break
+      case "gauge":
+        operation = "metric_time_series_gauge"
+        execute = () =>
+          tinybird.query.metric_time_series_gauge(params) as Effect.Effect<
+            { data: MetricTimeSeriesSumOutput[] },
+            unknown,
+            any
+          >
+        break
+      case "histogram":
+        operation = "metric_time_series_histogram"
+        execute = () =>
+          tinybird.query.metric_time_series_histogram(params) as Effect.Effect<
+            { data: MetricTimeSeriesSumOutput[] },
+            unknown,
+            any
+          >
+        break
+      case "exponential_histogram":
+        operation = "metric_time_series_exp_histogram"
+        execute = () =>
+          tinybird.query.metric_time_series_exp_histogram(params) as Effect.Effect<
+            { data: MetricTimeSeriesSumOutput[] },
+            unknown,
+            any
+          >
+        break
+      default:
+        return yield* invalidTinybirdInput(
+          "getMetricTimeSeries",
+          `Unknown metric type: ${String(input.metricType)}`,
+        )
+    }
+
+    if (!execute) {
+      return yield* invalidTinybirdInput(
+        "getMetricTimeSeries",
+        `Unknown metric type: ${String(input.metricType)}`,
+      )
+    }
+
+    const result = yield* runTinybirdQuery(operation, execute)
+
+    return {
+      data: result.data.map(transformTimeSeriesPoint),
+    }
+})
+
+const GetMetricsSummaryInputSchema = Schema.Struct({
+  service: Schema.optional(Schema.String),
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+})
+
+export type GetMetricsSummaryInput = Schema.Schema.Type<typeof GetMetricsSummaryInputSchema>
 
 export interface MetricTypeSummary {
-  metricType: string;
-  metricCount: number;
-  dataPointCount: number;
+  metricType: string
+  metricCount: number
+  dataPointCount: number
 }
 
 export interface MetricsSummaryResponse {
-  data: MetricTypeSummary[];
-  error: string | null;
+  data: MetricTypeSummary[]
 }
 
 function transformSummary(raw: MetricsSummaryOutput): MetricTypeSummary {
@@ -192,34 +247,38 @@ function transformSummary(raw: MetricsSummaryOutput): MetricTypeSummary {
     metricType: raw.metricType,
     metricCount: Number(raw.metricCount),
     dataPointCount: Number(raw.dataPointCount),
-  };
+  }
 }
 
-export async function getMetricsSummary({
+export function getMetricsSummary({
   data,
 }: {
   data: GetMetricsSummaryInput
-}): Promise<MetricsSummaryResponse> {
-  data = GetMetricsSummaryInput.parse(data ?? {})
+}) {
+  return getMetricsSummaryEffect({ data })
+}
 
-  try {
-    const tinybird = getTinybird();
+const getMetricsSummaryEffect = Effect.fn("Tinybird.getMetricsSummary")(function* ({
+  data,
+}: {
+  data: GetMetricsSummaryInput
+}) {
+    const input = yield* decodeInput(
+      GetMetricsSummaryInputSchema,
+      data ?? {},
+      "getMetricsSummary",
+    )
 
-    const result = await tinybird.query.metrics_summary({
-      service: data.service,
-      start_time: data.startTime,
-      end_time: data.endTime,
-    });
+    const tinybird = getTinybird()
+    const result = yield* runTinybirdQuery("metrics_summary", () =>
+      tinybird.query.metrics_summary({
+        service: input.service,
+        start_time: input.startTime,
+        end_time: input.endTime,
+      }),
+    )
 
     return {
       data: result.data.map(transformSummary),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getMetricsSummary failed:", error);
-    return {
-      data: [],
-      error: error instanceof Error ? error.message : "Failed to fetch metrics summary",
-    };
-  }
-}
+    }
+})

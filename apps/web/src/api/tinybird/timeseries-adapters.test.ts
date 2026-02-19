@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { Effect } from "effect"
 import {
   getCustomChartServiceDetail,
   getCustomChartServiceSparklines,
@@ -25,7 +26,7 @@ describe("timeseries adapters", () => {
   })
 
   it("fills overview/detail buckets without flattening existing points", async () => {
-    customTracesTimeseriesMock.mockResolvedValue({
+    customTracesTimeseriesMock.mockReturnValue(Effect.succeed({
       data: [
         {
           bucket: "2026-01-01 00:00:00",
@@ -37,24 +38,22 @@ describe("timeseries adapters", () => {
           p99Duration: 30,
         },
       ],
-    })
+    }))
 
-    const overview = await getOverviewTimeSeries({
+    const overview = await Effect.runPromise(getOverviewTimeSeries({
       data: {
         startTime: "2026-01-01 00:00:00",
         endTime: "2026-01-01 00:05:00",
       },
-    })
-    const detail = await getCustomChartServiceDetail({
+    }))
+    const detail = await Effect.runPromise(getCustomChartServiceDetail({
       data: {
         serviceName: "checkout",
         startTime: "2026-01-01 00:00:00",
         endTime: "2026-01-01 00:05:00",
       },
-    })
+    }))
 
-    expect(overview.error).toBeNull()
-    expect(detail.error).toBeNull()
     expect(overview.data).toHaveLength(6)
     expect(detail.data).toHaveLength(6)
     expect(overview.data[0]).toMatchObject({
@@ -75,7 +74,7 @@ describe("timeseries adapters", () => {
   })
 
   it("fills service sparklines per service across the selected timeline", async () => {
-    customTracesTimeseriesMock.mockResolvedValue({
+    customTracesTimeseriesMock.mockReturnValue(Effect.succeed({
       data: [
         {
           bucket: "2026-01-01 00:00:00",
@@ -90,16 +89,15 @@ describe("timeseries adapters", () => {
           errorRate: 0,
         },
       ],
-    })
+    }))
 
-    const response = await getCustomChartServiceSparklines({
+    const response = await Effect.runPromise(getCustomChartServiceSparklines({
       data: {
         startTime: "2026-01-01 00:00:00",
         endTime: "2026-01-01 00:02:00",
       },
-    })
+    }))
 
-    expect(response.error).toBeNull()
     expect(response.data.checkout).toHaveLength(3)
     expect(response.data.checkout[0]).toMatchObject({
       bucket: "2026-01-01T00:00:00.000Z",
@@ -119,7 +117,7 @@ describe("timeseries adapters", () => {
   })
 
   it("fills service apdex buckets while preserving real values", async () => {
-    serviceApdexTimeseriesMock.mockResolvedValue({
+    serviceApdexTimeseriesMock.mockReturnValue(Effect.succeed({
       data: [
         {
           bucket: "2026-01-01 00:00:00",
@@ -127,17 +125,16 @@ describe("timeseries adapters", () => {
           totalCount: 100,
         },
       ],
-    })
+    }))
 
-    const response = await getServiceApdexTimeSeries({
+    const response = await Effect.runPromise(getServiceApdexTimeSeries({
       data: {
         serviceName: "checkout",
         startTime: "2026-01-01 00:00:00",
         endTime: "2026-01-01 00:05:00",
       },
-    })
+    }))
 
-    expect(response.error).toBeNull()
     expect(response.data).toHaveLength(6)
     expect(response.data[0]).toMatchObject({
       bucket: "2026-01-01T00:00:00.000Z",

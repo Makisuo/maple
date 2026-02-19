@@ -1,55 +1,53 @@
-import { z } from "zod";
-import { getTinybird } from "@/lib/tinybird";
+import { Effect, Schema } from "effect"
+import { getTinybird } from "@/lib/tinybird"
+import {
+  TinybirdDateTimeString,
+  decodeInput,
+  runTinybirdQuery,
+} from "@/api/tinybird/effect-utils"
 
 export interface ServiceUsage {
-  serviceName: string;
-  totalLogs: number;
-  totalTraces: number;
-  totalMetrics: number;
-  dataSizeBytes: number;
-  logSizeBytes: number;
-  traceSizeBytes: number;
-  metricSizeBytes: number;
+  serviceName: string
+  totalLogs: number
+  totalTraces: number
+  totalMetrics: number
+  dataSizeBytes: number
+  logSizeBytes: number
+  traceSizeBytes: number
+  metricSizeBytes: number
 }
 
 export interface ServiceUsageResponse {
-  data: ServiceUsage[];
-  error: string | null;
+  data: ServiceUsage[]
 }
 
-const dateTimeString = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "Invalid datetime format");
+const GetServiceUsageInput = Schema.Struct({
+  service: Schema.optional(Schema.String),
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+})
 
-const GetServiceUsageInput = z.object({
-  service: z.string().optional(),
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-});
+export type GetServiceUsageInput = Schema.Schema.Type<typeof GetServiceUsageInput>
 
-export type GetServiceUsageInput = z.infer<typeof GetServiceUsageInput>;
+export const getServiceUsage = Effect.fn("Tinybird.getServiceUsage")(
+  function* ({
+    data,
+  }: {
+    data: GetServiceUsageInput
+  }) {
+    const input = yield* decodeInput(GetServiceUsageInput, data ?? {}, "getServiceUsage")
 
-export async function getServiceUsage({
-  data,
-}: {
-  data: GetServiceUsageInput
-}): Promise<ServiceUsageResponse> {
-  data = GetServiceUsageInput.parse(data ?? {})
+    const tinybird = getTinybird()
+    const result = yield* runTinybirdQuery("get_service_usage", () =>
+      tinybird.query.get_service_usage({
+        service: input.service,
+        start_time: input.startTime,
+        end_time: input.endTime,
+      }),
+    )
 
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.get_service_usage({
-      service: data.service,
-      start_time: data.startTime,
-      end_time: data.endTime,
-    });
-
-    // Handle empty results
     if (!result.data || result.data.length === 0) {
-      return {
-        data: [],
-        error: null,
-      };
+      return { data: [] }
     }
 
     return {
@@ -71,16 +69,6 @@ export async function getServiceUsage({
           Number(row.totalHistogramMetricSizeBytes ?? 0) +
           Number(row.totalExpHistogramMetricSizeBytes ?? 0),
       })),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getServiceUsage failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch service usage",
-    };
-  }
-}
+    }
+  },
+)

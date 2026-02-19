@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { Effect, Schema } from "effect"
 import { getTinybird, type ServiceOverviewOutput, type ServicesFacetsOutput } from "@/lib/tinybird";
 import {
   buildBucketTimeline,
@@ -6,11 +6,14 @@ import {
   toIsoBucket,
 } from "@/api/tinybird/timeseries-utils";
 import { estimateThroughput } from "@/lib/sampling";
+import {
+  TinybirdDateTimeString,
+  decodeInput,
+  runTinybirdQuery,
+} from "@/api/tinybird/effect-utils"
 
 // Date format: "YYYY-MM-DD HH:mm:ss" (Tinybird/ClickHouse compatible)
-const dateTimeString = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "Invalid datetime format");
+const dateTimeString = TinybirdDateTimeString
 
 // Service overview types
 export interface CommitBreakdown {
@@ -35,17 +38,16 @@ export interface ServiceOverview {
 
 export interface ServiceOverviewResponse {
   data: ServiceOverview[];
-  error: string | null;
 }
 
-const GetServiceOverviewInput = z.object({
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-  environments: z.array(z.string()).optional(),
-  commitShas: z.array(z.string()).optional(),
-});
+const GetServiceOverviewInput = Schema.Struct({
+  startTime: Schema.optional(dateTimeString),
+  endTime: Schema.optional(dateTimeString),
+  environments: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  commitShas: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+})
 
-export type GetServiceOverviewInput = z.infer<typeof GetServiceOverviewInput>;
+export type GetServiceOverviewInput = Schema.Schema.Type<typeof GetServiceOverviewInput>
 
 interface CoercedRow {
   serviceName: string;
@@ -158,49 +160,47 @@ function aggregateByServiceEnvironment(
   return results;
 }
 
-export async function getServiceOverview({
+export function getServiceOverview({
   data,
 }: {
   data: GetServiceOverviewInput
-}): Promise<ServiceOverviewResponse> {
-  data = GetServiceOverviewInput.parse(data ?? {})
+}) {
+  return getServiceOverviewEffect({ data })
+}
 
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.service_overview({
-      start_time: data.startTime,
-      end_time: data.endTime,
-      environments: data.environments?.join(","),
-      commit_shas: data.commitShas?.join(","),
-    });
+const getServiceOverviewEffect = Effect.fn("Tinybird.getServiceOverview")(function* ({
+  data,
+}: {
+  data: GetServiceOverviewInput
+}) {
+    const input = yield* decodeInput(GetServiceOverviewInput, data ?? {}, "getServiceOverview")
 
-    const startMs = data.startTime
-      ? new Date(data.startTime.replace(" ", "T") + "Z").getTime()
-      : 0;
-    const endMs = data.endTime
-      ? new Date(data.endTime.replace(" ", "T") + "Z").getTime()
-      : 0;
+    const tinybird = getTinybird()
+    const result = yield* runTinybirdQuery("service_overview", () =>
+      tinybird.query.service_overview({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        environments: input.environments?.join(","),
+        commit_shas: input.commitShas?.join(","),
+      }),
+    )
+
+    const startMs = input.startTime
+      ? new Date(input.startTime.replace(" ", "T") + "Z").getTime()
+      : 0
+    const endMs = input.endTime
+      ? new Date(input.endTime.replace(" ", "T") + "Z").getTime()
+      : 0
     const durationSeconds =
       startMs > 0 && endMs > 0
         ? Math.max((endMs - startMs) / 1000, 1)
-        : 3600; // fallback to 1 hour
+        : 3600
 
-    const coercedRows = result.data.map(coerceRow);
+    const coercedRows = result.data.map(coerceRow)
     return {
       data: aggregateByServiceEnvironment(coercedRows, durationSeconds),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getServiceOverview failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch service overview",
-    };
-  }
-}
+    }
+})
 
 // Service overview time series types
 export interface ServiceTimeSeriesPoint {
@@ -211,7 +211,6 @@ export interface ServiceTimeSeriesPoint {
 
 export interface ServiceOverviewTimeSeriesResponse {
   data: Record<string, ServiceTimeSeriesPoint[]>;
-  error: string | null;
 }
 
 function sortByBucket<T extends { bucket: string }>(rows: T[]): T[] {
@@ -261,15 +260,14 @@ export interface ServicesFacets {
 
 export interface ServicesFacetsResponse {
   data: ServicesFacets;
-  error: string | null;
 }
 
-const GetServicesFacetsInput = z.object({
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-});
+const GetServicesFacetsInput = Schema.Struct({
+  startTime: Schema.optional(dateTimeString),
+  endTime: Schema.optional(dateTimeString),
+})
 
-export type GetServicesFacetsInput = z.infer<typeof GetServicesFacetsInput>;
+export type GetServicesFacetsInput = Schema.Schema.Type<typeof GetServicesFacetsInput>
 
 function transformServicesFacets(facetsData: ServicesFacetsOutput[]): ServicesFacets {
   const environments: FacetItem[] = [];
@@ -290,38 +288,32 @@ function transformServicesFacets(facetsData: ServicesFacetsOutput[]): ServicesFa
   return { environments, commitShas };
 }
 
-export async function getServicesFacets({
+export function getServicesFacets({
   data,
 }: {
   data: GetServicesFacetsInput
-}): Promise<ServicesFacetsResponse> {
-  data = GetServicesFacetsInput.parse(data ?? {})
+}) {
+  return getServicesFacetsEffect({ data })
+}
 
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.services_facets({
-      start_time: data.startTime,
-      end_time: data.endTime,
-    });
+const getServicesFacetsEffect = Effect.fn("Tinybird.getServicesFacets")(function* ({
+  data,
+}: {
+  data: GetServicesFacetsInput
+}) {
+    const input = yield* decodeInput(GetServicesFacetsInput, data ?? {}, "getServicesFacets")
+    const tinybird = getTinybird()
+    const result = yield* runTinybirdQuery("services_facets", () =>
+      tinybird.query.services_facets({
+        start_time: input.startTime,
+        end_time: input.endTime,
+      }),
+    )
 
     return {
       data: transformServicesFacets(result.data),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getServicesFacets failed:", error);
-    return {
-      data: {
-        environments: [],
-        commitShas: [],
-      },
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch services facets",
-    };
-  }
-}
+    }
+})
 
 // Service detail types
 export interface ServiceDetailTimeSeriesPoint {
@@ -335,7 +327,6 @@ export interface ServiceDetailTimeSeriesPoint {
 
 export interface ServiceDetailTimeSeriesResponse {
   data: ServiceDetailTimeSeriesPoint[];
-  error: string | null;
 }
 
 export interface ServiceApdexTimeSeriesPoint {
@@ -346,57 +337,55 @@ export interface ServiceApdexTimeSeriesPoint {
 
 export interface ServiceApdexTimeSeriesResponse {
   data: ServiceApdexTimeSeriesPoint[];
-  error: string | null;
 }
 
-const GetServiceDetailInput = z.object({
-  serviceName: z.string(),
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-});
+const GetServiceDetailInput = Schema.Struct({
+  serviceName: Schema.String,
+  startTime: Schema.optional(dateTimeString),
+  endTime: Schema.optional(dateTimeString),
+})
 
-export type GetServiceDetailInput = z.infer<typeof GetServiceDetailInput>;
+export type GetServiceDetailInput = Schema.Schema.Type<typeof GetServiceDetailInput>
 
-export async function getServiceApdexTimeSeries({
+export function getServiceApdexTimeSeries({
   data,
 }: {
   data: GetServiceDetailInput
-}): Promise<ServiceApdexTimeSeriesResponse> {
-  data = GetServiceDetailInput.parse(data)
+}) {
+  return getServiceApdexTimeSeriesEffect({ data })
+}
 
-  try {
-    const tinybird = getTinybird();
-    const bucketSeconds = computeBucketSeconds(data.startTime, data.endTime);
-    const result = await tinybird.query.service_apdex_time_series({
-      service_name: data.serviceName,
-      start_time: data.startTime,
-      end_time: data.endTime,
-      bucket_seconds: bucketSeconds,
-    });
+const getServiceApdexTimeSeriesEffect = Effect.fn("Tinybird.getServiceApdexTimeSeries")(
+  function* ({
+    data,
+  }: {
+    data: GetServiceDetailInput
+  }) {
+    const input = yield* decodeInput(GetServiceDetailInput, data, "getServiceApdexTimeSeries")
+    const tinybird = getTinybird()
+    const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+    const result = yield* runTinybirdQuery("service_apdex_time_series", () =>
+      tinybird.query.service_apdex_time_series({
+        service_name: input.serviceName,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        bucket_seconds: bucketSeconds,
+      }),
+    )
 
     const points = result.data.map((row) => ({
       bucket: toIsoBucket(row.bucket),
       apdexScore: Number(row.apdexScore),
       totalCount: Number(row.totalCount),
-    }));
+    }))
 
     return {
       data: fillServiceApdexPoints(
         points,
-        data.startTime,
-        data.endTime,
+        input.startTime,
+        input.endTime,
         bucketSeconds,
       ),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getServiceApdexTimeSeries failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch service apdex time series",
-    };
-  }
-}
+    }
+  },
+)

@@ -1,5 +1,11 @@
+import { Effect, Schema } from "effect"
 import { getTinybird, type ServiceDependenciesOutput } from "@/lib/tinybird"
 import { estimateThroughput } from "@/lib/sampling"
+import {
+  TinybirdDateTimeString,
+  decodeInput,
+  runTinybirdQuery,
+} from "@/api/tinybird/effect-utils"
 
 export interface ServiceEdge {
   sourceService: string
@@ -16,14 +22,15 @@ export interface ServiceEdge {
 
 export interface ServiceMapResponse {
   edges: ServiceEdge[]
-  error: string | null
 }
 
-export interface GetServiceMapInput {
-  startTime?: string
-  endTime?: string
-  deploymentEnv?: string
-}
+const GetServiceMapInputSchema = Schema.Struct({
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  deploymentEnv: Schema.optional(Schema.String),
+})
+
+export type GetServiceMapInput = Schema.Schema.Type<typeof GetServiceMapInputSchema>
 
 function transformEdge(row: ServiceDependenciesOutput, durationSeconds: number): ServiceEdge {
   const callCount = Number(row.callCount)
@@ -49,24 +56,27 @@ function transformEdge(row: ServiceDependenciesOutput, durationSeconds: number):
   }
 }
 
-export async function getServiceMap({
-  data,
-}: {
-  data: GetServiceMapInput
-}): Promise<ServiceMapResponse> {
-  try {
+export const getServiceMap = Effect.fn("Tinybird.getServiceMap")(
+  function* ({
+    data,
+  }: {
+    data: GetServiceMapInput
+  }) {
+    const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMap")
     const tinybird = getTinybird()
-    const result = await tinybird.query.service_dependencies({
-      start_time: data.startTime,
-      end_time: data.endTime,
-      deployment_env: data.deploymentEnv,
-    })
+    const result = yield* runTinybirdQuery("service_dependencies", () =>
+      tinybird.query.service_dependencies({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        deployment_env: input.deploymentEnv,
+      }),
+    )
 
-    const startMs = data.startTime
-      ? new Date(data.startTime.replace(" ", "T") + "Z").getTime()
+    const startMs = input.startTime
+      ? new Date(input.startTime.replace(" ", "T") + "Z").getTime()
       : 0
-    const endMs = data.endTime
-      ? new Date(data.endTime.replace(" ", "T") + "Z").getTime()
+    const endMs = input.endTime
+      ? new Date(input.endTime.replace(" ", "T") + "Z").getTime()
       : 0
     const durationSeconds =
       startMs > 0 && endMs > 0
@@ -75,13 +85,6 @@ export async function getServiceMap({
 
     return {
       edges: result.data.map((row) => transformEdge(row, durationSeconds)),
-      error: null,
     }
-  } catch (error) {
-    console.error("[Tinybird] getServiceMap failed:", error)
-    return {
-      edges: [],
-      error: error instanceof Error ? error.message : "Failed to fetch service map",
-    }
-  }
-}
+  },
+)

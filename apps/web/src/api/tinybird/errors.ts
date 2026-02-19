@@ -1,38 +1,44 @@
-import { z } from "zod";
-import { getTinybird, type ErrorsByTypeOutput, type ErrorDetailTracesOutput, type ErrorsFacetsOutput, type ErrorsSummaryOutput } from "@/lib/tinybird";
-import { getSpamPatternsParam } from "@/lib/spam-patterns";
+import { Effect, Schema } from "effect"
+import {
+  getTinybird,
+  type ErrorDetailTracesOutput,
+  type ErrorsByTypeOutput,
+  type ErrorsFacetsOutput,
+  type ErrorsSummaryOutput,
+} from "@/lib/tinybird"
+import { getSpamPatternsParam } from "@/lib/spam-patterns"
+import {
+  TinybirdDateTimeString,
+  decodeInput,
+  runTinybirdQuery,
+} from "@/api/tinybird/effect-utils"
 
-// Date format: "YYYY-MM-DD HH:mm:ss" (Tinybird/ClickHouse compatible)
-const dateTimeString = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "Invalid datetime format");
+const OptionalStringArray = Schema.optional(Schema.mutable(Schema.Array(Schema.String)))
 
-// Error by type types
 export interface ErrorByType {
-  errorType: string;
-  count: number;
-  affectedServicesCount: number;
-  firstSeen: Date;
-  lastSeen: Date;
-  affectedServices: string[];
+  errorType: string
+  count: number
+  affectedServicesCount: number
+  firstSeen: Date
+  lastSeen: Date
+  affectedServices: string[]
 }
 
 export interface ErrorsByTypeResponse {
-  data: ErrorByType[];
-  error: string | null;
+  data: ErrorByType[]
 }
 
-const GetErrorsByTypeInput = z.object({
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-  services: z.array(z.string()).optional(),
-  deploymentEnvs: z.array(z.string()).optional(),
-  errorTypes: z.array(z.string()).optional(),
-  limit: z.number().optional(),
-  showSpam: z.boolean().optional(),
-});
+const GetErrorsByTypeInputSchema = Schema.Struct({
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  services: OptionalStringArray,
+  deploymentEnvs: OptionalStringArray,
+  errorTypes: OptionalStringArray,
+  limit: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.greaterThan(0))),
+  showSpam: Schema.optional(Schema.Boolean),
+})
 
-export type GetErrorsByTypeInput = z.infer<typeof GetErrorsByTypeInput>;
+export type GetErrorsByTypeInput = Schema.Schema.Type<typeof GetErrorsByTypeInputSchema>
 
 function transformErrorByType(raw: ErrorsByTypeOutput): ErrorByType {
   return {
@@ -42,157 +48,145 @@ function transformErrorByType(raw: ErrorsByTypeOutput): ErrorByType {
     firstSeen: new Date(raw.firstSeen),
     lastSeen: new Date(raw.lastSeen),
     affectedServices: raw.affectedServices,
-  };
+  }
 }
 
-export async function getErrorsByType({
+export function getErrorsByType({
   data,
 }: {
   data: GetErrorsByTypeInput
-}): Promise<ErrorsByTypeResponse> {
-  data = GetErrorsByTypeInput.parse(data ?? {})
+}) {
+  return getErrorsByTypeEffect({ data })
+}
 
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.errors_by_type({
-      start_time: data.startTime,
-      end_time: data.endTime,
-      services: data.services?.join(","),
-      deployment_envs: data.deploymentEnvs?.join(","),
-      error_types: data.errorTypes?.join(","),
-      limit: data.limit,
-      exclude_spam_patterns: getSpamPatternsParam(data.showSpam),
-    });
+const getErrorsByTypeEffect = Effect.fn("Tinybird.getErrorsByType")(function* ({
+  data,
+}: {
+  data: GetErrorsByTypeInput
+}) {
+    const input = yield* decodeInput(GetErrorsByTypeInputSchema, data ?? {}, "getErrorsByType")
+    const tinybird = getTinybird()
+
+    const result = yield* runTinybirdQuery("errors_by_type", () =>
+      tinybird.query.errors_by_type({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        services: input.services?.join(","),
+        deployment_envs: input.deploymentEnvs?.join(","),
+        error_types: input.errorTypes?.join(","),
+        limit: input.limit,
+        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+      }),
+    )
 
     return {
       data: result.data.map(transformErrorByType),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getErrorsByType failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch errors by type",
-    };
-  }
-}
+    }
+})
 
-// Error facets types
 export interface FacetItem {
-  name: string;
-  count: number;
+  name: string
+  count: number
 }
 
 export interface ErrorsFacets {
-  services: FacetItem[];
-  deploymentEnvs: FacetItem[];
-  errorTypes: FacetItem[];
+  services: FacetItem[]
+  deploymentEnvs: FacetItem[]
+  errorTypes: FacetItem[]
 }
 
 export interface ErrorsFacetsResponse {
-  data: ErrorsFacets;
-  error: string | null;
+  data: ErrorsFacets
 }
 
-const GetErrorsFacetsInput = z.object({
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-  services: z.array(z.string()).optional(),
-  deploymentEnvs: z.array(z.string()).optional(),
-  errorTypes: z.array(z.string()).optional(),
-  showSpam: z.boolean().optional(),
-});
+const GetErrorsFacetsInputSchema = Schema.Struct({
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  services: OptionalStringArray,
+  deploymentEnvs: OptionalStringArray,
+  errorTypes: OptionalStringArray,
+  showSpam: Schema.optional(Schema.Boolean),
+})
 
-export type GetErrorsFacetsInput = z.infer<typeof GetErrorsFacetsInput>;
+export type GetErrorsFacetsInput = Schema.Schema.Type<typeof GetErrorsFacetsInputSchema>
 
 function transformErrorsFacets(facetsData: ErrorsFacetsOutput[]): ErrorsFacets {
-  const services: FacetItem[] = [];
-  const deploymentEnvs: FacetItem[] = [];
-  const errorTypes: FacetItem[] = [];
+  const services: FacetItem[] = []
+  const deploymentEnvs: FacetItem[] = []
+  const errorTypes: FacetItem[] = []
 
   for (const row of facetsData) {
-    const item = { name: row.name, count: Number(row.count) };
+    const item = { name: row.name, count: Number(row.count) }
     switch (row.facetType) {
       case "service":
-        services.push(item);
-        break;
+        services.push(item)
+        break
       case "deploymentEnv":
-        deploymentEnvs.push(item);
-        break;
+        deploymentEnvs.push(item)
+        break
       case "errorType":
-        errorTypes.push(item);
-        break;
+        errorTypes.push(item)
+        break
     }
   }
 
-  return { services, deploymentEnvs, errorTypes };
+  return { services, deploymentEnvs, errorTypes }
 }
 
-export async function getErrorsFacets({
+export function getErrorsFacets({
   data,
 }: {
   data: GetErrorsFacetsInput
-}): Promise<ErrorsFacetsResponse> {
-  data = GetErrorsFacetsInput.parse(data ?? {})
+}) {
+  return getErrorsFacetsEffect({ data })
+}
 
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.errors_facets({
-      start_time: data.startTime,
-      end_time: data.endTime,
-      services: data.services?.join(","),
-      deployment_envs: data.deploymentEnvs?.join(","),
-      error_types: data.errorTypes?.join(","),
-      exclude_spam_patterns: getSpamPatternsParam(data.showSpam),
-    });
+const getErrorsFacetsEffect = Effect.fn("Tinybird.getErrorsFacets")(function* ({
+  data,
+}: {
+  data: GetErrorsFacetsInput
+}) {
+    const input = yield* decodeInput(GetErrorsFacetsInputSchema, data ?? {}, "getErrorsFacets")
+    const tinybird = getTinybird()
+
+    const result = yield* runTinybirdQuery("errors_facets", () =>
+      tinybird.query.errors_facets({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        services: input.services?.join(","),
+        deployment_envs: input.deploymentEnvs?.join(","),
+        error_types: input.errorTypes?.join(","),
+        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+      }),
+    )
 
     return {
       data: transformErrorsFacets(result.data),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getErrorsFacets failed:", error);
-    return {
-      data: {
-        services: [],
-        deploymentEnvs: [],
-        errorTypes: [],
-      },
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch errors facets",
-    };
-  }
-}
+    }
+})
 
-// Error summary types
 export interface ErrorsSummary {
-  totalErrors: number;
-  totalSpans: number;
-  errorRate: number;
-  affectedServicesCount: number;
-  affectedTracesCount: number;
+  totalErrors: number
+  totalSpans: number
+  errorRate: number
+  affectedServicesCount: number
+  affectedTracesCount: number
 }
 
 export interface ErrorsSummaryResponse {
-  data: ErrorsSummary | null;
-  error: string | null;
+  data: ErrorsSummary | null
 }
 
-const GetErrorsSummaryInput = z.object({
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-  services: z.array(z.string()).optional(),
-  deploymentEnvs: z.array(z.string()).optional(),
-  errorTypes: z.array(z.string()).optional(),
-  showSpam: z.boolean().optional(),
-});
+const GetErrorsSummaryInputSchema = Schema.Struct({
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  services: OptionalStringArray,
+  deploymentEnvs: OptionalStringArray,
+  errorTypes: OptionalStringArray,
+  showSpam: Schema.optional(Schema.Boolean),
+})
 
-export type GetErrorsSummaryInput = z.infer<typeof GetErrorsSummaryInput>;
+export type GetErrorsSummaryInput = Schema.Schema.Type<typeof GetErrorsSummaryInputSchema>
 
 function transformErrorsSummary(raw: ErrorsSummaryOutput): ErrorsSummary {
   return {
@@ -201,70 +195,66 @@ function transformErrorsSummary(raw: ErrorsSummaryOutput): ErrorsSummary {
     errorRate: Number(raw.errorRate),
     affectedServicesCount: Number(raw.affectedServicesCount),
     affectedTracesCount: Number(raw.affectedTracesCount),
-  };
-}
-
-export async function getErrorsSummary({
-  data,
-}: {
-  data: GetErrorsSummaryInput
-}): Promise<ErrorsSummaryResponse> {
-  data = GetErrorsSummaryInput.parse(data ?? {})
-
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.errors_summary({
-      start_time: data.startTime,
-      end_time: data.endTime,
-      services: data.services?.join(","),
-      deployment_envs: data.deploymentEnvs?.join(","),
-      error_types: data.errorTypes?.join(","),
-      exclude_spam_patterns: getSpamPatternsParam(data.showSpam),
-    });
-
-    const summary = result.data[0];
-    return {
-      data: summary ? transformErrorsSummary(summary) : null,
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getErrorsSummary failed:", error);
-    return {
-      data: null,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch errors summary",
-    };
   }
 }
 
-// Error detail traces types
+export function getErrorsSummary({
+  data,
+}: {
+  data: GetErrorsSummaryInput
+}) {
+  return getErrorsSummaryEffect({ data })
+}
+
+const getErrorsSummaryEffect = Effect.fn("Tinybird.getErrorsSummary")(function* ({
+  data,
+}: {
+  data: GetErrorsSummaryInput
+}) {
+    const input = yield* decodeInput(GetErrorsSummaryInputSchema, data ?? {}, "getErrorsSummary")
+    const tinybird = getTinybird()
+
+    const result = yield* runTinybirdQuery("errors_summary", () =>
+      tinybird.query.errors_summary({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        services: input.services?.join(","),
+        deployment_envs: input.deploymentEnvs?.join(","),
+        error_types: input.errorTypes?.join(","),
+        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+      }),
+    )
+
+    const summary = result.data[0]
+    return {
+      data: summary ? transformErrorsSummary(summary) : null,
+    }
+})
+
 export interface ErrorDetailTrace {
-  traceId: string;
-  startTime: Date;
-  durationMicros: number;
-  spanCount: number;
-  services: string[];
-  rootSpanName: string;
-  errorMessage: string;
+  traceId: string
+  startTime: Date
+  durationMicros: number
+  spanCount: number
+  services: string[]
+  rootSpanName: string
+  errorMessage: string
 }
 
 export interface ErrorDetailTracesResponse {
-  data: ErrorDetailTrace[];
-  error: string | null;
+  data: ErrorDetailTrace[]
 }
 
-const GetErrorDetailTracesInput = z.object({
-  errorType: z.string(),
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-  services: z.array(z.string()).optional(),
-  limit: z.number().optional(),
-  showSpam: z.boolean().optional(),
-});
+const GetErrorDetailTracesInputSchema = Schema.Struct({
+  errorType: Schema.String,
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  services: OptionalStringArray,
+  limit: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.greaterThan(0))),
+  showSpam: Schema.optional(Schema.Boolean),
+})
 
-export type GetErrorDetailTracesInput = z.infer<typeof GetErrorDetailTracesInput>;
+export type GetErrorDetailTracesInput = Schema.Schema.Type<typeof GetErrorDetailTracesInputSchema>
 
 function transformErrorDetailTrace(raw: ErrorDetailTracesOutput): ErrorDetailTrace {
   return {
@@ -275,39 +265,41 @@ function transformErrorDetailTrace(raw: ErrorDetailTracesOutput): ErrorDetailTra
     services: raw.services,
     rootSpanName: raw.rootSpanName,
     errorMessage: raw.errorMessage,
-  };
+  }
 }
 
-export async function getErrorDetailTraces({
+export function getErrorDetailTraces({
   data,
 }: {
   data: GetErrorDetailTracesInput
-}): Promise<ErrorDetailTracesResponse> {
-  data = GetErrorDetailTracesInput.parse(data ?? {})
+}) {
+  return getErrorDetailTracesEffect({ data })
+}
 
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.error_detail_traces({
-      error_type: data.errorType,
-      start_time: data.startTime,
-      end_time: data.endTime,
-      services: data.services?.join(","),
-      limit: data.limit,
-      exclude_spam_patterns: getSpamPatternsParam(data.showSpam),
-    });
+const getErrorDetailTracesEffect = Effect.fn("Tinybird.getErrorDetailTraces")(function* ({
+  data,
+}: {
+  data: GetErrorDetailTracesInput
+}) {
+    const input = yield* decodeInput(
+      GetErrorDetailTracesInputSchema,
+      data ?? {},
+      "getErrorDetailTraces",
+    )
+    const tinybird = getTinybird()
+
+    const result = yield* runTinybirdQuery("error_detail_traces", () =>
+      tinybird.query.error_detail_traces({
+        error_type: input.errorType,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        services: input.services?.join(","),
+        limit: input.limit,
+        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+      }),
+    )
 
     return {
       data: result.data.map(transformErrorDetailTrace),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getErrorDetailTraces failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch error detail traces",
-    };
-  }
-}
+    }
+})

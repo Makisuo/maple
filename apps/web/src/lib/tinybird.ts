@@ -2,7 +2,6 @@ import type { TinybirdPipe } from "@maple/domain"
 import { Effect } from "effect"
 import { MapleApiAtomClient } from "./services/common/atom-client"
 import { setMapleAuthHeaders } from "./services/common/auth-headers"
-import { runtime } from "./services/common/runtime"
 
 import type {
   CustomLogsBreakdownOutput,
@@ -30,6 +29,8 @@ import type {
   ServiceDependenciesOutput,
   ServiceOverviewOutput,
   ServicesFacetsOutput,
+  SpanAttributeKeysOutput,
+  SpanAttributeValuesOutput,
   SpanHierarchyOutput,
   TracesDurationStatsOutput,
   TracesFacetsOutput,
@@ -86,6 +87,10 @@ export type {
   ServiceOverviewOutput,
   ServicesFacetsParams,
   ServicesFacetsOutput,
+  SpanAttributeKeysParams,
+  SpanAttributeKeysOutput,
+  SpanAttributeValuesParams,
+  SpanAttributeValuesOutput,
   SpanHierarchyParams,
   SpanHierarchyOutput,
   TracesDurationStatsParams,
@@ -100,18 +105,21 @@ type QueryResponse<T> = {
 
 export { setMapleAuthHeaders }
 
+const queryTinybirdEffect = Effect.fn("Tinybird.queryPipe")(function* <T>(
+  pipe: TinybirdPipe,
+  params?: Record<string, unknown>,
+) {
+    const client = yield* MapleApiAtomClient
+    return (yield* client.tinybird.query({
+      payload: {
+        pipe,
+        params,
+      },
+    })) as QueryResponse<T>
+})
+
 const queryTinybird = <T>(pipe: TinybirdPipe, params?: Record<string, unknown>) =>
-  runtime.runPromise(
-    Effect.gen(function* () {
-      const client = yield* MapleApiAtomClient
-      return (yield* client.tinybird.query({
-        payload: {
-          pipe,
-          params,
-        },
-      })) as QueryResponse<T>
-    }),
-  )
+  queryTinybirdEffect<T>(pipe, params)
 
 const query = {
   list_traces: (params?: Record<string, unknown>) =>
@@ -170,6 +178,10 @@ const query = {
     queryTinybird<CustomMetricsBreakdownOutput>("custom_metrics_breakdown", params),
   service_dependencies: (params?: Record<string, unknown>) =>
     queryTinybird<ServiceDependenciesOutput>("service_dependencies", params),
+  span_attribute_keys: (params?: Record<string, unknown>) =>
+    queryTinybird<SpanAttributeKeysOutput>("span_attribute_keys", params),
+  span_attribute_values: (params?: Record<string, unknown>) =>
+    queryTinybird<SpanAttributeValuesOutput>("span_attribute_values", params),
 }
 
 export function createTinybird() {

@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
-import { z } from "zod"
+import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TimeRangePicker } from "@/components/time-range-picker"
@@ -15,15 +15,15 @@ import {
   getServiceApdexTimeSeriesResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
 
-const serviceDetailSearchSchema = z.object({
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-  timePreset: z.string().optional(),
+const serviceDetailSearchSchema = Schema.Struct({
+  startTime: Schema.optional(Schema.String),
+  endTime: Schema.optional(Schema.String),
+  timePreset: Schema.optional(Schema.String),
 })
 
 export const Route = createFileRoute("/services/$serviceName")({
   component: ServiceDetailPage,
-  validateSearch: (search) => serviceDetailSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(serviceDetailSearchSchema),
 })
 
 interface ServiceChartConfig {

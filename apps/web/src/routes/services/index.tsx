@@ -1,23 +1,23 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
+import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ServicesTable } from "@/components/services/services-table"
 import { ServicesFilterSidebar } from "@/components/services/services-filter-sidebar"
 import { TimeRangePicker } from "@/components/time-range-picker"
 
-const servicesSearchSchema = z.object({
-  environments: z.array(z.string()).optional(),
-  commitShas: z.array(z.string()).optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
+const servicesSearchSchema = Schema.Struct({
+  environments: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  commitShas: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  startTime: Schema.optional(Schema.String),
+  endTime: Schema.optional(Schema.String),
 })
 
-export type ServicesSearchParams = z.infer<typeof servicesSearchSchema>
+export type ServicesSearchParams = Schema.Schema.Type<typeof servicesSearchSchema>
 
 export const Route = createFileRoute("/services/")({
   component: ServicesPage,
-  validateSearch: (search) => servicesSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(servicesSearchSchema),
 })
 
 function ServicesPage() {

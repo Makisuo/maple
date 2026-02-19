@@ -1,20 +1,20 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
+import { Schema } from "effect"
 
 import { QueryBuilderLab } from "@/components/query-builder/query-builder-lab"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TimeRangePicker } from "@/components/time-range-picker"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 
-const queryBuilderLabSearchSchema = z.object({
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-  timePreset: z.string().optional(),
+const queryBuilderLabSearchSchema = Schema.Struct({
+  startTime: Schema.optional(Schema.String),
+  endTime: Schema.optional(Schema.String),
+  timePreset: Schema.optional(Schema.String),
 })
 
 export const Route = createFileRoute("/query-builder-lab")({
   component: QueryBuilderLabPage,
-  validateSearch: (search) => queryBuilderLabSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(queryBuilderLabSearchSchema),
 })
 
 function QueryBuilderLabPage() {

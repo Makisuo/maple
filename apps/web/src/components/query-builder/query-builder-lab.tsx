@@ -32,10 +32,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 import {
   getLogsFacetsResultAtom,
   getQueryBuilderTimeseriesResultAtom,
+  getSpanAttributeKeysResultAtom,
+  getSpanAttributeValuesResultAtom,
   getTracesFacetsResultAtom,
   listMetricsResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
@@ -166,6 +169,161 @@ function debugWarnings(debug: unknown): string[] {
   return warnings
 }
 
+const GROUP_BY_OPTIONS: Record<DataSource, Array<{ label: string; value: string }>> = {
+  traces: [
+    { label: "service.name", value: "service.name" },
+    { label: "span.name", value: "span.name" },
+    { label: "status.code", value: "status.code" },
+    { label: "http.method", value: "http.method" },
+    { label: "none", value: "none" },
+  ],
+  logs: [
+    { label: "service.name", value: "service.name" },
+    { label: "severity", value: "severity" },
+    { label: "none", value: "none" },
+  ],
+  metrics: [
+    { label: "service.name", value: "service.name" },
+    { label: "none", value: "none" },
+  ],
+}
+
+function GroupByAutocomplete({
+  value,
+  onChange,
+  dataSource,
+  attributeKeys,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  dataSource: DataSource
+  attributeKeys?: string[]
+  placeholder?: string
+}) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null)
+  const [isFocused, setIsFocused] = React.useState(false)
+  const [isDismissed, setIsDismissed] = React.useState(false)
+  const [activeIndex, setActiveIndex] = React.useState(0)
+
+  const suggestions = React.useMemo(() => {
+    const query = value.toLowerCase()
+    const staticOptions = GROUP_BY_OPTIONS[dataSource].map((opt) => ({
+      label: opt.label,
+      value: opt.value,
+    }))
+
+    const attrOptions =
+      dataSource === "traces" && attributeKeys
+        ? attributeKeys
+            .filter((key) => !key.startsWith("http.request.header.") && !key.startsWith("http.response.header."))
+            .map((key) => ({
+              label: `attr.${key}`,
+              value: `attr.${key}`,
+            }))
+        : []
+
+    const allOptions = [...staticOptions, ...attrOptions]
+
+    if (!query) return allOptions.slice(0, 12)
+
+    return allOptions
+      .filter(
+        (opt) =>
+          opt.label.toLowerCase().includes(query) ||
+          opt.value.toLowerCase().includes(query),
+      )
+      .slice(0, 12)
+  }, [value, dataSource, attributeKeys])
+
+  const isOpen = isFocused && !isDismissed && suggestions.length > 0
+
+  React.useEffect(() => {
+    setActiveIndex(0)
+  }, [suggestions.length, value])
+
+  const applySuggestion = React.useCallback(
+    (index: number) => {
+      const suggestion = suggestions[index]
+      if (!suggestion) return
+      onChange(suggestion.value)
+      setIsDismissed(true)
+    },
+    [suggestions, onChange],
+  )
+
+  return (
+    <div className="relative">
+      <Input
+        ref={inputRef}
+        value={value}
+        placeholder={placeholder}
+        onFocus={() => {
+          setIsFocused(true)
+          setIsDismissed(false)
+        }}
+        onBlur={() => setIsFocused(false)}
+        onChange={(event) => {
+          onChange(event.target.value)
+          setIsDismissed(false)
+        }}
+        onKeyDown={(event) => {
+          if (!isOpen || suggestions.length === 0) return
+
+          if (event.key === "ArrowDown") {
+            event.preventDefault()
+            setActiveIndex((c) => (c + 1) % suggestions.length)
+            return
+          }
+
+          if (event.key === "ArrowUp") {
+            event.preventDefault()
+            setActiveIndex((c) => (c - 1 + suggestions.length) % suggestions.length)
+            return
+          }
+
+          if (event.key === "Enter" || event.key === "Tab") {
+            event.preventDefault()
+            applySuggestion(activeIndex)
+            return
+          }
+
+          if (event.key === "Escape") {
+            event.preventDefault()
+            setIsDismissed(true)
+          }
+        }}
+      />
+      {isOpen && (
+        <div
+          role="listbox"
+          aria-label="Group by suggestions"
+          className="absolute z-50 mt-1 max-h-52 w-full overflow-auto border bg-popover text-popover-foreground shadow-md"
+        >
+          {suggestions.map((suggestion, index) => (
+            <button
+              key={suggestion.value}
+              type="button"
+              role="option"
+              aria-selected={index === activeIndex}
+              className={cn(
+                "flex w-full items-center px-2 py-1 text-left text-xs font-mono",
+                index === activeIndex
+                  ? "bg-accent text-accent-foreground"
+                  : "hover:bg-accent/60",
+              )}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => applySuggestion(index)}
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function QueryBuilderAtomResults({
   input,
 }: {
@@ -251,7 +409,8 @@ function QueryBuilderAtomResults({
               )}
             </div>
           )
-        })}
+        })
+        .render()}
     </>
   )
 }
@@ -300,6 +459,45 @@ export function QueryBuilderLab({
         endTime,
       },
     }),
+  )
+
+  const spanAttributeKeysResult = useAtomValue(
+    getSpanAttributeKeysResultAtom({
+      data: {
+        startTime,
+        endTime,
+      },
+    }),
+  )
+
+  const [activeAttributeKey, setActiveAttributeKey] = React.useState<string | null>(null)
+
+  const spanAttributeValuesResult = useAtomValue(
+    getSpanAttributeValuesResultAtom({
+      data: {
+        startTime,
+        endTime,
+        attributeKey: activeAttributeKey ?? "",
+      },
+    }),
+  )
+
+  const attributeKeys = React.useMemo(
+    () =>
+      Result.builder(spanAttributeKeysResult)
+        .onSuccess((response) => response.data.map((row) => row.attributeKey))
+        .orElse(() => []),
+    [spanAttributeKeysResult],
+  )
+
+  const attributeValues = React.useMemo(
+    () =>
+      activeAttributeKey
+        ? Result.builder(spanAttributeValuesResult)
+            .onSuccess((response) => response.data.map((row) => row.attributeValue))
+            .orElse(() => [])
+        : [],
+    [activeAttributeKey, spanAttributeValuesResult],
   )
 
   const metricRows = React.useMemo(
@@ -378,6 +576,8 @@ export function QueryBuilderLab({
         services: toNames(tracesFacets.services),
         spanNames: toNames(tracesFacets.spanNames),
         environments: toNames(tracesFacets.deploymentEnvs),
+        attributeKeys,
+        attributeValues,
       },
       logs: {
         services: toNames(logsFacets.services),
@@ -388,7 +588,7 @@ export function QueryBuilderLab({
         metricTypes: [...QUERY_BUILDER_METRIC_TYPES],
       },
     }
-  }, [logsFacetsResult, metricRows, tracesFacetsResult])
+  }, [attributeKeys, attributeValues, logsFacetsResult, metricRows, tracesFacetsResult])
 
   React.useEffect(() => {
     const firstMetric = metricOptions[0]
@@ -744,6 +944,11 @@ export function QueryBuilderLab({
                               value={query.whereClause}
                               dataSource={query.dataSource}
                               values={autocompleteValuesBySource[query.dataSource]}
+                              onActiveAttributeKey={
+                                query.dataSource === "traces"
+                                  ? setActiveAttributeKey
+                                  : undefined
+                              }
                               onChange={(nextWhereClause) =>
                                 updateQuery(query.id, (current) => ({
                                   ...current,
@@ -835,15 +1040,17 @@ export function QueryBuilderLab({
                             <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
                               Group By
                             </Label>
-                            <Input
+                            <GroupByAutocomplete
                               value={query.groupBy}
-                              onChange={(event) =>
+                              onChange={(nextGroupBy) =>
                                 updateQuery(query.id, (current) => ({
                                   ...current,
-                                  groupBy: event.target.value,
+                                  groupBy: nextGroupBy,
                                 }))
                               }
-                              placeholder="service.name | span.name | severity | none | attr.http.route"
+                              dataSource={query.dataSource}
+                              attributeKeys={attributeKeys}
+                              placeholder="service.name | span.name | none | attr.http.route"
                             />
                           </div>
                         )}
