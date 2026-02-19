@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
+import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ErrorsSummaryCards } from "@/components/errors/errors-summary-cards"
@@ -8,21 +8,21 @@ import { ErrorsFilterSidebar } from "@/components/errors/errors-filter-sidebar"
 import { TimeRangePicker } from "@/components/time-range-picker"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 
-const errorsSearchSchema = z.object({
-  services: z.array(z.string()).optional(),
-  deploymentEnvs: z.array(z.string()).optional(),
-  errorTypes: z.array(z.string()).optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-  timePreset: z.string().optional(),
-  showSpam: z.boolean().optional(),
+const errorsSearchSchema = Schema.Struct({
+  services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  deploymentEnvs: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  errorTypes: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  startTime: Schema.optional(Schema.String),
+  endTime: Schema.optional(Schema.String),
+  timePreset: Schema.optional(Schema.String),
+  showSpam: Schema.optional(Schema.Boolean),
 })
 
-export type ErrorsSearchParams = z.infer<typeof errorsSearchSchema>
+export type ErrorsSearchParams = Schema.Schema.Type<typeof errorsSearchSchema>
 
 export const Route = createFileRoute("/errors")({
   component: ErrorsPage,
-  validateSearch: (search) => errorsSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(errorsSearchSchema),
 })
 
 function ErrorsPage() {

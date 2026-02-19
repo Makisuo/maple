@@ -409,7 +409,8 @@ function QueryBuilderAtomResults({
               )}
             </div>
           )
-        })}
+        })
+        .render()}
     </>
   )
 }

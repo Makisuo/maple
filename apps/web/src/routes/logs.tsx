@@ -1,25 +1,25 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
+import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { LogsTable } from "@/components/logs/logs-table"
 import { LogsFilterSidebar } from "@/components/logs/logs-filter-sidebar"
 import { TimeRangePicker } from "@/components/time-range-picker"
 
-const logsSearchSchema = z.object({
-  services: z.array(z.string()).optional(),
-  severities: z.array(z.string()).optional(),
-  search: z.string().optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-  timePreset: z.string().optional(),
+const logsSearchSchema = Schema.Struct({
+  services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  severities: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  search: Schema.optional(Schema.String),
+  startTime: Schema.optional(Schema.String),
+  endTime: Schema.optional(Schema.String),
+  timePreset: Schema.optional(Schema.String),
 })
 
-export type LogsSearchParams = z.infer<typeof logsSearchSchema>
+export type LogsSearchParams = Schema.Schema.Type<typeof logsSearchSchema>
 
 export const Route = createFileRoute("/logs")({
   component: LogsPage,
-  validateSearch: (search) => logsSearchSchema.parse(search),
+  validateSearch: Schema.standardSchemaV1(logsSearchSchema),
 })
 
 function LogsPage() {
