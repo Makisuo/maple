@@ -14,7 +14,6 @@ import {
 } from "@/lib/query-builder/model"
 import {
   decodeInput,
-  type TinybirdApiError,
   TinybirdApiError as TinybirdApiErrorClass,
 } from "@/api/tinybird/effect-utils"
 
@@ -307,10 +306,7 @@ async function executeTimeseriesQuery(
   })
 
   const response = await Effect.runPromise(
-    Effect.gen(function* () {
-      const client = yield* MapleApiAtomClient
-      return yield* client.queryEngine.execute({ payload })
-    }).pipe(Effect.provide(MapleApiAtomClient.layer)),
+    executeTimeseriesQueryEffect(payload).pipe(Effect.provide(MapleApiAtomClient.layer)),
   )
 
   if (response.result.kind !== "timeseries") {
@@ -322,6 +318,13 @@ async function executeTimeseriesQuery(
     series: { ...point.series },
   }))
 }
+
+const executeTimeseriesQueryEffect = Effect.fn("Tinybird.executeTimeseriesQuery")(
+  function* (payload: QueryEngineExecuteRequest) {
+    const client = yield* MapleApiAtomClient
+    return yield* client.queryEngine.execute({ payload })
+  },
+)
 
 async function executeTimeseriesQueryWithFallback(
   startTime: string,
@@ -884,8 +887,16 @@ export function getQueryBuilderTimeseries({
   data,
 }: {
   data: QueryBuilderTimeseriesInput
-}): Effect.Effect<QueryBuilderTimeseriesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getQueryBuilderTimeseriesEffect({ data })
+}
+
+const getQueryBuilderTimeseriesEffect = Effect.fn("Tinybird.getQueryBuilderTimeseries")(
+  function* ({
+    data,
+  }: {
+    data: QueryBuilderTimeseriesInput
+  }) {
     const input = yield* decodeInput(
       QueryBuilderTimeseriesInputSchema,
       data,
@@ -905,5 +916,5 @@ export function getQueryBuilderTimeseries({
           cause,
         }),
     })
-  })
-}
+  },
+)

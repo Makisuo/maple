@@ -4,7 +4,6 @@ import {
   TinybirdDateTimeString,
   decodeInput,
   runTinybirdQuery,
-  type TinybirdApiError,
 } from "@/api/tinybird/effect-utils"
 
 export interface ErrorRateByService {
@@ -25,12 +24,12 @@ const GetErrorRateByServiceInput = Schema.Struct({
 
 export type GetErrorRateByServiceInput = Schema.Schema.Type<typeof GetErrorRateByServiceInput>
 
-export function getErrorRateByService({
-  data,
-}: {
-  data: GetErrorRateByServiceInput
-}): Effect.Effect<ErrorRateByServiceResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+export const getErrorRateByService = Effect.fn("Tinybird.getErrorRateByService")(
+  function* ({
+    data,
+  }: {
+    data: GetErrorRateByServiceInput
+  }) {
     const input = yield* decodeInput(
       GetErrorRateByServiceInput,
       data ?? {},
@@ -53,5 +52,5 @@ export function getErrorRateByService({
         errorRatePercent: Number(row.errorRatePercent),
       })),
     }
-  })
-}
+  },
+)

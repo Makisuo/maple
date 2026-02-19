@@ -105,8 +105,10 @@ type QueryResponse<T> = {
 
 export { setMapleAuthHeaders }
 
-const queryTinybird = <T>(pipe: TinybirdPipe, params?: Record<string, unknown>) =>
-  Effect.gen(function* () {
+const queryTinybirdEffect = Effect.fn("Tinybird.queryPipe")(function* <T>(
+  pipe: TinybirdPipe,
+  params?: Record<string, unknown>,
+) {
     const client = yield* MapleApiAtomClient
     return (yield* client.tinybird.query({
       payload: {
@@ -114,7 +116,10 @@ const queryTinybird = <T>(pipe: TinybirdPipe, params?: Record<string, unknown>) 
         params,
       },
     })) as QueryResponse<T>
-  })
+})
+
+const queryTinybird = <T>(pipe: TinybirdPipe, params?: Record<string, unknown>) =>
+  queryTinybirdEffect<T>(pipe, params)
 
 const query = {
   list_traces: (params?: Record<string, unknown>) =>

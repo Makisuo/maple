@@ -4,7 +4,6 @@ import {
   TinybirdDateTimeString,
   decodeInput,
   runTinybirdQuery,
-  type TinybirdApiError,
 } from "@/api/tinybird/effect-utils"
 
 const ListLogsInputSchema = Schema.Struct({
@@ -77,8 +76,15 @@ export function listLogs({
   data,
 }: {
   data: ListLogsInput
-}): Effect.Effect<LogsResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return listLogsEffect({ data })
+}
+
+const listLogsEffect = Effect.fn("Tinybird.listLogs")(function* ({
+  data,
+}: {
+  data: ListLogsInput
+}) {
     const input = yield* decodeInput(ListLogsInputSchema, data ?? {}, "listLogs")
     const limit = input.limit ?? DEFAULT_LIMIT
     const tinybird = getTinybird()
@@ -122,15 +128,21 @@ export function listLogs({
         cursor,
       },
     }
-  })
-}
+})
 
 export function getLogsCount({
   data,
 }: {
   data: ListLogsInput
-}): Effect.Effect<LogsCountResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getLogsCountEffect({ data })
+}
+
+const getLogsCountEffect = Effect.fn("Tinybird.getLogsCount")(function* ({
+  data,
+}: {
+  data: ListLogsInput
+}) {
     const input = yield* decodeInput(ListLogsInputSchema, data ?? {}, "getLogsCount")
     const tinybird = getTinybird()
 
@@ -148,8 +160,7 @@ export function getLogsCount({
     return {
       data: [{ total: Number(countResult.data[0]?.total ?? 0) }],
     }
-  })
-}
+})
 
 export interface FacetItem {
   name: string
@@ -178,8 +189,15 @@ export function getLogsFacets({
   data,
 }: {
   data: GetLogsFacetsInput
-}): Effect.Effect<LogsFacetsResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getLogsFacetsEffect({ data })
+}
+
+const getLogsFacetsEffect = Effect.fn("Tinybird.getLogsFacets")(function* ({
+  data,
+}: {
+  data: GetLogsFacetsInput
+}) {
     const input = yield* decodeInput(GetLogsFacetsInputSchema, data ?? {}, "getLogsFacets")
     const tinybird = getTinybird()
 
@@ -207,5 +225,4 @@ export function getLogsFacets({
     return {
       data: { services, severities },
     }
-  })
-}
+})

@@ -4,7 +4,6 @@ import {
   TinybirdDateTimeString,
   decodeInput,
   runTinybirdQuery,
-  type TinybirdApiError,
 } from "@/api/tinybird/effect-utils"
 
 export interface ServiceUsage {
@@ -30,12 +29,12 @@ const GetServiceUsageInput = Schema.Struct({
 
 export type GetServiceUsageInput = Schema.Schema.Type<typeof GetServiceUsageInput>
 
-export function getServiceUsage({
-  data,
-}: {
-  data: GetServiceUsageInput
-}): Effect.Effect<ServiceUsageResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+export const getServiceUsage = Effect.fn("Tinybird.getServiceUsage")(
+  function* ({
+    data,
+  }: {
+    data: GetServiceUsageInput
+  }) {
     const input = yield* decodeInput(GetServiceUsageInput, data ?? {}, "getServiceUsage")
 
     const tinybird = getTinybird()
@@ -71,5 +70,5 @@ export function getServiceUsage({
           Number(row.totalExpHistogramMetricSizeBytes ?? 0),
       })),
     }
-  })
-}
+  },
+)

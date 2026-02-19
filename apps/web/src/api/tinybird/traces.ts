@@ -10,7 +10,6 @@ import {
   TinybirdDateTimeString,
   decodeInput,
   runTinybirdQuery,
-  type TinybirdApiError,
 } from "@/api/tinybird/effect-utils"
 
 const ListTracesInputSchema = Schema.Struct({
@@ -72,8 +71,15 @@ export function listTraces({
   data,
 }: {
   data: ListTracesInput
-}): Effect.Effect<TracesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return listTracesEffect({ data })
+}
+
+const listTracesEffect = Effect.fn("Tinybird.listTraces")(function* ({
+  data,
+}: {
+  data: ListTracesInput
+}) {
     const input = yield* decodeInput(ListTracesInputSchema, data ?? {}, "listTraces")
     const limit = input.limit ?? DEFAULT_LIMIT
     const offset = input.offset ?? DEFAULT_OFFSET
@@ -104,8 +110,7 @@ export function listTraces({
         offset,
       },
     }
-  })
-}
+})
 
 export interface Span {
   traceId: string
@@ -215,8 +220,15 @@ export function getSpanHierarchy({
   data,
 }: {
   data: GetSpanHierarchyInput
-}): Effect.Effect<SpanHierarchyResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getSpanHierarchyEffect({ data })
+}
+
+const getSpanHierarchyEffect = Effect.fn("Tinybird.getSpanHierarchy")(function* ({
+  data,
+}: {
+  data: GetSpanHierarchyInput
+}) {
     const input = yield* decodeInput(GetSpanHierarchyInputSchema, data, "getSpanHierarchy")
     const tinybird = getTinybird()
 
@@ -237,8 +249,7 @@ export function getSpanHierarchy({
       rootSpans,
       totalDurationMs,
     }
-  })
-}
+})
 
 export interface FacetItem {
   name: string
@@ -347,8 +358,15 @@ export function getTracesFacets({
   data,
 }: {
   data: GetTracesFacetsInput
-}): Effect.Effect<TracesFacetsResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getTracesFacetsEffect({ data })
+}
+
+const getTracesFacetsEffect = Effect.fn("Tinybird.getTracesFacets")(function* ({
+  data,
+}: {
+  data: GetTracesFacetsInput
+}) {
     const input = yield* decodeInput(GetTracesFacetsInputSchema, data ?? {}, "getTracesFacets")
     const tinybird = getTinybird()
 
@@ -384,15 +402,21 @@ export function getTracesFacets({
     return {
       data: transformFacets(facetsResult.data, durationStatsResult.data),
     }
-  })
-}
+})
 
 export function getTracesDurationStats({
   data,
 }: {
   data: GetTracesFacetsInput
-}): Effect.Effect<TracesDurationStatsResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getTracesDurationStatsEffect({ data })
+}
+
+const getTracesDurationStatsEffect = Effect.fn("Tinybird.getTracesDurationStats")(function* ({
+  data,
+}: {
+  data: GetTracesFacetsInput
+}) {
     const input = yield* decodeInput(
       GetTracesFacetsInputSchema,
       data ?? {},
@@ -420,8 +444,7 @@ export function getTracesDurationStats({
         p95DurationMs: Number(row.p95DurationMs),
       })),
     }
-  })
-}
+})
 
 const GetSpanAttributeKeysInputSchema = Schema.Struct({
   startTime: Schema.optional(TinybirdDateTimeString),
@@ -438,8 +461,15 @@ export function getSpanAttributeKeys({
   data,
 }: {
   data: GetSpanAttributeKeysInput
-}): Effect.Effect<SpanAttributeKeysResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getSpanAttributeKeysEffect({ data })
+}
+
+const getSpanAttributeKeysEffect = Effect.fn("Tinybird.getSpanAttributeKeys")(function* ({
+  data,
+}: {
+  data: GetSpanAttributeKeysInput
+}) {
     const input = yield* decodeInput(
       GetSpanAttributeKeysInputSchema,
       data ?? {},
@@ -459,8 +489,7 @@ export function getSpanAttributeKeys({
         usageCount: Number(row.usageCount),
       })),
     }
-  })
-}
+})
 
 const GetSpanAttributeValuesInputSchema = Schema.Struct({
   startTime: Schema.optional(TinybirdDateTimeString),
@@ -478,8 +507,16 @@ export function getSpanAttributeValues({
   data,
 }: {
   data: GetSpanAttributeValuesInput
-}): Effect.Effect<SpanAttributeValuesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getSpanAttributeValuesEffect({ data })
+}
+
+const getSpanAttributeValuesEffect = Effect.fn("Tinybird.getSpanAttributeValues")(
+  function* ({
+    data,
+  }: {
+    data: GetSpanAttributeValuesInput
+  }) {
     const input = yield* decodeInput(
       GetSpanAttributeValuesInputSchema,
       data ?? {},
@@ -505,5 +542,5 @@ export function getSpanAttributeValues({
         usageCount: Number(row.usageCount),
       })),
     }
-  })
-}
+  },
+)

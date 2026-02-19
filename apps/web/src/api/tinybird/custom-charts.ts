@@ -17,8 +17,6 @@ import {
 } from "@/api/tinybird/effect-utils"
 import type {
   ServiceDetailTimeSeriesPoint,
-  ServiceDetailTimeSeriesResponse,
-  ServiceOverviewTimeSeriesResponse,
   ServiceTimeSeriesPoint,
 } from "@/api/tinybird/services"
 
@@ -144,10 +142,7 @@ const metricsMetrics = new Set<MetricsMetric>(["avg", "sum", "min", "max", "coun
 const metricsBreakdownMetrics = new Set<"avg" | "sum" | "count">(["avg", "sum", "count"])
 
 function executeQueryEngine(payload: QueryEngineExecuteRequest) {
-  return Effect.gen(function* () {
-    const client = yield* MapleApiAtomClient
-    return yield* client.queryEngine.execute({ payload })
-  }).pipe(
+  return executeQueryEngineEffect(payload).pipe(
     Effect.provide(MapleApiAtomClient.layer),
     Effect.mapError(
       (cause) =>
@@ -160,6 +155,13 @@ function executeQueryEngine(payload: QueryEngineExecuteRequest) {
     ),
   )
 }
+
+const executeQueryEngineEffect = Effect.fn("Tinybird.executeQueryEngine")(
+  function* (payload: QueryEngineExecuteRequest) {
+    const client = yield* MapleApiAtomClient
+    return yield* client.queryEngine.execute({ payload })
+  },
+)
 
 function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesInput): QuerySpec | string {
   if (data.source === "traces") {
@@ -249,8 +251,16 @@ export function getCustomChartTimeSeries({
   data,
 }: {
   data: CustomChartTimeSeriesInput
-}): Effect.Effect<CustomChartTimeSeriesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getCustomChartTimeSeriesEffect({ data })
+}
+
+const getCustomChartTimeSeriesEffect = Effect.fn("Tinybird.getCustomChartTimeSeries")(
+  function* ({
+    data,
+  }: {
+    data: CustomChartTimeSeriesInput
+  }) {
     const input = yield* decodeInput(
       CustomChartTimeSeriesInputSchema,
       data,
@@ -286,8 +296,8 @@ export function getCustomChartTimeSeries({
         series: { ...point.series },
       })),
     }
-  })
-}
+  },
+)
 
 const CustomChartBreakdownInputSchema = Schema.Struct({
   source: Schema.Literal("traces", "logs", "metrics"),
@@ -397,8 +407,16 @@ export function getCustomChartBreakdown({
   data,
 }: {
   data: CustomChartBreakdownInput
-}): Effect.Effect<CustomChartBreakdownResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getCustomChartBreakdownEffect({ data })
+}
+
+const getCustomChartBreakdownEffect = Effect.fn("Tinybird.getCustomChartBreakdown")(
+  function* ({
+    data,
+  }: {
+    data: CustomChartBreakdownInput
+  }) {
     const input = yield* decodeInput(
       CustomChartBreakdownInputSchema,
       data,
@@ -434,8 +452,8 @@ export function getCustomChartBreakdown({
         value: item.value,
       })),
     }
-  })
-}
+  },
+)
 
 const GetCustomChartServiceDetailInputSchema = Schema.Struct({
   serviceName: Schema.String,
@@ -449,8 +467,16 @@ export function getCustomChartServiceDetail({
   data,
 }: {
   data: GetCustomChartServiceDetailInput
-}): Effect.Effect<ServiceDetailTimeSeriesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getCustomChartServiceDetailEffect({ data })
+}
+
+const getCustomChartServiceDetailEffect = Effect.fn("Tinybird.getCustomChartServiceDetail")(
+  function* ({
+    data,
+  }: {
+    data: GetCustomChartServiceDetailInput
+  }) {
     const input = yield* decodeInput(
       GetCustomChartServiceDetailInputSchema,
       data,
@@ -483,8 +509,8 @@ export function getCustomChartServiceDetail({
     return {
       data: fillServiceDetailPoints(points, input.startTime, input.endTime, bucketSeconds),
     }
-  })
-}
+  },
+)
 
 const GetOverviewTimeSeriesInputSchema = Schema.Struct({
   startTime: Schema.optional(dateTimeString),
@@ -498,8 +524,15 @@ export function getOverviewTimeSeries({
   data,
 }: {
   data: GetOverviewTimeSeriesInput
-}): Effect.Effect<ServiceDetailTimeSeriesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getOverviewTimeSeriesEffect({ data })
+}
+
+const getOverviewTimeSeriesEffect = Effect.fn("Tinybird.getOverviewTimeSeries")(function* ({
+  data,
+}: {
+  data: GetOverviewTimeSeriesInput
+}) {
     const input = yield* decodeInput(
       GetOverviewTimeSeriesInputSchema,
       data ?? {},
@@ -532,8 +565,7 @@ export function getOverviewTimeSeries({
     return {
       data: fillServiceDetailPoints(points, input.startTime, input.endTime, bucketSeconds),
     }
-  })
-}
+})
 
 const GetCustomChartServiceSparklinesInputSchema = Schema.Struct({
   startTime: Schema.optional(dateTimeString),
@@ -550,8 +582,16 @@ export function getCustomChartServiceSparklines({
   data,
 }: {
   data: GetCustomChartServiceSparklinesInput
-}): Effect.Effect<ServiceOverviewTimeSeriesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getCustomChartServiceSparklinesEffect({ data })
+}
+
+const getCustomChartServiceSparklinesEffect = Effect.fn("Tinybird.getCustomChartServiceSparklines")(
+  function* ({
+    data,
+  }: {
+    data: GetCustomChartServiceSparklinesInput
+  }) {
     const input = yield* decodeInput(
       GetCustomChartServiceSparklinesInputSchema,
       data ?? {},
@@ -595,5 +635,5 @@ export function getCustomChartServiceSparklines({
     )
 
     return { data: filledGrouped }
-  })
-}
+  },
+)

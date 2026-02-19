@@ -11,7 +11,6 @@ import {
   TinybirdDateTimeString,
   decodeInput,
   runTinybirdQuery,
-  type TinybirdApiError,
 } from "@/api/tinybird/effect-utils"
 
 const OptionalStringArray = Schema.optional(Schema.mutable(Schema.Array(Schema.String)))
@@ -56,8 +55,15 @@ export function getErrorsByType({
   data,
 }: {
   data: GetErrorsByTypeInput
-}): Effect.Effect<ErrorsByTypeResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getErrorsByTypeEffect({ data })
+}
+
+const getErrorsByTypeEffect = Effect.fn("Tinybird.getErrorsByType")(function* ({
+  data,
+}: {
+  data: GetErrorsByTypeInput
+}) {
     const input = yield* decodeInput(GetErrorsByTypeInputSchema, data ?? {}, "getErrorsByType")
     const tinybird = getTinybird()
 
@@ -76,8 +82,7 @@ export function getErrorsByType({
     return {
       data: result.data.map(transformErrorByType),
     }
-  })
-}
+})
 
 export interface FacetItem {
   name: string
@@ -132,8 +137,15 @@ export function getErrorsFacets({
   data,
 }: {
   data: GetErrorsFacetsInput
-}): Effect.Effect<ErrorsFacetsResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getErrorsFacetsEffect({ data })
+}
+
+const getErrorsFacetsEffect = Effect.fn("Tinybird.getErrorsFacets")(function* ({
+  data,
+}: {
+  data: GetErrorsFacetsInput
+}) {
     const input = yield* decodeInput(GetErrorsFacetsInputSchema, data ?? {}, "getErrorsFacets")
     const tinybird = getTinybird()
 
@@ -151,8 +163,7 @@ export function getErrorsFacets({
     return {
       data: transformErrorsFacets(result.data),
     }
-  })
-}
+})
 
 export interface ErrorsSummary {
   totalErrors: number
@@ -191,8 +202,15 @@ export function getErrorsSummary({
   data,
 }: {
   data: GetErrorsSummaryInput
-}): Effect.Effect<ErrorsSummaryResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getErrorsSummaryEffect({ data })
+}
+
+const getErrorsSummaryEffect = Effect.fn("Tinybird.getErrorsSummary")(function* ({
+  data,
+}: {
+  data: GetErrorsSummaryInput
+}) {
     const input = yield* decodeInput(GetErrorsSummaryInputSchema, data ?? {}, "getErrorsSummary")
     const tinybird = getTinybird()
 
@@ -211,8 +229,7 @@ export function getErrorsSummary({
     return {
       data: summary ? transformErrorsSummary(summary) : null,
     }
-  })
-}
+})
 
 export interface ErrorDetailTrace {
   traceId: string
@@ -255,8 +272,15 @@ export function getErrorDetailTraces({
   data,
 }: {
   data: GetErrorDetailTracesInput
-}): Effect.Effect<ErrorDetailTracesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getErrorDetailTracesEffect({ data })
+}
+
+const getErrorDetailTracesEffect = Effect.fn("Tinybird.getErrorDetailTraces")(function* ({
+  data,
+}: {
+  data: GetErrorDetailTracesInput
+}) {
     const input = yield* decodeInput(
       GetErrorDetailTracesInputSchema,
       data ?? {},
@@ -278,5 +302,4 @@ export function getErrorDetailTraces({
     return {
       data: result.data.map(transformErrorDetailTrace),
     }
-  })
-}
+})

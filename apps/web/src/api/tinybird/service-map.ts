@@ -5,7 +5,6 @@ import {
   TinybirdDateTimeString,
   decodeInput,
   runTinybirdQuery,
-  type TinybirdApiError,
 } from "@/api/tinybird/effect-utils"
 
 export interface ServiceEdge {
@@ -57,12 +56,12 @@ function transformEdge(row: ServiceDependenciesOutput, durationSeconds: number):
   }
 }
 
-export function getServiceMap({
-  data,
-}: {
-  data: GetServiceMapInput
-}): Effect.Effect<ServiceMapResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+export const getServiceMap = Effect.fn("Tinybird.getServiceMap")(
+  function* ({
+    data,
+  }: {
+    data: GetServiceMapInput
+  }) {
     const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMap")
     const tinybird = getTinybird()
     const result = yield* runTinybirdQuery("service_dependencies", () =>
@@ -87,5 +86,5 @@ export function getServiceMap({
     return {
       edges: result.data.map((row) => transformEdge(row, durationSeconds)),
     }
-  })
-}
+  },
+)

@@ -10,7 +10,6 @@ import {
   decodeInput,
   invalidTinybirdInput,
   runTinybirdQuery,
-  type TinybirdApiError,
 } from "@/api/tinybird/effect-utils"
 
 const MetricTypeSchema = Schema.Literal(
@@ -66,8 +65,15 @@ export function listMetrics({
   data,
 }: {
   data: ListMetricsInput
-}): Effect.Effect<MetricsResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return listMetricsEffect({ data })
+}
+
+const listMetricsEffect = Effect.fn("Tinybird.listMetrics")(function* ({
+  data,
+}: {
+  data: ListMetricsInput
+}) {
     const input = yield* decodeInput(ListMetricsInputSchema, data ?? {}, "listMetrics")
     const tinybird = getTinybird()
 
@@ -86,8 +92,7 @@ export function listMetrics({
     return {
       data: result.data.map(transformMetric),
     }
-  })
-}
+})
 
 const GetMetricTimeSeriesInputSchema = Schema.Struct({
   metricName: Schema.String,
@@ -132,8 +137,15 @@ export function getMetricTimeSeries({
   data,
 }: {
   data: GetMetricTimeSeriesInput
-}): Effect.Effect<MetricTimeSeriesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getMetricTimeSeriesEffect({ data })
+}
+
+const getMetricTimeSeriesEffect = Effect.fn("Tinybird.getMetricTimeSeries")(function* ({
+  data,
+}: {
+  data: GetMetricTimeSeriesInput
+}) {
     const input = yield* decodeInput(
       GetMetricTimeSeriesInputSchema,
       data,
@@ -210,8 +222,7 @@ export function getMetricTimeSeries({
     return {
       data: result.data.map(transformTimeSeriesPoint),
     }
-  })
-}
+})
 
 const GetMetricsSummaryInputSchema = Schema.Struct({
   service: Schema.optional(Schema.String),
@@ -243,8 +254,15 @@ export function getMetricsSummary({
   data,
 }: {
   data: GetMetricsSummaryInput
-}): Effect.Effect<MetricsSummaryResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getMetricsSummaryEffect({ data })
+}
+
+const getMetricsSummaryEffect = Effect.fn("Tinybird.getMetricsSummary")(function* ({
+  data,
+}: {
+  data: GetMetricsSummaryInput
+}) {
     const input = yield* decodeInput(
       GetMetricsSummaryInputSchema,
       data ?? {},
@@ -263,5 +281,4 @@ export function getMetricsSummary({
     return {
       data: result.data.map(transformSummary),
     }
-  })
-}
+})

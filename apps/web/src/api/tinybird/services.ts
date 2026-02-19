@@ -10,7 +10,6 @@ import {
   TinybirdDateTimeString,
   decodeInput,
   runTinybirdQuery,
-  type TinybirdApiError,
 } from "@/api/tinybird/effect-utils"
 
 // Date format: "YYYY-MM-DD HH:mm:ss" (Tinybird/ClickHouse compatible)
@@ -165,8 +164,15 @@ export function getServiceOverview({
   data,
 }: {
   data: GetServiceOverviewInput
-}): Effect.Effect<ServiceOverviewResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getServiceOverviewEffect({ data })
+}
+
+const getServiceOverviewEffect = Effect.fn("Tinybird.getServiceOverview")(function* ({
+  data,
+}: {
+  data: GetServiceOverviewInput
+}) {
     const input = yield* decodeInput(GetServiceOverviewInput, data ?? {}, "getServiceOverview")
 
     const tinybird = getTinybird()
@@ -194,8 +200,7 @@ export function getServiceOverview({
     return {
       data: aggregateByServiceEnvironment(coercedRows, durationSeconds),
     }
-  })
-}
+})
 
 // Service overview time series types
 export interface ServiceTimeSeriesPoint {
@@ -287,8 +292,15 @@ export function getServicesFacets({
   data,
 }: {
   data: GetServicesFacetsInput
-}): Effect.Effect<ServicesFacetsResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getServicesFacetsEffect({ data })
+}
+
+const getServicesFacetsEffect = Effect.fn("Tinybird.getServicesFacets")(function* ({
+  data,
+}: {
+  data: GetServicesFacetsInput
+}) {
     const input = yield* decodeInput(GetServicesFacetsInput, data ?? {}, "getServicesFacets")
     const tinybird = getTinybird()
     const result = yield* runTinybirdQuery("services_facets", () =>
@@ -301,8 +313,7 @@ export function getServicesFacets({
     return {
       data: transformServicesFacets(result.data),
     }
-  })
-}
+})
 
 // Service detail types
 export interface ServiceDetailTimeSeriesPoint {
@@ -340,8 +351,16 @@ export function getServiceApdexTimeSeries({
   data,
 }: {
   data: GetServiceDetailInput
-}): Effect.Effect<ServiceApdexTimeSeriesResponse, TinybirdApiError> {
-  return Effect.gen(function* () {
+}) {
+  return getServiceApdexTimeSeriesEffect({ data })
+}
+
+const getServiceApdexTimeSeriesEffect = Effect.fn("Tinybird.getServiceApdexTimeSeries")(
+  function* ({
+    data,
+  }: {
+    data: GetServiceDetailInput
+  }) {
     const input = yield* decodeInput(GetServiceDetailInput, data, "getServiceApdexTimeSeries")
     const tinybird = getTinybird()
     const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
@@ -368,5 +387,5 @@ export function getServiceApdexTimeSeries({
         bucketSeconds,
       ),
     }
-  })
-}
+  },
+)
