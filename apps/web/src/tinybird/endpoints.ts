@@ -36,8 +36,8 @@ export const listTraces = defineEndpoint("list_traces", {
           TraceId AS traceId,
           any(OrgId) AS OrgId,
           min(Timestamp) AS startTime,
-          max(Timestamp) AS endTime,
-          dateDiff('microsecond', min(Timestamp), max(Timestamp)) AS durationMicros,
+          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + Duration)) AS endTime,
+          intDiv(max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
           count() AS spanCount,
           groupUniqArray(ServiceName) AS services,
           argMin(
@@ -1095,7 +1095,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
             OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500),
             1, 0
           )) AS hasError,
-          dateDiff('millisecond', min(Timestamp), max(Timestamp)) AS durationMs
+          (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 AS durationMs
         FROM traces
         WHERE TraceId != ''
           AND OrgId = {{String(org_id, "")}}
@@ -1374,7 +1374,7 @@ export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
         FROM (
           SELECT
             TraceId,
-            dateDiff('millisecond', min(Timestamp), max(Timestamp)) AS durationMs
+            (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 AS durationMs
           FROM traces
           WHERE TraceId != ''
           AND OrgId = {{String(org_id, "")}}
@@ -1695,7 +1695,7 @@ export const errorDetailTraces = defineEndpoint("error_detail_traces", {
         SELECT
           t.TraceId AS traceId,
           min(t.Timestamp) AS startTime,
-          dateDiff('microsecond', min(t.Timestamp), max(t.Timestamp)) AS durationMicros,
+          intDiv(max(toUnixTimestamp64Nano(t.Timestamp) + t.Duration) - min(toUnixTimestamp64Nano(t.Timestamp)), 1000) AS durationMicros,
           count() AS spanCount,
           groupUniqArray(t.ServiceName) AS services,
           argMin(
