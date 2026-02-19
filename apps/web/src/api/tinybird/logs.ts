@@ -1,51 +1,62 @@
-import { z } from "zod";
-import { getTinybird, type ListLogsOutput } from "@/lib/tinybird";
+import { Effect, Schema } from "effect"
+import { getTinybird, type ListLogsOutput } from "@/lib/tinybird"
+import {
+  TinybirdDateTimeString,
+  decodeInput,
+  runTinybirdQuery,
+  type TinybirdApiError,
+} from "@/api/tinybird/effect-utils"
 
-// Input validation schemas
-const ListLogsInput = z.object({
-  limit: z.number().min(1).max(1000).optional(),
-  service: z.string().optional(),
-  severity: z.string().optional(),
-  minSeverity: z.number().min(0).max(255).optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-  traceId: z.string().optional(),
-  spanId: z.string().optional(),
-  cursor: z.string().optional(),
-  search: z.string().optional(),
-});
+const ListLogsInputSchema = Schema.Struct({
+  limit: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1), Schema.lessThanOrEqualTo(1000)),
+  ),
+  service: Schema.optional(Schema.String),
+  severity: Schema.optional(Schema.String),
+  minSeverity: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0), Schema.lessThanOrEqualTo(255)),
+  ),
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  traceId: Schema.optional(Schema.String),
+  spanId: Schema.optional(Schema.String),
+  cursor: Schema.optional(Schema.String),
+  search: Schema.optional(Schema.String),
+})
 
-export type ListLogsInput = z.infer<typeof ListLogsInput>;
+export type ListLogsInput = Schema.Schema.Type<typeof ListLogsInputSchema>
 
-// Default values applied at runtime
-const DEFAULT_LIMIT = 100;
+const DEFAULT_LIMIT = 100
 
-// Log entry for client use (now matches endpoint output directly)
 export interface Log {
-  timestamp: string;
-  severityText: string;
-  severityNumber: number;
-  serviceName: string;
-  body: string;
-  traceId: string;
-  spanId: string;
-  logAttributes: Record<string, string>;
-  resourceAttributes: Record<string, string>;
+  timestamp: string
+  severityText: string
+  severityNumber: number
+  serviceName: string
+  body: string
+  traceId: string
+  spanId: string
+  logAttributes: Record<string, string>
+  resourceAttributes: Record<string, string>
 }
 
 export interface LogsResponse {
-  data: Log[];
+  data: Log[]
   meta: {
-    limit: number;
-    total: number;
-    cursor: string | null;
-  };
-  error: string | null;
+    limit: number
+    total: number
+    cursor: string | null
+  }
 }
 
 export interface LogsCountResponse {
-  data: Array<{ total: number }>;
-  error: string | null;
+  data: Array<{ total: number }>
+}
+
+function parseAttributes(value: string | null | undefined): Record<string, string> {
+  if (!value) return {}
+  const parsed = JSON.parse(value)
+  return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {}
 }
 
 function transformLog(raw: ListLogsOutput): Log {
@@ -57,53 +68,51 @@ function transformLog(raw: ListLogsOutput): Log {
     body: raw.body,
     traceId: raw.traceId,
     spanId: raw.spanId,
-    logAttributes: raw.logAttributes ? JSON.parse(raw.logAttributes) : {},
-    resourceAttributes: raw.resourceAttributes ? JSON.parse(raw.resourceAttributes) : {},
-  };
+    logAttributes: parseAttributes(raw.logAttributes),
+    resourceAttributes: parseAttributes(raw.resourceAttributes),
+  }
 }
 
-export async function listLogs({
+export function listLogs({
   data,
 }: {
   data: ListLogsInput
-}): Promise<LogsResponse> {
-  data = ListLogsInput.parse(data ?? {})
-  const limit = data.limit ?? DEFAULT_LIMIT;
+}): Effect.Effect<LogsResponse, TinybirdApiError> {
+  return Effect.gen(function* () {
+    const input = yield* decodeInput(ListLogsInputSchema, data ?? {}, "listLogs")
+    const limit = input.limit ?? DEFAULT_LIMIT
+    const tinybird = getTinybird()
 
-  try {
-    const tinybird = getTinybird();
+    const [logsResult, countResult] = yield* Effect.all([
+      runTinybirdQuery("list_logs", () =>
+        tinybird.query.list_logs({
+          limit,
+          service: input.service,
+          severity: input.severity,
+          min_severity: input.minSeverity,
+          start_time: input.startTime,
+          end_time: input.endTime,
+          trace_id: input.traceId,
+          span_id: input.spanId,
+          cursor: input.cursor,
+          search: input.search,
+        }),
+      ),
+      runTinybirdQuery("logs_count", () =>
+        tinybird.query.logs_count({
+          service: input.service,
+          severity: input.severity,
+          start_time: input.startTime,
+          end_time: input.endTime,
+          trace_id: input.traceId,
+          search: input.search,
+        }),
+      ),
+    ])
 
-    const [logsResult, countResult] = await Promise.all([
-      tinybird.query.list_logs({
-        limit,
-        service: data.service,
-        severity: data.severity,
-        min_severity: data.minSeverity,
-        start_time: data.startTime,
-        end_time: data.endTime,
-        trace_id: data.traceId,
-        span_id: data.spanId,
-        cursor: data.cursor,
-        search: data.search,
-      }),
-      tinybird.query.logs_count({
-        service: data.service,
-        severity: data.severity,
-        start_time: data.startTime,
-        end_time: data.endTime,
-        trace_id: data.traceId,
-        search: data.search,
-      }),
-    ]);
-
-    const total = Number(countResult.data[0]?.total ?? 0);
-    const logs = logsResult.data.map(transformLog);
-
-    // Cursor for next page (last timestamp if we have more data)
-    const cursor =
-      logs.length === limit && logs.length > 0
-        ? logs[logs.length - 1].timestamp
-        : null;
+    const total = Number(countResult.data[0]?.total ?? 0)
+    const logs = logsResult.data.map(transformLog)
+    const cursor = logs.length === limit && logs.length > 0 ? logs[logs.length - 1].timestamp : null
 
     return {
       data: logs,
@@ -112,118 +121,91 @@ export async function listLogs({
         total,
         cursor,
       },
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] listLogs failed:", error);
-    return {
-      data: [],
-      meta: {
-        limit,
-        total: 0,
-        cursor: null,
-      },
-      error: error instanceof Error ? error.message : "Failed to fetch logs",
-    };
-  }
+    }
+  })
 }
 
-export async function getLogsCount({
+export function getLogsCount({
   data,
 }: {
   data: ListLogsInput
-}): Promise<LogsCountResponse> {
-  data = ListLogsInput.parse(data ?? {})
+}): Effect.Effect<LogsCountResponse, TinybirdApiError> {
+  return Effect.gen(function* () {
+    const input = yield* decodeInput(ListLogsInputSchema, data ?? {}, "getLogsCount")
+    const tinybird = getTinybird()
 
-  try {
-    const tinybird = getTinybird();
-    const countResult = await tinybird.query.logs_count({
-      service: data.service,
-      severity: data.severity,
-      start_time: data.startTime,
-      end_time: data.endTime,
-      trace_id: data.traceId,
-      search: data.search,
-    });
+    const countResult = yield* runTinybirdQuery("logs_count", () =>
+      tinybird.query.logs_count({
+        service: input.service,
+        severity: input.severity,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        trace_id: input.traceId,
+        search: input.search,
+      }),
+    )
 
     return {
       data: [{ total: Number(countResult.data[0]?.total ?? 0) }],
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getLogsCount failed:", error);
-    return {
-      data: [{ total: 0 }],
-      error: error instanceof Error ? error.message : "Failed to fetch log count",
-    };
-  }
+    }
+  })
 }
 
 export interface FacetItem {
-  name: string;
-  count: number;
+  name: string
+  count: number
 }
 
 export interface LogsFacets {
-  services: FacetItem[];
-  severities: FacetItem[];
+  services: FacetItem[]
+  severities: FacetItem[]
 }
 
 export interface LogsFacetsResponse {
-  data: LogsFacets;
-  error: string | null;
+  data: LogsFacets
 }
 
-const GetLogsFacetsInput = z.object({
-  service: z.string().optional(),
-  severity: z.string().optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
-});
+const GetLogsFacetsInputSchema = Schema.Struct({
+  service: Schema.optional(Schema.String),
+  severity: Schema.optional(Schema.String),
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+})
 
-export type GetLogsFacetsInput = z.infer<typeof GetLogsFacetsInput>;
+export type GetLogsFacetsInput = Schema.Schema.Type<typeof GetLogsFacetsInputSchema>
 
-export async function getLogsFacets({
+export function getLogsFacets({
   data,
 }: {
   data: GetLogsFacetsInput
-}): Promise<LogsFacetsResponse> {
-  data = GetLogsFacetsInput.parse(data ?? {})
+}): Effect.Effect<LogsFacetsResponse, TinybirdApiError> {
+  return Effect.gen(function* () {
+    const input = yield* decodeInput(GetLogsFacetsInputSchema, data ?? {}, "getLogsFacets")
+    const tinybird = getTinybird()
 
-  try {
-    const tinybird = getTinybird();
-    const result = await tinybird.query.logs_facets({
-      service: data.service,
-      severity: data.severity,
-      start_time: data.startTime,
-      end_time: data.endTime,
-    });
+    const result = yield* runTinybirdQuery("logs_facets", () =>
+      tinybird.query.logs_facets({
+        service: input.service,
+        severity: input.severity,
+        start_time: input.startTime,
+        end_time: input.endTime,
+      }),
+    )
 
-    const services: FacetItem[] = [];
-    const severities: FacetItem[] = [];
+    const services: FacetItem[] = []
+    const severities: FacetItem[] = []
 
     for (const row of result.data) {
-      const count = Number(row.count);
+      const count = Number(row.count)
       if (row.facetType === "service" && row.serviceName) {
-        services.push({ name: row.serviceName, count });
+        services.push({ name: row.serviceName, count })
       } else if (row.facetType === "severity" && row.severityText) {
-        severities.push({ name: row.severityText, count });
+        severities.push({ name: row.severityText, count })
       }
     }
 
     return {
       data: { services, severities },
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getLogsFacets failed:", error);
-    return {
-      data: {
-        services: [],
-        severities: [],
-      },
-      error:
-        error instanceof Error ? error.message : "Failed to fetch log facets",
-    };
-  }
+    }
+  })
 }

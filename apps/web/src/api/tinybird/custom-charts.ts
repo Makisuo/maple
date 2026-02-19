@@ -1,33 +1,35 @@
-import { z } from "zod";
-import { Effect, Schema } from "effect";
-import {
-  QueryEngineExecuteRequest,
-  type QuerySpec,
-  type TracesMetric,
-  type MetricsMetric,
-} from "@maple/domain";
-import { getTinybird } from "@/lib/tinybird";
+import { QueryEngineExecuteRequest, type MetricsMetric, type QuerySpec, type TracesMetric } from "@maple/domain"
+import { Effect, Schema } from "effect"
+
+import { getTinybird } from "@/lib/tinybird"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
   buildBucketTimeline,
   computeBucketSeconds,
   toIsoBucket,
-} from "@/api/tinybird/timeseries-utils";
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client";
-import { runtime } from "@/lib/services/common/runtime";
+} from "@/api/tinybird/timeseries-utils"
+import {
+  TinybirdDateTimeString,
+  TinybirdApiError,
+  decodeInput,
+  invalidTinybirdInput,
+  runTinybirdQuery,
+} from "@/api/tinybird/effect-utils"
 import type {
   ServiceDetailTimeSeriesPoint,
   ServiceDetailTimeSeriesResponse,
-  ServiceTimeSeriesPoint,
   ServiceOverviewTimeSeriesResponse,
-} from "@/api/tinybird/services";
+  ServiceTimeSeriesPoint,
+} from "@/api/tinybird/services"
 
-// Date format: "YYYY-MM-DD HH:mm:ss" (Tinybird/ClickHouse compatible)
-const dateTimeString = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "Invalid datetime format");
+const dateTimeString = TinybirdDateTimeString
+
+function toMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error ? cause.message : fallback
+}
 
 function sortByBucket<T extends { bucket: string }>(rows: T[]): T[] {
-  return [...rows].sort((left, right) => left.bucket.localeCompare(right.bucket));
+  return [...rows].sort((left, right) => left.bucket.localeCompare(right.bucket))
 }
 
 function fillServiceDetailPoints(
@@ -36,20 +38,20 @@ function fillServiceDetailPoints(
   endTime: string | undefined,
   bucketSeconds: number,
 ): ServiceDetailTimeSeriesPoint[] {
-  const timeline = buildBucketTimeline(startTime, endTime, bucketSeconds);
+  const timeline = buildBucketTimeline(startTime, endTime, bucketSeconds)
   if (timeline.length === 0) {
-    return sortByBucket(points);
+    return sortByBucket(points)
   }
 
-  const byBucket = new Map<string, ServiceDetailTimeSeriesPoint>();
+  const byBucket = new Map<string, ServiceDetailTimeSeriesPoint>()
   for (const point of points) {
-    byBucket.set(toIsoBucket(point.bucket), point);
+    byBucket.set(toIsoBucket(point.bucket), point)
   }
 
   return timeline.map((bucket) => {
-    const existing = byBucket.get(bucket);
+    const existing = byBucket.get(bucket)
     if (existing) {
-      return existing;
+      return existing
     }
 
     return {
@@ -59,8 +61,8 @@ function fillServiceDetailPoints(
       p50LatencyMs: 0,
       p95LatencyMs: 0,
       p99LatencyMs: 0,
-    };
-  });
+    }
+  })
 }
 
 function fillServiceSparklinePoints(
@@ -68,69 +70,66 @@ function fillServiceSparklinePoints(
   timeline: string[],
 ): ServiceTimeSeriesPoint[] {
   if (timeline.length === 0) {
-    return sortByBucket(points);
+    return sortByBucket(points)
   }
 
-  const byBucket = new Map<string, ServiceTimeSeriesPoint>();
+  const byBucket = new Map<string, ServiceTimeSeriesPoint>()
   for (const point of points) {
-    byBucket.set(toIsoBucket(point.bucket), point);
+    byBucket.set(toIsoBucket(point.bucket), point)
   }
 
   return timeline.map((bucket) => {
-    const existing = byBucket.get(bucket);
+    const existing = byBucket.get(bucket)
     if (existing) {
-      return existing;
+      return existing
     }
 
     return {
       bucket,
       throughput: 0,
       errorRate: 0,
-    };
-  });
+    }
+  })
 }
 
-// --- Time Series ---
+const SharedFiltersSchema = Schema.Struct({
+  serviceName: Schema.optional(Schema.String),
+  spanName: Schema.optional(Schema.String),
+  severity: Schema.optional(Schema.String),
+  metricName: Schema.optional(Schema.String),
+  metricType: Schema.optional(
+    Schema.Literal("sum", "gauge", "histogram", "exponential_histogram"),
+  ),
+  rootSpansOnly: Schema.optional(Schema.Boolean),
+  environments: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  commitShas: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  attributeKey: Schema.optional(Schema.String),
+  attributeValue: Schema.optional(Schema.String),
+})
 
-const CustomChartTimeSeriesInput = z.object({
-  source: z.enum(["traces", "logs", "metrics"]),
-  metric: z.string(),
-  groupBy: z
-    .enum(["service", "span_name", "status_code", "severity", "attribute", "none"])
-    .optional(),
-  filters: z
-    .object({
-      serviceName: z.string().optional(),
-      spanName: z.string().optional(),
-      severity: z.string().optional(),
-      metricName: z.string().optional(),
-      metricType: z
-        .enum(["sum", "gauge", "histogram", "exponential_histogram"])
-        .optional(),
-      rootSpansOnly: z.boolean().optional(),
-      environments: z.array(z.string()).optional(),
-      commitShas: z.array(z.string()).optional(),
-      attributeKey: z.string().optional(),
-      attributeValue: z.string().optional(),
-    })
-    .optional(),
+const CustomChartTimeSeriesInputSchema = Schema.Struct({
+  source: Schema.Literal("traces", "logs", "metrics"),
+  metric: Schema.String,
+  groupBy: Schema.optional(
+    Schema.Literal("service", "span_name", "status_code", "severity", "attribute", "none"),
+  ),
+  filters: Schema.optional(SharedFiltersSchema),
   startTime: dateTimeString,
   endTime: dateTimeString,
-  bucketSeconds: z.number().min(1).optional(),
-});
+  bucketSeconds: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1)),
+  ),
+})
 
-export type CustomChartTimeSeriesInput = z.infer<
-  typeof CustomChartTimeSeriesInput
->;
+export type CustomChartTimeSeriesInput = Schema.Schema.Type<typeof CustomChartTimeSeriesInputSchema>
 
 export interface CustomChartTimeSeriesPoint {
-  bucket: string;
-  series: Record<string, number>;
+  bucket: string
+  series: Record<string, number>
 }
 
 export interface CustomChartTimeSeriesResponse {
-  data: CustomChartTimeSeriesPoint[];
-  error: string | null;
+  data: CustomChartTimeSeriesPoint[]
 }
 
 const tracesMetrics = new Set<TracesMetric>([
@@ -140,27 +139,32 @@ const tracesMetrics = new Set<TracesMetric>([
   "p95_duration",
   "p99_duration",
   "error_rate",
-]);
-const metricsMetrics = new Set<MetricsMetric>(["avg", "sum", "min", "max", "count"]);
-const metricsBreakdownMetrics = new Set<"avg" | "sum" | "count">(["avg", "sum", "count"]);
-
-function decodeQueryEngineRequest(input: unknown) {
-  return Schema.decodeUnknownSync(QueryEngineExecuteRequest)(input);
-}
+])
+const metricsMetrics = new Set<MetricsMetric>(["avg", "sum", "min", "max", "count"])
+const metricsBreakdownMetrics = new Set<"avg" | "sum" | "count">(["avg", "sum", "count"])
 
 function executeQueryEngine(payload: QueryEngineExecuteRequest) {
-  return runtime.runPromise(
-    Effect.gen(function* () {
-      const client = yield* MapleApiAtomClient;
-      return yield* client.queryEngine.execute({ payload });
-    }),
-  );
+  return Effect.gen(function* () {
+    const client = yield* MapleApiAtomClient
+    return yield* client.queryEngine.execute({ payload })
+  }).pipe(
+    Effect.provide(MapleApiAtomClient.layer),
+    Effect.mapError(
+      (cause) =>
+        new TinybirdApiError({
+          operation: "queryEngine.execute",
+          stage: "query",
+          message: toMessage(cause, "Query engine request failed"),
+          cause,
+        }),
+    ),
+  )
 }
 
 function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesInput): QuerySpec | string {
   if (data.source === "traces") {
     if (!tracesMetrics.has(data.metric as TracesMetric)) {
-      return `Unknown trace metric: ${data.metric}`;
+      return `Unknown trace metric: ${data.metric}`
     }
     if (
       data.groupBy &&
@@ -168,14 +172,21 @@ function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesInput): QuerySpec |
         data.groupBy,
       )
     ) {
-      return `Unsupported traces groupBy: ${data.groupBy}`;
+      return `Unsupported traces groupBy: ${data.groupBy}`
     }
 
     return {
       kind: "timeseries",
       source: "traces",
       metric: data.metric as TracesMetric,
-      groupBy: data.groupBy as "service" | "span_name" | "status_code" | "http_method" | "attribute" | "none" | undefined,
+      groupBy: data.groupBy as
+        | "service"
+        | "span_name"
+        | "status_code"
+        | "http_method"
+        | "attribute"
+        | "none"
+        | undefined,
       filters: {
         serviceName: data.filters?.serviceName,
         spanName: data.filters?.spanName,
@@ -186,15 +197,15 @@ function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesInput): QuerySpec |
         attributeValue: data.filters?.attributeValue,
       },
       bucketSeconds: data.bucketSeconds,
-    };
+    }
   }
 
   if (data.source === "logs") {
     if (data.metric !== "count") {
-      return `Unknown logs metric: ${data.metric}`;
+      return `Unknown logs metric: ${data.metric}`
     }
     if (data.groupBy && !["service", "severity", "none"].includes(data.groupBy)) {
-      return `Unsupported logs groupBy: ${data.groupBy}`;
+      return `Unsupported logs groupBy: ${data.groupBy}`
     }
 
     return {
@@ -207,17 +218,17 @@ function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesInput): QuerySpec |
         severity: data.filters?.severity,
       },
       bucketSeconds: data.bucketSeconds,
-    };
+    }
   }
 
   if (!metricsMetrics.has(data.metric as MetricsMetric)) {
-    return `Unknown metrics metric: ${data.metric}`;
+    return `Unknown metrics metric: ${data.metric}`
   }
   if (!data.filters?.metricName || !data.filters.metricType) {
-    return "metricName and metricType are required for metrics source";
+    return "metricName and metricType are required for metrics source"
   }
   if (data.groupBy && !["service", "none"].includes(data.groupBy)) {
-    return `Unsupported metrics groupBy: ${data.groupBy}`;
+    return `Unsupported metrics groupBy: ${data.groupBy}`
   }
 
   return {
@@ -231,31 +242,42 @@ function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesInput): QuerySpec |
       serviceName: data.filters.serviceName,
     },
     bucketSeconds: data.bucketSeconds,
-  };
+  }
 }
 
-export async function getCustomChartTimeSeries({
+export function getCustomChartTimeSeries({
   data,
 }: {
   data: CustomChartTimeSeriesInput
-}): Promise<CustomChartTimeSeriesResponse> {
-  data = CustomChartTimeSeriesInput.parse(data)
+}): Effect.Effect<CustomChartTimeSeriesResponse, TinybirdApiError> {
+  return Effect.gen(function* () {
+    const input = yield* decodeInput(
+      CustomChartTimeSeriesInputSchema,
+      data,
+      "getCustomChartTimeSeries",
+    )
 
-  try {
-    const query = buildTimeseriesQuerySpec(data);
+    const query = buildTimeseriesQuerySpec(input)
     if (typeof query === "string") {
-      return { data: [], error: query };
+      return yield* invalidTinybirdInput("getCustomChartTimeSeries", query)
     }
 
-    const request = decodeQueryEngineRequest({
-      startTime: data.startTime,
-      endTime: data.endTime,
-      query,
-    });
+    const request = yield* decodeInput(
+      QueryEngineExecuteRequest,
+      {
+        startTime: input.startTime,
+        endTime: input.endTime,
+        query,
+      },
+      "getCustomChartTimeSeries.request",
+    )
 
-    const response = await executeQueryEngine(request);
+    const response = yield* executeQueryEngine(request)
     if (response.result.kind !== "timeseries") {
-      return { data: [], error: "Unexpected query result kind" };
+      return yield* invalidTinybirdInput(
+        "getCustomChartTimeSeries",
+        "Unexpected query result kind",
+      )
     }
 
     return {
@@ -263,77 +285,49 @@ export async function getCustomChartTimeSeries({
         bucket: point.bucket,
         series: { ...point.series },
       })),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getCustomChartTimeSeries failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch custom chart time series",
-    };
-  }
+    }
+  })
 }
 
-// --- Breakdown ---
-
-const CustomChartBreakdownInput = z.object({
-  source: z.enum(["traces", "logs", "metrics"]),
-  metric: z.string(),
-  groupBy: z.enum([
+const CustomChartBreakdownInputSchema = Schema.Struct({
+  source: Schema.Literal("traces", "logs", "metrics"),
+  metric: Schema.String,
+  groupBy: Schema.Literal(
     "service",
     "span_name",
     "status_code",
     "http_method",
     "severity",
     "attribute",
-  ]),
-  filters: z
-    .object({
-      serviceName: z.string().optional(),
-      spanName: z.string().optional(),
-      severity: z.string().optional(),
-      metricName: z.string().optional(),
-      metricType: z
-        .enum(["sum", "gauge", "histogram", "exponential_histogram"])
-        .optional(),
-      rootSpansOnly: z.boolean().optional(),
-      environments: z.array(z.string()).optional(),
-      commitShas: z.array(z.string()).optional(),
-      attributeKey: z.string().optional(),
-      attributeValue: z.string().optional(),
-    })
-    .optional(),
+  ),
+  filters: Schema.optional(SharedFiltersSchema),
   startTime: dateTimeString,
   endTime: dateTimeString,
-  limit: z.number().min(1).max(100).optional(),
-});
+  limit: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1), Schema.lessThanOrEqualTo(100)),
+  ),
+})
 
-export type CustomChartBreakdownInput = z.infer<
-  typeof CustomChartBreakdownInput
->;
+export type CustomChartBreakdownInput = Schema.Schema.Type<typeof CustomChartBreakdownInputSchema>
 
 export interface CustomChartBreakdownItem {
-  name: string;
-  value: number;
+  name: string
+  value: number
 }
 
 export interface CustomChartBreakdownResponse {
-  data: CustomChartBreakdownItem[];
-  error: string | null;
+  data: CustomChartBreakdownItem[]
 }
 
 function buildBreakdownQuerySpec(data: CustomChartBreakdownInput): QuerySpec | string {
   if (data.source === "traces") {
     if (!tracesMetrics.has(data.metric as TracesMetric)) {
-      return `Unknown trace metric: ${data.metric}`;
+      return `Unknown trace metric: ${data.metric}`
     }
     if (
       !["service", "span_name", "status_code", "http_method", "attribute"].includes(data.groupBy)
     ) {
-      return `Unsupported traces groupBy: ${data.groupBy}`;
+      return `Unsupported traces groupBy: ${data.groupBy}`
     }
 
     return {
@@ -351,15 +345,15 @@ function buildBreakdownQuerySpec(data: CustomChartBreakdownInput): QuerySpec | s
         attributeValue: data.filters?.attributeValue,
       },
       limit: data.limit,
-    };
+    }
   }
 
   if (data.source === "logs") {
     if (data.metric !== "count") {
-      return `Unknown logs metric: ${data.metric}`;
+      return `Unknown logs metric: ${data.metric}`
     }
-    if (!["service", "severity"].includes(data.groupBy)) {
-      return `Unsupported logs groupBy: ${data.groupBy}`;
+    if (![("service" as const), ("severity" as const)].includes(data.groupBy as "service" | "severity")) {
+      return `Unsupported logs groupBy: ${data.groupBy}`
     }
 
     return {
@@ -372,17 +366,17 @@ function buildBreakdownQuerySpec(data: CustomChartBreakdownInput): QuerySpec | s
         severity: data.filters?.severity,
       },
       limit: data.limit,
-    };
+    }
   }
 
   if (!metricsBreakdownMetrics.has(data.metric as "avg" | "sum" | "count")) {
-    return `Unknown metrics metric: ${data.metric}`;
+    return `Unknown metrics metric: ${data.metric}`
   }
   if (!data.filters?.metricName || !data.filters.metricType) {
-    return "metricName and metricType are required for metrics source";
+    return "metricName and metricType are required for metrics source"
   }
   if (data.groupBy !== "service") {
-    return `Unsupported metrics groupBy: ${data.groupBy}`;
+    return `Unsupported metrics groupBy: ${data.groupBy}`
   }
 
   return {
@@ -396,30 +390,42 @@ function buildBreakdownQuerySpec(data: CustomChartBreakdownInput): QuerySpec | s
       serviceName: data.filters.serviceName,
     },
     limit: data.limit,
-  };
+  }
 }
 
-export async function getCustomChartBreakdown({
+export function getCustomChartBreakdown({
   data,
 }: {
   data: CustomChartBreakdownInput
-}): Promise<CustomChartBreakdownResponse> {
-  data = CustomChartBreakdownInput.parse(data)
+}): Effect.Effect<CustomChartBreakdownResponse, TinybirdApiError> {
+  return Effect.gen(function* () {
+    const input = yield* decodeInput(
+      CustomChartBreakdownInputSchema,
+      data,
+      "getCustomChartBreakdown",
+    )
 
-  try {
-    const query = buildBreakdownQuerySpec(data);
+    const query = buildBreakdownQuerySpec(input)
     if (typeof query === "string") {
-      return { data: [], error: query };
+      return yield* invalidTinybirdInput("getCustomChartBreakdown", query)
     }
 
-    const request = decodeQueryEngineRequest({
-      startTime: data.startTime,
-      endTime: data.endTime,
-      query,
-    });
-    const response = await executeQueryEngine(request);
+    const request = yield* decodeInput(
+      QueryEngineExecuteRequest,
+      {
+        startTime: input.startTime,
+        endTime: input.endTime,
+        query,
+      },
+      "getCustomChartBreakdown.request",
+    )
+
+    const response = yield* executeQueryEngine(request)
     if (response.result.kind !== "breakdown") {
-      return { data: [], error: "Unexpected query result kind" };
+      return yield* invalidTinybirdInput(
+        "getCustomChartBreakdown",
+        "Unexpected query result kind",
+      )
     }
 
     return {
@@ -427,45 +433,41 @@ export async function getCustomChartBreakdown({
         name: item.name,
         value: item.value,
       })),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getCustomChartBreakdown failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch custom chart breakdown",
-    };
-  }
+    }
+  })
 }
 
-// --- Service Detail (via custom traces timeseries) ---
+const GetCustomChartServiceDetailInputSchema = Schema.Struct({
+  serviceName: Schema.String,
+  startTime: Schema.optional(dateTimeString),
+  endTime: Schema.optional(dateTimeString),
+})
 
-const GetCustomChartServiceDetailInput = z.object({
-  serviceName: z.string(),
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-});
+type GetCustomChartServiceDetailInput = Schema.Schema.Type<typeof GetCustomChartServiceDetailInputSchema>
 
-export async function getCustomChartServiceDetail({
+export function getCustomChartServiceDetail({
   data,
 }: {
-  data: z.infer<typeof GetCustomChartServiceDetailInput>
-}): Promise<ServiceDetailTimeSeriesResponse> {
-  data = GetCustomChartServiceDetailInput.parse(data)
+  data: GetCustomChartServiceDetailInput
+}): Effect.Effect<ServiceDetailTimeSeriesResponse, TinybirdApiError> {
+  return Effect.gen(function* () {
+    const input = yield* decodeInput(
+      GetCustomChartServiceDetailInputSchema,
+      data,
+      "getCustomChartServiceDetail",
+    )
 
-  try {
-    const tinybird = getTinybird();
-    const bucketSeconds = computeBucketSeconds(data.startTime, data.endTime);
-    const result = await tinybird.query.custom_traces_timeseries({
-      start_time: data.startTime!,
-      end_time: data.endTime!,
-      bucket_seconds: bucketSeconds,
-      service_name: data.serviceName,
-      root_only: "1",
-    });
+    const tinybird = getTinybird()
+    const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+    const result = yield* runTinybirdQuery("custom_traces_timeseries", () =>
+      tinybird.query.custom_traces_timeseries({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        bucket_seconds: bucketSeconds,
+        service_name: input.serviceName,
+        root_only: "1",
+      }),
+    )
 
     const points = result.data.map(
       (row): ServiceDetailTimeSeriesPoint => ({
@@ -476,54 +478,45 @@ export async function getCustomChartServiceDetail({
         p95LatencyMs: Number(row.p95Duration),
         p99LatencyMs: Number(row.p99Duration),
       }),
-    );
+    )
 
     return {
-      data: fillServiceDetailPoints(
-        points,
-        data.startTime,
-        data.endTime,
-        bucketSeconds,
-      ),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getCustomChartServiceDetail failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch service detail time series",
-    };
-  }
+      data: fillServiceDetailPoints(points, input.startTime, input.endTime, bucketSeconds),
+    }
+  })
 }
 
-// --- Overview Time Series (all services aggregated, optional env filter) ---
+const GetOverviewTimeSeriesInputSchema = Schema.Struct({
+  startTime: Schema.optional(dateTimeString),
+  endTime: Schema.optional(dateTimeString),
+  environments: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+})
 
-const GetOverviewTimeSeriesInput = z.object({
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-  environments: z.array(z.string()).optional(),
-});
+type GetOverviewTimeSeriesInput = Schema.Schema.Type<typeof GetOverviewTimeSeriesInputSchema>
 
-export async function getOverviewTimeSeries({
+export function getOverviewTimeSeries({
   data,
 }: {
-  data: z.infer<typeof GetOverviewTimeSeriesInput>
-}): Promise<ServiceDetailTimeSeriesResponse> {
-  data = GetOverviewTimeSeriesInput.parse(data ?? {})
+  data: GetOverviewTimeSeriesInput
+}): Effect.Effect<ServiceDetailTimeSeriesResponse, TinybirdApiError> {
+  return Effect.gen(function* () {
+    const input = yield* decodeInput(
+      GetOverviewTimeSeriesInputSchema,
+      data ?? {},
+      "getOverviewTimeSeries",
+    )
 
-  try {
-    const tinybird = getTinybird();
-    const bucketSeconds = computeBucketSeconds(data.startTime, data.endTime);
-    const result = await tinybird.query.custom_traces_timeseries({
-      start_time: data.startTime!,
-      end_time: data.endTime!,
-      bucket_seconds: bucketSeconds,
-      root_only: "1",
-      environments: data.environments?.join(","),
-    });
+    const tinybird = getTinybird()
+    const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+    const result = yield* runTinybirdQuery("custom_traces_timeseries", () =>
+      tinybird.query.custom_traces_timeseries({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        bucket_seconds: bucketSeconds,
+        root_only: "1",
+        environments: input.environments?.join(","),
+      }),
+    )
 
     const points = result.data.map(
       (row): ServiceDetailTimeSeriesPoint => ({
@@ -534,75 +527,64 @@ export async function getOverviewTimeSeries({
         p95LatencyMs: Number(row.p95Duration),
         p99LatencyMs: Number(row.p99Duration),
       }),
-    );
+    )
 
     return {
-      data: fillServiceDetailPoints(
-        points,
-        data.startTime,
-        data.endTime,
-        bucketSeconds,
-      ),
-      error: null,
-    };
-  } catch (error) {
-    console.error("[Tinybird] getOverviewTimeSeries failed:", error);
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch overview time series",
-    };
-  }
+      data: fillServiceDetailPoints(points, input.startTime, input.endTime, bucketSeconds),
+    }
+  })
 }
 
-// --- Service Sparklines (via custom traces timeseries with group_by_service) ---
+const GetCustomChartServiceSparklinesInputSchema = Schema.Struct({
+  startTime: Schema.optional(dateTimeString),
+  endTime: Schema.optional(dateTimeString),
+  environments: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  commitShas: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+})
 
-const GetCustomChartServiceSparklinesInput = z.object({
-  startTime: dateTimeString.optional(),
-  endTime: dateTimeString.optional(),
-  environments: z.array(z.string()).optional(),
-  commitShas: z.array(z.string()).optional(),
-});
+type GetCustomChartServiceSparklinesInput = Schema.Schema.Type<
+  typeof GetCustomChartServiceSparklinesInputSchema
+>
 
-export async function getCustomChartServiceSparklines({
+export function getCustomChartServiceSparklines({
   data,
 }: {
-  data: z.infer<typeof GetCustomChartServiceSparklinesInput>
-}): Promise<ServiceOverviewTimeSeriesResponse> {
-  data = GetCustomChartServiceSparklinesInput.parse(data ?? {})
+  data: GetCustomChartServiceSparklinesInput
+}): Effect.Effect<ServiceOverviewTimeSeriesResponse, TinybirdApiError> {
+  return Effect.gen(function* () {
+    const input = yield* decodeInput(
+      GetCustomChartServiceSparklinesInputSchema,
+      data ?? {},
+      "getCustomChartServiceSparklines",
+    )
 
-  try {
-    const tinybird = getTinybird();
-    const bucketSeconds = computeBucketSeconds(data.startTime, data.endTime);
-    const result = await tinybird.query.custom_traces_timeseries({
-      start_time: data.startTime!,
-      end_time: data.endTime!,
-      bucket_seconds: bucketSeconds,
-      root_only: "1",
-      group_by_service: "1",
-      environments: data.environments?.join(","),
-      commit_shas: data.commitShas?.join(","),
-    });
+    const tinybird = getTinybird()
+    const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+    const result = yield* runTinybirdQuery("custom_traces_timeseries", () =>
+      tinybird.query.custom_traces_timeseries({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        bucket_seconds: bucketSeconds,
+        root_only: "1",
+        group_by_service: "1",
+        environments: input.environments?.join(","),
+        commit_shas: input.commitShas?.join(","),
+      }),
+    )
 
-    const timeline = buildBucketTimeline(
-      data.startTime,
-      data.endTime,
-      bucketSeconds,
-    );
-    const grouped: Record<string, ServiceTimeSeriesPoint[]> = {};
+    const timeline = buildBucketTimeline(input.startTime, input.endTime, bucketSeconds)
+    const grouped: Record<string, ServiceTimeSeriesPoint[]> = {}
     for (const row of result.data) {
-      const bucket = toIsoBucket(row.bucket);
+      const bucket = toIsoBucket(row.bucket)
       const point: ServiceTimeSeriesPoint = {
         bucket,
         throughput: Number(row.count),
         errorRate: Number(row.errorRate),
-      };
-      if (!grouped[row.groupName]) {
-        grouped[row.groupName] = [];
       }
-      grouped[row.groupName].push(point);
+      if (!grouped[row.groupName]) {
+        grouped[row.groupName] = []
+      }
+      grouped[row.groupName].push(point)
     }
 
     const filledGrouped = Object.fromEntries(
@@ -610,20 +592,8 @@ export async function getCustomChartServiceSparklines({
         service,
         fillServiceSparklinePoints(points, timeline),
       ]),
-    );
+    )
 
-    return { data: filledGrouped, error: null };
-  } catch (error) {
-    console.error(
-      "[Tinybird] getCustomChartServiceSparklines failed:",
-      error,
-    );
-    return {
-      data: {},
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch service sparklines",
-    };
-  }
+    return { data: filledGrouped }
+  })
 }

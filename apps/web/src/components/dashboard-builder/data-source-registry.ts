@@ -1,3 +1,4 @@
+import { Effect } from "effect"
 import type { DataSourceEndpoint } from "@/components/dashboard-builder/types"
 
 import { getServiceUsage } from "@/api/tinybird/service-usage"
@@ -25,7 +26,7 @@ import {
 import { getQueryBuilderTimeseries } from "@/api/tinybird/query-builder-timeseries"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ServerFunction = (opts: { data: any }) => Promise<any>
+type ServerFunction = (opts: { data: any }) => Effect.Effect<any, unknown>
 
 export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
   service_usage: getServiceUsage,

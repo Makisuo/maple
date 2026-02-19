@@ -23,7 +23,8 @@ import {
 } from "@/api/tinybird/services"
 import { getSpanAttributeKeys, getSpanAttributeValues, getSpanHierarchy, getTracesFacets, listTraces } from "@/api/tinybird/traces"
 import { getQueryBuilderTimeseries } from "@/api/tinybird/query-builder-timeseries"
-type AsyncQuery<Input, Output> = (input: Input) => Promise<Output>
+
+type QueryEffect<Input, Output> = (input: Input) => Effect.Effect<Output, unknown>
 
 interface QueryAtomOptions {
   staleTime?: number
@@ -75,33 +76,19 @@ function encodeKey(value: unknown): string {
   return JSON.stringify(normalized === undefined ? null : normalized)
 }
 
-async function parseErrorField<Output>(output: Output): Promise<Output> {
-  if (output && typeof output === "object" && "error" in output) {
-    const errorValue = (output as { error?: unknown }).error
-    if (typeof errorValue === "string" && errorValue.length > 0) {
-      throw new QueryAtomError({
-        message: errorValue,
-      })
-    }
-  }
-
-  return output
-}
-
 function makeQueryAtomFamily<Input, Output>(
-  query: AsyncQuery<Input, Output>,
+  query: QueryEffect<Input, Output>,
   options?: QueryAtomOptions,
 ) {
   const family = Atom.family((key: string) => {
     let resultAtom = Atom.make(
-      Effect.tryPromise({
-        try: async () => {
-          const input = JSON.parse(key) as Input
-          const output = await query(input)
-          return parseErrorField(output)
-        },
+      Effect.try({
+        try: () => JSON.parse(key) as Input,
         catch: toQueryAtomError,
-      }),
+      }).pipe(
+        Effect.flatMap((input) => query(input)),
+        Effect.mapError(toQueryAtomError),
+      ),
     )
 
     if (options?.staleTime !== undefined) {

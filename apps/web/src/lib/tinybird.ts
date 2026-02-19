@@ -2,7 +2,6 @@ import type { TinybirdPipe } from "@maple/domain"
 import { Effect } from "effect"
 import { MapleApiAtomClient } from "./services/common/atom-client"
 import { setMapleAuthHeaders } from "./services/common/auth-headers"
-import { runtime } from "./services/common/runtime"
 
 import type {
   CustomLogsBreakdownOutput,
@@ -107,17 +106,15 @@ type QueryResponse<T> = {
 export { setMapleAuthHeaders }
 
 const queryTinybird = <T>(pipe: TinybirdPipe, params?: Record<string, unknown>) =>
-  runtime.runPromise(
-    Effect.gen(function* () {
-      const client = yield* MapleApiAtomClient
-      return (yield* client.tinybird.query({
-        payload: {
-          pipe,
-          params,
-        },
-      })) as QueryResponse<T>
-    }),
-  )
+  Effect.gen(function* () {
+    const client = yield* MapleApiAtomClient
+    return (yield* client.tinybird.query({
+      payload: {
+        pipe,
+        params,
+      },
+    })) as QueryResponse<T>
+  })
 
 const query = {
   list_traces: (params?: Record<string, unknown>) =>
