@@ -21,7 +21,7 @@ import {
   getServiceOverview,
   getServicesFacets,
 } from "@/api/tinybird/services"
-import { getSpanHierarchy, getTracesFacets, listTraces } from "@/api/tinybird/traces"
+import { getSpanAttributeKeys, getSpanAttributeValues, getSpanHierarchy, getTracesFacets, listTraces } from "@/api/tinybird/traces"
 import { getQueryBuilderTimeseries } from "@/api/tinybird/query-builder-timeseries"
 type AsyncQuery<Input, Output> = (input: Input) => Promise<Output>
 
@@ -213,4 +213,12 @@ export const getQueryBuilderTimeseriesResultAtom = makeQueryAtomFamily(
 
 export const getServiceMapResultAtom = makeQueryAtomFamily(getServiceMap, {
   staleTime: 15_000,
+})
+
+export const getSpanAttributeKeysResultAtom = makeQueryAtomFamily(getSpanAttributeKeys, {
+  staleTime: 60_000,
+})
+
+export const getSpanAttributeValuesResultAtom = makeQueryAtomFamily(getSpanAttributeValues, {
+  staleTime: 30_000,
 })

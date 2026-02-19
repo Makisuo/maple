@@ -27,6 +27,8 @@ export const tinybirdPipes = [
   "custom_logs_breakdown",
   "custom_metrics_breakdown",
   "service_dependencies",
+  "span_attribute_keys",
+  "span_attribute_values",
 ] as const
 
 export type TinybirdPipe = (typeof tinybirdPipes)[number]

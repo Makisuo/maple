@@ -14,6 +14,7 @@ interface WhereClauseEditorProps {
   value: string
   onChange: (value: string) => void
   values?: WhereClauseAutocompleteValues
+  onActiveAttributeKey?: (key: string | null) => void
   placeholder?: string
   rows?: number
   className?: string
@@ -26,6 +27,7 @@ export function WhereClauseEditor({
   value,
   onChange,
   values,
+  onActiveAttributeKey,
   placeholder,
   rows = 2,
   className,
@@ -52,6 +54,16 @@ export function WhereClauseEditor({
       }),
     [cursor, dataSource, value, values],
   )
+
+  // Notify parent when user is editing a value for an attr.* key
+  React.useEffect(() => {
+    if (!onActiveAttributeKey) return
+    if (autocomplete.context === "value" && autocomplete.key?.startsWith("attr.")) {
+      onActiveAttributeKey(autocomplete.key.slice(5))
+    } else {
+      onActiveAttributeKey(null)
+    }
+  }, [autocomplete.context, autocomplete.key, onActiveAttributeKey])
 
   const suggestions = autocomplete.suggestions
   const isOpen = isFocused && !isDismissed && suggestions.length > 0

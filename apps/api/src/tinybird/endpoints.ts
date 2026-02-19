@@ -2488,3 +2488,80 @@ export const serviceDependencies = defineEndpoint("service_dependencies", {
 
 export type ServiceDependenciesParams = InferParams<typeof serviceDependencies>;
 export type ServiceDependenciesOutput = InferOutputRow<typeof serviceDependencies>;
+
+/**
+ * Span attribute keys endpoint - returns distinct span attribute key names
+ */
+export const spanAttributeKeys = defineEndpoint("span_attribute_keys", {
+  description: "List distinct span attribute keys with usage counts.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    limit: p.int32().optional(200).describe("Maximum number of keys to return"),
+  },
+  nodes: [
+    node({
+      name: "span_attribute_keys_node",
+      sql: `
+        SELECT
+          arrayJoin(mapKeys(SpanAttributes)) AS attributeKey,
+          count() AS usageCount
+        FROM traces
+        WHERE OrgId = {{String(org_id, "")}}
+          AND Timestamp >= {{DateTime(start_time)}}
+          AND Timestamp <= {{DateTime(end_time)}}
+          AND SpanAttributes != map()
+        GROUP BY attributeKey
+        ORDER BY usageCount DESC
+        LIMIT {{Int32(limit, 200)}}
+      `,
+    }),
+  ],
+  output: {
+    attributeKey: t.string(),
+    usageCount: t.uint64(),
+  },
+});
+
+export type SpanAttributeKeysParams = InferParams<typeof spanAttributeKeys>;
+export type SpanAttributeKeysOutput = InferOutputRow<typeof spanAttributeKeys>;
+
+/**
+ * Span attribute values endpoint - returns distinct values for a specific attribute key
+ */
+export const spanAttributeValues = defineEndpoint("span_attribute_values", {
+  description: "List distinct values for a specific span attribute key.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    attribute_key: p.string().describe("The attribute key to get values for"),
+    limit: p.int32().optional(50).describe("Maximum number of values to return"),
+  },
+  nodes: [
+    node({
+      name: "span_attribute_values_node",
+      sql: `
+        SELECT
+          SpanAttributes[{{String(attribute_key)}}] AS attributeValue,
+          count() AS usageCount
+        FROM traces
+        WHERE OrgId = {{String(org_id, "")}}
+          AND Timestamp >= {{DateTime(start_time)}}
+          AND Timestamp <= {{DateTime(end_time)}}
+          AND SpanAttributes[{{String(attribute_key)}}] != ''
+        GROUP BY attributeValue
+        ORDER BY usageCount DESC
+        LIMIT {{Int32(limit, 50)}}
+      `,
+    }),
+  ],
+  output: {
+    attributeValue: t.string(),
+    usageCount: t.uint64(),
+  },
+});
+
+export type SpanAttributeValuesParams = InferParams<typeof spanAttributeValues>;
+export type SpanAttributeValuesOutput = InferOutputRow<typeof spanAttributeValues>;

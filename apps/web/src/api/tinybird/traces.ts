@@ -470,3 +470,97 @@ export async function getTracesDurationStats({
     };
   }
 }
+
+// --- Span Attribute Keys ---
+
+const GetSpanAttributeKeysInput = z.object({
+  startTime: dateTimeString.optional(),
+  endTime: dateTimeString.optional(),
+});
+
+export type GetSpanAttributeKeysInput = z.infer<typeof GetSpanAttributeKeysInput>;
+
+export interface SpanAttributeKeysResponse {
+  data: Array<{ attributeKey: string; usageCount: number }>;
+  error: string | null;
+}
+
+export async function getSpanAttributeKeys({
+  data,
+}: {
+  data: GetSpanAttributeKeysInput;
+}): Promise<SpanAttributeKeysResponse> {
+  data = GetSpanAttributeKeysInput.parse(data ?? {});
+
+  try {
+    const tinybird = getTinybird();
+    const result = await tinybird.query.span_attribute_keys({
+      start_time: data.startTime,
+      end_time: data.endTime,
+    });
+
+    return {
+      data: result.data.map((row) => ({
+        attributeKey: row.attributeKey,
+        usageCount: Number(row.usageCount),
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error("[Tinybird] getSpanAttributeKeys failed:", error);
+    return {
+      data: [],
+      error: error instanceof Error ? error.message : "Failed to fetch span attribute keys",
+    };
+  }
+}
+
+// --- Span Attribute Values ---
+
+const GetSpanAttributeValuesInput = z.object({
+  startTime: dateTimeString.optional(),
+  endTime: dateTimeString.optional(),
+  attributeKey: z.string(),
+});
+
+export type GetSpanAttributeValuesInput = z.infer<typeof GetSpanAttributeValuesInput>;
+
+export interface SpanAttributeValuesResponse {
+  data: Array<{ attributeValue: string; usageCount: number }>;
+  error: string | null;
+}
+
+export async function getSpanAttributeValues({
+  data,
+}: {
+  data: GetSpanAttributeValuesInput;
+}): Promise<SpanAttributeValuesResponse> {
+  data = GetSpanAttributeValuesInput.parse(data ?? {});
+
+  if (!data.attributeKey) {
+    return { data: [], error: null };
+  }
+
+  try {
+    const tinybird = getTinybird();
+    const result = await tinybird.query.span_attribute_values({
+      start_time: data.startTime,
+      end_time: data.endTime,
+      attribute_key: data.attributeKey,
+    });
+
+    return {
+      data: result.data.map((row) => ({
+        attributeValue: row.attributeValue,
+        usageCount: Number(row.usageCount),
+      })),
+      error: null,
+    };
+  } catch (error) {
+    console.error("[Tinybird] getSpanAttributeValues failed:", error);
+    return {
+      data: [],
+      error: error instanceof Error ? error.message : "Failed to fetch span attribute values",
+    };
+  }
+}
