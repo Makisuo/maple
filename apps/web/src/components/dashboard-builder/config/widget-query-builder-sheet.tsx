@@ -1,26 +1,26 @@
 import * as React from "react"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Button } from "@maple/ui/components/ui/button"
+import { Checkbox } from "@maple/ui/components/ui/checkbox"
+import { Input } from "@maple/ui/components/ui/input"
+import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@maple/ui/components/ui/select"
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@/components/ui/sheet"
-import { chartRegistry } from "@/components/charts/registry"
+} from "@maple/ui/components/ui/sheet"
+import { chartRegistry } from "@maple/ui/components/charts/registry"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"

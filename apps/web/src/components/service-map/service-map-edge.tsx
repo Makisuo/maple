@@ -1,6 +1,6 @@
 import { memo, useId } from "react"
 import { getSmoothStepPath, type EdgeProps } from "@xyflow/react"
-import { getServiceLegendColor } from "@/lib/colors"
+import { getServiceLegendColor } from "@maple/ui/colors"
 import { useReducedMotion } from "@/hooks/use-reduced-motion"
 import type { ServiceEdgeData } from "./service-map-utils"
 

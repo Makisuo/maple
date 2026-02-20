@@ -1,0 +1,31 @@
+---
+interface Props {
+    title: string;
+    description: string;
+    type?: "SoftwareApplication" | "WebPage";
+    url?: string;
+}
+
+const { title, description, type = "WebPage", url } = Astro.props;
+
+const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": type,
+    name: title,
+    description,
+    ...(url ? { url } : {}),
+    ...(type === "SoftwareApplication"
+        ? {
+              applicationCategory: "DeveloperApplication",
+              operatingSystem: "Web",
+              offers: {
+                  "@type": "Offer",
+                  price: "0",
+                  priceCurrency: "USD",
+              },
+          }
+        : {}),
+};
+---
+
+<script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />

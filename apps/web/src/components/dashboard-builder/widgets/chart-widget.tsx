@@ -1,7 +1,7 @@
 import { memo, Suspense } from "react"
 
-import { Skeleton } from "@/components/ui/skeleton"
-import { getChartById } from "@/components/charts/registry"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { getChartById } from "@maple/ui/components/charts/registry"
 import { WidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
 import type {
   WidgetDataState,

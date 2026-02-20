@@ -11,13 +11,13 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@maple/ui/components/ui/card"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "@/components/ui/input-group"
+} from "@maple/ui/components/ui/input-group"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,10 +28,10 @@ import {
   AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
+} from "@maple/ui/components/ui/alert-dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Separator } from "@maple/ui/components/ui/separator"
 import {
   AlertWarningIcon,
   CheckIcon,

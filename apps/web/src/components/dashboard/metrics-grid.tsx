@@ -1,12 +1,12 @@
 import { Suspense } from "react"
 
-import { cn } from "@/lib/utils"
-import { Skeleton } from "@/components/ui/skeleton"
-import { getChartById } from "@/components/charts/registry"
+import { cn } from "@maple/ui/utils"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { getChartById } from "@maple/ui/components/charts/registry"
 import type {
   ChartLegendMode,
   ChartTooltipMode,
-} from "@/components/charts/_shared/chart-types"
+} from "@maple/ui/components/charts/_shared/chart-types"
 import { ReadonlyWidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
 
 interface MetricsGridItem {

@@ -1,12 +1,12 @@
 import { memo } from "react"
 import { Handle, Position } from "@xyflow/react"
-import { cn } from "@/lib/utils"
-import { getServiceLegendColor } from "@/lib/colors"
+import { cn } from "@maple/ui/utils"
+import { getServiceLegendColor } from "@maple/ui/colors"
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "@/components/ui/tooltip"
+} from "@maple/ui/components/ui/tooltip"
 import type { ServiceNodeData } from "./service-map-utils"
 
 function formatRate(value: number): string {

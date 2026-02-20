@@ -7,12 +7,12 @@ import {
   SheetContent,
   SheetTitle,
   SheetClose,
-} from "@/components/ui/sheet"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
+} from "@maple/ui/components/ui/sheet"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Button } from "@maple/ui/components/ui/button"
+import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { SeverityBadge } from "./severity-badge"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 import type { Log } from "@/api/tinybird/logs"
 
 interface LogDetailSheetProps {

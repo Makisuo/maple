@@ -119,4 +119,51 @@ describe("where clause autocomplete", () => {
 
     expect(applied.expression).toBe('service.name = "checkout" AND ')
   })
+
+  it("supports trace_search key suggestions without changing default traces scope", () => {
+    const defaultScope = getWhereClauseAutocomplete({
+      expression: "http",
+      cursor: 4,
+      dataSource: "traces",
+    })
+    const traceScope = getWhereClauseAutocomplete({
+      expression: "http",
+      cursor: 4,
+      dataSource: "traces",
+      scope: "trace_search",
+    })
+
+    expect(
+      defaultScope.suggestions.some((item) => item.insertText === "http.method"),
+    ).toBe(false)
+    expect(
+      traceScope.suggestions.some((item) => item.insertText === "http.method"),
+    ).toBe(true)
+  })
+
+  it("suggests trace_search values for HTTP and booleans", () => {
+    const method = getWhereClauseAutocomplete({
+      expression: "http.method = ge",
+      cursor: "http.method = ge".length,
+      dataSource: "traces",
+      scope: "trace_search",
+      values: {
+        httpMethods: ["GET", "POST"],
+      },
+    })
+    const hasError = getWhereClauseAutocomplete({
+      expression: "has_error = ",
+      cursor: "has_error = ".length,
+      dataSource: "traces",
+      scope: "trace_search",
+    })
+
+    expect(method.context).toBe("value")
+    expect(method.suggestions[0]?.label).toBe("GET")
+    expect(method.suggestions[0]?.insertText).toBe('"GET"')
+    expect(hasError.suggestions.map((item) => item.insertText)).toEqual([
+      "true",
+      "false",
+    ])
+  })
 })

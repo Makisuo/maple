@@ -7,9 +7,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Badge } from "@/components/ui/badge"
+} from "@maple/ui/components/ui/table"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { Badge } from "@maple/ui/components/ui/badge"
 import { MetricTypeBadge } from "./metric-type-badge"
 import { type Metric, type ListMetricsInput } from "@/api/tinybird/metrics"
 import { listMetricsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"

@@ -13,8 +13,8 @@ import "@xyflow/react/dist/style.css"
 
 import { EyeIcon } from "@/components/icons"
 
-import { Button } from "@/components/ui/button"
-import { getServiceLegendColor } from "@/lib/colors"
+import { Button } from "@maple/ui/components/ui/button"
+import { getServiceLegendColor } from "@maple/ui/colors"
 import { FlowSpanNode } from "./flow-node"
 import {
   transformSpansToFlow,

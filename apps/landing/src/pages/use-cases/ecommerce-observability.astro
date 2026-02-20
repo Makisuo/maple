@@ -1,0 +1,206 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+---
+
+<Layout title="E-Commerce Observability | Maple" description="Debug checkout failures, payment timeouts, and inventory issues in real-time with distributed tracing and log correlation.">
+    <Nav />
+    <FeatureHero
+        label="Use Case"
+        title="Debug checkout failures in seconds"
+        subtitle="When your flash sale hits and payments start failing, Maple shows you exactly what's happening across every service."
+    />
+
+    <!-- Scenario Walkthrough -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6 space-y-16">
+
+            <!-- Step 1: Alert fires -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">1</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">Alert fires</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        Your monitoring detects an error rate spike on the payment service. The alert includes
+                        the threshold breach and affected service, giving you immediate context.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">Alerts</span>
+                    </div>
+                    <div class="p-4">
+                        <div class="border border-destructive/30 bg-destructive/5 p-3">
+                            <div class="flex items-center gap-2 mb-2">
+                                <div class="w-2 h-2 bg-destructive"></div>
+                                <span class="text-[10px] text-fg font-medium">Error rate spike: payment-svc</span>
+                            </div>
+                            <div class="space-y-1">
+                                <div class="flex items-center justify-between text-[9px]">
+                                    <span class="text-fg-muted">Current error rate</span>
+                                    <span class="text-destructive font-mono">2.3%</span>
+                                </div>
+                                <div class="flex items-center justify-between text-[9px]">
+                                    <span class="text-fg-muted">Threshold</span>
+                                    <span class="text-fg-muted font-mono">1.0%</span>
+                                </div>
+                                <div class="flex items-center justify-between text-[9px]">
+                                    <span class="text-fg-muted">Triggered</span>
+                                    <span class="text-fg-muted font-mono">14:22:45 UTC</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Trace the failure -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">2</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">Trace the failure</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        Click into a failing trace to see the full request path. The payment span is immediately
+                        visible in red, showing a 5000ms timeout on the Stripe API call.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">Trace: d4e1a9f2</span>
+                    </div>
+                    <div class="p-3 space-y-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[9px] text-fg-muted w-20 shrink-0 truncate">api-gateway</span>
+                            <div class="flex-1 h-4 bg-bg relative">
+                                <div class="absolute inset-y-0 left-0 bg-chart-1/70 flex items-center px-1.5" style="width: 100%">
+                                    <span class="text-[8px] text-fg truncate">POST /checkout</span>
+                                </div>
+                            </div>
+                            <span class="text-[8px] text-fg-muted w-12 text-right shrink-0">5.2s</span>
+                        </div>
+                        <div class="flex items-center gap-2 pl-4">
+                            <span class="text-[9px] text-fg-muted w-20 shrink-0 truncate">auth-svc</span>
+                            <div class="flex-1 h-4 bg-bg relative">
+                                <div class="absolute inset-y-0 left-0 bg-chart-2/70 flex items-center px-1.5" style="width: 8%">
+                                    <span class="text-[8px] text-fg truncate">validate</span>
+                                </div>
+                            </div>
+                            <span class="text-[8px] text-fg-muted w-12 text-right shrink-0">38ms</span>
+                        </div>
+                        <div class="flex items-center gap-2 pl-4">
+                            <span class="text-[9px] text-fg-muted w-20 shrink-0 truncate">order-svc</span>
+                            <div class="flex-1 h-4 bg-bg relative">
+                                <div class="absolute inset-y-0 bg-chart-3/70 flex items-center px-1.5" style="width: 40%; left: 8%">
+                                    <span class="text-[8px] text-fg truncate">createOrder</span>
+                                </div>
+                            </div>
+                            <span class="text-[8px] text-fg-muted w-12 text-right shrink-0">180ms</span>
+                        </div>
+                        <div class="flex items-center gap-2 pl-8">
+                            <span class="text-[9px] text-fg-muted w-20 shrink-0 truncate">payment-svc</span>
+                            <div class="flex-1 h-4 bg-destructive/10 relative border border-destructive/30">
+                                <div class="absolute inset-y-0 bg-destructive/60 flex items-center px-1.5" style="width: 96%; left: 2%">
+                                    <span class="text-[8px] text-fg truncate">chargeCard TIMEOUT</span>
+                                </div>
+                            </div>
+                            <span class="text-[8px] text-destructive w-12 text-right shrink-0 font-medium">5000ms</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Find root cause -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">3</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">Find root cause</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        Jump to correlated logs for the failing span. The Stripe API timeout and retry exhaustion
+                        are immediately visible, confirming the root cause without switching tools.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">Correlated Logs</span>
+                    </div>
+                    <div class="p-0">
+                        <div class="flex items-center text-[8px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1">
+                            <span class="w-14 shrink-0">Time</span>
+                            <span class="w-10 shrink-0">Level</span>
+                            <span class="flex-1">Message</span>
+                        </div>
+                        <div class="flex items-center text-[9px] px-3 py-1.5 border-b border-border">
+                            <span class="w-14 shrink-0 text-fg-muted font-mono text-[8px]">14:22:48</span>
+                            <span class="w-10 shrink-0"><span class="text-[7px] px-1 py-0.5 bg-yellow-500/10 text-yellow-400">WARN</span></span>
+                            <span class="flex-1 text-fg-muted truncate">Stripe API response time: 4800ms (threshold: 3000ms)</span>
+                        </div>
+                        <div class="flex items-center text-[9px] px-3 py-1.5 border-b border-border bg-destructive/5">
+                            <span class="w-14 shrink-0 text-fg-muted font-mono text-[8px]">14:22:50</span>
+                            <span class="w-10 shrink-0"><span class="text-[7px] px-1 py-0.5 bg-red-500/10 text-red-400">ERROR</span></span>
+                            <span class="flex-1 text-fg-muted truncate">Stripe API timeout after 5000ms on charge txn_9d1e</span>
+                        </div>
+                        <div class="flex items-center text-[9px] px-3 py-1.5 border-b border-border bg-destructive/5">
+                            <span class="w-14 shrink-0 text-fg-muted font-mono text-[8px]">14:22:51</span>
+                            <span class="w-10 shrink-0"><span class="text-[7px] px-1 py-0.5 bg-red-500/10 text-red-400">ERROR</span></span>
+                            <span class="flex-1 text-fg-muted truncate">Retry 3/3 exhausted for charge txn_9d1e</span>
+                        </div>
+                        <div class="flex items-center text-[9px] px-3 py-1.5">
+                            <span class="w-14 shrink-0 text-fg-muted font-mono text-[8px]">14:22:51</span>
+                            <span class="w-10 shrink-0"><span class="text-[7px] px-1 py-0.5 bg-red-500/10 text-red-400">ERROR</span></span>
+                            <span class="flex-1 text-fg-muted truncate">Checkout failed: payment_timeout usr_2f8a order_7c3d</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Feature Highlights -->
+    <section class="py-24 md:py-32 border-t border-border">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">Capabilities</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">Built for e-commerce reliability</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">Distributed Tracing</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Follow checkout requests from cart to payment to confirmation. See every service hop with timing.</p>
+                </div>
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">Log Correlation</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Every failed payment links to its retry logs and timeout errors. One click from trace to logs.</p>
+                </div>
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">Error Tracking</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Group payment errors by type, see trends, fix systematically. No more searching through log files.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <BottomCTA />
+    <Footer />
+</Layout>

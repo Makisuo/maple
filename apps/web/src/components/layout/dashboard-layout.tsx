@@ -1,8 +1,8 @@
 import * as React from "react"
 
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
-import { Separator } from "@/components/ui/separator"
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@maple/ui/components/ui/sidebar"
+import { Separator } from "@maple/ui/components/ui/separator"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -10,7 +10,7 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
+} from "@maple/ui/components/ui/breadcrumb"
 import { Link } from "@tanstack/react-router"
 
 export interface BreadcrumbItem {

@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import { Input } from "@/components/ui/input"
+import { Input } from "@maple/ui/components/ui/input"
 import { MetricsSummaryCards, type MetricType } from "./metrics-summary-cards"
 import { MetricsVolumeChart } from "./metrics-volume-chart"
 import { MetricsTable } from "./metrics-table"

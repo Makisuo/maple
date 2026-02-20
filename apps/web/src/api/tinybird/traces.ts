@@ -27,6 +27,8 @@ const ListTracesInputSchema = Schema.Struct({
   httpMethod: Schema.optional(Schema.String),
   httpStatusCode: Schema.optional(Schema.String),
   deploymentEnv: Schema.optional(Schema.String),
+  attributeKey: Schema.optional(Schema.String),
+  attributeValue: Schema.optional(Schema.String),
   rootOnly: Schema.optional(Schema.Boolean),
 })
 
@@ -99,6 +101,8 @@ const listTracesEffect = Effect.fn("Tinybird.listTraces")(function* ({
         http_method: input.httpMethod,
         http_status_code: input.httpStatusCode,
         deployment_env: input.deploymentEnv,
+        attribute_filter_key: input.attributeKey,
+        attribute_filter_value: input.attributeValue,
         root_only: input.rootOnly,
       }),
     )
@@ -295,6 +299,8 @@ const GetTracesFacetsInputSchema = Schema.Struct({
   httpMethod: Schema.optional(Schema.String),
   httpStatusCode: Schema.optional(Schema.String),
   deploymentEnv: Schema.optional(Schema.String),
+  attributeKey: Schema.optional(Schema.String),
+  attributeValue: Schema.optional(Schema.String),
 })
 
 export type GetTracesFacetsInput = Schema.Schema.Type<typeof GetTracesFacetsInputSchema>
@@ -383,6 +389,8 @@ const getTracesFacetsEffect = Effect.fn("Tinybird.getTracesFacets")(function* ({
           http_method: input.httpMethod,
           http_status_code: input.httpStatusCode,
           deployment_env: input.deploymentEnv,
+          attribute_filter_key: input.attributeKey,
+          attribute_filter_value: input.attributeValue,
         }),
       ),
       runTinybirdQuery("traces_duration_stats", () =>
@@ -395,6 +403,8 @@ const getTracesFacetsEffect = Effect.fn("Tinybird.getTracesFacets")(function* ({
           http_method: input.httpMethod,
           http_status_code: input.httpStatusCode,
           deployment_env: input.deploymentEnv,
+          attribute_filter_key: input.attributeKey,
+          attribute_filter_value: input.attributeValue,
         }),
       ),
     ])
@@ -433,6 +443,8 @@ const getTracesDurationStatsEffect = Effect.fn("Tinybird.getTracesDurationStats"
         http_method: input.httpMethod,
         http_status_code: input.httpStatusCode,
         deployment_env: input.deploymentEnv,
+        attribute_filter_key: input.attributeKey,
+        attribute_filter_value: input.attributeValue,
       }),
     )
 

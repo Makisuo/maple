@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { WidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
 import type {
   WidgetDataState,

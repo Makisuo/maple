@@ -6,8 +6,8 @@ import {
   PulseIcon,
 } from "@/components/icons"
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetErrorsSummaryInput } from "@/api/tinybird/errors"
 import { getErrorsSummaryResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 

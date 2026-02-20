@@ -6,8 +6,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from "@/components/ui/dialog"
-import { getChartById } from "@/components/charts/registry"
+} from "@maple/ui/components/ui/dialog"
+import { getChartById } from "@maple/ui/components/charts/registry"
 import { ChartPreview } from "@/components/dashboard-builder/widgets/chart-preview"
 import type {
   VisualizationType,

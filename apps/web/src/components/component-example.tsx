@@ -17,9 +17,9 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+} from "@maple/ui/components/ui/alert-dialog"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Button } from "@maple/ui/components/ui/button"
 import {
   Card,
   CardAction,
@@ -28,7 +28,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@maple/ui/components/ui/card"
 import {
   Combobox,
   ComboboxContent,
@@ -36,7 +36,7 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-} from "@/components/ui/combobox"
+} from "@maple/ui/components/ui/combobox"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -53,9 +53,9 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+} from "@maple/ui/components/ui/dropdown-menu"
+import { Field, FieldGroup, FieldLabel } from "@maple/ui/components/ui/field"
+import { Input } from "@maple/ui/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -63,8 +63,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+} from "@maple/ui/components/ui/select"
+import { Textarea } from "@maple/ui/components/ui/textarea"
 import { PlusIcon, BluetoothIcon, DotsVerticalIcon, FileIcon, FolderIcon, FolderOpenIcon, CodeIcon, DotsIcon, MagnifierIcon, FloppyDiskIcon, DownloadIcon, EyeIcon, LayoutLeftIcon, PaletteIcon, SunIcon, MoonIcon, ComputerIcon, UserIcon, CreditCardIcon, GearIcon, KeyboardIcon, LanguageIcon, BellIcon, EnvelopeIcon, ShieldIcon, CircleQuestionIcon, LogoutIcon } from "@/components/icons"
 
 export function ComponentExample() {

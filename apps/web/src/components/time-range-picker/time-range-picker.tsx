@@ -1,8 +1,8 @@
 import { useState, useCallback } from "react"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
+import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
+import { Button } from "@maple/ui/components/ui/button"
+import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
+import { Separator } from "@maple/ui/components/ui/separator"
 import { ClockIcon } from "@/components/icons"
 
 import { formatTimeRangeDisplay, presetLabel, type TimePreset, relativeToAbsolute } from "@/lib/time-utils"

@@ -1,8 +1,8 @@
 import { ChevronRightIcon, ChevronDownIcon } from "@/components/icons"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Button } from "@maple/ui/components/ui/button"
+import { cn } from "@maple/ui/utils"
 import { formatDuration } from "@/lib/format"
 import { getCacheInfo, cacheResultStyles } from "@/lib/cache"
 import type { SpanNode } from "@/api/tinybird/traces"

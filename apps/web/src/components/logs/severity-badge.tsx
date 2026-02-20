@@ -1,5 +1,5 @@
-import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { cn } from "@maple/ui/utils"
 
 interface SeverityBadgeProps {
   severity: string
