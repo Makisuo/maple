@@ -7,8 +7,9 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TracesTable } from "@/components/traces/traces-table"
 import { TracesFilterSidebar } from "@/components/traces/traces-filter-sidebar"
 import { TimeRangePicker } from "@/components/time-range-picker"
-import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
-import { MagnifierIcon } from "@/components/icons"
+import { AdvancedFilterDialog } from "@/components/traces/advanced-filter-dialog"
+import { MagnifierIcon, XmarkIcon } from "@/components/icons"
+import { Button } from "@maple/ui/components/ui/button"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { applyWhereClause } from "@/lib/traces/advanced-filter-sync"
 import {
@@ -45,31 +46,15 @@ function TracesPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const [activeAttributeKey, setActiveAttributeKey] = React.useState<string | null>(null)
-  const [whereClauseText, setWhereClauseText] = React.useState(search.whereClause ?? "")
-  const isLocalUpdate = React.useRef(false)
 
-  // URL → local (external changes only: back/forward, sidebar clear, etc.)
-  React.useEffect(() => {
-    if (isLocalUpdate.current) {
-      isLocalUpdate.current = false
-      return
-    }
-    setWhereClauseText(search.whereClause ?? "")
-  }, [search.whereClause])
-
-  // Local → URL (debounced 300ms)
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      const trimmed = whereClauseText.trim() || undefined
-      if (trimmed !== (search.whereClause ?? undefined)) {
-        isLocalUpdate.current = true
-        navigate({
-          search: (prev) => applyWhereClause(prev, whereClauseText),
-        })
-      }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [whereClauseText, search.whereClause, navigate])
+  const handleApplyWhereClause = React.useCallback(
+    (newClause: string) => {
+      navigate({
+        search: (prev) => applyWhereClause(prev, newClause),
+      })
+    },
+    [navigate],
+  )
 
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(search.startTime, search.endTime)
@@ -170,35 +155,41 @@ function TracesPage() {
       title="Traces"
       description="View distributed traces across your services."
       headerActions={
-        <TimeRangePicker
-          startTime={search.startTime}
-          endTime={search.endTime}
-          onChange={handleTimeChange}
-        />
-      }
-    >
-      <div className="mb-4">
-        <div className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
-          <div className="flex items-center gap-1.5 pt-1.5 shrink-0">
-            <MagnifierIcon className="size-3.5 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground">Filter</span>
-          </div>
-          <WhereClauseEditor
-            className="flex-1 min-w-0"
-            rows={1}
-            value={whereClauseText}
-            dataSource="traces"
-            autocompleteScope="trace_search"
-            maxSuggestions={20}
-            values={autocompleteValues}
+        <div className="flex items-center gap-2">
+          <AdvancedFilterDialog
+            initialValue={search.whereClause ?? ""}
+            onApply={handleApplyWhereClause}
+            autocompleteValues={autocompleteValues}
             onActiveAttributeKey={setActiveAttributeKey}
-            onChange={setWhereClauseText}
-            placeholder='service.name = "checkout" AND attr.http.route = "/orders/:id"'
-            textareaClassName="border-0 bg-transparent shadow-none focus-visible:ring-0 resize-none px-0 py-1 text-xs min-h-0"
-            ariaLabel="Advanced traces where clause"
+          />
+          <TimeRangePicker
+            startTime={search.startTime}
+            endTime={search.endTime}
+            onChange={handleTimeChange}
           />
         </div>
-      </div>
+      }
+    >
+      {search.whereClause && (
+        <div className="mb-4 flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <MagnifierIcon className="size-3.5 text-primary shrink-0" />
+            <span className="text-xs font-mono text-foreground truncate" title={search.whereClause}>
+              {search.whereClause}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => handleApplyWhereClause("")}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            title="Clear filter"
+          >
+            <XmarkIcon />
+            <span className="sr-only">Clear filter</span>
+          </Button>
+        </div>
+      )}
       <div className="flex gap-4">
         <div className="flex-1 min-w-0">
           <TracesTable filters={search} />
