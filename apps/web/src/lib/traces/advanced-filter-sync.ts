@@ -15,7 +15,7 @@ export interface TracesSearchLike {
   attributeValue?: string
 }
 
-interface ParsedWhereClauseFilters {
+export interface ParsedWhereClauseFilters {
   service?: string
   spanName?: string
   deploymentEnv?: string
@@ -33,31 +33,6 @@ const TRUE_VALUES = new Set(["1", "true", "yes", "y"])
 const FALSE_VALUES = new Set(["0", "false", "no", "n"])
 
 const CLAUSE_RE = /^([a-zA-Z0-9_.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/
-
-function firstNonEmpty(values?: string[]): string | undefined {
-  if (!values || values.length === 0) {
-    return undefined
-  }
-
-  const first = values[0]?.trim()
-  return first ? first : undefined
-}
-
-function normalizeBoolean(value: unknown): boolean | undefined {
-  if (typeof value !== "boolean") {
-    return undefined
-  }
-
-  return value
-}
-
-function normalizeNumber(value: unknown): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return undefined
-  }
-
-  return value
-}
 
 function parseBoolean(value: string): boolean | null {
   const normalized = value.trim().toLowerCase()
@@ -89,11 +64,7 @@ function quoteValue(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/\"/g, '\\\"')}"`
 }
 
-function hasAnyFilter(filters: ParsedWhereClauseFilters): boolean {
-  return Object.values(filters).some((value) => value !== undefined)
-}
-
-function parseWhereClause(whereClause: string | undefined): {
+export function parseWhereClause(whereClause: string | undefined): {
   filters: ParsedWhereClauseFilters
   hasIncompleteClauses: boolean
 } {
@@ -221,7 +192,7 @@ function parseWhereClause(whereClause: string | undefined): {
   }
 }
 
-function toWhereClause(filters: ParsedWhereClauseFilters): string | undefined {
+export function toWhereClause(filters: ParsedWhereClauseFilters): string | undefined {
   const clauses: string[] = []
 
   if (filters.service) {
@@ -273,103 +244,50 @@ function toWhereClause(filters: ParsedWhereClauseFilters): string | undefined {
   return clauses.join(" AND ")
 }
 
-function normalizeLegacyFilters(search: TracesSearchLike): ParsedWhereClauseFilters {
-  const service = firstNonEmpty(search.services)
-  const spanName = firstNonEmpty(search.spanNames)
-  const deploymentEnv = firstNonEmpty(search.deploymentEnvs)
-  const httpMethod = firstNonEmpty(search.httpMethods)
-  const httpStatusCode = firstNonEmpty(search.httpStatusCodes)
-  const hasError = normalizeBoolean(search.hasError) === true ? true : undefined
-  const rootOnly = normalizeBoolean(search.rootOnly) === false ? false : undefined
-  const minDurationMs = normalizeNumber(search.minDurationMs)
-  const maxDurationMs = normalizeNumber(search.maxDurationMs)
-  const attributeKey = search.attributeKey?.trim()
-  const attributeValue = search.attributeValue?.trim()
-
-  return {
-    service,
-    spanName,
-    deploymentEnv,
-    httpMethod,
-    httpStatusCode,
-    hasError,
-    rootOnly,
-    minDurationMs,
-    maxDurationMs,
-    attributeKey: attributeKey && attributeValue ? attributeKey : undefined,
-    attributeValue: attributeKey && attributeValue ? attributeValue : undefined,
-  }
-}
-
-function normalizeWithFilters(
+/**
+ * One-way transform: parses a where clause string and merges the parsed
+ * filter values into the search params. Does NOT reverse-sync checkboxes
+ * back into whereClause text.
+ */
+export function applyWhereClause(
   search: TracesSearchLike,
-  filters: ParsedWhereClauseFilters,
+  whereClause: string,
 ): TracesSearchLike {
-  const whereClause = toWhereClause(filters)
+  const trimmed = whereClause.trim()
+
+  if (!trimmed) {
+    return {
+      ...search,
+      whereClause: undefined,
+      services: undefined,
+      spanNames: undefined,
+      hasError: undefined,
+      minDurationMs: undefined,
+      maxDurationMs: undefined,
+      httpMethods: undefined,
+      httpStatusCodes: undefined,
+      deploymentEnvs: undefined,
+      rootOnly: undefined,
+      attributeKey: undefined,
+      attributeValue: undefined,
+    }
+  }
+
+  const { filters } = parseWhereClause(trimmed)
 
   return {
-    startTime: search.startTime,
-    endTime: search.endTime,
-    services: filters.service ? [filters.service] : undefined,
-    spanNames: filters.spanName ? [filters.spanName] : undefined,
-    hasError: filters.hasError,
-    minDurationMs: filters.minDurationMs,
-    maxDurationMs: filters.maxDurationMs,
-    httpMethods: filters.httpMethod ? [filters.httpMethod] : undefined,
-    httpStatusCodes: filters.httpStatusCode ? [filters.httpStatusCode] : undefined,
-    deploymentEnvs: filters.deploymentEnv ? [filters.deploymentEnv] : undefined,
-    rootOnly: filters.rootOnly,
-    whereClause,
-    attributeKey: filters.attributeKey,
-    attributeValue: filters.attributeValue,
+    ...search,
+    whereClause: trimmed,
+    services: filters.service ? [filters.service] : search.services,
+    spanNames: filters.spanName ? [filters.spanName] : search.spanNames,
+    hasError: filters.hasError ?? search.hasError,
+    minDurationMs: filters.minDurationMs ?? search.minDurationMs,
+    maxDurationMs: filters.maxDurationMs ?? search.maxDurationMs,
+    httpMethods: filters.httpMethod ? [filters.httpMethod] : search.httpMethods,
+    httpStatusCodes: filters.httpStatusCode ? [filters.httpStatusCode] : search.httpStatusCodes,
+    deploymentEnvs: filters.deploymentEnv ? [filters.deploymentEnv] : search.deploymentEnvs,
+    rootOnly: filters.rootOnly ?? search.rootOnly,
+    attributeKey: filters.attributeKey ?? search.attributeKey,
+    attributeValue: filters.attributeValue ?? search.attributeValue,
   }
-}
-
-export function normalizeTracesSearchParams(search: TracesSearchLike): TracesSearchLike {
-  const normalizedWhereClause = search.whereClause?.trim()
-
-  if (normalizedWhereClause) {
-    const parsed = parseWhereClause(normalizedWhereClause)
-    if (hasAnyFilter(parsed.filters)) {
-      return normalizeWithFilters(search, parsed.filters)
-    }
-
-    if (parsed.hasIncompleteClauses) {
-      return {
-        startTime: search.startTime,
-        endTime: search.endTime,
-        whereClause: normalizedWhereClause,
-      }
-    }
-
-    return normalizeWithFilters(search, {})
-  }
-
-  return normalizeWithFilters(search, normalizeLegacyFilters(search))
-}
-
-function sortedObject(input: TracesSearchLike): Record<string, unknown> {
-  return {
-    attributeKey: input.attributeKey,
-    attributeValue: input.attributeValue,
-    deploymentEnvs: input.deploymentEnvs,
-    endTime: input.endTime,
-    hasError: input.hasError,
-    httpMethods: input.httpMethods,
-    httpStatusCodes: input.httpStatusCodes,
-    maxDurationMs: input.maxDurationMs,
-    minDurationMs: input.minDurationMs,
-    rootOnly: input.rootOnly,
-    services: input.services,
-    spanNames: input.spanNames,
-    startTime: input.startTime,
-    whereClause: input.whereClause,
-  }
-}
-
-export function areTracesSearchParamsEqual(
-  left: TracesSearchLike,
-  right: TracesSearchLike,
-): boolean {
-  return JSON.stringify(sortedObject(left)) === JSON.stringify(sortedObject(right))
 }

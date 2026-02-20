@@ -19,6 +19,7 @@ interface WhereClauseEditorProps {
   onActiveAttributeKey?: (key: string | null) => void
   placeholder?: string
   rows?: number
+  maxSuggestions?: number
   className?: string
   textareaClassName?: string
   ariaLabel?: string
@@ -33,6 +34,7 @@ export function WhereClauseEditor({
   onActiveAttributeKey,
   placeholder,
   rows = 2,
+  maxSuggestions,
   className,
   textareaClassName,
   ariaLabel,
@@ -55,8 +57,9 @@ export function WhereClauseEditor({
         dataSource,
         values,
         scope: autocompleteScope,
+        maxSuggestions,
       }),
-    [autocompleteScope, cursor, dataSource, value, values],
+    [autocompleteScope, cursor, dataSource, maxSuggestions, value, values],
   )
 
   // Notify parent when user is editing a value for an attr.* key

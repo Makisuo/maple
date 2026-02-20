@@ -29,9 +29,6 @@ export function ErrorsFilterSidebar() {
       data: {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
-        services: search.services,
-        deploymentEnvs: search.deploymentEnvs,
-        errorTypes: search.errorTypes,
         showSpam: search.showSpam,
       },
     }),
