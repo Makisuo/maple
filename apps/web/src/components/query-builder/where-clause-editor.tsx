@@ -1,22 +1,25 @@
 import * as React from "react"
 
-import { Textarea } from "@/components/ui/textarea"
+import { Textarea } from "@maple/ui/components/ui/textarea"
 import {
   applyWhereClauseSuggestion,
   getWhereClauseAutocomplete,
+  type WhereClauseAutocompleteScope,
   type WhereClauseAutocompleteValues,
 } from "@/lib/query-builder/where-clause-autocomplete"
 import type { QueryBuilderDataSource } from "@/lib/query-builder/model"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 
 interface WhereClauseEditorProps {
   dataSource: QueryBuilderDataSource
   value: string
   onChange: (value: string) => void
   values?: WhereClauseAutocompleteValues
+  autocompleteScope?: WhereClauseAutocompleteScope
   onActiveAttributeKey?: (key: string | null) => void
   placeholder?: string
   rows?: number
+  maxSuggestions?: number
   className?: string
   textareaClassName?: string
   ariaLabel?: string
@@ -27,9 +30,11 @@ export function WhereClauseEditor({
   value,
   onChange,
   values,
+  autocompleteScope,
   onActiveAttributeKey,
   placeholder,
   rows = 2,
+  maxSuggestions,
   className,
   textareaClassName,
   ariaLabel,
@@ -51,8 +56,10 @@ export function WhereClauseEditor({
         cursor,
         dataSource,
         values,
+        scope: autocompleteScope,
+        maxSuggestions,
       }),
-    [cursor, dataSource, value, values],
+    [autocompleteScope, cursor, dataSource, maxSuggestions, value, values],
   )
 
   // Notify parent when user is editing a value for an attr.* key
@@ -143,6 +150,15 @@ export function WhereClauseEditor({
         onSelect={(event) => syncCursor(event.currentTarget)}
         onKeyUp={(event) => syncCursor(event.currentTarget)}
         onKeyDown={(event) => {
+          // Always prevent Enter from inserting newlines (where clauses are single-line)
+          if (event.key === "Enter") {
+            event.preventDefault()
+            if (isOpen && suggestions.length > 0) {
+              applySuggestion(activeIndex)
+            }
+            return
+          }
+
           if (!isOpen || suggestions.length === 0) {
             return
           }
@@ -161,7 +177,7 @@ export function WhereClauseEditor({
             return
           }
 
-          if (event.key === "Enter" || event.key === "Tab") {
+          if (event.key === "Tab") {
             event.preventDefault()
             applySuggestion(activeIndex)
             return

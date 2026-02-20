@@ -1,14 +1,14 @@
 import * as React from "react"
 import { ChevronDownIcon, XmarkIcon, MagnifierIcon } from "@/components/icons"
 
-import { cn } from "@/lib/utils"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
+import { cn } from "@maple/ui/utils"
+import { Checkbox } from "@maple/ui/components/ui/checkbox"
+import { Label } from "@maple/ui/components/ui/label"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+} from "@maple/ui/components/ui/collapsible"
 
 export interface FilterOption {
   name: string

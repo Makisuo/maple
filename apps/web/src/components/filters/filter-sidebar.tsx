@@ -1,9 +1,9 @@
 import type { ReactNode } from "react"
 
-import { Separator } from "@/components/ui/separator"
-import { Skeleton } from "@/components/ui/skeleton"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { cn } from "@/lib/utils"
+import { Separator } from "@maple/ui/components/ui/separator"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
+import { cn } from "@maple/ui/utils"
 
 interface FilterSidebarFrameProps {
   children: ReactNode

@@ -8,8 +8,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@maple/ui/components/ui/table"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Log } from "@/api/tinybird/logs"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { SeverityBadge } from "./severity-badge"

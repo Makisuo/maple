@@ -1,7 +1,6 @@
-import { Result, useAtomValue } from "@effect-atom/atom-react"
+import { Result } from "@effect-atom/atom-react"
 import { useNavigate } from "@tanstack/react-router"
 
-import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import {
   FilterSection,
   SearchableFilterSection,
@@ -9,8 +8,8 @@ import {
 } from "./filter-section"
 import { DurationRangeFilter } from "./duration-range-filter"
 import { Route } from "@/routes/traces"
-import { Separator } from "@/components/ui/separator"
-import { getTracesFacetsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { Separator } from "@maple/ui/components/ui/separator"
+import type { TracesFacetsResponse } from "@/api/tinybird/traces"
 import {
   FilterSidebarBody,
   FilterSidebarError,
@@ -23,30 +22,13 @@ function LoadingState() {
   return <FilterSidebarLoading sectionCount={5} sticky />
 }
 
-export function TracesFilterSidebar() {
+interface TracesFilterSidebarProps {
+  facetsResult: Result.Result<TracesFacetsResponse, unknown>
+}
+
+export function TracesFilterSidebar({ facetsResult }: TracesFilterSidebarProps) {
   const navigate = useNavigate({ from: Route.fullPath })
   const search = Route.useSearch()
-  const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
-    search.startTime,
-    search.endTime,
-  )
-
-  const facetsResult = useAtomValue(
-    getTracesFacetsResultAtom({
-      data: {
-        startTime: effectiveStartTime,
-        endTime: effectiveEndTime,
-        service: search.services?.[0],
-        spanName: search.spanNames?.[0],
-        hasError: search.hasError,
-        minDurationMs: search.minDurationMs,
-        maxDurationMs: search.maxDurationMs,
-        httpMethod: search.httpMethods?.[0],
-        httpStatusCode: search.httpStatusCodes?.[0],
-        deploymentEnv: search.deploymentEnvs?.[0],
-      },
-    }),
-  )
 
   const updateFilter = <K extends keyof typeof search>(
     key: K,
@@ -55,9 +37,10 @@ export function TracesFilterSidebar() {
     navigate({
       search: (prev) => ({
         ...prev,
-        [key]: value === undefined || (Array.isArray(value) && value.length === 0)
-          ? undefined
-          : value,
+        [key]:
+          value === undefined || (Array.isArray(value) && value.length === 0)
+            ? undefined
+            : value,
       }),
     })
   }
@@ -67,7 +50,6 @@ export function TracesFilterSidebar() {
       search: {
         startTime: search.startTime,
         endTime: search.endTime,
-        rootOnly: search.rootOnly,
       },
     })
   }
@@ -75,13 +57,13 @@ export function TracesFilterSidebar() {
   const hasActiveFilters =
     (search.services?.length ?? 0) > 0 ||
     (search.spanNames?.length ?? 0) > 0 ||
+    (search.deploymentEnvs?.length ?? 0) > 0 ||
     (search.httpMethods?.length ?? 0) > 0 ||
     (search.httpStatusCodes?.length ?? 0) > 0 ||
-    (search.deploymentEnvs?.length ?? 0) > 0 ||
-    search.hasError ||
+    search.hasError !== undefined ||
     search.minDurationMs !== undefined ||
     search.maxDurationMs !== undefined ||
-    search.rootOnly === false
+    search.attributeKey !== undefined
 
   return Result.builder(facetsResult)
     .onInitial(() => <LoadingState />)

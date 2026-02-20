@@ -9,9 +9,9 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import {
   Card,
   CardContent,
-} from "@/components/ui/card"
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
-import { Button } from "@/components/ui/button"
+} from "@maple/ui/components/ui/card"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@maple/ui/components/ui/input-group"
+import { Button } from "@maple/ui/components/ui/button"
 import {
   CheckIcon,
   CopyIcon,
@@ -36,7 +36,7 @@ import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { getServiceOverviewResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 
 import { useCustomer } from "autumn-js/react"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"

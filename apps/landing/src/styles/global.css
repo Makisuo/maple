@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@source "../../../../packages/ui/src";
 @import "@fontsource-variable/geist-mono";
 
 :root {

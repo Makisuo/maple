@@ -6,9 +6,9 @@ import {
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
-} from "@/components/ui/chart"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@maple/ui/components/ui/chart"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@maple/ui/components/ui/card"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetMetricTimeSeriesInput, type MetricTimeSeriesResponse } from "@/api/tinybird/metrics"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { getMetricTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"

@@ -9,7 +9,7 @@ import { MetricsGrid } from "@/components/dashboard/metrics-grid"
 import type {
   ChartLegendMode,
   ChartTooltipMode,
-} from "@/components/charts/_shared/chart-types"
+} from "@maple/ui/components/charts/_shared/chart-types"
 import {
   getCustomChartServiceDetailResultAtom,
   getServiceApdexTimeSeriesResultAtom,

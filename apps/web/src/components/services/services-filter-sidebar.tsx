@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { FilterSection } from "@/components/traces/filter-section"
 import { Route } from "@/routes/services/index"
-import { Separator } from "@/components/ui/separator"
+import { Separator } from "@maple/ui/components/ui/separator"
 import { getServicesFacetsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import {
   FilterSidebarBody,

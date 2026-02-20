@@ -1,8 +1,8 @@
 import { useAuth } from "@clerk/clerk-react"
 // import { useCustomer } from "autumn-js/react"
 import { Navigate, Outlet, createRootRouteWithContext, redirect, useRouterState } from "@tanstack/react-router"
-import { Toaster } from "@/components/ui/sonner"
 // import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { Toaster } from "@maple/ui/components/ui/sonner"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import type { RouterAuthContext } from "@/router"
 

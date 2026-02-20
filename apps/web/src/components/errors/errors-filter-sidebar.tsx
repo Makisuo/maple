@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { FilterSection, SingleCheckboxFilter } from "@/components/traces/filter-section"
 import { Route } from "@/routes/errors"
-import { Separator } from "@/components/ui/separator"
+import { Separator } from "@maple/ui/components/ui/separator"
 import { getErrorsFacetsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import {
   FilterSidebarBody,
@@ -29,9 +29,6 @@ export function ErrorsFilterSidebar() {
       data: {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
-        services: search.services,
-        deploymentEnvs: search.deploymentEnvs,
-        errorTypes: search.errorTypes,
         showSpam: search.showSpam,
       },
     }),

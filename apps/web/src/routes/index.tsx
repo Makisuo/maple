@@ -11,14 +11,14 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@maple/ui/components/ui/select"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { ServiceUsageCards } from "@/components/dashboard/service-usage-cards"
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
 import type {
   ChartLegendMode,
   ChartTooltipMode,
-} from "@/components/charts/_shared/chart-types"
+} from "@maple/ui/components/charts/_shared/chart-types"
 import {
   getCustomChartTimeSeriesResultAtom,
   getOverviewTimeSeriesResultAtom,

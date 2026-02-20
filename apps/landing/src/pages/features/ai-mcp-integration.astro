@@ -1,0 +1,118 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../components/RelatedFeatures.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+---
+
+<Layout title="AI & MCP Integration | Maple" description="Connect Claude, Cursor, or any MCP client to diagnose production issues with 10+ AI-powered tools.">
+    <SeoHead title="AI & MCP Integration | Maple" description="Connect Claude, Cursor, or any MCP client to diagnose production issues with 10+ AI-powered tools." />
+    <Nav />
+    <FeatureHero
+        label="AI & MCP"
+        title="AI-powered observability diagnostics"
+        subtitle="Connect Claude Code, Cursor, or any MCP-compatible client to diagnose production issues using 10+ specialized tools."
+    />
+
+    <!-- Demo Mock: Agent Conversation -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="bg-bg-elevated border border-border">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Claude Code</span>
+                </div>
+
+                <div class="p-4 md:p-6 space-y-4 max-w-2xl mx-auto">
+                    <!-- User message -->
+                    <div class="flex gap-3">
+                        <div class="w-5 h-5 bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                            <span class="text-[8px] text-fg font-bold">U</span>
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-fg leading-relaxed">Our checkout is failing for some users. What's happening?</span>
+                        </div>
+                    </div>
+
+                    <!-- Agent: system_health tool call -->
+                    <div class="flex gap-3">
+                        <div class="w-5 h-5 bg-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                            <span class="text-[8px] text-accent font-bold">A</span>
+                        </div>
+                        <div class="space-y-2 flex-1">
+                            <div class="inline-flex items-center gap-1.5 border border-border bg-bg px-2 py-1">
+                                <div class="w-1.5 h-1.5 bg-chart-2"></div>
+                                <code class="text-[9px] text-fg-muted">system_health</code>
+                            </div>
+                            <p class="text-[10px] text-fg leading-relaxed">3 services healthy, <span class="text-destructive">payment-svc showing 2.3% error rate</span></p>
+                        </div>
+                    </div>
+
+                    <!-- Agent: find_errors tool call -->
+                    <div class="flex gap-3">
+                        <div class="w-5 h-5 bg-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                            <span class="text-[8px] text-accent font-bold">A</span>
+                        </div>
+                        <div class="space-y-2 flex-1">
+                            <div class="inline-flex items-center gap-1.5 border border-border bg-bg px-2 py-1">
+                                <div class="w-1.5 h-1.5 bg-chart-2"></div>
+                                <code class="text-[9px] text-fg-muted">find_errors</code>
+                            </div>
+                            <p class="text-[10px] text-fg leading-relaxed">142 <code class="text-[9px] text-destructive bg-destructive/10 px-1 py-0.5">ConnectionTimeout</code> errors in payment-svc in last hour</p>
+                        </div>
+                    </div>
+
+                    <!-- Agent: inspect_trace tool call -->
+                    <div class="flex gap-3">
+                        <div class="w-5 h-5 bg-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                            <span class="text-[8px] text-accent font-bold">A</span>
+                        </div>
+                        <div class="space-y-2 flex-1">
+                            <div class="inline-flex items-center gap-1.5 border border-border bg-bg px-2 py-1">
+                                <div class="w-1.5 h-1.5 bg-chart-2"></div>
+                                <code class="text-[9px] text-fg-muted">inspect_trace</code>
+                            </div>
+                            <p class="text-[10px] text-fg leading-relaxed">Root cause: Stripe API timeout at 5000ms. Payment retries exhausting (3/3 failed)</p>
+                        </div>
+                    </div>
+
+                    <!-- Agent summary box -->
+                    <div class="ml-8 border border-accent/30 bg-accent/5 p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="w-1.5 h-1.5 bg-accent"></div>
+                            <span class="text-[9px] text-accent uppercase tracking-wider font-medium">Diagnosis</span>
+                        </div>
+                        <p class="text-[10px] text-fg leading-relaxed">
+                            Root cause identified: Stripe webhook timeout causing payment failures. Recommend increasing timeout to 10s and adding circuit breaker.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detail Grid -->
+    <section class="py-24 md:py-32">
+        <div class="mx-auto max-w-6xl px-6">
+            <FeatureDetailGrid items={[
+                { title: "10+ MCP Tools", description: "system_health, find_errors, inspect_trace, search_logs, search_traces, and more." },
+                { title: "Auto-Diagnosis", description: "AI agent chains tools together to automatically trace from symptoms to root cause." },
+                { title: "Claude Code", description: "Connect directly from Claude Code for terminal-based observability diagnostics." },
+                { title: "Cursor", description: "Use Maple's MCP server from Cursor for in-editor debugging." },
+                { title: "OpenCode", description: "Compatible with OpenCode and other MCP clients." },
+                { title: "Any MCP Client", description: "Standard MCP protocol means any compatible client works out of the box." },
+            ]} />
+        </div>
+    </section>
+
+    <RelatedFeatures current="ai-mcp-integration" />
+    <BottomCTA />
+    <Footer />
+</Layout>

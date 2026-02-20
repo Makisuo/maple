@@ -12,15 +12,15 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Button } from "@/components/ui/button"
+} from "@maple/ui/components/ui/alert-dialog"
+import { Button } from "@maple/ui/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@maple/ui/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -28,18 +28,18 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { Badge } from "@/components/ui/badge"
+} from "@maple/ui/components/ui/dialog"
+import { Input } from "@maple/ui/components/ui/input"
+import { Label } from "@maple/ui/components/ui/label"
+import { Switch } from "@maple/ui/components/ui/switch"
+import { Badge } from "@maple/ui/components/ui/badge"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@maple/ui/components/ui/select"
 import {
   CircleCheckIcon,
   CircleXmarkIcon,

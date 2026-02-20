@@ -9,9 +9,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@maple/ui/components/ui/table"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Trace } from "@/api/tinybird/traces"
 import { listTracesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { TracesSearchParams } from "@/routes/traces"
@@ -125,6 +125,8 @@ export function TracesTable({ filters }: TracesTableProps) {
         httpMethod: filters?.httpMethods?.[0],
         httpStatusCode: filters?.httpStatusCodes?.[0],
         deploymentEnv: filters?.deploymentEnvs?.[0],
+        attributeKey: filters?.attributeKey,
+        attributeValue: filters?.attributeValue,
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
         rootOnly: filters?.rootOnly,

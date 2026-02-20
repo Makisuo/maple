@@ -9,7 +9,7 @@ import {
   SearchableFilterSection,
 } from "@/components/filters/filter-section"
 import { Route } from "@/routes/logs"
-import { Separator } from "@/components/ui/separator"
+import { Separator } from "@maple/ui/components/ui/separator"
 import { getLogsFacetsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import {
   FilterSidebarBody,

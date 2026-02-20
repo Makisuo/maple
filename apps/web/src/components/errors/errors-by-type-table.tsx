@@ -11,9 +11,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@maple/ui/components/ui/table"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetErrorsByTypeInput, type ErrorByType } from "@/api/tinybird/errors"
 import { formatDuration } from "@/lib/format"
 import {

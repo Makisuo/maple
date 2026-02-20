@@ -26,6 +26,8 @@ export const listTraces = defineEndpoint("list_traces", {
     http_method: p.string().optional().describe("Filter by HTTP method"),
     http_status_code: p.string().optional().describe("Filter by HTTP status code"),
     deployment_env: p.string().optional().describe("Filter by deployment environment"),
+    attribute_filter_key: p.string().optional().describe("Filter where SpanAttributes[key] = value"),
+    attribute_filter_value: p.string().optional().describe("Value for attribute filter"),
     root_only: p.boolean().optional().describe("Filter to root traces only (spans with no parent)"),
   },
   nodes: [
@@ -55,6 +57,15 @@ export const listTraces = defineEndpoint("list_traces", {
           groupUniqArrayIf(SpanAttributes['http.method'], SpanAttributes['http.method'] != '') AS httpMethods,
           groupUniqArrayIf(SpanAttributes['http.status_code'], SpanAttributes['http.status_code'] != '') AS httpStatusCodes,
           groupUniqArrayIf(ResourceAttributes['deployment.environment'], ResourceAttributes['deployment.environment'] != '') AS deploymentEnvs,
+          {% if defined(attribute_filter_key) %}
+          max(if(
+            SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}},
+            1,
+            0
+          )) AS matchesAttributeFilter,
+          {% else %}
+          1 AS matchesAttributeFilter,
+          {% end %}
           countIf(ParentSpanId = '') AS rootSpanCount
         FROM traces
         WHERE TraceId != ''
@@ -108,6 +119,9 @@ export const listTraces = defineEndpoint("list_traces", {
         {% end %}
         {% if defined(deployment_env) %}
           AND has(deploymentEnvs, {{String(deployment_env, "")}})
+        {% end %}
+        {% if defined(attribute_filter_key) %}
+          AND matchesAttributeFilter = 1
         {% end %}
         ORDER BY startTime DESC
         LIMIT {{Int32(limit, 100)}}
@@ -1069,6 +1083,8 @@ export const tracesFacets = defineEndpoint("traces_facets", {
     http_method: p.string().optional().describe("Filter by HTTP method"),
     http_status_code: p.string().optional().describe("Filter by HTTP status code"),
     deployment_env: p.string().optional().describe("Filter by deployment environment"),
+    attribute_filter_key: p.string().optional().describe("Filter where SpanAttributes[key] = value"),
+    attribute_filter_value: p.string().optional().describe("Value for attribute filter"),
   },
   nodes: [
     node({
@@ -1093,6 +1109,15 @@ export const tracesFacets = defineEndpoint("traces_facets", {
             OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500),
             1, 0
           )) AS hasError,
+          {% if defined(attribute_filter_key) %}
+          max(if(
+            SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}},
+            1,
+            0
+          )) AS matchesAttributeFilter,
+          {% else %}
+          1 AS matchesAttributeFilter,
+          {% end %}
           (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 AS durationMs
         FROM traces
         WHERE TraceId != ''
@@ -1116,6 +1141,9 @@ export const tracesFacets = defineEndpoint("traces_facets", {
         FROM trace_summaries
         ARRAY JOIN services AS service
         WHERE 1=1
+        {% if defined(attribute_filter_key) %}
+          AND matchesAttributeFilter = 1
+        {% end %}
         {% if defined(span_name) %}
           AND rootSpanName = {{String(span_name)}}
         {% end %}
@@ -1151,6 +1179,9 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           'spanName' AS facetType
         FROM trace_summaries
         WHERE 1=1
+        {% if defined(attribute_filter_key) %}
+          AND matchesAttributeFilter = 1
+        {% end %}
         {% if defined(service) %}
           AND has(services, {{String(service)}})
         {% end %}
@@ -1187,6 +1218,9 @@ export const tracesFacets = defineEndpoint("traces_facets", {
         FROM trace_summaries
         ARRAY JOIN httpMethods AS method
         WHERE 1=1
+        {% if defined(attribute_filter_key) %}
+          AND matchesAttributeFilter = 1
+        {% end %}
         {% if defined(service) %}
           AND has(services, {{String(service)}})
         {% end %}
@@ -1223,6 +1257,9 @@ export const tracesFacets = defineEndpoint("traces_facets", {
         FROM trace_summaries
         ARRAY JOIN httpStatusCodes AS status
         WHERE 1=1
+        {% if defined(attribute_filter_key) %}
+          AND matchesAttributeFilter = 1
+        {% end %}
         {% if defined(service) %}
           AND has(services, {{String(service)}})
         {% end %}
@@ -1259,6 +1296,9 @@ export const tracesFacets = defineEndpoint("traces_facets", {
         FROM trace_summaries
         ARRAY JOIN deploymentEnvs AS env
         WHERE 1=1
+        {% if defined(attribute_filter_key) %}
+          AND matchesAttributeFilter = 1
+        {% end %}
         {% if defined(service) %}
           AND has(services, {{String(service)}})
         {% end %}
@@ -1294,6 +1334,9 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           'errorCount' AS facetType
         FROM trace_summaries
         WHERE 1=1
+        {% if defined(attribute_filter_key) %}
+          AND matchesAttributeFilter = 1
+        {% end %}
         {% if defined(service) %}
           AND has(services, {{String(service)}})
         {% end %}
@@ -1359,6 +1402,8 @@ export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
     http_method: p.string().optional().describe("Filter by HTTP method"),
     http_status_code: p.string().optional().describe("Filter by HTTP status code"),
     deployment_env: p.string().optional().describe("Filter by deployment environment"),
+    attribute_filter_key: p.string().optional().describe("Filter where SpanAttributes[key] = value"),
+    attribute_filter_value: p.string().optional().describe("Value for attribute filter"),
   },
   nodes: [
     node({
@@ -1411,6 +1456,20 @@ export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
           {% end %}
           {% if defined(deployment_env) %}
             AND ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
+          {% end %}
+          {% if defined(attribute_filter_key) %}
+            AND TraceId IN (
+              SELECT TraceId FROM traces WHERE TraceId != ''
+              AND OrgId = {{String(org_id, "")}}
+              AND SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}}
+              {% if defined(start_time) %}
+                AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+              {% end %}
+              {% if defined(end_time) %}
+                AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+              {% end %}
+              GROUP BY TraceId
+            )
           {% end %}
           GROUP BY TraceId
         )

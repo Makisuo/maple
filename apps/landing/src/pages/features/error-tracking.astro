@@ -1,0 +1,145 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../components/RelatedFeatures.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+---
+
+<Layout title="Error Tracking | Maple" description="Find and fix errors faster with smart grouping, trend detection, and root cause analysis linked to traces.">
+    <SeoHead title="Error Tracking | Maple" description="Find and fix errors faster with smart grouping, trend detection, and root cause analysis linked to traces." />
+    <Nav />
+    <FeatureHero
+        label="Error Tracking"
+        title="Find and fix errors faster"
+        subtitle="Smart error grouping with trend detection, root cause analysis, and direct links to failing traces."
+    />
+
+    <!-- Demo Mock: Error Dashboard -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="bg-bg-elevated border border-border">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Errors</span>
+                </div>
+
+                <div class="p-4 md:p-6">
+                    <!-- Stat cards row -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                        <!-- Total Errors -->
+                        <div class="border border-border bg-bg p-4">
+                            <span class="text-[9px] text-fg-muted uppercase tracking-wider block mb-2">Total Errors</span>
+                            <div class="flex items-baseline gap-2">
+                                <span class="text-2xl font-bold text-fg">1,247</span>
+                                <span class="text-[9px] text-destructive flex items-center gap-0.5">
+                                    <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                                    23% from last hour
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Error Rate -->
+                        <div class="border border-border bg-bg p-4">
+                            <span class="text-[9px] text-fg-muted uppercase tracking-wider block mb-2">Error Rate</span>
+                            <span class="text-2xl font-bold text-fg">2.3%</span>
+                        </div>
+
+                        <!-- Affected Services -->
+                        <div class="border border-border bg-bg p-4">
+                            <span class="text-[9px] text-fg-muted uppercase tracking-wider block mb-2">Affected Services</span>
+                            <span class="text-2xl font-bold text-fg">4<span class="text-base text-fg-muted font-normal">/12</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Error type table -->
+                    <div class="border border-border bg-bg">
+                        <div class="px-4 py-3 border-b border-border">
+                            <span class="text-[10px] text-fg font-medium">Error Groups</span>
+                        </div>
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-border">
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-left py-2 px-4">Error Type</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-left py-2 px-4">Service</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-right py-2 px-4">Count</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-right py-2 px-4">Trend</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="border-b border-border/50 hover:bg-muted/5">
+                                    <td class="text-[10px] text-destructive font-mono py-2.5 px-4">ConnectionTimeout</td>
+                                    <td class="text-[10px] text-fg-muted py-2.5 px-4">payment-svc</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 px-4">142</td>
+                                    <td class="text-right py-2.5 px-4">
+                                        <span class="text-[9px] text-destructive flex items-center justify-end gap-1">
+                                            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                                            trending
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr class="border-b border-border/50 hover:bg-muted/5">
+                                    <td class="text-[10px] text-destructive font-mono py-2.5 px-4">NullPointerException</td>
+                                    <td class="text-[10px] text-fg-muted py-2.5 px-4">order-service</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 px-4">89</td>
+                                    <td class="text-right py-2.5 px-4">
+                                        <span class="text-[9px] text-fg-muted flex items-center justify-end gap-1">
+                                            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+                                            stable
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr class="border-b border-border/50 hover:bg-muted/5">
+                                    <td class="text-[10px] text-destructive font-mono py-2.5 px-4">AuthTokenExpired</td>
+                                    <td class="text-[10px] text-fg-muted py-2.5 px-4">auth-service</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 px-4">67</td>
+                                    <td class="text-right py-2.5 px-4">
+                                        <span class="text-[9px] text-chart-2 flex items-center justify-end gap-1">
+                                            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                                            declining
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-muted/5">
+                                    <td class="text-[10px] text-destructive font-mono py-2.5 px-4">RateLimitExceeded</td>
+                                    <td class="text-[10px] text-fg-muted py-2.5 px-4">api-gateway</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 px-4">34</td>
+                                    <td class="text-right py-2.5 px-4">
+                                        <span class="text-[9px] text-destructive flex items-center justify-end gap-1">
+                                            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                                            trending
+                                        </span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detail Grid -->
+    <section class="py-24 md:py-32">
+        <div class="mx-auto max-w-6xl px-6">
+            <FeatureDetailGrid items={[
+                { title: "Smart Grouping", description: "Errors are automatically grouped by type and message. No manual triage needed." },
+                { title: "Trend Detection", description: "See at a glance which errors are trending up, stable, or declining." },
+                { title: "Root Cause Analysis", description: "Drill into any error group to see the failing trace and exact span." },
+                { title: "Trace Linking", description: "Every error links directly to the trace that produced it." },
+                { title: "Spam Filtering", description: "Filter out noisy errors like health check failures and bot traffic." },
+                { title: "Environment Filtering", description: "Compare error rates between production, staging, and development." },
+            ]} />
+        </div>
+    </section>
+
+    <RelatedFeatures current="error-tracking" />
+    <BottomCTA />
+    <Footer />
+</Layout>

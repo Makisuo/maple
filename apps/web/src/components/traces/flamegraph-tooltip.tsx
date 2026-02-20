@@ -1,5 +1,5 @@
 import { formatDuration } from "@/lib/format"
-import { getServiceLegendColor, calculateSelfTime } from "@/lib/colors"
+import { getServiceLegendColor, calculateSelfTime } from "@maple/ui/colors"
 import type { SpanNode } from "@/api/tinybird/traces"
 
 interface FlamegraphTooltipProps {

@@ -9,15 +9,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Sparkline } from "@/components/ui/gradient-chart"
+} from "@maple/ui/components/ui/table"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "@/components/ui/tooltip"
+} from "@maple/ui/components/ui/tooltip"
 import {
   type ServiceOverview,
   type CommitBreakdown,

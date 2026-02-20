@@ -20,7 +20,7 @@ import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
-} from "@/components/ui/collapsible"
+} from "@maple/ui/components/ui/collapsible"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
 import {
   DropdownMenu,
@@ -30,7 +30,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@maple/ui/components/ui/dropdown-menu"
 import {
   Sidebar,
   SidebarContent,
@@ -43,7 +43,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar"
+} from "@maple/ui/components/ui/sidebar"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { useQuickStart } from "@/hooks/use-quick-start"

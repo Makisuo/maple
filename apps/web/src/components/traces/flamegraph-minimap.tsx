@@ -1,5 +1,5 @@
 import * as React from "react"
-import { getSpanColorStyle } from "@/lib/colors"
+import { getSpanColorStyle } from "@maple/ui/colors"
 import type { SpanNode } from "@/api/tinybird/traces"
 
 interface FlamegraphMinimapProps {

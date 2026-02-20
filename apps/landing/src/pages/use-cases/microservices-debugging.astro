@@ -1,0 +1,177 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+import { ServiceMapMock } from "../../components/ServiceMapMock.tsx";
+---
+
+<Layout title="Microservices Debugging | Maple" description="Debug latency cascades across distributed services with service maps, trace analysis, and dependency visualization.">
+    <Nav />
+    <FeatureHero
+        label="Use Case"
+        title="Debug latency cascades across services"
+        subtitle="When latency doubles without a deployment, Maple's service map shows you exactly where the cascade originates."
+    />
+
+    <!-- Scenario Walkthrough -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6 space-y-16">
+
+            <!-- Step 1: Dashboard alert -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">1</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">Dashboard alert</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        Your P95 latency dashboard shows a sudden spike. No deployments in the last 24 hours,
+                        so something in the infrastructure changed. Time to investigate.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">P95 Latency — api-gateway</span>
+                    </div>
+                    <div class="p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[9px] text-fg-muted">Last 60 minutes</span>
+                            <span class="text-[9px] text-destructive font-mono">Current: 480ms</span>
+                        </div>
+                        <div class="flex items-end gap-[3px] h-20">
+                            <div class="flex-1 bg-chart-1/50 h-[20%]"></div>
+                            <div class="flex-1 bg-chart-1/50 h-[22%]"></div>
+                            <div class="flex-1 bg-chart-1/50 h-[18%]"></div>
+                            <div class="flex-1 bg-chart-1/50 h-[25%]"></div>
+                            <div class="flex-1 bg-chart-1/50 h-[20%]"></div>
+                            <div class="flex-1 bg-chart-1/55 h-[23%]"></div>
+                            <div class="flex-1 bg-chart-1/55 h-[22%]"></div>
+                            <div class="flex-1 bg-chart-1/60 h-[28%]"></div>
+                            <div class="flex-1 bg-chart-1/65 h-[35%]"></div>
+                            <div class="flex-1 bg-chart-1/70 h-[48%]"></div>
+                            <div class="flex-1 bg-destructive/70 h-[72%]"></div>
+                            <div class="flex-1 bg-destructive/70 h-[85%]"></div>
+                            <div class="flex-1 bg-destructive/80 h-[90%]"></div>
+                            <div class="flex-1 bg-destructive/80 h-[88%]"></div>
+                            <div class="flex-1 bg-destructive h-[92%]"></div>
+                            <div class="flex-1 bg-destructive h-[95%]"></div>
+                        </div>
+                        <div class="flex items-center justify-between mt-2">
+                            <span class="text-[8px] text-fg-muted">13:00</span>
+                            <div class="flex items-center gap-1">
+                                <div class="w-6 border-t border-dashed border-destructive/50"></div>
+                                <span class="text-[8px] text-destructive">threshold: 200ms</span>
+                            </div>
+                            <span class="text-[8px] text-fg-muted">14:00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Service map investigation -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">2</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">Service map investigation</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        The service map highlights user-db with a red border, indicating it is the source of
+                        the latency cascade. The 450ms edge latency is far above its normal 12ms baseline.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">Service Map</span>
+                    </div>
+                    <div class="p-0" style="height: 320px">
+                        <ServiceMapMock client:visible />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Span-level diagnosis -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">3</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">Span-level diagnosis</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        Drill into the user-db span attributes to find the connection pool is completely exhausted:
+                        50 active connections with 23 queries waiting. The root cause is clear.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">Span Attributes — user-db</span>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <div class="flex items-center justify-between border-b border-border pb-2">
+                            <span class="text-[9px] text-fg-muted">db.system</span>
+                            <span class="text-[10px] text-fg font-mono">postgresql</span>
+                        </div>
+                        <div class="flex items-center justify-between border-b border-border pb-2">
+                            <span class="text-[9px] text-fg-muted">db.statement</span>
+                            <span class="text-[10px] text-fg font-mono truncate ml-4">SELECT * FROM users WHERE...</span>
+                        </div>
+                        <div class="flex items-center justify-between border-b border-border pb-2">
+                            <span class="text-[9px] text-fg-muted">db.pool.active</span>
+                            <span class="text-[10px] text-destructive font-mono font-medium">50 / 50</span>
+                        </div>
+                        <div class="flex items-center justify-between border-b border-border pb-2">
+                            <span class="text-[9px] text-fg-muted">db.pool.waiting</span>
+                            <span class="text-[10px] text-destructive font-mono font-medium">23</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[9px] text-fg-muted">db.pool.idle</span>
+                            <span class="text-[10px] text-fg font-mono">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Feature Highlights -->
+    <section class="py-24 md:py-32 border-t border-border">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">Capabilities</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">Built for microservices complexity</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">Service Catalog</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">See all services with P50/P95/P99 latency and Apdex scores. Spot degradations instantly.</p>
+                </div>
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">Dependency Map</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Visualize how services connect and where cascades originate. Red edges show slow paths.</p>
+                </div>
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">Span Attributes</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Drill into connection pools, query plans, and resource metrics on any span in the trace.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <BottomCTA />
+    <Footer />
+</Layout>

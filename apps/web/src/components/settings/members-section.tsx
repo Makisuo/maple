@@ -2,14 +2,14 @@ import { useOrganization, useAuth } from "@clerk/clerk-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@maple/ui/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@maple/ui/components/ui/card"
 import {
   Table,
   TableBody,
@@ -17,9 +17,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
+} from "@maple/ui/components/ui/table"
+import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
+import { Badge } from "@maple/ui/components/ui/badge"
 import {
   Dialog,
   DialogContent,
@@ -27,22 +27,22 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+} from "@maple/ui/components/ui/dialog"
+import { Input } from "@maple/ui/components/ui/input"
+import { Label } from "@maple/ui/components/ui/label"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@maple/ui/components/ui/select"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@maple/ui/components/ui/dropdown-menu"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,15 +53,15 @@ import {
   AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@maple/ui/components/ui/alert-dialog"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/components/ui/empty"
+} from "@maple/ui/components/ui/empty"
 import {
   PlusIcon,
   DotsVerticalIcon,

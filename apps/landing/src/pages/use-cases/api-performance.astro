@@ -1,0 +1,216 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+---
+
+<Layout title="API Performance Monitoring | Maple" description="Monitor API latency, throughput, and error rates with custom dashboards, Apdex scoring, and AI-powered diagnostics.">
+    <Nav />
+    <FeatureHero
+        label="Use Case"
+        title="Monitor API performance end-to-end"
+        subtitle="Track SLOs, detect latency regressions, and let AI agents diagnose issues while you sleep."
+    />
+
+    <!-- Scenario Walkthrough -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6 space-y-16">
+
+            <!-- Step 1: SLO monitoring -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">1</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">SLO monitoring</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        Your Apdex score drops below the acceptable threshold, and P99 latency breaches 200ms.
+                        The dashboard immediately surfaces which endpoints are affected.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">API Performance Dashboard</span>
+                    </div>
+                    <div class="p-4 grid grid-cols-2 gap-3">
+                        <!-- Apdex widget -->
+                        <div class="border border-border bg-bg p-3">
+                            <span class="text-[8px] text-fg-muted block mb-1">Apdex Score</span>
+                            <div class="flex items-baseline gap-2">
+                                <span class="text-xl font-bold text-yellow-400">0.72</span>
+                                <span class="text-[8px] text-fg-muted">/ 1.0</span>
+                            </div>
+                            <div class="mt-2 w-full h-1.5 bg-bg-elevated">
+                                <div class="h-full bg-yellow-400/70" style="width: 72%"></div>
+                            </div>
+                            <span class="text-[8px] text-yellow-400 mt-1 block">Below target (0.85)</span>
+                        </div>
+                        <!-- P99 widget -->
+                        <div class="border border-border bg-bg p-3">
+                            <span class="text-[8px] text-fg-muted block mb-1">P99 Latency</span>
+                            <div class="flex items-baseline gap-2">
+                                <span class="text-xl font-bold text-destructive">380ms</span>
+                            </div>
+                            <div class="mt-2 flex items-end gap-[2px] h-6">
+                                <div class="flex-1 bg-chart-1/40 h-[30%]"></div>
+                                <div class="flex-1 bg-chart-1/40 h-[35%]"></div>
+                                <div class="flex-1 bg-chart-1/50 h-[32%]"></div>
+                                <div class="flex-1 bg-chart-1/50 h-[40%]"></div>
+                                <div class="flex-1 bg-chart-1/60 h-[55%]"></div>
+                                <div class="flex-1 bg-destructive/60 h-[75%]"></div>
+                                <div class="flex-1 bg-destructive/70 h-[88%]"></div>
+                                <div class="flex-1 bg-destructive h-[95%]"></div>
+                            </div>
+                            <div class="relative mt-1">
+                                <div class="absolute w-full border-t border-dashed border-destructive/50" style="bottom: 0"></div>
+                                <span class="text-[7px] text-destructive">threshold: 200ms</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Regression detection -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">2</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">Regression detection</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        Compare performance across commits to pinpoint exactly when the regression was introduced.
+                        The commit comparison table shows the P99 jump from 120ms to 380ms.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">Commit Comparison — order-service</span>
+                    </div>
+                    <div class="p-0">
+                        <div class="flex items-center text-[8px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
+                            <span class="w-20 shrink-0">Commit</span>
+                            <span class="w-16 shrink-0">P50</span>
+                            <span class="w-16 shrink-0">P95</span>
+                            <span class="w-16 shrink-0">P99</span>
+                            <span class="flex-1 text-right">Error %</span>
+                        </div>
+                        <div class="flex items-center text-[9px] px-3 py-2 border-b border-border">
+                            <span class="w-20 shrink-0 text-fg font-mono text-[8px]">abc123</span>
+                            <span class="w-16 shrink-0 text-fg-muted font-mono">24ms</span>
+                            <span class="w-16 shrink-0 text-fg-muted font-mono">85ms</span>
+                            <span class="w-16 shrink-0 text-fg-muted font-mono">120ms</span>
+                            <span class="flex-1 text-right text-fg-muted font-mono">0.1%</span>
+                        </div>
+                        <div class="flex items-center text-[9px] px-3 py-2 bg-destructive/5">
+                            <span class="w-20 shrink-0 text-fg font-mono text-[8px]">def456</span>
+                            <span class="w-16 shrink-0 text-fg-muted font-mono">42ms</span>
+                            <span class="w-16 shrink-0 text-destructive font-mono">210ms</span>
+                            <span class="w-16 shrink-0 text-destructive font-mono font-medium">380ms</span>
+                            <span class="flex-1 text-right text-destructive font-mono">1.8%</span>
+                        </div>
+                    </div>
+                    <div class="px-3 py-2 border-t border-border">
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 bg-destructive"></div>
+                            <span class="text-[8px] text-fg-muted">P99 regression: <span class="text-destructive font-medium">+217%</span> after commit def456</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: AI diagnosis -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
+                            <span class="text-accent-foreground text-sm font-bold">3</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-fg">AI diagnosis</h3>
+                    </div>
+                    <p class="text-sm text-fg-muted leading-relaxed">
+                        The MCP agent automatically analyzes the regression, traces it to the specific commit,
+                        and identifies the root cause: an N+1 query introduced in the order service.
+                    </p>
+                </div>
+                <div class="border border-border bg-bg-elevated overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <div class="w-2 h-2 bg-border"></div>
+                        <span class="text-[9px] text-fg-muted ml-2">MCP Agent</span>
+                    </div>
+                    <div class="p-3 space-y-3">
+                        <!-- Agent thinking -->
+                        <div class="flex items-start gap-2">
+                            <div class="w-4 h-4 bg-chart-2/20 flex items-center justify-center shrink-0 mt-0.5">
+                                <span class="text-[8px] text-chart-2">AI</span>
+                            </div>
+                            <span class="text-[9px] text-fg-muted">Analyzing latency regression in order-service...</span>
+                        </div>
+                        <!-- Tool call -->
+                        <div class="border border-border bg-bg px-2.5 py-1.5">
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-[8px] text-accent font-mono">diagnose_service("order-service")</span>
+                            </div>
+                            <span class="text-[8px] text-fg-muted block mt-0.5">P99 jumped 217% between abc123 and def456</span>
+                        </div>
+                        <!-- Tool call 2 -->
+                        <div class="border border-border bg-bg px-2.5 py-1.5">
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-[8px] text-accent font-mono">find_slow_traces("order-service", commit="def456")</span>
+                            </div>
+                            <span class="text-[8px] text-fg-muted block mt-0.5">12 traces with 50+ db spans per request (was 3)</span>
+                        </div>
+                        <!-- Diagnosis -->
+                        <div class="flex items-start gap-2">
+                            <div class="w-4 h-4 bg-chart-2/20 flex items-center justify-center shrink-0 mt-0.5">
+                                <span class="text-[8px] text-chart-2">AI</span>
+                            </div>
+                            <div>
+                                <span class="text-[9px] text-fg font-medium">Root Cause Found</span>
+                                <span class="text-[8px] text-fg-muted block">N+1 query detected in order-service after commit def456. Each order now triggers individual item lookups instead of a batch query. Recommend adding eager loading.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Feature Highlights -->
+    <section class="py-24 md:py-32 border-t border-border">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">Capabilities</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">Built for API reliability</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">Custom Dashboards</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Build API monitoring dashboards with latency, throughput, and error widgets. Drag-and-drop layout.</p>
+                </div>
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">Apdex Scoring</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Application performance index with configurable thresholds per service and endpoint.</p>
+                </div>
+                <div class="bg-bg p-6">
+                    <h3 class="text-sm font-bold text-fg mb-2">AI Diagnostics</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">MCP agent automatically traces regressions to specific commits and queries. Diagnosis while you sleep.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <BottomCTA />
+    <Footer />
+</Layout>

@@ -1,14 +1,14 @@
 import type { ErrorComponentProps } from "@tanstack/react-router"
 import { Link, useRouter } from "@tanstack/react-router"
 import { AlertWarningIcon, CircleQuestionIcon, HouseIcon } from "@/components/icons"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@maple/ui/components/ui/button"
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/components/ui/empty"
+} from "@maple/ui/components/ui/empty"
 
 function RouteError({ error, reset }: ErrorComponentProps) {
   const router = useRouter()

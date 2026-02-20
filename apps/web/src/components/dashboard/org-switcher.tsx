@@ -17,21 +17,21 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@maple/ui/components/ui/dropdown-menu"
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar"
+} from "@maple/ui/components/ui/sidebar"
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
+} from "@maple/ui/components/ui/dialog"
+import { Input } from "@maple/ui/components/ui/input"
+import { Button } from "@maple/ui/components/ui/button"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
 function OrgAvatar({

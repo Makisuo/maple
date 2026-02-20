@@ -1,4 +1,4 @@
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
 import { CodeBlock } from "@/components/quick-start/code-block"
 
 const packageManagers = [
