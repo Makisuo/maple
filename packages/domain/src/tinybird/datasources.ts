@@ -84,7 +84,7 @@ export const traces = defineDatasource("traces", {
     ScopeAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
       jsonPath: "$.scope_attributes",
     }),
-    Duration: column(t.uint64(), { jsonPath: "$.duration" }),
+    Duration: column(t.uint64().default(0), { jsonPath: "$.duration" }),
     StatusCode: column(t.string().lowCardinality(), {
       jsonPath: "$.status_code",
     }),
@@ -150,6 +150,7 @@ export const serviceUsage = defineDatasource("service_usage", {
     ExpHistogramMetricCount: t.uint64(),
     ExpHistogramMetricSizeBytes: t.uint64(),
   },
+  forwardQuery: `SELECT *`,
   engine: engine.summingMergeTree({
     sortingKey: ["OrgId", "ServiceName", "Hour"],
     ttl: "Hour + INTERVAL 365 DAY",
@@ -190,7 +191,7 @@ export const metricsSum = defineDatasource("metrics_sum", {
     StartTimeUnix: column(t.dateTime64(9), { jsonPath: "$.start_timestamp" }),
     TimeUnix: column(t.dateTime64(9), { jsonPath: "$.timestamp" }),
     Value: column(t.float64(), { jsonPath: "$.value" }),
-    Flags: column(t.uint8(), { jsonPath: "$.flags" }),
+    Flags: column(t.uint32(), { jsonPath: "$.flags" }),
     ExemplarsTraceId: column(t.array(t.string()), {
       jsonPath: "$.exemplars_trace_id[:]",
     }),
@@ -214,22 +215,22 @@ export const metricsSum = defineDatasource("metrics_sum", {
   },
   forwardQuery: `
     SELECT
-      defaultValueOfTypeName('LowCardinality(String)') AS OrgId,
+      OrgId,
       ResourceAttributes,
       ResourceSchemaUrl,
       ScopeName,
       ScopeVersion,
       ScopeAttributes,
       ScopeSchemaUrl,
-      CAST(ServiceName, 'LowCardinality(String)') AS ServiceName,
+      ServiceName,
       MetricName,
-      CAST(MetricDescription, 'LowCardinality(String)') AS MetricDescription,
-      CAST(MetricUnit, 'LowCardinality(String)') AS MetricUnit,
+      MetricDescription,
+      MetricUnit,
       Attributes,
       StartTimeUnix,
       TimeUnix,
       Value,
-      Flags,
+      CAST(Flags, 'UInt32') AS Flags,
       ExemplarsTraceId,
       ExemplarsSpanId,
       ExemplarsTimestamp,
@@ -285,7 +286,7 @@ export const metricsGauge = defineDatasource("metrics_gauge", {
     StartTimeUnix: column(t.dateTime64(9), { jsonPath: "$.start_timestamp" }),
     TimeUnix: column(t.dateTime64(9), { jsonPath: "$.timestamp" }),
     Value: column(t.float64(), { jsonPath: "$.value" }),
-    Flags: column(t.uint8(), { jsonPath: "$.flags" }),
+    Flags: column(t.uint32(), { jsonPath: "$.flags" }),
     ExemplarsTraceId: column(t.array(t.string()), {
       jsonPath: "$.exemplars_trace_id[:]",
     }),
@@ -305,22 +306,22 @@ export const metricsGauge = defineDatasource("metrics_gauge", {
   },
   forwardQuery: `
     SELECT
-      defaultValueOfTypeName('LowCardinality(String)') AS OrgId,
+      OrgId,
       ResourceAttributes,
       ResourceSchemaUrl,
       ScopeName,
       ScopeVersion,
       ScopeAttributes,
       ScopeSchemaUrl,
-      CAST(ServiceName, 'LowCardinality(String)') AS ServiceName,
+      ServiceName,
       MetricName,
-      CAST(MetricDescription, 'LowCardinality(String)') AS MetricDescription,
-      CAST(MetricUnit, 'LowCardinality(String)') AS MetricUnit,
+      MetricDescription,
+      MetricUnit,
       Attributes,
       StartTimeUnix,
       TimeUnix,
       Value,
-      Flags,
+      CAST(Flags, 'UInt32') AS Flags,
       ExemplarsTraceId,
       ExemplarsSpanId,
       ExemplarsTimestamp,
@@ -397,7 +398,7 @@ export const metricsHistogram = defineDatasource("metrics_histogram", {
       t.array(t.map(t.string().lowCardinality(), t.string())),
       { jsonPath: "$.exemplars_filtered_attributes[:]" }
     ),
-    Flags: column(t.uint8(), { jsonPath: "$.flags" }),
+    Flags: column(t.uint32(), { jsonPath: "$.flags" }),
     Min: column(t.float64().nullable(), { jsonPath: "$.min" }),
     Max: column(t.float64().nullable(), { jsonPath: "$.max" }),
     AggregationTemporality: column(t.int32(), {
@@ -406,17 +407,17 @@ export const metricsHistogram = defineDatasource("metrics_histogram", {
   },
   forwardQuery: `
     SELECT
-      defaultValueOfTypeName('LowCardinality(String)') AS OrgId,
+      OrgId,
       ResourceAttributes,
       ResourceSchemaUrl,
       ScopeName,
       ScopeVersion,
       ScopeAttributes,
       ScopeSchemaUrl,
-      CAST(ServiceName, 'LowCardinality(String)') AS ServiceName,
+      ServiceName,
       MetricName,
-      CAST(MetricDescription, 'LowCardinality(String)') AS MetricDescription,
-      CAST(MetricUnit, 'LowCardinality(String)') AS MetricUnit,
+      MetricDescription,
+      MetricUnit,
       Attributes,
       StartTimeUnix,
       TimeUnix,
@@ -429,9 +430,9 @@ export const metricsHistogram = defineDatasource("metrics_histogram", {
       ExemplarsTimestamp,
       ExemplarsValue,
       ExemplarsFilteredAttributes,
-      Flags,
-      Min,
-      Max,
+      CAST(Flags, 'UInt32') AS Flags,
+      CAST(Min, 'Nullable(Float64)') AS Min,
+      CAST(Max, 'Nullable(Float64)') AS Max,
       AggregationTemporality
   `,
   engine: engine.mergeTree({
@@ -515,7 +516,7 @@ export const metricsExponentialHistogram = defineDatasource(
         t.array(t.map(t.string().lowCardinality(), t.string())),
         { jsonPath: "$.exemplars_filtered_attributes[:]" }
       ),
-      Flags: column(t.uint8(), { jsonPath: "$.flags" }),
+      Flags: column(t.uint32(), { jsonPath: "$.flags" }),
       Min: column(t.float64().nullable(), { jsonPath: "$.min" }),
       Max: column(t.float64().nullable(), { jsonPath: "$.max" }),
       AggregationTemporality: column(t.int32(), {
@@ -524,17 +525,17 @@ export const metricsExponentialHistogram = defineDatasource(
     },
     forwardQuery: `
       SELECT
-        defaultValueOfTypeName('LowCardinality(String)') AS OrgId,
+        OrgId,
         ResourceAttributes,
         ResourceSchemaUrl,
         ScopeName,
         ScopeVersion,
         ScopeAttributes,
         ScopeSchemaUrl,
-        CAST(ServiceName, 'LowCardinality(String)') AS ServiceName,
+        ServiceName,
         MetricName,
-        CAST(MetricDescription, 'LowCardinality(String)') AS MetricDescription,
-        CAST(MetricUnit, 'LowCardinality(String)') AS MetricUnit,
+        MetricDescription,
+        MetricUnit,
         Attributes,
         StartTimeUnix,
         TimeUnix,
@@ -551,9 +552,9 @@ export const metricsExponentialHistogram = defineDatasource(
         ExemplarsTimestamp,
         ExemplarsValue,
         ExemplarsFilteredAttributes,
-        Flags,
-        Min,
-        Max,
+        CAST(Flags, 'UInt32') AS Flags,
+        CAST(Min, 'Nullable(Float64)') AS Min,
+        CAST(Max, 'Nullable(Float64)') AS Max,
         AggregationTemporality
     `,
     engine: engine.mergeTree({
@@ -573,4 +574,3 @@ export const metricsExponentialHistogram = defineDatasource(
 export type MetricsExponentialHistogramRow = InferRow<
   typeof metricsExponentialHistogram
 >;
-

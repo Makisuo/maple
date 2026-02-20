@@ -448,7 +448,7 @@ export const errorRateByService = defineEndpoint("error_rate_by_service", {
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
         {% if defined(end_time) %}
-          AND Timestamp <= {{DateTime(end_time, "2023-12-31 23:59:59")}}
+          AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
         GROUP BY ServiceName
         ORDER BY errorRatePercent DESC
@@ -506,7 +506,7 @@ export const getServiceUsage = defineEndpoint("get_service_usage", {
           AND Hour >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
         {% if defined(end_time) %}
-          AND Hour <= {{DateTime(end_time, "2023-12-31 23:59:59")}}
+          AND Hour <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
         GROUP BY ServiceName
         ORDER BY totalSizeBytes DESC

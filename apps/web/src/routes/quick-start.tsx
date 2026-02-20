@@ -16,6 +16,7 @@ import {
   CheckIcon,
   CopyIcon,
   CircleCheckIcon,
+  EyeIcon,
   RocketIcon,
   HouseIcon,
   PulseIcon,
@@ -54,14 +55,24 @@ const frameworkIconMap: Record<FrameworkId, React.ComponentType<{ size?: number;
   effect: EffectIcon,
 }
 
+function maskKey(key: string): string {
+  if (key.length <= 18) return key
+  const prefix = key.slice(0, 14)
+  const suffix = key.slice(-4)
+  return `${prefix}${"•".repeat(key.length - 18)}${suffix}`
+}
+
 function CopyableInput({
   value,
   label,
+  masked,
 }: {
   value: string
   label: string
+  masked?: boolean
 }) {
   const [copied, setCopied] = useState(false)
+  const [isVisible, setIsVisible] = useState(false)
 
   async function handleCopy() {
     try {
@@ -80,10 +91,22 @@ function CopyableInput({
       <InputGroup>
         <InputGroupInput
           readOnly
-          value={value}
+          value={masked && !isVisible ? maskKey(value) : value}
           className="font-mono text-xs tracking-wide select-all"
         />
         <InputGroupAddon align="inline-end">
+          {masked && (
+            <InputGroupButton
+              onClick={() => setIsVisible((v) => !v)}
+              aria-label={isVisible ? "Hide key" : "Reveal key"}
+              title={isVisible ? "Hide" : "Reveal"}
+            >
+              <EyeIcon
+                size={14}
+                className={isVisible ? "text-foreground" : undefined}
+              />
+            </InputGroupButton>
+          )}
           <InputGroupButton
             onClick={handleCopy}
             aria-label={`Copy ${label.toLowerCase()}`}
@@ -202,7 +225,7 @@ function StepSetupApp({
             </div>
             <div className="p-4 grid gap-4 sm:grid-cols-2 bg-card">
               <CopyableInput value={ingestUrl} label="Ingest Endpoint" />
-              <CopyableInput value={displayKey} label="API Key" />
+              <CopyableInput value={displayKey} label="API Key" masked />
             </div>
           </div>
 

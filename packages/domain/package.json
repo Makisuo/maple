@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@effect/platform": "^0.94.4",
-    "@tinybirdco/sdk": "0.0.44",
+    "@tinybirdco/sdk": "0.0.54",
     "effect": "^3.19.16"
   },
   "devDependencies": {
