@@ -150,6 +150,15 @@ export function WhereClauseEditor({
         onSelect={(event) => syncCursor(event.currentTarget)}
         onKeyUp={(event) => syncCursor(event.currentTarget)}
         onKeyDown={(event) => {
+          // Always prevent Enter from inserting newlines (where clauses are single-line)
+          if (event.key === "Enter") {
+            event.preventDefault()
+            if (isOpen && suggestions.length > 0) {
+              applySuggestion(activeIndex)
+            }
+            return
+          }
+
           if (!isOpen || suggestions.length === 0) {
             return
           }
@@ -168,7 +177,7 @@ export function WhereClauseEditor({
             return
           }
 
-          if (event.key === "Enter" || event.key === "Tab") {
+          if (event.key === "Tab") {
             event.preventDefault()
             applySuggestion(activeIndex)
             return

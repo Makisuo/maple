@@ -46,15 +46,23 @@ function TracesPage() {
   const navigate = useNavigate({ from: Route.fullPath })
   const [activeAttributeKey, setActiveAttributeKey] = React.useState<string | null>(null)
   const [whereClauseText, setWhereClauseText] = React.useState(search.whereClause ?? "")
+  const isLocalUpdate = React.useRef(false)
 
+  // URL → local (external changes only: back/forward, sidebar clear, etc.)
   React.useEffect(() => {
+    if (isLocalUpdate.current) {
+      isLocalUpdate.current = false
+      return
+    }
     setWhereClauseText(search.whereClause ?? "")
   }, [search.whereClause])
 
+  // Local → URL (debounced 300ms)
   React.useEffect(() => {
     const timer = setTimeout(() => {
       const trimmed = whereClauseText.trim() || undefined
       if (trimmed !== (search.whereClause ?? undefined)) {
+        isLocalUpdate.current = true
         navigate({
           search: (prev) => applyWhereClause(prev, whereClauseText),
         })
