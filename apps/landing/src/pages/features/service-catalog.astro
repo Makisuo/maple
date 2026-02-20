@@ -7,6 +7,7 @@ import RelatedFeatures from "../../components/RelatedFeatures.astro";
 import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+import { ServiceMapMock } from "../../components/ServiceMapMock.tsx";
 ---
 
 <Layout title="Service Catalog & Map | Maple" description="See all your services at a glance with latency percentiles, Apdex scores, throughput, and dependency mapping.">
@@ -89,43 +90,8 @@ import Footer from "../../components/Footer.astro";
                     <!-- Mini dependency graph -->
                     <div class="w-full lg:w-72 border-t lg:border-t-0 lg:border-l border-border p-4 md:p-6">
                         <span class="text-[10px] text-fg-muted uppercase tracking-wider block mb-4">Dependencies</span>
-                        <div class="relative h-48">
-                            <!-- api-gateway (top center) -->
-                            <div class="absolute top-0 left-1/2 -translate-x-1/2 border border-chart-1/40 bg-chart-1/10 px-3 py-1.5">
-                                <span class="text-[9px] text-chart-1">api-gateway</span>
-                            </div>
-
-                            <!-- Lines from api-gateway down -->
-                            <svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 240 180">
-                                <!-- api-gateway to order-service -->
-                                <line x1="120" y1="30" x2="60" y2="80" stroke="oklch(1 0 0 / 10%)" stroke-width="1"/>
-                                <!-- api-gateway to auth-service -->
-                                <line x1="120" y1="30" x2="180" y2="80" stroke="oklch(1 0 0 / 10%)" stroke-width="1"/>
-                                <!-- order-service to payment-svc -->
-                                <line x1="60" y1="105" x2="60" y2="145" stroke="oklch(1 0 0 / 10%)" stroke-width="1"/>
-                                <!-- auth-service to user-db -->
-                                <line x1="180" y1="105" x2="180" y2="145" stroke="oklch(1 0 0 / 10%)" stroke-width="1"/>
-                            </svg>
-
-                            <!-- order-service (middle left) -->
-                            <div class="absolute top-[75px] left-0 border border-chart-3/40 bg-chart-3/10 px-3 py-1.5">
-                                <span class="text-[9px] text-chart-3">order-service</span>
-                            </div>
-
-                            <!-- auth-service (middle right) -->
-                            <div class="absolute top-[75px] right-0 border border-chart-2/40 bg-chart-2/10 px-3 py-1.5">
-                                <span class="text-[9px] text-chart-2">auth-service</span>
-                            </div>
-
-                            <!-- payment-svc (bottom left) -->
-                            <div class="absolute bottom-0 left-0 border border-destructive/40 bg-destructive/10 px-3 py-1.5">
-                                <span class="text-[9px] text-destructive">payment-svc</span>
-                            </div>
-
-                            <!-- user-db (bottom right) -->
-                            <div class="absolute bottom-0 right-0 border border-chart-5/40 bg-chart-5/10 px-3 py-1.5">
-                                <span class="text-[9px] text-chart-5">user-db</span>
-                            </div>
+                        <div class="relative h-64 w-full">
+                            <ServiceMapMock client:visible />
                         </div>
                     </div>
                 </div>

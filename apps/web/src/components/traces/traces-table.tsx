@@ -125,6 +125,8 @@ export function TracesTable({ filters }: TracesTableProps) {
         httpMethod: filters?.httpMethods?.[0],
         httpStatusCode: filters?.httpStatusCodes?.[0],
         deploymentEnv: filters?.deploymentEnvs?.[0],
+        attributeKey: filters?.attributeKey,
+        attributeValue: filters?.attributeValue,
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
         rootOnly: filters?.rootOnly,

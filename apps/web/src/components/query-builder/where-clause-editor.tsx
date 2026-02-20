@@ -4,6 +4,7 @@ import { Textarea } from "@maple/ui/components/ui/textarea"
 import {
   applyWhereClauseSuggestion,
   getWhereClauseAutocomplete,
+  type WhereClauseAutocompleteScope,
   type WhereClauseAutocompleteValues,
 } from "@/lib/query-builder/where-clause-autocomplete"
 import type { QueryBuilderDataSource } from "@/lib/query-builder/model"
@@ -14,6 +15,7 @@ interface WhereClauseEditorProps {
   value: string
   onChange: (value: string) => void
   values?: WhereClauseAutocompleteValues
+  autocompleteScope?: WhereClauseAutocompleteScope
   onActiveAttributeKey?: (key: string | null) => void
   placeholder?: string
   rows?: number
@@ -27,6 +29,7 @@ export function WhereClauseEditor({
   value,
   onChange,
   values,
+  autocompleteScope,
   onActiveAttributeKey,
   placeholder,
   rows = 2,
@@ -51,8 +54,9 @@ export function WhereClauseEditor({
         cursor,
         dataSource,
         values,
+        scope: autocompleteScope,
       }),
-    [cursor, dataSource, value, values],
+    [autocompleteScope, cursor, dataSource, value, values],
   )
 
   // Notify parent when user is editing a value for an attr.* key

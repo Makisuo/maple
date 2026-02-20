@@ -10,12 +10,16 @@ export type WhereClauseAutocompleteContext =
   | "value"
   | "conjunction"
 
+export type WhereClauseAutocompleteScope = "default" | "trace_search"
+
 export interface WhereClauseAutocompleteValues {
   services?: string[]
   spanNames?: string[]
   environments?: string[]
   commitShas?: string[]
   severities?: string[]
+  httpMethods?: string[]
+  httpStatusCodes?: string[]
   metricTypes?: QueryBuilderMetricType[]
   attributeKeys?: string[]
   attributeValues?: string[]
@@ -43,6 +47,7 @@ interface WhereClauseAutocompleteInput {
   cursor: number
   dataSource: QueryBuilderDataSource
   values?: WhereClauseAutocompleteValues
+  scope?: WhereClauseAutocompleteScope
   maxSuggestions?: number
 }
 
@@ -126,6 +131,59 @@ const KEY_DEFINITIONS: Record<QueryBuilderDataSource, KeyDefinition[]> = {
     },
   ],
 }
+
+const TRACE_SEARCH_KEY_DEFINITIONS: KeyDefinition[] = [
+  {
+    label: "service.name",
+    insertText: "service.name",
+    description: "Filter by service",
+  },
+  {
+    label: "span.name",
+    insertText: "span.name",
+    description: "Filter by root span name",
+  },
+  {
+    label: "deployment.environment",
+    insertText: "deployment.environment",
+    description: "Filter by deployment environment",
+  },
+  {
+    label: "http.method",
+    insertText: "http.method",
+    description: "Filter by HTTP method",
+  },
+  {
+    label: "http.status_code",
+    insertText: "http.status_code",
+    description: "Filter by HTTP status code",
+  },
+  {
+    label: "has_error",
+    insertText: "has_error",
+    description: "true or false",
+  },
+  {
+    label: "root_only",
+    insertText: "root_only",
+    description: "true or false",
+  },
+  {
+    label: "min_duration_ms",
+    insertText: "min_duration_ms",
+    description: "Minimum duration in milliseconds",
+  },
+  {
+    label: "max_duration_ms",
+    insertText: "max_duration_ms",
+    description: "Maximum duration in milliseconds",
+  },
+  {
+    label: "attr.<key>",
+    insertText: "attr.",
+    description: "Filter by a single span attribute",
+  },
+]
 
 function isSpace(char: string | undefined): boolean {
   return char == null || /\s/.test(char)
@@ -424,6 +482,26 @@ function normalizeKey(input: string | null): string {
     return "root_only"
   }
 
+  if (normalized === "has_error") {
+    return "has_error"
+  }
+
+  if (normalized === "http.method") {
+    return "http.method"
+  }
+
+  if (normalized === "http.status_code") {
+    return "http.status_code"
+  }
+
+  if (normalized === "min_duration_ms") {
+    return "min_duration_ms"
+  }
+
+  if (normalized === "max_duration_ms") {
+    return "max_duration_ms"
+  }
+
   if (normalized.startsWith("attr.")) {
     return "attr.*"
   }
@@ -524,6 +602,7 @@ function buildValueSuggestions(
   key: string | null,
   dataSource: QueryBuilderDataSource,
   values: WhereClauseAutocompleteValues | undefined,
+  scope: WhereClauseAutocompleteScope,
 ): WhereClauseAutocompleteSuggestion[] {
   const normalizedKey = normalizeKey(key)
 
@@ -537,6 +616,23 @@ function buildValueSuggestions(
       },
       {
         id: "value:false",
+        kind: "value",
+        label: "false",
+        insertText: "false",
+      },
+    ]
+  }
+
+  if (scope === "trace_search" && normalizedKey === "has_error") {
+    return [
+      {
+        id: "value:has_error:true",
+        kind: "value",
+        label: "true",
+        insertText: "true",
+      },
+      {
+        id: "value:has_error:false",
         kind: "value",
         label: "false",
         insertText: "false",
@@ -559,6 +655,12 @@ function buildValueSuggestions(
     "deployment.environment": uniqueValues(values?.environments ?? []),
     "deployment.commit_sha": uniqueValues(values?.commitShas ?? []),
     severity: uniqueValues(values?.severities ?? []),
+    ...(scope === "trace_search"
+      ? {
+          "http.method": uniqueValues(values?.httpMethods ?? []),
+          "http.status_code": uniqueValues(values?.httpStatusCodes ?? []),
+        }
+      : {}),
   }
 
   const explicit = mappedValues[normalizedKey]
@@ -619,6 +721,7 @@ function buildSuggestions(
   parsed: ParsedWhereClauseContext,
   dataSource: QueryBuilderDataSource,
   values: WhereClauseAutocompleteValues | undefined,
+  scope: WhereClauseAutocompleteScope,
   maxSuggestions: number,
 ): WhereClauseAutocompleteSuggestion[] {
   if (parsed.context === "key") {
@@ -635,7 +738,12 @@ function buildSuggestions(
       return filterAndRankSuggestions(attrSuggestions, query, maxSuggestions)
     }
 
-    const keySuggestions = KEY_DEFINITIONS[dataSource].map((keyDef) =>
+    const keyDefinitions =
+      scope === "trace_search" && dataSource === "traces"
+        ? TRACE_SEARCH_KEY_DEFINITIONS
+        : KEY_DEFINITIONS[dataSource]
+
+    const keySuggestions = keyDefinitions.map((keyDef) =>
       toSuggestion(
         {
           id: `key:${keyDef.insertText}`,
@@ -665,7 +773,12 @@ function buildSuggestions(
   }
 
   if (parsed.context === "value") {
-    const valueSuggestions = buildValueSuggestions(parsed.key, dataSource, values)
+    const valueSuggestions = buildValueSuggestions(
+      parsed.key,
+      dataSource,
+      values,
+      scope,
+    )
     return filterAndRankSuggestions(valueSuggestions, parsed.query, maxSuggestions)
   }
 
@@ -687,10 +800,11 @@ export function getWhereClauseAutocomplete({
   cursor,
   dataSource,
   values,
+  scope = "default",
   maxSuggestions = 8,
 }: WhereClauseAutocompleteInput): WhereClauseAutocompleteResult {
   const parsed = parseWhereClauseContext(expression, cursor)
-  const suggestions = buildSuggestions(parsed, dataSource, values, maxSuggestions)
+  const suggestions = buildSuggestions(parsed, dataSource, values, scope, maxSuggestions)
 
   return {
     context: parsed.context,

@@ -1,10 +1,15 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
+import { useEffect } from "react"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TracesTable } from "@/components/traces/traces-table"
 import { TracesFilterSidebar } from "@/components/traces/traces-filter-sidebar"
 import { TimeRangePicker } from "@/components/time-range-picker"
+import {
+  areTracesSearchParamsEqual,
+  normalizeTracesSearchParams,
+} from "@/lib/traces/advanced-filter-sync"
 
 const tracesSearchSchema = Schema.Struct({
   services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
@@ -18,6 +23,9 @@ const tracesSearchSchema = Schema.Struct({
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),
   rootOnly: Schema.optional(Schema.Boolean),
+  whereClause: Schema.optional(Schema.String),
+  attributeKey: Schema.optional(Schema.String),
+  attributeValue: Schema.optional(Schema.String),
 })
 
 export type TracesSearchParams = Schema.Schema.Type<typeof tracesSearchSchema>
@@ -31,9 +39,27 @@ function TracesPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
 
-  const handleTimeChange = ({ startTime, endTime }: { startTime?: string; endTime?: string }) => {
+  useEffect(() => {
+    const normalized = normalizeTracesSearchParams(search)
+    if (areTracesSearchParamsEqual(search, normalized)) {
+      return
+    }
+
     navigate({
-      search: (prev) => ({ ...prev, startTime, endTime }),
+      search: normalized,
+      replace: true,
+    })
+  }, [navigate, search])
+
+  const handleTimeChange = ({ startTime, endTime }: { startTime?: string; endTime?: string }) => {
+    const normalized = normalizeTracesSearchParams({
+      ...search,
+      startTime,
+      endTime,
+    })
+
+    navigate({
+      search: normalized,
     })
   }
 

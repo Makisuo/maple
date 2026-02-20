@@ -4,6 +4,7 @@ import Nav from "../../components/Nav.astro";
 import FeatureHero from "../../components/FeatureHero.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+import { ServiceMapMock } from "../../components/ServiceMapMock.tsx";
 ---
 
 <Layout title="Microservices Debugging | Maple" description="Debug latency cascades across distributed services with service maps, trace analysis, and dependency visualization.">
@@ -95,52 +96,8 @@ import Footer from "../../components/Footer.astro";
                         <div class="w-2 h-2 bg-border"></div>
                         <span class="text-[9px] text-fg-muted ml-2">Service Map</span>
                     </div>
-                    <div class="p-4" style="min-height: 240px">
-                        <!-- Top tier -->
-                        <div class="flex justify-center mb-2">
-                            <div class="border border-border bg-bg px-4 py-2 text-center">
-                                <span class="text-[9px] text-fg font-medium block">api-gateway</span>
-                                <span class="text-[8px] text-fg-muted">P95: 480ms</span>
-                            </div>
-                        </div>
-                        <!-- Edges down -->
-                        <div class="flex justify-center">
-                            <svg class="w-64 h-8" viewBox="0 0 256 32">
-                                <line x1="128" y1="0" x2="48" y2="32" stroke="oklch(0.65 0 0)" stroke-width="1" stroke-dasharray="3,3"/>
-                                <line x1="128" y1="0" x2="128" y2="32" stroke="oklch(0.65 0 0)" stroke-width="1" stroke-dasharray="3,3"/>
-                                <line x1="128" y1="0" x2="208" y2="32" stroke="oklch(0.65 0 0)" stroke-width="1" stroke-dasharray="3,3"/>
-                            </svg>
-                        </div>
-                        <!-- Middle tier -->
-                        <div class="flex justify-center gap-3 mb-2">
-                            <div class="border border-border bg-bg px-3 py-2 text-center">
-                                <span class="text-[9px] text-fg font-medium block">auth-svc</span>
-                                <span class="text-[8px] text-fg-muted">12ms</span>
-                            </div>
-                            <div class="border border-border bg-bg px-3 py-2 text-center">
-                                <span class="text-[9px] text-fg font-medium block">order-svc</span>
-                                <span class="text-[8px] text-fg-muted">320ms</span>
-                            </div>
-                            <div class="border border-border bg-bg px-3 py-2 text-center">
-                                <span class="text-[9px] text-fg font-medium block">payment-svc</span>
-                                <span class="text-[8px] text-fg-muted">280ms</span>
-                            </div>
-                        </div>
-                        <!-- Edge to user-db (red) -->
-                        <div class="flex justify-center">
-                            <svg class="w-64 h-8" viewBox="0 0 256 32">
-                                <line x1="80" y1="0" x2="128" y2="32" stroke="oklch(0.65 0 0)" stroke-width="1" stroke-dasharray="3,3"/>
-                                <line x1="128" y1="0" x2="128" y2="32" stroke="oklch(0.637 0.237 25.331)" stroke-width="2"/>
-                                <line x1="176" y1="0" x2="128" y2="32" stroke="oklch(0.637 0.237 25.331)" stroke-width="2"/>
-                            </svg>
-                        </div>
-                        <!-- Bottom tier: user-db highlighted -->
-                        <div class="flex justify-center">
-                            <div class="border-2 border-destructive bg-destructive/5 px-4 py-2 text-center">
-                                <span class="text-[9px] text-destructive font-medium block">user-db</span>
-                                <span class="text-[8px] text-destructive">450ms (was 12ms)</span>
-                            </div>
-                        </div>
+                    <div class="p-0" style="height: 320px">
+                        <ServiceMapMock client:visible />
                     </div>
                 </div>
             </div>
