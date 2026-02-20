@@ -19,6 +19,7 @@
     "@effect/platform": "^0.94.4",
     "@fontsource-variable/geist-mono": "^5.2.7",
     "@maple/domain": "workspace:*",
+    "@maple/ui": "workspace:*",
     "@maple/infra": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "^0.9.5",

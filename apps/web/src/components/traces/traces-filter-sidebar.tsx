@@ -9,7 +9,7 @@ import {
 } from "./filter-section"
 import { DurationRangeFilter } from "./duration-range-filter"
 import { Route } from "@/routes/traces"
-import { Separator } from "@/components/ui/separator"
+import { Separator } from "@maple/ui/components/ui/separator"
 import { getTracesFacetsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import {
   FilterSidebarBody,

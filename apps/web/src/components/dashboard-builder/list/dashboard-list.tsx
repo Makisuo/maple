@@ -1,7 +1,7 @@
 import { PlusIcon, TrashIcon } from "@/components/icons"
 
-import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@maple/ui/components/ui/card"
+import { Button } from "@maple/ui/components/ui/button"
 import type { Dashboard } from "@/components/dashboard-builder/types"
 
 interface DashboardListProps {

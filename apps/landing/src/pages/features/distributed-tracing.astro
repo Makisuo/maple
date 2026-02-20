@@ -1,0 +1,151 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../components/RelatedFeatures.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+---
+
+<Layout title="Distributed Tracing | Maple" description="Visualize request flows across services with flamegraph and waterfall views. Drill into any span to see attributes, events, and timing.">
+    <SeoHead title="Distributed Tracing | Maple" description="Visualize request flows across services with flamegraph and waterfall views. Drill into any span to see attributes, events, and timing." />
+    <Nav />
+    <FeatureHero
+        label="Distributed Tracing"
+        title="Follow every request across services"
+        subtitle="Visualize request flows with flamegraph, waterfall, and flow views. See exactly where time is spent across your distributed system."
+    />
+
+    <!-- Demo Mock: Waterfall Trace View -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="bg-bg-elevated border border-border">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Trace: a3f8c1d2</span>
+                </div>
+
+                <div class="flex flex-col md:flex-row">
+                    <!-- Waterfall spans -->
+                    <div class="flex-1 p-4 md:p-6 space-y-3">
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="text-[10px] text-fg-muted uppercase tracking-wider">Waterfall</span>
+                            <span class="text-[10px] text-fg-muted">Duration: 1.24s</span>
+                        </div>
+
+                        <!-- api-gateway span -->
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] text-fg-muted w-24 shrink-0 truncate">api-gateway</span>
+                                <div class="flex-1 h-5 bg-bg relative">
+                                    <div class="absolute inset-y-0 left-0 bg-chart-1/80 flex items-center px-2" style="width: 100%">
+                                        <span class="text-[8px] text-fg font-medium truncate">POST /checkout</span>
+                                    </div>
+                                </div>
+                                <span class="text-[9px] text-fg-muted w-12 text-right shrink-0">1.24s</span>
+                            </div>
+                        </div>
+
+                        <!-- auth-service span -->
+                        <div class="space-y-1 pl-6">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] text-fg-muted w-24 shrink-0 truncate">auth-service</span>
+                                <div class="flex-1 h-5 bg-bg relative">
+                                    <div class="absolute inset-y-0 left-0 bg-chart-2/80 flex items-center px-2" style="width: 15%">
+                                        <span class="text-[8px] text-fg font-medium truncate">validateToken</span>
+                                    </div>
+                                </div>
+                                <span class="text-[9px] text-fg-muted w-12 text-right shrink-0">45ms</span>
+                            </div>
+                        </div>
+
+                        <!-- order-service span -->
+                        <div class="space-y-1 pl-6">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] text-fg-muted w-24 shrink-0 truncate">order-service</span>
+                                <div class="flex-1 h-5 bg-bg relative">
+                                    <div class="absolute inset-y-0 bg-chart-3/80 flex items-center px-2" style="width: 40%; left: 12%">
+                                        <span class="text-[8px] text-fg font-medium truncate">createOrder</span>
+                                    </div>
+                                </div>
+                                <span class="text-[9px] text-fg-muted w-12 text-right shrink-0">480ms</span>
+                            </div>
+                        </div>
+
+                        <!-- payment-svc span (ERROR) -->
+                        <div class="space-y-1 pl-12">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] text-fg-muted w-24 shrink-0 truncate">payment-svc</span>
+                                <div class="flex-1 h-5 bg-bg relative">
+                                    <div class="absolute inset-y-0 bg-destructive/60 flex items-center px-2" style="width: 45%; left: 30%">
+                                        <span class="text-[8px] text-fg font-medium truncate">processPayment</span>
+                                    </div>
+                                </div>
+                                <span class="text-[9px] text-destructive w-12 text-right shrink-0">ERROR</span>
+                            </div>
+                        </div>
+
+                        <!-- inventory-svc span -->
+                        <div class="space-y-1 pl-12">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] text-fg-muted w-24 shrink-0 truncate">inventory-svc</span>
+                                <div class="flex-1 h-5 bg-bg relative">
+                                    <div class="absolute inset-y-0 bg-chart-5/80 flex items-center px-2" style="width: 12%; left: 52%">
+                                        <span class="text-[8px] text-fg font-medium truncate">reserveItems</span>
+                                    </div>
+                                </div>
+                                <span class="text-[9px] text-fg-muted w-12 text-right shrink-0">89ms</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Span attributes panel -->
+                    <div class="w-full md:w-64 border-t md:border-t-0 md:border-l border-border p-4 md:p-6">
+                        <span class="text-[10px] text-fg-muted uppercase tracking-wider">Span Attributes</span>
+                        <div class="mt-4 space-y-3">
+                            <div>
+                                <span class="text-[9px] text-fg-muted block">http.method</span>
+                                <span class="text-[10px] text-fg font-mono">POST</span>
+                            </div>
+                            <div>
+                                <span class="text-[9px] text-fg-muted block">http.route</span>
+                                <span class="text-[10px] text-fg font-mono">/checkout</span>
+                            </div>
+                            <div>
+                                <span class="text-[9px] text-fg-muted block">http.status_code</span>
+                                <span class="text-[10px] text-destructive font-mono">500</span>
+                            </div>
+                            <div>
+                                <span class="text-[9px] text-fg-muted block">error.type</span>
+                                <span class="text-[10px] text-destructive font-mono">PaymentTimeout</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detail Grid -->
+    <section class="py-24 md:py-32">
+        <div class="mx-auto max-w-6xl px-6">
+            <FeatureDetailGrid items={[
+                { title: "Waterfall View", description: "See the full timeline of a request with nested spans, timing bars, and service colors." },
+                { title: "Flamegraph View", description: "Identify hot paths and time-consuming operations with interactive flamegraph visualization." },
+                { title: "Flow View", description: "Understand service-to-service communication with an interactive dependency flow diagram." },
+                { title: "Span Attributes", description: "Inspect HTTP headers, database queries, error messages, and custom attributes on any span." },
+                { title: "Trace-Log Correlation", description: "Jump from any span directly to its correlated logs. Every signal connected by trace ID." },
+                { title: "Root Span Filtering", description: "Filter traces by service, duration, status, HTTP method, and custom attributes." },
+            ]} />
+        </div>
+    </section>
+
+    <RelatedFeatures current="distributed-tracing" />
+    <BottomCTA />
+    <Footer />
+</Layout>

@@ -3,17 +3,17 @@ import { useState } from "react"
 import { Exit } from "effect"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@maple/ui/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+} from "@maple/ui/components/ui/card"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Input } from "@maple/ui/components/ui/input"
+import { Label } from "@maple/ui/components/ui/label"
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from "@maple/ui/components/ui/dialog"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,21 +32,21 @@ import {
   AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@maple/ui/components/ui/alert-dialog"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-} from "@/components/ui/input-group"
+} from "@maple/ui/components/ui/input-group"
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@maple/ui/components/ui/empty"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import {
   AlertWarningIcon,
   CheckIcon,

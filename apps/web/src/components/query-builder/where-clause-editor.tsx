@@ -1,13 +1,13 @@
 import * as React from "react"
 
-import { Textarea } from "@/components/ui/textarea"
+import { Textarea } from "@maple/ui/components/ui/textarea"
 import {
   applyWhereClauseSuggestion,
   getWhereClauseAutocomplete,
   type WhereClauseAutocompleteValues,
 } from "@/lib/query-builder/where-clause-autocomplete"
 import type { QueryBuilderDataSource } from "@/lib/query-builder/model"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 
 interface WhereClauseEditorProps {
   dataSource: QueryBuilderDataSource

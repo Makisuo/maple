@@ -2,13 +2,13 @@ import * as React from "react"
 
 import { XmarkIcon } from "@/components/icons"
 
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { Button } from "@maple/ui/components/ui/button"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
 import { FlamegraphTooltipContent } from "./flamegraph-tooltip"
 import { FlamegraphMinimap } from "./flamegraph-minimap"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 import { formatDuration } from "@/lib/format"
-import { getSpanColorStyle, getServiceLegendColor } from "@/lib/colors"
+import { getSpanColorStyle, getServiceLegendColor } from "@maple/ui/colors"
 import { getCacheInfo } from "@/lib/cache"
 import type { SpanNode } from "@/api/tinybird/traces"
 

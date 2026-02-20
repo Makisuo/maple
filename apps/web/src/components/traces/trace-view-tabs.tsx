@@ -1,6 +1,6 @@
 import { MenuIcon, FireIcon, NetworkNodesIcon } from "@/components/icons"
 
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
 import { SpanHierarchy } from "./span-hierarchy"
 import { Flamegraph } from "./flamegraph"
 import { TraceFlowView } from "./flow-view"

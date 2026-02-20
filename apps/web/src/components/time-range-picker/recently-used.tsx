@@ -1,5 +1,5 @@
 import type { RecentTimeRange } from "@/hooks/use-recently-used-times"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 
 interface RecentlyUsedProps {
   recentTimes: RecentTimeRange[]

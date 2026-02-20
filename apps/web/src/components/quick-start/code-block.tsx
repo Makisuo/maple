@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { CopyIcon, CheckIcon } from "@/components/icons"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 import { highlightCode } from "@/lib/sugar-high"
 
 interface CodeBlockProps {

@@ -11,9 +11,9 @@ import {
 } from "@/components/icons"
 import type { IconComponent } from "@/components/icons"
 
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 import { formatDuration } from "@/lib/format"
-import { getSpanColorStyle, extractClassName } from "@/lib/colors"
+import { getSpanColorStyle, extractClassName } from "@maple/ui/colors"
 import { getCacheInfo, cacheResultStyles, CACHE_OPERATION_COLORS } from "@/lib/cache"
 import type { CacheInfo } from "@/lib/cache"
 import type { FlowNodeData, AggregatedDuration } from "./flow-utils"

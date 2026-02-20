@@ -6,13 +6,13 @@ import { toast } from "sonner"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TraceViewTabs } from "@/components/traces/trace-view-tabs"
 import { SpanDetailPanel } from "@/components/traces/span-detail-panel"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
-} from "@/components/ui/resizable"
+} from "@maple/ui/components/ui/resizable"
 import { formatDuration } from "@/lib/format"
 import { type Span, type SpanNode } from "@/api/tinybird/traces"
 import { getSpanHierarchyResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"

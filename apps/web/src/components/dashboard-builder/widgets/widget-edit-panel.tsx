@@ -1,5 +1,5 @@
-import { Input } from "@/components/ui/input"
-import { getChartById, getChartsByCategory } from "@/components/charts/registry"
+import { Input } from "@maple/ui/components/ui/input"
+import { getChartById, getChartsByCategory } from "@maple/ui/components/charts/registry"
 import { ChartPreview } from "@/components/dashboard-builder/widgets/chart-preview"
 import type {
   DashboardWidget,

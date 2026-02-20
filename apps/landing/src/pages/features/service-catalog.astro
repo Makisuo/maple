@@ -1,0 +1,153 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../components/RelatedFeatures.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+---
+
+<Layout title="Service Catalog & Map | Maple" description="See all your services at a glance with latency percentiles, Apdex scores, throughput, and dependency mapping.">
+    <SeoHead title="Service Catalog & Map | Maple" description="See all your services at a glance with latency percentiles, Apdex scores, throughput, and dependency mapping." />
+    <Nav />
+    <FeatureHero
+        label="Service Catalog"
+        title="All your services at a glance"
+        subtitle="Monitor every service with latency percentiles, Apdex scores, throughput metrics, and dependency visualization."
+    />
+
+    <!-- Demo Mock: Services Table + Dependency Graph -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="bg-bg-elevated border border-border">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Services</span>
+                </div>
+
+                <div class="flex flex-col lg:flex-row">
+                    <!-- Services table -->
+                    <div class="flex-1 p-4 md:p-6 overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-border">
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-left py-2 pr-4">Service</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-left py-2 pr-4">Env</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-right py-2 pr-4">P50</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-right py-2 pr-4">P95</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-right py-2 pr-4">P99</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-right py-2 pr-4">Apdex</th>
+                                    <th class="text-[9px] text-fg-muted uppercase tracking-wider text-right py-2">Throughput</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="border-b border-border/50">
+                                    <td class="text-[10px] text-fg py-2.5 pr-4">api-gateway</td>
+                                    <td class="text-[9px] text-fg-muted py-2.5 pr-4">prod</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">12ms</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">45ms</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">120ms</td>
+                                    <td class="text-[10px] text-chart-2 font-mono text-right py-2.5 pr-4">0.94</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5">1.2K/s</td>
+                                </tr>
+                                <tr class="border-b border-border/50">
+                                    <td class="text-[10px] text-fg py-2.5 pr-4">order-service</td>
+                                    <td class="text-[9px] text-fg-muted py-2.5 pr-4">prod</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">23ms</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">89ms</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">234ms</td>
+                                    <td class="text-[10px] text-chart-2 font-mono text-right py-2.5 pr-4">0.87</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5">456/s</td>
+                                </tr>
+                                <tr class="border-b border-border/50">
+                                    <td class="text-[10px] text-fg py-2.5 pr-4">payment-svc</td>
+                                    <td class="text-[9px] text-fg-muted py-2.5 pr-4">prod</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">34ms</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">150ms</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">380ms</td>
+                                    <td class="text-[10px] text-chart-1 font-mono text-right py-2.5 pr-4">0.72</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5">234/s</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-[10px] text-fg py-2.5 pr-4">user-db</td>
+                                    <td class="text-[9px] text-fg-muted py-2.5 pr-4">prod</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">8ms</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">15ms</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5 pr-4">42ms</td>
+                                    <td class="text-[10px] text-chart-2 font-mono text-right py-2.5 pr-4">0.98</td>
+                                    <td class="text-[10px] text-fg font-mono text-right py-2.5">890/s</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Mini dependency graph -->
+                    <div class="w-full lg:w-72 border-t lg:border-t-0 lg:border-l border-border p-4 md:p-6">
+                        <span class="text-[10px] text-fg-muted uppercase tracking-wider block mb-4">Dependencies</span>
+                        <div class="relative h-48">
+                            <!-- api-gateway (top center) -->
+                            <div class="absolute top-0 left-1/2 -translate-x-1/2 border border-chart-1/40 bg-chart-1/10 px-3 py-1.5">
+                                <span class="text-[9px] text-chart-1">api-gateway</span>
+                            </div>
+
+                            <!-- Lines from api-gateway down -->
+                            <svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 240 180">
+                                <!-- api-gateway to order-service -->
+                                <line x1="120" y1="30" x2="60" y2="80" stroke="oklch(1 0 0 / 10%)" stroke-width="1"/>
+                                <!-- api-gateway to auth-service -->
+                                <line x1="120" y1="30" x2="180" y2="80" stroke="oklch(1 0 0 / 10%)" stroke-width="1"/>
+                                <!-- order-service to payment-svc -->
+                                <line x1="60" y1="105" x2="60" y2="145" stroke="oklch(1 0 0 / 10%)" stroke-width="1"/>
+                                <!-- auth-service to user-db -->
+                                <line x1="180" y1="105" x2="180" y2="145" stroke="oklch(1 0 0 / 10%)" stroke-width="1"/>
+                            </svg>
+
+                            <!-- order-service (middle left) -->
+                            <div class="absolute top-[75px] left-0 border border-chart-3/40 bg-chart-3/10 px-3 py-1.5">
+                                <span class="text-[9px] text-chart-3">order-service</span>
+                            </div>
+
+                            <!-- auth-service (middle right) -->
+                            <div class="absolute top-[75px] right-0 border border-chart-2/40 bg-chart-2/10 px-3 py-1.5">
+                                <span class="text-[9px] text-chart-2">auth-service</span>
+                            </div>
+
+                            <!-- payment-svc (bottom left) -->
+                            <div class="absolute bottom-0 left-0 border border-destructive/40 bg-destructive/10 px-3 py-1.5">
+                                <span class="text-[9px] text-destructive">payment-svc</span>
+                            </div>
+
+                            <!-- user-db (bottom right) -->
+                            <div class="absolute bottom-0 right-0 border border-chart-5/40 bg-chart-5/10 px-3 py-1.5">
+                                <span class="text-[9px] text-chart-5">user-db</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detail Grid -->
+    <section class="py-24 md:py-32">
+        <div class="mx-auto max-w-6xl px-6">
+            <FeatureDetailGrid items={[
+                { title: "Latency Percentiles", description: "Track P50, P95, and P99 latency for every service in real-time." },
+                { title: "Apdex Score", description: "Application performance index at a glance. Color-coded for quick assessment." },
+                { title: "Service Dependencies", description: "Visualize service-to-service communication with an interactive dependency map." },
+                { title: "Environment Filtering", description: "Filter by production, staging, or any custom environment." },
+                { title: "Commit SHA Tracking", description: "Correlate performance changes with specific deployments." },
+                { title: "Throughput Monitoring", description: "Track requests per second across all services." },
+            ]} />
+        </div>
+    </section>
+
+    <RelatedFeatures current="service-catalog" />
+    <BottomCTA />
+    <Footer />
+</Layout>

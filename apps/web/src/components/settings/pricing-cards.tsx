@@ -7,7 +7,7 @@ type Product = NonNullable<
 >[number]
 type ProductItem = Product["items"][number]
 
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 import { getPlanFeatures } from "@/lib/billing/plans"
 import {
   Card,
@@ -16,12 +16,12 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
-} from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Spinner } from "@/components/ui/spinner"
+} from "@maple/ui/components/ui/card"
+import { Button } from "@maple/ui/components/ui/button"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Separator } from "@maple/ui/components/ui/separator"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { Spinner } from "@maple/ui/components/ui/spinner"
 import {
   Dialog,
   DialogContent,
@@ -29,7 +29,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/components/ui/dialog"
+} from "@maple/ui/components/ui/dialog"
 import {
   FileIcon,
   PulseIcon,

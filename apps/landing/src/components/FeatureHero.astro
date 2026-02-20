@@ -1,0 +1,49 @@
+---
+interface Props {
+    label: string;
+    title: string;
+    subtitle: string;
+}
+
+const { label, title, subtitle } = Astro.props;
+---
+
+<section class="relative pt-[47px] overflow-hidden">
+    <!-- Grid background -->
+    <div class="absolute inset-0 pointer-events-none" style="
+        background-image:
+            linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px),
+            linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px);
+        background-size: 60px 60px;
+        mask-image: radial-gradient(ellipse 70% 50% at 50% 30%, black, transparent);
+    "></div>
+
+    <div class="relative mx-auto max-w-6xl px-6 pt-24 md:pt-32 pb-16 md:pb-24">
+        <!-- Badge -->
+        <div class="mb-6">
+            <span class="inline-block border border-border px-3 py-1 text-[11px] text-accent uppercase tracking-wider">
+                {label}
+            </span>
+        </div>
+
+        <!-- Headline -->
+        <h1 class="text-3xl sm:text-4xl md:text-5xl font-bold text-fg leading-tight max-w-3xl">
+            {title}
+        </h1>
+
+        <!-- Subtitle -->
+        <p class="mt-5 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed">
+            {subtitle}
+        </p>
+
+        <!-- Dual CTAs -->
+        <div class="mt-8 flex flex-wrap items-center gap-4">
+            <a href="/waitlist" class="bg-accent text-accent-foreground px-6 py-2.5 text-sm font-medium hover:opacity-90 transition-opacity">
+                Join the waitlist
+            </a>
+            <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="border border-border px-6 py-2.5 text-sm font-medium text-fg hover:opacity-90 transition-opacity">
+                View on GitHub
+            </a>
+        </div>
+    </div>
+</section>

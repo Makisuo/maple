@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge"
+import { Badge } from "@maple/ui/components/ui/badge"
 
 const metricTypeConfig: Record<string, { label: string; className: string }> = {
   sum: {

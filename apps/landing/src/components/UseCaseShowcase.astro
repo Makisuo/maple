@@ -1,0 +1,210 @@
+---
+
+---
+
+<section class="py-24 md:py-32">
+    <div class="mx-auto max-w-6xl px-6">
+        <span class="text-[11px] text-accent uppercase tracking-wider">Use Cases</span>
+        <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-16">Real-world debugging scenarios</h2>
+
+        <!-- Scenario 1: Checkout errors spike (text left, mock right) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center pb-16 border-b border-border">
+            <div>
+                <span class="text-[11px] text-accent uppercase tracking-wider">E-Commerce</span>
+                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">Checkout errors spike during a flash sale</h3>
+                <p class="mt-3 text-sm text-fg-muted leading-relaxed">
+                    Your flash sale goes live and payment failures start climbing. You need to find the failing service,
+                    the exact error, and the upstream cause — fast.
+                </p>
+                <p class="mt-4 text-xs text-accent leading-relaxed">
+                    Root cause in 90 seconds: Stripe timeout, correlated with retry-exhaustion logs.
+                </p>
+                <a href="/use-cases/ecommerce-observability" class="mt-4 inline-block text-xs text-accent hover:underline underline-offset-2">See the full story &rarr;</a>
+            </div>
+            <div class="border border-border bg-bg-elevated overflow-hidden">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Trace: f7a2c8e1</span>
+                </div>
+                <!-- Condensed trace with payment span in red -->
+                <div class="p-3 space-y-1.5">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[9px] text-fg-muted w-20 shrink-0 truncate">api-gateway</span>
+                        <div class="flex-1 h-4 bg-bg relative">
+                            <div class="absolute inset-y-0 left-0 bg-chart-1/70 flex items-center px-1.5" style="width: 100%">
+                                <span class="text-[8px] text-fg truncate">POST /checkout</span>
+                            </div>
+                        </div>
+                        <span class="text-[8px] text-fg-muted w-10 text-right shrink-0">1.2s</span>
+                    </div>
+                    <div class="flex items-center gap-2 pl-4">
+                        <span class="text-[9px] text-fg-muted w-20 shrink-0 truncate">order-svc</span>
+                        <div class="flex-1 h-4 bg-bg relative">
+                            <div class="absolute inset-y-0 bg-chart-3/70 flex items-center px-1.5" style="width: 60%; left: 10%">
+                                <span class="text-[8px] text-fg truncate">createOrder</span>
+                            </div>
+                        </div>
+                        <span class="text-[8px] text-fg-muted w-10 text-right shrink-0">680ms</span>
+                    </div>
+                    <div class="flex items-center gap-2 pl-8">
+                        <span class="text-[9px] text-fg-muted w-20 shrink-0 truncate">payment-svc</span>
+                        <div class="flex-1 h-4 bg-bg relative">
+                            <div class="absolute inset-y-0 bg-destructive/70 flex items-center px-1.5" style="width: 50%; left: 25%">
+                                <span class="text-[8px] text-fg truncate">chargeCard ERROR</span>
+                            </div>
+                        </div>
+                        <span class="text-[8px] text-destructive w-10 text-right shrink-0">5000ms</span>
+                    </div>
+                </div>
+                <!-- Correlated log entry -->
+                <div class="border-t border-border px-3 py-2">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-wider mb-1.5">Correlated Logs</div>
+                    <div class="flex items-center gap-2 text-[9px]">
+                        <span class="text-fg-muted font-mono text-[8px]">14:23:01</span>
+                        <span class="text-[7px] px-1 py-0.5 bg-yellow-500/10 text-yellow-400">WARN</span>
+                        <span class="text-fg-muted truncate">Retry 3/3 exhausted for Stripe charge txn_9d1e — timeout 5000ms</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario 2: API latency doubles (mock left, text right) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center py-16 border-b border-border">
+            <div class="order-2 md:order-1 border border-border bg-bg-elevated overflow-hidden">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Service Map</span>
+                </div>
+                <!-- Static service map with boxes and edges -->
+                <div class="p-4 relative" style="min-height: 200px">
+                    <!-- Service nodes -->
+                    <div class="flex justify-center gap-6 mb-6">
+                        <div class="border border-border bg-bg px-3 py-2 text-center">
+                            <span class="text-[9px] text-fg font-medium block">api-gateway</span>
+                            <span class="text-[8px] text-fg-muted">P99: 120ms</span>
+                        </div>
+                    </div>
+                    <div class="flex justify-center gap-3 mb-2">
+                        <svg class="w-full h-6" viewBox="0 0 320 24">
+                            <line x1="80" y1="0" x2="40" y2="24" stroke="oklch(0.65 0 0)" stroke-width="1" stroke-dasharray="3,3"/>
+                            <line x1="160" y1="0" x2="160" y2="24" stroke="oklch(0.65 0 0)" stroke-width="1" stroke-dasharray="3,3"/>
+                            <line x1="240" y1="0" x2="280" y2="24" stroke="oklch(0.65 0 0)" stroke-width="1" stroke-dasharray="3,3"/>
+                        </svg>
+                    </div>
+                    <div class="flex justify-center gap-3">
+                        <div class="border border-border bg-bg px-3 py-2 text-center">
+                            <span class="text-[9px] text-fg font-medium block">auth-svc</span>
+                            <span class="text-[8px] text-fg-muted">22ms</span>
+                        </div>
+                        <div class="border border-border bg-bg px-3 py-2 text-center">
+                            <span class="text-[9px] text-fg font-medium block">order-svc</span>
+                            <span class="text-[8px] text-fg-muted">85ms</span>
+                        </div>
+                        <div class="border-2 border-destructive bg-destructive/5 px-3 py-2 text-center">
+                            <span class="text-[9px] text-destructive font-medium block">user-db</span>
+                            <span class="text-[8px] text-destructive">450ms</span>
+                        </div>
+                    </div>
+                    <div class="flex justify-center mt-2">
+                        <svg class="h-6 w-32" viewBox="0 0 128 24">
+                            <line x1="64" y1="0" x2="64" y2="24" stroke="oklch(0.637 0.237 25.331)" stroke-width="1.5"/>
+                        </svg>
+                    </div>
+                    <div class="flex justify-center">
+                        <div class="border border-border bg-bg px-3 py-2 text-center">
+                            <span class="text-[9px] text-fg font-medium block">postgres</span>
+                            <span class="text-[8px] text-fg-muted">pool: 50/50</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="order-1 md:order-2">
+                <span class="text-[11px] text-accent uppercase tracking-wider">Microservices</span>
+                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">API latency doubles without any deployment</h3>
+                <p class="mt-3 text-sm text-fg-muted leading-relaxed">
+                    No one deployed anything, but P95 latency just doubled. The service map shows which
+                    dependency is the bottleneck and how the cascade propagates.
+                </p>
+                <p class="mt-4 text-xs text-accent leading-relaxed">
+                    Service map reveals connection pool exhaustion cascading from user-db.
+                </p>
+                <a href="/use-cases/microservices-debugging" class="mt-4 inline-block text-xs text-accent hover:underline underline-offset-2">See the full story &rarr;</a>
+            </div>
+        </div>
+
+        <!-- Scenario 3: 3 AM alert (text left, mock right) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center pt-16">
+            <div>
+                <span class="text-[11px] text-accent uppercase tracking-wider">AI Diagnostics</span>
+                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">3 AM alert, nobody awake</h3>
+                <p class="mt-3 text-sm text-fg-muted leading-relaxed">
+                    An alert fires at 3 AM. Instead of paging your on-call, the MCP agent connects to Maple,
+                    investigates the issue, and posts a diagnosis to Slack.
+                </p>
+                <p class="mt-4 text-xs text-accent leading-relaxed">
+                    MCP agent auto-diagnoses and posts to Slack before anyone wakes up.
+                </p>
+                <a href="/use-cases/api-performance" class="mt-4 inline-block text-xs text-accent hover:underline underline-offset-2">See the full story &rarr;</a>
+            </div>
+            <div class="border border-border bg-bg-elevated overflow-hidden">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">MCP Agent Session</span>
+                </div>
+                <!-- Agent conversation -->
+                <div class="p-3 space-y-3">
+                    <!-- Alert trigger -->
+                    <div class="flex items-start gap-2">
+                        <div class="w-4 h-4 bg-destructive/20 flex items-center justify-center shrink-0 mt-0.5">
+                            <span class="text-[8px] text-destructive">!</span>
+                        </div>
+                        <div>
+                            <span class="text-[9px] text-fg font-medium">Alert: Error rate spike</span>
+                            <span class="text-[8px] text-fg-muted block">payment-svc at 4.2%, threshold 1.0%</span>
+                        </div>
+                    </div>
+                    <!-- Tool call 1 -->
+                    <div class="border border-border bg-bg px-2.5 py-1.5">
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[8px] text-accent font-mono">system_health()</span>
+                        </div>
+                        <span class="text-[8px] text-fg-muted block mt-0.5">3 services degraded, payment-svc critical</span>
+                    </div>
+                    <!-- Tool call 2 -->
+                    <div class="border border-border bg-bg px-2.5 py-1.5">
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[8px] text-accent font-mono">find_errors("payment-svc")</span>
+                        </div>
+                        <span class="text-[8px] text-fg-muted block mt-0.5">42 errors in last 5m: StripeTimeoutError</span>
+                    </div>
+                    <!-- Diagnosis -->
+                    <div class="flex items-start gap-2">
+                        <div class="w-4 h-4 bg-chart-2/20 flex items-center justify-center shrink-0 mt-0.5">
+                            <span class="text-[8px] text-chart-2">AI</span>
+                        </div>
+                        <div>
+                            <span class="text-[9px] text-fg font-medium">Diagnosis</span>
+                            <span class="text-[8px] text-fg-muted block">Stripe API timeout causing payment failures. Connection pool at capacity. Recommend circuit breaker activation.</span>
+                        </div>
+                    </div>
+                    <!-- Slack notification -->
+                    <div class="border-t border-border pt-2 mt-2">
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[8px] text-chart-3">Posted to #incidents</span>
+                            <span class="text-[8px] text-fg-muted">3:02 AM</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>

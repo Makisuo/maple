@@ -1,5 +1,5 @@
 import { Suspense, type ComponentType } from "react"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 interface ChartPreviewProps {
   component: ComponentType<{ className?: string }>

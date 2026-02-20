@@ -14,7 +14,7 @@ import "@xyflow/react/dist/style.css"
 
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 
-import { getServiceLegendColor } from "@/lib/colors"
+import { getServiceLegendColor } from "@maple/ui/colors"
 import { getServiceMapResultAtom, getServiceOverviewResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { GetServiceMapInput, ServiceEdge } from "@/api/tinybird/service-map"
 import type { GetServiceOverviewInput, ServiceOverview } from "@/api/tinybird/services"

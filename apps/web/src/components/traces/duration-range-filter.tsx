@@ -1,14 +1,14 @@
 import * as React from "react"
 import { ChevronDownIcon } from "@/components/icons"
 
-import { cn } from "@/lib/utils"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { cn } from "@maple/ui/utils"
+import { Input } from "@maple/ui/components/ui/input"
+import { Label } from "@maple/ui/components/ui/label"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+} from "@maple/ui/components/ui/collapsible"
 
 interface DurationRangeFilterProps {
   minValue: number | undefined

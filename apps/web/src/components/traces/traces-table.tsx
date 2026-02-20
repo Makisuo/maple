@@ -9,9 +9,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+} from "@maple/ui/components/ui/table"
+import { Badge } from "@maple/ui/components/ui/badge"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Trace } from "@/api/tinybird/traces"
 import { listTracesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { TracesSearchParams } from "@/routes/traces"

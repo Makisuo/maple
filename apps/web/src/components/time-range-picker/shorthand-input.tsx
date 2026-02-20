@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react"
-import { Input } from "@/components/ui/input"
+import { Input } from "@maple/ui/components/ui/input"
 import { relativeToAbsolute } from "@/lib/time-utils"
 
 interface ShorthandInputProps {

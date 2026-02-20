@@ -1,0 +1,172 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../components/RelatedFeatures.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+---
+
+<Layout title="Metrics & Dashboards | Maple" description="Build custom dashboards with 20+ chart types. Track latency, throughput, error rates, and any custom metric.">
+    <SeoHead title="Metrics & Dashboards | Maple" description="Build custom dashboards with 20+ chart types. Track latency, throughput, error rates, and any custom metric." />
+    <Nav />
+    <FeatureHero
+        label="Metrics & Dashboards"
+        title="Track every signal that matters"
+        subtitle="Drag-and-drop dashboard builder with 20+ chart types. Monitor latency, throughput, error rates, and custom metrics."
+    />
+
+    <!-- Demo Mock: Dashboard Canvas -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="bg-bg-elevated border border-border">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Dashboard: Production Overview</span>
+                </div>
+
+                <div class="p-4 md:p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- P95 Latency widget -->
+                        <div class="border border-border bg-bg p-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[9px] text-fg-muted cursor-grab">&#x22EE;&#x22EE;</span>
+                                    <span class="text-[10px] text-fg font-medium">P95 Latency</span>
+                                </div>
+                                <span class="text-[9px] text-fg-muted">Last 1h</span>
+                            </div>
+                            <div class="flex items-end gap-[2px] h-20">
+                                <div class="flex-1 bg-chart-1/30 hover:bg-chart-1/50 transition-colors" style="height: 30%"></div>
+                                <div class="flex-1 bg-chart-1/40 hover:bg-chart-1/50 transition-colors" style="height: 40%"></div>
+                                <div class="flex-1 bg-chart-1/50 hover:bg-chart-1/60 transition-colors" style="height: 35%"></div>
+                                <div class="flex-1 bg-chart-1/50 hover:bg-chart-1/60 transition-colors" style="height: 55%"></div>
+                                <div class="flex-1 bg-chart-1/60 hover:bg-chart-1/70 transition-colors" style="height: 50%"></div>
+                                <div class="flex-1 bg-chart-1/60 hover:bg-chart-1/70 transition-colors" style="height: 65%"></div>
+                                <div class="flex-1 bg-chart-1/70 hover:bg-chart-1/80 transition-colors" style="height: 80%"></div>
+                                <div class="flex-1 bg-chart-1 hover:bg-chart-1 transition-colors" style="height: 95%"></div>
+                            </div>
+                            <div class="flex items-center justify-between mt-2">
+                                <span class="text-[9px] text-fg-muted">12:00</span>
+                                <span class="text-[9px] text-fg-muted">13:00</span>
+                            </div>
+                        </div>
+
+                        <!-- Throughput widget -->
+                        <div class="border border-border bg-bg p-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[9px] text-fg-muted cursor-grab">&#x22EE;&#x22EE;</span>
+                                    <span class="text-[10px] text-fg font-medium">Throughput</span>
+                                </div>
+                                <span class="text-[9px] text-fg-muted">Last 1h</span>
+                            </div>
+                            <div class="flex items-end gap-[2px] h-20">
+                                <div class="flex-1 bg-chart-3/70 hover:bg-chart-3/90 transition-colors" style="height: 60%"></div>
+                                <div class="flex-1 bg-chart-3/70 hover:bg-chart-3/90 transition-colors" style="height: 75%"></div>
+                                <div class="flex-1 bg-chart-3/70 hover:bg-chart-3/90 transition-colors" style="height: 65%"></div>
+                                <div class="flex-1 bg-chart-3/80 hover:bg-chart-3/90 transition-colors" style="height: 85%"></div>
+                                <div class="flex-1 bg-chart-3/80 hover:bg-chart-3/90 transition-colors" style="height: 90%"></div>
+                                <div class="flex-1 bg-chart-3/70 hover:bg-chart-3/90 transition-colors" style="height: 70%"></div>
+                                <div class="flex-1 bg-chart-3/80 hover:bg-chart-3/90 transition-colors" style="height: 80%"></div>
+                                <div class="flex-1 bg-chart-3 hover:bg-chart-3 transition-colors" style="height: 88%"></div>
+                            </div>
+                            <div class="flex items-center justify-between mt-2">
+                                <span class="text-[9px] text-fg-muted">12:00</span>
+                                <span class="text-[9px] text-fg-muted">13:00</span>
+                            </div>
+                        </div>
+
+                        <!-- Error Rate stat widget -->
+                        <div class="border border-border bg-bg p-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[9px] text-fg-muted cursor-grab">&#x22EE;&#x22EE;</span>
+                                    <span class="text-[10px] text-fg font-medium">Error Rate</span>
+                                </div>
+                                <span class="text-[9px] text-fg-muted">Last 1h</span>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <span class="text-3xl font-bold text-fg">0.42%</span>
+                                <div class="flex-1">
+                                    <div class="flex items-end gap-[1px] h-8">
+                                        <div class="flex-1 bg-chart-2/30" style="height: 40%"></div>
+                                        <div class="flex-1 bg-chart-2/35" style="height: 35%"></div>
+                                        <div class="flex-1 bg-chart-2/40" style="height: 50%"></div>
+                                        <div class="flex-1 bg-chart-2/45" style="height: 45%"></div>
+                                        <div class="flex-1 bg-chart-2/50" style="height: 55%"></div>
+                                        <div class="flex-1 bg-chart-2/55" style="height: 60%"></div>
+                                        <div class="flex-1 bg-chart-2/60" style="height: 50%"></div>
+                                        <div class="flex-1 bg-chart-2/65" style="height: 65%"></div>
+                                        <div class="flex-1 bg-chart-2/70" style="height: 55%"></div>
+                                        <div class="flex-1 bg-chart-2/75" style="height: 70%"></div>
+                                        <div class="flex-1 bg-chart-2/80" style="height: 60%"></div>
+                                        <div class="flex-1 bg-chart-2" style="height: 42%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="text-[9px] text-chart-2 mt-2 block">Within healthy threshold</span>
+                        </div>
+
+                        <!-- Mini services table -->
+                        <div class="border border-border bg-bg p-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[9px] text-fg-muted cursor-grab">&#x22EE;&#x22EE;</span>
+                                    <span class="text-[10px] text-fg font-medium">Top Services</span>
+                                </div>
+                                <span class="text-[9px] text-fg-muted">By latency</span>
+                            </div>
+                            <div class="space-y-0">
+                                <div class="flex items-center justify-between py-2 border-b border-border/50">
+                                    <span class="text-[10px] text-fg">api-gateway</span>
+                                    <div class="flex items-center gap-4">
+                                        <span class="text-[9px] text-fg-muted">P95: 45ms</span>
+                                        <span class="text-[9px] text-chart-2">0.94</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-between py-2 border-b border-border/50">
+                                    <span class="text-[10px] text-fg">order-service</span>
+                                    <div class="flex items-center gap-4">
+                                        <span class="text-[9px] text-fg-muted">P95: 89ms</span>
+                                        <span class="text-[9px] text-chart-2">0.87</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-between py-2">
+                                    <span class="text-[10px] text-fg">payment-svc</span>
+                                    <div class="flex items-center gap-4">
+                                        <span class="text-[9px] text-fg-muted">P95: 150ms</span>
+                                        <span class="text-[9px] text-chart-1">0.72</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detail Grid -->
+    <section class="py-24 md:py-32">
+        <div class="mx-auto max-w-6xl px-6">
+            <FeatureDetailGrid items={[
+                { title: "Drag-Drop Builder", description: "Build dashboards visually. Drag widgets, resize them, arrange in any layout." },
+                { title: "20+ Chart Types", description: "Area, line, bar, pie, radar charts with multiple style variants." },
+                { title: "Gauge & Counter", description: "Display scalar metrics with stat widgets, gauges, and counters." },
+                { title: "Custom Time Ranges", description: "Zoom into any time window. Compare periods side-by-side." },
+                { title: "Dashboard Sharing", description: "Share dashboards with your team. Persist layouts to your account." },
+                { title: "Widget Templates", description: "Start fast with pre-built widget presets for common observability patterns." },
+            ]} />
+        </div>
+    </section>
+
+    <RelatedFeatures current="metrics-dashboards" />
+    <BottomCTA />
+    <Footer />
+</Layout>

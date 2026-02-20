@@ -1,5 +1,5 @@
 import { QUICK_SELECT_OPTIONS, relativeToAbsolute } from "@/lib/time-utils"
-import { Button } from "@/components/ui/button"
+import { Button } from "@maple/ui/components/ui/button"
 
 interface QuickSelectGridProps {
   onSelect: (range: { startTime: string; endTime: string }, value: string, label: string) => void

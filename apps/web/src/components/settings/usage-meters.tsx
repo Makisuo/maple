@@ -6,7 +6,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@maple/ui/components/ui/card"
 import {
   FileIcon,
   PulseIcon,
@@ -16,7 +16,7 @@ import {
 import type { AggregatedUsage } from "@/lib/billing/usage"
 import { formatGB, usagePercentage } from "@/lib/billing/usage"
 import type { PlanLimits } from "@/lib/billing/plans"
-import { cn } from "@/lib/utils"
+import { cn } from "@maple/ui/utils"
 
 interface MeterRowProps {
   icon: IconComponent

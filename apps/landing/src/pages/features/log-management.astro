@@ -1,0 +1,130 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../components/RelatedFeatures.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+---
+
+<Layout title="Log Management | Maple" description="Search and filter logs with full-text search. Correlate with traces for seamless debugging across your stack.">
+    <SeoHead title="Log Management | Maple" description="Search and filter logs with full-text search. Correlate with traces for seamless debugging across your stack." />
+    <Nav />
+    <FeatureHero
+        label="Log Management"
+        title="Search and correlate logs instantly"
+        subtitle="Full-text search across all your logs with severity filtering, service grouping, and trace correlation."
+    />
+
+    <!-- Demo Mock: Log Viewer -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="bg-bg-elevated border border-border">
+                <!-- Window chrome -->
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Logs</span>
+                </div>
+
+                <div class="flex flex-col md:flex-row">
+                    <!-- Sidebar: severity filter -->
+                    <div class="w-full md:w-44 border-b md:border-b-0 md:border-r border-border p-4">
+                        <span class="text-[10px] text-fg-muted uppercase tracking-wider block mb-3">Severity</span>
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between px-2 py-1.5 bg-destructive/10 border border-destructive/20">
+                                <span class="text-[10px] text-destructive font-medium">ERROR</span>
+                                <span class="text-[9px] text-destructive">142</span>
+                            </div>
+                            <div class="flex items-center justify-between px-2 py-1.5">
+                                <span class="text-[10px] text-chart-1 font-medium">WARN</span>
+                                <span class="text-[9px] text-fg-muted">891</span>
+                            </div>
+                            <div class="flex items-center justify-between px-2 py-1.5">
+                                <span class="text-[10px] text-chart-2 font-medium">INFO</span>
+                                <span class="text-[9px] text-fg-muted">12.3K</span>
+                            </div>
+                            <div class="flex items-center justify-between px-2 py-1.5">
+                                <span class="text-[10px] text-fg-muted font-medium">DEBUG</span>
+                                <span class="text-[9px] text-fg-muted">45.1K</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Main content -->
+                    <div class="flex-1 p-4 md:p-6">
+                        <!-- Search bar -->
+                        <div class="flex items-center gap-2 px-3 py-2 border border-border bg-bg mb-4">
+                            <svg class="w-3 h-3 text-fg-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                            <span class="text-[10px] text-fg">connection timeout</span>
+                        </div>
+
+                        <!-- Log entries -->
+                        <div class="space-y-0">
+                            <!-- ERROR row (highlighted) -->
+                            <div class="flex items-start gap-3 px-3 py-2 bg-destructive/5 border-l-2 border-destructive">
+                                <span class="text-[9px] text-fg-muted font-mono shrink-0">14:23:01</span>
+                                <span class="text-[9px] text-chart-4 shrink-0 w-20 truncate">payment-svc</span>
+                                <span class="text-[9px] text-destructive font-medium shrink-0 w-10">ERROR</span>
+                                <span class="text-[10px] text-fg leading-tight">Connection timeout after 5000ms</span>
+                            </div>
+
+                            <!-- WARN row -->
+                            <div class="flex items-start gap-3 px-3 py-2 border-b border-border/50">
+                                <span class="text-[9px] text-fg-muted font-mono shrink-0">14:23:01</span>
+                                <span class="text-[9px] text-chart-4 shrink-0 w-20 truncate">payment-svc</span>
+                                <span class="text-[9px] text-chart-1 font-medium shrink-0 w-10">WARN</span>
+                                <span class="text-[10px] text-fg leading-tight">Retry 2/3 charge txn_9d1e</span>
+                            </div>
+
+                            <!-- INFO row -->
+                            <div class="flex items-start gap-3 px-3 py-2 border-b border-border/50">
+                                <span class="text-[9px] text-fg-muted font-mono shrink-0">14:22:58</span>
+                                <span class="text-[9px] text-chart-3 shrink-0 w-20 truncate">api-gateway</span>
+                                <span class="text-[9px] text-chart-2 font-medium shrink-0 w-10">INFO</span>
+                                <span class="text-[10px] text-fg leading-tight">POST /checkout 200 203ms</span>
+                            </div>
+
+                            <!-- DEBUG row -->
+                            <div class="flex items-start gap-3 px-3 py-2 border-b border-border/50">
+                                <span class="text-[9px] text-fg-muted font-mono shrink-0">14:22:57</span>
+                                <span class="text-[9px] text-chart-2 shrink-0 w-20 truncate">auth-svc</span>
+                                <span class="text-[9px] text-fg-muted font-medium shrink-0 w-10">DEBUG</span>
+                                <span class="text-[10px] text-fg leading-tight">Token validated usr_2f8a</span>
+                            </div>
+
+                            <!-- Another ERROR row -->
+                            <div class="flex items-start gap-3 px-3 py-2 bg-destructive/5 border-l-2 border-destructive">
+                                <span class="text-[9px] text-fg-muted font-mono shrink-0">14:22:55</span>
+                                <span class="text-[9px] text-chart-4 shrink-0 w-20 truncate">payment-svc</span>
+                                <span class="text-[9px] text-destructive font-medium shrink-0 w-10">ERROR</span>
+                                <span class="text-[10px] text-fg leading-tight">Connection timeout after 5000ms</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detail Grid -->
+    <section class="py-24 md:py-32">
+        <div class="mx-auto max-w-6xl px-6">
+            <FeatureDetailGrid items={[
+                { title: "Full-Text Search", description: "Search across all log fields with instant results. Find the needle in the haystack." },
+                { title: "Severity Filtering", description: "Filter by ERROR, WARN, INFO, or DEBUG with real-time counts." },
+                { title: "Trace Correlation", description: "Click any log to see its parent trace. Jump between logs and spans seamlessly." },
+                { title: "Service Filtering", description: "Filter logs by service name to focus on the component you're debugging." },
+                { title: "Log Detail View", description: "Expand any log entry to see all structured fields, resource attributes, and context." },
+                { title: "Real-Time Streaming", description: "Watch logs arrive in real-time as your services emit them." },
+            ]} />
+        </div>
+    </section>
+
+    <RelatedFeatures current="log-management" />
+    <BottomCTA />
+    <Footer />
+</Layout>

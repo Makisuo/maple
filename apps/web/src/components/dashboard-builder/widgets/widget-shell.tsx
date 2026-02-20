@@ -1,9 +1,9 @@
 import type { ReactNode } from "react"
 import { GripDotsIcon, TrashIcon, GearIcon, PencilIcon } from "@/components/icons"
 
-import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Popover, PopoverTrigger, PopoverContent, PopoverHeader, PopoverTitle } from "@/components/ui/popover"
+import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@maple/ui/components/ui/card"
+import { Button } from "@maple/ui/components/ui/button"
+import { Popover, PopoverTrigger, PopoverContent, PopoverHeader, PopoverTitle } from "@maple/ui/components/ui/popover"
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 
 interface WidgetShellProps {
