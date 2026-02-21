@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/clerk-react"
-// import { useCustomer } from "autumn-js/react"
+import { useCustomer } from "autumn-js/react"
 import { Navigate, Outlet, createRootRouteWithContext, redirect, useRouterState } from "@tanstack/react-router"
-// import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { hasSelectedPlan } from "@/lib/billing/plan-gating"
 import { Toaster } from "@maple/ui/components/ui/sonner"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import type { RouterAuthContext } from "@/router"
@@ -54,10 +54,10 @@ function ClerkReverseRedirects() {
     }),
   })
   const { isSignedIn, orgId } = useAuth()
-  // const { customer, isLoading: isCustomerLoading } = useCustomer()
+  const { customer, isLoading: isCustomerLoading } = useCustomer()
 
-  // const redirectUrl = pathname + (searchStr ?? "")
-  // const selectedPlan = hasSelectedPlan(customer)
+  const redirectUrl = pathname + (searchStr ?? "")
+  const selectedPlan = hasSelectedPlan(customer)
 
   if (isSignedIn && (pathname === "/sign-in" || pathname === "/sign-up")) {
     return <Navigate to={getRedirectTarget(searchStr)} replace />
@@ -67,19 +67,18 @@ function ClerkReverseRedirects() {
     return <Navigate to={getRedirectTarget(searchStr)} replace />
   }
 
-  // --- TEMPORARILY DISABLED: Stripe not yet enabled ---
-  // if (isSignedIn && orgId) {
-  //   if (isCustomerLoading) {
-  //     return null
-  //   }
-  //   const ALLOWED_WITHOUT_PLAN = ["/select-plan", "/quick-start"]
-  //   if (!selectedPlan && !ALLOWED_WITHOUT_PLAN.includes(pathname)) {
-  //     return <Navigate to="/select-plan" search={{ redirect_url: redirectUrl }} replace />
-  //   }
-  //   if (selectedPlan && pathname === "/select-plan") {
-  //     return <Navigate to={getRedirectTarget(searchStr)} replace />
-  //   }
-  // }
+  if (isSignedIn && orgId) {
+    if (isCustomerLoading) {
+      return null
+    }
+    const ALLOWED_WITHOUT_PLAN = ["/select-plan", "/quick-start"]
+    if (!selectedPlan && !ALLOWED_WITHOUT_PLAN.includes(pathname)) {
+      return <Navigate to="/select-plan" search={{ redirect_url: redirectUrl }} replace />
+    }
+    if (selectedPlan && pathname === "/select-plan") {
+      return <Navigate to={getRedirectTarget(searchStr)} replace />
+    }
+  }
 
   return <AppFrame />
 }
