@@ -72,7 +72,10 @@ function getProductPrice(product: Product): {
 
 function formatIncludedUsage(item: ProductItem): string {
   if (item.included_usage === "inf") return "Unlimited"
-  if (item.included_usage != null) return `${item.included_usage} GB`
+  if (item.included_usage != null) {
+    const gb = Number(item.included_usage) / 1_000_000
+    return `${gb} GB`
+  }
   return ""
 }
 

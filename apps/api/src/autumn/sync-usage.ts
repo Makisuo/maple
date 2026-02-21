@@ -1,6 +1,6 @@
 import { Autumn } from "autumn-js"
 
-const BYTES_PER_GB = 1_000_000_000
+const BYTES_PER_KB = 1_000
 
 interface ServiceUsageRow {
   totalLogSizeBytes: number | bigint
@@ -27,9 +27,9 @@ function aggregateUsage(rows: ServiceUsageRow[]) {
   }
 
   return {
-    logsGB: logBytes / BYTES_PER_GB,
-    tracesGB: traceBytes / BYTES_PER_GB,
-    metricsGB: metricBytes / BYTES_PER_GB,
+    logsKB: logBytes / BYTES_PER_KB,
+    tracesKB: traceBytes / BYTES_PER_KB,
+    metricsKB: metricBytes / BYTES_PER_KB,
   }
 }
 
@@ -41,9 +41,9 @@ export async function syncOrgUsage(
   const usage = aggregateUsage(usageRows)
 
   await Promise.all([
-    autumn.track({ customer_id: orgId, feature_id: "logs_gb", value: usage.logsGB }),
-    autumn.track({ customer_id: orgId, feature_id: "traces_gb", value: usage.tracesGB }),
-    autumn.track({ customer_id: orgId, feature_id: "metrics_gb", value: usage.metricsGB }),
+    autumn.track({ customer_id: orgId, feature_id: "logs", value: usage.logsKB }),
+    autumn.track({ customer_id: orgId, feature_id: "traces", value: usage.tracesKB }),
+    autumn.track({ customer_id: orgId, feature_id: "metrics", value: usage.metricsKB }),
   ])
 
   return usage

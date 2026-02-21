@@ -14,21 +14,21 @@ import {
   type IconComponent,
 } from "@/components/icons"
 import type { AggregatedUsage } from "@/lib/billing/usage"
-import { formatGB, usagePercentage } from "@/lib/billing/usage"
+import { formatUsage, usagePercentage } from "@/lib/billing/usage"
 import type { PlanLimits } from "@/lib/billing/plans"
 import { cn } from "@maple/ui/utils"
 
 interface MeterRowProps {
   icon: IconComponent
   label: string
-  usedGB: number
-  limitGB: number
+  usedKB: number
+  limitKB: number
 }
 
-function MeterRow({ icon: Icon, label, usedGB, limitGB }: MeterRowProps) {
-  const pct = usagePercentage(usedGB, limitGB)
-  const isUnlimited = limitGB === Infinity
-  const limitLabel = isUnlimited ? "Unlimited" : formatGB(limitGB)
+function MeterRow({ icon: Icon, label, usedKB, limitKB }: MeterRowProps) {
+  const pct = usagePercentage(usedKB, limitKB)
+  const isUnlimited = limitKB === Infinity
+  const limitLabel = isUnlimited ? "Unlimited" : formatUsage(limitKB)
 
   return (
     <ProgressPrimitive.Root value={pct} className="flex flex-col gap-2">
@@ -38,7 +38,7 @@ function MeterRow({ icon: Icon, label, usedGB, limitGB }: MeterRowProps) {
           {label}
         </ProgressPrimitive.Label>
         <span className="text-muted-foreground ml-auto text-xs tabular-nums font-mono">
-          {formatGB(usedGB)} / {limitLabel}
+          {formatUsage(usedKB)} / {limitLabel}
         </span>
       </div>
       <ProgressPrimitive.Track className="bg-muted h-1.5 relative flex w-full items-center overflow-x-hidden">
@@ -78,20 +78,20 @@ export function UsageMeters({
         <MeterRow
           icon={FileIcon}
           label="Logs"
-          usedGB={usage.logsGB}
-          limitGB={limits.logsGB}
+          usedKB={usage.logsKB}
+          limitKB={limits.logsKB}
         />
         <MeterRow
           icon={PulseIcon}
           label="Traces"
-          usedGB={usage.tracesGB}
-          limitGB={limits.tracesGB}
+          usedKB={usage.tracesKB}
+          limitKB={limits.tracesKB}
         />
         <MeterRow
           icon={ChartLineIcon}
           label="Metrics"
-          usedGB={usage.metricsGB}
-          limitGB={limits.metricsGB}
+          usedKB={usage.metricsKB}
+          limitKB={limits.metricsKB}
         />
       </CardContent>
     </Card>

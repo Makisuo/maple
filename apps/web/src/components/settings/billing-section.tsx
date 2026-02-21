@@ -18,9 +18,9 @@ function limitsFromCustomer(
   if (!features) return null
   const defaults = getPlanLimits("free")
   return {
-    logsGB: features.logs_gb?.included_usage ?? defaults.logsGB,
-    tracesGB: features.traces_gb?.included_usage ?? defaults.tracesGB,
-    metricsGB: features.metrics_gb?.included_usage ?? defaults.metricsGB,
+    logsKB: features.logs?.included_usage ?? defaults.logsKB,
+    tracesKB: features.traces?.included_usage ?? defaults.tracesKB,
+    metricsKB: features.metrics?.included_usage ?? defaults.metricsKB,
     retentionDays: features.retention_days?.balance ?? defaults.retentionDays,
   }
 }

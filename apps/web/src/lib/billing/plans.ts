@@ -1,13 +1,13 @@
 export interface PlanLimits {
-  logsGB: number
-  tracesGB: number
-  metricsGB: number
+  logsKB: number
+  tracesKB: number
+  metricsKB: number
   retentionDays: number
 }
 
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
-  free: { logsGB: 10, tracesGB: 10, metricsGB: 10, retentionDays: 7 },
-  startup: { logsGB: 40, tracesGB: 40, metricsGB: 40, retentionDays: 30 },
+  free: { logsKB: 10_000_000, tracesKB: 10_000_000, metricsKB: 10_000_000, retentionDays: 7 },
+  startup: { logsKB: 40_000_000, tracesKB: 40_000_000, metricsKB: 40_000_000, retentionDays: 30 },
 }
 
 const DEFAULT_PLAN = "free"

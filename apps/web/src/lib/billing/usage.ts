@@ -1,32 +1,33 @@
 import type { ServiceUsage } from "@/api/tinybird/service-usage"
 
-const BYTES_PER_GB = 1_000_000_000
+const BYTES_PER_KB = 1_000
 
 export interface AggregatedUsage {
-  logsGB: number
-  tracesGB: number
-  metricsGB: number
+  logsKB: number
+  tracesKB: number
+  metricsKB: number
 }
 
 export function aggregateUsage(services: ServiceUsage[]): AggregatedUsage {
   return services.reduce<AggregatedUsage>(
     (acc, s) => ({
-      logsGB: acc.logsGB + s.logSizeBytes / BYTES_PER_GB,
-      tracesGB: acc.tracesGB + s.traceSizeBytes / BYTES_PER_GB,
-      metricsGB: acc.metricsGB + s.metricSizeBytes / BYTES_PER_GB,
+      logsKB: acc.logsKB + s.logSizeBytes / BYTES_PER_KB,
+      tracesKB: acc.tracesKB + s.traceSizeBytes / BYTES_PER_KB,
+      metricsKB: acc.metricsKB + s.metricSizeBytes / BYTES_PER_KB,
     }),
-    { logsGB: 0, tracesGB: 0, metricsGB: 0 },
+    { logsKB: 0, tracesKB: 0, metricsKB: 0 },
   )
 }
 
-export function usagePercentage(usedGB: number, limitGB: number): number {
-  if (limitGB === Infinity) return 0
-  if (limitGB === 0) return 100
-  return (usedGB / limitGB) * 100
+export function usagePercentage(usedKB: number, limitKB: number): number {
+  if (limitKB === Infinity) return 0
+  if (limitKB === 0) return 100
+  return (usedKB / limitKB) * 100
 }
 
-export function formatGB(gb: number): string {
-  if (gb < 0.01) return "0 GB"
-  if (gb < 1) return `${(gb * 1000).toFixed(0)} MB`
-  return `${gb.toFixed(2)} GB`
+export function formatUsage(kb: number): string {
+  if (kb < 1) return "0 KB"
+  if (kb < 1_000) return `${kb.toFixed(0)} KB`
+  if (kb < 1_000_000) return `${(kb / 1_000).toFixed(0)} MB`
+  return `${(kb / 1_000_000).toFixed(2)} GB`
 }
