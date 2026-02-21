@@ -1,8 +1,11 @@
+mod autumn;
+
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use autumn::AutumnTracker;
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
@@ -45,6 +48,9 @@ struct AppConfig {
     db_url: Option<String>,
     db_auth_token: Option<String>,
     lookup_hmac_key: String,
+    autumn_secret_key: Option<String>,
+    autumn_api_url: String,
+    autumn_flush_interval_secs: u64,
 }
 
 impl AppConfig {
@@ -111,6 +117,23 @@ impl AppConfig {
             return Err("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY is required".to_string());
         }
 
+        let autumn_secret_key = std::env::var("AUTUMN_SECRET_KEY")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+
+        let autumn_api_url = std::env::var("AUTUMN_API_URL")
+            .unwrap_or_else(|_| "https://api.useautumn.com".to_string())
+            .trim()
+            .trim_end_matches('/')
+            .to_string();
+
+        let autumn_flush_interval_secs = parse_u64(
+            "AUTUMN_FLUSH_INTERVAL_SECS",
+            std::env::var("AUTUMN_FLUSH_INTERVAL_SECS").ok(),
+            1,
+        )?;
+
         Ok(Self {
             port,
             forward_endpoint,
@@ -120,6 +143,9 @@ impl AppConfig {
             db_url,
             db_auth_token,
             lookup_hmac_key,
+            autumn_secret_key,
+            autumn_api_url,
+            autumn_flush_interval_secs,
         })
     }
 }
@@ -130,12 +156,12 @@ struct IngestKeyResolver {
     lookup_hmac_key: String,
 }
 
-#[derive(Clone)]
 struct AppState {
     config: AppConfig,
     http_client: Client,
     resolver: IngestKeyResolver,
     metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
+    autumn_tracker: Option<AutumnTracker>,
 }
 
 #[derive(Clone)]
@@ -282,6 +308,14 @@ async fn main() {
         }
     };
 
+    let autumn_tracker = config.autumn_secret_key.as_ref().map(|key| {
+        AutumnTracker::spawn(
+            key.clone(),
+            &config.autumn_api_url,
+            config.autumn_flush_interval_secs,
+        )
+    });
+
     let state = Arc::new(AppState {
         resolver: IngestKeyResolver {
             db: Arc::new(database),
@@ -290,6 +324,7 @@ async fn main() {
         http_client,
         config: config.clone(),
         metrics_handle: prometheus_handle,
+        autumn_tracker,
     });
 
     let cors = CorsLayer::new()
@@ -392,12 +427,17 @@ async fn handle_signal(
     let duration_ms = duration.as_millis() as u64;
 
     match result {
-        Ok((response, item_count, _org_id)) => {
+        Ok((response, item_count, org_id, decoded_bytes)) => {
             let status_code = response.status().as_u16();
             histogram!("ingest_request_duration_seconds", "signal" => signal.path(), "status" => "ok")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => signal.path(), "status" => "ok", "error_kind" => "none")
                 .increment(1);
+            if let Some(tracker) = &state.autumn_tracker {
+                let feature_id = signal.path();
+                let value_gb = decoded_bytes as f64 / 1_000_000_000.0;
+                tracker.track(&org_id, feature_id, value_gb);
+            }
             info!(
                 status = status_code,
                 duration_ms,
@@ -416,13 +456,13 @@ async fn handle_signal(
     }
 }
 
-/// Returns Ok((response, item_count, org_id)) or Err((ApiError, error_kind_label))
+/// Returns Ok((response, item_count, org_id, decoded_bytes)) or Err((ApiError, error_kind_label))
 async fn handle_signal_inner(
     state: &AppState,
     headers: &HeaderMap,
     body: Bytes,
     signal: Signal,
-) -> Result<(Response, usize, String), (ApiError, &'static str)> {
+) -> Result<(Response, usize, String, usize), (ApiError, &'static str)> {
     // --- Auth ---
     let ingest_key = extract_ingest_key(headers).ok_or_else(|| {
         warn!("Missing ingest key");
@@ -521,6 +561,8 @@ async fn handle_signal_inner(
     )
     .increment(enrich_result.item_count as u64);
 
+    let decoded_bytes = decoded_payload.len();
+
     // --- Encode & Forward ---
     let outbound_body =
         encode_payload(&enrich_result.payload, content_encoding.as_deref()).map_err(|e| {
@@ -538,7 +580,7 @@ async fn handle_signal_inner(
     .await
     .map_err(|e| (e, "forward"))?;
 
-    Ok((response, enrich_result.item_count, resolved_key.org_id.clone()))
+    Ok((response, enrich_result.item_count, resolved_key.org_id.clone(), decoded_bytes))
 }
 
 fn extract_ingest_key(headers: &HeaderMap) -> Option<String> {

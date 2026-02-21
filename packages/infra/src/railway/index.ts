@@ -237,6 +237,7 @@ export async function provisionRailwayStack(
       MAPLE_DB_URL: reqEnv("MAPLE_DB_URL"),
       MAPLE_DB_AUTH_TOKEN: reqEnv("MAPLE_DB_AUTH_TOKEN"),
       MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: reqEnv("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY"),
+      AUTUMN_SECRET_KEY: env.AUTUMN_SECRET_KEY?.trim() || "",
     },
   })
 

@@ -15,19 +15,19 @@ function limitsFromCustomer(features: CustomerFeatures): PlanLimits | null {
   if (!features) return null
   const defaults = getPlanLimits("starter")
   return {
-    logsKB: features.logs?.included_usage ?? defaults.logsKB,
-    tracesKB: features.traces?.included_usage ?? defaults.tracesKB,
-    metricsKB: features.metrics?.included_usage ?? defaults.metricsKB,
+    logsGB: features.logs?.included_usage ?? defaults.logsGB,
+    tracesGB: features.traces?.included_usage ?? defaults.tracesGB,
+    metricsGB: features.metrics?.included_usage ?? defaults.metricsGB,
     retentionDays: features.retention_days?.balance ?? defaults.retentionDays,
   }
 }
 
 function usageFromCustomer(features: CustomerFeatures): AggregatedUsage {
-  if (!features) return { logsKB: 0, tracesKB: 0, metricsKB: 0 }
+  if (!features) return { logsGB: 0, tracesGB: 0, metricsGB: 0 }
   return {
-    logsKB: features.logs?.usage ?? 0,
-    tracesKB: features.traces?.usage ?? 0,
-    metricsKB: features.metrics?.usage ?? 0,
+    logsGB: features.logs?.usage ?? 0,
+    tracesGB: features.traces?.usage ?? 0,
+    metricsGB: features.metrics?.usage ?? 0,
   }
 }
 

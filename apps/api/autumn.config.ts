@@ -33,22 +33,22 @@ export const starter = plan({
 	items: [
 		planFeature({
 			feature_id: 'logs',
-			included: 50_000_000,
+			included: 50,
 			reset: {
 				interval: 'month',
 			},
 		}),
 		planFeature({
-			
+
 			feature_id: 'metrics',
-			included: 50_000_000,
+			included: 50,
 			reset: {
 				interval: 'month',
 			},
 		}),
 		planFeature({
 			feature_id: 'traces',
-			included: 50_000_000,
+			included: 50,
 			reset: {
 				interval: 'month',
 			},
@@ -71,30 +71,30 @@ export const startup = plan({
 	items: [
 		planFeature({
 			feature_id: 'logs',
-			included: 100_000_000,
+			included: 100,
 			price: {
 				amount: 0.25,
-				billing_units: 1_000_000,
+				billing_units: 1,
 				billing_method: 'usage_based',
 				interval: 'month',
 			},
 		}),
 		planFeature({
 			feature_id: 'metrics',
-			included: 100_000_000,
+			included: 100,
 			price: {
 				amount: 0.25,
-				billing_units: 1_000_000,
+				billing_units: 1,
 				billing_method: 'usage_based',
 				interval: 'month',
 			},
 		}),
 		planFeature({
 			feature_id: 'traces',
-			included: 100_000_000,
+			included: 100,
 			price: {
 				amount: 0.25,
-				billing_units: 1_000_000,
+				billing_units: 1,
 				billing_method: 'usage_based',
 				interval: 'month',
 			},

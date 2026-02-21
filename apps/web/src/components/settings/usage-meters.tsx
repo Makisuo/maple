@@ -21,14 +21,14 @@ import { cn } from "@maple/ui/utils"
 interface MeterRowProps {
   icon: IconComponent
   label: string
-  usedKB: number
-  limitKB: number
+  usedGB: number
+  limitGB: number
 }
 
-function MeterRow({ icon: Icon, label, usedKB, limitKB }: MeterRowProps) {
-  const pct = usagePercentage(usedKB, limitKB)
-  const isUnlimited = limitKB === Infinity
-  const limitLabel = isUnlimited ? "Unlimited" : formatUsage(limitKB)
+function MeterRow({ icon: Icon, label, usedGB, limitGB }: MeterRowProps) {
+  const pct = usagePercentage(usedGB, limitGB)
+  const isUnlimited = limitGB === Infinity
+  const limitLabel = isUnlimited ? "Unlimited" : formatUsage(limitGB)
 
   return (
     <ProgressPrimitive.Root value={pct} className="flex flex-col gap-2">
@@ -38,7 +38,7 @@ function MeterRow({ icon: Icon, label, usedKB, limitKB }: MeterRowProps) {
           {label}
         </ProgressPrimitive.Label>
         <span className="text-muted-foreground ml-auto text-xs tabular-nums font-mono">
-          {formatUsage(usedKB)} / {limitLabel}
+          {formatUsage(usedGB)} / {limitLabel}
         </span>
       </div>
       <ProgressPrimitive.Track className="bg-muted h-1.5 relative flex w-full items-center overflow-x-hidden">
@@ -78,20 +78,20 @@ export function UsageMeters({
         <MeterRow
           icon={FileIcon}
           label="Logs"
-          usedKB={usage.logsKB}
-          limitKB={limits.logsKB}
+          usedGB={usage.logsGB}
+          limitGB={limits.logsGB}
         />
         <MeterRow
           icon={PulseIcon}
           label="Traces"
-          usedKB={usage.tracesKB}
-          limitKB={limits.tracesKB}
+          usedGB={usage.tracesGB}
+          limitGB={limits.tracesGB}
         />
         <MeterRow
           icon={ChartLineIcon}
           label="Metrics"
-          usedKB={usage.metricsKB}
-          limitKB={limits.metricsKB}
+          usedGB={usage.metricsGB}
+          limitGB={limits.metricsGB}
         />
       </CardContent>
     </Card>

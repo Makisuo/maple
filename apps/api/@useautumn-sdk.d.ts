@@ -11,7 +11,6 @@ declare module '@useautumn/sdk' {
   export const free: Plan;
   export const starter: Plan;
   export const startup: Plan;
-  export const team: Plan;
 
   // Base types
   export type Feature = import('./autumn.config').Feature;

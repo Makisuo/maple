@@ -60,7 +60,7 @@ try {
                 .filter((item) => item.feature_id)
                 .map((item) => ({
                     label: item.feature?.name ?? item.feature_id ?? "",
-                    value: item.included_usage === "inf" ? "Unlimited" : `${Number(item.included_usage ?? 0) / 1_000_000} GB`,
+                    value: item.included_usage === "inf" ? "Unlimited" : `${Number(item.included_usage ?? 0)} GB`,
                     detail: item.display?.secondary_text
                         ? item.display.secondary_text.replace(/\bper\s+[\d,]+\s+(Logs|Traces|Metrics)\b/i, "per GB")
                         : item.price != null
@@ -78,10 +78,10 @@ try {
                 interval: interval ? `/${interval}` : undefined,
                 isFree,
                 hasTrial: product.properties.has_trial,
-                subtitle: isFree ? "Free forever" : (product.display?.description ?? "For growing teams"),
+                subtitle: isFree ? "Free forever" : (product.display?.description ?? (slug === "starter" ? "For individuals and small projects" : "For growing teams")),
                 dataFeatures,
                 platformFeatures,
-                ctaLabel: isFree ? "Get started free" : (product.free_trial ? "Start free trial" : "Subscribe"),
+                ctaLabel: isFree ? "Get started free" : (product.free_trial ? `Start ${product.free_trial.length}-day free trial` : "Subscribe"),
                 ctaStyle: isFree ? "outline" as const : "accent" as const,
             }
         })
@@ -123,7 +123,7 @@ if (plans.length === 0) {
                 { label: "Metrics", value: "100 GB", detail: "then $0.25/GB" },
             ],
             platformFeatures: PLAN_FEATURES["startup"]!.map((f) => ({ label: f.label })),
-            ctaLabel: "Start free trial",
+            ctaLabel: "Start 30-day free trial",
             ctaStyle: "accent",
         },
     ]
@@ -134,8 +134,8 @@ if (plans.length === 0) {
     <div class="mx-auto max-w-6xl px-6">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {plans.map((plan) => (
-                <div class="border border-border bg-bg-elevated">
-                    <div class="p-6 md:p-8">
+                <div class="border border-border bg-bg-elevated flex flex-col">
+                    <div class="p-6 md:p-8 flex flex-col flex-1">
                         <span class="text-[11px] uppercase tracking-widest text-fg-muted">{plan.name}</span>
                         <div class="mt-2 text-4xl font-semibold text-fg">
                             ${plan.price}
@@ -185,15 +185,17 @@ if (plans.length === 0) {
                             </div>
                         </div>
 
-                        {plan.ctaStyle === "accent" ? (
-                            <a href="/waitlist" class="mt-8 block w-full bg-accent text-accent-foreground px-6 py-2.5 text-sm font-medium text-center hover:opacity-90 transition-opacity">
-                                {plan.ctaLabel}
-                            </a>
-                        ) : (
-                            <a href="/waitlist" class="mt-8 block w-full border border-border px-6 py-2.5 text-sm font-medium text-fg text-center hover:opacity-90 transition-opacity">
-                                {plan.ctaLabel}
-                            </a>
-                        )}
+                        <div class="mt-auto pt-8">
+                            {plan.ctaStyle === "accent" ? (
+                                <a href="/waitlist" class="block w-full bg-accent text-accent-foreground px-6 py-2.5 text-sm font-medium text-center hover:opacity-90 transition-opacity">
+                                    {plan.ctaLabel}
+                                </a>
+                            ) : (
+                                <a href="/waitlist" class="block w-full border border-border px-6 py-2.5 text-sm font-medium text-fg text-center hover:opacity-90 transition-opacity">
+                                    {plan.ctaLabel}
+                                </a>
+                            )}
+                        </div>
                     </div>
                 </div>
             ))}

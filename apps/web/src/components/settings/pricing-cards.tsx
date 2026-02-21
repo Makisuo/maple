@@ -8,7 +8,7 @@ type Product = NonNullable<
 type ProductItem = Product["items"][number]
 
 import { cn } from "@maple/ui/utils"
-import { getPlanFeatures } from "@/lib/billing/plans"
+import { getPlanFeatures, getPlanDescription } from "@/lib/billing/plans"
 import {
   Card,
   CardContent,
@@ -73,8 +73,7 @@ function getProductPrice(product: Product): {
 function formatIncludedUsage(item: ProductItem): string {
   if (item.included_usage === "inf") return "Unlimited"
   if (item.included_usage != null) {
-    const gb = Number(item.included_usage) / 1_000_000
-    return `${gb} GB`
+    return `${Number(item.included_usage)} GB`
   }
   return ""
 }
@@ -350,11 +349,9 @@ export function PricingCards() {
                     </span>
                   )}
                 </div>
-                {product.display?.description && (
-                  <CardDescription className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                    {product.display.description}
-                  </CardDescription>
-                )}
+                <CardDescription className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                  {product.display?.description ?? getPlanDescription(getProductSlug(product))}
+                </CardDescription>
                 {product.display?.everything_from && (
                   <p className="text-muted-foreground mt-3 text-xs font-medium">
                     Everything in <span className="text-foreground">{product.display.everything_from}</span>, plus:
@@ -442,7 +439,7 @@ export function PricingCards() {
                   ) : (
                     <>
                       {btn.label}
-                      {trialAvailable && !btn.disabled && " — Start free trial"}
+                      {trialAvailable && !btn.disabled && ` — Start ${product.free_trial?.length}-day free trial`}
                     </>
                   )}
                 </Button>

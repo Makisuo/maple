@@ -1508,6 +1508,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -2153,6 +2154,8 @@ dependencies = [
  "rustls 0.23.36",
  "rustls-pki-types",
  "rustls-platform-verifier",
+ "serde",
+ "serde_json",
  "sync_wrapper 1.0.2",
  "tokio",
  "tokio-rustls 0.26.4",
