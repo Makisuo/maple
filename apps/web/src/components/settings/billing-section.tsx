@@ -1,27 +1,33 @@
 import { useMemo } from "react"
-import { Result, useAtomValue } from "@effect-atom/atom-react"
 import { useCustomer } from "autumn-js/react"
 import { PricingCards } from "./pricing-cards"
 import { format } from "date-fns"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
-import { getServiceUsageResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
-import { formatForTinybird } from "@/lib/time-utils"
-import { aggregateUsage } from "@/lib/billing/usage"
+import { Card, CardContent, CardHeader } from "@maple/ui/components/ui/card"
 import { getPlanLimits, type PlanLimits } from "@/lib/billing/plans"
+import type { AggregatedUsage } from "@/lib/billing/usage"
 import { UsageMeters } from "./usage-meters"
 
-function limitsFromCustomer(
-  features: Record<string, { included_usage?: number | null; balance?: number | null }> | undefined,
-): PlanLimits | null {
+type CustomerFeatures = Record<string, { usage?: number | null; included_usage?: number | null; balance?: number | null }> | undefined
+
+function limitsFromCustomer(features: CustomerFeatures): PlanLimits | null {
   if (!features) return null
-  const defaults = getPlanLimits("free")
+  const defaults = getPlanLimits("starter")
   return {
     logsKB: features.logs?.included_usage ?? defaults.logsKB,
     tracesKB: features.traces?.included_usage ?? defaults.tracesKB,
     metricsKB: features.metrics?.included_usage ?? defaults.metricsKB,
     retentionDays: features.retention_days?.balance ?? defaults.retentionDays,
+  }
+}
+
+function usageFromCustomer(features: CustomerFeatures): AggregatedUsage {
+  if (!features) return { logsKB: 0, tracesKB: 0, metricsKB: 0 }
+  return {
+    logsKB: features.logs?.usage ?? 0,
+    tracesKB: features.traces?.usage ?? 0,
+    metricsKB: features.metrics?.usage ?? 0,
   }
 }
 
@@ -33,56 +39,32 @@ export function BillingSection() {
     () => new Date(now.getFullYear(), now.getMonth(), 1),
     [now],
   )
-  const startTime = useMemo(() => formatForTinybird(startOfMonth), [startOfMonth])
-  const endTime = useMemo(() => formatForTinybird(now), [now])
-
   const billingPeriodLabel = `${format(startOfMonth, "MMM d")} – ${format(now, "MMM d, yyyy")}`
 
-  const limits = limitsFromCustomer(customer?.features) ?? getPlanLimits("free")
-
-  const usageResult = useAtomValue(
-    getServiceUsageResultAtom({ data: { startTime, endTime } }),
-  )
+  const limits = limitsFromCustomer(customer?.features) ?? getPlanLimits("starter")
+  const usage = usageFromCustomer(customer?.features)
 
   return (
     <div className="space-y-6">
-      {Result.builder(usageResult)
-        .onInitial(() => (
-          <Card>
-            <CardHeader>
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="h-4 w-48" />
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </CardContent>
-          </Card>
-        ))
-        .onError(() => (
-          <Card>
-            <CardHeader>
-              <CardTitle>Current Usage</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Unable to load usage data.
-              </p>
-            </CardContent>
-          </Card>
-        ))
-        .onSuccess((response) => {
-          const usage = aggregateUsage(response.data)
-          return (
-            <UsageMeters
-              usage={usage}
-              limits={limits}
-              billingPeriodLabel={billingPeriodLabel}
-            />
-          )
-        })
-        .render()}
+      {isCustomerLoading ? (
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-4 w-48" />
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </CardContent>
+        </Card>
+      ) : (
+        <UsageMeters
+          usage={usage}
+          limits={limits}
+          billingPeriodLabel={billingPeriodLabel}
+        />
+      )}
 
       <div className="space-y-3">
         <h3 className="text-sm font-medium">Plans</h3>

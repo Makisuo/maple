@@ -60,11 +60,11 @@ try {
                 .filter((item) => item.feature_id)
                 .map((item) => ({
                     label: item.feature?.name ?? item.feature_id ?? "",
-                    value: item.included_usage === "inf" ? "Unlimited" : `${item.included_usage ?? 0} GB`,
+                    value: item.included_usage === "inf" ? "Unlimited" : `${Number(item.included_usage ?? 0) / 1_000_000} GB`,
                     detail: item.display?.secondary_text
-                        ? item.display.secondary_text.replace(/\bper\s+(Logs|Traces|Metrics)\b/i, "per GB")
+                        ? item.display.secondary_text.replace(/\bper\s+[\d,]+\s+(Logs|Traces|Metrics)\b/i, "per GB")
                         : item.price != null
-                          ? `then $${item.price}/${item.billing_units ?? 1} GB`
+                          ? `then $${item.price} per GB`
                           : undefined,
                 }))
 

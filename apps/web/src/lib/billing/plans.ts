@@ -6,11 +6,11 @@ export interface PlanLimits {
 }
 
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
-  free: { logsKB: 10_000_000, tracesKB: 10_000_000, metricsKB: 10_000_000, retentionDays: 7 },
+  starter: { logsKB: 10_000_000, tracesKB: 10_000_000, metricsKB: 10_000_000, retentionDays: 7 },
   startup: { logsKB: 40_000_000, tracesKB: 40_000_000, metricsKB: 40_000_000, retentionDays: 30 },
 }
 
-const DEFAULT_PLAN = "free"
+const DEFAULT_PLAN = "starter"
 
 export function getPlanLimits(planSlug: string | undefined): PlanLimits {
   return PLAN_LIMITS[planSlug ?? DEFAULT_PLAN] ?? PLAN_LIMITS[DEFAULT_PLAN]

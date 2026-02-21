@@ -45,11 +45,11 @@ const FEATURE_ICONS: Record<string, IconComponent> = {
 }
 
 function getProductSlug(product: Product): string {
-  if (product.properties.is_free) return "free"
+  if (product.properties.is_free) return "starter"
   const id = product.id?.toLowerCase()
-  if (id === "free" || id === "startup") return id
+  if (id === "starter" || id === "startup") return id
   const name = product.name?.toLowerCase()
-  if (name === "free" || name === "startup") return name
+  if (name === "starter" || name === "startup") return name
   return "startup"
 }
 
@@ -80,7 +80,7 @@ function formatIncludedUsage(item: ProductItem): string {
 }
 
 function normalizeDetailText(text: string): string {
-  return text.replace(/\bper\s+(Logs|Traces|Metrics)\b/i, "per GB")
+  return text.replace(/\bper\s+[\d,]+\s+(Logs|Traces|Metrics)\b/i, "per GB")
 }
 
 function getFeatureRows(product: Product) {
