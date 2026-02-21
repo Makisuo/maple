@@ -101,7 +101,7 @@ export function LogsFilterSidebar() {
           <FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
           <FilterSidebarBody>
             <div className="pb-3">
-              <span className="text-sm font-medium text-muted-foreground">Search</span>
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Search</span>
               <div className="relative mt-2 px-px">
                 <MagnifierIcon
                   strokeWidth={2}

@@ -21,7 +21,7 @@ export function FilterSidebarFrame({
   return (
     <div
       className={cn(
-        "w-64 shrink-0 overflow-hidden border-l pl-4",
+        "w-64 shrink-0 overflow-hidden border-r pr-4",
         sticky && "sticky top-0 self-start",
         waiting && "opacity-60",
         className
@@ -45,12 +45,12 @@ export function FilterSidebarHeader({
 }: FilterSidebarHeaderProps) {
   return (
     <div className="flex items-center justify-between py-2">
-      <h3 className="text-sm font-semibold">{title}</h3>
+      <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</h3>
       {canClear && onClear && (
         <button
           type="button"
           onClick={onClear}
-          className="text-xs text-primary hover:underline"
+          className="text-xs text-muted-foreground hover:text-foreground"
         >
           Clear all
         </button>

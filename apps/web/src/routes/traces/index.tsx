@@ -191,10 +191,10 @@ function TracesPage() {
         </div>
       )}
       <div className="flex gap-4">
+        <TracesFilterSidebar facetsResult={facetsResult} />
         <div className="flex-1 min-w-0">
           <TracesTable filters={search} />
         </div>
-        <TracesFilterSidebar facetsResult={facetsResult} />
       </div>
     </DashboardLayout>
   )

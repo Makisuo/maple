@@ -55,10 +55,10 @@ function LogsPage() {
       }
     >
       <div className="flex gap-4">
+        <LogsFilterSidebar />
         <div className="flex-1 min-w-0">
           <LogsTable filters={search} />
         </div>
-        <LogsFilterSidebar />
       </div>
     </DashboardLayout>
   )
