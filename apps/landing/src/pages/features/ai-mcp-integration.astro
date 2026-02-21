@@ -7,10 +7,13 @@ import RelatedFeatures from "../../components/RelatedFeatures.astro";
 import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+
+const pageTitle = "AI & MCP Integration | Maple";
+const pageDescription = "Connect Claude, Cursor, or any MCP-compatible client to diagnose production issues with 10+ AI-powered observability tools. From symptoms to root cause automatically.";
 ---
 
-<Layout title="AI & MCP Integration | Maple" description="Connect Claude, Cursor, or any MCP client to diagnose production issues with 10+ AI-powered tools.">
-    <SeoHead title="AI & MCP Integration | Maple" description="Connect Claude, Cursor, or any MCP client to diagnose production issues with 10+ AI-powered tools." />
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
         label="AI & MCP"

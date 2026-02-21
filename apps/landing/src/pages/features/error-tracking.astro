@@ -7,10 +7,13 @@ import RelatedFeatures from "../../components/RelatedFeatures.astro";
 import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+
+const pageTitle = "Error Tracking | Maple";
+const pageDescription = "Find and fix production errors faster with smart grouping, trend detection, and root cause analysis. Every error links directly to the failing trace and span.";
 ---
 
-<Layout title="Error Tracking | Maple" description="Find and fix errors faster with smart grouping, trend detection, and root cause analysis linked to traces.">
-    <SeoHead title="Error Tracking | Maple" description="Find and fix errors faster with smart grouping, trend detection, and root cause analysis linked to traces." />
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
         label="Error Tracking"

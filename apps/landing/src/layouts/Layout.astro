@@ -15,9 +15,10 @@ const {
     image = "/og-image.png",
 } = Astro.props;
 
-const canonicalUrl = Astro.site
-    ? new URL(Astro.url.pathname, Astro.site).toString()
-    : undefined;
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
+const absoluteImage = image.startsWith("http")
+    ? image
+    : new URL(image, Astro.site).toString();
 ---
 
 <!doctype html>
@@ -32,18 +33,21 @@ const canonicalUrl = Astro.site
         <meta name="description" content={description} />
         <meta name="theme-color" content="#000000" />
         <meta name="robots" content="index,follow" />
-        {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+        <link rel="canonical" href={canonicalUrl} />
+        <link rel="dns-prefetch" href="https://cdn.brandfetch.io" />
+        <link rel="preconnect" href="https://cdn.brandfetch.io" crossorigin />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="Maple" />
         <meta property="og:locale" content="en_US" />
         <meta property="og:title" content={title} />
         <meta property="og:description" content={description} />
-        <meta property="og:image" content={image} />
-        {canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
+        <meta property="og:image" content={absoluteImage} />
+        <meta property="og:url" content={canonicalUrl} />
         <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@maple_dev" />
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content={description} />
-        <meta name="twitter:image" content={image} />
+        <meta name="twitter:image" content={absoluteImage} />
         <meta name="generator" content={Astro.generator} />
         <title>{title}</title>
     </head>

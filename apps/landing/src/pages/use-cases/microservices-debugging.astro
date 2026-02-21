@@ -2,12 +2,17 @@
 import Layout from "../../layouts/Layout.astro";
 import Nav from "../../components/Nav.astro";
 import FeatureHero from "../../components/FeatureHero.astro";
+import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
 import { ServiceMapMock } from "../../components/ServiceMapMock.tsx";
+
+const pageTitle = "Microservices Debugging | Maple";
+const pageDescription = "Debug latency cascades across distributed services with interactive service maps, trace analysis, dependency visualization, and span-level resource diagnostics.";
 ---
 
-<Layout title="Microservices Debugging | Maple" description="Debug latency cascades across distributed services with service maps, trace analysis, and dependency visualization.">
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
         label="Use Case"

@@ -13,15 +13,20 @@ import AlertingIntegrations from "../components/AlertingIntegrations.astro";
 import HowItWorks from "../components/HowItWorks.astro";
 import BottomCTA from "../components/BottomCTA.astro";
 import Footer from "../components/Footer.astro";
+import SeoHead from "../components/SeoHead.astro";
 
 const PUBLISHABLE_KEY = import.meta.env.PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 if (!PUBLISHABLE_KEY) {
     throw new Error("Add your Clerk Publishable Key to the .env file");
 }
+
+const pageTitle = "Maple — OpenTelemetry Observability";
+const pageDescription = "Open-source observability platform built on OpenTelemetry. Collect, visualize, and analyze distributed traces, logs, and metrics from your services with AI-powered diagnostics.";
 ---
 
-<Layout>
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} type="SoftwareApplication" />
     <Nav />
     <Hero />
     <TrustBar />

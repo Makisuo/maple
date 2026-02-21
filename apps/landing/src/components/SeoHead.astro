@@ -8,12 +8,15 @@ interface Props {
 
 const { title, description, type = "WebPage", url } = Astro.props;
 
+const resolvedUrl =
+    url ?? (Astro.site ? new URL(Astro.url.pathname, Astro.site).toString() : undefined);
+
 const jsonLd = {
     "@context": "https://schema.org",
     "@type": type,
     name: title,
     description,
-    ...(url ? { url } : {}),
+    ...(resolvedUrl ? { url: resolvedUrl } : {}),
     ...(type === "SoftwareApplication"
         ? {
               applicationCategory: "DeveloperApplication",

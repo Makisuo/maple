@@ -7,10 +7,13 @@ import RelatedFeatures from "../../components/RelatedFeatures.astro";
 import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+
+const pageTitle = "Distributed Tracing | Maple";
+const pageDescription = "Visualize request flows across services with flamegraph and waterfall views. Drill into any span to see attributes, events, and timing.";
 ---
 
-<Layout title="Distributed Tracing | Maple" description="Visualize request flows across services with flamegraph and waterfall views. Drill into any span to see attributes, events, and timing.">
-    <SeoHead title="Distributed Tracing | Maple" description="Visualize request flows across services with flamegraph and waterfall views. Drill into any span to see attributes, events, and timing." />
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
         label="Distributed Tracing"

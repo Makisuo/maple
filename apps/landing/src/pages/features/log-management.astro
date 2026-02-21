@@ -7,10 +7,13 @@ import RelatedFeatures from "../../components/RelatedFeatures.astro";
 import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+
+const pageTitle = "Log Management | Maple";
+const pageDescription = "Search and filter logs with full-text search, severity filtering, and service grouping. Correlate logs with distributed traces for seamless debugging across your stack.";
 ---
 
-<Layout title="Log Management | Maple" description="Search and filter logs with full-text search. Correlate with traces for seamless debugging across your stack.">
-    <SeoHead title="Log Management | Maple" description="Search and filter logs with full-text search. Correlate with traces for seamless debugging across your stack." />
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
         label="Log Management"

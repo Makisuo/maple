@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@astrojs/react": "^4.4.2",
+    "@astrojs/sitemap": "^3.7.0",
     "@base-ui/react": "^1.1.0",
     "@clerk/clerk-react": "^5.60.0",
     "@fontsource-variable/geist-mono": "^5.2.7",

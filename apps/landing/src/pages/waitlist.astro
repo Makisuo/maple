@@ -1,13 +1,19 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import Nav from "../components/Nav.astro";
+import SeoHead from "../components/SeoHead.astro";
+import Footer from "../components/Footer.astro";
 
 import WaitlistForm from "../components/WaitlistForm";
+
+const pageTitle = "Join the Waitlist — Maple";
+const pageDescription = "Sign up for early access to Maple, the open-source observability platform. Get distributed tracing, log management, metrics dashboards, and AI-powered diagnostics.";
 ---
 
-<Layout title="Join the Waitlist — Maple">
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
-    <main class="min-h-screen flex items-center justify-center px-6">
+    <main class="min-h-screen flex flex-col items-center justify-center px-6 py-24">
         <div class="text-center">
             <div
                 class="w-10 h-10 bg-accent flex items-center justify-center mx-auto mb-6"
@@ -23,5 +29,37 @@ import WaitlistForm from "../components/WaitlistForm";
             </p>
             <WaitlistForm client:load />
         </div>
+
+        <!-- What you get with Maple -->
+        <section class="mt-24 max-w-2xl w-full">
+            <h2 class="text-lg font-bold text-fg mb-6 text-center">What you get with Maple</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="border border-border bg-bg-elevated p-4">
+                    <h3 class="text-sm font-medium text-fg mb-1">Distributed Tracing</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Follow requests across services with flamegraph, waterfall, and flow visualizations.</p>
+                </div>
+                <div class="border border-border bg-bg-elevated p-4">
+                    <h3 class="text-sm font-medium text-fg mb-1">Log Management</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Full-text search with severity filtering and automatic trace correlation.</p>
+                </div>
+                <div class="border border-border bg-bg-elevated p-4">
+                    <h3 class="text-sm font-medium text-fg mb-1">Metrics & Dashboards</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Drag-and-drop dashboard builder with 20+ chart types for latency, throughput, and error rates.</p>
+                </div>
+                <div class="border border-border bg-bg-elevated p-4">
+                    <h3 class="text-sm font-medium text-fg mb-1">AI Diagnostics</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Connect Claude, Cursor, or any MCP client to diagnose production issues automatically.</p>
+                </div>
+                <div class="border border-border bg-bg-elevated p-4">
+                    <h3 class="text-sm font-medium text-fg mb-1">Service Catalog</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Monitor all services with latency percentiles, Apdex scores, and dependency maps.</p>
+                </div>
+                <div class="border border-border bg-bg-elevated p-4">
+                    <h3 class="text-sm font-medium text-fg mb-1">Error Tracking</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">Smart grouping, trend detection, and root cause analysis linked directly to traces.</p>
+                </div>
+            </div>
+        </section>
     </main>
+    <Footer />
 </Layout>

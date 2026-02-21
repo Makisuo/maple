@@ -8,10 +8,13 @@ import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
 import { ServiceMapMock } from "../../components/ServiceMapMock.tsx";
+
+const pageTitle = "Service Catalog & Map | Maple";
+const pageDescription = "See all your services at a glance with latency percentiles, Apdex scores, throughput metrics, and interactive service-to-service dependency mapping.";
 ---
 
-<Layout title="Service Catalog & Map | Maple" description="See all your services at a glance with latency percentiles, Apdex scores, throughput, and dependency mapping.">
-    <SeoHead title="Service Catalog & Map | Maple" description="See all your services at a glance with latency percentiles, Apdex scores, throughput, and dependency mapping." />
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
         label="Service Catalog"

@@ -7,8 +7,25 @@ import { NavBar } from "./NavBar"
     Maple is in private beta — <a href="/waitlist" class="underline underline-offset-2 hover:text-fg transition-colors">join the waitlist</a>
 </div>
 
-<nav class="fixed top-[28px] left-0 right-0 z-50 border-b border-border bg-bg/95 backdrop-blur-md">
+<nav id="main-nav" class="fixed top-[28px] left-0 right-0 z-50 border-b border-border bg-bg/95 backdrop-blur-md transition-colors duration-200">
     <div class="mx-auto max-w-6xl px-6 h-14">
         <NavBar client:load />
     </div>
 </nav>
+
+<script>
+    const nav = document.getElementById("main-nav");
+    if (nav) {
+        const update = () => {
+            if (window.scrollY > 100) {
+                nav.classList.add("border-white/15");
+                nav.classList.remove("border-border");
+            } else {
+                nav.classList.remove("border-white/15");
+                nav.classList.add("border-border");
+            }
+        };
+        window.addEventListener("scroll", update, { passive: true });
+        update();
+    }
+</script>

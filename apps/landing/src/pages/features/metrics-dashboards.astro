@@ -7,10 +7,13 @@ import RelatedFeatures from "../../components/RelatedFeatures.astro";
 import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+
+const pageTitle = "Metrics & Dashboards | Maple";
+const pageDescription = "Build custom observability dashboards with 20+ chart types including area, line, bar, and pie. Track latency, throughput, error rates, and any custom OpenTelemetry metric.";
 ---
 
-<Layout title="Metrics & Dashboards | Maple" description="Build custom dashboards with 20+ chart types. Track latency, throughput, error rates, and any custom metric.">
-    <SeoHead title="Metrics & Dashboards | Maple" description="Build custom dashboards with 20+ chart types. Track latency, throughput, error rates, and any custom metric." />
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
         label="Metrics & Dashboards"

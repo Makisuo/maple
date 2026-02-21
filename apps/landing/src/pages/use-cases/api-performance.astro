@@ -2,11 +2,16 @@
 import Layout from "../../layouts/Layout.astro";
 import Nav from "../../components/Nav.astro";
 import FeatureHero from "../../components/FeatureHero.astro";
+import SeoHead from "../../components/SeoHead.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+
+const pageTitle = "API Performance Monitoring | Maple";
+const pageDescription = "Monitor API latency, throughput, and error rates with custom dashboards, Apdex scoring, commit-level regression detection, and AI-powered diagnostics for root cause analysis.";
 ---
 
-<Layout title="API Performance Monitoring | Maple" description="Monitor API latency, throughput, and error rates with custom dashboards, Apdex scoring, and AI-powered diagnostics.">
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
         label="Use Case"
