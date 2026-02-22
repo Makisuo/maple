@@ -280,7 +280,7 @@ export function PricingCards() {
   }
 
   function handleEnterpriseContact() {
-    window.location.href = "mailto:support@maple.dev"
+    window.open("https://cal.com/david-granzin/30min?overlayCalendar=true", "_blank", "noopener,noreferrer")
   }
 
   const enterprisePlanFeatures = getPlanFeatures("enterprise")
@@ -464,7 +464,7 @@ export function PricingCards() {
             </CardDescription>
           </div>
           <Button variant="default" className="w-full sm:w-auto shrink-0 h-10 shadow-sm" onClick={handleEnterpriseContact}>
-            Contact Sales
+            Talk to Founder
           </Button>
         </CardHeader>
 
