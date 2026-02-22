@@ -8,6 +8,9 @@ import {
   ServerIcon,
   CircleWarningIcon,
   MagnifierIcon,
+  CodeIcon,
+  KeyIcon,
+  DatabaseIcon,
   GearIcon,
   LogoutIcon,
   ChevronUpIcon,
@@ -96,6 +99,21 @@ const toolsNavItems = [
     icon: MagnifierIcon,
   },
   {
+    title: "MCP",
+    href: "/mcp",
+    icon: CodeIcon,
+  },
+  {
+    title: "Developer",
+    href: "/developer",
+    icon: KeyIcon,
+  },
+  {
+    title: "Connectors",
+    href: "/connectors",
+    icon: DatabaseIcon,
+  },
+  {
     title: "Settings",
     href: "/settings",
     icon: GearIcon,
@@ -182,7 +200,7 @@ function UserMenu() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link to="/settings" search={{ tab: "ingestion" }} />}>
+          <DropdownMenuItem render={<Link to="/settings" />}>
             <GearIcon size={16} />
             Settings
           </DropdownMenuItem>
@@ -228,7 +246,7 @@ function GuestMenu() {
         className="min-w-56"
       >
         <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link to="/settings" search={{ tab: "ingestion" }} />}>
+          <DropdownMenuItem render={<Link to="/settings" />}>
             <GearIcon size={16} />
             Settings
           </DropdownMenuItem>

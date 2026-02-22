@@ -18,9 +18,12 @@ import { Route as QuickStartRouteImport } from './routes/quick-start'
 import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
 import { Route as OrgRequiredRouteImport } from './routes/org-required'
 import { Route as MetricsRouteImport } from './routes/metrics'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ErrorsRouteImport } from './routes/errors'
+import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as DashboardsRouteImport } from './routes/dashboards'
+import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as ServicesIndexRouteImport } from './routes/services/index'
@@ -72,6 +75,11 @@ const MetricsRoute = MetricsRouteImport.update({
   path: '/metrics',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LogsRoute = LogsRouteImport.update({
   id: '/logs',
   path: '/logs',
@@ -82,9 +90,19 @@ const ErrorsRoute = ErrorsRouteImport.update({
   path: '/errors',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeveloperRoute = DeveloperRouteImport.update({
+  id: '/developer',
+  path: '/developer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardsRoute = DashboardsRouteImport.update({
   id: '/dashboards',
   path: '/dashboards',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectorsRoute = ConnectorsRouteImport.update({
+  id: '/connectors',
+  path: '/connectors',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -115,9 +133,12 @@ const ServicesServiceNameRoute = ServicesServiceNameRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
+  '/developer': typeof DeveloperRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
+  '/mcp': typeof McpRoute
   '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -134,9 +155,12 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
+  '/developer': typeof DeveloperRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
+  '/mcp': typeof McpRoute
   '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -154,9 +178,12 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
+  '/developer': typeof DeveloperRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
+  '/mcp': typeof McpRoute
   '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -175,9 +202,12 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/connectors'
     | '/dashboards'
+    | '/developer'
     | '/errors'
     | '/logs'
+    | '/mcp'
     | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
@@ -194,9 +224,12 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/connectors'
     | '/dashboards'
+    | '/developer'
     | '/errors'
     | '/logs'
+    | '/mcp'
     | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
@@ -213,9 +246,12 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/connectors'
     | '/dashboards'
+    | '/developer'
     | '/errors'
     | '/logs'
+    | '/mcp'
     | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
@@ -233,9 +269,12 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ConnectorsRoute: typeof ConnectorsRoute
   DashboardsRoute: typeof DashboardsRoute
+  DeveloperRoute: typeof DeveloperRoute
   ErrorsRoute: typeof ErrorsRoute
   LogsRoute: typeof LogsRoute
+  McpRoute: typeof McpRoute
   MetricsRoute: typeof MetricsRoute
   OrgRequiredRoute: typeof OrgRequiredRoute
   QueryBuilderLabRoute: typeof QueryBuilderLabRoute
@@ -316,6 +355,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MetricsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/logs': {
       id: '/logs'
       path: '/logs'
@@ -330,11 +376,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ErrorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/developer': {
+      id: '/developer'
+      path: '/developer'
+      fullPath: '/developer'
+      preLoaderRoute: typeof DeveloperRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboards': {
       id: '/dashboards'
       path: '/dashboards'
       fullPath: '/dashboards'
       preLoaderRoute: typeof DashboardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connectors': {
+      id: '/connectors'
+      path: '/connectors'
+      fullPath: '/connectors'
+      preLoaderRoute: typeof ConnectorsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -377,9 +437,12 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ConnectorsRoute: ConnectorsRoute,
   DashboardsRoute: DashboardsRoute,
+  DeveloperRoute: DeveloperRoute,
   ErrorsRoute: ErrorsRoute,
   LogsRoute: LogsRoute,
+  McpRoute: McpRoute,
   MetricsRoute: MetricsRoute,
   OrgRequiredRoute: OrgRequiredRoute,
   QueryBuilderLabRoute: QueryBuilderLabRoute,
