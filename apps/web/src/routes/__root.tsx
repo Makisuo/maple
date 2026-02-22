@@ -73,7 +73,7 @@ function ClerkReverseRedirects() {
     }
     const ALLOWED_WITHOUT_PLAN = ["/select-plan", "/quick-start"]
     if (!selectedPlan && !ALLOWED_WITHOUT_PLAN.includes(pathname)) {
-      return <Navigate to="/select-plan" search={{ redirect_url: redirectUrl }} replace />
+      return <Navigate to="/quick-start" search={{ redirect_url: redirectUrl }} replace />
     }
     if (selectedPlan && pathname === "/select-plan") {
       return <Navigate to={getRedirectTarget(searchStr)} replace />
