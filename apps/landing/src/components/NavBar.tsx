@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/clerk-react"
 import {
   NavigationMenu,
   NavigationMenuList,
@@ -6,6 +7,7 @@ import {
   NavigationMenuContent,
   NavigationMenuLink,
 } from "@maple/ui/components/ui/navigation-menu"
+import { ClerkProvider } from "./ClerkProvider"
 
 const featureLinks = [
   { href: "/features/distributed-tracing", label: "Distributed Tracing" },
@@ -34,7 +36,9 @@ const integrationLinks = [
   { href: "/integrations/nodejs", label: "Node.js" },
 ]
 
-export function NavBar() {
+function NavBarInner() {
+  const { isSignedIn, isLoaded } = useAuth()
+
   return (
     <div className="flex items-center justify-between h-full">
       {/* Left group: Logo + Navigation */}
@@ -144,12 +148,20 @@ export function NavBar() {
         </a>
 
         <a
-          href="/waitlist"
+          href="https://app.maple.dev"
           className="bg-accent text-accent-foreground px-4 py-1.5 text-xs font-medium hover:opacity-90 transition-opacity"
         >
-          Join waitlist
+          {isLoaded && isSignedIn ? "Dashboard" : "Get started for free"}
         </a>
       </div>
     </div>
+  )
+}
+
+export function NavBar() {
+  return (
+    <ClerkProvider>
+      <NavBarInner />
+    </ClerkProvider>
   )
 }

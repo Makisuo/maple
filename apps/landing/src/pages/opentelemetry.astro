@@ -1,0 +1,109 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Nav from "../components/Nav.astro";
+import FeatureHero from "../components/FeatureHero.astro";
+import FeatureDetailGrid from "../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../components/RelatedFeatures.astro";
+import SeoHead from "../components/SeoHead.astro";
+import BottomCTA from "../components/BottomCTA.astro";
+import Footer from "../components/Footer.astro";
+
+const pageTitle = "OpenTelemetry Observability Platform — Maple";
+const pageDescription = "Maple is built natively on OpenTelemetry. Ingest traces, logs, and metrics via OTLP with full spec compliance — no proprietary agents, no vendor lock-in.";
+---
+
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} type="WebPage" />
+    <Nav />
+    <FeatureHero
+        label="OpenTelemetry"
+        title="Built on OpenTelemetry from the ground up"
+        subtitle="Maple is a fully OTel-native observability platform. Every signal — traces, logs, and metrics — flows through the open standard. No proprietary agents, no SDK lock-in."
+    />
+
+    <!-- What is OpenTelemetry -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">The Standard</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg max-w-2xl">What is OpenTelemetry?</h2>
+            <div class="mt-6 max-w-3xl space-y-4">
+                <p class="text-sm md:text-base text-fg-muted leading-relaxed">
+                    OpenTelemetry is the CNCF open-source standard for collecting observability data from distributed systems. It provides a single, vendor-neutral set of APIs, SDKs, and tools to instrument your applications and export traces, logs, and metrics.
+                </p>
+                <p class="text-sm md:text-base text-fg-muted leading-relaxed">
+                    With support for every major language and framework, OTel has become the industry default for telemetry instrumentation — backed by contributions from hundreds of organizations.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why we build on OpenTelemetry -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">Our Approach</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12 max-w-2xl">Why we build on OpenTelemetry</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
+                <div class="bg-bg p-6 md:p-8">
+                    <h3 class="text-base font-semibold text-fg mb-2">No vendor lock-in</h3>
+                    <p class="text-sm text-fg-muted leading-relaxed">Your instrumentation stays the same regardless of which backend you choose. Switch providers without touching application code.</p>
+                </div>
+                <div class="bg-bg p-6 md:p-8">
+                    <h3 class="text-base font-semibold text-fg mb-2">One standard, all signals</h3>
+                    <p class="text-sm text-fg-muted leading-relaxed">Traces, logs, and metrics share a unified data model with correlated context. No stitching together separate tools.</p>
+                </div>
+                <div class="bg-bg p-6 md:p-8">
+                    <h3 class="text-base font-semibold text-fg mb-2">Community-driven</h3>
+                    <p class="text-sm text-fg-muted leading-relaxed">Backed by the CNCF and hundreds of contributors. The spec evolves with real-world needs, not a single vendor's roadmap.</p>
+                </div>
+                <div class="bg-bg p-6 md:p-8">
+                    <h3 class="text-base font-semibold text-fg mb-2">Broad language support</h3>
+                    <p class="text-sm text-fg-muted leading-relaxed">First-party SDKs for Go, Java, Python, JavaScript, .NET, Rust, and more. Auto-instrumentation available for most frameworks.</p>
+                </div>
+                <div class="bg-bg p-6 md:p-8">
+                    <h3 class="text-base font-semibold text-fg mb-2">Future-proof</h3>
+                    <p class="text-sm text-fg-muted leading-relaxed">As the industry converges on OTel, your investment in instrumentation carries forward. No more rip-and-replace migrations.</p>
+                </div>
+                <div class="bg-bg p-6 md:p-8">
+                    <h3 class="text-base font-semibold text-fg mb-2">Rich ecosystem</h3>
+                    <p class="text-sm text-fg-muted leading-relaxed">Collectors, exporters, processors, and connectors — a full pipeline you can customize to match your infrastructure.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How Maple follows the spec -->
+    <section class="py-24 md:py-32">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">Spec Compliance</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12 max-w-2xl">How Maple follows the spec</h2>
+            <FeatureDetailGrid items={[
+                { title: "Native OTLP Ingest", description: "Send telemetry directly via OTLP/gRPC or OTLP/HTTP. No translation layers, no proprietary formats." },
+                { title: "Semantic Conventions", description: "Maple understands and indexes OTel semantic conventions — HTTP, database, RPC, messaging — out of the box." },
+                { title: "All Three Signals", description: "First-class support for traces, logs, and metrics. Each signal is stored, queried, and correlated natively." },
+                { title: "Collector Compatible", description: "Use the OpenTelemetry Collector to route, filter, and batch telemetry before sending it to Maple." },
+                { title: "Any OTel SDK", description: "Works with every official OTel SDK. If it speaks OTLP, Maple can ingest it — no vendor-specific libraries required." },
+                { title: "Context Propagation", description: "W3C Trace Context and Baggage propagation supported. Correlate spans, logs, and metrics across service boundaries." },
+            ]} />
+        </div>
+    </section>
+
+    <!-- OTel Ecosystem -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">Ecosystem</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg max-w-2xl">Works with your existing OTel setup</h2>
+            <div class="mt-6 max-w-3xl space-y-4">
+                <p class="text-sm md:text-base text-fg-muted leading-relaxed">
+                    Already using the OpenTelemetry Collector, auto-instrumentation agents, or OTel SDKs? Point your OTLP exporter at Maple and start seeing data immediately. No code changes, no new agents to deploy.
+                </p>
+                <p class="text-sm md:text-base text-fg-muted leading-relaxed">
+                    Maple fits into the OTel ecosystem as a backend — receiving, storing, and visualizing the telemetry your existing pipeline produces. Swap in Maple without disrupting your instrumentation.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <RelatedFeatures current="" />
+    <BottomCTA />
+    <Footer />
+</Layout>

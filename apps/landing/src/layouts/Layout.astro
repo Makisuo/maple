@@ -1,8 +1,6 @@
 ---
 import "../styles/global.css";
 
-import ClerkProvider from "../components/ClerkProvider";
-
 interface Props {
     title?: string;
     description?: string;
@@ -52,8 +50,6 @@ const absoluteImage = image.startsWith("http")
         <title>{title}</title>
     </head>
     <body class="min-h-screen antialiased">
-        <ClerkProvider>
-            <slot />
-        </ClerkProvider>
+        <slot />
     </body>
 </html>
