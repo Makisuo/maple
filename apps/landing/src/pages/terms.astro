@@ -1,0 +1,160 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import SeoHead from "../components/SeoHead.astro";
+
+const pageTitle = "Terms of Service — Maple";
+const pageDescription = "Read the terms and conditions for using the Maple observability platform.";
+---
+
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
+    <Nav />
+
+    <main class="mx-auto max-w-3xl px-6 py-24">
+        <p class="text-fg-muted text-xs mb-6">Last updated: February 22, 2026</p>
+        <h1 class="text-fg text-2xl font-medium mb-12">Terms of Service</h1>
+
+        <div class="space-y-10 text-fg-muted text-sm leading-relaxed">
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">1. Acceptance of Terms</h2>
+                <p>
+                    By accessing or using Maple (the "Service"), operated by Makisuo LLC ("we", "us", "our"),
+                    you agree to be bound by these Terms of Service. If you do not agree, do not use the Service.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">2. Service Description</h2>
+                <p>
+                    Maple is an open-source observability platform built on OpenTelemetry. It provides tools
+                    for collecting, storing, and visualizing distributed traces, logs, and metrics from your
+                    applications.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">3. Accounts</h2>
+                <p class="mb-3">
+                    You must create an account to use certain features of the Service. You are responsible for
+                    maintaining the security of your account credentials and for all activity under your account.
+                </p>
+                <p>
+                    You must provide accurate information when creating your account and keep it up to date.
+                    We reserve the right to suspend or terminate accounts that violate these terms.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">4. User Responsibilities</h2>
+                <p class="mb-3">You agree to:</p>
+                <ul class="list-disc list-inside space-y-1.5">
+                    <li>Use the Service in compliance with all applicable laws</li>
+                    <li>Not send malicious, harmful, or illegal data through the Service</li>
+                    <li>Not attempt to gain unauthorized access to the Service or its systems</li>
+                    <li>Not interfere with or disrupt the Service's infrastructure</li>
+                    <li>Not reverse-engineer, decompile, or disassemble the cloud Service (the open-source codebase is governed by its license)</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">5. Data Ownership</h2>
+                <p class="mb-3">
+                    You retain full ownership of the telemetry data (traces, logs, and metrics) you send to the
+                    Service. We do not claim any intellectual property rights over your data.
+                </p>
+                <p>
+                    We process your data solely to provide the Service and will not sell, share, or use your
+                    telemetry data for any purpose other than operating and improving the Service.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">6. Service Availability</h2>
+                <p>
+                    We strive to maintain high availability but do not guarantee uninterrupted access to the
+                    Service. We may perform maintenance, updates, or modifications that temporarily affect
+                    availability. We will provide reasonable notice when possible.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">7. Payment and Billing</h2>
+                <p>
+                    Paid plans are billed according to the pricing published on our website. Usage beyond your
+                    plan's included allowance will be billed at the stated overage rates. You are responsible
+                    for paying all fees associated with your account.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">8. Limitation of Liability</h2>
+                <p>
+                    To the maximum extent permitted by law, Makisuo LLC shall not be liable for any indirect,
+                    incidental, special, consequential, or punitive damages, including loss of profits, data,
+                    or business opportunities, arising from your use of the Service. Our total liability shall
+                    not exceed the amount you paid us in the twelve months preceding the claim.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">9. Disclaimer of Warranties</h2>
+                <p>
+                    The Service is provided "as is" and "as available" without warranties of any kind, whether
+                    express or implied, including but not limited to warranties of merchantability, fitness for
+                    a particular purpose, and non-infringement.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">10. Termination</h2>
+                <p class="mb-3">
+                    You may stop using the Service and delete your account at any time. We may suspend or
+                    terminate your access if you violate these terms or engage in conduct that is harmful
+                    to the Service or other users.
+                </p>
+                <p>
+                    Upon termination, your right to use the Service ceases immediately. We will retain your
+                    data for a reasonable period to allow you to export it, after which it will be deleted.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">11. Open Source</h2>
+                <p>
+                    Maple's source code is available under an open-source license. Your use of the self-hosted
+                    version is governed by that license. These Terms of Service apply specifically to the
+                    cloud-hosted Service operated by Makisuo LLC.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">12. Changes to Terms</h2>
+                <p>
+                    We may update these Terms of Service from time to time. Continued use of the Service after
+                    changes are posted constitutes acceptance of the updated terms. We will notify you of
+                    significant changes via email or a notice on the Service.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">13. Governing Law</h2>
+                <p>
+                    These terms are governed by the laws of the United States. Any disputes arising from these
+                    terms or your use of the Service shall be resolved in accordance with applicable law.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">14. Contact</h2>
+                <p>
+                    If you have questions about these Terms of Service, contact us at
+                    <a href="mailto:legal@getmaple.dev" class="text-fg underline underline-offset-4 hover:text-accent transition-colors">legal@getmaple.dev</a>.
+                </p>
+            </section>
+        </div>
+    </main>
+
+    <Footer />
+</Layout>

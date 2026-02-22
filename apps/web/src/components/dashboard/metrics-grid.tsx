@@ -17,6 +17,7 @@ interface MetricsGridItem {
   data: Record<string, unknown>[]
   legend?: ChartLegendMode
   tooltip?: ChartTooltipMode
+  isLoading?: boolean
 }
 
 interface MetricsGridProps {
@@ -42,14 +43,18 @@ export function MetricsGrid({ items, className }: MetricsGridProps) {
             className={cn("h-[280px]", fullWidth && "md:col-span-2")}
           >
             <ReadonlyWidgetShell title={item.title}>
-              <Suspense fallback={<Skeleton className="h-full w-full" />}>
-                <ChartComponent
-                  data={item.data}
-                  className="h-full w-full aspect-auto"
-                  legend={item.legend}
-                  tooltip={item.tooltip}
-                />
-              </Suspense>
+              {item.isLoading ? (
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <Suspense fallback={<Skeleton className="h-full w-full" />}>
+                  <ChartComponent
+                    data={item.data}
+                    className="h-full w-full aspect-auto"
+                    legend={item.legend}
+                    tooltip={item.tooltip}
+                  />
+                </Suspense>
+              )}
             </ReadonlyWidgetShell>
           </div>
         )

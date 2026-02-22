@@ -1,0 +1,130 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import SeoHead from "../components/SeoHead.astro";
+
+const pageTitle = "Privacy Policy — Maple";
+const pageDescription = "Learn how Maple collects, uses, and protects your data. Our privacy policy explains your rights and our commitment to data security.";
+---
+
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} />
+    <Nav />
+
+    <main class="mx-auto max-w-3xl px-6 py-24">
+        <p class="text-fg-muted text-xs mb-6">Last updated: February 22, 2026</p>
+        <h1 class="text-fg text-2xl font-medium mb-12">Privacy Policy</h1>
+
+        <div class="space-y-10 text-fg-muted text-sm leading-relaxed">
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">1. Introduction</h2>
+                <p>
+                    Maple is operated by Makisuo LLC ("we", "us", "our"). This Privacy Policy explains how we collect,
+                    use, and protect information when you use the Maple observability platform and related services
+                    (the "Service").
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">2. Information We Collect</h2>
+                <h3 class="text-fg text-sm font-medium mb-2">Account Information</h3>
+                <p class="mb-3">
+                    When you create an account, we collect your name, email address, and authentication credentials.
+                    Authentication is handled by Clerk, a third-party authentication provider.
+                </p>
+                <h3 class="text-fg text-sm font-medium mb-2">Telemetry Data</h3>
+                <p class="mb-3">
+                    The Service ingests OpenTelemetry data (traces, logs, and metrics) that you send from your
+                    applications. This data is owned by you and processed solely to provide the Service.
+                </p>
+                <h3 class="text-fg text-sm font-medium mb-2">Usage Data</h3>
+                <p>
+                    We collect basic usage information such as page views, feature usage, and performance metrics
+                    to improve the Service.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">3. How We Use Your Data</h2>
+                <ul class="list-disc list-inside space-y-1.5">
+                    <li>To provide and maintain the Service</li>
+                    <li>To authenticate your identity and manage your account</li>
+                    <li>To process and display your telemetry data</li>
+                    <li>To send service-related communications</li>
+                    <li>To improve the Service and develop new features</li>
+                    <li>To comply with legal obligations</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">4. Data Retention</h2>
+                <p>
+                    Telemetry data is retained according to your plan's retention period. Account information is
+                    retained for as long as your account is active. You may request deletion of your account and
+                    associated data at any time by contacting us.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">5. Data Security</h2>
+                <p>
+                    We implement industry-standard security measures to protect your data, including encryption
+                    in transit (TLS) and at rest. However, no method of transmission or storage is 100% secure,
+                    and we cannot guarantee absolute security.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">6. Third-Party Services</h2>
+                <p class="mb-3">We use the following third-party services to operate the platform:</p>
+                <ul class="list-disc list-inside space-y-1.5">
+                    <li><strong class="text-fg">Clerk</strong> — Authentication and user management</li>
+                    <li><strong class="text-fg">Tinybird</strong> — Analytics data processing and storage</li>
+                    <li><strong class="text-fg">OpenTelemetry</strong> — Telemetry data collection standard</li>
+                </ul>
+                <p class="mt-3">
+                    Each third-party service has its own privacy policy governing their handling of data.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">7. Your Rights</h2>
+                <p class="mb-3">You have the right to:</p>
+                <ul class="list-disc list-inside space-y-1.5">
+                    <li>Access the personal data we hold about you</li>
+                    <li>Request correction of inaccurate data</li>
+                    <li>Request deletion of your data</li>
+                    <li>Export your telemetry data</li>
+                    <li>Withdraw consent for data processing</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">8. Cookies</h2>
+                <p>
+                    We use essential cookies for authentication and session management. We do not use
+                    third-party advertising or tracking cookies.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">9. Changes to This Policy</h2>
+                <p>
+                    We may update this Privacy Policy from time to time. We will notify you of significant changes
+                    by posting a notice on the Service or sending you an email.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-fg text-base font-medium mb-3">10. Contact</h2>
+                <p>
+                    If you have questions about this Privacy Policy, contact us at
+                    <a href="mailto:privacy@getmaple.dev" class="text-fg underline underline-offset-4 hover:text-accent transition-colors">privacy@getmaple.dev</a>.
+                </p>
+            </section>
+        </div>
+    </main>
+
+    <Footer />
+</Layout>
