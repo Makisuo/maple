@@ -94,10 +94,18 @@ function useClerkAuthSettled() {
 
 function ClerkInnerApp() {
   const { settled, isSignedIn, orgId } = useClerkAuthSettled()
+  const isRouterMountedRef = useRef(false)
 
   useEffect(() => {
+    if (!settled) return
+    if (!isRouterMountedRef.current) {
+      isRouterMountedRef.current = true
+      return () => {
+        isRouterMountedRef.current = false
+      }
+    }
     router.invalidate()
-  }, [isSignedIn, orgId])
+  }, [settled, isSignedIn, orgId])
 
   if (!settled) return null
 
