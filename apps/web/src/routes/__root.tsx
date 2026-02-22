@@ -2,6 +2,7 @@ import { useAuth } from "@clerk/clerk-react"
 import { useCustomer } from "autumn-js/react"
 import { Navigate, Outlet, createRootRouteWithContext, redirect, useRouterState } from "@tanstack/react-router"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { Toaster } from "@maple/ui/components/ui/sonner"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import type { RouterAuthContext } from "@/router"
@@ -40,19 +41,19 @@ function AppFrame() {
   )
 }
 
-function getRedirectTarget(searchStr: string, fallback = "/"): string {
+function getRedirectTarget(searchStr: string, fallback = "/") {
   const params = new URLSearchParams(searchStr)
   const target = params.get("redirect_url")
-  if (!target) return fallback
-  return target.startsWith("/") ? target : fallback
+  if (!target || !target.startsWith("/")) return parseRedirectUrl(fallback)
+  return parseRedirectUrl(target)
 }
 
-function getSignUpRedirectTarget(searchStr: string): string {
+function getSignUpRedirectTarget(searchStr: string) {
   const target = new URLSearchParams(searchStr).get("redirect_url")
   if (!target || target === "/" || !target.startsWith("/")) {
-    return "/quick-start"
+    return parseRedirectUrl("/quick-start")
   }
-  return target
+  return parseRedirectUrl(target)
 }
 
 function ClerkReverseRedirects() {
@@ -69,15 +70,18 @@ function ClerkReverseRedirects() {
   const selectedPlan = hasSelectedPlan(customer)
 
   if (isSignedIn && pathname === "/sign-in") {
-    return <Navigate to={getRedirectTarget(searchStr)} replace />
+    const target = getRedirectTarget(searchStr)
+    return <Navigate to={target.pathname} search={target.search} replace />
   }
 
   if (isSignedIn && pathname === "/sign-up") {
-    return <Navigate to={getSignUpRedirectTarget(searchStr)} replace />
+    const target = getSignUpRedirectTarget(searchStr)
+    return <Navigate to={target.pathname} search={target.search} replace />
   }
 
   if (isSignedIn && orgId && pathname === "/org-required") {
-    return <Navigate to={getRedirectTarget(searchStr)} replace />
+    const target = getRedirectTarget(searchStr)
+    return <Navigate to={target.pathname} search={target.search} replace />
   }
 
   if (isSignedIn && orgId) {
@@ -89,7 +93,8 @@ function ClerkReverseRedirects() {
       return <Navigate to="/select-plan" search={{ redirect_url: redirectUrl }} replace />
     }
     if (selectedPlan && pathname === "/select-plan") {
-      return <Navigate to={getRedirectTarget(searchStr)} replace />
+      const target = getRedirectTarget(searchStr)
+      return <Navigate to={target.pathname} search={target.search} replace />
     }
   }
 

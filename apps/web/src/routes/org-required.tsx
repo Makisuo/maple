@@ -1,6 +1,7 @@
 import { OrganizationSwitcher, useAuth } from "@clerk/clerk-react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
+import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { AuthLayout } from "@/components/layout/auth-layout"
 
@@ -34,7 +35,8 @@ function OrgRequiredPageClerk() {
   }
 
   if (orgId) {
-    return <Navigate to={redirect_url || "/"} replace />
+    const target = parseRedirectUrl(redirect_url || "/")
+    return <Navigate to={target.pathname} search={target.search} replace />
   }
 
   return (

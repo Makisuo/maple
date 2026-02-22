@@ -5,6 +5,7 @@ import { Schema } from "effect"
 import { RocketIcon } from "@/components/icons"
 import { PricingCards } from "@/components/settings/pricing-cards"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
 const SelectPlanSearch = Schema.Struct({
@@ -45,7 +46,8 @@ function SelectPlanPage() {
   }
 
   if (hasSelectedPlan(customer)) {
-    return <Navigate to={redirectTarget} replace />
+    const target = parseRedirectUrl(redirectTarget)
+    return <Navigate to={target.pathname} search={target.search} replace />
   }
 
   return (
