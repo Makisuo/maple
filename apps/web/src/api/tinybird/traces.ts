@@ -134,6 +134,7 @@ export interface Span {
 export interface SpanNode extends Span {
   children: SpanNode[]
   depth: number
+  isMissing?: boolean
 }
 
 export interface SpanHierarchyResponse {
@@ -181,6 +182,8 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
     spanMap.set(span.spanId, { ...span, children: [], depth: 0 })
   }
 
+  const missingParentGroups = new Map<string, SpanNode[]>()
+
   for (const span of spans) {
     const node = spanMap.get(span.spanId)
     if (!node) {
@@ -189,9 +192,34 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
     if (span.parentSpanId && spanMap.has(span.parentSpanId)) {
       const parent = spanMap.get(span.parentSpanId)
       parent?.children.push(node)
+    } else if (span.parentSpanId) {
+      const group = missingParentGroups.get(span.parentSpanId) || []
+      group.push(node)
+      missingParentGroups.set(span.parentSpanId, group)
     } else {
       rootSpans.push(node)
     }
+  }
+
+  for (const [missingParentId, children] of missingParentGroups) {
+    const placeholder: SpanNode = {
+      traceId: children[0].traceId,
+      spanId: missingParentId,
+      parentSpanId: "",
+      spanName: "Missing Span",
+      serviceName: "unknown",
+      spanKind: "SPAN_KIND_INTERNAL",
+      durationMs: 0,
+      startTime: children[0].startTime,
+      statusCode: "Unset",
+      statusMessage: "",
+      spanAttributes: {},
+      resourceAttributes: {},
+      children,
+      depth: 0,
+      isMissing: true,
+    }
+    rootSpans.push(placeholder)
   }
 
   function setDepth(node: SpanNode, depth: number) {

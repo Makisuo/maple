@@ -43,6 +43,56 @@ export function SpanRow({
 }: SpanRowProps) {
   const hasChildren = span.children.length > 0
 
+  if (span.isMissing) {
+    return (
+      <div
+        className={cn(
+          "group flex items-center border-b border-dashed py-1.5 px-2 bg-muted/30",
+          isSelected && "bg-primary/5 border-l-2 border-l-primary"
+        )}
+      >
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {span.depth > 0 && <div style={{ width: `${span.depth * 24}px` }} className="shrink-0" />}
+
+          {hasChildren ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-5 w-5 shrink-0"
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggle()
+              }}
+            >
+              {expanded ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
+            </Button>
+          ) : (
+            <div className="w-5 shrink-0" />
+          )}
+
+          <Badge
+            variant="outline"
+            className="shrink-0 font-mono text-[10px] px-1.5 border-dashed text-muted-foreground"
+          >
+            missing
+          </Badge>
+
+          <span className="flex-1 truncate font-mono text-xs italic text-muted-foreground" title={`Missing span: ${span.spanId}`}>
+            Missing Span
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          <div className="w-32" />
+          <span className="w-16 text-right font-mono text-[10px] text-muted-foreground/50 truncate" title={span.spanId}>
+            {span.spanId.slice(0, 8)}
+          </span>
+          <div className="w-14" />
+        </div>
+      </div>
+    )
+  }
+
   // Calculate waterfall bar position and width
   const traceStartMs = new Date(traceStartTime).getTime()
   const spanStartMs = new Date(span.startTime).getTime()

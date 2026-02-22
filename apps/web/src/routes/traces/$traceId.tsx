@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 import { Schema } from "effect"
 import { toast } from "sonner"
@@ -124,12 +124,49 @@ function TraceDetailPage() {
               >
                 {traceId}
               </Badge>
-              <a
-                href="/traces"
+              <Link
+                to="/traces"
                 className="mt-6 text-sm text-primary underline underline-offset-4 hover:text-primary/80"
               >
                 Back to Traces
-              </a>
+              </Link>
+            </div>
+          </DashboardLayout>
+        )
+      }
+
+      if (data.rootSpans.length === 0) {
+        return (
+          <DashboardLayout
+            breadcrumbs={[
+              { label: "Traces", href: "/traces" },
+              { label: traceId.slice(0, 8) },
+            ]}
+            title="Root span not found"
+            description={`Found ${data.spans.length} span${data.spans.length !== 1 ? "s" : ""}, but the root span is missing. The trace may be incomplete.`}
+          >
+            <div className="flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
+              <p className="text-sm text-muted-foreground">Trace ID</p>
+              <Badge
+                variant="outline"
+                className="mt-1 font-mono text-xs cursor-pointer hover:bg-muted"
+                onClick={() => {
+                  navigator.clipboard.writeText(traceId)
+                  toast.success("Trace ID copied to clipboard")
+                }}
+              >
+                {traceId}
+              </Badge>
+              <p className="mt-4 text-sm text-muted-foreground max-w-md">
+                This trace contains spans but the root span was not found.
+                It may not have been ingested yet or could have been dropped during sampling.
+              </p>
+              <Link
+                to="/traces"
+                className="mt-6 text-sm text-primary underline underline-offset-4 hover:text-primary/80"
+              >
+                Back to Traces
+              </Link>
             </div>
           </DashboardLayout>
         )

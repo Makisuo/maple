@@ -119,6 +119,45 @@ export const FlowSpanNode = memo(function FlowSpanNode({
   data,
 }: FlowSpanNodeProps) {
   const { span, services, isSelected, count, aggregatedDuration } = data
+
+  if (span.isMissing) {
+    return (
+      <>
+        <Handle
+          type="target"
+          position={Position.Top}
+          className="!opacity-0 !w-0 !h-0 !min-w-0 !min-h-0"
+          isConnectable={false}
+        />
+        <div
+          className={cn(
+            "relative w-[280px] rounded-lg transition-all duration-200",
+            "flex flex-col overflow-hidden border-2 border-dashed border-muted-foreground/30",
+            isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background"
+          )}
+        >
+          <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] bg-muted/50 text-muted-foreground">
+            <span className="font-semibold">Missing Span</span>
+          </div>
+          <div className="px-3 py-2.5 bg-card/50">
+            <p className="font-mono text-[11px] text-muted-foreground/70 truncate" title={span.spanId}>
+              {span.spanId.slice(0, 16)}
+            </p>
+            <p className="mt-1 text-[10px] text-muted-foreground/50 italic">
+              Not ingested or dropped
+            </p>
+          </div>
+        </div>
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          className="!opacity-0 !w-0 !h-0 !min-w-0 !min-h-0"
+          isConnectable={false}
+        />
+      </>
+    )
+  }
+
   const isCombined = count > 1
 
   const kindLabel = SPAN_KIND_LABELS[span.spanKind] || span.spanKind.replace("SPAN_KIND_", "")
