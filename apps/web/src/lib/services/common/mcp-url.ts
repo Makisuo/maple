@@ -1,6 +1,9 @@
 const configuredMcpUrl = import.meta.env.VITE_MCP_URL?.trim()
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
 
 export const mcpUrl =
   configuredMcpUrl && configuredMcpUrl.length > 0
     ? configuredMcpUrl.replace(/\/$/, "")
-    : "http://127.0.0.1:3473"
+    : apiBaseUrl && apiBaseUrl.length > 0
+      ? apiBaseUrl.replace(/\/$/, "")
+      : "http://localhost:3472"

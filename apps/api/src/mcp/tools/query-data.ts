@@ -8,8 +8,9 @@ import {
 } from "./types"
 import { defaultTimeRange } from "../lib/time"
 import { formatDurationFromMs, formatNumber, formatPercent, formatTable } from "../lib/format"
+import { HttpServerRequest } from "@effect/platform"
 import { Cause, Effect, Exit, ManagedRuntime, Option } from "effect"
-import { getTenantContext } from "@/lib/tenant-context"
+import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
 import { QueryEngineService } from "@/services/QueryEngineService"
 import type {
   LogsFilters,
@@ -308,13 +309,11 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           }
         }
 
-        const tenant = getTenantContext()
-        if (!tenant) {
-          return {
-            isError: true,
-            content: [{ type: "text" as const, text: "Tenant context is missing." }],
-          }
-        }
+        const tenant = yield* Effect.gen(function* () {
+          const req = yield* HttpServerRequest.HttpServerRequest
+          const nativeReq = yield* HttpServerRequest.toWeb(req)
+          return yield* Effect.tryPromise(() => resolveMcpTenantContext(nativeReq))
+        }).pipe(Effect.orDie)
 
         const exit = yield* Effect.promise(() =>
           QueryEngineRuntime.runPromiseExit(

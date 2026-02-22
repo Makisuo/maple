@@ -1,11 +1,9 @@
 import { HttpApiScalar, HttpLayerRouter, HttpMiddleware, HttpServerResponse } from "@effect/platform"
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
 import { MapleApi } from "@maple/domain/http"
-import { Config, Effect, Layer, ManagedRuntime } from "effect"
+import { Config, Layer } from "effect"
 import { HttpApiRoutes } from "./http"
-import { runWithTenantContext } from "@/lib/tenant-context"
-import { mcpWebHandler } from "./mcp/app"
-import { resolveMcpTenantContext } from "./mcp/lib/resolve-tenant"
+import { McpLive } from "./mcp/app"
 import { AutumnRouter } from "./routes/autumn.http"
 import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthorizationLive } from "./services/AuthorizationLive"
@@ -27,13 +25,13 @@ const DocsRoute = HttpApiScalar.layerHttpLayerRouter({
   path: "/docs",
 })
 
-const AllRoutes = Layer.mergeAll(HttpApiRoutes, HealthRouter, DocsRoute, AutumnRouter).pipe(
+const AllRoutes = Layer.mergeAll(HttpApiRoutes, HealthRouter, DocsRoute, AutumnRouter, McpLive).pipe(
   Layer.provideMerge(
     HttpLayerRouter.cors({
       allowedOrigins: ["*"],
       allowedMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["*"],
-      exposedHeaders: [],
+      exposedHeaders: ["Mcp-Session-Id"],
     }),
   ),
 )
@@ -48,34 +46,6 @@ const MainLive = Layer.mergeAll(
   OrgIngestKeysService.Live,
   ScrapeTargetsService.Live,
 )
-
-const mcpPort = await ManagedRuntime.make(Env.Default).runPromise(
-  Effect.gen(function* () {
-    return (yield* Env).MCP_PORT
-  }),
-)
-
-Bun.serve({
-  port: mcpPort,
-  fetch: async (request) => {
-    try {
-      const tenant = await resolveMcpTenantContext(request)
-      return await runWithTenantContext(tenant, () => mcpWebHandler.handler(request))
-    } catch (error) {
-      return new Response(
-        JSON.stringify({
-          error: error instanceof Error ? error.message : "Unauthorized",
-        }),
-        {
-          status: 401,
-          headers: {
-            "content-type": "application/json",
-          },
-        },
-      )
-    }
-  },
-})
 
 const app = HttpLayerRouter.serve(AllRoutes).pipe(
   HttpMiddleware.withTracerDisabledWhen(

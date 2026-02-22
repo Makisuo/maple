@@ -20,7 +20,7 @@ interface ToolDefinition {
   readonly name: string
   readonly description: string
   readonly schema: Schema.Struct.Fields
-  readonly handler: (params: unknown) => Effect.Effect<McpToolResult>
+  readonly handler: (params: unknown) => Effect.Effect<McpToolResult, never, any>
 }
 
 const toErrorMessage = (error: unknown): string => {

@@ -6,7 +6,6 @@ export class Env extends Effect.Service<Env>()("Env", {
   effect: Effect.gen(function* () {
     const env = {
       PORT: yield* Config.number("PORT").pipe(Config.withDefault(3472)),
-      MCP_PORT: yield* Config.number("MCP_PORT").pipe(Config.withDefault(3473)),
       TINYBIRD_HOST: yield* Config.string("TINYBIRD_HOST"),
       TINYBIRD_TOKEN: yield* Config.redacted("TINYBIRD_TOKEN"),
       MAPLE_DB_URL: yield* Config.string("MAPLE_DB_URL").pipe(Config.withDefault("")),

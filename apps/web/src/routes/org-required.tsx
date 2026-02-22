@@ -2,6 +2,7 @@ import { OrganizationSwitcher, useAuth } from "@clerk/clerk-react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { AuthLayout } from "@/components/layout/auth-layout"
 
 const OrgRequiredSearch = Schema.Struct({
   redirect_url: Schema.optional(Schema.String),
@@ -37,16 +38,14 @@ function OrgRequiredPageClerk() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-lg rounded-lg border bg-card p-6">
-        <h1 className="text-xl font-semibold">Organization required</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Select or create an organization before entering the app.
-        </p>
-        <div className="mt-4">
-          <OrganizationSwitcher hidePersonal />
-        </div>
+    <AuthLayout maxWidth="max-w-lg">
+      <h1 className="text-xl font-semibold">Organization required</h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Select or create an organization before entering the app.
+      </p>
+      <div className="mt-4">
+        <OrganizationSwitcher hidePersonal />
       </div>
-    </main>
+    </AuthLayout>
   )
 }

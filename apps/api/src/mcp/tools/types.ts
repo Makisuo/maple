@@ -11,7 +11,7 @@ export interface McpToolRegistrar {
     name: string,
     description: string,
     schema: TFields,
-    handler: (params: Schema.Struct.Type<TFields>) => Effect.Effect<McpToolResult>,
+    handler: (params: Schema.Struct.Type<TFields>) => Effect.Effect<McpToolResult, never, any>,
   ): void
 }
 

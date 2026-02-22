@@ -1,4 +1,5 @@
 import { SignIn } from "@clerk/clerk-react"
+
 import { FormEvent, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
@@ -7,6 +8,8 @@ import { Input } from "@maple/ui/components/ui/input"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { setSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
+import { AuthLayout } from "@/components/layout/auth-layout"
+import { clerkAppearance } from "@/lib/clerk-appearance"
 
 const SignInSearch = Schema.Struct({
   redirect_url: Schema.optional(Schema.String),
@@ -72,8 +75,8 @@ export function SelfHostedSignInPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-sm rounded-lg border bg-card p-6 space-y-4">
+    <AuthLayout>
+      <div className="space-y-4">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold">Sign in</h1>
           <p className="text-sm text-muted-foreground">
@@ -98,16 +101,16 @@ export function SelfHostedSignInPage() {
           </Button>
         </form>
       </div>
-    </main>
+    </AuthLayout>
   )
 }
 
 export function SignInPage() {
   if (isClerkAuthEnabled) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6">
-        <SignIn />
-      </main>
+      <AuthLayout>
+        <SignIn appearance={clerkAppearance} />
+      </AuthLayout>
     )
   }
 
