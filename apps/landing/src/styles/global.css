@@ -23,11 +23,17 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.552 0.016 285.938);
-    --chart-1: oklch(0.83 0.10 230);
-    --chart-2: oklch(0.75 0.14 233);
-    --chart-3: oklch(0.68 0.15 237);
-    --chart-4: oklch(0.59 0.14 242);
-    --chart-5: oklch(0.50 0.12 243);
+    --chart-1: oklch(0.74 0.14 250);
+    --chart-2: oklch(0.76 0.12 185);
+    --chart-3: oklch(0.78 0.14 85);
+    --chart-4: oklch(0.72 0.14 310);
+    --chart-5: oklch(0.75 0.14 20);
+    --chart-p99:        oklch(0.72 0.18 30);
+    --chart-p95:        oklch(0.76 0.15 65);
+    --chart-p50:        oklch(0.76 0.12 250);
+    --chart-error:      oklch(0.704 0.191 22.216);
+    --chart-throughput: oklch(0.72 0.12 285);
+    --chart-apdex:      oklch(0.74 0.15 155);
     --bg-elevated: oklch(0.21 0.006 285.885);
     --radius: 0;
 }
@@ -65,6 +71,12 @@
     --color-chart-3: var(--chart-3);
     --color-chart-4: var(--chart-4);
     --color-chart-5: var(--chart-5);
+    --color-chart-p99: var(--chart-p99);
+    --color-chart-p95: var(--chart-p95);
+    --color-chart-p50: var(--chart-p50);
+    --color-chart-error: var(--chart-error);
+    --color-chart-throughput: var(--chart-throughput);
+    --color-chart-apdex: var(--chart-apdex);
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
     --radius-lg: var(--radius);

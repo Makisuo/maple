@@ -14,9 +14,9 @@ import {
 import { formatLatency, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
 const chartConfig = {
-  p99LatencyMs: { label: "P99", color: "var(--chart-1)" },
-  p95LatencyMs: { label: "P95", color: "var(--chart-2)" },
-  p50LatencyMs: { label: "P50", color: "var(--chart-3)" },
+  p99LatencyMs: { label: "P99", color: "var(--chart-p99)" },
+  p95LatencyMs: { label: "P95", color: "var(--chart-p95)" },
+  p50LatencyMs: { label: "P50", color: "var(--chart-p50)" },
 } satisfies ChartConfig
 
 export function LatencyLineChart({ data, className, legend, tooltip }: BaseChartProps) {
@@ -55,10 +55,14 @@ export function LatencyLineChart({ data, className, legend, tooltip }: BaseChart
                   if (!payload?.[0]?.payload?.bucket) return ""
                   return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
                 }}
-                formatter={(value, name) => {
+                formatter={(value, name, item) => {
                   const config = chartConfig[name as keyof typeof chartConfig]
                   return (
                     <span className="flex items-center gap-2">
+                      <span
+                        className="shrink-0 size-2.5 rounded-[2px]"
+                        style={{ backgroundColor: item.color }}
+                      />
                       <span className="text-muted-foreground">{config?.label ?? name}</span>
                       <span className="font-mono font-medium">{formatLatency(value as number)}</span>
                     </span>

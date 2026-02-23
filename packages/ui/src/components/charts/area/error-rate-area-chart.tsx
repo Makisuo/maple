@@ -15,7 +15,7 @@ import {
 import { formatErrorRate, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
 const chartConfig = {
-  errorRate: { label: "Error Rate", color: "var(--color-destructive, #ef4444)" },
+  errorRate: { label: "Error Rate", color: "var(--chart-error)" },
 } satisfies ChartConfig
 
 export function ErrorRateAreaChart({ data, className, legend, tooltip }: BaseChartProps) {

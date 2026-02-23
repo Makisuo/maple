@@ -39,7 +39,7 @@ export function ThroughputAreaChart({ data, className, legend, tooltip }: BaseCh
       ({
         throughput: {
           label: rateLabel ? `Throughput (${rateLabel})` : "Throughput",
-          color: "var(--chart-4)",
+          color: "var(--chart-throughput)",
         },
       }) satisfies ChartConfig,
     [rateLabel],

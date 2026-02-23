@@ -15,7 +15,7 @@ import {
 import { inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
 
 const chartConfig = {
-  apdexScore: { label: "Apdex", color: "var(--chart-5)" },
+  apdexScore: { label: "Apdex", color: "var(--chart-apdex)" },
 } satisfies ChartConfig
 
 export function ApdexAreaChart({ data, className, legend, tooltip }: BaseChartProps) {
