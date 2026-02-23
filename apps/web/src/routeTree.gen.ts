@@ -21,6 +21,7 @@ import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ErrorsRouteImport } from './routes/errors'
+import { Route as EndpointsRouteImport } from './routes/endpoints'
 import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as DashboardsRouteImport } from './routes/dashboards'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
@@ -90,6 +91,11 @@ const ErrorsRoute = ErrorsRouteImport.update({
   path: '/errors',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EndpointsRoute = EndpointsRouteImport.update({
+  id: '/endpoints',
+  path: '/endpoints',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeveloperRoute = DeveloperRouteImport.update({
   id: '/developer',
   path: '/developer',
@@ -136,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
+  '/endpoints': typeof EndpointsRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
@@ -158,6 +165,7 @@ export interface FileRoutesByTo {
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
+  '/endpoints': typeof EndpointsRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
@@ -181,6 +189,7 @@ export interface FileRoutesById {
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
+  '/endpoints': typeof EndpointsRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
@@ -205,6 +214,7 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
+    | '/endpoints'
     | '/errors'
     | '/logs'
     | '/mcp'
@@ -227,6 +237,7 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
+    | '/endpoints'
     | '/errors'
     | '/logs'
     | '/mcp'
@@ -249,6 +260,7 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
+    | '/endpoints'
     | '/errors'
     | '/logs'
     | '/mcp'
@@ -272,6 +284,7 @@ export interface RootRouteChildren {
   ConnectorsRoute: typeof ConnectorsRoute
   DashboardsRoute: typeof DashboardsRoute
   DeveloperRoute: typeof DeveloperRoute
+  EndpointsRoute: typeof EndpointsRoute
   ErrorsRoute: typeof ErrorsRoute
   LogsRoute: typeof LogsRoute
   McpRoute: typeof McpRoute
@@ -376,6 +389,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ErrorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/endpoints': {
+      id: '/endpoints'
+      path: '/endpoints'
+      fullPath: '/endpoints'
+      preLoaderRoute: typeof EndpointsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/developer': {
       id: '/developer'
       path: '/developer'
@@ -440,6 +460,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectorsRoute: ConnectorsRoute,
   DashboardsRoute: DashboardsRoute,
   DeveloperRoute: DeveloperRoute,
+  EndpointsRoute: EndpointsRoute,
   ErrorsRoute: ErrorsRoute,
   LogsRoute: LogsRoute,
   McpRoute: McpRoute,

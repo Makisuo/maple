@@ -31,6 +31,7 @@ export const tinybirdPipes = [
   "span_attribute_values",
   "resource_attribute_keys",
   "resource_attribute_values",
+  "http_endpoints_overview",
 ] as const
 
 export type TinybirdPipe = (typeof tinybirdPipes)[number]

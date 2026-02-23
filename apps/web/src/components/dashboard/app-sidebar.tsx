@@ -4,6 +4,7 @@ import {
   HouseIcon,
   FileIcon,
   PulseIcon,
+  ChartBarIcon,
   ChartLineIcon,
   ServerIcon,
   CircleWarningIcon,
@@ -69,6 +70,11 @@ const servicesNavItems = [
 ]
 
 const telemetryNavItems = [
+  {
+    title: "Endpoints",
+    href: "/endpoints",
+    icon: ChartBarIcon,
+  },
   {
     title: "Errors",
     href: "/errors",

@@ -2770,3 +2770,66 @@ export const resourceAttributeValues = defineEndpoint("resource_attribute_values
 
 export type ResourceAttributeValuesParams = InferParams<typeof resourceAttributeValues>;
 export type ResourceAttributeValuesOutput = InferOutputRow<typeof resourceAttributeValues>;
+
+/**
+ * HTTP endpoints overview - aggregated metrics for HTTP server endpoints discovered from traces
+ */
+export const httpEndpointsOverview = defineEndpoint("http_endpoints_overview", {
+  description: "Get aggregated metrics for HTTP endpoints grouped by service, method, and route.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    service_name: p.string().optional().describe("Filter by service name"),
+    environments: p.string().optional().describe("Comma-separated environments filter"),
+    limit: p.int32().optional(100).describe("Maximum number of results"),
+  },
+  nodes: [
+    node({
+      name: "http_endpoints_overview_node",
+      sql: `
+        SELECT
+          ServiceName AS serviceName,
+          if(
+            SpanName LIKE 'http.server %' AND SpanAttributes['http.route'] != '',
+            concat(replaceOne(SpanName, 'http.server ', ''), ' ', SpanAttributes['http.route']),
+            SpanName
+          ) AS endpointName,
+          if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
+            if(SpanAttributes['http.request.method'] != '', SpanAttributes['http.request.method'], '')) AS httpMethod,
+          count() AS count,
+          avg(Duration) / 1000000 AS avgDuration,
+          quantile(0.5)(Duration) / 1000000 AS p50Duration,
+          quantile(0.95)(Duration) / 1000000 AS p95Duration,
+          quantile(0.99)(Duration) / 1000000 AS p99Duration,
+          if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate
+        FROM traces
+        WHERE Timestamp >= {{DateTime(start_time)}}
+          AND Timestamp <= {{DateTime(end_time)}}
+          AND OrgId = {{String(org_id, "")}}
+          AND SpanKind = 'Server'
+          {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
+          {% if defined(environments) %}
+            AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
+          {% end %}
+        GROUP BY serviceName, endpointName, httpMethod
+        ORDER BY count DESC
+        LIMIT {{Int32(limit, 100)}}
+      `,
+    }),
+  ],
+  output: {
+    serviceName: t.string(),
+    endpointName: t.string(),
+    httpMethod: t.string(),
+    count: t.uint64(),
+    avgDuration: t.float64(),
+    p50Duration: t.float64(),
+    p95Duration: t.float64(),
+    p99Duration: t.float64(),
+    errorRate: t.float64(),
+  },
+});
+
+export type HttpEndpointsOverviewParams = InferParams<typeof httpEndpointsOverview>;
+export type HttpEndpointsOverviewOutput = InferOutputRow<typeof httpEndpointsOverview>;
