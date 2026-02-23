@@ -57,6 +57,7 @@ interface EndpointRecentTracesProps {
   traces: Trace[]
   service: string
   endpoint: string
+  method: string
   startTime?: string
   endTime?: string
 }
@@ -65,6 +66,7 @@ export function EndpointRecentTraces({
   traces,
   service,
   endpoint,
+  method,
   startTime,
   endTime,
 }: EndpointRecentTracesProps) {
@@ -137,7 +139,9 @@ export function EndpointRecentTraces({
             to="/traces"
             search={{
               services: [service],
-              spanNames: [endpoint],
+              httpMethods: [method],
+              attributeKey: "http.route",
+              attributeValue: endpoint,
               startTime,
               endTime,
             }}

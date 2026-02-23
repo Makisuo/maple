@@ -114,12 +114,15 @@ function EndpointDetailPage() {
     }),
   )
 
-  // Recent traces
+  // Recent traces — filter by http.route attribute since endpointName
+  // comes from http.route (not rootSpanName which list_traces filters on)
   const tracesResult = useAtomValue(
     listTracesResultAtom({
       data: {
         service: search.service,
-        spanName: search.endpoint,
+        httpMethod: search.method,
+        attributeKey: "http.route",
+        attributeValue: search.endpoint,
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
         limit: 20,
@@ -226,6 +229,7 @@ function EndpointDetailPage() {
             traces={traces}
             service={search.service}
             endpoint={search.endpoint}
+            method={search.method}
             startTime={search.startTime}
             endTime={search.endTime}
           />
