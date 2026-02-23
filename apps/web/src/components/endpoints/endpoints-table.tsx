@@ -26,10 +26,16 @@ function formatLatency(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`
 }
 
-function formatCount(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`
-  return count.toLocaleString()
+function formatThroughput(count: number, durationSeconds: number): string {
+  if (durationSeconds <= 0) return `${count}`
+  const rate = count / durationSeconds
+  if (rate >= 1_000_000) return `${(rate / 1_000_000).toFixed(1)}M/s`
+  if (rate >= 1_000) return `${(rate / 1_000).toFixed(1)}k/s`
+  if (rate >= 100) return `${rate.toFixed(0)}/s`
+  if (rate >= 10) return `${rate.toFixed(1)}/s`
+  if (rate >= 1) return `${rate.toFixed(1)}/s`
+  if (rate >= 0.01) return `${rate.toFixed(2)}/s`
+  return `${rate.toFixed(3)}/s`
 }
 
 function formatErrorRate(rate: number): string {
@@ -59,7 +65,8 @@ export interface EndpointsTableProps {
   filters?: {
     startTime?: string
     endTime?: string
-    service?: string
+    services?: string[]
+    httpMethods?: string[]
     environments?: string[]
   }
 }
@@ -67,7 +74,7 @@ export interface EndpointsTableProps {
 function LoadingState() {
   return (
     <div className="rounded-md border">
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
             <TableHead className="w-[80px]">Method</TableHead>
@@ -76,15 +83,15 @@ function LoadingState() {
             <TableHead className="w-[80px] text-right">P50</TableHead>
             <TableHead className="w-[80px] text-right">P95</TableHead>
             <TableHead className="w-[80px] text-right">P99</TableHead>
-            <TableHead className="w-[180px]">Throughput</TableHead>
-            <TableHead className="w-[180px]">Error Rate</TableHead>
+            <TableHead className="w-[140px]">Throughput</TableHead>
+            <TableHead className="w-[140px]">Error Rate</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {Array.from({ length: 8 }).map((_, i) => (
             <TableRow key={i}>
               <TableCell><Skeleton className="h-5 w-12" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+              <TableCell className="truncate max-w-0"><Skeleton className="h-4 w-48" /></TableCell>
               <TableCell><Skeleton className="h-4 w-24" /></TableCell>
               <TableCell><Skeleton className="h-4 w-14 ml-auto" /></TableCell>
               <TableCell><Skeleton className="h-4 w-14 ml-auto" /></TableCell>
@@ -107,12 +114,18 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(filters?.startTime, filters?.endTime)
 
+  const durationSeconds = Math.max(
+    (new Date(effectiveEndTime).getTime() - new Date(effectiveStartTime).getTime()) / 1000,
+    1,
+  )
+
   const overviewResult = useAtomValue(
     getHttpEndpointsOverviewResultAtom({
       data: {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
-        serviceName: filters?.service,
+        services: filters?.services,
+        httpMethods: filters?.httpMethods,
         environments: filters?.environments,
       },
     }),
@@ -123,7 +136,8 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
       data: {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
-        serviceName: filters?.service,
+        services: filters?.services,
+        httpMethods: filters?.httpMethods,
         environments: filters?.environments,
       },
     }),
@@ -144,7 +158,7 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
       return (
         <div className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}>
           <div className="rounded-md border">
-            <Table>
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[80px]">Method</TableHead>
@@ -153,8 +167,8 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
                   <TableHead className="w-[80px] text-right">P50</TableHead>
                   <TableHead className="w-[80px] text-right">P95</TableHead>
                   <TableHead className="w-[80px] text-right">P99</TableHead>
-                  <TableHead className="w-[180px]">Throughput</TableHead>
-                  <TableHead className="w-[180px]">Error Rate</TableHead>
+                  <TableHead className="w-[140px]">Throughput</TableHead>
+                  <TableHead className="w-[140px]">Error Rate</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -179,7 +193,7 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
                         <TableCell>
                           <MethodBadge method={endpoint.httpMethod} />
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="truncate max-w-0">
                           <Link
                             to="/traces"
                             search={{
@@ -189,6 +203,7 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
                               endTime: filters?.endTime,
                             }}
                             className="font-mono text-sm text-primary hover:underline"
+                            title={endpoint.endpointName}
                           >
                             {endpoint.endpointName}
                           </Link>
@@ -216,7 +231,7 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
                           {formatLatency(endpoint.p99Duration)}
                         </TableCell>
                         <TableCell>
-                          <div className="relative w-[120px] h-8">
+                          <div className="relative h-8 w-full">
                             <Sparkline
                               data={throughputData}
                               color="var(--color-primary, #3b82f6)"
@@ -224,13 +239,13 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
                             />
                             <div className="absolute inset-0 flex items-center justify-center">
                               <span className="font-mono text-xs font-semibold [text-shadow:0_0_6px_var(--background),0_0_12px_var(--background),0_0_18px_var(--background)]">
-                                {formatCount(endpoint.count)}
+                                {formatThroughput(endpoint.count, durationSeconds)}
                               </span>
                             </div>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="relative w-[120px] h-8">
+                          <div className="relative h-8 w-full">
                             <Sparkline
                               data={errorRateData}
                               color="var(--color-destructive, #ef4444)"

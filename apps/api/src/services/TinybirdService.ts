@@ -25,6 +25,8 @@ import {
   errorsFacets,
   errorsSummary,
   getServiceUsage,
+  httpEndpointsOverview,
+  httpEndpointsTimeseries,
   listLogs,
   listMetrics,
   listTraces,
@@ -99,6 +101,8 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
         span_attribute_values: spanAttributeValues,
         resource_attribute_keys: resourceAttributeKeys,
         resource_attribute_values: resourceAttributeValues,
+        http_endpoints_overview: httpEndpointsOverview,
+        http_endpoints_timeseries: httpEndpointsTimeseries,
       },
     })
 

@@ -2780,7 +2780,8 @@ export const httpEndpointsOverview = defineEndpoint("http_endpoints_overview", {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
-    service_name: p.string().optional().describe("Filter by service name"),
+    services: p.string().optional().describe("Comma-separated service names filter"),
+    http_methods: p.string().optional().describe("Comma-separated HTTP methods filter"),
     environments: p.string().optional().describe("Comma-separated environments filter"),
     limit: p.int32().optional(100).describe("Maximum number of results"),
   },
@@ -2791,8 +2792,8 @@ export const httpEndpointsOverview = defineEndpoint("http_endpoints_overview", {
         SELECT
           ServiceName AS serviceName,
           if(
-            SpanName LIKE 'http.server %' AND SpanAttributes['http.route'] != '',
-            concat(replaceOne(SpanName, 'http.server ', ''), ' ', SpanAttributes['http.route']),
+            SpanAttributes['http.route'] != '',
+            SpanAttributes['http.route'],
             SpanName
           ) AS endpointName,
           if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
@@ -2808,7 +2809,14 @@ export const httpEndpointsOverview = defineEndpoint("http_endpoints_overview", {
           AND Timestamp <= {{DateTime(end_time)}}
           AND OrgId = {{String(org_id, "")}}
           AND SpanKind = 'Server'
-          {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
+          {% if defined(services) %}
+            AND ServiceName IN splitByChar(',', {{String(services, "")}})
+          {% end %}
+          {% if defined(http_methods) %}
+            AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
+              if(SpanAttributes['http.request.method'] != '', SpanAttributes['http.request.method'], ''))
+            IN splitByChar(',', {{String(http_methods, "")}})
+          {% end %}
           {% if defined(environments) %}
             AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
           {% end %}
@@ -2844,7 +2852,8 @@ export const httpEndpointsTimeseries = defineEndpoint("http_endpoints_timeseries
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
-    service_name: p.string().optional().describe("Filter by service name"),
+    services: p.string().optional().describe("Comma-separated service names filter"),
+    http_methods: p.string().optional().describe("Comma-separated HTTP methods filter"),
     environments: p.string().optional().describe("Comma-separated environments filter"),
   },
   nodes: [
@@ -2856,8 +2865,8 @@ export const httpEndpointsTimeseries = defineEndpoint("http_endpoints_timeseries
           concat(
             ServiceName, '::',
             if(
-              SpanName LIKE 'http.server %' AND SpanAttributes['http.route'] != '',
-              concat(replaceOne(SpanName, 'http.server ', ''), ' ', SpanAttributes['http.route']),
+              SpanAttributes['http.route'] != '',
+              SpanAttributes['http.route'],
               SpanName
             ), '::',
             if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
@@ -2870,7 +2879,14 @@ export const httpEndpointsTimeseries = defineEndpoint("http_endpoints_timeseries
           AND Timestamp <= {{DateTime(end_time)}}
           AND OrgId = {{String(org_id, "")}}
           AND SpanKind = 'Server'
-          {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
+          {% if defined(services) %}
+            AND ServiceName IN splitByChar(',', {{String(services, "")}})
+          {% end %}
+          {% if defined(http_methods) %}
+            AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
+              if(SpanAttributes['http.request.method'] != '', SpanAttributes['http.request.method'], ''))
+            IN splitByChar(',', {{String(http_methods, "")}})
+          {% end %}
           {% if defined(environments) %}
             AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
           {% end %}

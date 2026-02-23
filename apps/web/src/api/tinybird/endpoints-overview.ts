@@ -32,7 +32,8 @@ export interface HttpEndpointsOverviewResponse {
 const GetHttpEndpointsOverviewInput = Schema.Struct({
   startTime: dateTimeString,
   endTime: dateTimeString,
-  serviceName: Schema.optional(Schema.String),
+  services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  httpMethods: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
   environments: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 })
 
@@ -77,7 +78,8 @@ const getHttpEndpointsOverviewEffect = Effect.fn("Tinybird.getHttpEndpointsOverv
       tinybird.query.http_endpoints_overview({
         start_time: input.startTime,
         end_time: input.endTime,
-        service_name: input.serviceName,
+        services: input.services?.join(","),
+        http_methods: input.httpMethods?.join(","),
         environments: input.environments?.join(","),
       }),
     )
@@ -98,7 +100,8 @@ export interface EndpointSparklinePoint {
 const GetHttpEndpointsSparklinesInput = Schema.Struct({
   startTime: Schema.optional(dateTimeString),
   endTime: Schema.optional(dateTimeString),
-  serviceName: Schema.optional(Schema.String),
+  services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  httpMethods: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
   environments: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 })
 
@@ -151,7 +154,8 @@ const getHttpEndpointsSparklinesEffect = Effect.fn("Tinybird.getHttpEndpointsSpa
         start_time: input.startTime,
         end_time: input.endTime,
         bucket_seconds: bucketSeconds,
-        service_name: input.serviceName,
+        services: input.services?.join(","),
+        http_methods: input.httpMethods?.join(","),
         environments: input.environments?.join(","),
       }),
     )
