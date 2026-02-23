@@ -30,6 +30,7 @@ import type {
   ServiceOverviewOutput,
   ServicesFacetsOutput,
   HttpEndpointsOverviewOutput,
+  HttpEndpointsTimeseriesOutput,
   ResourceAttributeKeysOutput,
   ResourceAttributeValuesOutput,
   SpanAttributeKeysOutput,
@@ -92,6 +93,8 @@ export type {
   ServicesFacetsOutput,
   HttpEndpointsOverviewParams,
   HttpEndpointsOverviewOutput,
+  HttpEndpointsTimeseriesParams,
+  HttpEndpointsTimeseriesOutput,
   ResourceAttributeKeysParams,
   ResourceAttributeKeysOutput,
   ResourceAttributeValuesParams,
@@ -197,6 +200,8 @@ const query = {
     queryTinybird<ResourceAttributeValuesOutput>("resource_attribute_values", params),
   http_endpoints_overview: (params?: Record<string, unknown>) =>
     queryTinybird<HttpEndpointsOverviewOutput>("http_endpoints_overview", params),
+  http_endpoints_timeseries: (params?: Record<string, unknown>) =>
+    queryTinybird<HttpEndpointsTimeseriesOutput>("http_endpoints_timeseries", params),
 }
 
 export function createTinybird() {

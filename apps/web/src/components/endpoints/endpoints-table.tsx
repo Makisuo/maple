@@ -12,8 +12,12 @@ import {
 } from "@maple/ui/components/ui/table"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import type { HttpEndpointOverview } from "@/api/tinybird/endpoints-overview"
-import { getHttpEndpointsOverviewResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import {
+  getHttpEndpointsOverviewResultAtom,
+  getHttpEndpointsSparklinesResultAtom,
+} from "@/lib/services/atoms/tinybird-query-atoms"
 
 function formatLatency(ms: number): string {
   if (ms == null || Number.isNaN(ms)) return "-"
@@ -69,11 +73,11 @@ function LoadingState() {
             <TableHead className="w-[80px]">Method</TableHead>
             <TableHead>Endpoint</TableHead>
             <TableHead className="w-[140px]">Service</TableHead>
-            <TableHead className="w-[90px] text-right">Requests</TableHead>
             <TableHead className="w-[80px] text-right">P50</TableHead>
             <TableHead className="w-[80px] text-right">P95</TableHead>
             <TableHead className="w-[80px] text-right">P99</TableHead>
-            <TableHead className="w-[90px] text-right">Error Rate</TableHead>
+            <TableHead className="w-[180px]">Throughput</TableHead>
+            <TableHead className="w-[180px]">Error Rate</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -85,8 +89,8 @@ function LoadingState() {
               <TableCell><Skeleton className="h-4 w-14 ml-auto" /></TableCell>
               <TableCell><Skeleton className="h-4 w-14 ml-auto" /></TableCell>
               <TableCell><Skeleton className="h-4 w-14 ml-auto" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-14 ml-auto" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-14 ml-auto" /></TableCell>
+              <TableCell><Skeleton className="h-8 w-full" /></TableCell>
+              <TableCell><Skeleton className="h-8 w-full" /></TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -95,11 +99,15 @@ function LoadingState() {
   )
 }
 
+function endpointKey(endpoint: HttpEndpointOverview): string {
+  return `${endpoint.serviceName}::${endpoint.endpointName}::${endpoint.httpMethod}`
+}
+
 export function EndpointsTable({ filters }: EndpointsTableProps) {
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(filters?.startTime, filters?.endTime)
 
-  const result = useAtomValue(
+  const overviewResult = useAtomValue(
     getHttpEndpointsOverviewResultAtom({
       data: {
         startTime: effectiveStartTime,
@@ -110,7 +118,18 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
     }),
   )
 
-  return Result.builder(result)
+  const sparklinesResult = useAtomValue(
+    getHttpEndpointsSparklinesResultAtom({
+      data: {
+        startTime: effectiveStartTime,
+        endTime: effectiveEndTime,
+        serviceName: filters?.service,
+        environments: filters?.environments,
+      },
+    }),
+  )
+
+  return Result.builder(Result.all([overviewResult, sparklinesResult]))
     .onInitial(() => <LoadingState />)
     .onError((error) => (
       <div className="rounded-md border border-red-500/50 bg-red-500/10 p-8">
@@ -118,11 +137,12 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
         <pre className="mt-2 text-xs text-red-500 whitespace-pre-wrap">{error.message}</pre>
       </div>
     ))
-    .onSuccess((response, resultState) => {
-      const endpoints = response.data
+    .onSuccess(([overviewResponse, sparklinesResponse], combinedResult) => {
+      const endpoints = overviewResponse.data
+      const sparklinesMap = sparklinesResponse.data
 
       return (
-        <div className={`space-y-4 transition-opacity ${resultState.waiting ? "opacity-60" : ""}`}>
+        <div className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}>
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -130,11 +150,11 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
                   <TableHead className="w-[80px]">Method</TableHead>
                   <TableHead>Endpoint</TableHead>
                   <TableHead className="w-[140px]">Service</TableHead>
-                  <TableHead className="w-[90px] text-right">Requests</TableHead>
                   <TableHead className="w-[80px] text-right">P50</TableHead>
                   <TableHead className="w-[80px] text-right">P95</TableHead>
                   <TableHead className="w-[80px] text-right">P99</TableHead>
-                  <TableHead className="w-[90px] text-right">Error Rate</TableHead>
+                  <TableHead className="w-[180px]">Throughput</TableHead>
+                  <TableHead className="w-[180px]">Error Rate</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -145,68 +165,87 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  endpoints.map((endpoint: HttpEndpointOverview) => (
-                    <TableRow
-                      key={`${endpoint.serviceName}-${endpoint.httpMethod}-${endpoint.endpointName}`}
-                      className="hover:bg-muted/50"
-                    >
-                      <TableCell>
-                        <MethodBadge method={endpoint.httpMethod} />
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          to="/traces"
-                          search={{
-                            spanNames: [endpoint.endpointName],
-                            services: [endpoint.serviceName],
-                            startTime: filters?.startTime,
-                            endTime: filters?.endTime,
-                          }}
-                          className="font-mono text-sm text-primary hover:underline"
-                        >
-                          {endpoint.endpointName}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          to="/services/$serviceName"
-                          params={{ serviceName: endpoint.serviceName }}
-                          search={{
-                            startTime: filters?.startTime,
-                            endTime: filters?.endTime,
-                          }}
-                          className="text-sm text-muted-foreground hover:text-primary hover:underline"
-                        >
-                          {endpoint.serviceName}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {formatCount(endpoint.count)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {formatLatency(endpoint.p50Duration)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {formatLatency(endpoint.p95Duration)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {formatLatency(endpoint.p99Duration)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span
-                          className={`font-mono text-xs ${
-                            endpoint.errorRate > 5
-                              ? "text-red-600 dark:text-red-400 font-semibold"
-                              : endpoint.errorRate > 1
-                                ? "text-amber-600 dark:text-amber-400"
-                                : "text-muted-foreground"
-                          }`}
-                        >
-                          {formatErrorRate(endpoint.errorRate)}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  endpoints.map((endpoint: HttpEndpointOverview) => {
+                    const key = endpointKey(endpoint)
+                    const series = sparklinesMap[key]
+                    const throughputData = series?.map((p) => ({ value: p.throughput })) ?? []
+                    const errorRateData = series?.map((p) => ({ value: p.errorRate })) ?? []
+
+                    return (
+                      <TableRow
+                        key={key}
+                        className="hover:bg-muted/50"
+                      >
+                        <TableCell>
+                          <MethodBadge method={endpoint.httpMethod} />
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            to="/traces"
+                            search={{
+                              spanNames: [endpoint.endpointName],
+                              services: [endpoint.serviceName],
+                              startTime: filters?.startTime,
+                              endTime: filters?.endTime,
+                            }}
+                            className="font-mono text-sm text-primary hover:underline"
+                          >
+                            {endpoint.endpointName}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            to="/services/$serviceName"
+                            params={{ serviceName: endpoint.serviceName }}
+                            search={{
+                              startTime: filters?.startTime,
+                              endTime: filters?.endTime,
+                            }}
+                            className="text-sm text-muted-foreground hover:text-primary hover:underline"
+                          >
+                            {endpoint.serviceName}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {formatLatency(endpoint.p50Duration)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {formatLatency(endpoint.p95Duration)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {formatLatency(endpoint.p99Duration)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="relative w-[120px] h-8">
+                            <Sparkline
+                              data={throughputData}
+                              color="var(--color-primary, #3b82f6)"
+                              className="absolute inset-0 h-full w-full"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <span className="font-mono text-xs font-semibold [text-shadow:0_0_6px_var(--background),0_0_12px_var(--background),0_0_18px_var(--background)]">
+                                {formatCount(endpoint.count)}
+                              </span>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="relative w-[120px] h-8">
+                            <Sparkline
+                              data={errorRateData}
+                              color="var(--color-destructive, #ef4444)"
+                              className="absolute inset-0 h-full w-full"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <span className="font-mono text-xs font-semibold [text-shadow:0_0_6px_var(--background),0_0_12px_var(--background),0_0_18px_var(--background)]">
+                                {formatErrorRate(endpoint.errorRate)}
+                              </span>
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>

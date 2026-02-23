@@ -6,7 +6,7 @@ import {
   getCustomChartTimeSeries,
   getOverviewTimeSeries,
 } from "@/api/tinybird/custom-charts"
-import { getHttpEndpointsOverview } from "@/api/tinybird/endpoints-overview"
+import { getHttpEndpointsOverview, getHttpEndpointsSparklines } from "@/api/tinybird/endpoints-overview"
 import {
   getErrorDetailTraces,
   getErrorsByType,
@@ -221,6 +221,13 @@ export const getResourceAttributeValuesResultAtom = makeQueryAtomFamily(getResou
 
 export const getHttpEndpointsOverviewResultAtom = makeQueryAtomFamily(
   getHttpEndpointsOverview,
+  {
+    staleTime: 30_000,
+  },
+)
+
+export const getHttpEndpointsSparklinesResultAtom = makeQueryAtomFamily(
+  getHttpEndpointsSparklines,
   {
     staleTime: 30_000,
   },
