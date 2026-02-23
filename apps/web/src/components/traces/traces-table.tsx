@@ -1,5 +1,5 @@
 import { Result, useAtomValue } from "@effect-atom/atom-react"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import {
@@ -101,6 +101,7 @@ function LoadingState() {
 }
 
 export function TracesTable({ filters }: TracesTableProps) {
+  const navigate = useNavigate()
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
     filters?.startTime,
     filters?.endTime,
@@ -161,13 +162,15 @@ export function TracesTable({ filters }: TracesTableProps) {
                 response.data.map((trace: Trace) => (
                   <TableRow
                     key={trace.traceId}
-                    className="relative cursor-pointer"
+                    className="cursor-pointer"
+                    onClick={() => navigate({ to: "/traces/$traceId", params: { traceId: trace.traceId } })}
                   >
                     <TableCell>
                       <Link
                         to="/traces/$traceId"
                         params={{ traceId: trace.traceId }}
-                        className="font-mono text-xs text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary after:absolute after:inset-0 after:content-['']"
+                        className="font-mono text-xs text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
+                        onClick={(e) => e.stopPropagation()}
                       >
                         {truncateId(trace.traceId)}
                       </Link>

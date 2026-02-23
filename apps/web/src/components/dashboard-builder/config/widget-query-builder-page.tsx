@@ -1,22 +1,14 @@
 import * as React from "react"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 
-import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
-import { Checkbox } from "@maple/ui/components/ui/checkbox"
 import { Input } from "@maple/ui/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@maple/ui/components/ui/select"
-import { chartRegistry } from "@maple/ui/components/charts/registry"
-import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
+import { QueryPanel } from "@/components/dashboard-builder/config/query-panel"
+import { FormulaPanel } from "@/components/dashboard-builder/config/formula-panel"
+import { WidgetSettingsBar } from "@/components/dashboard-builder/config/widget-settings-bar"
 import type {
   DashboardWidget,
   ValueUnit,
@@ -25,7 +17,6 @@ import type {
 } from "@/components/dashboard-builder/types"
 import { useWidgetData } from "@/hooks/use-widget-data"
 import {
-  AGGREGATIONS_BY_SOURCE,
   buildTimeseriesQuerySpec,
   createFormulaDraft,
   createQueryDraft,
@@ -68,27 +59,6 @@ interface QueryBuilderWidgetState {
   statValueField: string
   unit: ValueUnit
   tableLimit: string
-}
-
-const UNIT_OPTIONS: Array<{ value: ValueUnit; label: string }> = [
-  { value: "none", label: "None" },
-  { value: "number", label: "Number" },
-  { value: "percent", label: "Percent" },
-  { value: "duration_ms", label: "Duration (ms)" },
-  { value: "duration_us", label: "Duration (us)" },
-  { value: "bytes", label: "Bytes" },
-  { value: "requests_per_sec", label: "Requests/sec" },
-  { value: "short", label: "Short" },
-]
-
-function parseMetricSelection(raw: string): {
-  metricName: string
-  metricType: QueryBuilderMetricType
-} | null {
-  const [metricName, metricType] = raw.split("::")
-  if (!metricName || !metricType) return null
-  if (!QUERY_BUILDER_METRIC_TYPES.includes(metricType as QueryBuilderMetricType)) return null
-  return { metricName, metricType: metricType as QueryBuilderMetricType }
 }
 
 function parsePositiveNumber(raw: string): number | undefined {
@@ -302,6 +272,10 @@ function buildWidgetDisplay(
   const display: WidgetDisplayConfig = {
     ...widget.display,
     title: state.title.trim() ? state.title.trim() : undefined,
+    chartPresentation: {
+      ...widget.display.chartPresentation,
+      legend: "visible",
+    },
   }
   if (widget.visualization === "chart") display.chartId = state.chartId
   if (widget.visualization === "stat") display.unit = state.unit
@@ -341,21 +315,18 @@ export function WidgetQueryBuilderPage({
     cloneWidgetState(toInitialState(widget))
   )
   const [validationError, setValidationError] = React.useState<string | null>(null)
+  const [collapsedQueries, setCollapsedQueries] = React.useState<Set<string>>(new Set())
 
   const metricsResult = useAtomValue(
     listMetricsResultAtom({ data: { limit: 300 } }),
   )
 
   const tracesFacetsResult = useAtomValue(
-    getTracesFacetsResultAtom({
-      data: {},
-    }),
+    getTracesFacetsResultAtom({ data: {} }),
   )
 
   const logsFacetsResult = useAtomValue(
-    getLogsFacetsResultAtom({
-      data: {},
-    }),
+    getLogsFacetsResultAtom({ data: {} }),
   )
 
   const metricRows = React.useMemo(
@@ -403,17 +374,12 @@ export function WidgetQueryBuilderPage({
     const toNames = (items: Array<{ name: string }>): string[] => {
       const seen = new Set<string>()
       const values: string[] = []
-
       for (const item of items) {
         const next = item.name.trim()
-        if (!next || seen.has(next)) {
-          continue
-        }
-
+        if (!next || seen.has(next)) continue
         seen.add(next)
         values.push(next)
       }
-
       return values
     }
 
@@ -476,16 +442,6 @@ export function WidgetQueryBuilderPage({
     }
   }, [stagedState, widget])
 
-  const isChart = widget.visualization === "chart"
-  const isStat = widget.visualization === "stat"
-  const isTable = widget.visualization === "table"
-
-  const chartStyleOptions = isChart
-    ? chartRegistry.filter(
-        (chart) => chart.id === "query-builder-line" || chart.id === state.chartId,
-      )
-    : []
-
   const runPreview = () => {
     const error = validateQueries(state)
     if (error) { setValidationError(error); return }
@@ -545,6 +501,11 @@ export function WidgetQueryBuilderPage({
           .map((query, index) => ({ ...query, name: queryLabel(index) })),
       }
     })
+    setCollapsedQueries((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
   }
 
   const addFormula = () => {
@@ -564,6 +525,25 @@ export function WidgetQueryBuilderPage({
         .filter((formula) => formula.id !== id)
         .map((formula, index) => ({ ...formula, name: formulaLabel(index) })),
     }))
+  }
+
+  const updateFormula = (
+    id: string,
+    updater: (f: QueryBuilderFormulaDraft) => QueryBuilderFormulaDraft,
+  ) => {
+    setState((current) => ({
+      ...current,
+      formulas: current.formulas.map((f) => (f.id === id ? updater(f) : f)),
+    }))
+  }
+
+  const toggleCollapse = (id: string) => {
+    setCollapsedQueries((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   return (
@@ -610,181 +590,67 @@ export function WidgetQueryBuilderPage({
 
         {/* Configuration */}
         <div className="px-6 py-6 space-y-6">
-          {/* Widget settings row */}
-          <div className="flex flex-wrap items-end gap-4">
-            {isChart && (
-              <div className="space-y-1 w-48">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  Chart Style
-                </p>
-                <Select
-                  value={state.chartId}
-                  onValueChange={(value) =>
-                    setState((current) => ({ ...current, chartId: value ?? current.chartId }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {chartStyleOptions.map((chart) => (
-                      <SelectItem key={chart.id} value={chart.id}>{chart.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+          {/* Widget settings */}
+          <WidgetSettingsBar
+            visualization={widget.visualization}
+            chartId={state.chartId}
+            comparisonMode={state.comparisonMode}
+            includePercentChange={state.includePercentChange}
+            debug={state.debug}
+            statAggregate={state.statAggregate}
+            statValueField={state.statValueField}
+            unit={state.unit}
+            tableLimit={state.tableLimit}
+            seriesFieldOptions={seriesFieldOptions}
+            onChange={(updates) =>
+              setState((current) => ({ ...current, ...updates }))
+            }
+          />
 
-            <div className="space-y-1 w-48">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Comparison
-              </p>
-              <Select
-                value={state.comparisonMode}
-                onValueChange={(value) =>
-                  setState((current) => ({
-                    ...current,
-                    comparisonMode: value === "previous_period" ? "previous_period" : "none",
-                  }))
+          {validationError && (
+            <p className="text-xs text-destructive font-medium">{validationError}</p>
+          )}
+
+          {/* Query panels */}
+          <div className="space-y-3">
+            {state.queries.map((query, index) => (
+              <QueryPanel
+                key={query.id}
+                query={query}
+                index={index}
+                collapsed={collapsedQueries.has(query.id)}
+                canRemove={state.queries.length > 1}
+                metricSelectionOptions={metricSelectionOptions}
+                autocompleteValues={autocompleteValuesBySource}
+                onUpdate={(updater) => updateQuery(query.id, updater)}
+                onClone={() => cloneQuery(query.id)}
+                onRemove={() => removeQuery(query.id)}
+                onToggleCollapse={() => toggleCollapse(query.id)}
+                onDataSourceChange={(ds) =>
+                  updateQuery(query.id, (current) =>
+                    resetQueryForDataSource(current, ds)
+                  )
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  <SelectItem value="previous_period">Previous period</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {isStat && (
-              <>
-                <div className="space-y-1 w-36">
-                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                    Aggregate
-                  </p>
-                  <Select
-                    value={state.statAggregate}
-                    onValueChange={(value) =>
-                      setState((current) => ({
-                        ...current,
-                        statAggregate: (value as StatAggregate) ?? current.statAggregate,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="first">first</SelectItem>
-                      <SelectItem value="sum">sum</SelectItem>
-                      <SelectItem value="count">count</SelectItem>
-                      <SelectItem value="avg">avg</SelectItem>
-                      <SelectItem value="max">max</SelectItem>
-                      <SelectItem value="min">min</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1 w-48">
-                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                    Value Field
-                  </p>
-                  <Select
-                    value={state.statValueField || seriesFieldOptions[0]}
-                    onValueChange={(value) =>
-                      setState((current) => ({
-                        ...current,
-                        statValueField: value ?? current.statValueField,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select series" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {seriesFieldOptions.map((field) => (
-                        <SelectItem key={field} value={field}>{field}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1 w-40">
-                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                    Unit
-                  </p>
-                  <Select
-                    value={state.unit}
-                    onValueChange={(value) =>
-                      setState((current) => ({
-                        ...current,
-                        unit: (value as ValueUnit) ?? current.unit,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {UNIT_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            )}
-
-            {isTable && (
-              <div className="space-y-1 w-36">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  Row Limit
-                </p>
-                <Input
-                  value={state.tableLimit}
-                  onChange={(event) =>
-                    setState((current) => ({ ...current, tableLimit: event.target.value }))
-                  }
-                  placeholder="50"
-                  type="number"
-                  min={1}
-                />
-              </div>
-            )}
-
-            <div className="flex items-center gap-4 ml-auto">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="qb-percent-change"
-                  checked={state.includePercentChange}
-                  disabled={state.comparisonMode === "none"}
-                  onCheckedChange={(checked) =>
-                    setState((current) => ({ ...current, includePercentChange: checked === true }))
-                  }
-                />
-                <label htmlFor="qb-percent-change" className="text-[11px] text-muted-foreground">
-                  % change
-                </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="qb-debug"
-                  checked={state.debug}
-                  onCheckedChange={(checked) =>
-                    setState((current) => ({ ...current, debug: checked === true }))
-                  }
-                />
-                <label htmlFor="qb-debug" className="text-[11px] text-muted-foreground">
-                  Debug
-                </label>
-              </div>
-            </div>
+              />
+            ))}
           </div>
 
+          {/* Formula panels */}
+          {state.formulas.length > 0 && (
+            <div className="space-y-3">
+              {state.formulas.map((formula) => (
+                <FormulaPanel
+                  key={formula.id}
+                  formula={formula}
+                  onUpdate={(updater) => updateFormula(formula.id, updater)}
+                  onRemove={() => removeFormula(formula.id)}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Toolbar */}
-          <div className="flex items-center gap-3 border-b pb-4">
+          <div className="flex items-center gap-3 border-t pt-4">
             <Button variant="outline" size="sm" onClick={addQuery}>
               + Query
             </Button>
@@ -799,234 +665,6 @@ export function WidgetQueryBuilderPage({
               {state.formulas.length > 0 && `, ${state.formulas.map((f) => f.name).join(", ")}`}
             </span>
           </div>
-
-          {validationError && (
-            <p className="text-xs text-destructive font-medium">{validationError}</p>
-          )}
-
-          {/* Query panels */}
-          <div className="space-y-4">
-            {state.queries.map((query) => {
-              const aggregateOptions = AGGREGATIONS_BY_SOURCE[query.dataSource]
-              const metricValue =
-                query.metricName && query.metricType
-                  ? `${query.metricName}::${query.metricType}`
-                  : undefined
-
-              return (
-                <div key={query.id} className="border border-l-2 border-l-primary p-4 space-y-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <Badge variant="outline" className="font-mono text-xs">
-                        {query.name}
-                      </Badge>
-                      <div className="flex items-center gap-1.5">
-                        <Checkbox
-                          id={`query-enabled-${query.id}`}
-                          checked={query.enabled}
-                          onCheckedChange={(checked) =>
-                            updateQuery(query.id, (current) => ({ ...current, enabled: checked === true }))
-                          }
-                        />
-                        <label htmlFor={`query-enabled-${query.id}`} className="text-[11px] text-muted-foreground">
-                          enabled
-                        </label>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="xs" onClick={() => cloneQuery(query.id)}>
-                        Clone
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => removeQuery(query.id)}
-                        disabled={state.queries.length === 1}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-                    <div className="space-y-1">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Source</p>
-                      <Select
-                        value={query.dataSource}
-                        onValueChange={(value) =>
-                          updateQuery(query.id, (current) =>
-                            resetQueryForDataSource(current, (value as QueryBuilderDataSource) ?? current.dataSource)
-                          )
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="traces">Traces</SelectItem>
-                          <SelectItem value="logs">Logs</SelectItem>
-                          <SelectItem value="metrics">Metrics</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Aggregation</p>
-                      <Select
-                        value={query.aggregation}
-                        onValueChange={(value) =>
-                          updateQuery(query.id, (current) => ({ ...current, aggregation: value ?? current.aggregation }))
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {aggregateOptions.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Every</p>
-                      <Input
-                        value={query.stepInterval}
-                        onChange={(event) =>
-                          updateQuery(query.id, (current) => ({ ...current, stepInterval: event.target.value }))
-                        }
-                        placeholder="60, 5m, 1h"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Group By</p>
-                      <Input
-                        value={query.groupBy}
-                        onChange={(event) =>
-                          updateQuery(query.id, (current) => ({
-                            ...current,
-                            groupBy: event.target.value,
-                            addOns: { ...current.addOns, groupBy: true },
-                          }))
-                        }
-                        placeholder="service.name"
-                      />
-                    </div>
-                  </div>
-
-                  {query.dataSource === "metrics" && (
-                    <div className="space-y-1">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Metric</p>
-                      <Select
-                        value={metricValue}
-                        onValueChange={(value) => {
-                          const parsed = value ? parseMetricSelection(value) : null
-                          if (!parsed) return
-                          updateQuery(query.id, (current) => ({
-                            ...current,
-                            metricName: parsed.metricName,
-                            metricType: parsed.metricType,
-                          }))
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select metric" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {metricSelectionOptions.length === 0 ? (
-                            <SelectItem value="__none__" disabled>No metrics available</SelectItem>
-                          ) : (
-                            metricSelectionOptions.map((metric) => (
-                              <SelectItem key={metric.value} value={metric.value}>{metric.label}</SelectItem>
-                            ))
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-
-                  <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
-                    <div className="space-y-1">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Legend</p>
-                      <Input
-                        value={query.legend}
-                        onChange={(event) =>
-                          updateQuery(query.id, (current) => ({ ...current, legend: event.target.value }))
-                        }
-                        placeholder="Human-friendly series name"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Where</p>
-                      <WhereClauseEditor
-                        rows={1}
-                        value={query.whereClause}
-                        dataSource={query.dataSource}
-                        values={autocompleteValuesBySource[query.dataSource]}
-                        onChange={(nextWhereClause) =>
-                          updateQuery(query.id, (current) => ({ ...current, whereClause: nextWhereClause }))
-                        }
-                        placeholder='service.name = "checkout" AND status.code = "Error"'
-                        textareaClassName="min-h-[36px] resize-y"
-                        ariaLabel={`Where clause for query ${query.name}`}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Formula panels */}
-          {state.formulas.length > 0 && (
-            <div className="space-y-4">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Formulas
-              </p>
-              {state.formulas.map((formula) => (
-                <div key={formula.id} className="border border-dashed border-l-2 border-l-chart-3 p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <Badge variant="outline" className="font-mono text-xs">
-                      {formula.name}
-                    </Badge>
-                    <Button variant="ghost" size="xs" onClick={() => removeFormula(formula.id)}>
-                      Remove
-                    </Button>
-                  </div>
-                  <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
-                    <Input
-                      value={formula.expression}
-                      onChange={(event) =>
-                        setState((current) => ({
-                          ...current,
-                          formulas: current.formulas.map((item) =>
-                            item.id === formula.id ? { ...item, expression: event.target.value } : item
-                          ),
-                        }))
-                      }
-                      placeholder="A / B, (A + B) / 2"
-                      className="font-mono"
-                    />
-                    <Input
-                      value={formula.legend}
-                      onChange={(event) =>
-                        setState((current) => ({
-                          ...current,
-                          formulas: current.formulas.map((item) =>
-                            item.id === formula.id ? { ...item, legend: event.target.value } : item
-                          ),
-                        }))
-                      }
-                      placeholder="Legend"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </div>

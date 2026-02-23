@@ -67,6 +67,40 @@ export const QUERY_BUILDER_METRIC_TYPES: readonly QueryBuilderMetricType[] = [
   "exponential_histogram",
 ] as const
 
+export const GROUP_BY_OPTIONS: Record<
+  QueryBuilderDataSource,
+  Array<{ label: string; value: string }>
+> = {
+  traces: [
+    { label: "service.name", value: "service.name" },
+    { label: "span.name", value: "span.name" },
+    { label: "status.code", value: "status.code" },
+    { label: "http.method", value: "http.method" },
+    { label: "none", value: "none" },
+  ],
+  logs: [
+    { label: "service.name", value: "service.name" },
+    { label: "severity", value: "severity" },
+    { label: "none", value: "none" },
+  ],
+  metrics: [
+    { label: "service.name", value: "service.name" },
+    { label: "none", value: "none" },
+  ],
+}
+
+const QUERY_BADGE_COLORS = [
+  "bg-chart-1",
+  "bg-chart-2",
+  "bg-chart-4",
+  "bg-chart-5",
+  "bg-chart-3",
+] as const
+
+export function queryBadgeColor(index: number): string {
+  return QUERY_BADGE_COLORS[index % QUERY_BADGE_COLORS.length]
+}
+
 function defaultWhereClause(): string {
   return ""
 }
