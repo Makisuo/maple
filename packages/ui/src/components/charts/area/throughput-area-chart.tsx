@@ -73,8 +73,12 @@ export function ThroughputAreaChart({ data, className, legend, tooltip }: BaseCh
                   if (!payload?.[0]?.payload?.bucket) return ""
                   return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
                 }}
-                formatter={(value) => (
+                formatter={(value, _name, item) => (
                   <span className="flex items-center gap-2">
+                    <span
+                      className="shrink-0 size-2.5 rounded-[2px]"
+                      style={{ backgroundColor: item.color }}
+                    />
                     <span className="text-muted-foreground">Throughput</span>
                     <span className="font-mono font-medium">
                       {Number(value).toLocaleString()}{rateLabel}
