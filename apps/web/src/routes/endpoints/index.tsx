@@ -18,7 +18,7 @@ const endpointsSearchSchema = Schema.Struct({
   httpMethods: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 })
 
-export const Route = createFileRoute("/endpoints")({
+export const Route = createFileRoute("/endpoints/")({
   component: EndpointsPage,
   validateSearch: Schema.standardSchemaV1(endpointsSearchSchema),
 })

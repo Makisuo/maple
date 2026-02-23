@@ -21,15 +21,16 @@ import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ErrorsRouteImport } from './routes/errors'
-import { Route as EndpointsRouteImport } from './routes/endpoints'
 import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as DashboardsRouteImport } from './routes/dashboards'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as ServicesIndexRouteImport } from './routes/services/index'
+import { Route as EndpointsIndexRouteImport } from './routes/endpoints/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 import { Route as ServicesServiceNameRouteImport } from './routes/services/$serviceName'
+import { Route as EndpointsDetailRouteImport } from './routes/endpoints/detail'
 
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
@@ -91,11 +92,6 @@ const ErrorsRoute = ErrorsRouteImport.update({
   path: '/errors',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EndpointsRoute = EndpointsRouteImport.update({
-  id: '/endpoints',
-  path: '/endpoints',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const DeveloperRoute = DeveloperRouteImport.update({
   id: '/developer',
   path: '/developer',
@@ -126,6 +122,11 @@ const ServicesIndexRoute = ServicesIndexRouteImport.update({
   path: '/services/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EndpointsIndexRoute = EndpointsIndexRouteImport.update({
+  id: '/endpoints/',
+  path: '/endpoints/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
   id: '/traces/$traceId',
   path: '/traces/$traceId',
@@ -136,13 +137,17 @@ const ServicesServiceNameRoute = ServicesServiceNameRouteImport.update({
   path: '/services/$serviceName',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EndpointsDetailRoute = EndpointsDetailRouteImport.update({
+  id: '/endpoints/detail',
+  path: '/endpoints/detail',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
-  '/endpoints': typeof EndpointsRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
@@ -155,8 +160,10 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/endpoints/detail': typeof EndpointsDetailRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/endpoints/': typeof EndpointsIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
 }
@@ -165,7 +172,6 @@ export interface FileRoutesByTo {
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
-  '/endpoints': typeof EndpointsRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
@@ -178,8 +184,10 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/endpoints/detail': typeof EndpointsDetailRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/endpoints': typeof EndpointsIndexRoute
   '/services': typeof ServicesIndexRoute
   '/traces': typeof TracesIndexRoute
 }
@@ -189,7 +197,6 @@ export interface FileRoutesById {
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
-  '/endpoints': typeof EndpointsRoute
   '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
@@ -202,8 +209,10 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/endpoints/detail': typeof EndpointsDetailRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/endpoints/': typeof EndpointsIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
 }
@@ -214,7 +223,6 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
-    | '/endpoints'
     | '/errors'
     | '/logs'
     | '/mcp'
@@ -227,8 +235,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/endpoints/detail'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/endpoints/'
     | '/services/'
     | '/traces/'
   fileRoutesByTo: FileRoutesByTo
@@ -237,7 +247,6 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
-    | '/endpoints'
     | '/errors'
     | '/logs'
     | '/mcp'
@@ -250,8 +259,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/endpoints/detail'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/endpoints'
     | '/services'
     | '/traces'
   id:
@@ -260,7 +271,6 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
-    | '/endpoints'
     | '/errors'
     | '/logs'
     | '/mcp'
@@ -273,8 +283,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/endpoints/detail'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/endpoints/'
     | '/services/'
     | '/traces/'
   fileRoutesById: FileRoutesById
@@ -284,7 +296,6 @@ export interface RootRouteChildren {
   ConnectorsRoute: typeof ConnectorsRoute
   DashboardsRoute: typeof DashboardsRoute
   DeveloperRoute: typeof DeveloperRoute
-  EndpointsRoute: typeof EndpointsRoute
   ErrorsRoute: typeof ErrorsRoute
   LogsRoute: typeof LogsRoute
   McpRoute: typeof McpRoute
@@ -297,8 +308,10 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
+  EndpointsDetailRoute: typeof EndpointsDetailRoute
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
+  EndpointsIndexRoute: typeof EndpointsIndexRoute
   ServicesIndexRoute: typeof ServicesIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
 }
@@ -389,13 +402,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ErrorsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/endpoints': {
-      id: '/endpoints'
-      path: '/endpoints'
-      fullPath: '/endpoints'
-      preLoaderRoute: typeof EndpointsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/developer': {
       id: '/developer'
       path: '/developer'
@@ -438,6 +444,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ServicesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/endpoints/': {
+      id: '/endpoints/'
+      path: '/endpoints'
+      fullPath: '/endpoints/'
+      preLoaderRoute: typeof EndpointsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/traces/$traceId': {
       id: '/traces/$traceId'
       path: '/traces/$traceId'
@@ -452,6 +465,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ServicesServiceNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/endpoints/detail': {
+      id: '/endpoints/detail'
+      path: '/endpoints/detail'
+      fullPath: '/endpoints/detail'
+      preLoaderRoute: typeof EndpointsDetailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -460,7 +480,6 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectorsRoute: ConnectorsRoute,
   DashboardsRoute: DashboardsRoute,
   DeveloperRoute: DeveloperRoute,
-  EndpointsRoute: EndpointsRoute,
   ErrorsRoute: ErrorsRoute,
   LogsRoute: LogsRoute,
   McpRoute: McpRoute,
@@ -473,8 +492,10 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
+  EndpointsDetailRoute: EndpointsDetailRoute,
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
+  EndpointsIndexRoute: EndpointsIndexRoute,
   ServicesIndexRoute: ServicesIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
 }

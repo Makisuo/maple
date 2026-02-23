@@ -10,10 +10,10 @@ import {
   TableHeader,
   TableRow,
 } from "@maple/ui/components/ui/table"
-import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import type { HttpEndpointOverview } from "@/api/tinybird/endpoints-overview"
+import { MethodBadge } from "@/components/endpoints/method-badge"
 import {
   getHttpEndpointsOverviewResultAtom,
   getHttpEndpointsSparklinesResultAtom,
@@ -42,23 +42,6 @@ function formatErrorRate(rate: number): string {
   if (rate < 0.01) return "0%"
   if (rate < 1) return `${rate.toFixed(2)}%`
   return `${rate.toFixed(1)}%`
-}
-
-const METHOD_COLORS: Record<string, string> = {
-  GET: "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-400",
-  POST: "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400",
-  PUT: "bg-amber-500/10 text-amber-600 dark:bg-amber-400/10 dark:text-amber-400",
-  PATCH: "bg-orange-500/10 text-orange-600 dark:bg-orange-400/10 dark:text-orange-400",
-  DELETE: "bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400",
-}
-
-function MethodBadge({ method }: { method: string }) {
-  const colorClass = METHOD_COLORS[method.toUpperCase()] ?? ""
-  return (
-    <Badge variant="secondary" className={`font-mono text-[11px] ${colorClass}`}>
-      {method}
-    </Badge>
-  )
 }
 
 export interface EndpointsTableProps {
@@ -195,10 +178,11 @@ export function EndpointsTable({ filters }: EndpointsTableProps) {
                         </TableCell>
                         <TableCell className="truncate max-w-0">
                           <Link
-                            to="/traces"
+                            to="/endpoints/detail"
                             search={{
-                              spanNames: [endpoint.endpointName],
-                              services: [endpoint.serviceName],
+                              service: endpoint.serviceName,
+                              endpoint: endpoint.endpointName,
+                              method: endpoint.httpMethod,
                               startTime: filters?.startTime,
                               endTime: filters?.endTime,
                             }}
