@@ -1,5 +1,5 @@
 # Build context: apps/ingest/ (via Railway rootDirectory)
-FROM rust:1.88-slim AS build
+FROM rust:1.88 AS build
 WORKDIR /app
 
 COPY . .
