@@ -5,6 +5,7 @@ import { format } from "date-fns"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@maple/ui/components/ui/card"
+import { Button } from "@maple/ui/components/ui/button"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { getPlanLimits, type PlanLimits } from "@/lib/billing/plans"
 import type { AggregatedUsage } from "@/lib/billing/usage"
@@ -27,6 +28,7 @@ function limitsFromCustomer(features: CustomerFeatures): PlanLimits | null {
 
 function CurrentPlanCard() {
   const { isTrialing, daysRemaining, trialEndsAt, planName, planStatus, isLoading } = useTrialStatus()
+  const { openBillingPortal } = useCustomer()
 
   if (isLoading) {
     return (
@@ -68,6 +70,11 @@ function CurrentPlanCard() {
           </CardDescription>
         )}
       </CardHeader>
+      <CardContent className="pt-0">
+        <Button variant="outline" size="sm" onClick={() => openBillingPortal({ returnUrl: window.location.href })}>
+          Manage billing
+        </Button>
+      </CardContent>
     </Card>
   )
 }
