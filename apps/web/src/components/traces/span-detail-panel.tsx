@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
-import { XmarkIcon, ClockIcon, CircleWarningIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon } from "@/components/icons"
+import { XmarkIcon, ClockIcon, CircleWarningIcon, CircleInfoIcon, SquareTerminalIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -17,6 +17,7 @@ import { getCacheInfo, cacheResultStyles } from "@/lib/cache"
 import type { SpanNode } from "@/api/tinybird/traces"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { listLogsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@/components/attributes"
 
 interface SpanDetailPanelProps {
   span: SpanNode
@@ -56,66 +57,6 @@ function formatTimestamp(timestamp: string): string {
     second: "2-digit",
     fractionalSecondDigits: 3,
   })
-}
-
-function CopyableValue({
-  value,
-  children,
-  className,
-}: {
-  value: string
-  children?: React.ReactNode
-  className?: string
-}) {
-  return (
-    <span
-      className={cn(
-        "cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors",
-        className
-      )}
-      onClick={() => {
-        navigator.clipboard.writeText(value)
-        toast.success("Copied to clipboard")
-      }}
-      title="Click to copy"
-    >
-      {children ?? value}
-    </span>
-  )
-}
-
-function AttributesTable({ attributes, title }: { attributes: Record<string, string>; title: string }) {
-  const entries = Object.entries(attributes)
-
-  if (entries.length === 0) {
-    return (
-      <div className="text-xs text-muted-foreground py-2">
-        No {title.toLowerCase()} available
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-1">
-      <h4 className="text-xs font-medium text-muted-foreground">{title}</h4>
-      <div className="rounded-md border">
-        <table className="w-full text-xs">
-          <tbody>
-            {entries.map(([key, value]) => (
-              <tr key={key} className="border-b last:border-b-0">
-                <td className="px-2 py-1.5 font-mono text-muted-foreground bg-muted/30 w-1/3 break-all">
-                  <CopyableValue value={key}>{key}</CopyableValue>
-                </td>
-                <td className="px-2 py-1.5 font-mono break-all">
-                  <CopyableValue value={value}>{value}</CopyableValue>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
 }
 
 function LogEntry({ log }: { log: Log }) {
@@ -356,8 +297,8 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
       {/* Tabs content */}
       <Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">
         <TabsList variant="line" className="shrink-0 px-4">
-          <TabsTrigger value="details">Details</TabsTrigger>
-          <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="details"><CircleInfoIcon size={14} /> Details</TabsTrigger>
+          <TabsTrigger value="logs"><SquareTerminalIcon size={14} /> Logs</TabsTrigger>
         </TabsList>
 
         <TabsContent value="details" className="flex-1 min-h-0 mt-0">
@@ -420,10 +361,7 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
               />
 
               {/* Resource Attributes */}
-              <AttributesTable
-                attributes={span.resourceAttributes ?? {}}
-                title="Resource Attributes"
-              />
+              <ResourceAttributesSection attributes={span.resourceAttributes ?? {}} />
             </div>
           </ScrollArea>
         </TabsContent>

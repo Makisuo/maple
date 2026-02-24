@@ -1,6 +1,5 @@
 import { Link } from "@tanstack/react-router"
 import { XmarkIcon, ClockIcon, PulseIcon } from "@/components/icons"
-import { toast } from "sonner"
 
 import {
   Sheet,
@@ -12,8 +11,8 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { SeverityBadge } from "./severity-badge"
-import { cn } from "@maple/ui/utils"
 import type { Log } from "@/api/tinybird/logs"
+import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@/components/attributes"
 
 interface LogDetailSheetProps {
   log: Log | null
@@ -31,66 +30,6 @@ function formatTimestamp(timestamp: string): string {
     second: "2-digit",
     fractionalSecondDigits: 3,
   })
-}
-
-function CopyableValue({
-  value,
-  children,
-  className,
-}: {
-  value: string
-  children?: React.ReactNode
-  className?: string
-}) {
-  return (
-    <span
-      className={cn(
-        "cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors",
-        className
-      )}
-      onClick={() => {
-        navigator.clipboard.writeText(value)
-        toast.success("Copied to clipboard")
-      }}
-      title="Click to copy"
-    >
-      {children ?? value}
-    </span>
-  )
-}
-
-function AttributesTable({ attributes, title }: { attributes: Record<string, string>; title: string }) {
-  const entries = Object.entries(attributes)
-
-  if (entries.length === 0) {
-    return (
-      <div className="text-xs text-muted-foreground py-2">
-        No {title.toLowerCase()} available
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-1">
-      <h4 className="text-xs font-medium text-muted-foreground">{title}</h4>
-      <div className="rounded-md border">
-        <table className="w-full text-xs">
-          <tbody>
-            {entries.map(([key, value]) => (
-              <tr key={key} className="border-b last:border-b-0">
-                <td className="px-2 py-1.5 font-mono text-muted-foreground bg-muted/30 w-1/3 break-all">
-                  <CopyableValue value={key}>{key}</CopyableValue>
-                </td>
-                <td className="px-2 py-1.5 font-mono break-all">
-                  <CopyableValue value={value}>{value}</CopyableValue>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
 }
 
 export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps) {
@@ -198,10 +137,7 @@ export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps)
             />
 
             {/* Resource Attributes */}
-            <AttributesTable
-              attributes={log.resourceAttributes}
-              title="Resource Attributes"
-            />
+            <ResourceAttributesSection attributes={log.resourceAttributes} />
           </div>
         </ScrollArea>
       </SheetContent>
