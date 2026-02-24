@@ -304,7 +304,14 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
       <Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">
         <TabsList variant="line" className="shrink-0 px-4">
           <TabsTrigger value="details"><CircleInfoIcon size={14} /> Details</TabsTrigger>
-          <TabsTrigger value="logs"><SquareTerminalIcon size={14} /> Logs</TabsTrigger>
+          <TabsTrigger value="logs">
+            <SquareTerminalIcon size={14} /> Logs
+            {logCount !== null && logCount > 0 && (
+              <Badge variant="secondary" className="text-[10px] ml-1 px-1.5 py-0">
+                {logCount}
+              </Badge>
+            )}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="details" className="flex-1 min-h-0 mt-0">
