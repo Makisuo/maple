@@ -221,6 +221,12 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
   const cacheInfo = getCacheInfo(span.spanAttributes)
   const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
   const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
+  const logsResult = useAtomValue(
+    span.traceId && span.spanId
+      ? listLogsResultAtom({ data: { traceId: span.traceId, spanId: span.spanId, limit: 100 } })
+      : disabledResultAtom<LogsResponse>(),
+  )
+  const logCount = Result.isSuccess(logsResult) ? logsResult.value.data.length : null
 
   return (
     <div className="flex flex-col h-full border-l bg-background overflow-hidden">
