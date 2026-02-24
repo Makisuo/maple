@@ -23,7 +23,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
-use libsql::{params, Builder, Connection, Database};
+use libsql::{params, Builder, Database};
 use metrics::{counter, gauge, histogram};
 use moka::future::Cache;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
@@ -155,7 +155,7 @@ impl AppConfig {
 }
 
 struct IngestKeyResolver {
-    conn: Connection,
+    db: Arc<Database>,
     lookup_hmac_key: String,
     cache: Cache<String, ResolvedIngestKey>,
 }
@@ -325,8 +325,6 @@ async fn main() {
         )
     });
 
-    let conn = database.connect().expect("Failed to create database connection");
-
     let ingest_key_cache = Cache::builder()
         .time_to_live(Duration::from_secs(60))
         .max_capacity(1_000)
@@ -334,7 +332,7 @@ async fn main() {
 
     let state = Arc::new(AppState {
         resolver: IngestKeyResolver {
-            conn,
+            db: Arc::new(database),
             lookup_hmac_key: config.lookup_hmac_key.clone(),
             cache: ingest_key_cache,
         },
@@ -941,7 +939,8 @@ impl IngestKeyResolver {
             "SELECT org_id FROM org_ingest_keys WHERE {hash_column} = ? LIMIT 1"
         );
 
-        let mut rows = self.conn
+        let conn = self.db.connect().map_err(|error| error.to_string())?;
+        let mut rows = conn
             .query(&query, params![key_hash.clone()])
             .await
             .map_err(|error| error.to_string())?;
