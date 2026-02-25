@@ -274,6 +274,13 @@
   }
 }
 
+/* Trace timeline bar hover — CSS-only to avoid React re-renders */
+.trace-timeline-bar:hover {
+  background-color: var(--hover-bg) !important;
+  box-shadow: inset 0 0 0 1px oklch(0.5 0.05 0 / 0.15);
+  z-index: 5;
+}
+
 /* Service map flowing dash animation */
 .service-map-flowing-dash {
   animation: service-map-flow 1.5s linear infinite;

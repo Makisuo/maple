@@ -28,7 +28,7 @@ export function SpanHierarchy({
   rootSpans,
   totalDurationMs,
   traceStartTime,
-  defaultExpandDepth = 2,
+  defaultExpandDepth = Infinity,
   selectedSpanId,
   onSelectSpan,
 }: SpanHierarchyProps) {

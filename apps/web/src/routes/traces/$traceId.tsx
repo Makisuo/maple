@@ -272,7 +272,7 @@ function TraceDetailPage() {
                   totalDurationMs={data.totalDurationMs}
                   traceStartTime={traceStartTime}
                   services={services}
-                  defaultExpandDepth={2}
+                  defaultExpandDepth={Infinity}
                   selectedSpanId={selectedSpan?.spanId}
                   onSelectSpan={handleSelectSpan}
                 />

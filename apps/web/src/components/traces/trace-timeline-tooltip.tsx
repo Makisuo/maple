@@ -2,7 +2,7 @@ import { formatDuration } from "@/lib/format"
 import { getServiceLegendColor, calculateSelfTime } from "@maple/ui/colors"
 import type { SpanNode } from "@/api/tinybird/traces"
 
-interface FlamegraphTooltipProps {
+interface TraceTimelineTooltipProps {
   span: SpanNode
   services?: string[]
   totalDurationMs?: number
@@ -17,61 +17,58 @@ const kindLabels: Record<string, string> = {
   SPAN_KIND_INTERNAL: "Internal",
 }
 
-export function FlamegraphTooltipContent({
+export function TraceTimelineTooltipContent({
   span,
   services,
   totalDurationMs,
-  traceStartTime
-}: FlamegraphTooltipProps) {
+  traceStartTime,
+}: TraceTimelineTooltipProps) {
   const kindLabel =
     kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
 
-  // Optional enhanced features (only if extra props provided)
   const serviceColor = services ? getServiceLegendColor(span.serviceName, services) : null
   const selfTime = calculateSelfTime(span, span.children)
   const selfTimePercent = span.durationMs > 0 ? (selfTime / span.durationMs) * 100 : 0
   const durationPercent = totalDurationMs ? (span.durationMs / totalDurationMs) * 100 : null
 
-  // Calculate start offset from trace start
   const startOffset = traceStartTime
     ? new Date(span.startTime).getTime() - new Date(traceStartTime).getTime()
     : null
 
-  // Extract HTTP details from attributes
   const httpMethod = span.spanAttributes["http.method"] || span.spanAttributes["http.request.method"]
   const httpStatus = span.spanAttributes["http.status_code"] || span.spanAttributes["http.response.status_code"]
   const httpRoute = span.spanAttributes["http.route"] || span.spanAttributes["http.target"] || span.spanAttributes["url.path"]
 
   return (
     <div className="space-y-2 font-mono text-xs">
-      {/* Header with service color dot */}
+      {/* Header */}
       <div className="flex items-center gap-2">
         {serviceColor && (
           <div
-            className="h-2.5 w-2.5 rounded-sm shrink-0"
+            className="h-2.5 w-2.5 shrink-0"
             style={{ backgroundColor: serviceColor }}
           />
         )}
         <span className="font-medium truncate">{span.spanName}</span>
       </div>
 
-      {/* Duration bar visualization */}
+      {/* Duration bar */}
       {durationPercent !== null && (
         <div className="space-y-1">
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-muted-foreground">Duration</span>
             <span>{formatDuration(span.durationMs)} ({durationPercent.toFixed(1)}%)</span>
           </div>
-          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+          <div className="h-1.5 w-full bg-muted overflow-hidden">
             <div
-              className="h-full rounded-full bg-primary/70"
+              className="h-full bg-primary/70"
               style={{ width: `${Math.max(durationPercent, 1)}%` }}
             />
           </div>
         </div>
       )}
 
-      {/* Self-time indicator */}
+      {/* Self time */}
       {span.children.length > 0 && (
         <div className="flex items-center justify-between text-[10px]">
           <span className="text-muted-foreground">Self time</span>
@@ -81,7 +78,7 @@ export function FlamegraphTooltipContent({
         </div>
       )}
 
-      {/* Main details grid */}
+      {/* Details grid */}
       <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[10px]">
         <span className="text-muted-foreground">Service</span>
         <span>{span.serviceName}</span>
@@ -117,7 +114,7 @@ export function FlamegraphTooltipContent({
         </span>
       </div>
 
-      {/* HTTP details if available */}
+      {/* HTTP details */}
       {(httpMethod || httpStatus || httpRoute) && (
         <div className="border-t border-border pt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[10px]">
           {httpMethod && (

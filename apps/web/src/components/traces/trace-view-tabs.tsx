@@ -2,7 +2,7 @@ import { MenuIcon, FireIcon, NetworkNodesIcon } from "@/components/icons"
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
 import { SpanHierarchy } from "./span-hierarchy"
-import { Flamegraph } from "./flamegraph"
+import { TraceTimeline } from "./trace-timeline"
 import { TraceFlowView } from "./flow-view"
 import type { SpanNode, Span } from "@/api/tinybird/traces"
 
@@ -23,7 +23,7 @@ export function TraceViewTabs({
   totalDurationMs,
   traceStartTime,
   services,
-  defaultExpandDepth = 2,
+  defaultExpandDepth = Infinity,
   selectedSpanId,
   onSelectSpan,
 }: TraceViewTabsProps) {
@@ -35,9 +35,9 @@ export function TraceViewTabs({
           <MenuIcon size={14} />
           Waterfall
         </TabsTrigger>
-        <TabsTrigger value="flamegraph">
+        <TabsTrigger value="timeline">
           <FireIcon size={14} />
-          Flamegraph
+          Timeline
         </TabsTrigger>
         <TabsTrigger value="flow">
           <NetworkNodesIcon size={14} />
@@ -56,8 +56,8 @@ export function TraceViewTabs({
         />
       </TabsContent>
 
-      <TabsContent value="flamegraph" className="flex-1 min-h-0 overflow-auto">
-        <Flamegraph
+      <TabsContent value="timeline" className="flex-1 min-h-0">
+        <TraceTimeline
           rootSpans={rootSpans}
           totalDurationMs={totalDurationMs}
           traceStartTime={traceStartTime}
