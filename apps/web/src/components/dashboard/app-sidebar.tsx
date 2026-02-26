@@ -16,6 +16,7 @@ import {
   RocketIcon,
   CheckIcon,
   NetworkNodesIcon,
+  ChatBubbleSparkleIcon,
 } from "@/components/icons"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
 import {
@@ -52,6 +53,11 @@ const mainNavItems = [
     title: "Overview",
     href: "/",
     icon: HouseIcon,
+  },
+  {
+    title: "Chat",
+    href: "/chat",
+    icon: ChatBubbleSparkleIcon,
   },
 ]
 

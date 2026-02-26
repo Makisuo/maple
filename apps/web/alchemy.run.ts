@@ -31,6 +31,16 @@ if (!process.env.VITE_CLERK_PUBLISHABLE_KEY) {
 process.env.VITE_API_BASE_URL = railway.apiUrl
 process.env.VITE_INGEST_URL = railway.ingestUrl
 
+const chatAgentUrl =
+  deploymentTarget.kind === "prd"
+    ? "https://chat.maple.dev"
+    : deploymentTarget.kind === "stg"
+      ? "https://chat-staging.maple.dev"
+      : process.env.VITE_CHAT_AGENT_URL ?? ""
+if (chatAgentUrl) {
+  process.env.VITE_CHAT_AGENT_URL = chatAgentUrl
+}
+
 const webDomains =
   deploymentTarget.kind === "prd"
     ? [

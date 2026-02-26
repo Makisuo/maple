@@ -6,6 +6,7 @@ import { useQuickStart } from "@/hooks/use-quick-start"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { Toaster } from "@maple/ui/components/ui/sonner"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
+import { ChatTrigger } from "@/components/chat"
 import type { RouterAuthContext } from "@/router"
 
 const PUBLIC_PATHS = new Set(["/sign-in", "/sign-up", "/org-required"])
@@ -38,6 +39,7 @@ function AppFrame() {
     <>
       <Outlet />
       <Toaster />
+      <ChatTrigger />
     </>
   )
 }

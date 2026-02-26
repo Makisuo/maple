@@ -30,7 +30,7 @@ export function CopyableValue({
   )
 }
 
-function tryParseJson(value: string): unknown | null {
+export function tryParseJson(value: string): unknown | null {
   const trimmed = value.trimStart()
   if (trimmed[0] !== "{" && trimmed[0] !== "[") return null
   try {

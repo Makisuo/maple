@@ -24,6 +24,7 @@ import { Route as ErrorsRouteImport } from './routes/errors'
 import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as DashboardsRouteImport } from './routes/dashboards'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
+import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as ServicesIndexRouteImport } from './routes/services/index'
@@ -105,6 +106,11 @@ const ConnectorsRoute = ConnectorsRouteImport.update({
   path: '/connectors',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ChatRoute = ChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -133,6 +139,7 @@ const ServicesServiceNameRoute = ServicesServiceNameRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
@@ -178,6 +186,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
@@ -202,6 +211,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/chat'
     | '/connectors'
     | '/dashboards'
     | '/developer'
@@ -224,6 +234,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/chat'
     | '/connectors'
     | '/dashboards'
     | '/developer'
@@ -246,6 +257,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/chat'
     | '/connectors'
     | '/dashboards'
     | '/developer'
@@ -269,6 +281,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ChatRoute: typeof ChatRoute
   ConnectorsRoute: typeof ConnectorsRoute
   DashboardsRoute: typeof DashboardsRoute
   DeveloperRoute: typeof DeveloperRoute
@@ -397,6 +410,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/chat': {
+      id: '/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -437,6 +457,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ChatRoute: ChatRoute,
   ConnectorsRoute: ConnectorsRoute,
   DashboardsRoute: DashboardsRoute,
   DeveloperRoute: DeveloperRoute,

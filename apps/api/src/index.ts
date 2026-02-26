@@ -20,12 +20,17 @@ const HealthRouter = HttpLayerRouter.use((router) =>
   router.add("GET", "/health", HttpServerResponse.text("OK")),
 )
 
+// Return 405 for GET /mcp so MCP Streamable HTTP clients skip SSE gracefully
+const McpGetFallback = HttpLayerRouter.use((router) =>
+  router.add("GET", "/mcp", HttpServerResponse.empty({ status: 405 })),
+)
+
 const DocsRoute = HttpApiScalar.layerHttpLayerRouter({
   api: MapleApi,
   path: "/docs",
 })
 
-const AllRoutes = Layer.mergeAll(HttpApiRoutes, HealthRouter, DocsRoute, AutumnRouter, McpLive).pipe(
+const AllRoutes = Layer.mergeAll(HttpApiRoutes, HealthRouter, McpGetFallback, DocsRoute, AutumnRouter, McpLive).pipe(
   Layer.provideMerge(
     HttpLayerRouter.cors({
       allowedOrigins: ["*"],
