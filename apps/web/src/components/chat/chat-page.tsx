@@ -26,14 +26,22 @@ export function ChatPage({ initialTabId }: ChatPageProps) {
             onCreate={createTab}
           />
         </header>
-        <div className="flex min-h-0 flex-1 flex-col">
-          {activeTabId && (
-            <ChatConversation
-              key={activeTabId}
-              tabId={activeTabId}
-              onFirstMessage={(id, text) => renameTab(id, text)}
-            />
-          )}
+        <div className="relative min-h-0 flex-1 bg-background">
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={
+                tab.id === activeTabId
+                  ? "flex h-full flex-col"
+                  : "hidden"
+              }
+            >
+              <ChatConversation
+                tabId={tab.id}
+                onFirstMessage={(id, text) => renameTab(id, text)}
+              />
+            </div>
+          ))}
         </div>
       </SidebarInset>
     </SidebarProvider>
