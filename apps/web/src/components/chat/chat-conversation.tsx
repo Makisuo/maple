@@ -108,43 +108,49 @@ export function ChatConversation({ tabId, onFirstMessage }: ChatConversationProp
             </ConversationEmptyState>
           ) : (
             <>
-              {messages.map((message) => (
-                <Message key={message.id} from={message.role}>
-                  <MessageContent>
-                    {message.parts.map((part, i) => {
-                      if (part.type === "text") {
-                        return <MessageResponse key={i}>{part.text}</MessageResponse>
-                      }
-                      if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
-                        const toolPart = part as {
-                          type: string
-                          toolCallId: string
-                          toolName?: string
-                          state: string
-                          input?: unknown
-                          output?: unknown
-                          errorText?: string
+              {messages.map((message, messageIndex) => {
+                const isLastMessage = messageIndex === messages.length - 1
+                return (
+                  <Message key={message.id} from={message.role}>
+                    <MessageContent>
+                      {message.parts.map((part, i) => {
+                        if (part.type === "text") {
+                          return <MessageResponse key={i}>{part.text}</MessageResponse>
                         }
-                        const toolName = part.type.startsWith("tool-")
-                          ? part.type.replace(/^tool-/, "")
-                          : (toolPart.toolName ?? "unknown")
-                        return (
-                          <Tool
-                            key={toolPart.toolCallId ?? i}
-                            toolName={toolName}
-                            toolCallId={toolPart.toolCallId}
-                            state={toolPart.state}
-                            input={toolPart.input}
-                            output={toolPart.output}
-                            errorText={toolPart.errorText}
-                          />
-                        )
-                      }
-                      return null
-                    })}
-                  </MessageContent>
-                </Message>
-              ))}
+                        if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
+                          const toolPart = part as {
+                            type: string
+                            toolCallId: string
+                            toolName?: string
+                            state: string
+                            input?: unknown
+                            output?: unknown
+                            errorText?: string
+                          }
+                          const toolName = part.type.startsWith("tool-")
+                            ? part.type.replace(/^tool-/, "")
+                            : (toolPart.toolName ?? "unknown")
+                          return (
+                            <Tool
+                              key={toolPart.toolCallId ?? i}
+                              toolName={toolName}
+                              toolCallId={toolPart.toolCallId}
+                              state={toolPart.state}
+                              input={toolPart.input}
+                              output={toolPart.output}
+                              errorText={toolPart.errorText}
+                            />
+                          )
+                        }
+                        return null
+                      })}
+                      {shouldShowThinkingIndicator(message, isLoading, isLastMessage) && (
+                        <ThinkingIndicator />
+                      )}
+                    </MessageContent>
+                  </Message>
+                )
+              })}
               {isLoading && messages[messages.length - 1]?.role === "user" && (
                 <Message from="assistant">
                   <MessageContent>
