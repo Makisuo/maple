@@ -52,7 +52,7 @@ class ChatAgent extends AIChatAgent<Env> {
     })
 
     const result = streamText({
-      model: openrouter.chatModel("moonshotai/kimi-k2.5"),
+      model: openrouter.chatModel("moonshotai/kimi-k2.5:nitro"),
       system: SYSTEM_PROMPT,
       messages: await convertToModelMessages(this.messages),
       tools,
