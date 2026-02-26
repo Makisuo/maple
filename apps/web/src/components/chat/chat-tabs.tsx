@@ -1,6 +1,8 @@
 import type { ChatTab } from "@/hooks/use-chat-tabs"
 import { cn } from "@maple/ui/lib/utils"
 import { PlusIcon, XmarkIcon } from "@/components/icons"
+import { Button } from "@maple/ui/components/ui/button"
+import { Separator } from "@maple/ui/components/ui/separator"
 
 interface ChatTabsProps {
   tabs: ChatTab[]
@@ -12,8 +14,9 @@ interface ChatTabsProps {
 
 export function ChatTabBar({ tabs, activeTabId, onSelect, onClose, onCreate }: ChatTabsProps) {
   return (
-    <div className="flex items-center border-b bg-muted/30">
-      <div className="flex flex-1 items-center gap-0 overflow-x-auto">
+    <div className="flex min-w-0 flex-1 items-center">
+      <Separator orientation="vertical" className="mx-2 h-4" />
+      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId
           return (
@@ -21,10 +24,10 @@ export function ChatTabBar({ tabs, activeTabId, onSelect, onClose, onCreate }: C
               key={tab.id}
               type="button"
               className={cn(
-                "group relative flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors",
-                "hover:bg-muted/50",
+                "group flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                "hover:bg-muted/80",
                 isActive
-                  ? "bg-background text-foreground"
+                  ? "bg-muted text-foreground"
                   : "text-muted-foreground",
               )}
               onClick={() => onSelect(tab.id)}
@@ -34,7 +37,12 @@ export function ChatTabBar({ tabs, activeTabId, onSelect, onClose, onCreate }: C
                 <span
                   role="button"
                   tabIndex={0}
-                  className="ml-1 rounded-sm p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+                  className={cn(
+                    "ml-0.5 rounded-sm p-0.5 transition-opacity hover:bg-foreground/10",
+                    isActive
+                      ? "opacity-60 hover:opacity-100"
+                      : "opacity-0 group-hover:opacity-60 hover:!opacity-100",
+                  )}
                   onClick={(e) => {
                     e.stopPropagation()
                     onClose(tab.id)
@@ -49,21 +57,19 @@ export function ChatTabBar({ tabs, activeTabId, onSelect, onClose, onCreate }: C
                   <XmarkIcon size={12} />
                 </span>
               )}
-              {isActive && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-              )}
             </button>
           )
         })}
       </div>
-      <button
-        type="button"
-        className="flex shrink-0 items-center gap-1 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="ml-1 shrink-0 text-muted-foreground"
         onClick={onCreate}
       >
         <PlusIcon size={14} />
-        <span>New Chat</span>
-      </button>
+        <span className="sr-only">New Chat</span>
+      </Button>
     </div>
   )
 }

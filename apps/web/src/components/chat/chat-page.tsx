@@ -1,4 +1,5 @@
-import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { AppSidebar } from "@/components/dashboard/app-sidebar"
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@maple/ui/components/ui/sidebar"
 import { useChatTabs } from "@/hooks/use-chat-tabs"
 import { ChatTabBar } from "./chat-tabs"
 import { ChatConversation } from "./chat-conversation"
@@ -12,15 +13,19 @@ export function ChatPage({ initialTabId }: ChatPageProps) {
     useChatTabs(initialTabId)
 
   return (
-    <DashboardLayout breadcrumbs={[{ label: "Chat" }]}>
-      <div className="-mx-4 -mb-4 flex min-h-0 flex-1 flex-col">
-        <ChatTabBar
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onSelect={setActiveTab}
-          onClose={closeTab}
-          onCreate={createTab}
-        />
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset>
+        <header className="flex h-12 shrink-0 items-center border-b px-2">
+          <SidebarTrigger className="-ml-0.5" />
+          <ChatTabBar
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onSelect={setActiveTab}
+            onClose={closeTab}
+            onCreate={createTab}
+          />
+        </header>
         <div className="flex min-h-0 flex-1 flex-col">
           {activeTabId && (
             <ChatConversation
@@ -30,7 +35,7 @@ export function ChatPage({ initialTabId }: ChatPageProps) {
             />
           )}
         </div>
-      </div>
-    </DashboardLayout>
+      </SidebarInset>
+    </SidebarProvider>
   )
 }

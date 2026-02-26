@@ -21,7 +21,27 @@ import {
 } from "@/components/ai-elements/prompt-input"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import { Shimmer } from "@/components/ai-elements/shimmer"
-import { ToolCallDisplay } from "./tool-call-display"
+import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator"
+import { Tool } from "@/components/ai-elements/tool"
+import type { UIMessage } from "ai"
+
+function shouldShowThinkingIndicator(
+  message: UIMessage,
+  isLoading: boolean,
+  isLastMessage: boolean,
+): boolean {
+  if (!isLoading || !isLastMessage || message.role !== "assistant") return false
+  const parts = message.parts
+  if (parts.length === 0) return true
+  const lastPart = parts[parts.length - 1]
+  // If text is actively streaming, user already sees content appearing
+  if (
+    lastPart.type === "text" &&
+    (lastPart as { state?: string }).state === "streaming"
+  )
+    return false
+  return true
+}
 
 const PROMPT_SUGGESTIONS = [
   "What's the overall system health?",
@@ -95,20 +115,28 @@ export function ChatConversation({ tabId, onFirstMessage }: ChatConversationProp
                       if (part.type === "text") {
                         return <MessageResponse key={i}>{part.text}</MessageResponse>
                       }
-                      if (part.type.startsWith("tool-")) {
+                      if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
                         const toolPart = part as {
                           type: string
                           toolCallId: string
+                          toolName?: string
                           state: string
+                          input?: unknown
                           output?: unknown
+                          errorText?: string
                         }
-                        const toolName = part.type.replace(/^tool-/, "")
+                        const toolName = part.type.startsWith("tool-")
+                          ? part.type.replace(/^tool-/, "")
+                          : (toolPart.toolName ?? "unknown")
                         return (
-                          <ToolCallDisplay
-                            key={i}
+                          <Tool
+                            key={toolPart.toolCallId ?? i}
                             toolName={toolName}
+                            toolCallId={toolPart.toolCallId}
                             state={toolPart.state}
-                            result={toolPart.output}
+                            input={toolPart.input}
+                            output={toolPart.output}
+                            errorText={toolPart.errorText}
                           />
                         )
                       }
