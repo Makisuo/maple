@@ -15,7 +15,7 @@ const errorsSearchSchema = Schema.Struct({
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),
   timePreset: Schema.optional(Schema.String),
-  showSpam: Schema.optional(Schema.Boolean),
+  showSpam: Schema.optional(Schema.Union(Schema.Boolean, Schema.BooleanFromString)),
 })
 
 export type ErrorsSearchParams = Schema.Schema.Type<typeof errorsSearchSchema>

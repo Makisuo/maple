@@ -24,3 +24,4 @@ apps/api/.data/
 
 .alchemy
 .mcp.json
+.dev.vars

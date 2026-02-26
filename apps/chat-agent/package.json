@@ -1,0 +1,24 @@
+{
+  "name": "@maple/chat-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy:stack": "alchemy deploy",
+    "destroy:stack": "alchemy destroy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/mcp": "^1.0.21",
+    "@ai-sdk/openai-compatible": "^2.0.30",
+    "@cloudflare/ai-chat": "^0.1.3",
+    "agents": "^0.5.1",
+    "ai": "^6.0.97"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.14.4"
+  }
+}

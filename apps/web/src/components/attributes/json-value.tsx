@@ -20,7 +20,7 @@ export function CollapsibleJsonValue({ value, parsed }: CollapsibleJsonValueProp
   const preview = value.length > 80 ? value.slice(0, 80) + "…" : value
 
   return (
-    <div>
+    <div className="min-w-0">
       <button
         type="button"
         className="flex items-start gap-1 w-full text-left font-mono text-xs break-all cursor-pointer hover:bg-muted/50 rounded px-0.5 -mx-0.5 transition-colors"

@@ -148,7 +148,7 @@ export function LogsVolumeChart({ filters }: LogsVolumeChartProps) {
                   />
                 }
               />
-              {seriesKeys.map((key, index) => (
+              {seriesKeys.map((key) => (
                 <Bar
                   key={key}
                   dataKey={key}

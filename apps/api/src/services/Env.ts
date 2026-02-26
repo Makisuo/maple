@@ -21,6 +21,7 @@ export class Env extends Effect.Service<Env>()("Env", {
       MAPLE_ORG_ID_OVERRIDE: yield* Config.string("MAPLE_ORG_ID_OVERRIDE").pipe(Config.withDefault("")),
       AUTUMN_SECRET_KEY: yield* Config.string("AUTUMN_SECRET_KEY").pipe(Config.withDefault("")),
       SD_INTERNAL_TOKEN: yield* Config.string("SD_INTERNAL_TOKEN").pipe(Config.withDefault("")),
+      INTERNAL_SERVICE_TOKEN: yield* Config.string("INTERNAL_SERVICE_TOKEN").pipe(Config.withDefault("")),
     } as const
 
     if (env.MAPLE_AUTH_MODE.toLowerCase() !== "clerk" && env.MAPLE_ROOT_PASSWORD.trim().length === 0) {

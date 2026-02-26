@@ -8,6 +8,12 @@ import { defaultTimeRange } from "../lib/time"
 import { formatDurationMs, formatDurationFromMs, formatTable } from "../lib/format"
 import { Effect } from "effect"
 
+const SYSTEM_SPAN_PATTERNS = ["ClusterCron"]
+
+function isSystemTrace(rootSpanName: string): boolean {
+  return SYSTEM_SPAN_PATTERNS.some((pattern) => rootSpanName.includes(pattern))
+}
+
 export function registerFindSlowTracesTool(server: McpToolRegistrar) {
   server.tool(
     "find_slow_traces",
@@ -31,7 +37,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
               start_time: st,
               end_time: et,
               service,
-              limit: lim,
+              limit: 500,
             }),
             queryTinybird("traces_duration_stats", {
               start_time: st,
@@ -43,9 +49,10 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
         )
 
         const stats = statsResult.data[0]
-        const traces = [...tracesResult.data].sort(
-          (a, b) => Number(b.durationMicros) - Number(a.durationMicros),
-        )
+        const traces = [...tracesResult.data]
+          .filter((t) => !isSystemTrace(t.rootSpanName))
+          .sort((a, b) => Number(b.durationMicros) - Number(a.durationMicros))
+          .slice(0, lim)
 
         if (traces.length === 0) {
           return { content: [{ type: "text", text: `No traces found in ${st} — ${et}` }] }
