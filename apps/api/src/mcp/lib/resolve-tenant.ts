@@ -41,8 +41,11 @@ export async function resolveMcpTenantContext(request: Request): Promise<McpTena
     const env = await EnvRuntime.runPromise(Env)
     const expected = env.INTERNAL_SERVICE_TOKEN
 
+    if (expected.length === 0) {
+      throw new Error("INTERNAL_SERVICE_TOKEN is not configured on the server")
+    }
+
     if (
-      expected.length > 0 &&
       provided.length === expected.length &&
       timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
     ) {
@@ -61,7 +64,9 @@ export async function resolveMcpTenantContext(request: Request): Promise<McpTena
       }
     }
 
-    throw new Error("Invalid internal service token")
+    throw new Error(
+      `Internal service token mismatch (provided length: ${provided.length}, expected length: ${expected.length})`,
+    )
   }
 
   if (token && token.startsWith(API_KEY_PREFIX)) {

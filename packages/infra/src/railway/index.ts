@@ -194,6 +194,7 @@ export async function provisionRailwayStack(
       CLERK_PUBLISHABLE_KEY: env.CLERK_PUBLISHABLE_KEY?.trim() || "",
       CLERK_JWT_KEY: env.CLERK_JWT_KEY?.trim() || "",
       SD_INTERNAL_TOKEN: env.SD_INTERNAL_TOKEN?.trim() || "",
+      INTERNAL_SERVICE_TOKEN: env.INTERNAL_SERVICE_TOKEN?.trim() || "",
       AUTUMN_SECRET_KEY: env.AUTUMN_SECRET_KEY?.trim() || "",
       OTEL_ENVIRONMENT: "production",
       OTEL_BASE_URL: toIngestPrivateEndpoint(serviceNames.ingest),
