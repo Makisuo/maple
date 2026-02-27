@@ -80,7 +80,7 @@ function formatIncludedUsage(item: ProductItem): string {
 }
 
 function normalizeDetailText(text: string): string {
-  return text.replace(/\bper\s+(?:[\d,]+\s+)?(Logs|Traces|Metrics)\b/i, "per GB")
+  return text.replace(/\bper\s+(?:[\d,]+\s+)?(?:logs?|traces?|metrics?)\b/i, "per GB")
 }
 
 function getFeatureRows(product: Product) {
