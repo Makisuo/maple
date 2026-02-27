@@ -57,7 +57,7 @@ export function WidgetProposalCard({ input, onAccept }: WidgetProposalCardProps)
           <p className="truncate font-medium text-foreground">
             {input.display.title ?? "Untitled Widget"}
           </p>
-          <p className="text-muted-foreground">
+          <p className="truncate text-muted-foreground">
             {vizLabel} &middot; {input.dataSource.endpoint}
           </p>
         </div>
