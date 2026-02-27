@@ -15,6 +15,8 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Trace } from "@/api/tinybird/traces"
 import { listTracesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { TracesSearchParams } from "@/routes/traces"
+import { useTimezonePreference } from "@/hooks/use-timezone-preference"
+import { formatTimestampInTimezone } from "@/lib/timezone-format"
 
 function formatDuration(ms: number): string {
   if (ms < 1) {
@@ -24,17 +26,6 @@ function formatDuration(ms: number): string {
     return `${ms.toFixed(1)}ms`
   }
   return `${(ms / 1000).toFixed(2)}s`
-}
-
-function formatTimestamp(timestamp: string): string {
-  const date = new Date(timestamp)
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
 }
 
 function truncateId(id: string, length = 8): string {
@@ -102,6 +93,7 @@ function LoadingState() {
 
 export function TracesTable({ filters }: TracesTableProps) {
   const navigate = useNavigate()
+  const { effectiveTimezone } = useTimezonePreference()
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
     filters?.startTime,
     filters?.endTime,
@@ -179,7 +171,9 @@ export function TracesTable({ filters }: TracesTableProps) {
                       <div className="flex flex-col">
                         <span className="font-mono text-xs">{trace.rootSpanName || "Unknown"}</span>
                         <span className="text-[10px] text-muted-foreground">
-                          {formatTimestamp(trace.startTime)}
+                          {formatTimestampInTimezone(trace.startTime, {
+                            timeZone: effectiveTimezone,
+                          })}
                         </span>
                       </div>
                     </TableCell>

@@ -13,6 +13,8 @@ import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { SeverityBadge } from "./severity-badge"
 import type { Log } from "@/api/tinybird/logs"
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@/components/attributes"
+import { useTimezonePreference } from "@/hooks/use-timezone-preference"
+import { formatTimestampInTimezone } from "@/lib/timezone-format"
 
 interface LogDetailSheetProps {
   log: Log | null
@@ -20,19 +22,8 @@ interface LogDetailSheetProps {
   onOpenChange: (open: boolean) => void
 }
 
-function formatTimestamp(timestamp: string): string {
-  const date = new Date(timestamp)
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    fractionalSecondDigits: 3,
-  })
-}
-
 export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps) {
+  const { effectiveTimezone } = useTimezonePreference()
   if (!log) return null
 
   return (
@@ -64,7 +55,10 @@ export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps)
             <ClockIcon size={12} className="text-muted-foreground" />
             <span className="font-mono">
               <CopyableValue value={log.timestamp}>
-                {formatTimestamp(log.timestamp)}
+                {formatTimestampInTimezone(log.timestamp, {
+                  timeZone: effectiveTimezone,
+                  withMilliseconds: true,
+                })}
               </CopyableValue>
             </span>
           </div>

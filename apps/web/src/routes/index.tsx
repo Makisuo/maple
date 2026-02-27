@@ -63,7 +63,7 @@ function DashboardPage() {
   const navigate = useNavigate({ from: Route.fullPath })
 
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
-    useEffectiveTimeRange(search.startTime, search.endTime, "7d")
+    useEffectiveTimeRange(search.startTime, search.endTime, "24h")
 
   const handleTimeChange = ({
     startTime,
@@ -229,7 +229,7 @@ function DashboardPage() {
           <TimeRangePicker
             startTime={search.startTime}
             endTime={search.endTime}
-            presetValue={search.timePreset ?? "7d"}
+            presetValue={search.timePreset ?? "24h"}
             onChange={handleTimeChange}
           />
         </div>

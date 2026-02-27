@@ -16,17 +16,8 @@ import { SeverityBadge } from "./severity-badge"
 import { LogDetailSheet } from "./log-detail-sheet"
 import type { LogsSearchParams } from "@/routes/logs"
 import { listLogsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
-
-function formatTimestamp(timestamp: string): string {
-  const date = new Date(timestamp)
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
-}
+import { useTimezonePreference } from "@/hooks/use-timezone-preference"
+import { formatTimestampInTimezone } from "@/lib/timezone-format"
 
 function truncateBody(body: string, maxLength = 100): string {
   if (body.length <= maxLength) return body
@@ -69,6 +60,7 @@ function LoadingState() {
 export function LogsTable({ filters }: LogsTableProps) {
   const [selectedLog, setSelectedLog] = useState<Log | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const { effectiveTimezone } = useTimezonePreference()
 
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(filters?.startTime, filters?.endTime)
@@ -126,7 +118,9 @@ export function LogsTable({ filters }: LogsTableProps) {
                       onClick={() => handleRowClick(log)}
                     >
                       <TableCell className="font-mono text-muted-foreground">
-                        {formatTimestamp(log.timestamp)}
+                        {formatTimestampInTimezone(log.timestamp, {
+                          timeZone: effectiveTimezone,
+                        })}
                       </TableCell>
                       <TableCell>
                         <span className="font-mono text-xs">{log.serviceName}</span>

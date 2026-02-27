@@ -18,6 +18,8 @@ import type { SpanNode } from "@/api/tinybird/traces"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { listLogsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@/components/attributes"
+import { useTimezonePreference } from "@/hooks/use-timezone-preference"
+import { formatTimestampInTimezone } from "@/lib/timezone-format"
 
 interface SpanDetailPanelProps {
   span: SpanNode
@@ -47,25 +49,13 @@ const severityStyles: Record<string, string> = {
   FATAL: "text-red-700",
 }
 
-function formatTimestamp(timestamp: string): string {
-  const date = new Date(timestamp)
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    fractionalSecondDigits: 3,
-  })
-}
-
-function LogEntry({ log }: { log: Log }) {
+function LogEntry({ log, timeZone }: { log: Log; timeZone: string }) {
   const severityStyle = severityStyles[log.severityText] ?? "text-gray-500"
 
   return (
     <div className="border-b py-2 px-2 last:border-b-0 hover:bg-muted/30">
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-1">
-        <span>{formatTimestamp(log.timestamp)}</span>
+        <span>{formatTimestampInTimezone(log.timestamp, { timeZone })}</span>
         <Badge variant="outline" className={cn("text-[10px] px-1 py-0", severityStyle)}>
           {log.severityText}
         </Badge>
@@ -172,7 +162,15 @@ function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSecti
   )
 }
 
-function SpanLogs({ traceId, spanId }: { traceId: string; spanId: string }) {
+function SpanLogs({
+  traceId,
+  spanId,
+  timeZone,
+}: {
+  traceId: string
+  spanId: string
+  timeZone: string
+}) {
   const logsResult = useAtomValue(
     traceId && spanId
       ? listLogsResultAtom({ data: { traceId, spanId, limit: 100 } })
@@ -209,7 +207,7 @@ function SpanLogs({ traceId, spanId }: { traceId: string; spanId: string }) {
       return (
         <div className="divide-y">
           {logs.map((log, i) => (
-            <LogEntry key={`${log.timestamp}-${i}`} log={log} />
+            <LogEntry key={`${log.timestamp}-${i}`} log={log} timeZone={timeZone} />
           ))}
         </div>
       )
@@ -218,6 +216,7 @@ function SpanLogs({ traceId, spanId }: { traceId: string; spanId: string }) {
 }
 
 export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
+  const { effectiveTimezone } = useTimezonePreference()
   const cacheInfo = getCacheInfo(span.spanAttributes)
   const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
   const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
@@ -325,7 +324,10 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
                     <span className="text-muted-foreground">Start Time</span>
                     <span className="font-mono">
                       <CopyableValue value={span.startTime}>
-                        {formatTimestamp(span.startTime)}
+                        {formatTimestampInTimezone(span.startTime, {
+                          timeZone: effectiveTimezone,
+                          withMilliseconds: true,
+                        })}
                       </CopyableValue>
                     </span>
                   </div>
@@ -381,7 +383,11 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 
         <TabsContent value="logs" className="flex-1 min-h-0 mt-0">
           <ScrollArea className="h-full">
-            <SpanLogs traceId={span.traceId} spanId={span.spanId} />
+            <SpanLogs
+              traceId={span.traceId}
+              spanId={span.spanId}
+              timeZone={effectiveTimezone}
+            />
           </ScrollArea>
         </TabsContent>
       </Tabs>
