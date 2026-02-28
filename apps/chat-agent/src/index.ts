@@ -108,11 +108,17 @@ const dashboardBuilderTools = {
         })).optional(),
       }),
     }),
+    execute: async () => ({
+      status: "proposed",
+    }),
   }),
   remove_dashboard_widget: tool({
     description: "Remove a widget from the dashboard by its title.",
     inputSchema: z.object({
       widgetTitle: z.string().describe("The title of the widget to remove"),
+    }),
+    execute: async () => ({
+      status: "proposed",
     }),
   }),
 }
