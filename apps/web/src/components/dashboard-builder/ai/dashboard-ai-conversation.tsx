@@ -25,6 +25,7 @@ import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator"
 import { Tool } from "@/components/ai-elements/tool"
 import { WidgetProposalCard } from "./widget-proposal-card"
 import { WidgetRemovalCard } from "./widget-removal-card"
+import { normalizeAiWidgetProposal } from "./normalize-widget-proposal"
 import type { UIMessage } from "ai"
 import type {
   DashboardWidget,
@@ -180,19 +181,31 @@ export function DashboardAiConversation({
                                 />
                               )
                             }
+                            const normalized = normalizeAiWidgetProposal({
+                              visualization: input.visualization,
+                              dataSource: input.dataSource,
+                              display: input.display,
+                            })
+
+                            if (normalized.kind === "blocked") {
+                              return (
+                                <WidgetProposalCard
+                                  key={toolPart.toolCallId ?? i}
+                                  input={normalized.proposal}
+                                  disabledReason={normalized.reason}
+                                />
+                              )
+                            }
+
                             return (
                               <WidgetProposalCard
                                 key={toolPart.toolCallId ?? i}
-                                input={{
-                                  visualization: input.visualization,
-                                  dataSource: input.dataSource,
-                                  display: input.display,
-                                }}
+                                input={normalized.proposal}
                                 onAccept={() => {
                                   onAddWidget(
-                                    input.visualization!,
-                                    input.dataSource!,
-                                    input.display!,
+                                    normalized.proposal.visualization,
+                                    normalized.proposal.dataSource,
+                                    normalized.proposal.display,
                                   )
                                 }}
                               />

@@ -12,28 +12,90 @@ interface DashboardContext {
   existingWidgets: Array<{ title: string; visualization: string }>
 }
 
+const METRIC_TYPES = ["sum", "gauge", "histogram", "exponential_histogram"] as const
+const METRIC_TYPES_SET = new Set<string>(METRIC_TYPES)
+
+const dashboardWidgetDataSourceSchema = z.object({
+  endpoint: z.string().describe("One of the available DataSourceEndpoint values"),
+  params: z.record(z.string(), z.unknown()).optional(),
+  transform: z.object({
+    reduceToValue: z.object({
+      field: z.string(),
+      aggregate: z.enum(["sum", "first", "count", "avg", "max", "min"]),
+    }).optional(),
+    fieldMap: z.record(z.string(), z.string()).optional(),
+    flattenSeries: z.object({ valueField: z.string() }).optional(),
+    limit: z.number().optional(),
+    sortBy: z.object({
+      field: z.string(),
+      direction: z.enum(["asc", "desc"]),
+    }).optional(),
+  }).optional(),
+}).superRefine((dataSource, ctx) => {
+  if (dataSource.endpoint !== "custom_query_builder_timeseries") {
+    return
+  }
+
+  const params = dataSource.params
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "custom_query_builder_timeseries requires params.queries[]",
+      path: ["params"],
+    })
+    return
+  }
+
+  const rawQueries = (params as Record<string, unknown>).queries
+  if (!Array.isArray(rawQueries) || rawQueries.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "custom_query_builder_timeseries requires params.queries[]",
+      path: ["params", "queries"],
+    })
+    return
+  }
+
+  for (const [index, rawQuery] of rawQueries.entries()) {
+    if (typeof rawQuery !== "object" || rawQuery === null || Array.isArray(rawQuery)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Each query must be an object",
+        path: ["params", "queries", index],
+      })
+      continue
+    }
+
+    const query = rawQuery as Record<string, unknown>
+    if (query.dataSource !== "metrics") continue
+
+    if (typeof query.metricName !== "string" || query.metricName.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Metrics queries require metricName",
+        path: ["params", "queries", index, "metricName"],
+      })
+    }
+
+    if (
+      typeof query.metricType !== "string" ||
+      !METRIC_TYPES_SET.has(query.metricType)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Metrics queries require a valid metricType",
+        path: ["params", "queries", index, "metricType"],
+      })
+    }
+  }
+})
+
 const dashboardBuilderTools = {
   add_dashboard_widget: tool({
     description: "Add a widget to the user's dashboard. The widget will be previewed and the user can confirm adding it.",
     inputSchema: z.object({
       visualization: z.enum(["stat", "chart", "table"]),
-      dataSource: z.object({
-        endpoint: z.string().describe("One of the available DataSourceEndpoint values"),
-        params: z.record(z.string(), z.unknown()).optional(),
-        transform: z.object({
-          reduceToValue: z.object({
-            field: z.string(),
-            aggregate: z.enum(["sum", "first", "count", "avg", "max", "min"]),
-          }).optional(),
-          fieldMap: z.record(z.string(), z.string()).optional(),
-          flattenSeries: z.object({ valueField: z.string() }).optional(),
-          limit: z.number().optional(),
-          sortBy: z.object({
-            field: z.string(),
-            direction: z.enum(["asc", "desc"]),
-          }).optional(),
-        }).optional(),
-      }),
+      dataSource: dashboardWidgetDataSourceSchema,
       display: z.object({
         title: z.string(),
         unit: z.enum(["none", "number", "percent", "duration_ms", "duration_us", "bytes", "requests_per_sec", "short"]).optional(),

@@ -84,6 +84,34 @@ Best for: trends over time, comparisons across services, latency/throughput patt
 Use endpoint="custom_query_builder_timeseries" with appropriate params.
 Available chartId values: "query-builder-bar", "query-builder-area", "query-builder-line"
 
+Required shape for custom_query_builder_timeseries params:
+{
+  "queries": [
+    {
+      "id": "uuid",
+      "name": "A",
+      "enabled": true,
+      "dataSource": "traces|logs|metrics",
+      "aggregation": "...",
+      "whereClause": "...",
+      "groupBy": "...",
+      "addOns": { "groupBy": true, "having": false, "orderBy": false, "limit": false, "legend": false },
+      "stepInterval": "60",
+      "metricName": "",
+      "metricType": "sum|gauge|histogram|exponential_histogram",
+      "having": "",
+      "orderBy": "",
+      "limit": "",
+      "legend": "",
+      "orderByDirection": "desc",
+      "signalSource": "default"
+    }
+  ],
+  "formulas": [],
+  "comparison": { "mode": "none", "includePercentChange": true },
+  "debug": false
+}
+
 ## Data Source Endpoints
 - service_usage: Per-service usage stats (totalTraces, totalLogs, serviceName)
 - service_overview: All services with p95LatencyMs, errorRate, throughput
@@ -121,6 +149,8 @@ number, percent, duration_ms, duration_us, bytes, requests_per_sec, short, none
 - For trends over time → chart. For a single metric → stat. For detailed records → table.
 - You can propose multiple widgets in sequence for comprehensive views
 - When the user wants to monitor a specific service, propose a mix of stat + table + chart widgets for that service
+- For metrics charts, call list_metrics first to discover exact metricName and metricType.
+- Never output a metrics query without both metricName and metricType.
 
 ## Response Style
 - Be concise. Briefly explain what you're adding and why, then use the tool.

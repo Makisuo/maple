@@ -20,7 +20,8 @@ interface WidgetProposal {
 
 interface WidgetProposalCardProps {
   input: WidgetProposal
-  onAccept: () => void
+  onAccept?: () => void
+  disabledReason?: string
 }
 
 const vizIcons: Record<string, typeof PulseIcon> = {
@@ -35,14 +36,14 @@ const vizLabels: Record<string, string> = {
   table: "Table",
 }
 
-export function WidgetProposalCard({ input, onAccept }: WidgetProposalCardProps) {
+export function WidgetProposalCard({ input, onAccept, disabledReason }: WidgetProposalCardProps) {
   const [added, setAdded] = useState(false)
 
   const Icon = vizIcons[input.visualization] ?? GridIcon
   const vizLabel = vizLabels[input.visualization] ?? input.visualization
 
   const handleAdd = () => {
-    if (added) return
+    if (added || !onAccept || disabledReason) return
     onAccept()
     setAdded(true)
   }
@@ -60,11 +61,20 @@ export function WidgetProposalCard({ input, onAccept }: WidgetProposalCardProps)
           <p className="truncate text-muted-foreground">
             {vizLabel} &middot; {input.dataSource.endpoint}
           </p>
+          {disabledReason && (
+            <p className="mt-1 text-[11px] text-destructive">
+              {disabledReason}
+            </p>
+          )}
         </div>
         {added ? (
           <span className="flex items-center gap-1 text-emerald-600">
             <CheckIcon className="size-3.5" />
             Added
+          </span>
+        ) : disabledReason ? (
+          <span className="text-[11px] text-muted-foreground">
+            Blocked
           </span>
         ) : (
           <Button
