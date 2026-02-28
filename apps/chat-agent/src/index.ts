@@ -14,6 +14,8 @@ interface DashboardContext {
 
 const METRIC_TYPES = ["sum", "gauge", "histogram", "exponential_histogram"] as const
 const METRIC_TYPES_SET = new Set<string>(METRIC_TYPES)
+const QUERY_SOURCES = ["traces", "logs", "metrics"] as const
+const QUERY_SOURCES_SET = new Set<string>(QUERY_SOURCES)
 
 const dashboardWidgetDataSourceSchema = z.object({
   endpoint: z.string().describe("One of the available DataSourceEndpoint values"),
@@ -67,7 +69,20 @@ const dashboardWidgetDataSourceSchema = z.object({
     }
 
     const query = rawQuery as Record<string, unknown>
-    if (query.dataSource !== "metrics") continue
+    const querySource = query.dataSource ?? query.source
+    if (
+      typeof querySource !== "string" ||
+      !QUERY_SOURCES_SET.has(querySource)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Each query must provide dataSource or source in traces|logs|metrics",
+        path: ["params", "queries", index, "dataSource"],
+      })
+      continue
+    }
+
+    if (querySource !== "metrics") continue
 
     if (typeof query.metricName !== "string" || query.metricName.trim().length === 0) {
       ctx.addIssue({
