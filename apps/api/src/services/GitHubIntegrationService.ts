@@ -61,6 +61,15 @@ function rowToResponse(row: typeof githubIntegrations.$inferSelect): GitHubInteg
     mappings = []
   }
 
+  let defaultRepo: GitHubRepoInfo | null = null
+  try {
+    if (row.defaultRepo) {
+      defaultRepo = new GitHubRepoInfo(JSON.parse(row.defaultRepo))
+    }
+  } catch {
+    defaultRepo = null
+  }
+
   return new GitHubIntegrationResponse({
     id: row.id,
     orgId: row.orgId,
@@ -69,6 +78,7 @@ function rowToResponse(row: typeof githubIntegrations.$inferSelect): GitHubInteg
     githubAccountType: row.githubAccountType,
     selectedRepos: repos,
     serviceRepoMappings: mappings,
+    defaultRepo,
     enabled: row.enabled === 1,
     status: row.status,
     lastSyncAt: row.lastSyncAt ? new Date(row.lastSyncAt).toISOString() : null,
@@ -381,6 +391,9 @@ export class GitHubIntegrationService extends Effect.Service<GitHubIntegrationSe
         }
         if (request.serviceRepoMappings !== undefined) {
           updates.serviceRepoMappings = JSON.stringify(request.serviceRepoMappings)
+        }
+        if (request.defaultRepo !== undefined) {
+          updates.defaultRepo = request.defaultRepo ? JSON.stringify(request.defaultRepo) : null
         }
         if (request.enabled !== undefined) {
           updates.enabled = request.enabled ? 1 : 0

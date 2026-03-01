@@ -10,6 +10,7 @@ export const githubIntegrations = sqliteTable(
     githubAccountType: text("github_account_type").notNull(),
     selectedRepos: text("selected_repos").notNull(), // JSON array of {id, fullName, owner, name}
     serviceRepoMappings: text("service_repo_mappings").notNull().default("[]"), // JSON array of {serviceName, repoFullName}
+    defaultRepo: text("default_repo"), // JSON: {id, fullName, owner, name} or null
     enabled: integer("enabled", { mode: "number" }).notNull().default(1),
     status: text("status").notNull().default("connected"), // connected | error | suspended
     lastSyncAt: integer("last_sync_at", { mode: "number" }),

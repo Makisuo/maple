@@ -28,6 +28,7 @@ export class GitHubIntegrationResponse extends Schema.Class<GitHubIntegrationRes
   githubAccountType: Schema.String,
   selectedRepos: Schema.Array(GitHubRepoInfo),
   serviceRepoMappings: Schema.Array(ServiceRepoMapping),
+  defaultRepo: Schema.NullOr(GitHubRepoInfo),
   enabled: Schema.Boolean,
   status: Schema.String,
   lastSyncAt: Schema.NullOr(Schema.String),
@@ -54,6 +55,7 @@ export class UpdateGitHubIntegrationRequest extends Schema.Class<UpdateGitHubInt
 )({
   selectedRepos: Schema.optional(Schema.Array(GitHubRepoInfo)),
   serviceRepoMappings: Schema.optional(Schema.Array(ServiceRepoMapping)),
+  defaultRepo: Schema.optional(Schema.NullOr(GitHubRepoInfo)),
   enabled: Schema.optional(Schema.Boolean),
 }) {}
 

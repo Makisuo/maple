@@ -24,7 +24,13 @@ import {
 } from "@maple/ui/components/ui/card"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Switch } from "@maple/ui/components/ui/switch"
-import { Checkbox } from "@maple/ui/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@maple/ui/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
@@ -43,6 +49,8 @@ import {
 import {
   CircleCheckIcon,
   CircleXmarkIcon,
+  DotsVerticalIcon,
+  GearIcon,
   LoaderIcon,
   NetworkNodesIcon,
   TrashIcon,
@@ -71,6 +79,7 @@ interface GitHubIntegration {
   githubAccountType: string
   selectedRepos: GitHubRepoInfo[]
   serviceRepoMappings: ServiceRepoMappingInfo[]
+  defaultRepo: GitHubRepoInfo | null
   enabled: boolean
   status: string
   lastSyncAt: string | null
@@ -100,14 +109,12 @@ export function GitHubIntegrationSection({ installationId, setupAction }: GitHub
   const [disconnectTarget, setDisconnectTarget] = useState<GitHubIntegration | null>(null)
   const [isDisconnecting, setIsDisconnecting] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
-  const [repoDialogOpen, setRepoDialogOpen] = useState(false)
-  const [repoDialogIntegration, setRepoDialogIntegration] = useState<GitHubIntegration | null>(null)
-  const [selectedRepoIds, setSelectedRepoIds] = useState<Set<number>>(new Set())
-  const [isSavingRepos, setIsSavingRepos] = useState(false)
   const [mappingDialogOpen, setMappingDialogOpen] = useState(false)
   const [mappingDialogIntegration, setMappingDialogIntegration] = useState<GitHubIntegration | null>(null)
   const [serviceMappings, setServiceMappings] = useState<Map<string, string>>(new Map())
+  const [selectedDefaultRepo, setSelectedDefaultRepo] = useState<GitHubRepoInfo | null>(null)
   const [isSavingMappings, setIsSavingMappings] = useState(false)
+  const [isMappingReposLoading, setIsMappingReposLoading] = useState(false)
 
   const listQueryAtom = MapleApiAtomClient.query("githubIntegrations", "list", {})
   const listResult = useAtomValue(listQueryAtom)
@@ -204,52 +211,6 @@ export function GitHubIntegrationSection({ installationId, setupAction }: GitHub
     .orElse(() => [])
   const isLoadingRepos = Result.isInitial(reposResult)
 
-  function openRepoSelector(integration: GitHubIntegration) {
-    setRepoDialogIntegration(integration)
-    setSelectedRepoIds(new Set(integration.selectedRepos.map((r) => r.id)))
-    setRepoDialogOpen(true)
-    refreshRepos()
-  }
-
-  function toggleRepoSelection(repo: AccessibleRepo) {
-    setSelectedRepoIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(repo.id)) {
-        next.delete(repo.id)
-      } else {
-        next.add(repo.id)
-      }
-      return next
-    })
-  }
-
-  async function handleSaveRepos() {
-    if (!repoDialogIntegration) return
-    setIsSavingRepos(true)
-
-    const selectedRepos: GitHubRepoInfo[] = accessibleRepos
-      .filter((r) => selectedRepoIds.has(r.id))
-      .map((r) => ({
-        id: r.id,
-        fullName: r.fullName,
-        owner: r.owner,
-        name: r.name,
-      }))
-
-    const result = await updateMutation({
-      path: { integrationId: repoDialogIntegration.id },
-      payload: { selectedRepos },
-    })
-    if (Exit.isSuccess(result)) {
-      toast.success("Repository selection updated")
-      setRepoDialogOpen(false)
-      refreshIntegrations()
-    } else {
-      toast.error("Failed to update repository selection")
-    }
-    setIsSavingRepos(false)
-  }
-
   function openMappingDialog(integration: GitHubIntegration) {
     setMappingDialogIntegration(integration)
     const initial = new Map<string, string>()
@@ -257,7 +218,12 @@ export function GitHubIntegrationSection({ installationId, setupAction }: GitHub
       initial.set(m.serviceName, m.repoFullName)
     }
     setServiceMappings(initial)
+    setSelectedDefaultRepo(integration.defaultRepo)
+    setIsMappingReposLoading(true)
     setMappingDialogOpen(true)
+    refreshRepos()
+    // Clear loading state after a tick (repos atom will update)
+    setTimeout(() => setIsMappingReposLoading(false), 0)
   }
 
   async function handleSaveMappings() {
@@ -273,7 +239,7 @@ export function GitHubIntegrationSection({ installationId, setupAction }: GitHub
 
     const result = await updateMutation({
       path: { integrationId: mappingDialogIntegration.id },
-      payload: { serviceRepoMappings: mappingsArray },
+      payload: { serviceRepoMappings: mappingsArray, defaultRepo: selectedDefaultRepo },
     })
     if (Exit.isSuccess(result)) {
       toast.success("Service mappings updated")
@@ -354,9 +320,11 @@ export function GitHubIntegrationSection({ installationId, setupAction }: GitHub
                     )}
                   </div>
                   <div className="text-muted-foreground text-xs mt-0.5">
-                    {integration.selectedRepos.length === 0
-                      ? "No repositories selected"
-                      : `${integration.selectedRepos.length} repo${integration.selectedRepos.length === 1 ? "" : "s"} selected${integration.serviceRepoMappings.length > 0 ? ` · ${integration.serviceRepoMappings.length} service mapping${integration.serviceRepoMappings.length === 1 ? "" : "s"}` : ""}`}
+                    {integration.defaultRepo ? `Default: ${integration.defaultRepo.fullName}` : "No default repo"}
+                    {" · "}
+                    {integration.serviceRepoMappings.length > 0
+                      ? `${integration.serviceRepoMappings.length} service mapping${integration.serviceRepoMappings.length === 1 ? "" : "s"}`
+                      : "No service mappings"}
                   </div>
                   {integration.lastError && (
                     <div className="text-destructive text-xs mt-0.5 truncate">
@@ -367,95 +335,46 @@ export function GitHubIntegrationSection({ installationId, setupAction }: GitHub
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => openRepoSelector(integration)}
-                >
-                  Select Repos
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
                   onClick={() => openMappingDialog(integration)}
-                  disabled={integration.selectedRepos.length === 0}
                 >
-                  Map Services
+                  Repo Mappings
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => setDisconnectTarget(integration)}
-                  disabled={isDisconnecting}
-                  className="text-muted-foreground hover:text-destructive shrink-0"
-                >
-                  <TrashIcon size={14} />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button variant="ghost" size="icon-sm" className="shrink-0" />
+                    }
+                  >
+                    <DotsVerticalIcon size={14} />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        window.open(
+                          `https://github.com/apps/${GITHUB_APP_NAME}/installations/${integration.installationId}`,
+                          "_blank",
+                        )
+                      }}
+                    >
+                      <GearIcon size={14} />
+                      Manage on GitHub
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => setDisconnectTarget(integration)}
+                      disabled={isDisconnecting}
+                    >
+                      <TrashIcon size={14} />
+                      Disconnect
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             ))}
           </div>
         )}
       </CardContent>
-
-      {/* Repo Selector Dialog */}
-      <Dialog open={repoDialogOpen} onOpenChange={setRepoDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Select Repositories</DialogTitle>
-            <DialogDescription>
-              Choose which repositories the Maple agent should create issues in when anomalies are detected.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-80 overflow-y-auto space-y-1 py-2">
-            {isLoadingRepos ? (
-              <div className="text-muted-foreground flex items-center gap-2 py-8 text-sm justify-center">
-                <LoaderIcon size={14} className="animate-spin" />
-                Loading repositories...
-              </div>
-            ) : accessibleRepos.length === 0 ? (
-              <div className="text-muted-foreground py-8 text-center text-sm">
-                No repositories found. Check your GitHub App installation permissions.
-              </div>
-            ) : (
-              accessibleRepos.map((repo) => (
-                <label
-                  key={repo.id}
-                  className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-muted/50 cursor-pointer"
-                >
-                  <Checkbox
-                    checked={selectedRepoIds.has(repo.id)}
-                    onCheckedChange={() => toggleRepoSelection(repo)}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <span className="text-sm font-medium">{repo.fullName}</span>
-                    {repo.private && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-2">
-                        Private
-                      </Badge>
-                    )}
-                  </div>
-                </label>
-              ))
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setRepoDialogOpen(false)}
-              disabled={isSavingRepos}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleSaveRepos} disabled={isSavingRepos || isLoadingRepos}>
-              {isSavingRepos ? (
-                <>
-                  <LoaderIcon size={14} className="animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                `Save (${selectedRepoIds.size} selected)`
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Service Mapping Dialog */}
       <Dialog open={mappingDialogOpen} onOpenChange={setMappingDialogOpen}>
@@ -463,48 +382,88 @@ export function GitHubIntegrationSection({ installationId, setupAction }: GitHub
           <DialogHeader>
             <DialogTitle>Map Services to Repositories</DialogTitle>
             <DialogDescription>
-              Assign each service to a specific repository for issue creation. Unmapped services will use the first selected repo as default.
+              Set a default repository and optionally map individual services to specific repositories.
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-80 overflow-y-auto space-y-2 py-2">
-            {serviceNames.length === 0 ? (
-              <div className="text-muted-foreground py-8 text-center text-sm">
-                No services found. Send some traces to see your services here.
+          {isLoadingRepos || isMappingReposLoading ? (
+            <div className="text-muted-foreground flex items-center gap-2 py-8 text-sm justify-center">
+              <LoaderIcon size={14} className="animate-spin" />
+              Loading repositories...
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1.5 pb-2 border-b">
+                <label className="text-sm font-medium">Default Repository</label>
+                <Select
+                  value={selectedDefaultRepo?.fullName ?? "__none__"}
+                  onValueChange={(value: string | null) => {
+                    if (!value || value === "__none__") {
+                      setSelectedDefaultRepo(null)
+                    } else {
+                      const repo = accessibleRepos.find((r) => r.fullName === value)
+                      if (repo) {
+                        setSelectedDefaultRepo({ id: repo.id, fullName: repo.fullName, owner: repo.owner, name: repo.name })
+                      }
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {accessibleRepos.map((repo) => (
+                      <SelectItem key={repo.fullName} value={repo.fullName}>
+                        {repo.fullName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-muted-foreground text-xs">
+                  Fallback repo for services without a specific mapping.
+                </p>
               </div>
-            ) : (
-              serviceNames.map((svc) => (
-                <div key={svc} className="flex items-center gap-3 px-1">
-                  <span className="text-sm font-medium min-w-0 flex-1 truncate">{svc}</span>
-                  <Select
-                    value={serviceMappings.get(svc) ?? "__default__"}
-                    onValueChange={(value: string | null) => {
-                      setServiceMappings((prev) => {
-                        const next = new Map(prev)
-                        if (!value || value === "__default__") {
-                          next.delete(svc)
-                        } else {
-                          next.set(svc, value)
-                        }
-                        return next
-                      })
-                    }}
-                  >
-                    <SelectTrigger className="w-52">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__default__">Default (first repo)</SelectItem>
-                      {mappingDialogIntegration?.selectedRepos.map((repo) => (
-                        <SelectItem key={repo.fullName} value={repo.fullName}>
-                          {repo.fullName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))
-            )}
-          </div>
+              <div className="max-h-64 overflow-y-auto space-y-2 py-2">
+                {serviceNames.length === 0 ? (
+                  <div className="text-muted-foreground py-8 text-center text-sm">
+                    No services found. Send some traces to see your services here.
+                  </div>
+                ) : (
+                  serviceNames.map((svc) => (
+                    <div key={svc} className="flex items-center gap-3 px-1">
+                      <span className="text-sm font-medium min-w-0 flex-1 truncate">{svc}</span>
+                      <Select
+                        value={serviceMappings.get(svc) ?? "__default__"}
+                        onValueChange={(value: string | null) => {
+                          setServiceMappings((prev) => {
+                            const next = new Map(prev)
+                            if (!value || value === "__default__") {
+                              next.delete(svc)
+                            } else {
+                              next.set(svc, value)
+                            }
+                            return next
+                          })
+                        }}
+                      >
+                        <SelectTrigger className="w-52">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">Default</SelectItem>
+                          {accessibleRepos.map((repo) => (
+                            <SelectItem key={repo.fullName} value={repo.fullName}>
+                              {repo.fullName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
           <DialogFooter>
             <Button
               variant="outline"

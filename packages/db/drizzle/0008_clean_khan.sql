@@ -1,0 +1,1 @@
+ALTER TABLE `github_integrations` ADD `default_repo` text;

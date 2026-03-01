@@ -57,6 +57,13 @@
       "when": 1772390142197,
       "tag": "0007_busy_juggernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1772390894822,
+      "tag": "0008_clean_khan",
+      "breakpoints": true
     }
   ]
 }

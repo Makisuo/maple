@@ -18,6 +18,11 @@ interface ServiceRepoMappingEntry {
   repoFullName: string
 }
 
+function parseRepoFullName(fullName: string): { owner: string; name: string } {
+  const [owner, name] = fullName.split("/")
+  return { owner: owner!, name: name! }
+}
+
 export const runAgentLoop = Effect.gen(function* () {
   const state = yield* AnomalyStateService
   const detection = yield* AnomalyDetectionService
@@ -96,16 +101,13 @@ const processOrg = (
       return
     }
 
-    if (repos.length === 0) {
-      yield* Effect.logDebug(
-        `No target repos configured for org ${integration.orgId}, recording anomalies without issues`,
-      )
-      // Record anomalies without GitHub issues
-      for (const anomaly of newAnomalies) {
-        yield* state.recordAnomaly(integration.orgId, anomaly, null, null, null)
+    // Parse default repo
+    let defaultRepo: RepoInfo | null = null
+    try {
+      if (integration.defaultRepo) {
+        defaultRepo = JSON.parse(integration.defaultRepo) as RepoInfo
       }
-      return
-    }
+    } catch { /* empty */ }
 
     // Parse service-to-repo mappings
     let mappings: ServiceRepoMappingEntry[] = []
@@ -113,14 +115,23 @@ const processOrg = (
       mappings = JSON.parse(integration.serviceRepoMappings) as ServiceRepoMappingEntry[]
     } catch { /* empty */ }
 
-    const repoByFullName = new Map(repos.map((r) => [r.fullName, r]))
-    const serviceToRepo = new Map<string, RepoInfo>()
+    const serviceToRepo = new Map<string, { owner: string; name: string; fullName: string }>()
     for (const m of mappings) {
-      const repo = repoByFullName.get(m.repoFullName)
-      if (repo) serviceToRepo.set(m.serviceName, repo)
+      serviceToRepo.set(m.serviceName, { ...parseRepoFullName(m.repoFullName), fullName: m.repoFullName })
     }
 
-    function resolveTargetRepo(anomaly: { serviceName?: string; affectedServices: readonly string[] }): RepoInfo {
+    // Check if we have any way to create issues
+    if (repos.length === 0 && !defaultRepo && serviceToRepo.size === 0) {
+      yield* Effect.logDebug(
+        `No target repos configured for org ${integration.orgId}, recording anomalies without issues`,
+      )
+      for (const anomaly of newAnomalies) {
+        yield* state.recordAnomaly(integration.orgId, anomaly, null, null, null)
+      }
+      return
+    }
+
+    function resolveTargetRepo(anomaly: { serviceName?: string; affectedServices: readonly string[] }): { owner: string; name: string; fullName: string } | undefined {
       if (anomaly.serviceName) {
         const mapped = serviceToRepo.get(anomaly.serviceName)
         if (mapped) return mapped
@@ -129,7 +140,9 @@ const processOrg = (
         const mapped = serviceToRepo.get(svc)
         if (mapped) return mapped
       }
-      return repos[0]!
+      if (defaultRepo) return { owner: defaultRepo.owner, name: defaultRepo.name, fullName: defaultRepo.fullName }
+      if (repos[0]) return { owner: repos[0].owner, name: repos[0].name, fullName: repos[0].fullName }
+      return undefined
     }
 
     // Get installation token
@@ -141,6 +154,11 @@ const processOrg = (
       (anomaly) =>
         Effect.gen(function* () {
           const targetRepo = resolveTargetRepo(anomaly)
+          if (!targetRepo) {
+            yield* Effect.logDebug(`No target repo for anomaly "${anomaly.title}", recording without issue`)
+            yield* state.recordAnomaly(integration.orgId, anomaly, null, null, null)
+            return
+          }
           const issue = yield* github.createIssue(
             token,
             targetRepo.owner,
