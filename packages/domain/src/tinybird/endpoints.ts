@@ -2770,3 +2770,138 @@ export const resourceAttributeValues = defineEndpoint("resource_attribute_values
 
 export type ResourceAttributeValuesParams = InferParams<typeof resourceAttributeValues>;
 export type ResourceAttributeValuesOutput = InferOutputRow<typeof resourceAttributeValues>;
+
+/**
+ * HTTP endpoints overview - aggregated metrics for HTTP server endpoints discovered from traces
+ */
+export const httpEndpointsOverview = defineEndpoint("http_endpoints_overview", {
+  description: "Get aggregated metrics for HTTP endpoints grouped by service, method, and route.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    services: p.string().optional().describe("Comma-separated service names filter"),
+    http_methods: p.string().optional().describe("Comma-separated HTTP methods filter"),
+    environments: p.string().optional().describe("Comma-separated environments filter"),
+    limit: p.int32().optional(100).describe("Maximum number of results"),
+  },
+  nodes: [
+    node({
+      name: "http_endpoints_overview_node",
+      sql: `
+        SELECT
+          ServiceName AS serviceName,
+          if(
+            SpanAttributes['http.route'] != '',
+            SpanAttributes['http.route'],
+            SpanName
+          ) AS endpointName,
+          if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
+            if(SpanAttributes['http.request.method'] != '', SpanAttributes['http.request.method'], '')) AS httpMethod,
+          count() AS count,
+          avg(Duration) / 1000000 AS avgDuration,
+          quantile(0.5)(Duration) / 1000000 AS p50Duration,
+          quantile(0.95)(Duration) / 1000000 AS p95Duration,
+          quantile(0.99)(Duration) / 1000000 AS p99Duration,
+          if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate
+        FROM traces
+        WHERE Timestamp >= {{DateTime(start_time)}}
+          AND Timestamp <= {{DateTime(end_time)}}
+          AND OrgId = {{String(org_id, "")}}
+          AND SpanKind = 'Server'
+          {% if defined(services) %}
+            AND ServiceName IN splitByChar(',', {{String(services, "")}})
+          {% end %}
+          {% if defined(http_methods) %}
+            AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
+              if(SpanAttributes['http.request.method'] != '', SpanAttributes['http.request.method'], ''))
+            IN splitByChar(',', {{String(http_methods, "")}})
+          {% end %}
+          {% if defined(environments) %}
+            AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
+          {% end %}
+        GROUP BY serviceName, endpointName, httpMethod
+        ORDER BY count DESC
+        LIMIT {{Int32(limit, 100)}}
+      `,
+    }),
+  ],
+  output: {
+    serviceName: t.string(),
+    endpointName: t.string(),
+    httpMethod: t.string(),
+    count: t.uint64(),
+    avgDuration: t.float64(),
+    p50Duration: t.float64(),
+    p95Duration: t.float64(),
+    p99Duration: t.float64(),
+    errorRate: t.float64(),
+  },
+});
+
+export type HttpEndpointsOverviewParams = InferParams<typeof httpEndpointsOverview>;
+export type HttpEndpointsOverviewOutput = InferOutputRow<typeof httpEndpointsOverview>;
+
+/**
+ * HTTP endpoints time series - time-bucketed throughput and error rate per endpoint
+ */
+export const httpEndpointsTimeseries = defineEndpoint("http_endpoints_timeseries", {
+  description: "Time-bucketed throughput and error rate for HTTP server endpoints, grouped by endpoint name.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
+    services: p.string().optional().describe("Comma-separated service names filter"),
+    http_methods: p.string().optional().describe("Comma-separated HTTP methods filter"),
+    environments: p.string().optional().describe("Comma-separated environments filter"),
+  },
+  nodes: [
+    node({
+      name: "http_endpoints_ts_node",
+      sql: `
+        SELECT
+          toStartOfInterval(Timestamp, INTERVAL {{Int32(bucket_seconds, 60)}} SECOND) AS bucket,
+          concat(
+            ServiceName, '::',
+            if(
+              SpanAttributes['http.route'] != '',
+              SpanAttributes['http.route'],
+              SpanName
+            ), '::',
+            if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
+              if(SpanAttributes['http.request.method'] != '', SpanAttributes['http.request.method'], ''))
+          ) AS endpointKey,
+          count() AS count,
+          if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate
+        FROM traces
+        WHERE Timestamp >= {{DateTime(start_time)}}
+          AND Timestamp <= {{DateTime(end_time)}}
+          AND OrgId = {{String(org_id, "")}}
+          AND SpanKind = 'Server'
+          {% if defined(services) %}
+            AND ServiceName IN splitByChar(',', {{String(services, "")}})
+          {% end %}
+          {% if defined(http_methods) %}
+            AND if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'],
+              if(SpanAttributes['http.request.method'] != '', SpanAttributes['http.request.method'], ''))
+            IN splitByChar(',', {{String(http_methods, "")}})
+          {% end %}
+          {% if defined(environments) %}
+            AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
+          {% end %}
+        GROUP BY bucket, endpointKey
+        ORDER BY bucket ASC, endpointKey ASC
+      `,
+    }),
+  ],
+  output: {
+    bucket: t.dateTime(),
+    endpointKey: t.string(),
+    count: t.uint64(),
+    errorRate: t.float64(),
+  },
+});
+
+export type HttpEndpointsTimeseriesParams = InferParams<typeof httpEndpointsTimeseries>;
+export type HttpEndpointsTimeseriesOutput = InferOutputRow<typeof httpEndpointsTimeseries>;
