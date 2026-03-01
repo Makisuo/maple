@@ -24,12 +24,12 @@ import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
 export function register() {
   registerOTel({
     serviceName: "my-next-app",
-    attributes: { "x-api-key": "{{API_KEY}}" },
+    attributes: { environment: "production" },
     traceExporter: { url: "{{INGEST_URL}}/v1/traces" },
     logRecordProcessor: new SimpleLogRecordProcessor(
       new OTLPLogExporter({
         url: "{{INGEST_URL}}/v1/logs",
-        headers: { "x-api-key": "{{API_KEY}}" },
+        headers: { Authorization: "Bearer {{API_KEY}}" },
       })
     ),
   });
@@ -51,13 +51,13 @@ const { SimpleLogRecordProcessor } = require("@opentelemetry/sdk-logs");
 const sdk = new NodeSDK({
   traceExporter: new OTLPTraceExporter({
     url: "{{INGEST_URL}}/v1/traces",
-    headers: { "x-api-key": "{{API_KEY}}" },
+    headers: { Authorization: "Bearer {{API_KEY}}" },
   }),
   logRecordProcessors: [
     new SimpleLogRecordProcessor(
       new OTLPLogExporter({
         url: "{{INGEST_URL}}/v1/logs",
-        headers: { "x-api-key": "{{API_KEY}}" },
+        headers: { Authorization: "Bearer {{API_KEY}}" },
       })
     ),
   ],
@@ -83,7 +83,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 provider = TracerProvider()
 exporter = OTLPSpanExporter(
     endpoint="{{INGEST_URL}}/v1/traces",
-    headers={"x-api-key": "{{API_KEY}}"},
+    headers={"Authorization": "Bearer {{API_KEY}}"},
 )
 provider.add_span_processor(BatchSpanProcessor(exporter))
 trace.set_tracer_provider(provider)
@@ -118,7 +118,7 @@ func main() {
 	exporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpointURL("{{INGEST_URL}}/v1/traces"),
 		otlptracehttp.WithHeaders(map[string]string{
-			"x-api-key": "{{API_KEY}}",
+			"Authorization": "Bearer {{API_KEY}}",
 		}),
 	)
 	if err != nil {
@@ -156,7 +156,7 @@ export const TracerLive = Otlp.layerJson({
     serviceVersion: "1.0.0",
   },
   headers: {
-    "x-api-key": "{{API_KEY}}",
+    "Authorization": "Bearer {{API_KEY}}",
   },
 }).pipe(Layer.provide(FetchHttpClient.layer))
 
