@@ -35,6 +35,7 @@ import {
   getTracesFacetsResultAtom,
   listMetricsResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
+import { useOrgId } from "@/hooks/use-org-id"
 
 type StatAggregate = "sum" | "first" | "count" | "avg" | "max" | "min"
 
@@ -310,6 +311,7 @@ export function WidgetQueryBuilderPage({
   onApply,
   onCancel,
 }: WidgetQueryBuilderPageProps) {
+  const orgId = useOrgId()
   const [state, setState] = React.useState<QueryBuilderWidgetState>(() => toInitialState(widget))
   const [stagedState, setStagedState] = React.useState<QueryBuilderWidgetState>(() =>
     cloneWidgetState(toInitialState(widget))
@@ -318,15 +320,15 @@ export function WidgetQueryBuilderPage({
   const [collapsedQueries, setCollapsedQueries] = React.useState<Set<string>>(new Set())
 
   const metricsResult = useAtomValue(
-    listMetricsResultAtom({ data: { limit: 300 } }),
+    listMetricsResultAtom({ data: { limit: 300 } }, orgId),
   )
 
   const tracesFacetsResult = useAtomValue(
-    getTracesFacetsResultAtom({ data: {} }),
+    getTracesFacetsResultAtom({ data: {} }, orgId),
   )
 
   const logsFacetsResult = useAtomValue(
-    getLogsFacetsResultAtom({ data: {} }),
+    getLogsFacetsResultAtom({ data: {} }, orgId),
   )
 
   const metricRows = React.useMemo(

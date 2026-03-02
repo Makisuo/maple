@@ -83,7 +83,10 @@ function makeQueryAtomFamily<Input, Output>(
   const family = Atom.family((key: string) => {
     let resultAtom = Atom.make(
       Effect.try({
-        try: () => JSON.parse(key) as Input,
+        try: () => {
+          const { _orgId: _, ...rest } = JSON.parse(key) as { _orgId: string } & Record<string, unknown>
+          return rest as unknown as Input
+        },
         catch: toQueryAtomError,
       }).pipe(
         Effect.flatMap((input) => query(input)),
@@ -98,7 +101,8 @@ function makeQueryAtomFamily<Input, Output>(
     return resultAtom
   })
 
-  return (input: Input) => family(encodeKey(input))
+  return (input: Input, orgId: string) =>
+    family(encodeKey({ _orgId: orgId, ...(input as Record<string, unknown>) }))
 }
 
 export const getServiceUsageResultAtom = makeQueryAtomFamily(getServiceUsage, {

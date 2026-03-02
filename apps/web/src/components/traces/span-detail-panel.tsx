@@ -20,6 +20,7 @@ import { listLogsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@/components/attributes"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
+import { useOrgId } from "@/hooks/use-org-id"
 
 interface SpanDetailPanelProps {
   span: SpanNode
@@ -171,9 +172,10 @@ function SpanLogs({
   spanId: string
   timeZone: string
 }) {
+  const orgId = useOrgId()
   const logsResult = useAtomValue(
     traceId && spanId
-      ? listLogsResultAtom({ data: { traceId, spanId, limit: 100 } })
+      ? listLogsResultAtom({ data: { traceId, spanId, limit: 100 } }, orgId)
       : disabledResultAtom<LogsResponse>(),
   )
 
@@ -217,12 +219,13 @@ function SpanLogs({
 
 export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
   const { effectiveTimezone } = useTimezonePreference()
+  const orgId = useOrgId()
   const cacheInfo = getCacheInfo(span.spanAttributes)
   const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
   const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
   const logsResult = useAtomValue(
     span.traceId && span.spanId
-      ? listLogsResultAtom({ data: { traceId: span.traceId, spanId: span.spanId, limit: 100 } })
+      ? listLogsResultAtom({ data: { traceId: span.traceId, spanId: span.spanId, limit: 100 } }, orgId)
       : disabledResultAtom<LogsResponse>(),
   )
   const logCount = Result.isSuccess(logsResult) ? logsResult.value.data.length : null

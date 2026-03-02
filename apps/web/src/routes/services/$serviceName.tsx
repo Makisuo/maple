@@ -5,6 +5,7 @@ import { Schema } from "effect"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TimeRangePicker } from "@/components/time-range-picker"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useOrgId } from "@/hooks/use-org-id"
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
 import type {
   ChartLegendMode,
@@ -46,6 +47,7 @@ function ServiceDetailPage() {
   const { serviceName } = Route.useParams()
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
+  const orgId = useOrgId()
 
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(search.startTime, search.endTime)
@@ -76,7 +78,7 @@ function ServiceDetailPage() {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
       },
-    }),
+    }, orgId),
   )
 
   const apdexResult = useAtomValue(
@@ -86,7 +88,7 @@ function ServiceDetailPage() {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
       },
-    }),
+    }, orgId),
   )
 
   const detailPoints = Result.builder(detailResult)

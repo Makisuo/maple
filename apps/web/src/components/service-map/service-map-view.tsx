@@ -16,6 +16,7 @@ import { Result, useAtomValue } from "@effect-atom/atom-react"
 
 import { getServiceLegendColor } from "@maple/ui/colors"
 import { getServiceMapResultAtom, getServiceOverviewResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { useOrgId } from "@/hooks/use-org-id"
 import type { GetServiceMapInput, ServiceEdge } from "@/api/tinybird/service-map"
 import type { GetServiceOverviewInput, ServiceOverview } from "@/api/tinybird/services"
 import { ServiceMapNode } from "./service-map-node"
@@ -169,6 +170,7 @@ function ServiceMapCanvas({
 }
 
 export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
+  const orgId = useOrgId()
   const durationSeconds = useMemo(() => {
     const ms = new Date(endTime).getTime() - new Date(startTime).getTime()
     return Math.max(1, ms / 1000)
@@ -184,8 +186,8 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
     [startTime, endTime],
   )
 
-  const mapResult = useAtomValue(getServiceMapResultAtom(mapInput))
-  const overviewResult = useAtomValue(getServiceOverviewResultAtom(overviewInput))
+  const mapResult = useAtomValue(getServiceMapResultAtom(mapInput, orgId))
+  const overviewResult = useAtomValue(getServiceOverviewResultAtom(overviewInput, orgId))
 
   // Both need to be loaded for the view
   return Result.builder(mapResult)

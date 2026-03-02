@@ -20,6 +20,7 @@ import {
 } from "@/lib/format"
 import type { LogsSearchParams } from "@/routes/logs"
 import { SEVERITY_COLORS, SEVERITY_ORDER } from "@/lib/severity"
+import { useOrgId } from "@/hooks/use-org-id"
 
 /** More bars than the default 40-point target for a denser histogram. */
 const HISTOGRAM_TARGET_POINTS = 150
@@ -41,6 +42,7 @@ interface LogsVolumeChartProps {
 }
 
 export function LogsVolumeChart({ filters }: LogsVolumeChartProps) {
+  const orgId = useOrgId()
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(filters?.startTime, filters?.endTime)
 
@@ -63,7 +65,7 @@ export function LogsVolumeChart({ filters }: LogsVolumeChartProps) {
           severity: filters?.severities?.[0],
         },
       },
-    }),
+    }, orgId),
   )
 
   return Result.builder(timeSeriesResult)

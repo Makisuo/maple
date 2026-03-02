@@ -17,6 +17,7 @@ import { listTracesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { TracesSearchParams } from "@/routes/traces"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function formatDuration(ms: number): string {
   if (ms < 1) {
@@ -94,6 +95,7 @@ function LoadingState() {
 export function TracesTable({ filters }: TracesTableProps) {
   const navigate = useNavigate()
   const { effectiveTimezone } = useTimezonePreference()
+  const orgId = useOrgId()
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
     filters?.startTime,
     filters?.endTime,
@@ -123,7 +125,7 @@ export function TracesTable({ filters }: TracesTableProps) {
         attributeValueMatchMode: filters?.attributeValueMatchMode,
         resourceAttributeValueMatchMode: filters?.resourceAttributeValueMatchMode,
       },
-    }),
+    }, orgId),
   )
 
   return Result.builder(tracesResult)

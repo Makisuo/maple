@@ -13,6 +13,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { MetricTypeBadge } from "./metric-type-badge"
 import { type Metric, type ListMetricsInput } from "@/api/tinybird/metrics"
 import { listMetricsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function formatNumber(num: number): string {
   if (num >= 1_000_000) {
@@ -81,6 +82,7 @@ export function MetricsTable({
   selectedMetric,
   onSelectMetric,
 }: MetricsTableProps) {
+  const orgId = useOrgId()
   const metricsResult = useAtomValue(
     listMetricsResultAtom({
       data: {
@@ -88,7 +90,7 @@ export function MetricsTable({
         metricType: metricType || undefined,
         limit: 100,
       },
-    }),
+    }, orgId),
   )
 
   return Result.builder(metricsResult)

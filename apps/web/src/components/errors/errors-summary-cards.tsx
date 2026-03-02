@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/u
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetErrorsSummaryInput } from "@/api/tinybird/errors"
 import { getErrorsSummaryResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function formatNumber(num: number): string {
   if (num >= 1_000_000) {
@@ -36,7 +37,8 @@ interface ErrorsSummaryCardsProps {
 }
 
 export function ErrorsSummaryCards({ filters }: ErrorsSummaryCardsProps) {
-  const summaryResult = useAtomValue(getErrorsSummaryResultAtom({ data: filters }))
+  const orgId = useOrgId()
+  const summaryResult = useAtomValue(getErrorsSummaryResultAtom({ data: filters }, orgId))
 
   return Result.builder(summaryResult)
     .onInitial(() => (
