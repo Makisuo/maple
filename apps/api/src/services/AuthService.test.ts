@@ -7,6 +7,7 @@ const baseEnv = {
   MAPLE_ROOT_PASSWORD: "root-password",
   MAPLE_DEFAULT_ORG_ID: "default",
   MAPLE_ORG_ID_OVERRIDE: "",
+  INTERNAL_SERVICE_TOKEN: "",
   CLERK_SECRET_KEY: "",
   CLERK_PUBLISHABLE_KEY: "",
   CLERK_JWT_KEY: "",

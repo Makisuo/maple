@@ -195,6 +195,7 @@ interface AuthEnv {
   readonly MAPLE_DEFAULT_ORG_ID: string
   readonly MAPLE_ORG_ID_OVERRIDE: string
   readonly MAPLE_ROOT_PASSWORD: string
+  readonly INTERNAL_SERVICE_TOKEN: string
   readonly CLERK_SECRET_KEY: string
   readonly CLERK_PUBLISHABLE_KEY: string
   readonly CLERK_JWT_KEY: string
@@ -270,6 +271,28 @@ export const makeResolveTenant = (
   Effect.fn("AuthService.resolveTenant")(function* (
     headers: HeaderRecord,
   ): Effect.fn.Return<TenantContext, UnauthorizedError> {
+    // Internal service token auth (e.g. agent, chat-agent)
+    const bearerToken = getBearerToken(headers)
+    if (bearerToken && bearerToken.startsWith("maple_svc_") && env.INTERNAL_SERVICE_TOKEN.length > 0) {
+      const provided = bearerToken.slice("maple_svc_".length)
+      const expected = env.INTERNAL_SERVICE_TOKEN
+      const providedBuf = Buffer.from(provided)
+      const expectedBuf = Buffer.from(expected)
+
+      if (providedBuf.length === expectedBuf.length && timingSafeEqual(providedBuf, expectedBuf)) {
+        const orgId =
+          env.MAPLE_ORG_ID_OVERRIDE.length > 0
+            ? env.MAPLE_ORG_ID_OVERRIDE
+            : getHeader(headers, "x-org-id")
+        if (!orgId) {
+          return yield* unauthorized("X-Org-Id header is required for internal service auth")
+        }
+        return { orgId, userId: "internal-service", roles: ["root"], authMode: "self_hosted" as const }
+      }
+
+      return yield* unauthorized("Invalid internal service token")
+    }
+
     const authMode = getAuthMode(env.MAPLE_AUTH_MODE)
 
     if (authMode === "clerk") {

@@ -3,6 +3,9 @@ import { DetectedAnomaly } from "../lib/anomaly-types"
 import { AgentEnv } from "./AgentEnv"
 import { MapleApiClient } from "./MapleApiClient"
 
+const formatForTinybird = (date: Date): string =>
+  date.toISOString().replace("T", " ").slice(0, 19)
+
 export class AnomalyDetectionService extends Effect.Service<AnomalyDetectionService>()(
   "AnomalyDetectionService",
   {
@@ -49,12 +52,12 @@ export class AnomalyDetectionService extends Effect.Service<AnomalyDetectionServ
         ) {
           const [currentResult, baselineResult] = yield* Effect.all([
             api.queryTinybird(orgId, "errors_summary", {
-              start_time: currentStart.toISOString(),
-              end_time: currentEnd.toISOString(),
+              start_time: formatForTinybird(currentStart),
+              end_time: formatForTinybird(currentEnd),
             }),
             api.queryTinybird(orgId, "errors_summary", {
-              start_time: baselineStart.toISOString(),
-              end_time: baselineEnd.toISOString(),
+              start_time: formatForTinybird(baselineStart),
+              end_time: formatForTinybird(baselineEnd),
             }),
           ])
 
@@ -104,12 +107,12 @@ export class AnomalyDetectionService extends Effect.Service<AnomalyDetectionServ
         ) {
           const [currentResult, baselineResult] = yield* Effect.all([
             api.queryTinybird(orgId, "errors_by_type", {
-              start_time: currentStart.toISOString(),
-              end_time: currentEnd.toISOString(),
+              start_time: formatForTinybird(currentStart),
+              end_time: formatForTinybird(currentEnd),
             }),
             api.queryTinybird(orgId, "errors_by_type", {
-              start_time: baselineStart.toISOString(),
-              end_time: baselineEnd.toISOString(),
+              start_time: formatForTinybird(baselineStart),
+              end_time: formatForTinybird(baselineEnd),
             }),
           ])
 
@@ -152,12 +155,12 @@ export class AnomalyDetectionService extends Effect.Service<AnomalyDetectionServ
         ) {
           const [currentResult, baselineResult] = yield* Effect.all([
             api.queryTinybird(orgId, "service_overview", {
-              start_time: currentStart.toISOString(),
-              end_time: currentEnd.toISOString(),
+              start_time: formatForTinybird(currentStart),
+              end_time: formatForTinybird(currentEnd),
             }),
             api.queryTinybird(orgId, "service_overview", {
-              start_time: baselineStart.toISOString(),
-              end_time: baselineEnd.toISOString(),
+              start_time: formatForTinybird(baselineStart),
+              end_time: formatForTinybird(baselineEnd),
             }),
           ])
 
@@ -208,8 +211,8 @@ export class AnomalyDetectionService extends Effect.Service<AnomalyDetectionServ
           type ApdexRow = { apdexScore: number; totalCount: number }
 
           const servicesResult = yield* api.queryTinybird(orgId, "service_overview", {
-            start_time: currentStart.toISOString(),
-            end_time: currentEnd.toISOString(),
+            start_time: formatForTinybird(currentStart),
+            end_time: formatForTinybird(currentEnd),
           })
 
           const anomalies: DetectedAnomaly[] = []
@@ -218,8 +221,8 @@ export class AnomalyDetectionService extends Effect.Service<AnomalyDetectionServ
           for (const service of servicesResult.data as ServiceOverviewRow[]) {
             const apdexResult = yield* api.queryTinybird(orgId, "service_apdex_time_series", {
               service_name: service.serviceName,
-              start_time: currentStart.toISOString(),
-              end_time: currentEnd.toISOString(),
+              start_time: formatForTinybird(currentStart),
+              end_time: formatForTinybird(currentEnd),
               bucket_seconds: env.AGENT_DETECTION_WINDOW_MINUTES * 60,
             }).pipe(Effect.catchAll(() => Effect.succeed({ data: [] as ApdexRow[] })))
 

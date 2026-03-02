@@ -7,7 +7,7 @@ export class AgentEnv extends Effect.Service<AgentEnv>()("AgentEnv", {
     const env = {
       // Maple API
       MAPLE_API_URL: yield* Config.string("MAPLE_API_URL"),
-      MAPLE_ROOT_PASSWORD: yield* Config.string("MAPLE_ROOT_PASSWORD"),
+      INTERNAL_SERVICE_TOKEN: yield* Config.string("INTERNAL_SERVICE_TOKEN"),
 
       // Database (shared with API)
       MAPLE_DB_URL: yield* Config.string("MAPLE_DB_URL").pipe(Config.withDefault("")),
