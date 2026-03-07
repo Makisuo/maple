@@ -43,6 +43,13 @@
       "when": 1771286980788,
       "tag": "0005_crazy_joshua_kane",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1772904984342,
+      "tag": "0006_ancient_frog_thor",
+      "breakpoints": true
     }
   ]
 }

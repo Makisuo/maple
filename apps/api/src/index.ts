@@ -1,36 +1,49 @@
-import { HttpApiScalar, HttpLayerRouter, HttpMiddleware, HttpServerResponse } from "@effect/platform"
-import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
-import { MapleApi } from "@maple/domain/http"
-import { Config, Layer } from "effect"
-import { HttpApiRoutes } from "./http"
-import { McpLive } from "./mcp/app"
-import { AutumnRouter } from "./routes/autumn.http"
-import { ApiKeysService } from "./services/ApiKeysService"
-import { AuthorizationLive } from "./services/AuthorizationLive"
-import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
-import { Env } from "./services/Env"
-import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
-import { QueryEngineService } from "./services/QueryEngineService"
-import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
-import { TinybirdService } from "./services/TinybirdService"
-import { AuthService } from "./services/AuthService"
-import { TracerLive } from "./services/Telemetry"
+import {
+  HttpApiScalar,
+  HttpLayerRouter,
+  HttpMiddleware,
+  HttpServerResponse,
+} from "@effect/platform";
+import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
+import { MapleApi } from "@maple/domain/http";
+import { Config, Layer } from "effect";
+import { HttpApiRoutes } from "./http";
+import { McpLive } from "./mcp/app";
+import { AutumnRouter } from "./routes/autumn.http";
+import { ApiKeysService } from "./services/ApiKeysService";
+import { AuthorizationLive } from "./services/AuthorizationLive";
+import { CloudflareLogpushService } from "./services/CloudflareLogpushService";
+import { DashboardPersistenceService } from "./services/DashboardPersistenceService";
+import { Env } from "./services/Env";
+import { OrgIngestKeysService } from "./services/OrgIngestKeysService";
+import { QueryEngineService } from "./services/QueryEngineService";
+import { ScrapeTargetsService } from "./services/ScrapeTargetsService";
+import { TinybirdService } from "./services/TinybirdService";
+import { AuthService } from "./services/AuthService";
+import { TracerLive } from "./services/Telemetry";
 
 const HealthRouter = HttpLayerRouter.use((router) =>
   router.add("GET", "/health", HttpServerResponse.text("OK")),
-)
+);
 
 // Return 405 for GET /mcp so MCP Streamable HTTP clients skip SSE gracefully
 const McpGetFallback = HttpLayerRouter.use((router) =>
   router.add("GET", "/mcp", HttpServerResponse.empty({ status: 405 })),
-)
+);
 
 const DocsRoute = HttpApiScalar.layerHttpLayerRouter({
   api: MapleApi,
   path: "/docs",
-})
+});
 
-const AllRoutes = Layer.mergeAll(HttpApiRoutes, HealthRouter, McpGetFallback, DocsRoute, AutumnRouter, McpLive).pipe(
+const AllRoutes = Layer.mergeAll(
+  HttpApiRoutes,
+  HealthRouter,
+  McpGetFallback,
+  DocsRoute,
+  AutumnRouter,
+  McpLive,
+).pipe(
   Layer.provideMerge(
     HttpLayerRouter.cors({
       allowedOrigins: ["*"],
@@ -39,7 +52,7 @@ const AllRoutes = Layer.mergeAll(HttpApiRoutes, HealthRouter, McpGetFallback, Do
       exposedHeaders: ["Mcp-Session-Id"],
     }),
   ),
-)
+);
 
 const MainLive = Layer.mergeAll(
   Env.Default,
@@ -47,10 +60,11 @@ const MainLive = Layer.mergeAll(
   QueryEngineService.Default,
   AuthService.Default,
   ApiKeysService.Live,
+  CloudflareLogpushService.Live,
   DashboardPersistenceService.Live,
   OrgIngestKeysService.Live,
   ScrapeTargetsService.Live,
-)
+);
 
 const app = HttpLayerRouter.serve(AllRoutes).pipe(
   HttpMiddleware.withTracerDisabledWhen(
@@ -58,9 +72,7 @@ const app = HttpLayerRouter.serve(AllRoutes).pipe(
   ),
   Layer.provideMerge(MainLive),
   Layer.provide(TracerLive),
-  Layer.provide(
-    AuthorizationLive.pipe(Layer.provideMerge(Env.Default)),
-  ),
+  Layer.provide(AuthorizationLive.pipe(Layer.provideMerge(Env.Default))),
   Layer.provideMerge(
     BunHttpServer.layerConfig(
       Config.all({
@@ -69,6 +81,6 @@ const app = HttpLayerRouter.serve(AllRoutes).pipe(
       }),
     ).pipe(Layer.orDie),
   ),
-)
+);
 
-BunRuntime.runMain(Layer.launch(app))
+BunRuntime.runMain(Layer.launch(app));

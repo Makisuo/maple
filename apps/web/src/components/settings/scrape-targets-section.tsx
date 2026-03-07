@@ -13,14 +13,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@maple/ui/components/ui/alert-dialog"
+import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@maple/ui/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -29,10 +23,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@maple/ui/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@maple/ui/components/ui/dropdown-menu"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@maple/ui/components/ui/empty"
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
-import { Switch } from "@maple/ui/components/ui/switch"
-import { Badge } from "@maple/ui/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -40,9 +46,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@maple/ui/components/ui/select"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { Switch } from "@maple/ui/components/ui/switch"
+import { cn } from "@maple/ui/lib/utils"
 import {
-  CircleCheckIcon,
   CircleXmarkIcon,
+  DotsVerticalIcon,
   FireIcon,
   LoaderIcon,
   PencilIcon,
@@ -51,6 +60,7 @@ import {
   TrashIcon,
 } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { formatRelativeTime } from "@/lib/format"
 
 interface ScrapeTarget {
   id: string
@@ -68,19 +78,6 @@ interface ScrapeTarget {
   updatedAt: string
 }
 
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  if (diff < 0) return "just now"
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
 const AUTH_TYPE_LABELS: Record<string, string> = {
   none: "None",
   bearer: "Bearer Token",
@@ -90,12 +87,10 @@ const AUTH_TYPE_LABELS: Record<string, string> = {
 export function ScrapeTargetsSection() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<ScrapeTarget | null>(null)
   const [probingId, setProbingId] = useState<string | null>(null)
 
-  // Form state — used for both create and edit
   const [editingTarget, setEditingTarget] = useState<ScrapeTarget | null>(null)
   const [formName, setFormName] = useState("")
   const [formServiceName, setFormServiceName] = useState("")
@@ -165,7 +160,7 @@ export function ScrapeTargetsSection() {
     if (formAuthType === "bearer") {
       if (!formAuthToken.trim()) {
         if (editingTarget?.hasCredentials && editingTarget.authType === "bearer") {
-          return null // keep existing
+          return null
         }
         return null
       }
@@ -174,7 +169,7 @@ export function ScrapeTargetsSection() {
     if (formAuthType === "basic") {
       if (!formAuthUsername.trim() && !formAuthPassword.trim()) {
         if (editingTarget?.hasCredentials && editingTarget.authType === "basic") {
-          return null // keep existing
+          return null
         }
         return null
       }
@@ -238,7 +233,6 @@ export function ScrapeTargetsSection() {
 
   async function handleDelete(targetId: string) {
     setDeleteConfirmTarget(null)
-    setDeletingId(targetId)
     const result = await deleteMutation({ path: { targetId } })
     if (Exit.isSuccess(result)) {
       toast.success("Scrape target deleted")
@@ -246,7 +240,6 @@ export function ScrapeTargetsSection() {
     } else {
       toast.error("Failed to delete scrape target")
     }
-    setDeletingId(null)
   }
 
   async function handleToggleEnabled(target: ScrapeTarget) {
@@ -264,135 +257,151 @@ export function ScrapeTargetsSection() {
   }
 
   return (
-    <Card>
-      <CardHeader>
+    <>
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-1.5">
-              <FireIcon size={14} className="text-muted-foreground" />
-              Prometheus
-            </CardTitle>
-            <CardDescription>
-              Scrape metrics from Prometheus exporter endpoints.
-            </CardDescription>
-          </div>
-          <Button size="sm" onClick={openAddDialog}>
+          <p className="text-muted-foreground text-sm">
+            Scrape metrics from Prometheus exporter endpoints.
+          </p>
+          <Button size="sm" className="shrink-0" onClick={openAddDialog}>
             <PlusIcon size={14} />
             Add Target
           </Button>
         </div>
-      </CardHeader>
-      <CardContent>
+
         {Result.isInitial(listResult) ? (
-          <div className="text-muted-foreground flex items-center gap-2 py-8 text-sm justify-center">
-            <LoaderIcon size={14} className="animate-spin" />
-            Loading...
+          <div className="space-y-2">
+            <Skeleton className="h-[60px] w-full" />
+            <Skeleton className="h-[60px] w-full" />
+            <Skeleton className="h-[60px] w-full" />
           </div>
         ) : !Result.isSuccess(listResult) ? (
           <div className="text-muted-foreground py-8 text-center text-sm">
             Failed to load scrape targets.
           </div>
         ) : targets.length === 0 ? (
-          <div className="text-muted-foreground py-8 text-center text-sm">
-            No scrape targets configured. Add a Prometheus exporter endpoint to get
-            started.
-          </div>
+          <Empty className="py-12">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FireIcon size={16} />
+              </EmptyMedia>
+              <EmptyTitle>No scrape targets</EmptyTitle>
+              <EmptyDescription>
+                Add a Prometheus exporter endpoint to start scraping metrics.
+              </EmptyDescription>
+            </EmptyHeader>
+            <Button size="sm" onClick={openAddDialog}>
+              <PlusIcon size={14} />
+              Add Target
+            </Button>
+          </Empty>
         ) : (
-          <div className="space-y-3">
+          <div className="divide-y">
             {targets.map((target) => (
               <div
                 key={target.id}
-                className="flex items-center gap-3 rounded-md border p-3"
+                className="flex items-center gap-3 px-1 py-3"
               >
+                <div
+                  className={cn(
+                    "size-2 shrink-0 rounded-full",
+                    !target.enabled
+                      ? "bg-muted-foreground/30"
+                      : target.lastScrapeError
+                        ? "bg-destructive"
+                        : target.lastScrapeAt
+                          ? "bg-emerald-500"
+                          : "bg-amber-500",
+                  )}
+                />
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">
+                      {target.name}
+                    </span>
+                    {target.serviceName && (
+                      <Badge variant="outline" className="shrink-0">
+                        {target.serviceName}
+                      </Badge>
+                    )}
+                    {target.authType !== "none" && (
+                      <Badge variant="outline" className="shrink-0">
+                        {AUTH_TYPE_LABELS[target.authType] ?? target.authType}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 text-xs">
+                    <span className="max-w-[300px] truncate font-mono">
+                      {target.url}
+                    </span>
+                    <span>{target.scrapeIntervalSeconds}s interval</span>
+                    {target.lastScrapeAt && (
+                      <span>
+                        Last scraped {formatRelativeTime(target.lastScrapeAt)}
+                      </span>
+                    )}
+                  </div>
+                  {target.lastScrapeError && (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-destructive">
+                      <CircleXmarkIcon size={12} className="shrink-0" />
+                      <span className="truncate">{target.lastScrapeError}</span>
+                    </div>
+                  )}
+                </div>
+
                 <Switch
                   checked={target.enabled}
                   onCheckedChange={() => handleToggleEnabled(target)}
                   disabled={togglingId === target.id}
                 />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate">
-                      {target.name}
-                    </span>
-                    {target.serviceName && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        {target.serviceName}
-                      </Badge>
-                    )}
-                    {target.authType !== "none" && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        {AUTH_TYPE_LABELS[target.authType] ?? target.authType}
-                      </Badge>
-                    )}
-                    {target.lastScrapeError ? (
-                      <Badge variant="destructive" className="text-[10px] gap-1 px-1.5 py-0">
-                        <CircleXmarkIcon size={10} />
-                        Error
-                      </Badge>
-                    ) : target.lastScrapeAt ? (
-                      <Badge variant="secondary" className="text-[10px] gap-1 px-1.5 py-0">
-                        <CircleCheckIcon size={10} />
-                        OK
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        Pending
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="text-muted-foreground text-xs truncate">
-                    {target.url}
-                    <span className="mx-1.5">·</span>
-                    {target.scrapeIntervalSeconds}s interval
-                    {target.lastScrapeAt && (
-                      <>
-                        <span className="mx-1.5">·</span>
-                        Last scraped {formatRelativeTime(target.lastScrapeAt)}
-                      </>
-                    )}
-                  </div>
-                  {target.lastScrapeError && (
-                    <div className="text-destructive text-xs mt-0.5 truncate">
-                      {target.lastScrapeError}
-                    </div>
-                  )}
-                </div>
+
                 <Button
-                  variant="ghost"
-                  size="icon-sm"
+                  variant="outline"
+                  size="sm"
                   onClick={() => handleProbe(target)}
                   disabled={probingId === target.id}
-                  className="text-muted-foreground hover:text-foreground shrink-0"
-                  title="Test connection"
                 >
                   {probingId === target.id ? (
                     <LoaderIcon size={14} className="animate-spin" />
                   ) : (
                     <PulseIcon size={14} />
                   )}
+                  Test
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => openEditDialog(target)}
-                  className="text-muted-foreground hover:text-foreground shrink-0"
-                >
-                  <PencilIcon size={14} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => setDeleteConfirmTarget(target)}
-                  disabled={deletingId === target.id}
-                  className="text-muted-foreground hover:text-destructive shrink-0"
-                >
-                  <TrashIcon size={14} />
-                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground hover:text-foreground shrink-0"
+                      />
+                    }
+                  >
+                    <DotsVerticalIcon size={14} />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => openEditDialog(target)}>
+                      <PencilIcon size={14} />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => setDeleteConfirmTarget(target)}
+                    >
+                      <TrashIcon size={14} />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             ))}
           </div>
         )}
-      </CardContent>
+      </div>
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -573,6 +582,6 @@ export function ScrapeTargetsSection() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </>
   )
 }

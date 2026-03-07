@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use autumn::AutumnTracker;
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
+use axum::extract::Path;
 use axum::extract::State;
 use axum::http::header::{HeaderName, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
 use axum::http::{HeaderMap, Method, StatusCode};
@@ -19,6 +20,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use chrono::DateTime;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -29,16 +31,20 @@ use moka::future::Cache;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, KeyValue};
+use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, InstrumentationScope, KeyValue};
+use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use prost::Message;
 use reqwest::Client;
 use serde::Serialize;
+use serde_json::{Map as JsonMap, Value as JsonValue};
 use sha2::Sha256;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{debug, error, info, warn, Span};
 
 const INGEST_SOURCE: &str = "maple-ingest-gateway";
+const CLOUDFLARE_LOGPUSH_SOURCE: &str = "cloudflare-logpush";
+const CLOUDFLARE_SECRET_HEADER: &str = "x-maple-cloudflare-secret";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -160,10 +166,17 @@ struct IngestKeyResolver {
     cache: Cache<String, ResolvedIngestKey>,
 }
 
+struct CloudflareConnectorResolver {
+    db: Arc<Database>,
+    lookup_hmac_key: String,
+    cache: Cache<String, ResolvedCloudflareConnector>,
+}
+
 struct AppState {
     config: AppConfig,
     http_client: Client,
     resolver: IngestKeyResolver,
+    cloudflare_resolver: CloudflareConnectorResolver,
     metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
     autumn_tracker: Option<AutumnTracker>,
 }
@@ -175,10 +188,21 @@ struct ResolvedIngestKey {
     key_id: String,
 }
 
+#[derive(Clone)]
+struct ResolvedCloudflareConnector {
+    connector_id: String,
+    org_id: String,
+    service_name: String,
+    zone_name: String,
+    dataset: String,
+    secret_key_id: String,
+}
+
 #[derive(Clone, Copy)]
 enum IngestKeyType {
     Public,
     Private,
+    Connector,
 }
 
 impl IngestKeyType {
@@ -186,6 +210,7 @@ impl IngestKeyType {
         match self {
             Self::Public => "public",
             Self::Private => "private",
+            Self::Connector => "connector",
         }
     }
 }
@@ -225,6 +250,7 @@ struct ErrorBody {
     error: String,
 }
 
+#[derive(Debug)]
 struct ApiError {
     status: StatusCode,
     message: String,
@@ -330,11 +356,23 @@ async fn main() {
         .max_capacity(1_000)
         .build();
 
+    let cloudflare_connector_cache = Cache::builder()
+        .time_to_live(Duration::from_secs(60))
+        .max_capacity(1_000)
+        .build();
+
+    let shared_db = Arc::new(database);
+
     let state = Arc::new(AppState {
         resolver: IngestKeyResolver {
-            db: Arc::new(database),
+            db: Arc::clone(&shared_db),
             lookup_hmac_key: config.lookup_hmac_key.clone(),
             cache: ingest_key_cache,
+        },
+        cloudflare_resolver: CloudflareConnectorResolver {
+            db: Arc::clone(&shared_db),
+            lookup_hmac_key: config.lookup_hmac_key.clone(),
+            cache: cloudflare_connector_cache,
         },
         http_client,
         config: config.clone(),
@@ -350,6 +388,7 @@ async fn main() {
             CONTENT_TYPE,
             CONTENT_ENCODING,
             HeaderName::from_static("x-maple-ingest-key"),
+            HeaderName::from_static(CLOUDFLARE_SECRET_HEADER),
         ]);
 
     let app = Router::new()
@@ -358,6 +397,10 @@ async fn main() {
         .route("/v1/traces", post(handle_traces))
         .route("/v1/logs", post(handle_logs))
         .route("/v1/metrics", post(handle_metrics))
+        .route(
+            "/v1/logpush/cloudflare/http_requests/{connector_id}",
+            post(handle_cloudflare_logpush_http_requests),
+        )
         .layer(cors)
         .layer(DefaultBodyLimit::max(config.max_request_body_bytes))
         .with_state(state);
@@ -416,6 +459,15 @@ async fn handle_metrics(
     handle_signal(state, headers, body, Signal::Metrics).await
 }
 
+async fn handle_cloudflare_logpush_http_requests(
+    State(state): State<Arc<AppState>>,
+    Path(connector_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    handle_cloudflare_logpush(state, connector_id, headers, body).await
+}
+
 async fn handle_signal(
     state: Arc<AppState>,
     headers: HeaderMap,
@@ -455,9 +507,7 @@ async fn handle_signal(
             }
             info!(
                 status = status_code,
-                duration_ms,
-                item_count,
-                "Request processed"
+                duration_ms, item_count, "Request processed"
             );
             response
         }
@@ -466,6 +516,75 @@ async fn handle_signal(
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => signal.path(), "status" => "error", "error_kind" => error_kind)
                 .increment(1);
+            error.into_response()
+        }
+    }
+}
+
+async fn handle_cloudflare_logpush(
+    state: Arc<AppState>,
+    connector_id: String,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let start = Instant::now();
+    let body_bytes = body.len();
+
+    gauge!("ingest_requests_in_flight").increment(1.0);
+    let _guard = InFlightGuard;
+
+    let span = tracing::info_span!(
+        "cloudflare_logpush",
+        signal = "logs",
+        dataset = "http_requests",
+        body_bytes,
+        org_id = tracing::field::Empty,
+        connector_id = %connector_id,
+    );
+    let _enter = span.enter();
+
+    let result = handle_cloudflare_logpush_inner(&state, &connector_id, &headers, body).await;
+    let duration = start.elapsed();
+
+    match result {
+        Ok((response, item_count, org_id, is_validation)) => {
+            let status_code = response.status().as_u16();
+            histogram!("ingest_request_duration_seconds", "signal" => "logs", "status" => "ok")
+                .record(duration.as_secs_f64());
+            counter!("ingest_requests_total", "signal" => "logs", "status" => "ok", "error_kind" => "none")
+                .increment(1);
+            counter!(
+                "ingest_cloudflare_batches_total",
+                "dataset" => "http_requests",
+                "validation" => if is_validation { "true" } else { "false" }
+            )
+            .increment(1);
+            if is_validation {
+                counter!("ingest_cloudflare_validation_total", "dataset" => "http_requests")
+                    .increment(1);
+            }
+            info!(
+                status = status_code,
+                duration_ms = duration.as_millis() as u64,
+                item_count,
+                org_id = %org_id,
+                "Cloudflare Logpush request processed"
+            );
+            response
+        }
+        Err((error, error_kind)) => {
+            histogram!("ingest_request_duration_seconds", "signal" => "logs", "status" => "error")
+                .record(duration.as_secs_f64());
+            counter!("ingest_requests_total", "signal" => "logs", "status" => "error", "error_kind" => error_kind)
+                .increment(1);
+            if error_kind == "auth" {
+                counter!("ingest_cloudflare_auth_failures_total", "dataset" => "http_requests")
+                    .increment(1);
+            }
+            if error_kind == "parse" {
+                counter!("ingest_cloudflare_parse_failures_total", "dataset" => "http_requests")
+                    .increment(1);
+            }
             error.into_response()
         }
     }
@@ -540,8 +659,7 @@ async fn handle_signal_inner(
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty() && value != "identity");
 
-    histogram!("ingest_request_body_bytes", "signal" => signal.path())
-        .record(body.len() as f64);
+    histogram!("ingest_request_body_bytes", "signal" => signal.path()).record(body.len() as f64);
 
     // --- Decode ---
     let decoded_payload = decode_payload(&body, content_encoding.as_deref()).map_err(|e| {
@@ -559,12 +677,9 @@ async fn handle_signal_inner(
         .record(decoded_payload.len() as f64);
 
     // --- Enrich ---
-    let enrich_result =
-        enrich_payload(signal, payload_format, &decoded_payload, &resolved_key).map_err(|e| {
-            warn!(
-                format = payload_format.label(),
-                "Invalid OTLP payload"
-            );
+    let enrich_result = enrich_payload(signal, payload_format, &decoded_payload, &resolved_key)
+        .map_err(|e| {
+            warn!(format = payload_format.label(), "Invalid OTLP payload");
             (e, "enrich")
         })?;
 
@@ -579,10 +694,8 @@ async fn handle_signal_inner(
     let decoded_bytes = decoded_payload.len();
 
     // --- Encode & Forward ---
-    let outbound_body =
-        encode_payload(&enrich_result.payload, content_encoding.as_deref()).map_err(|e| {
-            (e, "encode")
-        })?;
+    let outbound_body = encode_payload(&enrich_result.payload, content_encoding.as_deref())
+        .map_err(|e| (e, "encode"))?;
 
     let response = forward_to_collector(
         state,
@@ -595,11 +708,469 @@ async fn handle_signal_inner(
     .await
     .map_err(|e| (e, "forward"))?;
 
-    Ok((response, enrich_result.item_count, resolved_key.org_id.clone(), decoded_bytes))
+    Ok((
+        response,
+        enrich_result.item_count,
+        resolved_key.org_id.clone(),
+        decoded_bytes,
+    ))
+}
+
+async fn handle_cloudflare_logpush_inner(
+    state: &AppState,
+    connector_id: &str,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<(Response, usize, String, bool), (ApiError, &'static str)> {
+    let secret = headers
+        .get(CLOUDFLARE_SECRET_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            warn!("Missing Cloudflare connector secret");
+            (
+                ApiError::unauthorized("Invalid connector credentials"),
+                "auth",
+            )
+        })?;
+
+    let resolved = state
+        .cloudflare_resolver
+        .resolve_connector(connector_id, secret)
+        .await
+        .map_err(|error| {
+            error!(error = %error, connector_id, "Cloudflare connector resolution failed");
+            (
+                ApiError::service_unavailable("Connector authentication unavailable"),
+                "auth",
+            )
+        })?
+        .ok_or_else(|| {
+            warn!(connector_id, "Invalid Cloudflare connector credentials");
+            (
+                ApiError::unauthorized("Invalid connector credentials"),
+                "auth",
+            )
+        })?;
+
+    Span::current().record("org_id", &resolved.org_id.as_str());
+    debug!(
+        connector_id = %resolved.connector_id,
+        org_id = %resolved.org_id,
+        key_id = %resolved.secret_key_id,
+        "Authenticated Cloudflare Logpush connector"
+    );
+
+    if body.len() > state.config.max_request_body_bytes {
+        warn!(
+            body_bytes = body.len(),
+            max_bytes = state.config.max_request_body_bytes,
+            connector_id = %resolved.connector_id,
+            "Cloudflare Logpush payload too large"
+        );
+        let _ = state
+            .cloudflare_resolver
+            .record_failure(&resolved.connector_id, "Request body too large")
+            .await;
+        return Err((
+            ApiError::payload_too_large("Request body too large"),
+            "payload_too_large",
+        ));
+    }
+
+    let content_type = headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/x-ndjson")
+        .to_ascii_lowercase();
+
+    if !is_supported_cloudflare_content_type(&content_type) {
+        let _ = state
+            .cloudflare_resolver
+            .record_failure(&resolved.connector_id, "Unsupported content type")
+            .await;
+        return Err((
+            ApiError::unsupported_media_type(
+                "Unsupported content type for Cloudflare Logpush payload",
+            ),
+            "unsupported_media",
+        ));
+    }
+
+    let content_encoding = headers
+        .get(CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty() && value != "identity");
+
+    let decoded_payload = match decode_payload(&body, content_encoding.as_deref()) {
+        Ok(decoded) => decoded,
+        Err(error) => {
+            let _ = state
+                .cloudflare_resolver
+                .record_failure(&resolved.connector_id, &error.message)
+                .await;
+            return Err((error, "decode"));
+        }
+    };
+
+    let parsed = match parse_cloudflare_payload(&decoded_payload) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            let _ = state
+                .cloudflare_resolver
+                .record_failure(&resolved.connector_id, &error.message)
+                .await;
+            return Err((error, "parse"));
+        }
+    };
+
+    match parsed {
+        ParsedCloudflarePayload::Validation => {
+            info!(connector_id = %resolved.connector_id, "Cloudflare validation ping accepted");
+            return Ok((
+                StatusCode::OK.into_response(),
+                0,
+                resolved.org_id.clone(),
+                true,
+            ));
+        }
+        ParsedCloudflarePayload::Records(records) => {
+            let request = build_cloudflare_logs_request(&resolved, records);
+            let item_count = count_log_items(&request);
+            counter!(
+                "ingest_cloudflare_records_total",
+                "dataset" => resolved.dataset.clone(),
+                "org_id" => resolved.org_id.clone()
+            )
+            .increment(item_count as u64);
+
+            let response = match forward_to_collector(
+                state,
+                Signal::Logs,
+                "application/x-protobuf",
+                None,
+                request.encode_to_vec(),
+                &ResolvedIngestKey {
+                    org_id: resolved.org_id.clone(),
+                    key_type: IngestKeyType::Connector,
+                    key_id: resolved.secret_key_id.clone(),
+                },
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    let _ = state
+                        .cloudflare_resolver
+                        .record_failure(&resolved.connector_id, &error.message)
+                        .await;
+                    return Err((error, "forward"));
+                }
+            };
+
+            let _ = state
+                .cloudflare_resolver
+                .record_success(&resolved.connector_id)
+                .await;
+
+            Ok((response, item_count, resolved.org_id.clone(), false))
+        }
+    }
+}
+
+enum ParsedCloudflarePayload {
+    Validation,
+    Records(Vec<JsonMap<String, JsonValue>>),
+}
+
+fn is_supported_cloudflare_content_type(content_type: &str) -> bool {
+    content_type.contains("json")
+        || content_type.contains("ndjson")
+        || content_type.contains("text/plain")
+        || content_type == "application/octet-stream"
+}
+
+fn parse_cloudflare_payload(payload: &[u8]) -> Result<ParsedCloudflarePayload, ApiError> {
+    let text = std::str::from_utf8(payload)
+        .map_err(|_| ApiError::bad_request("Cloudflare Logpush payload must be UTF-8 JSON"))?;
+    let trimmed = text.trim();
+
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request(
+            "Cloudflare Logpush payload was empty",
+        ));
+    }
+
+    if trimmed.contains('\n') && !trimmed.starts_with('[') {
+        let mut records = Vec::new();
+        for line in trimmed.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let value: JsonValue = serde_json::from_str(line)
+                .map_err(|_| ApiError::bad_request("Invalid Cloudflare NDJSON payload"))?;
+            match value {
+                JsonValue::Object(object) => records.push(object),
+                _ => {
+                    return Err(ApiError::bad_request(
+                        "Cloudflare NDJSON payload must contain JSON objects",
+                    ))
+                }
+            }
+        }
+
+        if records.is_empty() {
+            return Err(ApiError::bad_request(
+                "Cloudflare Logpush payload was empty",
+            ));
+        }
+
+        return Ok(ParsedCloudflarePayload::Records(records));
+    }
+
+    if trimmed.starts_with('[') {
+        let value: JsonValue = serde_json::from_str(trimmed)
+            .map_err(|_| ApiError::bad_request("Invalid Cloudflare JSON array payload"))?;
+        return extract_cloudflare_records(value);
+    }
+
+    if trimmed.starts_with('{') {
+        let value: JsonValue = serde_json::from_str(trimmed)
+            .map_err(|_| ApiError::bad_request("Invalid Cloudflare JSON payload"))?;
+        return extract_cloudflare_records(value);
+    }
+
+    Err(ApiError::bad_request(
+        "Cloudflare Logpush payload must be a JSON object, JSON array, or NDJSON",
+    ))
+}
+
+fn extract_cloudflare_records(value: JsonValue) -> Result<ParsedCloudflarePayload, ApiError> {
+    match value {
+        JsonValue::Object(object) => {
+            if object.len() == 1
+                && object
+                    .get("content")
+                    .and_then(JsonValue::as_str)
+                    .is_some_and(|value| value == "tests")
+            {
+                return Ok(ParsedCloudflarePayload::Validation);
+            }
+
+            Ok(ParsedCloudflarePayload::Records(vec![object]))
+        }
+        JsonValue::Array(values) => {
+            let mut records = Vec::with_capacity(values.len());
+            for value in values {
+                match value {
+                    JsonValue::Object(object) => records.push(object),
+                    _ => {
+                        return Err(ApiError::bad_request(
+                            "Cloudflare JSON array payload must contain JSON objects",
+                        ))
+                    }
+                }
+            }
+
+            if records.is_empty() {
+                return Err(ApiError::bad_request(
+                    "Cloudflare Logpush payload was empty",
+                ));
+            }
+
+            Ok(ParsedCloudflarePayload::Records(records))
+        }
+        _ => Err(ApiError::bad_request(
+            "Cloudflare Logpush payload must be a JSON object, JSON array, or NDJSON",
+        )),
+    }
+}
+
+fn build_cloudflare_logs_request(
+    resolved: &ResolvedCloudflareConnector,
+    records: Vec<JsonMap<String, JsonValue>>,
+) -> ExportLogsServiceRequest {
+    let log_records = records
+        .into_iter()
+        .map(|record| build_cloudflare_log_record(resolved, record))
+        .collect();
+
+    ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: build_cloudflare_resource_attributes(resolved),
+                dropped_attributes_count: 0,
+                entity_refs: Vec::new(),
+            }),
+            schema_url: String::new(),
+            scope_logs: vec![ScopeLogs {
+                scope: Some(InstrumentationScope {
+                    name: "cloudflare.logpush".to_string(),
+                    version: "http_requests".to_string(),
+                    attributes: Vec::new(),
+                    dropped_attributes_count: 0,
+                }),
+                schema_url: String::new(),
+                log_records,
+            }],
+        }],
+    }
+}
+
+fn build_cloudflare_resource_attributes(resolved: &ResolvedCloudflareConnector) -> Vec<KeyValue> {
+    vec![
+        string_attribute("maple_org_id", &resolved.org_id),
+        string_attribute("maple_ingest_source", CLOUDFLARE_LOGPUSH_SOURCE),
+        string_attribute("maple_ingest_key_type", IngestKeyType::Connector.as_str()),
+        string_attribute("cloud.provider", "cloudflare"),
+        string_attribute("cloudflare.dataset", &resolved.dataset),
+        string_attribute("cloudflare.zone_name", &resolved.zone_name),
+        string_attribute("maple_cloudflare_connector_id", &resolved.connector_id),
+        string_attribute("service.name", &resolved.service_name),
+    ]
+}
+
+fn build_cloudflare_log_record(
+    _resolved: &ResolvedCloudflareConnector,
+    record: JsonMap<String, JsonValue>,
+) -> LogRecord {
+    let timestamp = record
+        .get("EdgeStartTimestamp")
+        .and_then(parse_cloudflare_timestamp)
+        .or_else(|| {
+            record
+                .get("EdgeEndTimestamp")
+                .and_then(parse_cloudflare_timestamp)
+        })
+        .unwrap_or_else(current_time_unix_nano);
+
+    let status_code = record
+        .get("EdgeResponseStatus")
+        .and_then(parse_status_code)
+        .unwrap_or(0);
+    let (severity_text, severity_number) = severity_from_status(status_code);
+    let body = build_cloudflare_body(&record, status_code);
+    let attributes = record
+        .iter()
+        .filter_map(|(key, value)| json_value_to_attribute(key, value))
+        .collect();
+
+    LogRecord {
+        time_unix_nano: timestamp,
+        observed_time_unix_nano: timestamp,
+        severity_number,
+        severity_text: severity_text.to_string(),
+        body: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(body)),
+        }),
+        attributes,
+        dropped_attributes_count: 0,
+        flags: 0,
+        trace_id: Vec::new(),
+        span_id: Vec::new(),
+        event_name: String::new(),
+    }
+}
+
+fn build_cloudflare_body(record: &JsonMap<String, JsonValue>, status_code: u16) -> String {
+    let method = record
+        .get("ClientRequestMethod")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("UNKNOWN");
+    let host = record
+        .get("ClientRequestHost")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("-");
+    let uri = record
+        .get("ClientRequestURI")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("");
+
+    format!("{method} {host}{uri} -> {status_code}")
+}
+
+fn parse_status_code(value: &JsonValue) -> Option<u16> {
+    value
+        .as_u64()
+        .and_then(|value| u16::try_from(value).ok())
+        .or_else(|| value.as_str().and_then(|value| value.parse::<u16>().ok()))
+}
+
+fn severity_from_status(status_code: u16) -> (&'static str, i32) {
+    if status_code >= 500 {
+        return ("ERROR", 17);
+    }
+    if status_code >= 400 {
+        return ("WARN", 13);
+    }
+
+    ("INFO", 9)
+}
+
+fn parse_cloudflare_timestamp(value: &JsonValue) -> Option<u64> {
+    match value {
+        JsonValue::Number(number) => number.as_u64().map(normalize_numeric_timestamp),
+        JsonValue::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if let Ok(value) = trimmed.parse::<u64>() {
+                return Some(normalize_numeric_timestamp(value));
+            }
+            DateTime::parse_from_rfc3339(trimmed)
+                .ok()
+                .and_then(|value| value.timestamp_nanos_opt())
+                .and_then(|value| u64::try_from(value).ok())
+        }
+        _ => None,
+    }
+}
+
+fn normalize_numeric_timestamp(value: u64) -> u64 {
+    if value >= 1_000_000_000_000_000 {
+        return value;
+    }
+
+    value.saturating_mul(1_000_000_000)
+}
+
+fn current_time_unix_nano() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+fn string_attribute(key: &str, value: &str) -> KeyValue {
+    KeyValue {
+        key: key.to_string(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(value.to_string())),
+        }),
+    }
+}
+
+fn json_value_to_attribute(key: &str, value: &JsonValue) -> Option<KeyValue> {
+    let string_value = match value {
+        JsonValue::Null => return None,
+        JsonValue::String(value) => value.clone(),
+        JsonValue::Bool(value) => value.to_string(),
+        JsonValue::Number(value) => value.to_string(),
+        JsonValue::Array(_) | JsonValue::Object(_) => serde_json::to_string(value).ok()?,
+    };
+
+    Some(string_attribute(key, &string_value))
 }
 
 fn extract_ingest_key(headers: &HeaderMap) -> Option<String> {
-    if let Some(value) = headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok()) {
+    if let Some(value) = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    {
         if value.len() > 7 && value[..7].eq_ignore_ascii_case("Bearer ") {
             let token = value[7..].trim();
             if !token.is_empty() {
@@ -699,21 +1270,30 @@ fn enrich_payload(
                 .map_err(|_| ApiError::bad_request("Invalid OTLP traces protobuf payload"))?;
             enrich_trace_request(&mut request, resolved_key);
             let item_count = count_trace_items(&request);
-            Ok(EnrichResult { payload: request.encode_to_vec(), item_count })
+            Ok(EnrichResult {
+                payload: request.encode_to_vec(),
+                item_count,
+            })
         }
         (Signal::Logs, PayloadFormat::Protobuf) => {
             let mut request = ExportLogsServiceRequest::decode(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP logs protobuf payload"))?;
             enrich_logs_request(&mut request, resolved_key);
             let item_count = count_log_items(&request);
-            Ok(EnrichResult { payload: request.encode_to_vec(), item_count })
+            Ok(EnrichResult {
+                payload: request.encode_to_vec(),
+                item_count,
+            })
         }
         (Signal::Metrics, PayloadFormat::Protobuf) => {
             let mut request = ExportMetricsServiceRequest::decode(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP metrics protobuf payload"))?;
             enrich_metrics_request(&mut request, resolved_key);
             let item_count = count_metric_items(&request);
-            Ok(EnrichResult { payload: request.encode_to_vec(), item_count })
+            Ok(EnrichResult {
+                payload: request.encode_to_vec(),
+                item_count,
+            })
         }
         (Signal::Traces, PayloadFormat::Json) => {
             let mut request: ExportTraceServiceRequest = serde_json::from_slice(payload)
@@ -722,7 +1302,10 @@ fn enrich_payload(
             let item_count = count_trace_items(&request);
             let payload = serde_json::to_vec(&request)
                 .map_err(|_| ApiError::service_unavailable("Failed to serialize traces payload"))?;
-            Ok(EnrichResult { payload, item_count })
+            Ok(EnrichResult {
+                payload,
+                item_count,
+            })
         }
         (Signal::Logs, PayloadFormat::Json) => {
             let mut request: ExportLogsServiceRequest = serde_json::from_slice(payload)
@@ -731,16 +1314,23 @@ fn enrich_payload(
             let item_count = count_log_items(&request);
             let payload = serde_json::to_vec(&request)
                 .map_err(|_| ApiError::service_unavailable("Failed to serialize logs payload"))?;
-            Ok(EnrichResult { payload, item_count })
+            Ok(EnrichResult {
+                payload,
+                item_count,
+            })
         }
         (Signal::Metrics, PayloadFormat::Json) => {
             let mut request: ExportMetricsServiceRequest = serde_json::from_slice(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP metrics JSON payload"))?;
             enrich_metrics_request(&mut request, resolved_key);
             let item_count = count_metric_items(&request);
-            let payload = serde_json::to_vec(&request)
-                .map_err(|_| ApiError::service_unavailable("Failed to serialize metrics payload"))?;
-            Ok(EnrichResult { payload, item_count })
+            let payload = serde_json::to_vec(&request).map_err(|_| {
+                ApiError::service_unavailable("Failed to serialize metrics payload")
+            })?;
+            Ok(EnrichResult {
+                payload,
+                item_count,
+            })
         }
     }
 }
@@ -791,7 +1381,9 @@ fn enrich_metrics_request(
     resolved_key: &ResolvedIngestKey,
 ) {
     for resource_metric in &mut request.resource_metrics {
-        let resource = resource_metric.resource.get_or_insert_with(Resource::default);
+        let resource = resource_metric
+            .resource
+            .get_or_insert_with(Resource::default);
         enrich_resource_attributes(&mut resource.attributes, resolved_key);
     }
 }
@@ -803,7 +1395,11 @@ fn enrich_resource_attributes(attributes: &mut Vec<KeyValue>, resolved_key: &Res
     });
 
     upsert_string_attribute(attributes, "maple_org_id", &resolved_key.org_id);
-    upsert_string_attribute(attributes, "maple_ingest_key_type", resolved_key.key_type.as_str());
+    upsert_string_attribute(
+        attributes,
+        "maple_ingest_key_type",
+        resolved_key.key_type.as_str(),
+    );
     upsert_string_attribute(attributes, "maple_ingest_source", INGEST_SOURCE);
 }
 
@@ -891,7 +1487,9 @@ async fn forward_to_collector(
             org_id = %resolved_key.org_id,
             "Collector returned error"
         );
-        return Err(ApiError::service_unavailable("Telemetry backend unavailable"));
+        return Err(ApiError::service_unavailable(
+            "Telemetry backend unavailable",
+        ));
     }
 
     let status = StatusCode::from_u16(upstream_status_code).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -933,11 +1531,10 @@ impl IngestKeyResolver {
         let hash_column = match key_type {
             IngestKeyType::Public => "public_key_hash",
             IngestKeyType::Private => "private_key_hash",
+            IngestKeyType::Connector => return Ok(None),
         };
 
-        let query = format!(
-            "SELECT org_id FROM org_ingest_keys WHERE {hash_column} = ? LIMIT 1"
-        );
+        let query = format!("SELECT org_id FROM org_ingest_keys WHERE {hash_column} = ? LIMIT 1");
 
         let conn = self.db.connect().map_err(|error| error.to_string())?;
         let mut rows = conn
@@ -957,9 +1554,83 @@ impl IngestKeyResolver {
             key_id: key_hash.chars().take(16).collect(),
         };
 
-        self.cache.insert(raw_key.to_string(), resolved.clone()).await;
+        self.cache
+            .insert(raw_key.to_string(), resolved.clone())
+            .await;
 
         Ok(Some(resolved))
+    }
+}
+
+impl CloudflareConnectorResolver {
+    async fn resolve_connector(
+        &self,
+        connector_id: &str,
+        raw_secret: &str,
+    ) -> Result<Option<ResolvedCloudflareConnector>, String> {
+        let cache_key = format!("{connector_id}:{raw_secret}");
+        if let Some(cached) = self.cache.get(&cache_key).await {
+            return Ok(Some(cached));
+        }
+
+        let secret_hash = hash_ingest_key(raw_secret, &self.lookup_hmac_key)?;
+        let conn = self.db.connect().map_err(|error| error.to_string())?;
+        let mut rows = conn
+            .query(
+                "SELECT org_id, service_name, zone_name, dataset FROM cloudflare_logpush_connectors WHERE id = ? AND secret_hash = ? AND enabled = 1 LIMIT 1",
+                params![connector_id.to_string(), secret_hash.clone()],
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+
+        let Some(row) = rows.next().await.map_err(|error| error.to_string())? else {
+            return Ok(None);
+        };
+
+        let resolved = ResolvedCloudflareConnector {
+            connector_id: connector_id.to_string(),
+            org_id: row.get(0).map_err(|error| error.to_string())?,
+            service_name: row.get(1).map_err(|error| error.to_string())?,
+            zone_name: row.get(2).map_err(|error| error.to_string())?,
+            dataset: row.get(3).map_err(|error| error.to_string())?,
+            secret_key_id: secret_hash.chars().take(16).collect(),
+        };
+
+        self.cache.insert(cache_key, resolved.clone()).await;
+
+        Ok(Some(resolved))
+    }
+
+    async fn record_success(&self, connector_id: &str) -> Result<(), String> {
+        let conn = self.db.connect().map_err(|error| error.to_string())?;
+        conn.execute(
+            "UPDATE cloudflare_logpush_connectors SET last_received_at = ?, last_error = NULL, updated_at = ? WHERE id = ?",
+            params![
+                current_time_millis() as i64,
+                current_time_millis() as i64,
+                connector_id.to_string()
+            ],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
+        Ok(())
+    }
+
+    async fn record_failure(&self, connector_id: &str, error_message: &str) -> Result<(), String> {
+        let conn = self.db.connect().map_err(|error| error.to_string())?;
+        conn.execute(
+            "UPDATE cloudflare_logpush_connectors SET last_error = ?, updated_at = ? WHERE id = ?",
+            params![
+                error_message.to_string(),
+                current_time_millis() as i64,
+                connector_id.to_string()
+            ],
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
+        Ok(())
     }
 }
 
@@ -980,6 +1651,13 @@ fn hash_ingest_key(raw_key: &str, lookup_hmac_key: &str) -> Result<String, Strin
         .map_err(|error| format!("Invalid HMAC key: {error}"))?;
     mac.update(raw_key.as_bytes());
     Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
+}
+
+fn current_time_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 async fn open_database(config: &AppConfig) -> Result<Database, String> {
@@ -1173,5 +1851,125 @@ mod tests {
         assert!(is_remote_db_url("libsql://example.turso.io"));
         assert!(is_remote_db_url("https://example.com"));
         assert!(!is_remote_db_url("file:../api/.data/maple.db"));
+    }
+
+    #[test]
+    fn cloudflare_validation_payload_is_detected() {
+        let parsed = parse_cloudflare_payload(br#"{"content":"tests"}"#).unwrap();
+        assert!(matches!(parsed, ParsedCloudflarePayload::Validation));
+    }
+
+    #[test]
+    fn cloudflare_ndjson_payload_parses_multiple_records() {
+        let parsed = parse_cloudflare_payload(
+            br#"{"RayID":"a","EdgeResponseStatus":200}
+{"RayID":"b","EdgeResponseStatus":503}"#,
+        )
+        .unwrap();
+
+        match parsed {
+            ParsedCloudflarePayload::Validation => panic!("expected records"),
+            ParsedCloudflarePayload::Records(records) => {
+                assert_eq!(records.len(), 2);
+                assert_eq!(
+                    records[0].get("RayID").and_then(JsonValue::as_str),
+                    Some("a")
+                );
+                assert_eq!(
+                    records[1].get("RayID").and_then(JsonValue::as_str),
+                    Some("b")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cloudflare_timestamps_support_rfc3339_unix_and_unix_nano() {
+        let rfc3339 = JsonValue::String("2025-03-07T12:34:56Z".to_string());
+        let unix = JsonValue::Number(serde_json::Number::from(1_741_351_296u64));
+        let unix_nano = JsonValue::Number(serde_json::Number::from(1_741_351_296_123_456_789u64));
+
+        assert_eq!(
+            parse_cloudflare_timestamp(&rfc3339),
+            Some(1_741_350_896_000_000_000)
+        );
+        assert_eq!(
+            parse_cloudflare_timestamp(&unix),
+            Some(1_741_351_296_000_000_000)
+        );
+        assert_eq!(
+            parse_cloudflare_timestamp(&unix_nano),
+            Some(1_741_351_296_123_456_789)
+        );
+    }
+
+    #[test]
+    fn cloudflare_log_record_maps_body_severity_and_attributes() {
+        let resolved = ResolvedCloudflareConnector {
+            connector_id: "connector_1".to_string(),
+            org_id: "org_1".to_string(),
+            service_name: "cloudflare/example.com".to_string(),
+            zone_name: "example.com".to_string(),
+            dataset: "http_requests".to_string(),
+            secret_key_id: "secret".to_string(),
+        };
+        let record = serde_json::from_str::<JsonMap<String, JsonValue>>(
+            r#"{
+                "EdgeStartTimestamp": "2025-03-07T12:34:56Z",
+                "ClientRequestMethod": "GET",
+                "ClientRequestHost": "example.com",
+                "ClientRequestURI": "/status",
+                "EdgeResponseStatus": 503,
+                "RayID": "abc123",
+                "ClientCountry": "US",
+                "ZoneName": "example.com"
+            }"#,
+        )
+        .unwrap();
+
+        let otlp = build_cloudflare_logs_request(&resolved, vec![record]);
+        let resource_log = &otlp.resource_logs[0];
+        let log_record = &resource_log.scope_logs[0].log_records[0];
+
+        assert_eq!(log_record.severity_text, "ERROR");
+        assert_eq!(log_record.severity_number, 17);
+        assert_eq!(
+            log_record.body.as_ref().and_then(|body| match &body.value {
+                Some(any_value::Value::StringValue(value)) => Some(value.as_str()),
+                _ => None,
+            }),
+            Some("GET example.com/status -> 503")
+        );
+
+        let mut resource_values = std::collections::HashMap::new();
+        for attribute in resource_log.resource.as_ref().unwrap().attributes.iter() {
+            if let Some(AnyValue {
+                value: Some(any_value::Value::StringValue(value)),
+            }) = &attribute.value
+            {
+                resource_values.insert(attribute.key.as_str(), value.as_str());
+            }
+        }
+        assert_eq!(
+            resource_values.get("maple_ingest_source"),
+            Some(&CLOUDFLARE_LOGPUSH_SOURCE)
+        );
+        assert_eq!(
+            resource_values.get("service.name"),
+            Some(&"cloudflare/example.com")
+        );
+
+        let mut log_values = std::collections::HashMap::new();
+        for attribute in log_record.attributes.iter() {
+            if let Some(AnyValue {
+                value: Some(any_value::Value::StringValue(value)),
+            }) = &attribute.value
+            {
+                log_values.insert(attribute.key.as_str(), value.as_str());
+            }
+        }
+
+        assert_eq!(log_values.get("RayID"), Some(&"abc123"));
+        assert_eq!(log_values.get("ClientCountry"), Some(&"US"));
     }
 }

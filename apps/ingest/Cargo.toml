@@ -7,6 +7,7 @@ edition = "2021"
 axum = "0.8.8"
 tikv-jemallocator = "0.6"
 base64 = "0.22.1"
+chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
 flate2 = "1.1.5"
 hmac = "0.12.1"
 libsql = "0.9.29"

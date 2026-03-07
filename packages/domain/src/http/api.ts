@@ -1,17 +1,19 @@
-import { HttpApi, OpenApi } from "@effect/platform"
-import { ApiKeysApiGroup } from "./api-keys"
-import { AuthApiGroup, AuthPublicApiGroup } from "./auth"
-import { DashboardsApiGroup } from "./dashboards"
-import { IngestKeysApiGroup } from "./ingest-keys"
-import { QueryEngineApiGroup } from "./query-engine"
-import { ScrapeTargetsApiGroup } from "./scrape-targets"
-import { ServiceDiscoveryApiGroup } from "./service-discovery"
-import { TinybirdApiGroup } from "./tinybird"
+import { HttpApi, OpenApi } from "@effect/platform";
+import { ApiKeysApiGroup } from "./api-keys";
+import { AuthApiGroup, AuthPublicApiGroup } from "./auth";
+import { CloudflareLogpushApiGroup } from "./cloudflare-logpush";
+import { DashboardsApiGroup } from "./dashboards";
+import { IngestKeysApiGroup } from "./ingest-keys";
+import { QueryEngineApiGroup } from "./query-engine";
+import { ScrapeTargetsApiGroup } from "./scrape-targets";
+import { ServiceDiscoveryApiGroup } from "./service-discovery";
+import { TinybirdApiGroup } from "./tinybird";
 
 export class MapleApi extends HttpApi.make("MapleApi")
   .add(AuthPublicApiGroup)
   .add(AuthApiGroup)
   .add(ApiKeysApiGroup)
+  .add(CloudflareLogpushApiGroup)
   .add(DashboardsApiGroup)
   .add(IngestKeysApiGroup)
   .add(QueryEngineApiGroup)
