@@ -242,8 +242,16 @@ export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
                     return (
                       <Fragment key={`${errorRow.errorType}-${index}`}>
                         <TableRow
-                          className="cursor-pointer hover:bg-muted/50"
+                          className="cursor-pointer hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+                          tabIndex={0}
+                          aria-expanded={isExpanded}
                           onClick={() => toggleExpanded(errorRow.errorType)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault()
+                              toggleExpanded(errorRow.errorType)
+                            }
+                          }}
                         >
                           <TableCell className="w-[32px] px-2">
                             {isExpanded ? (

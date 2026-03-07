@@ -58,7 +58,8 @@ export function SpanRow({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="h-5 w-5 shrink-0"
+              className="h-6 w-6 shrink-0"
+              aria-label={expanded ? "Collapse span" : "Expand span"}
               onClick={(e) => {
                 e.stopPropagation()
                 onToggle()
@@ -67,7 +68,7 @@ export function SpanRow({
               {expanded ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
             </Button>
           ) : (
-            <div className="w-5 shrink-0" />
+            <div className="w-6 shrink-0" />
           )}
 
           <Badge
@@ -112,11 +113,19 @@ export function SpanRow({
   return (
     <div
       className={cn(
-        "group flex items-center border-b py-1.5 hover:bg-muted/50 cursor-pointer px-2",
+        "group flex items-center border-b py-1.5 hover:bg-muted/50 cursor-pointer px-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         span.statusCode === "Error" && "bg-red-500/5",
         isSelected && "bg-primary/5 border-l-2 border-l-primary"
       )}
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect?.(span)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onSelect?.(span)
+        }
+      }}
     >
       {/* Left section: Toggle + Service + Kind + Span Name (variable width) */}
       <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -127,7 +136,8 @@ export function SpanRow({
           <Button
             variant="ghost"
             size="icon-sm"
-            className="h-5 w-5 shrink-0"
+            className="h-6 w-6 shrink-0"
+            aria-label={expanded ? "Collapse span" : "Expand span"}
             onClick={(e) => {
               e.stopPropagation()
               onToggle()
@@ -136,7 +146,7 @@ export function SpanRow({
             {expanded ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
           </Button>
         ) : (
-          <div className="w-5 shrink-0" />
+          <div className="w-6 shrink-0" />
         )}
 
         <Badge

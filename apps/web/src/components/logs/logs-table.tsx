@@ -114,8 +114,15 @@ export function LogsTable({ filters }: LogsTableProps) {
                   response.data.map((log: Log) => (
                     <TableRow
                       key={`${log.timestamp}-${log.traceId}-${log.spanId}`}
-                      className="cursor-pointer"
+                      className="cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+                      tabIndex={0}
                       onClick={() => handleRowClick(log)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          handleRowClick(log)
+                        }
+                      }}
                     >
                       <TableCell className="font-mono text-muted-foreground">
                         {formatTimestampInTimezone(log.timestamp, {

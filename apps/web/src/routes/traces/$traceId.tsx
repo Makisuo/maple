@@ -126,9 +126,19 @@ function TraceDetailPage() {
               <Badge
                 variant="outline"
                 className="mt-1 font-mono text-xs cursor-pointer hover:bg-muted"
+                role="button"
+                tabIndex={0}
+                aria-label="Copy trace ID"
                 onClick={() => {
                   navigator.clipboard.writeText(traceId)
                   toast.success("Trace ID copied to clipboard")
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    navigator.clipboard.writeText(traceId)
+                    toast.success("Trace ID copied to clipboard")
+                  }
                 }}
               >
                 {traceId}
@@ -159,9 +169,19 @@ function TraceDetailPage() {
               <Badge
                 variant="outline"
                 className="mt-1 font-mono text-xs cursor-pointer hover:bg-muted"
+                role="button"
+                tabIndex={0}
+                aria-label="Copy trace ID"
                 onClick={() => {
                   navigator.clipboard.writeText(traceId)
                   toast.success("Trace ID copied to clipboard")
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    navigator.clipboard.writeText(traceId)
+                    toast.success("Trace ID copied to clipboard")
+                  }
                 }}
               >
                 {traceId}
@@ -212,9 +232,19 @@ function TraceDetailPage() {
             <Badge
               variant="outline"
               className="font-mono text-xs cursor-pointer hover:bg-muted"
+              role="button"
+              tabIndex={0}
+              aria-label="Copy trace ID"
               onClick={() => {
                 navigator.clipboard.writeText(traceId)
                 toast.success("Trace ID copied to clipboard")
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  navigator.clipboard.writeText(traceId)
+                  toast.success("Trace ID copied to clipboard")
+                }
               }}
             >
               {traceId.slice(0, 8)}...

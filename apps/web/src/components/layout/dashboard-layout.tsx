@@ -125,7 +125,7 @@ export function DashboardLayout({
               {children}
             </div>
           </main>
-          {rightSidebar}
+          {rightSidebar && <aside>{rightSidebar}</aside>}
         </div>
       </SidebarInset>
     </SidebarProvider>

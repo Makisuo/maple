@@ -159,12 +159,23 @@ export function TracesTable({ filters }: TracesTableProps) {
                 response.data.map((trace: Trace) => (
                   <TableRow
                     key={trace.traceId}
-                    className="cursor-pointer"
+                    className="cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+                    tabIndex={0}
                     onClick={() => navigate({
                       to: "/traces/$traceId",
                       params: { traceId: trace.traceId },
                       search: true,
                     })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        navigate({
+                          to: "/traces/$traceId",
+                          params: { traceId: trace.traceId },
+                          search: true,
+                        })
+                      }
+                    }}
                   >
                     <TableCell>
                       <Link
