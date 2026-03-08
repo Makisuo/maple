@@ -12,6 +12,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetMetricTimeSeriesInput, type MetricTimeSeriesResponse } from "@/api/tinybird/metrics"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { getMetricTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { useOrgId } from "@/hooks/use-org-id"
 
 const chartConfig = {
   avgValue: {
@@ -30,6 +31,7 @@ interface MetricsVolumeChartProps {
 }
 
 export function MetricsVolumeChart({ metricName, metricType }: MetricsVolumeChartProps) {
+  const orgId = useOrgId()
   const chartResult = useAtomValue(
     metricName && metricType
       ? getMetricTimeSeriesResultAtom({
@@ -38,7 +40,7 @@ export function MetricsVolumeChart({ metricName, metricType }: MetricsVolumeChar
           metricType,
           bucketSeconds: 60,
         },
-      })
+      }, orgId)
       : disabledResultAtom<MetricTimeSeriesResponse>(),
   )
 

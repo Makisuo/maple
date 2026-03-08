@@ -13,12 +13,14 @@ import {
   FilterSidebarHeader,
   FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function LoadingState() {
   return <FilterSidebarLoading sectionCount={3} />
 }
 
 export function ErrorsFilterSidebar() {
+  const orgId = useOrgId()
   const navigate = useNavigate({ from: Route.fullPath })
   const search = Route.useSearch()
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
@@ -31,7 +33,7 @@ export function ErrorsFilterSidebar() {
         endTime: effectiveEndTime,
         showSpam: search.showSpam,
       },
-    }),
+    }, orgId),
   )
 
   const updateFilter = <K extends keyof typeof search>(

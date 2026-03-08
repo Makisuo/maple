@@ -8,6 +8,7 @@ import { relativeToAbsolute } from "@/lib/time-utils"
 import type { TimeRange } from "@/components/dashboard-builder/types"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function resolveTimeRange(timeRange: TimeRange): {
   startTime: string
@@ -224,11 +225,14 @@ const widgetDataResultFamily = Atom.family((key: string) =>
   Atom.make(
     Effect.try({
       try: () =>
-        JSON.parse(key) as {
-          endpoint: DashboardWidget["dataSource"]["endpoint"]
-          params: Record<string, unknown>
-          transform: WidgetDataSource["transform"]
-        },
+        (() => {
+          const { _orgId: _, ...rest } = JSON.parse(key) as { _orgId: string } & Record<string, unknown>
+          return rest as {
+            endpoint: DashboardWidget["dataSource"]["endpoint"]
+            params: Record<string, unknown>
+            transform: WidgetDataSource["transform"]
+          }
+        })(),
       catch: toWidgetDataAtomError,
     }).pipe(
       Effect.flatMap(({ endpoint, params, transform }) => {
@@ -258,9 +262,10 @@ const widgetDataResultAtom = (input: {
   endpoint: DashboardWidget["dataSource"]["endpoint"]
   params: Record<string, unknown>
   transform: WidgetDataSource["transform"]
-}) => widgetDataResultFamily(encodeKey(input))
+}, orgId: string) => widgetDataResultFamily(encodeKey({ _orgId: orgId, ...input }))
 
 export function useWidgetData(widget: DashboardWidget) {
+  const orgId = useOrgId()
   const dashboardTimeRange = useDashboardTimeRange()
 
   const resolvedTime = resolveTimeRange(dashboardTimeRange.state.timeRange)
@@ -284,7 +289,7 @@ export function useWidgetData(widget: DashboardWidget) {
           endpoint: widget.dataSource.endpoint,
           params: resolvedParams,
           transform: widget.dataSource.transform,
-        })
+        }, orgId)
       : disabledResultAtom(),
   )
 

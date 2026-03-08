@@ -19,6 +19,7 @@ import {
   FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 import { SEVERITY_COLORS } from "@/lib/severity"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function LoadingState() {
   return <FilterSidebarLoading sectionCount={3} sticky />
@@ -27,6 +28,7 @@ function LoadingState() {
 export function LogsFilterSidebar() {
   const navigate = useNavigate({ from: Route.fullPath })
   const search = Route.useSearch()
+  const orgId = useOrgId()
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(search.startTime, search.endTime)
 
@@ -54,7 +56,7 @@ export function LogsFilterSidebar() {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
       },
-    }),
+    }, orgId),
   )
 
   const updateFilter = <K extends keyof typeof search>(

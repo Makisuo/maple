@@ -11,6 +11,7 @@ import { AdvancedFilterDialog } from "@/components/traces/advanced-filter-dialog
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useOrgId } from "@/hooks/use-org-id"
 import { applyWhereClause } from "@/lib/traces/advanced-filter-sync"
 import {
   getTracesFacetsResultAtom,
@@ -56,6 +57,7 @@ export const Route = createFileRoute("/traces/")({
 function TracesPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
+  const orgId = useOrgId()
   const [activeAttributeKey, setActiveAttributeKey] = React.useState<string | null>(null)
   const [activeResourceAttributeKey, setActiveResourceAttributeKey] = React.useState<string | null>(null)
 
@@ -77,7 +79,7 @@ function TracesPage() {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
       },
-    }),
+    }, orgId),
   )
 
   const spanAttributeKeysResult = useAtomValue(
@@ -86,7 +88,7 @@ function TracesPage() {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
       },
-    }),
+    }, orgId),
   )
 
   const spanAttributeValuesResult = useAtomValue(
@@ -96,7 +98,7 @@ function TracesPage() {
         endTime: effectiveEndTime,
         attributeKey: activeAttributeKey ?? "",
       },
-    }),
+    }, orgId),
   )
 
   const resourceAttributeKeysResult = useAtomValue(
@@ -105,7 +107,7 @@ function TracesPage() {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
       },
-    }),
+    }, orgId),
   )
 
   const resourceAttributeValuesResult = useAtomValue(
@@ -115,7 +117,7 @@ function TracesPage() {
         endTime: effectiveEndTime,
         attributeKey: activeResourceAttributeKey ?? "",
       },
-    }),
+    }, orgId),
   )
 
   const attributeKeys = React.useMemo(

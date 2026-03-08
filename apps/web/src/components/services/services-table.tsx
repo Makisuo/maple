@@ -27,6 +27,7 @@ import {
   getServiceOverviewResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { ServicesSearchParams } from "@/routes/services/index"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function formatLatency(ms: number): string {
   if (ms == null || Number.isNaN(ms)) {
@@ -193,6 +194,7 @@ function LoadingState() {
 }
 
 export function ServicesTable({ filters }: ServicesTableProps) {
+  const orgId = useOrgId()
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(filters?.startTime, filters?.endTime)
 
@@ -204,7 +206,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
         environments: filters?.environments,
         commitShas: filters?.commitShas,
       },
-    }),
+    }, orgId),
   )
 
   const timeSeriesResult = useAtomValue(
@@ -215,7 +217,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
         environments: filters?.environments,
         commitShas: filters?.commitShas,
       },
-    }),
+    }, orgId),
   )
 
   return Result.builder(Result.all([overviewResult, timeSeriesResult]))

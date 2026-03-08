@@ -18,6 +18,7 @@ import type { LogsSearchParams } from "@/routes/logs"
 import { listLogsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function truncateBody(body: string, maxLength = 100): string {
   if (body.length <= maxLength) return body
@@ -61,6 +62,7 @@ export function LogsTable({ filters }: LogsTableProps) {
   const [selectedLog, setSelectedLog] = useState<Log | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const { effectiveTimezone } = useTimezonePreference()
+  const orgId = useOrgId()
 
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(filters?.startTime, filters?.endTime)
@@ -74,7 +76,7 @@ export function LogsTable({ filters }: LogsTableProps) {
         severity: filters?.severities?.[0],
         search: filters?.search,
       },
-    }),
+    }, orgId),
   )
 
   const handleRowClick = (log: Log) => {

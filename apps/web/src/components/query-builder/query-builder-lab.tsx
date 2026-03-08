@@ -1,6 +1,7 @@
 import * as React from "react"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 import { PulseIcon, XmarkIcon, PlusIcon, MagnifierIcon } from "@/components/icons"
+import { useOrgId } from "@/hooks/use-org-id"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -331,8 +332,9 @@ function QueryBuilderAtomResults({
 }: {
   input: QueryBuilderTimeseriesInput
 }) {
+  const orgId = useOrgId()
   const result = useAtomValue(
-    getQueryBuilderTimeseriesResultAtom({ data: input }),
+    getQueryBuilderTimeseriesResultAtom({ data: input }, orgId),
   )
 
   return (
@@ -421,6 +423,7 @@ export function QueryBuilderLab({
   startTime,
   endTime,
 }: QueryBuilderLabProps) {
+  const orgId = useOrgId()
   const [queries, setQueries] = React.useState<QueryDraft[]>([
     createQuery(0),
     createQuery(1),
@@ -442,7 +445,7 @@ export function QueryBuilderLab({
       data: {
         limit: 300,
       },
-    }),
+    }, orgId),
   )
 
   const tracesFacetsResult = useAtomValue(
@@ -451,7 +454,7 @@ export function QueryBuilderLab({
         startTime,
         endTime,
       },
-    }),
+    }, orgId),
   )
 
   const logsFacetsResult = useAtomValue(
@@ -460,7 +463,7 @@ export function QueryBuilderLab({
         startTime,
         endTime,
       },
-    }),
+    }, orgId),
   )
 
   const spanAttributeKeysResult = useAtomValue(
@@ -469,7 +472,7 @@ export function QueryBuilderLab({
         startTime,
         endTime,
       },
-    }),
+    }, orgId),
   )
 
   const [activeAttributeKey, setActiveAttributeKey] = React.useState<string | null>(null)
@@ -482,7 +485,7 @@ export function QueryBuilderLab({
         endTime,
         attributeKey: activeAttributeKey ?? "",
       },
-    }),
+    }, orgId),
   )
 
   const resourceAttributeKeysResult = useAtomValue(
@@ -491,7 +494,7 @@ export function QueryBuilderLab({
         startTime,
         endTime,
       },
-    }),
+    }, orgId),
   )
 
   const resourceAttributeValuesResult = useAtomValue(
@@ -501,7 +504,7 @@ export function QueryBuilderLab({
         endTime,
         attributeKey: activeResourceAttributeKey ?? "",
       },
-    }),
+    }, orgId),
   )
 
   const attributeKeys = React.useMemo(

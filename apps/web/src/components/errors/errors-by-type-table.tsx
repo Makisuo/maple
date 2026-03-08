@@ -20,6 +20,7 @@ import {
   getErrorDetailTracesResultAtom,
   getErrorsByTypeResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
+import { useOrgId } from "@/hooks/use-org-id"
 
 function formatNumber(num: number): string {
   if (num >= 1_000_000) {
@@ -45,6 +46,7 @@ interface ErrorsByTypeTableProps {
 }
 
 function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filters: GetErrorsByTypeInput }) {
+  const orgId = useOrgId()
   const detailResult = useAtomValue(
     getErrorDetailTracesResultAtom({
       data: {
@@ -54,7 +56,7 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
         services: filters.services,
         limit: 5,
       },
-    }),
+    }, orgId),
   )
 
   return (
@@ -197,9 +199,10 @@ function LoadingState() {
 }
 
 export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
+  const orgId = useOrgId()
   const [expandedError, setExpandedError] = useState<string | null>(null)
 
-  const errorsResult = useAtomValue(getErrorsByTypeResultAtom({ data: filters }))
+  const errorsResult = useAtomValue(getErrorsByTypeResultAtom({ data: filters }, orgId))
 
   return Result.builder(errorsResult)
     .onInitial(() => <LoadingState />)

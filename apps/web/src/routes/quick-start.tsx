@@ -36,6 +36,7 @@ import { useQuickStart, type StepId } from "@/hooks/use-quick-start"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useOrgId } from "@/hooks/use-org-id"
 import { getServiceOverviewResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { cn } from "@maple/ui/utils"
 
@@ -286,6 +287,7 @@ function StepVerifyData({
   isComplete: boolean
   onComplete: () => void
 }) {
+  const orgId = useOrgId()
   const [pollCount, setPollCount] = useState(0)
   const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "1h")
 
@@ -306,7 +308,7 @@ function StepVerifyData({
         endTime,
       },
       _poll: pollCount,
-    } as any),
+    } as any, orgId),
   )
 
   useEffect(() => {
@@ -601,7 +603,8 @@ const STEPS: {
 ]
 
 function QuickStartPage() {
-  const { orgId } = useAuth()
+  const { orgId: clerkOrgId } = useAuth()
+  const orgId = useOrgId()
   const {
     activeStep,
     setActiveStep,
@@ -613,7 +616,7 @@ function QuickStartPage() {
     reset,
     selectedFramework,
     setSelectedFramework,
-  } = useQuickStart(orgId)
+  } = useQuickStart(clerkOrgId)
 
   // --- Page-level auto-completion (runs regardless of active step) ---
   const { customer } = useCustomer()
@@ -622,7 +625,7 @@ function QuickStartPage() {
   const overviewResult = useAtomValue(
     getServiceOverviewResultAtom({
       data: { startTime, endTime },
-    } as any),
+    } as any, orgId),
   )
 
   // Auto-complete "verify-data" if data already exists

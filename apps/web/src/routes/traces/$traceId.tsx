@@ -16,6 +16,7 @@ import {
 import { formatDuration } from "@/lib/format"
 import { type Span, type SpanNode } from "@/api/tinybird/traces"
 import { getSpanHierarchyResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { useOrgId } from "@/hooks/use-org-id"
 import { findSpanById } from "@/components/traces/flow-utils"
 
 const TraceDetailSearchSchema = Schema.Struct({
@@ -40,7 +41,8 @@ function TraceDetailPage() {
   const searchStr = useRouterState({ select: (state) => state.location.searchStr })
   const backToTracesHref = buildBackToTracesHref(searchStr)
   const navigate = useNavigate({ from: Route.fullPath })
-  const result = useAtomValue(getSpanHierarchyResultAtom({ data: { traceId } }))
+  const orgId = useOrgId()
+  const result = useAtomValue(getSpanHierarchyResultAtom({ data: { traceId } }, orgId))
 
   return Result.builder(result)
     .onInitial(() => (

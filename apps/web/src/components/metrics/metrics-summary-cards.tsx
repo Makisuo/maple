@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/u
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type ListMetricsInput } from "@/api/tinybird/metrics"
 import { getMetricsSummaryResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { useOrgId } from "@/hooks/use-org-id"
 
 export type MetricType = ListMetricsInput["metricType"]
 
@@ -52,7 +53,8 @@ interface MetricsSummaryCardsProps {
 }
 
 export function MetricsSummaryCards({ selectedType, onSelectType }: MetricsSummaryCardsProps) {
-  const summaryResult = useAtomValue(getMetricsSummaryResultAtom({ data: {} }))
+  const orgId = useOrgId()
+  const summaryResult = useAtomValue(getMetricsSummaryResultAtom({ data: {} }, orgId))
 
   return Result.builder(summaryResult)
     .onInitial(() => (

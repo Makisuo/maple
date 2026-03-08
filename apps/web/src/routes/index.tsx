@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@maple/ui/components/ui/select"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useOrgId } from "@/hooks/use-org-id"
 import { ServiceUsageCards } from "@/components/dashboard/service-usage-cards"
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
 import type {
@@ -61,6 +62,7 @@ const OVERVIEW_CHARTS: OverviewChartConfig[] = [
 function DashboardPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
+  const orgId = useOrgId()
 
   const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
     useEffectiveTimeRange(search.startTime, search.endTime, "24h")
@@ -99,7 +101,7 @@ function DashboardPage() {
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
       },
-    }),
+    }, orgId),
   )
 
   const environments = Result.builder(facetsResult)
@@ -129,7 +131,7 @@ function DashboardPage() {
             endTime: effectiveEndTime,
             environments: environmentFilter,
           },
-        })
+        }, orgId)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       : disabledResultAtom<{ data: ServiceDetailTimeSeriesPoint[] }, any>(),
   )
@@ -148,7 +150,7 @@ function DashboardPage() {
               environments: environmentFilter,
             },
           },
-        })
+        }, orgId)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       : disabledResultAtom<CustomChartTimeSeriesResponse, any>(),
   )
