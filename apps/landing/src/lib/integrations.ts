@@ -28,35 +28,30 @@ export const integrations: Record<string, Integration> = {
     steps: [
       {
         title: "Install dependencies",
-        code: `npm install @vercel/otel @opentelemetry/api`,
+        code: `npm install @vercel/otel @opentelemetry/sdk-logs @opentelemetry/exporter-logs-otlp-http`,
         language: "bash",
       },
       {
-        title: "Configure exporter",
-        code: `// instrumentation.ts
-import { registerOTel } from "@vercel/otel"
+        title: "Configure instrumentation",
+        code: `// instrumentation.ts (project root)
+import { registerOTel } from "@vercel/otel";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
 
 export function register() {
   registerOTel({
-    serviceName: "my-nextjs-app",
-    traceExporter: "otlp",
-    // Point to your Maple OTLP endpoint
-    attributes: {
-      "deployment.environment": process.env.NODE_ENV,
-    },
-  })
+    serviceName: "my-next-app",
+    attributes: { environment: "production" },
+    traceExporter: { url: "https://ingest.maple.dev/v1/traces" },
+    logRecordProcessor: new SimpleLogRecordProcessor(
+      new OTLPLogExporter({
+        url: "https://ingest.maple.dev/v1/logs",
+        headers: { Authorization: "Bearer your-api-key" },
+      })
+    ),
+  });
 }`,
         language: "typescript",
-      },
-      {
-        title: "See your data",
-        code: `# Set the OTLP endpoint environment variable
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://your-maple-instance.example.com"
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <your-token>"
-
-# Deploy your app and traces will appear in Maple
-npm run build && npm start`,
-        language: "bash",
       },
     ],
     signals: [
@@ -95,28 +90,32 @@ npm run build && npm start`,
     steps: [
       {
         title: "Install dependencies",
-        code: `pip install opentelemetry-distro opentelemetry-exporter-otlp`,
+        code: `pip install opentelemetry-sdk \\
+  opentelemetry-exporter-otlp-proto-http \\
+  opentelemetry-instrumentation`,
         language: "bash",
       },
       {
-        title: "Configure exporter",
-        code: `# Set environment variables for OTLP export
-export OTEL_SERVICE_NAME="my-python-app"
-export OTEL_EXPORTER_OTLP_ENDPOINT="https://your-maple-instance.example.com"
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <your-token>"
-export OTEL_TRACES_EXPORTER="otlp"
-export OTEL_LOGS_EXPORTER="otlp"
-export OTEL_METRICS_EXPORTER="otlp"
+        title: "Configure tracing",
+        code: `# tracing.py
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-# Install auto-instrumentation packages for detected libraries
-opentelemetry-bootstrap -a install`,
-        language: "bash",
-      },
-      {
-        title: "Run with auto-instrumentation",
-        code: `# Start your application with the OpenTelemetry instrument wrapper
-opentelemetry-instrument python app.py`,
-        language: "bash",
+provider = TracerProvider()
+exporter = OTLPSpanExporter(
+    endpoint="https://ingest.maple.dev/v1/traces",
+    headers={"Authorization": "Bearer your-api-key"},
+)
+provider.add_span_processor(BatchSpanProcessor(exporter))
+trace.set_tracer_provider(provider)
+
+# Create a tracer and send a test span
+tracer = trace.get_tracer("quickstart")
+with tracer.start_as_current_span("hello-maple"):
+    print("Trace sent!")`,
+        language: "python",
       },
     ],
     signals: [
@@ -155,35 +154,36 @@ opentelemetry-instrument python app.py`,
     steps: [
       {
         title: "Install dependencies",
-        code: `npm install @opentelemetry/auto-instrumentations-node @opentelemetry/exporter-trace-otlp-http @opentelemetry/sdk-node`,
+        code: `npm install @opentelemetry/sdk-node @opentelemetry/auto-instrumentations-node @opentelemetry/exporter-trace-otlp-http @opentelemetry/exporter-logs-otlp-http`,
         language: "bash",
       },
       {
         title: "Configure tracing",
-        code: `// tracing.ts
-import { NodeSDK } from "@opentelemetry/sdk-node"
-import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node"
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
+        code: `// tracing.js — run with: node --require ./tracing.js app.js
+const { NodeSDK } = require("@opentelemetry/sdk-node");
+const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
+const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
+const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-http");
+const { SimpleLogRecordProcessor } = require("@opentelemetry/sdk-logs");
 
 const sdk = new NodeSDK({
-  serviceName: "my-node-app",
   traceExporter: new OTLPTraceExporter({
-    url: "https://your-maple-instance.example.com/v1/traces",
-    headers: {
-      Authorization: "Bearer <your-token>",
-    },
+    url: "https://ingest.maple.dev/v1/traces",
+    headers: { Authorization: "Bearer your-api-key" },
   }),
+  logRecordProcessors: [
+    new SimpleLogRecordProcessor(
+      new OTLPLogExporter({
+        url: "https://ingest.maple.dev/v1/logs",
+        headers: { Authorization: "Bearer your-api-key" },
+      })
+    ),
+  ],
   instrumentations: [getNodeAutoInstrumentations()],
-})
+});
 
-sdk.start()`,
-        language: "typescript",
-      },
-      {
-        title: "Start your app",
-        code: `# Require the tracing module before your application code
-node --require ./tracing.js app.js`,
-        language: "bash",
+sdk.start();`,
+        language: "javascript",
       },
     ],
     signals: [
