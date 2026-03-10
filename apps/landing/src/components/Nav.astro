@@ -1,14 +1,15 @@
 ---
+import * as m from "../paraglide/messages";
 import { NavBar } from "./NavBar"
 ---
 
 <!-- Announcement bar -->
 <div class="fixed top-0 left-0 right-0 z-50 bg-bg backdrop-blur-md text-accent text-[10px] text-center py-1.5 border-b border-border">
-    Maple is now available — <a href="https://app.maple.dev" class="underline underline-offset-2 hover:text-fg transition-colors">get started for free</a>
+    <span>{m.nav_announcement()}</span><a href="https://app.maple.dev" class="underline underline-offset-2 hover:text-fg transition-colors">{m.nav_announcement_link()}</a>
 </div>
 
 <nav id="main-nav" class="fixed top-[28px] left-0 right-0 z-50 border-b border-border bg-bg/95 backdrop-blur-md transition-colors duration-200">
-    <div class="mx-auto max-w-6xl px-6 h-14">
+    <div class="mx-auto max-w-6xl px-6 h-14 flex items-center">
         <NavBar client:load />
     </div>
 </nav>

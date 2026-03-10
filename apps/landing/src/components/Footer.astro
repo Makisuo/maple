@@ -1,5 +1,6 @@
 ---
-
+import * as m from "../paraglide/messages";
+import LanguageSwitcher from "./LanguageSwitcher.astro";
 ---
 
 <footer class="border-t border-border">
@@ -14,69 +15,70 @@
                     <span class="text-fg text-xs font-medium">Maple</span>
                 </div>
                 <p class="text-fg-muted text-[10px] leading-relaxed max-w-xs">
-                    Open-source observability platform built on OpenTelemetry.
+                    {m.footer_tagline()}
                 </p>
             </div>
 
             <!-- Col 2: Product -->
             <div>
-                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4">Product</h4>
+                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4">{m.footer_product()}</h4>
                 <ul class="space-y-2">
-                    <li><a href="/#features" class="text-fg-muted text-xs hover:text-fg transition-colors">Features</a></li>
-                    <li><a href="/#how-it-works" class="text-fg-muted text-xs hover:text-fg transition-colors">How it works</a></li>
-                    <li><a href="/pricing" class="text-fg-muted text-xs hover:text-fg transition-colors">Pricing</a></li>
-<li><a href="/opentelemetry" class="text-fg-muted text-xs hover:text-fg transition-colors">OpenTelemetry</a></li>
-                    <li><a href="/roadmap" class="text-fg-muted text-xs hover:text-fg transition-colors">Roadmap</a></li>
+                    <li><a href="/#features" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_features()}</a></li>
+                    <li><a href="/#how-it-works" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_how_it_works()}</a></li>
+                    <li><a href="/pricing" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_pricing()}</a></li>
+<li><a href="/opentelemetry" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_opentelemetry()}</a></li>
+                    <li><a href="/roadmap" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_roadmap()}</a></li>
                 </ul>
             </div>
 
             <!-- Col 3: Features -->
             <div>
-                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4">Features</h4>
+                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4">{m.footer_features()}</h4>
                 <ul class="space-y-2">
-                    <li><a href="/features/distributed-tracing" class="text-fg-muted text-xs hover:text-fg transition-colors">Distributed Tracing</a></li>
-                    <li><a href="/features/log-management" class="text-fg-muted text-xs hover:text-fg transition-colors">Log Management</a></li>
-                    <li><a href="/features/metrics-dashboards" class="text-fg-muted text-xs hover:text-fg transition-colors">Metrics & Dashboards</a></li>
-                    <li><a href="/features/service-catalog" class="text-fg-muted text-xs hover:text-fg transition-colors">Service Catalog</a></li>
-                    <li><a href="/features/error-tracking" class="text-fg-muted text-xs hover:text-fg transition-colors">Error Tracking</a></li>
-                    <li><a href="/features/ai-mcp-integration" class="text-fg-muted text-xs hover:text-fg transition-colors">AI & MCP</a></li>
+                    <li><a href="/features/distributed-tracing" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_distributed_tracing()}</a></li>
+                    <li><a href="/features/log-management" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_log_management()}</a></li>
+                    <li><a href="/features/metrics-dashboards" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_metrics_dashboards()}</a></li>
+                    <li><a href="/features/service-catalog" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_service_catalog()}</a></li>
+                    <li><a href="/features/error-tracking" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_error_tracking()}</a></li>
+                    <li><a href="/features/ai-mcp-integration" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_ai_mcp()}</a></li>
                 </ul>
             </div>
 
             <!-- Col 4: Compare -->
             <div>
-                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4">Compare</h4>
+                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4">{m.footer_compare()}</h4>
                 <ul class="space-y-2">
-                    <li><a href="/compare/datadog" class="text-fg-muted text-xs hover:text-fg transition-colors">vs Datadog</a></li>
-                    <li><a href="/compare/grafana" class="text-fg-muted text-xs hover:text-fg transition-colors">vs Grafana</a></li>
-                    <li><a href="/compare/new-relic" class="text-fg-muted text-xs hover:text-fg transition-colors">vs New Relic</a></li>
+                    <li><a href="/compare/datadog" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_vs_datadog()}</a></li>
+                    <li><a href="/compare/grafana" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_vs_grafana()}</a></li>
+                    <li><a href="/compare/new-relic" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_vs_new_relic()}</a></li>
                 </ul>
 
-                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4 mt-6">Integrations</h4>
+                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4 mt-6">{m.footer_integrations()}</h4>
                 <ul class="space-y-2">
-                    <li><a href="/integrations/nextjs" class="text-fg-muted text-xs hover:text-fg transition-colors">Next.js</a></li>
-                    <li><a href="/integrations/python" class="text-fg-muted text-xs hover:text-fg transition-colors">Python</a></li>
-                    <li><a href="/integrations/nodejs" class="text-fg-muted text-xs hover:text-fg transition-colors">Node.js</a></li>
+                    <li><a href="/integrations/nextjs" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.nav_nextjs()}</a></li>
+                    <li><a href="/integrations/python" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.nav_python()}</a></li>
+                    <li><a href="/integrations/nodejs" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.nav_nodejs()}</a></li>
                 </ul>
             </div>
 
             <!-- Col 5: Community -->
             <div>
-                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4">Community</h4>
+                <h4 class="text-[11px] text-fg font-medium uppercase tracking-wider mb-4">{m.footer_community()}</h4>
                 <ul class="space-y-2">
-                    <li><a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-fg transition-colors">GitHub</a></li>
-                    <li><a href="https://opentelemetry.io" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-fg transition-colors">OpenTelemetry</a></li>
-                    <li><a href="https://x.com/maple_dev" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-fg transition-colors">Twitter / X</a></li>
+                    <li><a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_github()}</a></li>
+                    <li><a href="https://opentelemetry.io" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_opentelemetry()}</a></li>
+                    <li><a href="https://x.com/maple_dev" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-fg transition-colors">{m.footer_twitter()}</a></li>
                 </ul>
             </div>
         </div>
 
         <!-- Bottom bar -->
         <div class="mt-12 pt-6 border-t border-border flex items-center justify-between">
-            <p class="text-fg-muted text-[10px]">&copy; 2026 Maple. All rights reserved.</p>
-            <div class="flex gap-4">
-                <a href="/privacy" class="text-fg-muted text-[10px] hover:text-fg transition-colors">Privacy Policy</a>
-                <a href="/terms" class="text-fg-muted text-[10px] hover:text-fg transition-colors">Terms of Service</a>
+            <p class="text-fg-muted text-[10px]">&copy; {m.footer_copyright()}</p>
+            <div class="flex items-center gap-4">
+                <a href="/privacy" class="text-fg-muted text-[10px] hover:text-fg transition-colors">{m.footer_privacy()}</a>
+                <a href="/terms" class="text-fg-muted text-[10px] hover:text-fg transition-colors">{m.footer_terms()}</a>
+                <LanguageSwitcher />
             </div>
         </div>
     </div>

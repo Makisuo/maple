@@ -6,19 +6,20 @@ import SeoHead from "../../components/SeoHead.astro";
 import Breadcrumb from "../../components/Breadcrumb.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+import * as m from "../../paraglide/messages";
 
-const pageTitle = "E-Commerce Observability | Maple";
-const pageDescription = "Debug checkout failures, payment timeouts, and inventory issues in real-time with distributed tracing and log correlation.";
+const pageTitle = m.page_ecommerce_title();
+const pageDescription = m.page_ecommerce_desc();
 ---
 
 <Layout title={pageTitle} description={pageDescription} ogType="article">
     <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
-    <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Use Cases" }, { label: "E-Commerce Observability" }]} />
+    <Breadcrumb items={[{ label: m.breadcrumb_home(), href: "/" }, { label: m.breadcrumb_use_cases() }, { label: "E-Commerce Observability" }]} />
     <FeatureHero
-        label="Use Case"
-        title="Debug checkout failures in seconds"
-        subtitle="When your flash sale hits and payments start failing, Maple shows you exactly what's happening across every service."
+        label={m.page_ecommerce_label()}
+        title={m.page_ecommerce_heading()}
+        subtitle={m.page_ecommerce_subtitle()}
     />
 
     <!-- Scenario Walkthrough -->
@@ -32,11 +33,10 @@ const pageDescription = "Debug checkout failures, payment timeouts, and inventor
                         <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
                             <span class="text-accent-foreground text-sm font-bold">1</span>
                         </div>
-                        <h3 class="text-lg font-bold text-fg">Alert fires</h3>
+                        <h3 class="text-lg font-bold text-fg">{m.page_ecommerce_step1()}</h3>
                     </div>
                     <p class="text-sm text-fg-muted leading-relaxed">
-                        Your monitoring detects an error rate spike on the payment service. The alert includes
-                        the threshold breach and affected service, giving you immediate context.
+                        {m.page_ecommerce_step1_desc()}
                     </p>
                 </div>
                 <div class="border border-border bg-bg-elevated overflow-hidden">
@@ -78,11 +78,10 @@ const pageDescription = "Debug checkout failures, payment timeouts, and inventor
                         <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
                             <span class="text-accent-foreground text-sm font-bold">2</span>
                         </div>
-                        <h3 class="text-lg font-bold text-fg">Trace the failure</h3>
+                        <h3 class="text-lg font-bold text-fg">{m.page_ecommerce_step2()}</h3>
                     </div>
                     <p class="text-sm text-fg-muted leading-relaxed">
-                        Click into a failing trace to see the full request path. The payment span is immediately
-                        visible in red, showing a 5000ms timeout on the Stripe API call.
+                        {m.page_ecommerce_step2_desc()}
                     </p>
                 </div>
                 <div class="border border-border bg-bg-elevated overflow-hidden">
@@ -140,11 +139,10 @@ const pageDescription = "Debug checkout failures, payment timeouts, and inventor
                         <div class="w-8 h-8 bg-accent flex items-center justify-center shrink-0">
                             <span class="text-accent-foreground text-sm font-bold">3</span>
                         </div>
-                        <h3 class="text-lg font-bold text-fg">Find root cause</h3>
+                        <h3 class="text-lg font-bold text-fg">{m.page_ecommerce_step3()}</h3>
                     </div>
                     <p class="text-sm text-fg-muted leading-relaxed">
-                        Jump to correlated logs for the failing span. The Stripe API timeout and retry exhaustion
-                        are immediately visible, confirming the root cause without switching tools.
+                        {m.page_ecommerce_step3_desc()}
                     </p>
                 </div>
                 <div class="border border-border bg-bg-elevated overflow-hidden">
@@ -189,20 +187,20 @@ const pageDescription = "Debug checkout failures, payment timeouts, and inventor
     <!-- Feature Highlights -->
     <section class="py-24 md:py-32 border-t border-border">
         <div class="mx-auto max-w-6xl px-6">
-            <span class="text-[11px] text-accent uppercase tracking-wider">Capabilities</span>
-            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">Built for e-commerce reliability</h2>
+            <span class="text-[11px] text-accent uppercase tracking-wider">{m.page_ecommerce_capabilities()}</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">{m.page_ecommerce_capabilities_heading()}</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
                 <div class="bg-bg p-6">
-                    <h3 class="text-sm font-bold text-fg mb-2">Distributed Tracing</h3>
-                    <p class="text-xs text-fg-muted leading-relaxed">Follow checkout requests from cart to payment to confirmation. See every service hop with timing.</p>
+                    <h3 class="text-sm font-bold text-fg mb-2">{m.page_ecommerce_cap_tracing()}</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">{m.page_ecommerce_cap_tracing_desc()}</p>
                 </div>
                 <div class="bg-bg p-6">
-                    <h3 class="text-sm font-bold text-fg mb-2">Log Correlation</h3>
-                    <p class="text-xs text-fg-muted leading-relaxed">Every failed payment links to its retry logs and timeout errors. One click from trace to logs.</p>
+                    <h3 class="text-sm font-bold text-fg mb-2">{m.page_ecommerce_cap_logs()}</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">{m.page_ecommerce_cap_logs_desc()}</p>
                 </div>
                 <div class="bg-bg p-6">
-                    <h3 class="text-sm font-bold text-fg mb-2">Error Tracking</h3>
-                    <p class="text-xs text-fg-muted leading-relaxed">Group payment errors by type, see trends, fix systematically. No more searching through log files.</p>
+                    <h3 class="text-sm font-bold text-fg mb-2">{m.page_ecommerce_cap_errors()}</h3>
+                    <p class="text-xs text-fg-muted leading-relaxed">{m.page_ecommerce_cap_errors_desc()}</p>
                 </div>
             </div>
         </div>

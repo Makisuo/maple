@@ -1,5 +1,6 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
+import paraglide from '@inlang/paraglide-astro';
 import react from '@astrojs/react';
 import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
@@ -8,7 +9,27 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   site: 'https://maple.dev',
   trailingSlash: 'ignore',
-  integrations: [react(), sitemap()],
+  i18n: {
+    locales: ['en', 'ja', 'ko'],
+    defaultLocale: 'en',
+  },
+  integrations: [
+    paraglide({
+      project: './project.inlang',
+      outdir: './src/paraglide',
+    }),
+    react(),
+    sitemap({
+      i18n: {
+        defaultLocale: 'en',
+        locales: {
+          en: 'en',
+          ja: 'ja',
+          ko: 'ko',
+        },
+      },
+    }),
+  ],
   vite: {
     plugins: [tailwindcss()],
     envDir: '../../',

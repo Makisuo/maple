@@ -1,20 +1,20 @@
 ---
-
+import * as m from "../paraglide/messages";
 ---
 
 <section class="pt-16 pb-24 md:pt-20 md:pb-32">
     <div class="mx-auto max-w-6xl px-6">
         <div class="mb-12">
-            <span class="text-[11px] text-accent uppercase tracking-wider">Under the hood</span>
-            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg">Built different</h2>
+            <span class="text-[11px] text-accent uppercase tracking-wider">{m.tech_badge()}</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg">{m.tech_heading()}</h2>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
             <!-- Columnar storage -->
             <div class="bg-bg p-6 md:p-8">
-                <h3 class="text-base font-semibold text-fg mb-2">Columnar storage</h3>
+                <h3 class="text-base font-semibold text-fg mb-2">{m.tech_columnar_title()}</h3>
                 <p class="text-sm text-fg-muted leading-relaxed mb-6">
-                    Queries over billions of rows in milliseconds. Powered by a columnar engine designed for observability workloads.
+                    {m.tech_columnar_desc()}
                 </p>
                 <div class="bg-bg-elevated border border-border p-4">
                     <div class="flex items-center gap-2 mb-3">
@@ -29,7 +29,7 @@
                         <span class="text-fg-muted">WHERE</span> service = <span class="text-chart-2">'api'</span>
                     </code>
                     <div class="mt-3 pt-3 border-t border-border flex items-center justify-between">
-                        <span class="text-[9px] text-fg-muted">2.4B rows scanned</span>
+                        <span class="text-[9px] text-fg-muted">{m.tech_columnar_rows()}</span>
                         <span class="text-[9px] text-chart-2 font-medium">12ms</span>
                     </div>
                 </div>
@@ -37,9 +37,9 @@
 
             <!-- Correlated signals -->
             <div class="bg-bg p-6 md:p-8">
-                <h3 class="text-base font-semibold text-fg mb-2">Correlated signals</h3>
+                <h3 class="text-base font-semibold text-fg mb-2">{m.tech_correlated_title()}</h3>
                 <p class="text-sm text-fg-muted leading-relaxed mb-6">
-                    Jump from a trace to its logs, from a log to its metric. Every signal is connected by trace and span IDs.
+                    {m.tech_correlated_desc()}
                 </p>
                 <div class="bg-bg-elevated border border-border p-4">
                     <div class="flex items-center gap-2 mb-3">
@@ -50,17 +50,17 @@
                     </div>
                     <div class="space-y-2">
                         <div class="flex items-center gap-3">
-                            <div class="w-16 text-[9px] text-chart-1 border border-chart-1/30 bg-chart-1/5 px-2 py-1 text-center">Trace</div>
+                            <div class="w-16 text-[9px] text-chart-1 border border-chart-1/30 bg-chart-1/5 px-2 py-1 text-center">{m.tech_trace()}</div>
                             <div class="flex-1 border-t border-dashed border-border"></div>
                             <svg class="w-3 h-3 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                         </div>
                         <div class="flex items-center gap-3">
-                            <div class="w-16 text-[9px] text-chart-2 border border-chart-2/30 bg-chart-2/5 px-2 py-1 text-center">Log</div>
+                            <div class="w-16 text-[9px] text-chart-2 border border-chart-2/30 bg-chart-2/5 px-2 py-1 text-center">{m.tech_log()}</div>
                             <div class="flex-1 border-t border-dashed border-border"></div>
                             <svg class="w-3 h-3 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                         </div>
                         <div class="flex items-center gap-3">
-                            <div class="w-16 text-[9px] text-chart-3 border border-chart-3/30 bg-chart-3/5 px-2 py-1 text-center">Metric</div>
+                            <div class="w-16 text-[9px] text-chart-3 border border-chart-3/30 bg-chart-3/5 px-2 py-1 text-center">{m.tech_metric()}</div>
                             <div class="flex-1 border-t border-dashed border-border"></div>
                             <svg class="w-3 h-3 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                         </div>
@@ -74,9 +74,9 @@
 
             <!-- Real-time ingestion -->
             <div class="bg-bg p-6 md:p-8">
-                <h3 class="text-base font-semibold text-fg mb-2">Real-time ingestion</h3>
+                <h3 class="text-base font-semibold text-fg mb-2">{m.tech_realtime_title()}</h3>
                 <p class="text-sm text-fg-muted leading-relaxed mb-6">
-                    Data is queryable within seconds of ingestion. No waiting for batch jobs or delayed indexes.
+                    {m.tech_realtime_desc()}
                 </p>
                 <div class="bg-bg-elevated border border-border p-4">
                     <div class="flex items-center gap-2 mb-3">
@@ -87,22 +87,22 @@
                     </div>
                     <div class="space-y-3">
                         <div class="flex items-center justify-between">
-                            <span class="text-[9px] text-fg-muted">Status</span>
+                            <span class="text-[9px] text-fg-muted">{m.tech_status()}</span>
                             <div class="flex items-center gap-2">
                                 <div class="w-2 h-2 bg-green-400 animate-pulse-dot"></div>
-                                <span class="text-[9px] text-green-400">Live</span>
+                                <span class="text-[9px] text-green-400">{m.tech_live()}</span>
                             </div>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[9px] text-fg-muted">Last span</span>
-                            <span class="text-[9px] text-fg font-mono">2s ago</span>
+                            <span class="text-[9px] text-fg-muted">{m.tech_last_span()}</span>
+                            <span class="text-[9px] text-fg font-mono">{m.tech_last_span_value()}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[9px] text-fg-muted">Ingestion rate</span>
+                            <span class="text-[9px] text-fg-muted">{m.tech_ingestion_rate()}</span>
                             <span class="text-[9px] text-fg font-mono">14.2K/s</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[9px] text-fg-muted">Avg latency</span>
+                            <span class="text-[9px] text-fg-muted">{m.tech_avg_latency()}</span>
                             <span class="text-[9px] text-fg font-mono">1.8s</span>
                         </div>
                     </div>

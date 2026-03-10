@@ -89,11 +89,6 @@ export class Env extends Effect.Service<Env>()("Env", {
         )
       }
 
-      if (Option.isNone(normalizedEnv.CLERK_JWT_KEY)) {
-        return yield* Effect.dieMessage(
-          "CLERK_JWT_KEY is required when MAPLE_AUTH_MODE=clerk",
-        )
-      }
     }
 
     if (

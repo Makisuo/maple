@@ -12,12 +12,12 @@
   },
   "dependencies": {
     "@astrojs/react": "^4.4.2",
-    "autumn-js": "^0.1.75",
     "@astrojs/sitemap": "^3.7.0",
     "@base-ui/react": "^1.1.0",
     "@clerk/clerk-react": "^5.60.0",
-
     "@fontsource-variable/geist-mono": "^5.2.7",
+    "@inlang/paraglide-astro": "^0.4.1",
+    "@inlang/paraglide-js": "^2.14.0",
     "@maple/infra": "workspace:*",
     "@maple/ui": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
@@ -26,6 +26,7 @@
     "@xyflow/react": "^12.10.0",
     "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848",
     "astro": "^5.17.1",
+    "autumn-js": "^0.1.75",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "react": "^19.2.4",

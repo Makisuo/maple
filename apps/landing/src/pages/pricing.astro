@@ -7,34 +7,35 @@ import FAQ from "../components/FAQ.astro";
 import BottomCTA from "../components/BottomCTA.astro";
 import Footer from "../components/Footer.astro";
 import SeoHead from "../components/SeoHead.astro";
+import * as m from "../paraglide/messages";
 
-const pageTitle = "Simple, Transparent Pricing — Maple";
-const pageDescription = "Start free with generous data limits for logs, traces, and metrics. Scale with transparent, usage-based pricing. No per-seat fees, no hidden costs.";
+const pageTitle = m.page_pricing_title();
+const pageDescription = m.page_pricing_desc();
 
 const faqItems = [
     {
-        question: "How does data ingestion work?",
-        answer: "Maple measures ingestion by the volume of data you send — logs, traces, and metrics are each measured in gigabytes. Each plan includes a monthly data allowance per signal type. Check the plans above for exact limits."
+        question: m.faq_ingestion_q(),
+        answer: m.faq_ingestion_a()
     },
     {
-        question: "What happens if I exceed my plan limits?",
-        answer: "We'll notify you as you approach your limits. On the free plan, ingestion pauses once you hit the cap. On paid plans, additional usage is billed at transparent per-GB rates with no surprises."
+        question: m.faq_limits_q(),
+        answer: m.faq_limits_a()
     },
     {
-        question: "How long is data retained?",
-        answer: "Retention varies by plan — the Starter plan includes 14-day retention, Startup includes 30 days, and Enterprise plans offer custom retention periods. All plans include full query access to your retained data."
+        question: m.faq_retention_q(),
+        answer: m.faq_retention_a()
     },
     {
-        question: "Is Maple compatible with OpenTelemetry?",
-        answer: "Yes — Maple is built natively on OpenTelemetry. Any application instrumented with OTel SDKs or the OTel Collector can send data directly to Maple with zero code changes. No proprietary agents required."
+        question: m.faq_otel_q(),
+        answer: m.faq_otel_a()
     },
     {
-        question: "Can I self-host Maple?",
-        answer: "Absolutely. Maple is fully open source and can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience."
+        question: m.faq_selfhost_q(),
+        answer: m.faq_selfhost_a()
     },
     {
-        question: "Do you offer a free trial for paid plans?",
-        answer: "Yes, paid plans include a 30-day free trial so you can explore all features before committing."
+        question: m.faq_trial_q(),
+        answer: m.faq_trial_a()
     }
 ];
 ---
@@ -43,9 +44,9 @@ const faqItems = [
     <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
     <FeatureHero
-        label="Pricing"
-        title="Simple, transparent pricing"
-        subtitle="Start free with generous limits. Scale as you grow with usage-based pricing — no per-seat fees, no hidden costs, no vendor lock-in."
+        label={m.page_pricing_label()}
+        title={m.page_pricing_heading()}
+        subtitle={m.page_pricing_subtitle()}
     />
     <PricingTable />
     <FAQ items={faqItems} />

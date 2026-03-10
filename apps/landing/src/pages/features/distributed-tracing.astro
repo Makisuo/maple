@@ -8,19 +8,20 @@ import SeoHead from "../../components/SeoHead.astro";
 import Breadcrumb from "../../components/Breadcrumb.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
 import Footer from "../../components/Footer.astro";
+import * as m from "../../paraglide/messages";
 
-const pageTitle = "Distributed Tracing | Maple";
-const pageDescription = "Visualize request flows across services with flamegraph and waterfall views. Drill into any span to see attributes, events, and timing.";
+const pageTitle = m.page_dt_title();
+const pageDescription = m.page_dt_desc();
 ---
 
 <Layout title={pageTitle} description={pageDescription} ogType="article">
     <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
-    <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Features", href: "/#features" }, { label: "Distributed Tracing" }]} />
+    <Breadcrumb items={[{ label: m.breadcrumb_home(), href: "/" }, { label: m.breadcrumb_features(), href: "/#features" }, { label: m.page_dt_label() }]} />
     <FeatureHero
-        label="Distributed Tracing"
-        title="Follow every request across services"
-        subtitle="Visualize request flows with flamegraph, waterfall, and flow views. See exactly where time is spent across your distributed system."
+        label={m.page_dt_label()}
+        title={m.page_dt_heading()}
+        subtitle={m.page_dt_subtitle()}
     />
 
     <!-- Demo Mock: Waterfall Trace View -->
@@ -39,7 +40,7 @@ const pageDescription = "Visualize request flows across services with flamegraph
                     <!-- Waterfall spans -->
                     <div class="flex-1 p-4 md:p-6 space-y-3">
                         <div class="flex items-center justify-between mb-4">
-                            <span class="text-[10px] text-fg-muted uppercase tracking-wider">Waterfall</span>
+                            <span class="text-[10px] text-fg-muted uppercase tracking-wider">{m.page_dt_waterfall()}</span>
                             <span class="text-[10px] text-fg-muted">Duration: 1.24s</span>
                         </div>
 
@@ -111,7 +112,7 @@ const pageDescription = "Visualize request flows across services with flamegraph
 
                     <!-- Span attributes panel -->
                     <div class="w-full md:w-64 border-t md:border-t-0 md:border-l border-border p-4 md:p-6">
-                        <span class="text-[10px] text-fg-muted uppercase tracking-wider">Span Attributes</span>
+                        <span class="text-[10px] text-fg-muted uppercase tracking-wider">{m.page_dt_span_attributes()}</span>
                         <div class="mt-4 space-y-3">
                             <div>
                                 <span class="text-[9px] text-fg-muted block">http.method</span>
@@ -140,12 +141,12 @@ const pageDescription = "Visualize request flows across services with flamegraph
     <section class="py-24 md:py-32">
         <div class="mx-auto max-w-6xl px-6">
             <FeatureDetailGrid items={[
-                { title: "Waterfall View", description: "See the full timeline of a request with nested spans, timing bars, and service colors." },
-                { title: "Flamegraph View", description: "Identify hot paths and time-consuming operations with interactive flamegraph visualization." },
-                { title: "Flow View", description: "Understand service-to-service communication with an interactive dependency flow diagram." },
-                { title: "Span Attributes", description: "Inspect HTTP headers, database queries, error messages, and custom attributes on any span." },
-                { title: "Trace-Log Correlation", description: "Jump from any span directly to its correlated logs. Every signal connected by trace ID." },
-                { title: "Root Span Filtering", description: "Filter traces by service, duration, status, HTTP method, and custom attributes." },
+                { title: m.page_dt_waterfall_view(), description: m.page_dt_waterfall_view_desc() },
+                { title: m.page_dt_flamegraph(), description: m.page_dt_flamegraph_desc() },
+                { title: m.page_dt_flow(), description: m.page_dt_flow_desc() },
+                { title: m.page_dt_attributes(), description: m.page_dt_attributes_desc() },
+                { title: m.page_dt_correlation(), description: m.page_dt_correlation_desc() },
+                { title: m.page_dt_filtering(), description: m.page_dt_filtering_desc() },
             ]} />
         </div>
     </section>

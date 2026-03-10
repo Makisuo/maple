@@ -7,33 +7,34 @@ import {
   NavigationMenuContent,
   NavigationMenuLink,
 } from "@maple/ui/components/ui/navigation-menu"
+import * as m from "../paraglide/messages"
 import { ClerkProvider } from "./ClerkProvider"
 
 const featureLinks = [
-  { href: "/features/distributed-tracing", label: "Distributed Tracing" },
-  { href: "/features/metrics-dashboards", label: "Metrics & Dashboards" },
-  { href: "/features/log-management", label: "Log Management" },
-  { href: "/features/service-catalog", label: "Service Catalog & Map" },
-  { href: "/features/error-tracking", label: "Error Tracking" },
-  { href: "/features/ai-mcp-integration", label: "AI & MCP Integration" },
+  { href: "/features/distributed-tracing", label: () => m.nav_distributed_tracing() },
+  { href: "/features/metrics-dashboards", label: () => m.nav_metrics_dashboards() },
+  { href: "/features/log-management", label: () => m.nav_log_management() },
+  { href: "/features/service-catalog", label: () => m.nav_service_catalog() },
+  { href: "/features/error-tracking", label: () => m.nav_error_tracking() },
+  { href: "/features/ai-mcp-integration", label: () => m.nav_ai_mcp() },
 ]
 
 const useCaseLinks = [
-  { href: "/use-cases/ecommerce-observability", label: "E-Commerce Observability" },
-  { href: "/use-cases/microservices-debugging", label: "Microservices Debugging" },
-  { href: "/use-cases/api-performance", label: "API Performance" },
+  { href: "/use-cases/ecommerce-observability", label: () => m.nav_ecommerce() },
+  { href: "/use-cases/microservices-debugging", label: () => m.nav_microservices() },
+  { href: "/use-cases/api-performance", label: () => m.nav_api_performance() },
 ]
 
 const compareLinks = [
-  { href: "/compare/datadog", label: "Maple vs Datadog" },
-  { href: "/compare/grafana", label: "Maple vs Grafana" },
-  { href: "/compare/new-relic", label: "Maple vs New Relic" },
+  { href: "/compare/datadog", label: () => m.nav_vs_datadog() },
+  { href: "/compare/grafana", label: () => m.nav_vs_grafana() },
+  { href: "/compare/new-relic", label: () => m.nav_vs_new_relic() },
 ]
 
 const integrationLinks = [
-  { href: "/integrations/nextjs", label: "Next.js" },
-  { href: "/integrations/python", label: "Python" },
-  { href: "/integrations/nodejs", label: "Node.js" },
+  { href: "/integrations/nextjs", label: () => m.nav_nextjs() },
+  { href: "/integrations/python", label: () => m.nav_python() },
+  { href: "/integrations/nodejs", label: () => m.nav_nodejs() },
 ]
 
 function NavBarInner() {
@@ -54,7 +55,7 @@ function NavBarInner() {
           <NavigationMenuList>
             <NavigationMenuItem>
               <NavigationMenuTrigger className="bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
-                Features
+                {m.nav_features()}
               </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <div className="grid grid-cols-2 gap-1 p-2">
@@ -64,7 +65,7 @@ function NavBarInner() {
                       href={link.href}
                       className="whitespace-nowrap"
                     >
-                      {link.label}
+                      {link.label()}
                     </NavigationMenuLink>
                   ))}
                 </div>
@@ -73,7 +74,7 @@ function NavBarInner() {
 
             <NavigationMenuItem>
               <NavigationMenuTrigger className="bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
-                Use Cases
+                {m.nav_use_cases()}
               </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <div className="p-2 min-w-[220px]">
@@ -82,7 +83,7 @@ function NavBarInner() {
                       key={link.href}
                       href={link.href}
                     >
-                      {link.label}
+                      {link.label()}
                     </NavigationMenuLink>
                   ))}
                 </div>
@@ -91,7 +92,7 @@ function NavBarInner() {
 
 <NavigationMenuItem>
               <NavigationMenuTrigger className="bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
-                Integrations
+                {m.nav_integrations()}
               </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <div className="p-2 min-w-[220px]">
@@ -100,7 +101,7 @@ function NavBarInner() {
                       key={link.href}
                       href={link.href}
                     >
-                      {link.label}
+                      {link.label()}
                     </NavigationMenuLink>
                   ))}
                 </div>
@@ -109,13 +110,13 @@ function NavBarInner() {
 
             <NavigationMenuItem>
               <a href="/pricing" className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all">
-                Pricing
+                {m.nav_pricing()}
               </a>
             </NavigationMenuItem>
 
             <NavigationMenuItem>
               <a href="/roadmap" className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all">
-                Roadmap
+                {m.nav_roadmap()}
               </a>
             </NavigationMenuItem>
           </NavigationMenuList>
@@ -139,7 +140,7 @@ function NavBarInner() {
           href="https://app.maple.dev"
           className="bg-accent text-accent-foreground px-4 py-1.5 text-xs font-medium hover:opacity-90 transition-opacity"
         >
-          {isLoaded && isSignedIn ? "Dashboard" : "Get started for free"}
+          {isLoaded && isSignedIn ? m.nav_dashboard() : m.nav_get_started()}
         </a>
       </div>
     </div>

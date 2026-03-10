@@ -1,0 +1,111 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import Nav from "../../../components/Nav.astro";
+import FeatureHero from "../../../components/FeatureHero.astro";
+import QuickStartCode from "../../../components/QuickStartCode.astro";
+import FeatureDetailGrid from "../../../components/FeatureDetailGrid.astro";
+import RelatedIntegrations from "../../../components/RelatedIntegrations.astro";
+import BottomCTA from "../../../components/BottomCTA.astro";
+import Footer from "../../../components/Footer.astro";
+import SeoHead from "../../../components/SeoHead.astro";
+import Breadcrumb from "../../../components/Breadcrumb.astro";
+import { integrations } from "../../../lib/integrations";
+
+const integration = integrations.nextjs;
+const pageTitle = "Next.js Observability with OpenTelemetry — Maple";
+const pageDescription = "Add distributed tracing, logging, and metrics to your Next.js app in minutes. Built on OpenTelemetry with zero vendor lock-in.";
+
+const howToJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "How to add OpenTelemetry observability to Next.js",
+    "description": pageDescription,
+    "step": integration.steps.map((step, index) => ({
+        "@type": "HowToStep",
+        "position": index + 1,
+        "name": step.title,
+        "text": step.code,
+    })),
+};
+---
+
+<Layout title={pageTitle} description={pageDescription} ogType="article">
+    <SeoHead title={pageTitle} description={pageDescription} />
+    <Nav />
+    <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Integrations" }, { label: "Next.js" }]} />
+    <FeatureHero
+        label="Next.js"
+        title="Next.js observability with OpenTelemetry"
+        subtitle="Add distributed tracing to your Next.js application in minutes. Capture server components, API routes, and middleware spans automatically with Vercel's built-in instrumentation hook."
+    />
+
+    <QuickStartCode steps={integration.steps} />
+
+    <!-- What you get -->
+    <section class="py-24 md:py-32">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">What you get</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">Automatic instrumentation for Next.js</h2>
+            <FeatureDetailGrid items={integration.signals.map(s => ({ title: s.title, description: s.description }))} />
+        </div>
+    </section>
+
+    <!-- Demo Mock: Trace Preview -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <span class="text-[11px] text-accent uppercase tracking-wider">Live trace preview</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-8">See your Next.js traces</h2>
+            <div class="bg-bg-elevated border border-border">
+                <div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Trace: Next.js App</span>
+                </div>
+                <div class="p-4 md:p-6 space-y-2">
+                    <!-- GET /api/users -->
+                    <div class="flex items-center gap-3 py-1.5">
+                        <div class="w-1.5 h-1.5 bg-green-400 shrink-0"></div>
+                        <span class="text-[10px] font-mono text-fg flex-1 truncate">GET /api/users</span>
+                        <div class="w-32 md:w-48 h-1 bg-bg relative shrink-0">
+                            <div class="absolute inset-y-0 left-0 bg-accent/20 h-1" style="width: 100%"></div>
+                        </div>
+                        <span class="text-[10px] text-fg-muted shrink-0 w-12 text-right">145ms</span>
+                    </div>
+                    <!-- middleware/auth -->
+                    <div class="flex items-center gap-3 py-1.5 pl-4">
+                        <div class="w-1.5 h-1.5 bg-blue-400 shrink-0"></div>
+                        <span class="text-[10px] font-mono text-fg flex-1 truncate">middleware/auth</span>
+                        <div class="w-32 md:w-48 h-1 bg-bg relative shrink-0">
+                            <div class="absolute inset-y-0 left-0 bg-accent/20 h-1" style="width: 8%"></div>
+                        </div>
+                        <span class="text-[10px] text-fg-muted shrink-0 w-12 text-right">12ms</span>
+                    </div>
+                    <!-- pg.query SELECT users -->
+                    <div class="flex items-center gap-3 py-1.5 pl-4">
+                        <div class="w-1.5 h-1.5 bg-green-400 shrink-0"></div>
+                        <span class="text-[10px] font-mono text-fg flex-1 truncate">pg.query SELECT users</span>
+                        <div class="w-32 md:w-48 h-1 bg-bg relative shrink-0">
+                            <div class="absolute inset-y-0 left-0 bg-accent/20 h-1" style="width: 23%"></div>
+                        </div>
+                        <span class="text-[10px] text-fg-muted shrink-0 w-12 text-right">34ms</span>
+                    </div>
+                    <!-- fetch https://api.stripe.com -->
+                    <div class="flex items-center gap-3 py-1.5 pl-4">
+                        <div class="w-1.5 h-1.5 bg-blue-400 shrink-0"></div>
+                        <span class="text-[10px] font-mono text-fg flex-1 truncate">fetch https://api.stripe.com</span>
+                        <div class="w-32 md:w-48 h-1 bg-bg relative shrink-0">
+                            <div class="absolute inset-y-0 left-0 bg-accent/20 h-1" style="width: 61%"></div>
+                        </div>
+                        <span class="text-[10px] text-fg-muted shrink-0 w-12 text-right">89ms</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <RelatedIntegrations current="nextjs" />
+    <BottomCTA />
+    <Footer />
+    <script type="application/ld+json" set:html={JSON.stringify(howToJsonLd)} />
+</Layout>

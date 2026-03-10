@@ -6,19 +6,19 @@ import RoadmapBoard from "../components/RoadmapBoard.astro"
 import BottomCTA from "../components/BottomCTA.astro"
 import Footer from "../components/Footer.astro"
 import SeoHead from "../components/SeoHead.astro"
+import * as m from "../paraglide/messages"
 
-const pageTitle = "Roadmap — Maple"
-const pageDescription =
-	"See what we're building, what's in progress, and what's shipped. Maple's development roadmap is transparent and updated regularly."
+const pageTitle = m.page_roadmap_title()
+const pageDescription = m.page_roadmap_desc()
 ---
 
 <Layout title={pageTitle} description={pageDescription}>
 	<SeoHead title={pageTitle} description={pageDescription} />
 	<Nav />
 	<FeatureHero
-		label="Roadmap"
-		title="What we're building"
-		subtitle="A transparent view of Maple's development. See what's shipped, what's in progress, and where we're headed next."
+		label={m.page_roadmap_label()}
+		title={m.page_roadmap_heading()}
+		subtitle={m.page_roadmap_subtitle()}
 	/>
 	<RoadmapBoard />
 	<BottomCTA />

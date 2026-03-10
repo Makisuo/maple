@@ -1,23 +1,23 @@
 ---
+import * as m from "../paraglide/messages";
 import { ServiceMapMock } from "./ServiceMapMock.tsx";
 ---
 
 <section class="py-24 md:py-32">
     <div class="mx-auto max-w-6xl px-6">
-        <span class="text-[11px] text-accent uppercase tracking-wider">Use Cases</span>
-        <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-16">Real-world debugging scenarios</h2>
+        <span class="text-[11px] text-accent uppercase tracking-wider">{m.usecases_badge()}</span>
+        <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-16">{m.usecases_heading()}</h2>
 
         <!-- Scenario 1: Checkout errors spike (text left, mock right) -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center pb-16 border-b border-border">
             <div>
-                <span class="text-[11px] text-accent uppercase tracking-wider">E-Commerce</span>
-                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">Checkout errors spike during a flash sale</h3>
+                <span class="text-[11px] text-accent uppercase tracking-wider">{m.usecases_ecommerce_badge()}</span>
+                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">{m.usecases_ecommerce_heading()}</h3>
                 <p class="mt-3 text-sm text-fg-muted leading-relaxed">
-                    Your flash sale goes live and payment failures start climbing. You need to find the failing service,
-                    the exact error, and the upstream cause — fast.
+                    {m.usecases_ecommerce_desc()}
                 </p>
                 <p class="mt-4 text-xs text-accent leading-relaxed">
-                    Root cause in 90 seconds: Stripe timeout, correlated with retry-exhaustion logs.
+                    {m.usecases_ecommerce_result()}
                 </p>
                 <a href="/use-cases/ecommerce-observability" class="mt-4 inline-block text-xs text-accent hover:underline underline-offset-2">See the full story &rarr;</a>
             </div>
@@ -61,7 +61,7 @@ import { ServiceMapMock } from "./ServiceMapMock.tsx";
                 </div>
                 <!-- Correlated log entry -->
                 <div class="border-t border-border px-3 py-2">
-                    <div class="text-[8px] text-fg-muted uppercase tracking-wider mb-1.5">Correlated Logs</div>
+                    <div class="text-[8px] text-fg-muted uppercase tracking-wider mb-1.5">{m.usecases_correlated_logs()}</div>
                     <div class="flex items-center gap-2 text-[9px]">
                         <span class="text-fg-muted font-mono text-[8px]">14:23:01</span>
                         <span class="text-[7px] px-1 py-0.5 bg-yellow-500/10 text-yellow-400">WARN</span>
@@ -79,7 +79,7 @@ import { ServiceMapMock } from "./ServiceMapMock.tsx";
                     <div class="w-2 h-2 bg-border"></div>
                     <div class="w-2 h-2 bg-border"></div>
                     <div class="w-2 h-2 bg-border"></div>
-                    <span class="text-[9px] text-fg-muted ml-2">Service Map</span>
+                    <span class="text-[9px] text-fg-muted ml-2">{m.usecases_service_map()}</span>
                 </div>
                 <!-- Static service map with boxes and edges -->
                 <div class="p-0 relative" style="height: 280px">
@@ -87,14 +87,13 @@ import { ServiceMapMock } from "./ServiceMapMock.tsx";
                 </div>
             </div>
             <div class="order-1 md:order-2">
-                <span class="text-[11px] text-accent uppercase tracking-wider">Microservices</span>
-                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">API latency doubles without any deployment</h3>
+                <span class="text-[11px] text-accent uppercase tracking-wider">{m.usecases_microservices_badge()}</span>
+                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">{m.usecases_microservices_heading()}</h3>
                 <p class="mt-3 text-sm text-fg-muted leading-relaxed">
-                    No one deployed anything, but P95 latency just doubled. The service map shows which
-                    dependency is the bottleneck and how the cascade propagates.
+                    {m.usecases_microservices_desc()}
                 </p>
                 <p class="mt-4 text-xs text-accent leading-relaxed">
-                    Service map reveals connection pool exhaustion cascading from user-db.
+                    {m.usecases_microservices_result()}
                 </p>
                 <a href="/use-cases/microservices-debugging" class="mt-4 inline-block text-xs text-accent hover:underline underline-offset-2">See the full story &rarr;</a>
             </div>
@@ -103,14 +102,13 @@ import { ServiceMapMock } from "./ServiceMapMock.tsx";
         <!-- Scenario 3: 3 AM alert (text left, mock right) -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center pt-16">
             <div>
-                <span class="text-[11px] text-accent uppercase tracking-wider">AI Diagnostics</span>
-                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">3 AM alert, nobody awake</h3>
+                <span class="text-[11px] text-accent uppercase tracking-wider">{m.usecases_ai_badge()}</span>
+                <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">{m.usecases_ai_heading()}</h3>
                 <p class="mt-3 text-sm text-fg-muted leading-relaxed">
-                    An alert fires at 3 AM. Instead of paging your on-call, the MCP agent connects to Maple,
-                    investigates the issue, and posts a diagnosis to Slack.
+                    {m.usecases_ai_desc()}
                 </p>
                 <p class="mt-4 text-xs text-accent leading-relaxed">
-                    MCP agent auto-diagnoses and posts to Slack before anyone wakes up.
+                    {m.usecases_ai_result()}
                 </p>
                 <a href="/use-cases/api-performance" class="mt-4 inline-block text-xs text-accent hover:underline underline-offset-2">See the full story &rarr;</a>
             </div>
@@ -120,7 +118,7 @@ import { ServiceMapMock } from "./ServiceMapMock.tsx";
                     <div class="w-2 h-2 bg-border"></div>
                     <div class="w-2 h-2 bg-border"></div>
                     <div class="w-2 h-2 bg-border"></div>
-                    <span class="text-[9px] text-fg-muted ml-2">MCP Agent Session</span>
+                    <span class="text-[9px] text-fg-muted ml-2">{m.usecases_mcp_agent_session()}</span>
                 </div>
                 <!-- Agent conversation -->
                 <div class="p-3 space-y-3">
@@ -130,7 +128,7 @@ import { ServiceMapMock } from "./ServiceMapMock.tsx";
                             <span class="text-[8px] text-destructive">!</span>
                         </div>
                         <div>
-                            <span class="text-[9px] text-fg font-medium">Alert: Error rate spike</span>
+                            <span class="text-[9px] text-fg font-medium">{m.usecases_alert_title()}</span>
                             <span class="text-[8px] text-fg-muted block">payment-svc at 4.2%, threshold 1.0%</span>
                         </div>
                     </div>
@@ -154,14 +152,14 @@ import { ServiceMapMock } from "./ServiceMapMock.tsx";
                             <span class="text-[8px] text-chart-2">AI</span>
                         </div>
                         <div>
-                            <span class="text-[9px] text-fg font-medium">Diagnosis</span>
-                            <span class="text-[8px] text-fg-muted block">Stripe API timeout causing payment failures. Connection pool at capacity. Recommend circuit breaker activation.</span>
+                            <span class="text-[9px] text-fg font-medium">{m.usecases_diagnosis()}</span>
+                            <span class="text-[8px] text-fg-muted block">{m.usecases_diagnosis_text()}</span>
                         </div>
                     </div>
                     <!-- Slack notification -->
                     <div class="border-t border-border pt-2 mt-2">
                         <div class="flex items-center gap-1.5">
-                            <span class="text-[8px] text-chart-3">Posted to #incidents</span>
+                            <span class="text-[8px] text-chart-3">{m.usecases_posted_incidents()}</span>
                             <span class="text-[8px] text-fg-muted">3:02 AM</span>
                         </div>
                     </div>

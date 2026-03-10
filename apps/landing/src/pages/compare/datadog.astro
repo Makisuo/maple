@@ -9,20 +9,21 @@ import Footer from "../../components/Footer.astro";
 import SeoHead from "../../components/SeoHead.astro";
 import Breadcrumb from "../../components/Breadcrumb.astro";
 import { competitors, featureOrder } from "../../lib/competitors";
+import * as m from "../../paraglide/messages";
 
 const competitor = competitors.datadog;
-const pageTitle = `Datadog Alternative (Open Source) — Maple vs Datadog`;
-const pageDescription = `Compare Maple and Datadog for observability. Maple offers transparent usage-based pricing, native OpenTelemetry support, and AI-powered diagnostics — fully open source.`;
+const pageTitle = m.page_dd_title();
+const pageDescription = m.page_dd_desc();
 ---
 
 <Layout title={pageTitle} description={pageDescription} ogType="article">
     <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
-    <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Compare" }, { label: "Datadog" }]} />
+    <Breadcrumb items={[{ label: m.breadcrumb_home(), href: "/" }, { label: m.breadcrumb_compare() }, { label: "Datadog" }]} />
     <FeatureHero
-        label="Compare"
-        title="Maple vs Datadog"
-        subtitle="Datadog is powerful but comes with complex per-host pricing and proprietary agents. Maple delivers the same distributed tracing, logs, and metrics with transparent usage-based pricing, native OpenTelemetry support, and zero vendor lock-in."
+        label={m.page_compare_label()}
+        title={m.page_dd_heading()}
+        subtitle={m.page_dd_subtitle()}
     />
 
     <ComparisonTable
@@ -36,18 +37,18 @@ const pageDescription = `Compare Maple and Datadog for observability. Maple offe
         <div class="mx-auto max-w-6xl px-6">
             <div class="mb-10">
                 <span class="inline-block border border-border px-3 py-1 text-[11px] text-accent uppercase tracking-wider mb-4">
-                    Why choose Maple
+                    {m.page_compare_why()}
                 </span>
-                <h2 class="text-2xl sm:text-3xl font-bold text-fg">Key advantages over Datadog</h2>
+                <h2 class="text-2xl sm:text-3xl font-bold text-fg">{m.page_dd_advantages()}</h2>
             </div>
 
             <FeatureDetailGrid items={[
-                { title: "Transparent pricing", description: "Simple usage-based pricing with no per-host fees, no hidden costs, and no surprise bills at the end of the month." },
-                { title: "OpenTelemetry native", description: "Built from the ground up on OpenTelemetry standards. No proprietary agents to install or maintain — use the instrumentation you already have." },
-                { title: "AI & MCP integration", description: "Diagnose issues faster with AI-powered root cause analysis and MCP tool integration for automated observability workflows." },
-                { title: "Fully open source", description: "Inspect every line of code, contribute features, and trust that your observability platform has no black boxes." },
-                { title: "No vendor lock-in", description: "Your data stays in open formats. Switch providers or self-host at any time — your instrumentation never needs to change." },
-                { title: "Self-hosting available", description: "Run Maple on your own infrastructure for complete data sovereignty, compliance, and cost control." },
+                { title: m.page_dd_transparent(), description: m.page_dd_transparent_desc() },
+                { title: m.page_dd_otel(), description: m.page_dd_otel_desc() },
+                { title: m.page_dd_ai(), description: m.page_dd_ai_desc() },
+                { title: m.page_dd_oss(), description: m.page_dd_oss_desc() },
+                { title: m.page_dd_nolock(), description: m.page_dd_nolock_desc() },
+                { title: m.page_dd_selfhost(), description: m.page_dd_selfhost_desc() },
             ]} />
         </div>
     </section>

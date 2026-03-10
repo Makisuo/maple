@@ -10,10 +10,11 @@ import Footer from "../../components/Footer.astro";
 import SeoHead from "../../components/SeoHead.astro";
 import Breadcrumb from "../../components/Breadcrumb.astro";
 import { integrations } from "../../lib/integrations";
+import * as m from "../../paraglide/messages";
 
 const integration = integrations.nextjs;
-const pageTitle = "Next.js Observability with OpenTelemetry — Maple";
-const pageDescription = "Add distributed tracing, logging, and metrics to your Next.js app in minutes. Built on OpenTelemetry with zero vendor lock-in.";
+const pageTitle = m.page_nextjs_title();
+const pageDescription = m.page_nextjs_desc();
 
 const howToJsonLd = {
     "@context": "https://schema.org",
@@ -32,11 +33,11 @@ const howToJsonLd = {
 <Layout title={pageTitle} description={pageDescription} ogType="article">
     <SeoHead title={pageTitle} description={pageDescription} />
     <Nav />
-    <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Integrations" }, { label: "Next.js" }]} />
+    <Breadcrumb items={[{ label: m.breadcrumb_home(), href: "/" }, { label: m.breadcrumb_integrations() }, { label: "Next.js" }]} />
     <FeatureHero
-        label="Next.js"
-        title="Next.js observability with OpenTelemetry"
-        subtitle="Add distributed tracing to your Next.js application in minutes. Capture server components, API routes, and middleware spans automatically with Vercel's built-in instrumentation hook."
+        label={m.page_nextjs_label()}
+        title={m.page_nextjs_heading()}
+        subtitle={m.page_nextjs_subtitle()}
     />
 
     <QuickStartCode steps={integration.steps} />
@@ -44,8 +45,8 @@ const howToJsonLd = {
     <!-- What you get -->
     <section class="py-24 md:py-32">
         <div class="mx-auto max-w-6xl px-6">
-            <span class="text-[11px] text-accent uppercase tracking-wider">What you get</span>
-            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">Automatic instrumentation for Next.js</h2>
+            <span class="text-[11px] text-accent uppercase tracking-wider">{m.page_nextjs_what_you_get()}</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">{m.page_nextjs_auto_heading()}</h2>
             <FeatureDetailGrid items={integration.signals.map(s => ({ title: s.title, description: s.description }))} />
         </div>
     </section>
@@ -53,8 +54,8 @@ const howToJsonLd = {
     <!-- Demo Mock: Trace Preview -->
     <section class="py-16 md:py-24">
         <div class="mx-auto max-w-6xl px-6">
-            <span class="text-[11px] text-accent uppercase tracking-wider">Live trace preview</span>
-            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-8">See your Next.js traces</h2>
+            <span class="text-[11px] text-accent uppercase tracking-wider">{m.page_nextjs_trace_preview()}</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-8">{m.page_nextjs_trace_heading()}</h2>
             <div class="bg-bg-elevated border border-border">
                 <div class="flex items-center gap-2 px-4 py-3 border-b border-border">
                     <div class="w-2 h-2 bg-border"></div>
