@@ -10,9 +10,10 @@ import {
 import { defaultTimeRange } from "../lib/time"
 import { formatDurationFromMs, formatNumber, formatPercent, formatTable } from "../lib/format"
 import { HttpServerRequest } from "@effect/platform"
-import { Cause, Effect, Exit, ManagedRuntime, Option, ParseResult, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Option, ParseResult, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
+import { Env } from "@/services/Env"
 import { QueryEngineService } from "@/services/QueryEngineService"
 import {
   MetricType,
@@ -26,7 +27,9 @@ import {
   type TracesFilters,
 } from "@maple/domain"
 
-const QueryEngineRuntime = ManagedRuntime.make(QueryEngineService.Default)
+const QueryEngineRuntime = ManagedRuntime.make(
+  QueryEngineService.Default.pipe(Layer.provide(Env.Default)),
+)
 
 const commonTimeRangeFields = {
   start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss). Defaults to 1 hour ago"),

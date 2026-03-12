@@ -1,9 +1,10 @@
 import { TinybirdQueryError, type TinybirdQueryRequest } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Tinybird } from "@tinybirdco/sdk"
-import { Effect, Redacted } from "effect"
+import { Effect, Option, Redacted } from "effect"
 import { Env } from "./Env"
 import type { TenantContext } from "./AuthService"
+import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
 import {
   type CustomLogsBreakdownOutput,
   type CustomLogsBreakdownParams,
@@ -57,57 +58,78 @@ import {
   tracesFacets,
 } from "@maple/domain/tinybird"
 
+const pipes = {
+  list_traces: listTraces,
+  span_hierarchy: spanHierarchy,
+  list_logs: listLogs,
+  logs_count: logsCount,
+  logs_facets: logsFacets,
+  error_rate_by_service: errorRateByService,
+  get_service_usage: getServiceUsage,
+  list_metrics: listMetrics,
+  metric_time_series_sum: metricTimeSeriesSum,
+  metric_time_series_gauge: metricTimeSeriesGauge,
+  metric_time_series_histogram: metricTimeSeriesHistogram,
+  metric_time_series_exp_histogram: metricTimeSeriesExpHistogram,
+  metrics_summary: metricsSummary,
+  traces_facets: tracesFacets,
+  traces_duration_stats: tracesDurationStats,
+  service_overview: serviceOverview,
+  services_facets: servicesFacets,
+  errors_by_type: errorsByType,
+  error_detail_traces: errorDetailTraces,
+  errors_facets: errorsFacets,
+  errors_summary: errorsSummary,
+  service_apdex_time_series: serviceApdexTimeSeries,
+  custom_traces_timeseries: customTracesTimeseries,
+  custom_traces_breakdown: customTracesBreakdown,
+  custom_logs_timeseries: customLogsTimeseries,
+  custom_logs_breakdown: customLogsBreakdown,
+  custom_metrics_breakdown: customMetricsBreakdown,
+  service_dependencies: serviceDependencies,
+  span_attribute_keys: spanAttributeKeys,
+  span_attribute_values: spanAttributeValues,
+  resource_attribute_keys: resourceAttributeKeys,
+  resource_attribute_values: resourceAttributeValues,
+} as const
+
+const createClient = (baseUrl: string, token: string) =>
+  new Tinybird({
+    baseUrl,
+    token,
+    datasources: {},
+    pipes,
+  })
+
+let tinybirdClientFactory: typeof createClient = createClient
+
 export class TinybirdService extends Effect.Service<TinybirdService>()("TinybirdService", {
   accessors: true,
-  dependencies: [Env.Default],
+  dependencies: [Env.Default, OrgTinybirdSettingsService.Live],
   effect: Effect.gen(function* () {
     const env = yield* Env
-
-    const client = new Tinybird({
-      baseUrl: env.TINYBIRD_HOST,
-      token: Redacted.value(env.TINYBIRD_TOKEN),
-      datasources: {},
-      pipes: {
-        list_traces: listTraces,
-        span_hierarchy: spanHierarchy,
-        list_logs: listLogs,
-        logs_count: logsCount,
-        logs_facets: logsFacets,
-        error_rate_by_service: errorRateByService,
-        get_service_usage: getServiceUsage,
-        list_metrics: listMetrics,
-        metric_time_series_sum: metricTimeSeriesSum,
-        metric_time_series_gauge: metricTimeSeriesGauge,
-        metric_time_series_histogram: metricTimeSeriesHistogram,
-        metric_time_series_exp_histogram: metricTimeSeriesExpHistogram,
-        metrics_summary: metricsSummary,
-        traces_facets: tracesFacets,
-        traces_duration_stats: tracesDurationStats,
-        service_overview: serviceOverview,
-        services_facets: servicesFacets,
-        errors_by_type: errorsByType,
-        error_detail_traces: errorDetailTraces,
-        errors_facets: errorsFacets,
-        errors_summary: errorsSummary,
-        service_apdex_time_series: serviceApdexTimeSeries,
-        custom_traces_timeseries: customTracesTimeseries,
-        custom_traces_breakdown: customTracesBreakdown,
-        custom_logs_timeseries: customLogsTimeseries,
-        custom_logs_breakdown: customLogsBreakdown,
-        custom_metrics_breakdown: customMetricsBreakdown,
-        service_dependencies: serviceDependencies,
-        span_attribute_keys: spanAttributeKeys,
-        span_attribute_values: spanAttributeValues,
-        resource_attribute_keys: resourceAttributeKeys,
-        resource_attribute_values: resourceAttributeValues,
-      },
-    })
+    const orgTinybirdSettings = yield* OrgTinybirdSettingsService
 
     const toTinybirdQueryError = (pipe: TinybirdQueryRequest["pipe"], error: unknown) =>
       new TinybirdQueryError({
         message: error instanceof Error ? error.message : "Tinybird query failed",
         pipe,
       })
+
+    const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
+      tenant: TenantContext,
+      pipe: TinybirdQueryRequest["pipe"],
+    ) {
+      const override = yield* orgTinybirdSettings.resolveRuntimeConfig(tenant.orgId).pipe(
+        Effect.catchAll((error) => Effect.fail(toTinybirdQueryError(pipe, error))),
+      )
+
+      if (Option.isSome(override)) {
+        return tinybirdClientFactory(override.value.host, override.value.token)
+      }
+
+      return tinybirdClientFactory(env.TINYBIRD_HOST, Redacted.value(env.TINYBIRD_TOKEN))
+    })
 
     const runPipe = Effect.fn("TinybirdService.runPipe")(function* <
       TPipe extends TinybirdQueryRequest["pipe"],
@@ -134,6 +156,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       payload: TinybirdQueryRequest,
     ) {
+      const client = yield* resolveClient(tenant, payload.pipe)
       const pipeAccessor = (client as unknown as Record<string, { query: (params?: Record<string, unknown>) => Promise<unknown> }>)[
         payload.pipe
       ]
@@ -164,6 +187,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<CustomTracesTimeseriesParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "custom_traces_timeseries")
       return yield* runPipe<
         "custom_traces_timeseries",
         Omit<CustomTracesTimeseriesParams, "org_id">,
@@ -175,6 +199,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<CustomTracesBreakdownParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "custom_traces_breakdown")
       return yield* runPipe<
         "custom_traces_breakdown",
         Omit<CustomTracesBreakdownParams, "org_id">,
@@ -186,6 +211,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<CustomLogsTimeseriesParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "custom_logs_timeseries")
       return yield* runPipe<
         "custom_logs_timeseries",
         Omit<CustomLogsTimeseriesParams, "org_id">,
@@ -197,6 +223,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<CustomLogsBreakdownParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "custom_logs_breakdown")
       return yield* runPipe<
         "custom_logs_breakdown",
         Omit<CustomLogsBreakdownParams, "org_id">,
@@ -208,6 +235,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<CustomMetricsBreakdownParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "custom_metrics_breakdown")
       return yield* runPipe<
         "custom_metrics_breakdown",
         Omit<CustomMetricsBreakdownParams, "org_id">,
@@ -219,6 +247,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<MetricTimeSeriesSumParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "metric_time_series_sum")
       return yield* runPipe<
         "metric_time_series_sum",
         Omit<MetricTimeSeriesSumParams, "org_id">,
@@ -230,6 +259,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<MetricTimeSeriesGaugeParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "metric_time_series_gauge")
       return yield* runPipe<
         "metric_time_series_gauge",
         Omit<MetricTimeSeriesGaugeParams, "org_id">,
@@ -243,6 +273,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<MetricTimeSeriesHistogramParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "metric_time_series_histogram")
       return yield* runPipe<
         "metric_time_series_histogram",
         Omit<MetricTimeSeriesHistogramParams, "org_id">,
@@ -256,6 +287,7 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       tenant: TenantContext,
       params: Omit<MetricTimeSeriesExpHistogramParams, "org_id">,
     ) {
+      const client = yield* resolveClient(tenant, "metric_time_series_exp_histogram")
       return yield* runPipe<
         "metric_time_series_exp_histogram",
         Omit<MetricTimeSeriesExpHistogramParams, "org_id">,
@@ -282,3 +314,12 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
     }
   }),
 }) {}
+
+export const __testables = {
+  setClientFactory: (factory: typeof createClient) => {
+    tinybirdClientFactory = factory
+  },
+  reset: () => {
+    tinybirdClientFactory = createClient
+  },
+}

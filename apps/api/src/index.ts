@@ -16,6 +16,7 @@ import { CloudflareLogpushService } from "./services/CloudflareLogpushService";
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService";
 import { Env } from "./services/Env";
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService";
+import { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService";
 import { QueryEngineService } from "./services/QueryEngineService";
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService";
 import { TinybirdService } from "./services/TinybirdService";
@@ -63,6 +64,7 @@ const MainLive = Layer.mergeAll(
   CloudflareLogpushService.Live,
   DashboardPersistenceService.Live,
   OrgIngestKeysService.Live,
+  OrgTinybirdSettingsService.Live,
   ScrapeTargetsService.Live,
 );
 

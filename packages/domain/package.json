@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./http": "./src/http/index.ts",
     "./query-engine": "./src/query-engine.ts",
+    "./tinybird-project-sync": "./src/tinybird/project-sync.ts",
     "./tinybird-pipes": "./src/tinybird-pipes.ts",
     "./tinybird": "./src/tinybird/index.ts"
   },

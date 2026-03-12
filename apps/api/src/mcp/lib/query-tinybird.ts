@@ -1,11 +1,14 @@
 import { HttpServerRequest } from "@effect/platform"
 import type { TinybirdPipe } from "@maple/domain"
-import { Effect, ManagedRuntime } from "effect"
+import { Effect, Layer, ManagedRuntime } from "effect"
 import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
 import { McpTenantError, McpQueryError } from "@/mcp/tools/types"
+import { Env } from "@/services/Env"
 import { TinybirdService } from "@/services/TinybirdService"
 
-const TinybirdRuntime = ManagedRuntime.make(TinybirdService.Default)
+const TinybirdRuntime = ManagedRuntime.make(
+  TinybirdService.Default.pipe(Layer.provide(Env.Default)),
+)
 
 const resolveTenant = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest
