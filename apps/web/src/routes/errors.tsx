@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 
+import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ErrorsSummaryCards } from "@/components/errors/errors-summary-cards"
 import { ErrorsByTypeTable } from "@/components/errors/errors-by-type-table"
@@ -14,9 +15,9 @@ import {
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const errorsSearchSchema = Schema.Struct({
-  services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-  deploymentEnvs: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-  errorTypes: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  services: OptionalStringArrayParam,
+  deploymentEnvs: OptionalStringArrayParam,
+  errorTypes: OptionalStringArrayParam,
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),
   timePreset: Schema.optional(Schema.String),

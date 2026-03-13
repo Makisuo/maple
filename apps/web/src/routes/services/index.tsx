@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 
+import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ServicesTable } from "@/components/services/services-table"
 import { ServicesFilterSidebar } from "@/components/services/services-filter-sidebar"
@@ -13,8 +14,8 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 
 const servicesSearchSchema = Schema.Struct({
-  environments: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-  commitShas: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  environments: OptionalStringArrayParam,
+  commitShas: OptionalStringArrayParam,
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),
   timePreset: Schema.optional(Schema.String),

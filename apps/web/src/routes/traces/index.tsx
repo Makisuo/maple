@@ -3,6 +3,7 @@ import { Result } from "@effect-atom/atom-react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 
+import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TracesTable } from "@/components/traces/traces-table"
 import { TracesFilterSidebar } from "@/components/traces/traces-filter-sidebar"
@@ -26,14 +27,14 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 const ContainsMatchMode = Schema.optional(Schema.Literal("contains"))
 
 const tracesSearchSchema = Schema.Struct({
-  services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-  spanNames: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  services: OptionalStringArrayParam,
+  spanNames: OptionalStringArrayParam,
   hasError: Schema.optional(Schema.Union(Schema.Boolean, Schema.BooleanFromString)),
   minDurationMs: Schema.optional(Schema.Union(Schema.Number, Schema.NumberFromString)),
   maxDurationMs: Schema.optional(Schema.Union(Schema.Number, Schema.NumberFromString)),
-  httpMethods: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-  httpStatusCodes: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-  deploymentEnvs: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  httpMethods: OptionalStringArrayParam,
+  httpStatusCodes: OptionalStringArrayParam,
+  deploymentEnvs: OptionalStringArrayParam,
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),
   timePreset: Schema.optional(Schema.String),

@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 
+import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { LogsTable } from "@/components/logs/logs-table"
 import { LogsVolumeChart } from "@/components/logs/logs-volume-chart"
@@ -10,8 +11,8 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const logsSearchSchema = Schema.Struct({
-  services: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-  severities: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  services: OptionalStringArrayParam,
+  severities: OptionalStringArrayParam,
   search: Schema.optional(Schema.String),
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),
