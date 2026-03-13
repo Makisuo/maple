@@ -30,7 +30,7 @@ function sortByBucket<T extends { bucket: string }>(rows: T[]): T[] {
   return [...rows].sort((left, right) => left.bucket.localeCompare(right.bucket))
 }
 
-function fillServiceDetailPoints(
+export function fillServiceDetailPoints(
   points: ServiceDetailTimeSeriesPoint[],
   startTime: string | undefined,
   endTime: string | undefined,

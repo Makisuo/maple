@@ -88,6 +88,11 @@ export const myEndpoint = defineEndpoint("my_endpoint", {
 
 Never use raw `fetch()` calls to `/v0/sql` - always define typed endpoints for type safety and consistency.
 
+When adding a new Tinybird endpoint, register it in **three** places:
+1. Define in `packages/domain/src/tinybird/endpoints.ts`
+2. Add pipe name to `packages/domain/src/tinybird-pipes.ts`
+3. Register in `apps/api/src/services/TinybirdService.ts` pipes config + import
+
 ## Environment Variables
 
 ```
