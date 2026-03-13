@@ -91,6 +91,7 @@ describe("OrgTinybirdSettingsService", () => {
       result: "success",
       deploymentId: "dep-1",
     }))
+    __testables.setGetProjectRevisionImpl(async () => "rev-1")
 
     const layer = makeLayer(url)
 
@@ -263,6 +264,7 @@ describe("OrgTinybirdSettingsService", () => {
       result: "success",
       deploymentId: "dep-1",
     }))
+    __testables.setGetProjectRevisionImpl(async () => "rev-1")
 
     const layer = makeLayer(url)
 
@@ -294,8 +296,8 @@ describe("OrgTinybirdSettingsService", () => {
     expect(getError(memberExit)).toBeInstanceOf(OrgTinybirdSettingsForbiddenError)
   })
 
-  it("resyncs stale revisions on runtime resolution", async () => {
-    const { url, dbPath } = createTempDbUrl()
+  it("reports out_of_sync when the bundled Tinybird revision changes", async () => {
+    const { url } = createTempDbUrl()
     __testables.setSyncProjectImpl(async () => ({
       projectRevision: "rev-1",
       result: "success",
@@ -317,45 +319,24 @@ describe("OrgTinybirdSettingsService", () => {
     )
 
     __testables.setGetProjectRevisionImpl(async () => "rev-2")
-    __testables.setSyncProjectImpl(async () => ({
-      projectRevision: "rev-2",
-      result: "success",
-      deploymentId: "dep-2",
-    }))
 
-    const runtimeConfig = await Effect.runPromise(
-      OrgTinybirdSettingsService.resolveRuntimeConfig(asOrgId("org_a")).pipe(
+    const result = await Effect.runPromise(
+      OrgTinybirdSettingsService.get(asOrgId("org_a"), adminRoles).pipe(
         Effect.provide(layer),
       ),
     )
 
-    expect(Option.isSome(runtimeConfig)).toBe(true)
-    if (Option.isSome(runtimeConfig)) {
-      expect(runtimeConfig.value).toEqual({
-        host: "https://customer.tinybird.co",
-        token: "secret-token",
-        projectRevision: "rev-2",
-      })
-    }
-
-    const db = new Database(dbPath, { readonly: true })
-    const row = db
-      .query("SELECT sync_status, project_revision FROM org_tinybird_settings WHERE org_id = ?")
-      .get("org_a") as
-      | {
-          sync_status: string
-          project_revision: string
-        }
-      | undefined
-    db.close()
-
-    expect(row).toEqual({
-      sync_status: "active",
-      project_revision: "rev-2",
+    expect(result).toEqual({
+      configured: true,
+      host: "https://customer.tinybird.co",
+      syncStatus: "out_of_sync",
+      lastSyncAt: expect.any(String),
+      lastSyncError: null,
+      projectRevision: "rev-1",
     })
   })
 
-  it("marks the config unhealthy when runtime resync fails", async () => {
+  it("fails runtime resolution when the bundled Tinybird revision changes without mutating the stored config", async () => {
     const { url, dbPath } = createTempDbUrl()
     __testables.setSyncProjectImpl(async () => ({
       projectRevision: "rev-1",
@@ -378,8 +359,10 @@ describe("OrgTinybirdSettingsService", () => {
     )
 
     __testables.setGetProjectRevisionImpl(async () => "rev-2")
+    let syncCalls = 0
     __testables.setSyncProjectImpl(async () => {
-      throw new Error("customer sync failed")
+      syncCalls += 1
+      throw new Error("runtime sync should not execute")
     })
 
     const exit = await Effect.runPromiseExit(
@@ -389,21 +372,74 @@ describe("OrgTinybirdSettingsService", () => {
     )
 
     expect(getError(exit)).toBeInstanceOf(OrgTinybirdSettingsSyncError)
+    const error = getError(exit) as OrgTinybirdSettingsSyncError
+    expect(error.message).toContain("Please resync the project in settings")
+    expect(syncCalls).toBe(0)
 
     const db = new Database(dbPath, { readonly: true })
     const row = db
-      .query("SELECT sync_status, last_sync_error FROM org_tinybird_settings WHERE org_id = ?")
+      .query("SELECT sync_status, last_sync_error, project_revision FROM org_tinybird_settings WHERE org_id = ?")
       .get("org_a") as
       | {
           sync_status: string
           last_sync_error: string | null
+          project_revision: string
         }
       | undefined
     db.close()
 
     expect(row).toEqual({
-      sync_status: "error",
-      last_sync_error: "customer sync failed",
+      sync_status: "active",
+      last_sync_error: null,
+      project_revision: "rev-1",
+    })
+  })
+
+  it("reports stored error states without masking them as out_of_sync", async () => {
+    const { url, dbPath } = createTempDbUrl()
+    __testables.setSyncProjectImpl(async () => ({
+      projectRevision: "rev-1",
+      result: "success",
+      deploymentId: "dep-1",
+    }))
+
+    const layer = makeLayer(url)
+
+    await Effect.runPromise(
+      OrgTinybirdSettingsService.upsert(
+        asOrgId("org_a"),
+        asUserId("user_a"),
+        adminRoles,
+        {
+          host: "https://customer.tinybird.co",
+          token: "secret-token",
+        },
+      ).pipe(Effect.provide(layer)),
+    )
+
+    const db = new Database(dbPath)
+    db
+      .query(
+        "UPDATE org_tinybird_settings SET sync_status = ?, last_sync_error = ? WHERE org_id = ?",
+      )
+      .run("error", "customer sync failed", "org_a")
+    db.close()
+
+    __testables.setGetProjectRevisionImpl(async () => "rev-2")
+
+    const result = await Effect.runPromise(
+      OrgTinybirdSettingsService.get(asOrgId("org_a"), adminRoles).pipe(
+        Effect.provide(layer),
+      ),
+    )
+
+    expect(result).toEqual({
+      configured: true,
+      host: "https://customer.tinybird.co",
+      syncStatus: "error",
+      lastSyncAt: expect.any(String),
+      lastSyncError: "customer sync failed",
+      projectRevision: "rev-1",
     })
   })
 })

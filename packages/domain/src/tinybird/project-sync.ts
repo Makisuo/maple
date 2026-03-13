@@ -1,12 +1,5 @@
-import { createHash } from "node:crypto"
-import { resolve } from "node:path"
+import { datasources, pipes, projectRevision } from "../generated/tinybird-project-manifest"
 
-const REPO_ROOT = resolve(new URL("../../../../", import.meta.url).pathname)
-const INCLUDE_PATHS = [
-  resolve(REPO_ROOT, "packages/domain/src/tinybird/datasources.ts"),
-  resolve(REPO_ROOT, "packages/domain/src/tinybird/endpoints.ts"),
-  resolve(REPO_ROOT, "packages/domain/src/tinybird/materializations.ts"),
-] as const
 const POLL_INTERVAL_MS = 2_000
 const MAX_POLL_ATTEMPTS = 300
 
@@ -49,21 +42,10 @@ export interface TinybirdProjectSyncResult {
   readonly deploymentId?: string
 }
 
-let buildPromise: Promise<TinybirdProjectBuild> | null = null
-
-const loadBuildFromInclude = async () => {
-  const module = await import(
-    new URL("../../../../node_modules/@tinybirdco/sdk/dist/generator/index.js", import.meta.url).href
-  )
-  return module.buildFromInclude as (input: {
-    includePaths: string[]
-    cwd: string
-  }) => Promise<{
-    resources: {
-      datasources: Array<{ name: string; content: string }>
-      pipes: Array<{ name: string; content: string }>
-    }
-  }>
+const bundledProject: TinybirdProjectBuild = {
+  datasources,
+  pipes,
+  projectRevision,
 }
 
 const normalizeBaseUrl = (raw: string) => raw.trim().replace(/\/+$/, "")
@@ -85,58 +67,13 @@ const toDeployErrorMessage = (body: DeployResponse, fallback: string): string =>
   return fallback
 }
 
-const createProjectRevision = (
-  datasources: ReadonlyArray<GeneratedResource>,
-  pipes: ReadonlyArray<GeneratedResource>,
-): string => {
-  const digest = createHash("sha256")
+export const buildTinybirdProject = async (): Promise<TinybirdProjectBuild> => bundledProject
 
-  for (const resource of [...datasources].sort((left, right) => left.name.localeCompare(right.name))) {
-    digest.update(`datasource:${resource.name}\n${resource.content}\n`)
-  }
-
-  for (const resource of [...pipes].sort((left, right) => left.name.localeCompare(right.name))) {
-    digest.update(`pipe:${resource.name}\n${resource.content}\n`)
-  }
-
-  return digest.digest("hex")
-}
-
-export const buildTinybirdProject = async (): Promise<TinybirdProjectBuild> => {
-  if (!buildPromise) {
-    buildPromise = (async () => {
-      const buildFromInclude = await loadBuildFromInclude()
-      const buildResult = await buildFromInclude({
-        includePaths: [...INCLUDE_PATHS],
-        cwd: REPO_ROOT,
-      })
-      const datasources = buildResult.resources.datasources.map((resource: { name: string; content: string }) => ({
-        name: resource.name,
-        content: resource.content,
-      }))
-      const pipes = buildResult.resources.pipes.map((resource: { name: string; content: string }) => ({
-        name: resource.name,
-        content: resource.content,
-      }))
-
-      return {
-        datasources,
-        pipes,
-        projectRevision: createProjectRevision(datasources, pipes),
-      } satisfies TinybirdProjectBuild
-    })()
-  }
-
-  return buildPromise
-}
-
-export const getCurrentTinybirdProjectRevision = async (): Promise<string> =>
-  (await buildTinybirdProject()).projectRevision
+export const getCurrentTinybirdProjectRevision = async (): Promise<string> => projectRevision
 
 export const syncTinybirdProject = async (
   params: TinybirdProjectSyncParams,
 ): Promise<TinybirdProjectSyncResult> => {
-  const { datasources, pipes, projectRevision } = await buildTinybirdProject()
   const baseUrl = normalizeBaseUrl(params.baseUrl)
 
   const formData = new FormData()

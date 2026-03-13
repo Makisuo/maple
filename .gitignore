@@ -1,5 +1,6 @@
 .tinyb
 .tinybird-generated
+.tinybird-entities-*.mjs
 .terraform
 .DS_Store
 .claude

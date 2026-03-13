@@ -3,7 +3,7 @@ import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
 import { IsoDateTimeString } from "../primitives"
 
-export const OrgTinybirdSyncStatus = Schema.Literal("active", "error")
+export const OrgTinybirdSyncStatus = Schema.Literal("active", "error", "out_of_sync")
 export type OrgTinybirdSyncStatus = Schema.Schema.Type<typeof OrgTinybirdSyncStatus>
 
 export class OrgTinybirdSettingsResponse extends Schema.Class<OrgTinybirdSettingsResponse>(

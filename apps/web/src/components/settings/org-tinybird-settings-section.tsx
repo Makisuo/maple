@@ -120,6 +120,9 @@ export function OrgTinybirdSettingsSection({
     if (!configured) {
       return <Badge variant="secondary">Default Maple Tinybird</Badge>
     }
+    if (settings?.syncStatus === "out_of_sync") {
+      return <Badge variant="secondary">Out of sync</Badge>
+    }
     if (settings?.syncStatus === "active") {
       return <Badge variant="outline">Connected</Badge>
     }
@@ -245,6 +248,12 @@ export function OrgTinybirdSettingsSection({
                     <span className="text-muted-foreground">Project revision</span>
                     <span className="font-mono text-xs">{settings?.projectRevision ?? "Not configured"}</span>
                   </div>
+                  {settings?.syncStatus === "out_of_sync" ? (
+                    <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-800">
+                      Maple&apos;s Tinybird project definition changed since this org last synced. Resync the
+                      project to keep BYO queries working.
+                    </div>
+                  ) : null}
                   {settings?.lastSyncError ? (
                     <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-destructive">
                       {settings.lastSyncError}

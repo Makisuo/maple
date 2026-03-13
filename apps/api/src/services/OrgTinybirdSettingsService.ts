@@ -110,6 +110,8 @@ const normalizeToken = (
 const isOrgAdmin = (roles: ReadonlyArray<RoleName>) =>
   roles.includes("root" as RoleName) || roles.includes("org:admin" as RoleName)
 
+const OUT_OF_SYNC_MESSAGE = "BYO Tinybird project is out of sync with Maple. Please resync the project in settings."
+
 export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettingsService>()(
   "OrgTinybirdSettingsService",
   {
@@ -156,13 +158,37 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
         )
       })
 
+      const getCurrentProjectRevision = Effect.fn("OrgTinybirdSettingsService.getCurrentProjectRevision")(function* () {
+        return yield* Effect.tryPromise({
+          try: () => getProjectRevisionImpl(),
+          catch: (error) =>
+            new OrgTinybirdSettingsSyncError({
+              message: error instanceof Error ? error.message : "Failed to load Tinybird project revision",
+            }),
+        })
+      })
+
+      const resolveSyncStatus = (
+        row: typeof orgTinybirdSettings.$inferSelect | null | undefined,
+        currentRevision: string | null,
+      ) => {
+        if (row == null) return null
+        if (row.syncStatus === "error") return "error" as const
+        if (row.syncStatus === "active" && currentRevision !== null && row.projectRevision !== currentRevision) {
+          return "out_of_sync" as const
+        }
+        if (row.syncStatus === "active") return "active" as const
+        return null
+      }
+
       const toResponse = (
         row: typeof orgTinybirdSettings.$inferSelect | null | undefined,
+        currentRevision: string | null,
       ): OrgTinybirdSettingsResponse =>
         new OrgTinybirdSettingsResponse({
           configured: row != null,
           host: row?.host ?? null,
-          syncStatus: row?.syncStatus === "active" || row?.syncStatus === "error" ? row.syncStatus : null,
+          syncStatus: resolveSyncStatus(row, currentRevision),
           lastSyncAt:
             row?.lastSyncAt == null
               ? null
@@ -188,28 +214,18 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
         })
       })
 
-      const updateSyncFailure = Effect.fn("OrgTinybirdSettingsService.updateSyncFailure")(function* (
-        orgId: OrgId,
-        message: string,
-      ) {
-        yield* db
-          .update(orgTinybirdSettings)
-          .set({
-            syncStatus: "error",
-            lastSyncError: message,
-            updatedAt: Date.now(),
-          })
-          .where(eq(orgTinybirdSettings.orgId, orgId))
-          .pipe(Effect.mapError(toPersistenceError))
-      })
-
       const get = Effect.fn("OrgTinybirdSettingsService.get")(function* (
         orgId: OrgId,
         roles: ReadonlyArray<RoleName>,
       ) {
         yield* requireAdmin(roles)
         const row = yield* selectRow(orgId)
-        return toResponse(Option.getOrUndefined(row))
+        const currentRevision = yield* getCurrentProjectRevision().pipe(
+          Effect.map((revision) => revision as string | null),
+          Effect.catchTag("OrgTinybirdSettingsSyncError", () => Effect.succeed(null)),
+        )
+
+        return toResponse(Option.getOrUndefined(row), currentRevision)
       })
 
       const upsert = Effect.fn("OrgTinybirdSettingsService.upsert")(function* (
@@ -272,7 +288,7 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
           .pipe(Effect.mapError(toPersistenceError))
 
         const stored = yield* requireRow(orgId)
-        return toResponse(stored)
+        return toResponse(stored, syncResult.projectRevision)
       })
 
       const deleteSettings = Effect.fn("OrgTinybirdSettingsService.delete")(function* (
@@ -323,7 +339,7 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
           .pipe(Effect.mapError(toPersistenceError))
 
         const updated = yield* requireRow(orgId)
-        return toResponse(updated)
+        return toResponse(updated, syncResult.projectRevision)
       })
 
       const resolveRuntimeConfig = Effect.fn("OrgTinybirdSettingsService.resolveRuntimeConfig")(function* (
@@ -342,6 +358,15 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
           )
         }
 
+        const currentRevision = yield* getCurrentProjectRevision()
+        if (row.value.projectRevision !== currentRevision) {
+          return yield* Effect.fail(
+            new OrgTinybirdSettingsSyncError({
+              message: OUT_OF_SYNC_MESSAGE,
+            }),
+          )
+        }
+
         const token = yield* decryptToken(
           {
             ciphertext: row.value.tokenCiphertext,
@@ -350,43 +375,6 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
           },
           encryptionKey,
         )
-        const currentRevision = yield* Effect.tryPromise({
-          try: () => getProjectRevisionImpl(),
-          catch: (error) =>
-            new OrgTinybirdSettingsSyncError({
-              message: error instanceof Error ? error.message : "Failed to load Tinybird project revision",
-            }),
-        })
-
-        if (row.value.projectRevision !== currentRevision) {
-          const syncAttempt = yield* syncCandidate(row.value.host, token).pipe(
-            Effect.catchTag("OrgTinybirdSettingsSyncError", (error) =>
-              Effect.gen(function* () {
-                yield* updateSyncFailure(orgId, error.message)
-                return yield* Effect.fail(error)
-              }),
-            ),
-          )
-
-          const now = Date.now()
-          yield* db
-            .update(orgTinybirdSettings)
-            .set({
-              syncStatus: "active",
-              lastSyncAt: now,
-              lastSyncError: null,
-              projectRevision: syncAttempt.projectRevision,
-              updatedAt: now,
-            })
-            .where(eq(orgTinybirdSettings.orgId, orgId))
-            .pipe(Effect.mapError(toPersistenceError))
-
-          return Option.some({
-            host: row.value.host,
-            token,
-            projectRevision: syncAttempt.projectRevision,
-          })
-        }
 
         return Option.some({
           host: row.value.host,

@@ -10,6 +10,8 @@
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "tinybird:manifest": "bun run ./scripts/generate-tinybird-project-manifest.ts",
+    "tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
     "deploy:prd": "bun scripts/deploy-stack.ts deploy prd",
     "destroy:prd": "bun scripts/deploy-stack.ts destroy prd",
     "deploy:stg": "bun scripts/deploy-stack.ts deploy stg",
