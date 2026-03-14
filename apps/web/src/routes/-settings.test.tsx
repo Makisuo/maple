@@ -148,6 +148,7 @@ describe("SettingsPage BYO entitlement gating", () => {
   })
 
   it("shows Data Platform when bringyourowncloud is attached", () => {
+    vi.spyOn(SettingsRoute.Route, "useSearch").mockReturnValue({ tab: "data-platform" })
     render(<SettingsRoute.SettingsPage />)
 
     expect(screen.getByRole("button", { name: "Data Platform" })).toBeTruthy()
