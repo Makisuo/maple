@@ -139,7 +139,7 @@ describe("SettingsPage BYO entitlement gating", () => {
     mocks.isCustomerLoading = false
     mocks.orgSectionProps = []
     mocks.tabsValue = ""
-    vi.spyOn(SettingsRoute.Route, "useSearch").mockReturnValue({ tab: "data-platform" })
+    vi.spyOn(SettingsRoute.Route, "useSearch").mockReturnValue({ tab: "members" })
   })
 
   afterEach(() => {

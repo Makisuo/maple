@@ -2,6 +2,7 @@ import { datasources, pipes, projectRevision } from "../generated/tinybird-proje
 
 const POLL_INTERVAL_MS = 2_000
 const MAX_POLL_ATTEMPTS = 300
+const FETCH_TIMEOUT_MS = 30_000
 
 interface GeneratedResource {
   readonly name: string
@@ -98,6 +99,7 @@ export const syncTinybirdProject = async (
       method: "POST",
       headers: { Authorization: `Bearer ${params.token}` },
       body: formData,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     },
   )
   const deployBody = (await deployRes.json()) as DeployResponse
@@ -124,6 +126,7 @@ export const syncTinybirdProject = async (
 
     const statusRes = await fetch(`${baseUrl}/v1/deployments/${deploymentId}`, {
       headers: { Authorization: `Bearer ${params.token}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
     if (!statusRes.ok) {
       throw new Error(`Tinybird deployment status check failed: ${statusRes.status} ${statusRes.statusText}`)
@@ -146,6 +149,7 @@ export const syncTinybirdProject = async (
   const liveRes = await fetch(`${baseUrl}/v1/deployments/${deploymentId}/set-live`, {
     method: "POST",
     headers: { Authorization: `Bearer ${params.token}` },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   })
   if (!liveRes.ok) {
     throw new Error(`Failed to set Tinybird deployment live: ${liveRes.status} ${await liveRes.text()}`)

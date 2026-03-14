@@ -5,6 +5,15 @@ import { Effect, Option, Redacted } from "effect"
 import { Env } from "./Env"
 import type { TenantContext } from "./AuthService"
 import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
+
+const CLIENT_CACHE_TTL_MS = 30_000
+interface CachedClient {
+  client: ReturnType<typeof createClient>
+  host: string
+  token: string
+  expiresAt: number
+}
+const clientCache = new Map<string, CachedClient>()
 import {
   type CustomLogsBreakdownOutput,
   type CustomLogsBreakdownParams,
@@ -116,6 +125,17 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
         pipe,
       })
 
+    const getCachedOrCreateClient = (orgId: string, host: string, token: string) => {
+      const now = Date.now()
+      const cached = clientCache.get(orgId)
+      if (cached && cached.host === host && cached.token === token && cached.expiresAt > now) {
+        return cached.client
+      }
+      const client = tinybirdClientFactory(host, token)
+      clientCache.set(orgId, { client, host, token, expiresAt: now + CLIENT_CACHE_TTL_MS })
+      return client
+    }
+
     const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
       tenant: TenantContext,
       pipe: TinybirdQueryRequest["pipe"],
@@ -125,10 +145,10 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
       )
 
       if (Option.isSome(override)) {
-        return tinybirdClientFactory(override.value.host, override.value.token)
+        return getCachedOrCreateClient(tenant.orgId, override.value.host, override.value.token)
       }
 
-      return tinybirdClientFactory(env.TINYBIRD_HOST, Redacted.value(env.TINYBIRD_TOKEN))
+      return getCachedOrCreateClient("__managed__", env.TINYBIRD_HOST, Redacted.value(env.TINYBIRD_TOKEN))
     })
 
     const runPipe = Effect.fn("TinybirdService.runPipe")(function* <
@@ -318,8 +338,10 @@ export class TinybirdService extends Effect.Service<TinybirdService>()("Tinybird
 export const __testables = {
   setClientFactory: (factory: typeof createClient) => {
     tinybirdClientFactory = factory
+    clientCache.clear()
   },
   reset: () => {
     tinybirdClientFactory = createClient
+    clientCache.clear()
   },
 }

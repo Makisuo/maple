@@ -110,6 +110,17 @@ export function OrgTinybirdSettingsSection({
   const isBusy = isSaving || isResyncing || isDisabling
   const configured = settings?.configured === true
 
+  const isValidHost = useMemo(() => {
+    const trimmed = host.trim()
+    if (trimmed.length === 0) return false
+    try {
+      const url = new URL(trimmed)
+      return url.protocol === "https:" || url.protocol === "http:"
+    } catch {
+      return false
+    }
+  }, [host])
+
   useEffect(() => {
     if (settings?.host) {
       setHost(settings.host)
@@ -220,6 +231,11 @@ export function OrgTinybirdSettingsSection({
                     onChange={(event) => setHost(event.target.value)}
                     disabled={isBusy}
                   />
+                  {host.trim().length > 0 && !isValidHost ? (
+                    <p className="text-destructive text-xs">
+                      Enter a valid URL (e.g. https://api.tinybird.co)
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-2">
@@ -264,7 +280,7 @@ export function OrgTinybirdSettingsSection({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => void handleSave()} disabled={isBusy || host.trim().length === 0 || (!configured && token.trim().length === 0)}>
+                  <Button onClick={() => void handleSave()} disabled={isBusy || !isValidHost || (!configured && token.trim().length === 0)}>
                     {isSaving ? "Saving..." : configured ? "Update connection" : "Save connection"}
                   </Button>
                   <Button

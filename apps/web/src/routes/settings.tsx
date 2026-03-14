@@ -16,7 +16,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 const SettingsSearch = Schema.Struct({
   tab: Schema.optionalWith(
     Schema.Literal("members", "billing", "data-platform"),
-    { default: () => "data-platform" as const },
+    { default: () => "members" as const },
   ),
 })
 
