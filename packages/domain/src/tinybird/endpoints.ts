@@ -1738,25 +1738,6 @@ export const serviceOverview = defineEndpoint("service_overview", {
   },
   nodes: [
     node({
-      name: "error_traces_by_service",
-      sql: `
-        SELECT ServiceName, TraceId
-        FROM traces
-        WHERE StatusCode = 'Error'
-          AND OrgId = {{String(org_id, "")}}
-        {% if defined(start_time) %}
-          AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-        {% end %}
-        {% if defined(end_time) %}
-          AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-        {% end %}
-        {% if defined(environments) %}
-          AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
-        {% end %}
-        GROUP BY ServiceName, TraceId
-      `,
-    }),
-    node({
       name: "service_overview_node",
       sql: `
         SELECT
@@ -1764,7 +1745,7 @@ export const serviceOverview = defineEndpoint("service_overview", {
           ResourceAttributes['deployment.environment'] AS environment,
           ResourceAttributes['deployment.commit_sha'] AS commitSha,
           count() AS throughput,
-          countIf((ServiceName, TraceId) IN (SELECT ServiceName, TraceId FROM error_traces_by_service)) AS errorCount,
+          countIf(StatusCode = 'Error') AS errorCount,
           count() AS spanCount,
           quantile(0.50)(Duration / 1000000) AS p50LatencyMs,
           quantile(0.95)(Duration / 1000000) AS p95LatencyMs,
@@ -2342,19 +2323,7 @@ export const customTracesTimeseries = defineEndpoint("custom_traces_timeseries",
           quantile(0.5)(Duration) / 1000000 AS p50Duration,
           quantile(0.95)(Duration) / 1000000 AS p95Duration,
           quantile(0.99)(Duration) / 1000000 AS p99Duration,
-          {% if defined(root_only) %}
-            if(count() > 0,
-              countIf(TraceId IN (
-                SELECT TraceId FROM traces
-                WHERE StatusCode = 'Error'
-                  AND OrgId = {{String(org_id, "")}}
-                  AND Timestamp >= {{DateTime(start_time)}}
-                  AND Timestamp <= {{DateTime(end_time)}}
-                  {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
-              )) * 100.0 / count(), 0) AS errorRate
-          {% else %}
-            if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate
-          {% end %}
+          if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate
         FROM traces
         WHERE Timestamp >= {{DateTime(start_time)}}
           AND OrgId = {{String(org_id, "")}}
@@ -2442,19 +2411,7 @@ export const customTracesBreakdown = defineEndpoint("custom_traces_breakdown", {
           quantile(0.5)(Duration) / 1000000 AS p50Duration,
           quantile(0.95)(Duration) / 1000000 AS p95Duration,
           quantile(0.99)(Duration) / 1000000 AS p99Duration,
-          {% if defined(root_only) %}
-            if(count() > 0,
-              countIf(TraceId IN (
-                SELECT TraceId FROM traces
-                WHERE StatusCode = 'Error'
-                  AND OrgId = {{String(org_id, "")}}
-                  AND Timestamp >= {{DateTime(start_time)}}
-                  AND Timestamp <= {{DateTime(end_time)}}
-                  {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
-              )) * 100.0 / count(), 0) AS errorRate
-          {% else %}
-            if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate
-          {% end %}
+          if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate
         FROM traces
         WHERE Timestamp >= {{DateTime(start_time)}}
           AND OrgId = {{String(org_id, "")}}
