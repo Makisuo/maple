@@ -21,7 +21,6 @@ export interface ErrorByType {
   affectedServicesCount: number
   firstSeen: Date
   lastSeen: Date
-  affectedServices: string[]
 }
 
 export interface ErrorsByTypeResponse {
@@ -47,7 +46,6 @@ function transformErrorByType(raw: ErrorsByTypeOutput): ErrorByType {
     affectedServicesCount: Number(raw.affectedServicesCount),
     firstSeen: new Date(raw.firstSeen),
     lastSeen: new Date(raw.lastSeen),
-    affectedServices: raw.affectedServices,
   }
 }
 

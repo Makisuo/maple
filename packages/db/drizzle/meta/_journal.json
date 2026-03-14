@@ -57,6 +57,13 @@
       "when": 1773200000000,
       "tag": "0007_tense_captain_britain",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1773800000000,
+      "tag": "0008_grey_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }

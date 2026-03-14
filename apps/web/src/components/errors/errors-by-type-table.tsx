@@ -80,16 +80,24 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
           </div>
         </div>
 
-        <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1">Affected Services</p>
-          <div className="flex flex-wrap gap-1.5">
-            {errorRow.affectedServices.map((service) => (
-              <Badge key={service} variant="outline" className="text-xs">
-                {service}
-              </Badge>
-            ))}
-          </div>
-        </div>
+        {Result.builder(detailResult)
+          .onSuccess((response) => {
+            const allServices = [...new Set(response.data.flatMap((t) => t.services))]
+            if (allServices.length === 0) return null
+            return (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Affected Services</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {allServices.map((service) => (
+                    <Badge key={service} variant="outline" className="text-xs">
+                      {service}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )
+          })
+          .render()}
       </div>
 
       <div>
@@ -101,7 +109,6 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
               hasError: true,
               startTime: filters.startTime,
               endTime: filters.endTime,
-              services: errorRow.affectedServices.length === 1 ? errorRow.affectedServices : undefined,
             }}
             className="text-xs text-primary hover:underline"
           >

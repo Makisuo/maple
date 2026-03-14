@@ -1,5 +1,5 @@
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Cause, Exit, Option } from "effect"
 import { toast } from "sonner"
 
@@ -26,7 +26,7 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@maple/ui/components/ui/alert-dialog"
-import { AlertWarningIcon } from "@/components/icons"
+import { AlertWarningIcon, LoaderIcon } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
 function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
@@ -90,6 +90,10 @@ export function OrgTinybirdSettingsSection({
   const settingsResult = useAtomValue(settingsQueryAtom)
   const refreshSettings = useAtomRefresh(settingsQueryAtom)
 
+  const deploymentStatusAtom = MapleApiAtomClient.query("orgTinybirdSettings", "deploymentStatus", {})
+  const deploymentStatusResult = useAtomValue(deploymentStatusAtom)
+  const refreshDeploymentStatus = useAtomRefresh(deploymentStatusAtom)
+
   const upsertMutation = useAtomSet(
     MapleApiAtomClient.mutation("orgTinybirdSettings", "upsert"),
     { mode: "promiseExit" },
@@ -107,8 +111,39 @@ export function OrgTinybirdSettingsSection({
     .onSuccess((value) => value)
     .orElse(() => null)
 
-  const isBusy = isSaving || isResyncing || isDisabling
+  const deploymentStatus = Result.builder(deploymentStatusResult)
+    .onSuccess((value) => value)
+    .orElse(() => null)
+
+  const isDeploying = deploymentStatus?.hasDeployment === true && deploymentStatus?.isTerminal === false
+  const isBusy = isSaving || isResyncing || isDisabling || isDeploying
   const configured = settings?.configured === true
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return
+    pollRef.current = setInterval(() => {
+      refreshDeploymentStatus()
+    }, 3000)
+  }, [refreshDeploymentStatus])
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isDeploying) {
+      startPolling()
+    } else if (pollRef.current) {
+      stopPolling()
+      refreshSettings()
+    }
+    return stopPolling
+  }, [isDeploying, startPolling, stopPolling, refreshSettings])
 
   const isValidHost = useMemo(() => {
     const trimmed = host.trim()
@@ -130,6 +165,14 @@ export function OrgTinybirdSettingsSection({
   }, [settings?.configured, settings?.host])
 
   const statusBadge = useMemo(() => {
+    if (isDeploying) {
+      return (
+        <Badge variant="secondary">
+          <LoaderIcon size={12} className="mr-1 animate-spin" />
+          Deploying
+        </Badge>
+      )
+    }
     if (!configured) {
       return <Badge variant="secondary">Default Maple Tinybird</Badge>
     }
@@ -141,7 +184,7 @@ export function OrgTinybirdSettingsSection({
     }
 
     return <Badge variant="destructive">Needs attention</Badge>
-  }, [configured, settings?.syncStatus])
+  }, [configured, isDeploying, settings?.syncStatus])
 
   async function handleSave() {
     setIsSaving(true)
@@ -156,6 +199,7 @@ export function OrgTinybirdSettingsSection({
     if (Exit.isSuccess(result)) {
       setToken("")
       refreshSettings()
+      refreshDeploymentStatus()
       toast.success(configured ? "Tinybird connection updated" : "Tinybird connection saved")
       return
     }
@@ -170,6 +214,7 @@ export function OrgTinybirdSettingsSection({
 
     if (Exit.isSuccess(result)) {
       refreshSettings()
+      refreshDeploymentStatus()
       toast.success("Tinybird project synced")
       return
     }
@@ -266,6 +311,15 @@ export function OrgTinybirdSettingsSection({
                     <span className="text-muted-foreground">Project revision</span>
                     <span className="font-mono text-xs">{settings?.projectRevision ?? "Not configured"}</span>
                   </div>
+                  {isDeploying ? (
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Deployment</span>
+                      <span className="flex items-center gap-1.5 text-xs">
+                        <LoaderIcon size={12} className="animate-spin" />
+                        <span className="capitalize">{deploymentStatus?.status ?? "In progress"}</span>
+                      </span>
+                    </div>
+                  ) : null}
                   {settings?.syncStatus === "out_of_sync" ? (
                     <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-800">
                       Maple&apos;s Tinybird project definition changed since this org last synced. Resync the

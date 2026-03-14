@@ -193,6 +193,35 @@ export const serviceMapSpans = defineDatasource("service_map_spans", {
 export type ServiceMapSpansRow = InferRow<typeof serviceMapSpans>;
 
 /**
+ * Lightweight projection of root spans for service overview queries.
+ * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes.
+ * Only stores root spans (ParentSpanId = ''), sorted by (OrgId, ServiceName, Timestamp).
+ * Populated by materialized view, not direct ingestion.
+ */
+export const serviceOverviewSpans = defineDatasource("service_overview_spans", {
+  description:
+    "Lightweight projection of root spans for service overview queries. Pre-extracts deployment attributes from ResourceAttributes. Populated by materialized view.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Timestamp: t.dateTime(),
+    ServiceName: t.string().lowCardinality(),
+    Duration: t.uint64(),
+    StatusCode: t.string().lowCardinality(),
+    TraceState: t.string(),
+    DeploymentEnv: t.string().lowCardinality(),
+    CommitSha: t.string().lowCardinality(),
+  },
+  engine: engine.mergeTree({
+    partitionKey: "toDate(Timestamp)",
+    sortingKey: ["OrgId", "ServiceName", "Timestamp"],
+    ttl: "Timestamp + INTERVAL 90 DAY",
+  }),
+});
+
+export type ServiceOverviewSpansRow = InferRow<typeof serviceOverviewSpans>;
+
+/**
  * OpenTelemetry sum/counter metrics datasource
  */
 export const metricsSum = defineDatasource("metrics_sum", {

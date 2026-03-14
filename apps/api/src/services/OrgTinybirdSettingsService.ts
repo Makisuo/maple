@@ -1,6 +1,7 @@
 import { SqliteDrizzle } from "@effect/sql-drizzle/Sqlite"
 import {
   IsoDateTimeString,
+  OrgTinybirdDeploymentStatusResponse,
   OrgTinybirdSettingsEncryptionError,
   OrgTinybirdSettingsForbiddenError,
   OrgTinybirdSettingsPersistenceError,
@@ -12,7 +13,7 @@ import {
   type RoleName,
   UserId,
 } from "@maple/domain/http"
-import { getCurrentTinybirdProjectRevision, syncTinybirdProject } from "@maple/domain/tinybird-project-sync"
+import { getCurrentTinybirdProjectRevision, getDeploymentStatus as getDeploymentStatusFn, syncTinybirdProject } from "@maple/domain/tinybird-project-sync"
 import { orgTinybirdSettings } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
@@ -34,6 +35,7 @@ interface RuntimeTinybirdConfig {
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 let syncProjectImpl = syncTinybirdProject
 let getProjectRevisionImpl = getCurrentTinybirdProjectRevision
+let getDeploymentStatusImpl = getDeploymentStatusFn
 
 const toPersistenceError = (error: unknown) =>
   new OrgTinybirdSettingsPersistenceError({
@@ -265,6 +267,7 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
             lastSyncAt: now,
             lastSyncError: null,
             projectRevision: syncResult.projectRevision,
+            lastDeploymentId: syncResult.deploymentId ?? null,
             createdAt: Option.isSome(existing) ? existing.value.createdAt : now,
             updatedAt: now,
             createdBy: Option.isSome(existing) ? existing.value.createdBy : userId,
@@ -281,6 +284,7 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
               lastSyncAt: now,
               lastSyncError: null,
               projectRevision: syncResult.projectRevision,
+              lastDeploymentId: syncResult.deploymentId ?? null,
               updatedAt: now,
               updatedBy: userId,
             },
@@ -332,6 +336,7 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
             lastSyncAt: now,
             lastSyncError: null,
             projectRevision: syncResult.projectRevision,
+            lastDeploymentId: syncResult.deploymentId ?? null,
             updatedAt: now,
             updatedBy: userId,
           })
@@ -383,11 +388,54 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
         })
       })
 
+      const getDeploymentStatus = Effect.fn("OrgTinybirdSettingsService.getDeploymentStatus")(function* (
+        orgId: OrgId,
+        roles: ReadonlyArray<RoleName>,
+      ) {
+        yield* requireAdmin(roles)
+        const row = yield* requireRow(orgId)
+
+        if (!row.lastDeploymentId) {
+          return new OrgTinybirdDeploymentStatusResponse({
+            hasDeployment: false,
+            deploymentId: null,
+            status: null,
+            isTerminal: null,
+          })
+        }
+
+        const token = yield* decryptToken(
+          { ciphertext: row.tokenCiphertext, iv: row.tokenIv, tag: row.tokenTag },
+          encryptionKey,
+        )
+
+        const result = yield* Effect.tryPromise({
+          try: () =>
+            getDeploymentStatusImpl({
+              baseUrl: row.host,
+              token,
+              deploymentId: row.lastDeploymentId!,
+            }),
+          catch: (error) =>
+            new OrgTinybirdSettingsSyncError({
+              message: error instanceof Error ? error.message : "Failed to check deployment status",
+            }),
+        })
+
+        return new OrgTinybirdDeploymentStatusResponse({
+          hasDeployment: true,
+          deploymentId: result.deploymentId,
+          status: result.status,
+          isTerminal: result.isTerminal,
+        })
+      })
+
       return {
         get,
         upsert,
         delete: deleteSettings,
         resync,
+        getDeploymentStatus,
         resolveRuntimeConfig,
       }
     }),
@@ -403,8 +451,12 @@ export const __testables = {
   setGetProjectRevisionImpl: (impl: typeof getCurrentTinybirdProjectRevision) => {
     getProjectRevisionImpl = impl
   },
+  setGetDeploymentStatusImpl: (impl: typeof getDeploymentStatusFn) => {
+    getDeploymentStatusImpl = impl
+  },
   reset: () => {
     syncProjectImpl = syncTinybirdProject
     getProjectRevisionImpl = getCurrentTinybirdProjectRevision
+    getDeploymentStatusImpl = getDeploymentStatusFn
   },
 }

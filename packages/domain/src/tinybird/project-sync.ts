@@ -68,6 +68,34 @@ const toDeployErrorMessage = (body: DeployResponse, fallback: string): string =>
   return fallback
 }
 
+export interface TinybirdDeploymentStatus {
+  readonly deploymentId: string
+  readonly status: string
+  readonly isTerminal: boolean
+}
+
+const TERMINAL_STATUSES = new Set(["live", "data_ready", "failed", "error"])
+
+export const getDeploymentStatus = async (
+  params: TinybirdProjectSyncParams & { readonly deploymentId: string },
+): Promise<TinybirdDeploymentStatus> => {
+  const baseUrl = normalizeBaseUrl(params.baseUrl)
+  const res = await fetch(`${baseUrl}/v1/deployments/${params.deploymentId}`, {
+    headers: { Authorization: `Bearer ${params.token}` },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  })
+  if (!res.ok) {
+    throw new Error(`Deployment status check failed: ${res.status} ${res.statusText}`)
+  }
+  const body = (await res.json()) as { deployment?: { status?: string } }
+  const status = body.deployment?.status ?? "unknown"
+  return {
+    deploymentId: params.deploymentId,
+    status,
+    isTerminal: TERMINAL_STATUSES.has(status),
+  }
+}
+
 export const buildTinybirdProject = async (): Promise<TinybirdProjectBuild> => bundledProject
 
 export const getCurrentTinybirdProjectRevision = async (): Promise<string> => projectRevision

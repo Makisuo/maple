@@ -139,19 +139,19 @@ export const getLogsFacetsResultAtom = makeQueryAtomFamily(getLogsFacets, {
 })
 
 export const getErrorsByTypeResultAtom = makeQueryAtomFamily(getErrorsByType, {
-  staleTime: 30_000,
+  staleTime: 60_000,
 })
 
 export const getErrorDetailTracesResultAtom = makeQueryAtomFamily(getErrorDetailTraces, {
-  staleTime: 30_000,
+  staleTime: 120_000,
 })
 
 export const getErrorsFacetsResultAtom = makeQueryAtomFamily(getErrorsFacets, {
-  staleTime: 30_000,
+  staleTime: 60_000,
 })
 
 export const getErrorsSummaryResultAtom = makeQueryAtomFamily(getErrorsSummary, {
-  staleTime: 30_000,
+  staleTime: 60_000,
 })
 
 export const listMetricsResultAtom = makeQueryAtomFamily(listMetrics, {

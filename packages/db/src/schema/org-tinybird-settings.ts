@@ -12,6 +12,7 @@ export const orgTinybirdSettings = sqliteTable(
     lastSyncAt: integer("last_sync_at", { mode: "number" }),
     lastSyncError: text("last_sync_error"),
     projectRevision: text("project_revision").notNull(),
+    lastDeploymentId: text("last_deployment_id"),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
     createdBy: text("created_by").notNull(),

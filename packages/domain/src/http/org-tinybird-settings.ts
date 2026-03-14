@@ -24,6 +24,15 @@ export class OrgTinybirdSettingsUpsertRequest extends Schema.Class<OrgTinybirdSe
   token: Schema.String,
 }) {}
 
+export class OrgTinybirdDeploymentStatusResponse extends Schema.Class<OrgTinybirdDeploymentStatusResponse>(
+  "OrgTinybirdDeploymentStatusResponse",
+)({
+  hasDeployment: Schema.Boolean,
+  deploymentId: Schema.NullOr(Schema.String),
+  status: Schema.NullOr(Schema.String),
+  isTerminal: Schema.NullOr(Schema.Boolean),
+}) {}
+
 export class OrgTinybirdSettingsDeleteResponse extends Schema.Class<OrgTinybirdSettingsDeleteResponse>(
   "OrgTinybirdSettingsDeleteResponse",
 )({
@@ -90,6 +99,15 @@ export class OrgTinybirdSettingsApiGroup extends HttpApiGroup.make("orgTinybirdS
   .add(
     HttpApiEndpoint.post("resync", "/resync")
       .addSuccess(OrgTinybirdSettingsResponse)
+      .addError(OrgTinybirdSettingsForbiddenError)
+      .addError(OrgTinybirdSettingsValidationError)
+      .addError(OrgTinybirdSettingsPersistenceError)
+      .addError(OrgTinybirdSettingsEncryptionError)
+      .addError(OrgTinybirdSettingsSyncError),
+  )
+  .add(
+    HttpApiEndpoint.get("deploymentStatus", "/deployment-status")
+      .addSuccess(OrgTinybirdDeploymentStatusResponse)
       .addError(OrgTinybirdSettingsForbiddenError)
       .addError(OrgTinybirdSettingsValidationError)
       .addError(OrgTinybirdSettingsPersistenceError)

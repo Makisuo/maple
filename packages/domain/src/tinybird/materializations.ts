@@ -2,6 +2,7 @@ import { defineMaterializedView, node } from "@tinybirdco/sdk";
 import {
   serviceUsage,
   serviceMapSpans,
+  serviceOverviewSpans,
 } from "./datasources";
 
 /**
@@ -262,4 +263,34 @@ export const serviceMapSpansMv = defineMaterializedView(
   }
 );
 
-
+/**
+ * Materialized view projecting root spans for service overview queries.
+ * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes
+ * so the service overview query avoids scanning heavy Map columns.
+ */
+export const serviceOverviewSpansMv = defineMaterializedView(
+  "service_overview_spans_mv",
+  {
+    description:
+      "Materialized view projecting root spans for service overview queries. Pre-extracts deployment attributes from ResourceAttributes at write time.",
+    datasource: serviceOverviewSpans,
+    nodes: [
+      node({
+        name: "service_overview_spans_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          toDateTime(Timestamp) AS Timestamp,
+          ServiceName,
+          Duration,
+          StatusCode,
+          TraceState,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ResourceAttributes['deployment.commit_sha'] AS CommitSha
+        FROM traces
+        WHERE ParentSpanId = ''
+      `,
+      }),
+    ],
+  }
+);
