@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@effect-atom/atom-react"
+import { useCustomer } from "autumn-js/react"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -9,6 +10,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { BillingSection } from "@/components/settings/billing-section"
 import { MembersSection } from "@/components/settings/members-section"
 import { OrgTinybirdSettingsSection } from "@/components/settings/org-tinybird-settings-section"
+import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
 const SettingsSearch = Schema.Struct({
@@ -23,23 +25,25 @@ export const Route = createFileRoute("/settings")({
   validateSearch: Schema.standardSchemaV1(SettingsSearch),
 })
 
-function SettingsPage() {
+export function SettingsPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
+  const { customer, isLoading: isCustomerLoading } = useCustomer()
 
   const isAdmin = Result.builder(sessionResult)
     .onSuccess((session) =>
       session.roles.some((role) => role === "root" || role === "org:admin"),
     )
     .orElse(() => false)
+  const canAccessDataPlatform = isAdmin && hasBringYourOwnCloudAddOn(customer)
 
   const availableTabs = isClerkAuthEnabled
-    ? (isAdmin ? ["members", "billing", "data-platform"] : ["members", "billing"])
-    : (isAdmin ? ["data-platform"] : [])
+    ? (canAccessDataPlatform ? ["members", "billing", "data-platform"] : ["members", "billing"])
+    : (canAccessDataPlatform ? ["data-platform"] : [])
   const activeTab = availableTabs.includes(search.tab) ? search.tab : availableTabs[0]
 
-  if (Result.isInitial(sessionResult)) {
+  if (Result.isInitial(sessionResult) || (isAdmin && isCustomerLoading)) {
     return (
       <DashboardLayout
         breadcrumbs={[{ label: "Settings" }]}
@@ -97,7 +101,7 @@ function SettingsPage() {
         ) : null}
         {availableTabs.includes("data-platform") ? (
           <TabsContent value="data-platform" className="pt-4">
-            <OrgTinybirdSettingsSection isAdmin={isAdmin} />
+            <OrgTinybirdSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessDataPlatform} />
           </TabsContent>
         ) : null}
       </Tabs>

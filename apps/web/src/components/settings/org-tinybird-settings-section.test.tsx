@@ -90,14 +90,14 @@ describe("OrgTinybirdSettingsSection", () => {
       },
     }
 
-    render(<OrgTinybirdSettingsSection isAdmin />)
+    render(<OrgTinybirdSettingsSection isAdmin hasEntitlement />)
 
     expect(screen.getByText("Out of sync")).toBeTruthy()
     expect(screen.getByText(/project definition changed since this org last synced/i)).toBeTruthy()
   })
 
   it("resyncs explicitly from the settings screen", async () => {
-    render(<OrgTinybirdSettingsSection isAdmin />)
+    render(<OrgTinybirdSettingsSection isAdmin hasEntitlement />)
 
     fireEvent.click(screen.getByRole("button", { name: "Resync project" }))
 
@@ -107,5 +107,11 @@ describe("OrgTinybirdSettingsSection", () => {
     expect(mocks.refreshSpy).toHaveBeenCalled()
     expect(mocks.toastSuccessSpy).toHaveBeenCalledWith("Tinybird project synced")
     expect(mocks.toastErrorSpy).not.toHaveBeenCalled()
+  })
+
+  it("renders nothing when the org lacks the BYO entitlement", () => {
+    const { container } = render(<OrgTinybirdSettingsSection isAdmin hasEntitlement={false} />)
+
+    expect(container.firstChild).toBeNull()
   })
 })

@@ -72,10 +72,12 @@ function formatSyncDate(value: string | null): string {
 
 interface OrgTinybirdSettingsSectionProps {
   isAdmin: boolean
+  hasEntitlement: boolean
 }
 
 export function OrgTinybirdSettingsSection({
   isAdmin,
+  hasEntitlement,
 }: OrgTinybirdSettingsSectionProps) {
   const [host, setHost] = useState("")
   const [token, setToken] = useState("")
@@ -181,7 +183,7 @@ export function OrgTinybirdSettingsSection({
     toast.error(getExitErrorMessage(result, "Failed to disable BYO Tinybird"))
   }
 
-  if (!isAdmin) {
+  if (!isAdmin || !hasEntitlement) {
     return null
   }
 

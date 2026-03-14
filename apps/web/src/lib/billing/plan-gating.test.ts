@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Customer } from "autumn-js"
-import { hasSelectedPlan } from "./plan-gating"
+import { hasBringYourOwnCloudAddOn, hasSelectedPlan } from "./plan-gating"
 
 function buildCustomer(products: Customer["products"]): Customer {
   return {
@@ -70,5 +70,85 @@ describe("hasSelectedPlan", () => {
     expect(hasSelectedPlan(addOnCustomer)).toBe(false)
     expect(hasSelectedPlan(defaultCustomer)).toBe(false)
     expect(hasSelectedPlan(scheduledCustomer)).toBe(false)
+  })
+})
+
+describe("hasBringYourOwnCloudAddOn", () => {
+  it("returns false when customer is missing", () => {
+    expect(hasBringYourOwnCloudAddOn(null)).toBe(false)
+    expect(hasBringYourOwnCloudAddOn(undefined)).toBe(false)
+  })
+
+  it("returns true for active bringyourowncloud add-on", () => {
+    const customer = buildCustomer([
+      buildProduct({
+        id: "bringyourowncloud",
+        is_add_on: true,
+      }),
+    ])
+
+    expect(hasBringYourOwnCloudAddOn(customer)).toBe(true)
+  })
+
+  it("returns true for trialing and past_due bringyourowncloud add-ons", () => {
+    const trialingCustomer = buildCustomer([
+      buildProduct({
+        id: "bringyourowncloud",
+        is_add_on: true,
+        status: "trialing" as Customer["products"][number]["status"],
+      }),
+    ])
+    const pastDueCustomer = buildCustomer([
+      buildProduct({
+        id: "bringyourowncloud",
+        is_add_on: true,
+        status: "past_due" as Customer["products"][number]["status"],
+      }),
+    ])
+
+    expect(hasBringYourOwnCloudAddOn(trialingCustomer)).toBe(true)
+    expect(hasBringYourOwnCloudAddOn(pastDueCustomer)).toBe(true)
+  })
+
+  it("returns false for inactive bringyourowncloud add-ons", () => {
+    const scheduledCustomer = buildCustomer([
+      buildProduct({
+        id: "bringyourowncloud",
+        is_add_on: true,
+        status: "scheduled" as Customer["products"][number]["status"],
+      }),
+    ])
+    const canceledCustomer = buildCustomer([
+      buildProduct({
+        id: "bringyourowncloud",
+        is_add_on: true,
+        status: "canceled" as Customer["products"][number]["status"],
+      }),
+    ])
+
+    expect(hasBringYourOwnCloudAddOn(scheduledCustomer)).toBe(false)
+    expect(hasBringYourOwnCloudAddOn(canceledCustomer)).toBe(false)
+  })
+
+  it("returns false for non-matching add-on ids", () => {
+    const customer = buildCustomer([
+      buildProduct({
+        id: "tinybird",
+        is_add_on: true,
+      }),
+    ])
+
+    expect(hasBringYourOwnCloudAddOn(customer)).toBe(false)
+  })
+
+  it("matches bringyourowncloud add-on ids case-insensitively", () => {
+    const customer = buildCustomer([
+      buildProduct({
+        id: "BringYourOwnCloud",
+        is_add_on: true,
+      }),
+    ])
+
+    expect(hasBringYourOwnCloudAddOn(customer)).toBe(true)
   })
 })
