@@ -222,6 +222,42 @@ export const serviceOverviewSpans = defineDatasource("service_overview_spans", {
 export type ServiceOverviewSpansRow = InferRow<typeof serviceOverviewSpans>;
 
 /**
+ * Pre-materialized root spans for the trace list view.
+ * Extracts HTTP attributes and normalizes span names at write time
+ * so the trace list query avoids scanning heavy Map columns and GROUP BY.
+ * Sorted by (OrgId, Timestamp, TraceId) for fast time-range pagination.
+ * Populated by materialized view, not direct ingestion.
+ */
+export const traceListMv = defineDatasource("trace_list_mv", {
+  description:
+    "Pre-materialized root spans for the trace list view. Extracts HTTP attributes and normalizes span names at write time. Populated by materialized view.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    TraceId: t.string(),
+    Timestamp: t.dateTime(),
+    ServiceName: t.string().lowCardinality(),
+    SpanName: t.string(),
+    SpanKind: t.string().lowCardinality(),
+    Duration: t.uint64(),
+    StatusCode: t.string().lowCardinality(),
+    HttpMethod: t.string().lowCardinality(),
+    HttpRoute: t.string(),
+    HttpStatusCode: t.string().lowCardinality(),
+    DeploymentEnv: t.string().lowCardinality(),
+    HasError: t.uint8(),
+    TraceState: t.string(),
+  },
+  engine: engine.mergeTree({
+    partitionKey: "toDate(Timestamp)",
+    sortingKey: ["OrgId", "Timestamp", "TraceId"],
+    ttl: "Timestamp + INTERVAL 90 DAY",
+  }),
+});
+
+export type TraceListMvRow = InferRow<typeof traceListMv>;
+
+/**
  * OpenTelemetry sum/counter metrics datasource
  */
 export const metricsSum = defineDatasource("metrics_sum", {

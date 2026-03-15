@@ -3,6 +3,7 @@ import {
   serviceUsage,
   serviceMapSpans,
   serviceOverviewSpans,
+  traceListMv,
 } from "./datasources";
 
 /**
@@ -294,3 +295,51 @@ export const serviceOverviewSpansMv = defineMaterializedView(
     ],
   }
 );
+
+/**
+ * Materialized view populating trace_list_mv from root spans.
+ * Pre-extracts HTTP attributes from SpanAttributes and normalizes span names
+ * so the trace list query avoids scanning heavy Map columns and GROUP BY.
+ */
+export const traceListMvMv = defineMaterializedView("trace_list_mv_mv", {
+  description:
+    "Populates trace_list_mv from root spans with pre-extracted HTTP attributes and normalized span names.",
+  datasource: traceListMv,
+  nodes: [
+    node({
+      name: "trace_list_mv_node",
+      sql: `
+        SELECT
+          OrgId,
+          TraceId,
+          toDateTime(Timestamp) AS Timestamp,
+          ServiceName,
+          if(
+            (SpanName LIKE 'http.server %' OR SpanName IN ('GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'))
+            AND (SpanAttributes['http.route'] != '' OR SpanAttributes['url.path'] != ''),
+            concat(
+              if(SpanName LIKE 'http.server %', replaceOne(SpanName, 'http.server ', ''), SpanName),
+              ' ',
+              if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], SpanAttributes['url.path'])
+            ),
+            SpanName
+          ) AS SpanName,
+          SpanKind,
+          Duration,
+          StatusCode,
+          if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) AS HttpMethod,
+          if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], if(SpanAttributes['url.path'] != '', SpanAttributes['url.path'], SpanAttributes['http.target'])) AS HttpRoute,
+          if(SpanAttributes['http.status_code'] != '', SpanAttributes['http.status_code'], SpanAttributes['http.response.status_code']) AS HttpStatusCode,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          toUInt8(
+            StatusCode = 'Error'
+            OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500)
+            OR (SpanAttributes['http.response.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.response.status_code']) >= 500)
+          ) AS HasError,
+          TraceState
+        FROM traces
+        WHERE ParentSpanId = ''
+      `,
+    }),
+  ],
+});

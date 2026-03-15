@@ -8,10 +8,11 @@ import {
 } from "@tinybirdco/sdk";
 
 /**
- * List traces endpoint - get aggregated trace info with pagination
+ * List traces endpoint - queries pre-materialized trace_list_mv for fast pagination.
+ * No GROUP BY needed — each row in trace_list_mv IS a trace (root span).
  */
 export const listTraces = defineEndpoint("list_traces", {
-  description: "List traces with pagination. Returns aggregated trace info.",
+  description: "List traces with pagination. Queries pre-materialized root span data for fast loading.",
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     limit: p.int32().optional(100).describe("Number of results"),
@@ -26,109 +27,36 @@ export const listTraces = defineEndpoint("list_traces", {
     http_method: p.string().optional().describe("Filter by HTTP method"),
     http_status_code: p.string().optional().describe("Filter by HTTP status code"),
     deployment_env: p.string().optional().describe("Filter by deployment environment"),
-    attribute_filter_key: p.string().optional().describe("Filter where SpanAttributes[key] = value"),
-    attribute_filter_value: p.string().optional().describe("Value for attribute filter"),
-    resource_filter_key: p.string().optional().describe("Filter where ResourceAttributes[key] = value"),
-    resource_filter_value: p.string().optional().describe("Value for resource attribute filter"),
-    root_only: p.boolean().optional().describe("Filter to root traces only (spans with no parent)"),
     service_match_mode: p.string().optional().describe("Match mode for service filter: 'contains' for substring match"),
     span_name_match_mode: p.string().optional().describe("Match mode for span name filter: 'contains' for substring match"),
     deployment_env_match_mode: p.string().optional().describe("Match mode for deployment env filter: 'contains' for substring match"),
-    attribute_value_match_mode: p.string().optional().describe("Match mode for attribute value filter: 'contains' for substring match"),
-    resource_value_match_mode: p.string().optional().describe("Match mode for resource value filter: 'contains' for substring match"),
   },
   nodes: [
     node({
-      name: "base_traces",
+      name: "list_traces_node",
       sql: `
         SELECT
           TraceId AS traceId,
-          min(Timestamp) AS startTime,
-          fromUnixTimestamp64Nano(max(toUnixTimestamp64Nano(Timestamp) + Duration)) AS endTime,
-          intDiv(max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp)), 1000) AS durationMicros,
-          count() AS spanCount,
-          groupUniqArray(10)(ServiceName) AS services,
-          argMin(
-            if(
-              (SpanName LIKE 'http.server %' OR SpanName IN ('GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'))
-              AND (SpanAttributes['http.route'] != '' OR SpanAttributes['url.path'] != ''),
-              concat(
-                if(SpanName LIKE 'http.server %', replaceOne(SpanName, 'http.server ', ''), SpanName),
-                ' ',
-                if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], SpanAttributes['url.path'])
-              ),
-              SpanName
-            ),
-            tuple(if(ParentSpanId = '', 0, 1), Timestamp)
-          ) AS rootSpanName,
-          argMin(SpanKind, tuple(if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanKind,
-          argMin(StatusCode, tuple(if(ParentSpanId = '', 0, 1), Timestamp)) AS rootSpanStatusCode,
-          argMin(
-            if(
-              SpanAttributes['http.method'] != '',
-              SpanAttributes['http.method'],
-              SpanAttributes['http.request.method']
-            ),
-            tuple(if(ParentSpanId = '', 0, 1), Timestamp)
-          ) AS rootHttpMethod,
-          argMin(
-            if(
-              SpanAttributes['http.route'] != '',
-              SpanAttributes['http.route'],
-              if(
-                SpanAttributes['url.path'] != '',
-                SpanAttributes['url.path'],
-                SpanAttributes['http.target']
-              )
-            ),
-            tuple(if(ParentSpanId = '', 0, 1), Timestamp)
-          ) AS rootHttpRoute,
-          argMin(
-            if(
-              SpanAttributes['http.status_code'] != '',
-              SpanAttributes['http.status_code'],
-              SpanAttributes['http.response.status_code']
-            ),
-            tuple(if(ParentSpanId = '', 0, 1), Timestamp)
-          ) AS rootHttpStatusCode,
-          max(if(
-            StatusCode = 'Error'
-            OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500),
-            1, 0
-          )) AS hasError,
-          groupUniqArrayIf(10)(SpanAttributes['http.method'], SpanAttributes['http.method'] != '') AS httpMethods,
-          groupUniqArrayIf(10)(SpanAttributes['http.status_code'], SpanAttributes['http.status_code'] != '') AS httpStatusCodes,
-          groupUniqArrayIf(10)(ResourceAttributes['deployment.environment'], ResourceAttributes['deployment.environment'] != '') AS deploymentEnvs,
-          {% if defined(attribute_filter_key) %}
-          max(if(
-            {% if defined(attribute_value_match_mode) and attribute_value_match_mode == "contains" %}
-            positionCaseInsensitive(SpanAttributes[{{String(attribute_filter_key)}}], {{String(attribute_filter_value, "")}}) > 0,
-            {% else %}
-            SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}},
-            {% end %}
-            1,
-            0
-          )) AS matchesAttributeFilter,
-          {% else %}
-          1 AS matchesAttributeFilter,
-          {% end %}
-          {% if defined(resource_filter_key) %}
-          max(if(
-            {% if defined(resource_value_match_mode) and resource_value_match_mode == "contains" %}
-            positionCaseInsensitive(ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, "")}}) > 0,
-            {% else %}
-            ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, "")}},
-            {% end %}
-            1,
-            0
-          )) AS matchesResourceFilter,
-          {% else %}
-          1 AS matchesResourceFilter,
-          {% end %}
-          countIf(ParentSpanId = '') AS rootSpanCount
-        FROM traces
-        WHERE TraceId != ''
-          AND OrgId = {{String(org_id, "")}}
+          Timestamp AS startTime,
+          Timestamp AS endTime,
+          intDiv(Duration, 1000) AS durationMicros,
+          toUInt64(1) AS spanCount,
+          [ServiceName] AS services,
+          SpanName AS rootSpanName,
+          SpanKind AS rootSpanKind,
+          StatusCode AS rootSpanStatusCode,
+          HttpMethod AS rootHttpMethod,
+          HttpRoute AS rootHttpRoute,
+          HttpStatusCode AS rootHttpStatusCode,
+          HasError AS hasError
+        FROM trace_list_mv
+        WHERE OrgId = {{String(org_id, "")}}
+        {% if defined(start_time) %}
+          AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+        {% end %}
+        {% if defined(end_time) %}
+          AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+        {% end %}
         {% if defined(service) %}
           {% if defined(service_match_mode) and service_match_mode == "contains" %}
           AND positionCaseInsensitive(ServiceName, {{String(service, "")}}) > 0
@@ -136,73 +64,36 @@ export const listTraces = defineEndpoint("list_traces", {
           AND ServiceName = {{String(service, "")}}
           {% end %}
         {% end %}
-        {% if defined(start_time) %}
-          AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-        {% end %}
-        {% if defined(end_time) %}
-          AND Timestamp <= {{DateTime(end_time, "2023-12-31 23:59:59")}}
-        {% end %}
-        GROUP BY TraceId
-      `,
-    }),
-    node({
-      name: "list_traces_node",
-      sql: `
-        SELECT
-          traceId,
-          startTime,
-          endTime,
-          durationMicros,
-          spanCount,
-          services,
-          rootSpanName,
-          rootSpanKind,
-          rootSpanStatusCode,
-          rootHttpMethod,
-          rootHttpRoute,
-          rootHttpStatusCode,
-          hasError
-        FROM base_traces
-        WHERE 1=1
-        {% if not defined(root_only) or root_only %}
-          AND rootSpanCount > 0
-        {% end %}
         {% if defined(span_name) %}
           {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
-          AND positionCaseInsensitive(rootSpanName, {{String(span_name, "")}}) > 0
+          AND positionCaseInsensitive(SpanName, {{String(span_name, "")}}) > 0
           {% else %}
-          AND rootSpanName = {{String(span_name, "")}}
+          AND SpanName = {{String(span_name, "")}}
           {% end %}
         {% end %}
         {% if defined(has_error) and has_error %}
-          AND hasError = 1
+          AND HasError = 1
         {% end %}
         {% if defined(min_duration_ms) %}
-          AND durationMicros >= {{Float64(min_duration_ms, 0)}} * 1000
+          AND Duration >= {{Float64(min_duration_ms, 0)}} * 1000000
         {% end %}
         {% if defined(max_duration_ms) %}
-          AND durationMicros <= {{Float64(max_duration_ms, 999999999)}} * 1000
+          AND Duration <= {{Float64(max_duration_ms, 999999999)}} * 1000000
         {% end %}
         {% if defined(http_method) %}
-          AND has(httpMethods, {{String(http_method, "")}})
+          AND HttpMethod = {{String(http_method, "")}}
         {% end %}
         {% if defined(http_status_code) %}
-          AND has(httpStatusCodes, {{String(http_status_code, "")}})
+          AND HttpStatusCode = {{String(http_status_code, "")}}
         {% end %}
         {% if defined(deployment_env) %}
           {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
-          AND arrayExists(x -> positionCaseInsensitive(x, {{String(deployment_env, "")}}) > 0, deploymentEnvs)
+          AND positionCaseInsensitive(DeploymentEnv, {{String(deployment_env, "")}}) > 0
           {% else %}
-          AND has(deploymentEnvs, {{String(deployment_env, "")}})
+          AND DeploymentEnv = {{String(deployment_env, "")}}
           {% end %}
         {% end %}
-        {% if defined(attribute_filter_key) %}
-          AND matchesAttributeFilter = 1
-        {% end %}
-        {% if defined(resource_filter_key) %}
-          AND matchesResourceFilter = 1
-        {% end %}
-        ORDER BY startTime DESC
+        ORDER BY Timestamp DESC
         LIMIT {{Int32(limit, 100)}}
         OFFSET {{Int32(offset, 0)}}
       `,
@@ -1156,10 +1047,11 @@ export type MetricsSummaryParams = InferParams<typeof metricsSummary>;
 export type MetricsSummaryOutput = InferOutputRow<typeof metricsSummary>;
 
 /**
- * Traces facets endpoint - get facet counts for filtering
+ * Traces facets endpoint - queries pre-materialized trace_list_mv for fast facet counts.
+ * No subqueries needed — all filters are direct WHERE clauses on pre-extracted columns.
  */
 export const tracesFacets = defineEndpoint("traces_facets", {
-  description: "Returns facet counts for trace filtering (services, span names, HTTP methods, status codes, environments).",
+  description: "Returns facet counts for trace filtering from pre-materialized root span data.",
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -1172,15 +1064,9 @@ export const tracesFacets = defineEndpoint("traces_facets", {
     http_method: p.string().optional().describe("Filter by HTTP method"),
     http_status_code: p.string().optional().describe("Filter by HTTP status code"),
     deployment_env: p.string().optional().describe("Filter by deployment environment"),
-    attribute_filter_key: p.string().optional().describe("Filter where SpanAttributes[key] = value"),
-    attribute_filter_value: p.string().optional().describe("Value for attribute filter"),
-    resource_filter_key: p.string().optional().describe("Filter where ResourceAttributes[key] = value"),
-    resource_filter_value: p.string().optional().describe("Value for resource attribute filter"),
     service_match_mode: p.string().optional().describe("Match mode for service filter: 'contains' for substring match"),
     span_name_match_mode: p.string().optional().describe("Match mode for span name filter: 'contains' for substring match"),
     deployment_env_match_mode: p.string().optional().describe("Match mode for deployment env filter: 'contains' for substring match"),
-    attribute_value_match_mode: p.string().optional().describe("Match mode for attribute value filter: 'contains' for substring match"),
-    resource_value_match_mode: p.string().optional().describe("Match mode for resource value filter: 'contains' for substring match"),
   },
   nodes: [
     node({
@@ -1188,151 +1074,51 @@ export const tracesFacets = defineEndpoint("traces_facets", {
       sql: `
         SELECT
           ServiceName AS name,
-          uniqExact(TraceId) AS count,
+          count() AS count,
           'service' AS facetType
-        FROM traces
-        WHERE TraceId != ''
-          AND OrgId = {{String(org_id, "")}}
+        FROM trace_list_mv
+        WHERE OrgId = {{String(org_id, "")}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
         {% if defined(end_time) %}
           AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
+        {% if defined(service) %}
+          {% if defined(service_match_mode) and service_match_mode == "contains" %}
+          AND positionCaseInsensitive(ServiceName, {{String(service, "")}}) > 0
+          {% else %}
+          AND ServiceName = {{String(service, "")}}
+          {% end %}
+        {% end %}
         {% if defined(span_name) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
-              ParentSpanId = '' AND positionCaseInsensitive(SpanName, {{String(span_name)}}) > 0
-            {% else %}
-              ParentSpanId = '' AND SpanName = {{String(span_name)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
+          AND positionCaseInsensitive(SpanName, {{String(span_name, "")}}) > 0
+          {% else %}
+          AND SpanName = {{String(span_name, "")}}
+          {% end %}
         {% end %}
         {% if defined(has_error) and has_error %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE (StatusCode = 'Error' OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500))
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HasError = 1
         {% end %}
         {% if defined(min_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 >= {{Float64(min_duration_ms)}}
-          )
+          AND Duration >= {{Float64(min_duration_ms, 0)}} * 1000000
         {% end %}
         {% if defined(max_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 <= {{Float64(max_duration_ms)}}
-          )
+          AND Duration <= {{Float64(max_duration_ms, 999999999)}} * 1000000
         {% end %}
         {% if defined(http_method) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.method'] = {{String(http_method)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpMethod = {{String(http_method, "")}}
         {% end %}
         {% if defined(http_status_code) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.status_code'] = {{String(http_status_code)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpStatusCode = {{String(http_status_code, "")}}
         {% end %}
         {% if defined(deployment_env) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes['deployment.environment'], {{String(deployment_env)}}) > 0
-            {% else %}
-              ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        {% if defined(attribute_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(attribute_value_match_mode) and attribute_value_match_mode == "contains" %}
-              positionCaseInsensitive(SpanAttributes[{{String(attribute_filter_key)}}], {{String(attribute_filter_value, "")}}) > 0
-            {% else %}
-              SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        {% if defined(resource_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(resource_value_match_mode) and resource_value_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, "")}}) > 0
-            {% else %}
-              ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
+          AND positionCaseInsensitive(DeploymentEnv, {{String(deployment_env, "")}}) > 0
+          {% else %}
+          AND DeploymentEnv = {{String(deployment_env, "")}}
+          {% end %}
         {% end %}
         GROUP BY ServiceName
         ORDER BY count DESC
@@ -1343,22 +1129,11 @@ export const tracesFacets = defineEndpoint("traces_facets", {
       name: "span_name_facets",
       sql: `
         SELECT
-          if(
-            (SpanName LIKE 'http.server %' OR SpanName IN ('GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'))
-            AND (SpanAttributes['http.route'] != '' OR SpanAttributes['url.path'] != ''),
-            concat(
-              if(SpanName LIKE 'http.server %', replaceOne(SpanName, 'http.server ', ''), SpanName),
-              ' ',
-              if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], SpanAttributes['url.path'])
-            ),
-            SpanName
-          ) AS name,
-          uniqExact(TraceId) AS count,
+          SpanName AS name,
+          count() AS count,
           'spanName' AS facetType
-        FROM traces
-        WHERE ParentSpanId = ''
-          AND TraceId != ''
-          AND OrgId = {{String(org_id, "")}}
+        FROM trace_list_mv
+        WHERE OrgId = {{String(org_id, "")}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1366,156 +1141,56 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
         {% if defined(service) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(service_match_mode) and service_match_mode == "contains" %}
-              positionCaseInsensitive(ServiceName, {{String(service)}}) > 0
-            {% else %}
-              ServiceName = {{String(service)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(service_match_mode) and service_match_mode == "contains" %}
+          AND positionCaseInsensitive(ServiceName, {{String(service, "")}}) > 0
+          {% else %}
+          AND ServiceName = {{String(service, "")}}
+          {% end %}
+        {% end %}
+        {% if defined(span_name) %}
+          {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
+          AND positionCaseInsensitive(SpanName, {{String(span_name, "")}}) > 0
+          {% else %}
+          AND SpanName = {{String(span_name, "")}}
+          {% end %}
         {% end %}
         {% if defined(has_error) and has_error %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE (StatusCode = 'Error' OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500))
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HasError = 1
         {% end %}
         {% if defined(min_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 >= {{Float64(min_duration_ms)}}
-          )
+          AND Duration >= {{Float64(min_duration_ms, 0)}} * 1000000
         {% end %}
         {% if defined(max_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 <= {{Float64(max_duration_ms)}}
-          )
+          AND Duration <= {{Float64(max_duration_ms, 999999999)}} * 1000000
         {% end %}
         {% if defined(http_method) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.method'] = {{String(http_method)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpMethod = {{String(http_method, "")}}
         {% end %}
         {% if defined(http_status_code) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.status_code'] = {{String(http_status_code)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpStatusCode = {{String(http_status_code, "")}}
         {% end %}
         {% if defined(deployment_env) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes['deployment.environment'], {{String(deployment_env)}}) > 0
-            {% else %}
-              ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
+          AND positionCaseInsensitive(DeploymentEnv, {{String(deployment_env, "")}}) > 0
+          {% else %}
+          AND DeploymentEnv = {{String(deployment_env, "")}}
+          {% end %}
         {% end %}
-        {% if defined(attribute_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(attribute_value_match_mode) and attribute_value_match_mode == "contains" %}
-              positionCaseInsensitive(SpanAttributes[{{String(attribute_filter_key)}}], {{String(attribute_filter_value, "")}}) > 0
-            {% else %}
-              SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        {% if defined(resource_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(resource_value_match_mode) and resource_value_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, "")}}) > 0
-            {% else %}
-              ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        GROUP BY name
+          AND SpanName != ''
+        GROUP BY SpanName
         ORDER BY count DESC
-        LIMIT 50
+        LIMIT 20
       `,
     }),
     node({
       name: "http_method_facets",
       sql: `
         SELECT
-          SpanAttributes['http.method'] AS name,
-          uniqExact(TraceId) AS count,
+          HttpMethod AS name,
+          count() AS count,
           'httpMethod' AS facetType
-        FROM traces
-        WHERE SpanAttributes['http.method'] != ''
-          AND TraceId != ''
-          AND OrgId = {{String(org_id, "")}}
+        FROM trace_list_mv
+        WHERE OrgId = {{String(org_id, "")}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1523,145 +1198,43 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
         {% if defined(service) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(service_match_mode) and service_match_mode == "contains" %}
-              positionCaseInsensitive(ServiceName, {{String(service)}}) > 0
-            {% else %}
-              ServiceName = {{String(service)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(service_match_mode) and service_match_mode == "contains" %}
+          AND positionCaseInsensitive(ServiceName, {{String(service, "")}}) > 0
+          {% else %}
+          AND ServiceName = {{String(service, "")}}
+          {% end %}
         {% end %}
         {% if defined(span_name) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
-              ParentSpanId = '' AND positionCaseInsensitive(SpanName, {{String(span_name)}}) > 0
-            {% else %}
-              ParentSpanId = '' AND SpanName = {{String(span_name)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
+          AND positionCaseInsensitive(SpanName, {{String(span_name, "")}}) > 0
+          {% else %}
+          AND SpanName = {{String(span_name, "")}}
+          {% end %}
         {% end %}
         {% if defined(has_error) and has_error %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE (StatusCode = 'Error' OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500))
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HasError = 1
         {% end %}
         {% if defined(min_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 >= {{Float64(min_duration_ms)}}
-          )
+          AND Duration >= {{Float64(min_duration_ms, 0)}} * 1000000
         {% end %}
         {% if defined(max_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 <= {{Float64(max_duration_ms)}}
-          )
+          AND Duration <= {{Float64(max_duration_ms, 999999999)}} * 1000000
+        {% end %}
+        {% if defined(http_method) %}
+          AND HttpMethod = {{String(http_method, "")}}
         {% end %}
         {% if defined(http_status_code) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.status_code'] = {{String(http_status_code)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpStatusCode = {{String(http_status_code, "")}}
         {% end %}
         {% if defined(deployment_env) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes['deployment.environment'], {{String(deployment_env)}}) > 0
-            {% else %}
-              ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
+          AND positionCaseInsensitive(DeploymentEnv, {{String(deployment_env, "")}}) > 0
+          {% else %}
+          AND DeploymentEnv = {{String(deployment_env, "")}}
+          {% end %}
         {% end %}
-        {% if defined(attribute_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(attribute_value_match_mode) and attribute_value_match_mode == "contains" %}
-              positionCaseInsensitive(SpanAttributes[{{String(attribute_filter_key)}}], {{String(attribute_filter_value, "")}}) > 0
-            {% else %}
-              SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        {% if defined(resource_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(resource_value_match_mode) and resource_value_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, "")}}) > 0
-            {% else %}
-              ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        GROUP BY name
+          AND HttpMethod != ''
+        GROUP BY HttpMethod
         ORDER BY count DESC
         LIMIT 20
       `,
@@ -1670,13 +1243,11 @@ export const tracesFacets = defineEndpoint("traces_facets", {
       name: "http_status_facets",
       sql: `
         SELECT
-          SpanAttributes['http.status_code'] AS name,
-          uniqExact(TraceId) AS count,
+          HttpStatusCode AS name,
+          count() AS count,
           'httpStatus' AS facetType
-        FROM traces
-        WHERE SpanAttributes['http.status_code'] != ''
-          AND TraceId != ''
-          AND OrgId = {{String(org_id, "")}}
+        FROM trace_list_mv
+        WHERE OrgId = {{String(org_id, "")}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1684,145 +1255,43 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
         {% if defined(service) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(service_match_mode) and service_match_mode == "contains" %}
-              positionCaseInsensitive(ServiceName, {{String(service)}}) > 0
-            {% else %}
-              ServiceName = {{String(service)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(service_match_mode) and service_match_mode == "contains" %}
+          AND positionCaseInsensitive(ServiceName, {{String(service, "")}}) > 0
+          {% else %}
+          AND ServiceName = {{String(service, "")}}
+          {% end %}
         {% end %}
         {% if defined(span_name) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
-              ParentSpanId = '' AND positionCaseInsensitive(SpanName, {{String(span_name)}}) > 0
-            {% else %}
-              ParentSpanId = '' AND SpanName = {{String(span_name)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
+          AND positionCaseInsensitive(SpanName, {{String(span_name, "")}}) > 0
+          {% else %}
+          AND SpanName = {{String(span_name, "")}}
+          {% end %}
         {% end %}
         {% if defined(has_error) and has_error %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE (StatusCode = 'Error' OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500))
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HasError = 1
         {% end %}
         {% if defined(min_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 >= {{Float64(min_duration_ms)}}
-          )
+          AND Duration >= {{Float64(min_duration_ms, 0)}} * 1000000
         {% end %}
         {% if defined(max_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 <= {{Float64(max_duration_ms)}}
-          )
+          AND Duration <= {{Float64(max_duration_ms, 999999999)}} * 1000000
         {% end %}
         {% if defined(http_method) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.method'] = {{String(http_method)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpMethod = {{String(http_method, "")}}
+        {% end %}
+        {% if defined(http_status_code) %}
+          AND HttpStatusCode = {{String(http_status_code, "")}}
         {% end %}
         {% if defined(deployment_env) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes['deployment.environment'], {{String(deployment_env)}}) > 0
-            {% else %}
-              ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
+          AND positionCaseInsensitive(DeploymentEnv, {{String(deployment_env, "")}}) > 0
+          {% else %}
+          AND DeploymentEnv = {{String(deployment_env, "")}}
+          {% end %}
         {% end %}
-        {% if defined(attribute_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(attribute_value_match_mode) and attribute_value_match_mode == "contains" %}
-              positionCaseInsensitive(SpanAttributes[{{String(attribute_filter_key)}}], {{String(attribute_filter_value, "")}}) > 0
-            {% else %}
-              SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        {% if defined(resource_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(resource_value_match_mode) and resource_value_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, "")}}) > 0
-            {% else %}
-              ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        GROUP BY name
+          AND HttpStatusCode != ''
+        GROUP BY HttpStatusCode
         ORDER BY count DESC
         LIMIT 20
       `,
@@ -1831,13 +1300,11 @@ export const tracesFacets = defineEndpoint("traces_facets", {
       name: "deployment_env_facets",
       sql: `
         SELECT
-          ResourceAttributes['deployment.environment'] AS name,
-          uniqExact(TraceId) AS count,
+          DeploymentEnv AS name,
+          count() AS count,
           'deploymentEnv' AS facetType
-        FROM traces
-        WHERE ResourceAttributes['deployment.environment'] != ''
-          AND TraceId != ''
-          AND OrgId = {{String(org_id, "")}}
+        FROM trace_list_mv
+        WHERE OrgId = {{String(org_id, "")}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1845,141 +1312,43 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
         {% if defined(service) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(service_match_mode) and service_match_mode == "contains" %}
-              positionCaseInsensitive(ServiceName, {{String(service)}}) > 0
-            {% else %}
-              ServiceName = {{String(service)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(service_match_mode) and service_match_mode == "contains" %}
+          AND positionCaseInsensitive(ServiceName, {{String(service, "")}}) > 0
+          {% else %}
+          AND ServiceName = {{String(service, "")}}
+          {% end %}
         {% end %}
         {% if defined(span_name) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
-              ParentSpanId = '' AND positionCaseInsensitive(SpanName, {{String(span_name)}}) > 0
-            {% else %}
-              ParentSpanId = '' AND SpanName = {{String(span_name)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
+          AND positionCaseInsensitive(SpanName, {{String(span_name, "")}}) > 0
+          {% else %}
+          AND SpanName = {{String(span_name, "")}}
+          {% end %}
         {% end %}
         {% if defined(has_error) and has_error %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE (StatusCode = 'Error' OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500))
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HasError = 1
         {% end %}
         {% if defined(min_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 >= {{Float64(min_duration_ms)}}
-          )
+          AND Duration >= {{Float64(min_duration_ms, 0)}} * 1000000
         {% end %}
         {% if defined(max_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 <= {{Float64(max_duration_ms)}}
-          )
+          AND Duration <= {{Float64(max_duration_ms, 999999999)}} * 1000000
         {% end %}
         {% if defined(http_method) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.method'] = {{String(http_method)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpMethod = {{String(http_method, "")}}
         {% end %}
         {% if defined(http_status_code) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.status_code'] = {{String(http_status_code)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpStatusCode = {{String(http_status_code, "")}}
         {% end %}
-        {% if defined(attribute_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(attribute_value_match_mode) and attribute_value_match_mode == "contains" %}
-              positionCaseInsensitive(SpanAttributes[{{String(attribute_filter_key)}}], {{String(attribute_filter_value, "")}}) > 0
-            {% else %}
-              SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+        {% if defined(deployment_env) %}
+          {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
+          AND positionCaseInsensitive(DeploymentEnv, {{String(deployment_env, "")}}) > 0
+          {% else %}
+          AND DeploymentEnv = {{String(deployment_env, "")}}
+          {% end %}
         {% end %}
-        {% if defined(resource_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(resource_value_match_mode) and resource_value_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, "")}}) > 0
-            {% else %}
-              ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        GROUP BY name
+          AND DeploymentEnv != ''
+        GROUP BY DeploymentEnv
         ORDER BY count DESC
         LIMIT 20
       `,
@@ -1989,12 +1358,10 @@ export const tracesFacets = defineEndpoint("traces_facets", {
       sql: `
         SELECT
           'error' AS name,
-          uniqExact(TraceId) AS count,
+          count() AS count,
           'errorCount' AS facetType
-        FROM traces
-        WHERE (StatusCode = 'Error' OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500))
-          AND TraceId != ''
-          AND OrgId = {{String(org_id, "")}}
+        FROM trace_list_mv
+        WHERE OrgId = {{String(org_id, "")}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -2002,148 +1369,46 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
         {% if defined(service) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(service_match_mode) and service_match_mode == "contains" %}
-              positionCaseInsensitive(ServiceName, {{String(service)}}) > 0
-            {% else %}
-              ServiceName = {{String(service)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(service_match_mode) and service_match_mode == "contains" %}
+          AND positionCaseInsensitive(ServiceName, {{String(service, "")}}) > 0
+          {% else %}
+          AND ServiceName = {{String(service, "")}}
+          {% end %}
         {% end %}
         {% if defined(span_name) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
-              ParentSpanId = '' AND positionCaseInsensitive(SpanName, {{String(span_name)}}) > 0
-            {% else %}
-              ParentSpanId = '' AND SpanName = {{String(span_name)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
+          AND positionCaseInsensitive(SpanName, {{String(span_name, "")}}) > 0
+          {% else %}
+          AND SpanName = {{String(span_name, "")}}
+          {% end %}
+        {% end %}
+        {% if defined(has_error) and has_error %}
+          AND HasError = 1
         {% end %}
         {% if defined(min_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 >= {{Float64(min_duration_ms)}}
-          )
+          AND Duration >= {{Float64(min_duration_ms, 0)}} * 1000000
         {% end %}
         {% if defined(max_duration_ms) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-            GROUP BY TraceId
-            HAVING (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 <= {{Float64(max_duration_ms)}}
-          )
+          AND Duration <= {{Float64(max_duration_ms, 999999999)}} * 1000000
         {% end %}
         {% if defined(http_method) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.method'] = {{String(http_method)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpMethod = {{String(http_method, "")}}
         {% end %}
         {% if defined(http_status_code) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE SpanAttributes['http.status_code'] = {{String(http_status_code)}}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          AND HttpStatusCode = {{String(http_status_code, "")}}
         {% end %}
         {% if defined(deployment_env) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes['deployment.environment'], {{String(deployment_env)}}) > 0
-            {% else %}
-              ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
+          {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
+          AND positionCaseInsensitive(DeploymentEnv, {{String(deployment_env, "")}}) > 0
+          {% else %}
+          AND DeploymentEnv = {{String(deployment_env, "")}}
+          {% end %}
         {% end %}
-        {% if defined(attribute_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(attribute_value_match_mode) and attribute_value_match_mode == "contains" %}
-              positionCaseInsensitive(SpanAttributes[{{String(attribute_filter_key)}}], {{String(attribute_filter_value, "")}}) > 0
-            {% else %}
-              SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
-        {% if defined(resource_filter_key) %}
-          AND TraceId IN (
-            SELECT TraceId FROM traces
-            WHERE {% if defined(resource_value_match_mode) and resource_value_match_mode == "contains" %}
-              positionCaseInsensitive(ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, "")}}) > 0
-            {% else %}
-              ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, "")}}
-            {% end %}
-              AND OrgId = {{String(org_id, "")}}
-            {% if defined(start_time) %}
-              AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-            {% end %}
-            {% if defined(end_time) %}
-              AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
-            {% end %}
-          )
-        {% end %}
+          AND HasError = 1
       `,
     }),
     node({
-      name: "combined_facets",
+      name: "facets_combined",
       sql: `
         SELECT * FROM service_facets
         UNION ALL
@@ -2170,10 +1435,10 @@ export type TracesFacetsParams = InferParams<typeof tracesFacets>;
 export type TracesFacetsOutput = InferOutputRow<typeof tracesFacets>;
 
 /**
- * Traces duration stats endpoint - get min, max, p50, p95 durations
+ * Traces duration stats endpoint - queries pre-materialized trace_list_mv for fast percentile calculation.
  */
 export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
-  description: "Returns duration statistics (min, max, p50, p95) for traces.",
+  description: "Returns duration statistics (min, max, p50, p95) for traces from pre-materialized data.",
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -2184,85 +1449,63 @@ export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
     http_method: p.string().optional().describe("Filter by HTTP method"),
     http_status_code: p.string().optional().describe("Filter by HTTP status code"),
     deployment_env: p.string().optional().describe("Filter by deployment environment"),
-    attribute_filter_key: p.string().optional().describe("Filter where SpanAttributes[key] = value"),
-    attribute_filter_value: p.string().optional().describe("Value for attribute filter"),
-    resource_filter_key: p.string().optional().describe("Filter where ResourceAttributes[key] = value"),
-    resource_filter_value: p.string().optional().describe("Value for resource attribute filter"),
     service_match_mode: p.string().optional().describe("Match mode for service filter: 'contains' for substring match"),
     span_name_match_mode: p.string().optional().describe("Match mode for span name filter: 'contains' for substring match"),
     deployment_env_match_mode: p.string().optional().describe("Match mode for deployment env filter: 'contains' for substring match"),
-    attribute_value_match_mode: p.string().optional().describe("Match mode for attribute value filter: 'contains' for substring match"),
-    resource_value_match_mode: p.string().optional().describe("Match mode for resource value filter: 'contains' for substring match"),
   },
   nodes: [
     node({
       name: "duration_stats_node",
       sql: `
         SELECT
-          min(durationMs) AS minDurationMs,
-          max(durationMs) AS maxDurationMs,
-          quantile(0.50)(durationMs) AS p50DurationMs,
-          quantile(0.95)(durationMs) AS p95DurationMs
-        FROM (
-          SELECT
-            TraceId,
-            (max(toUnixTimestamp64Nano(Timestamp) + Duration) - min(toUnixTimestamp64Nano(Timestamp))) / 1000000.0 AS durationMs
-          FROM traces
-          WHERE TraceId != ''
-            AND OrgId = {{String(org_id, "")}}
-          {% if defined(start_time) %}
-            AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+          min(Duration) / 1000000.0 AS minDurationMs,
+          max(Duration) / 1000000.0 AS maxDurationMs,
+          quantile(0.5)(Duration) / 1000000.0 AS p50DurationMs,
+          quantile(0.95)(Duration) / 1000000.0 AS p95DurationMs
+        FROM trace_list_mv
+        WHERE OrgId = {{String(org_id, "")}}
+        {% if defined(start_time) %}
+          AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+        {% end %}
+        {% if defined(end_time) %}
+          AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+        {% end %}
+        {% if defined(service) %}
+          {% if defined(service_match_mode) and service_match_mode == "contains" %}
+          AND positionCaseInsensitive(ServiceName, {{String(service, "")}}) > 0
+          {% else %}
+          AND ServiceName = {{String(service, "")}}
           {% end %}
-          {% if defined(end_time) %}
-            AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+        {% end %}
+        {% if defined(span_name) %}
+          {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
+          AND positionCaseInsensitive(SpanName, {{String(span_name, "")}}) > 0
+          {% else %}
+          AND SpanName = {{String(span_name, "")}}
           {% end %}
-          {% if defined(service) %}
-            {% if defined(service_match_mode) and service_match_mode == "contains" %}
-            AND positionCaseInsensitive(ServiceName, {{String(service)}}) > 0
-            {% else %}
-            AND ServiceName = {{String(service)}}
-            {% end %}
+        {% end %}
+        {% if defined(has_error) and has_error %}
+          AND HasError = 1
+        {% end %}
+        {% if defined(min_duration_ms) %}
+          AND Duration >= {{Float64(min_duration_ms, 0)}} * 1000000
+        {% end %}
+        {% if defined(max_duration_ms) %}
+          AND Duration <= {{Float64(max_duration_ms, 999999999)}} * 1000000
+        {% end %}
+        {% if defined(http_method) %}
+          AND HttpMethod = {{String(http_method, "")}}
+        {% end %}
+        {% if defined(http_status_code) %}
+          AND HttpStatusCode = {{String(http_status_code, "")}}
+        {% end %}
+        {% if defined(deployment_env) %}
+          {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
+          AND positionCaseInsensitive(DeploymentEnv, {{String(deployment_env, "")}}) > 0
+          {% else %}
+          AND DeploymentEnv = {{String(deployment_env, "")}}
           {% end %}
-          {% if defined(span_name) %}
-            {% if defined(span_name_match_mode) and span_name_match_mode == "contains" %}
-            AND ParentSpanId = '' AND positionCaseInsensitive(SpanName, {{String(span_name)}}) > 0
-            {% else %}
-            AND ParentSpanId = '' AND SpanName = {{String(span_name)}}
-            {% end %}
-          {% end %}
-          {% if defined(http_method) %}
-            AND SpanAttributes['http.method'] = {{String(http_method)}}
-          {% end %}
-          {% if defined(http_status_code) %}
-            AND SpanAttributes['http.status_code'] = {{String(http_status_code)}}
-          {% end %}
-          {% if defined(deployment_env) %}
-            {% if defined(deployment_env_match_mode) and deployment_env_match_mode == "contains" %}
-            AND positionCaseInsensitive(ResourceAttributes['deployment.environment'], {{String(deployment_env)}}) > 0
-            {% else %}
-            AND ResourceAttributes['deployment.environment'] = {{String(deployment_env)}}
-            {% end %}
-          {% end %}
-          GROUP BY TraceId
-          HAVING 1=1
-          {% if defined(has_error) and has_error %}
-            AND max(if(StatusCode = 'Error' OR (SpanAttributes['http.status_code'] != '' AND toUInt16OrZero(SpanAttributes['http.status_code']) >= 500), 1, 0)) = 1
-          {% end %}
-          {% if defined(attribute_filter_key) %}
-            {% if defined(attribute_value_match_mode) and attribute_value_match_mode == "contains" %}
-            AND max(if(positionCaseInsensitive(SpanAttributes[{{String(attribute_filter_key)}}], {{String(attribute_filter_value, "")}}) > 0, 1, 0)) = 1
-            {% else %}
-            AND max(if(SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, "")}}, 1, 0)) = 1
-            {% end %}
-          {% end %}
-          {% if defined(resource_filter_key) %}
-            {% if defined(resource_value_match_mode) and resource_value_match_mode == "contains" %}
-            AND max(if(positionCaseInsensitive(ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, "")}}) > 0, 1, 0)) = 1
-            {% else %}
-            AND max(if(ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, "")}}, 1, 0)) = 1
-            {% end %}
-          {% end %}
-        )
+        {% end %}
       `,
     }),
   ],

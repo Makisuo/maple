@@ -2,6 +2,7 @@ import { SqliteDrizzle } from "@effect/sql-drizzle/Sqlite"
 import {
   IsoDateTimeString,
   OrgTinybirdDeploymentStatusResponse,
+  OrgTinybirdInstanceHealthResponse,
   OrgTinybirdSettingsEncryptionError,
   OrgTinybirdSettingsForbiddenError,
   OrgTinybirdSettingsPersistenceError,
@@ -13,7 +14,7 @@ import {
   type RoleName,
   UserId,
 } from "@maple/domain/http"
-import { getCurrentTinybirdProjectRevision, getDeploymentStatus as getDeploymentStatusFn, syncTinybirdProject } from "@maple/domain/tinybird-project-sync"
+import { getCurrentTinybirdProjectRevision, fetchInstanceHealth as fetchInstanceHealthFn, getDeploymentStatus as getDeploymentStatusFn, syncTinybirdProject } from "@maple/domain/tinybird-project-sync"
 import { orgTinybirdSettings } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
@@ -36,6 +37,7 @@ const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 let syncProjectImpl = syncTinybirdProject
 let getProjectRevisionImpl = getCurrentTinybirdProjectRevision
 let getDeploymentStatusImpl = getDeploymentStatusFn
+let fetchInstanceHealthImpl = fetchInstanceHealthFn
 
 const toPersistenceError = (error: unknown) =>
   new OrgTinybirdSettingsPersistenceError({
@@ -430,12 +432,50 @@ export class OrgTinybirdSettingsService extends Effect.Service<OrgTinybirdSettin
         })
       })
 
+      const getInstanceHealth = Effect.fn("OrgTinybirdSettingsService.getInstanceHealth")(function* (
+        orgId: OrgId,
+        roles: ReadonlyArray<RoleName>,
+      ) {
+        yield* requireAdmin(roles)
+        const row = yield* requireRow(orgId)
+        const token = yield* decryptToken(
+          { ciphertext: row.tokenCiphertext, iv: row.tokenIv, tag: row.tokenTag },
+          encryptionKey,
+        )
+
+        const result = yield* Effect.tryPromise({
+          try: () =>
+            fetchInstanceHealthImpl({
+              baseUrl: row.host,
+              token,
+            }),
+          catch: (error) =>
+            new OrgTinybirdSettingsSyncError({
+              message: error instanceof Error ? error.message : "Failed to fetch instance health",
+            }),
+        })
+
+        return new OrgTinybirdInstanceHealthResponse({
+          workspaceName: result.workspaceName,
+          datasources: result.datasources.map((d) => ({
+            name: d.name,
+            rowCount: d.rowCount,
+            bytes: d.bytes,
+          })),
+          totalRows: result.totalRows,
+          totalBytes: result.totalBytes,
+          recentErrorCount: result.recentErrorCount,
+          avgQueryLatencyMs: result.avgQueryLatencyMs,
+        })
+      })
+
       return {
         get,
         upsert,
         delete: deleteSettings,
         resync,
         getDeploymentStatus,
+        getInstanceHealth,
         resolveRuntimeConfig,
       }
     }),
@@ -454,9 +494,13 @@ export const __testables = {
   setGetDeploymentStatusImpl: (impl: typeof getDeploymentStatusFn) => {
     getDeploymentStatusImpl = impl
   },
+  setFetchInstanceHealthImpl: (impl: typeof fetchInstanceHealthFn) => {
+    fetchInstanceHealthImpl = impl
+  },
   reset: () => {
     syncProjectImpl = syncTinybirdProject
     getProjectRevisionImpl = getCurrentTinybirdProjectRevision
     getDeploymentStatusImpl = getDeploymentStatusFn
+    fetchInstanceHealthImpl = fetchInstanceHealthFn
   },
 }

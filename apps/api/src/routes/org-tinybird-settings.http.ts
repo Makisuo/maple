@@ -35,6 +35,12 @@ export const HttpOrgTinybirdSettingsLive = HttpApiBuilder.group(
             return yield* service.getDeploymentStatus(tenant.orgId, tenant.roles)
           }),
         )
+        .handle("instanceHealth", () =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            return yield* service.getInstanceHealth(tenant.orgId, tenant.roles)
+          }),
+        )
         .handle("delete", () =>
           Effect.gen(function* () {
             const tenant = yield* CurrentTenant.Context

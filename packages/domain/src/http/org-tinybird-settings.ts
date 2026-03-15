@@ -33,6 +33,23 @@ export class OrgTinybirdDeploymentStatusResponse extends Schema.Class<OrgTinybir
   isTerminal: Schema.NullOr(Schema.Boolean),
 }) {}
 
+const OrgTinybirdDatasourceStats = Schema.Struct({
+  name: Schema.String,
+  rowCount: Schema.Number,
+  bytes: Schema.Number,
+})
+
+export class OrgTinybirdInstanceHealthResponse extends Schema.Class<OrgTinybirdInstanceHealthResponse>(
+  "OrgTinybirdInstanceHealthResponse",
+)({
+  workspaceName: Schema.NullOr(Schema.String),
+  datasources: Schema.Array(OrgTinybirdDatasourceStats),
+  totalRows: Schema.Number,
+  totalBytes: Schema.Number,
+  recentErrorCount: Schema.Number,
+  avgQueryLatencyMs: Schema.NullOr(Schema.Number),
+}) {}
+
 export class OrgTinybirdSettingsDeleteResponse extends Schema.Class<OrgTinybirdSettingsDeleteResponse>(
   "OrgTinybirdSettingsDeleteResponse",
 )({
@@ -108,6 +125,15 @@ export class OrgTinybirdSettingsApiGroup extends HttpApiGroup.make("orgTinybirdS
   .add(
     HttpApiEndpoint.get("deploymentStatus", "/deployment-status")
       .addSuccess(OrgTinybirdDeploymentStatusResponse)
+      .addError(OrgTinybirdSettingsForbiddenError)
+      .addError(OrgTinybirdSettingsValidationError)
+      .addError(OrgTinybirdSettingsPersistenceError)
+      .addError(OrgTinybirdSettingsEncryptionError)
+      .addError(OrgTinybirdSettingsSyncError),
+  )
+  .add(
+    HttpApiEndpoint.get("instanceHealth", "/instance-health")
+      .addSuccess(OrgTinybirdInstanceHealthResponse)
       .addError(OrgTinybirdSettingsForbiddenError)
       .addError(OrgTinybirdSettingsValidationError)
       .addError(OrgTinybirdSettingsPersistenceError)

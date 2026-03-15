@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "@maple/ui/components/ui/alert-dialog"
 import { AlertWarningIcon, LoaderIcon } from "@/components/icons"
+import { formatLatency, formatNumber } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
 function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
@@ -52,6 +53,19 @@ function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string
   }
 
   return fallback
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_000_000_000) {
+    return `${(bytes / 1_000_000_000).toFixed(2)} GB`
+  }
+  if (bytes >= 1_000_000) {
+    return `${(bytes / 1_000_000).toFixed(2)} MB`
+  }
+  if (bytes >= 1_000) {
+    return `${(bytes / 1_000).toFixed(1)} KB`
+  }
+  return `${bytes} B`
 }
 
 function formatSyncDate(value: string | null): string {
@@ -94,6 +108,9 @@ export function OrgTinybirdSettingsSection({
   const deploymentStatusResult = useAtomValue(deploymentStatusAtom)
   const refreshDeploymentStatus = useAtomRefresh(deploymentStatusAtom)
 
+  const instanceHealthAtom = MapleApiAtomClient.query("orgTinybirdSettings", "instanceHealth", {})
+  const instanceHealthResult = useAtomValue(instanceHealthAtom)
+
   const upsertMutation = useAtomSet(
     MapleApiAtomClient.mutation("orgTinybirdSettings", "upsert"),
     { mode: "promiseExit" },
@@ -112,6 +129,10 @@ export function OrgTinybirdSettingsSection({
     .orElse(() => null)
 
   const deploymentStatus = Result.builder(deploymentStatusResult)
+    .onSuccess((value) => value)
+    .orElse(() => null)
+
+  const instanceHealth = Result.builder(instanceHealthResult)
     .onSuccess((value) => value)
     .orElse(() => null)
 
@@ -356,6 +377,85 @@ export function OrgTinybirdSettingsSection({
             )}
           </CardContent>
         </Card>
+
+        {configured ? (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>Instance Health</CardTitle>
+                {Result.isInitial(instanceHealthResult) ? (
+                  <Skeleton className="h-5 w-24" />
+                ) : instanceHealth?.workspaceName ? (
+                  <span className="text-muted-foreground text-sm font-mono">{instanceHealth.workspaceName}</span>
+                ) : null}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {Result.isInitial(instanceHealthResult) ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ) : !instanceHealth ? (
+                <p className="text-sm text-muted-foreground">
+                  Failed to load instance health.
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-lg border px-3 py-2">
+                      <p className="text-muted-foreground text-xs">Storage</p>
+                      <p className="text-lg font-semibold">{formatBytes(instanceHealth.totalBytes)}</p>
+                    </div>
+                    <div className="rounded-lg border px-3 py-2">
+                      <p className="text-muted-foreground text-xs">Total rows</p>
+                      <p className="text-lg font-semibold">{formatNumber(instanceHealth.totalRows)}</p>
+                    </div>
+                  </div>
+
+                  {instanceHealth.datasources.length > 0 ? (
+                    <div className="rounded-lg border">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b text-muted-foreground">
+                            <th className="px-3 py-2 text-left font-medium">Datasource</th>
+                            <th className="px-3 py-2 text-right font-medium">Rows</th>
+                            <th className="px-3 py-2 text-right font-medium">Size</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {instanceHealth.datasources.map((ds) => (
+                            <tr key={ds.name} className="border-b last:border-b-0">
+                              <td className="px-3 py-2 font-mono text-xs">{ds.name}</td>
+                              <td className="px-3 py-2 text-right">{formatNumber(ds.rowCount)}</td>
+                              <td className="px-3 py-2 text-right">{formatBytes(ds.bytes)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-lg border px-3 py-2">
+                      <p className="text-muted-foreground text-xs">Errors (24h)</p>
+                      <p className="text-lg font-semibold">{instanceHealth.recentErrorCount}</p>
+                    </div>
+                    <div className="rounded-lg border px-3 py-2">
+                      <p className="text-muted-foreground text-xs">Avg latency (24h)</p>
+                      <p className="text-lg font-semibold">
+                        {instanceHealth.avgQueryLatencyMs != null
+                          ? formatLatency(instanceHealth.avgQueryLatencyMs)
+                          : "-"}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <AlertDialog open={disableOpen} onOpenChange={setDisableOpen}>

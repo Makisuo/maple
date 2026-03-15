@@ -91,7 +91,6 @@ function LoadingState() {
               <TableHead>Root Span</TableHead>
               <TableHead className="w-[160px]">Services</TableHead>
               <TableHead className="w-[100px]">Duration</TableHead>
-              <TableHead className="w-[80px]">Spans</TableHead>
               <TableHead className="w-[80px]">Status</TableHead>
             </TableRow>
           </TableHeader>
@@ -102,7 +101,6 @@ function LoadingState() {
                 <TableCell><Skeleton className="h-4 w-40" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                <TableCell><Skeleton className="h-4 w-8" /></TableCell>
                 <TableCell><Skeleton className="h-4 w-12" /></TableCell>
               </TableRow>
             ))}
@@ -168,14 +166,13 @@ export function TracesTable({ filters }: TracesTableProps) {
                 <TableHead>Root Span</TableHead>
                 <TableHead className="hidden md:table-cell w-[160px]">Services</TableHead>
                 <TableHead className="w-[100px]">Duration</TableHead>
-                <TableHead className="hidden md:table-cell w-[80px]">Spans</TableHead>
                 <TableHead className="w-[80px]">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {response.data.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center">
+                  <TableCell colSpan={5} className="h-24 text-center">
                     No traces found
                   </TableCell>
                 </TableRow>
@@ -249,9 +246,6 @@ export function TracesTable({ filters }: TracesTableProps) {
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {formatDuration(trace.durationMs)}
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                      {trace.spanCount}
                     </TableCell>
                     <TableCell>
                       {trace.rootSpan.http?.statusCode != null ? (

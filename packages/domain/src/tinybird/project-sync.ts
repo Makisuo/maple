@@ -96,6 +96,97 @@ export const getDeploymentStatus = async (
   }
 }
 
+export interface TinybirdDatasourceStats {
+  readonly name: string
+  readonly rowCount: number
+  readonly bytes: number
+}
+
+export interface TinybirdInstanceHealth {
+  readonly workspaceName: string | null
+  readonly datasources: ReadonlyArray<TinybirdDatasourceStats>
+  readonly totalRows: number
+  readonly totalBytes: number
+  readonly recentErrorCount: number
+  readonly avgQueryLatencyMs: number | null
+}
+
+interface SqlResponse {
+  readonly data?: ReadonlyArray<Record<string, unknown>>
+}
+
+const fetchJson = async <T>(url: string, token: string, init?: RequestInit): Promise<T> => {
+  const res = await fetch(url, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, ...init?.headers },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  })
+  if (!res.ok) {
+    throw new Error(`Tinybird API error: ${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as T
+}
+
+const querySql = async (baseUrl: string, token: string, sql: string): Promise<SqlResponse | null> =>
+  fetchJson<SqlResponse>(
+    `${baseUrl}/v0/sql?q=${encodeURIComponent(`${sql} FORMAT JSON`)}`,
+    token,
+  ).catch(() => null)
+
+export const fetchInstanceHealth = async (
+  params: TinybirdProjectSyncParams,
+): Promise<TinybirdInstanceHealth> => {
+  const baseUrl = normalizeBaseUrl(params.baseUrl)
+
+  const [workspace, datasourcesResult, errorsResult, latencyResult] = await Promise.all([
+    fetchJson<{ name?: string }>(
+      `${baseUrl}/v1/workspace`,
+      params.token,
+    ).catch(() => null),
+
+    querySql(
+      baseUrl,
+      params.token,
+      "SELECT datasource_name, bytes, rows FROM tinybird.datasources_storage WHERE timestamp = (SELECT max(timestamp) FROM tinybird.datasources_storage) ORDER BY bytes DESC",
+    ),
+
+    querySql(
+      baseUrl,
+      params.token,
+      "SELECT count() as cnt FROM tinybird.endpoint_errors WHERE start_datetime >= now() - interval 1 day",
+    ),
+
+    querySql(
+      baseUrl,
+      params.token,
+      "SELECT avg(duration) as avg_ms FROM tinybird.pipe_stats_rt WHERE start_datetime >= now() - interval 1 day",
+    ),
+  ])
+
+  const ds = (datasourcesResult?.data ?? []).map((row) => ({
+    name: String(row.datasource_name ?? ""),
+    rowCount: Number(row.rows ?? 0),
+    bytes: Number(row.bytes ?? 0),
+  }))
+
+  const totalRows = ds.reduce((sum, d) => sum + d.rowCount, 0)
+  const totalBytes = ds.reduce((sum, d) => sum + d.bytes, 0)
+
+  const recentErrorCount = Number(errorsResult?.data?.[0]?.cnt ?? 0)
+  const avgLatencyRaw = latencyResult?.data?.[0]?.avg_ms
+  // duration from pipe_stats_rt is in seconds, convert to ms
+  const avgQueryLatencyMs = typeof avgLatencyRaw === "number" ? avgLatencyRaw * 1000 : null
+
+  return {
+    workspaceName: workspace?.name ?? null,
+    datasources: ds,
+    totalRows,
+    totalBytes,
+    recentErrorCount,
+    avgQueryLatencyMs,
+  }
+}
+
 export const buildTinybirdProject = async (): Promise<TinybirdProjectBuild> => bundledProject
 
 export const getCurrentTinybirdProjectRevision = async (): Promise<string> => projectRevision

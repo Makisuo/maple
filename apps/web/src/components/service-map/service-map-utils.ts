@@ -129,15 +129,18 @@ function computeLayers(
   nodes: Node<ServiceNodeData>[],
   edges: Edge<ServiceEdgeData>[],
 ): Map<string, { layer: number; indexInLayer: number; layerSize: number }> {
-  // Build adjacency list and in-degree map
+  // Build adjacency list (forward + reverse) and in-degree map
   const adjacency = new Map<string, string[]>()
+  const reverseAdj = new Map<string, string[]>()
   const inDegree = new Map<string, number>()
   for (const n of nodes) {
     adjacency.set(n.id, [])
+    reverseAdj.set(n.id, [])
     inDegree.set(n.id, 0)
   }
   for (const e of edges) {
     adjacency.get(e.source)?.push(e.target)
+    reverseAdj.get(e.target)?.push(e.source)
     inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1)
   }
 
@@ -184,7 +187,7 @@ function computeLayers(
     }
   }
 
-  // Group nodes by layer and sort alphabetically within each layer
+  // Group nodes by layer, initial alphabetical sort for determinism
   const layerGroups = new Map<number, string[]>()
   for (const [id, layer] of layerMap) {
     if (!layerGroups.has(layer)) layerGroups.set(layer, [])
@@ -192,6 +195,60 @@ function computeLayers(
   }
   for (const group of layerGroups.values()) {
     group.sort()
+  }
+
+  // Barycenter ordering: sort nodes within each layer by the median position
+  // of their neighbors in adjacent layers to minimize edge crossings
+  const layerIndices = [...layerGroups.keys()].sort((a, b) => a - b)
+  const positionOf = new Map<string, number>()
+
+  function updatePositions() {
+    for (const [, group] of layerGroups) {
+      for (let i = 0; i < group.length; i++) {
+        positionOf.set(group[i], i)
+      }
+    }
+  }
+
+  function barySort(layer: string[], getNeighbors: (id: string) => string[]) {
+    const barycenters = new Map<string, number>()
+    for (let i = 0; i < layer.length; i++) {
+      const neighbors = getNeighbors(layer[i])
+      const positions = neighbors
+        .map((n) => positionOf.get(n))
+        .filter((p): p is number => p !== undefined)
+
+      if (positions.length === 0) {
+        barycenters.set(layer[i], i)
+      } else {
+        positions.sort((a, b) => a - b)
+        const mid = Math.floor(positions.length / 2)
+        const median =
+          positions.length % 2 === 1
+            ? positions[mid]
+            : (positions[mid - 1] + positions[mid]) / 2
+        barycenters.set(layer[i], median)
+      }
+    }
+    layer.sort((a, b) => {
+      const ba = barycenters.get(a) ?? 0
+      const bb = barycenters.get(b) ?? 0
+      return ba !== bb ? ba - bb : a.localeCompare(b)
+    })
+  }
+
+  updatePositions()
+  for (let sweep = 0; sweep < 2; sweep++) {
+    // Left-to-right: order by neighbors in previous layer
+    for (let li = 1; li < layerIndices.length; li++) {
+      barySort(layerGroups.get(layerIndices[li])!, (id) => reverseAdj.get(id) ?? [])
+      updatePositions()
+    }
+    // Right-to-left: order by neighbors in next layer
+    for (let li = layerIndices.length - 2; li >= 0; li--) {
+      barySort(layerGroups.get(layerIndices[li])!, (id) => adjacency.get(id) ?? [])
+      updatePositions()
+    }
   }
 
   // Build final result
@@ -222,7 +279,7 @@ export function layoutNodes(
     return {
       id: n.id,
       x: assignment.layer * 300,
-      y: (assignment.indexInLayer - (assignment.layerSize - 1) / 2) * 120,
+      y: (assignment.indexInLayer - (assignment.layerSize - 1) / 2) * 150,
     }
   })
   const simLinks: SimulationLinkDatum<SimNode>[] = edges.map((e) => ({
@@ -240,10 +297,10 @@ export function layoutNodes(
       "link",
       forceLink<SimNode, SimulationLinkDatum<SimNode>>(simLinks)
         .id((d) => d.id)
-        .distance(220)
+        .distance(280)
         .strength(0.3),
     )
-    .force("charge", forceManyBody().strength(-400))
+    .force("charge", forceManyBody().strength(-500))
     .force(
       "x",
       forceX<SimNode>((d) => {
@@ -255,12 +312,11 @@ export function layoutNodes(
       "y",
       forceY<SimNode>((d) => {
         const assignment = layers.get(d.id)
-        return assignment
-          ? (assignment.indexInLayer - (assignment.layerSize - 1) / 2) * 120
-          : 0
-      }).strength(0.3),
+        if (!assignment) return 0
+        return (assignment.indexInLayer - (assignment.layerSize - 1) / 2) * 150
+      }).strength(0.5),
     )
-    .force("collide", forceCollide(110))
+    .force("collide", forceCollide(120))
     .stop()
 
   // Run synchronously
