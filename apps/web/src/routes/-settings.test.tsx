@@ -132,7 +132,9 @@ describe("SettingsPage BYO entitlement gating", () => {
     mocks.customer = buildCustomer([
       buildProduct(),
     ])
-    mocks.customer!.features = { bringyourowncloud: true }
+    mocks.customer!.features = {
+      bringyourowncloud: { id: "bringyourowncloud", name: "Bring Your Own Cloud", type: "static" as const },
+    }
     mocks.isCustomerLoading = false
     mocks.orgSectionProps = []
     mocks.tabsValue = ""

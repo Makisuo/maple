@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest"
 import type { Customer } from "autumn-js"
 import { hasBringYourOwnCloudAddOn, hasSelectedPlan } from "./plan-gating"
 
+const byocFeature = {
+  id: "bringyourowncloud",
+  name: "Bring Your Own Cloud",
+  type: "static" as const,
+}
+
 function buildCustomer(products: Customer["products"], features: Customer["features"] = {}): Customer {
   return {
     id: "cus_1",
@@ -80,24 +86,14 @@ describe("hasBringYourOwnCloudAddOn", () => {
   })
 
   it("returns true when bringyourowncloud feature is present", () => {
-    const customer = buildCustomer([], { bringyourowncloud: true })
+    const customer = buildCustomer([], { bringyourowncloud: byocFeature })
 
     expect(hasBringYourOwnCloudAddOn(customer)).toBe(true)
   })
 
-  it("returns true for truthy bringyourowncloud feature values", () => {
-    const customer1 = buildCustomer([], { bringyourowncloud: true })
-    const customer2 = buildCustomer([], { bringyourowncloud: 1 })
+  it("returns false when bringyourowncloud feature is missing", () => {
+    const customer = buildCustomer([])
 
-    expect(hasBringYourOwnCloudAddOn(customer1)).toBe(true)
-    expect(hasBringYourOwnCloudAddOn(customer2)).toBe(true)
-  })
-
-  it("returns false when bringyourowncloud feature is falsy or missing", () => {
-    const noFeature = buildCustomer([])
-    const falsyFeature = buildCustomer([], { bringyourowncloud: false })
-
-    expect(hasBringYourOwnCloudAddOn(noFeature)).toBe(false)
-    expect(hasBringYourOwnCloudAddOn(falsyFeature)).toBe(false)
+    expect(hasBringYourOwnCloudAddOn(customer)).toBe(false)
   })
 })

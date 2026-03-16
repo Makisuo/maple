@@ -1,7 +1,6 @@
 import type { Customer } from "autumn-js"
 
 const ALLOWED_PRODUCT_STATUSES = new Set(["active", "trialing", "past_due"])
-const BRING_YOUR_OWN_CLOUD_ADD_ON_ID = "bringyourowncloud"
 
 function isLegacyFreeProduct(product: Customer["products"][number]): boolean {
   if (product.id.toLowerCase() === "free") return true
