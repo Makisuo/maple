@@ -10,8 +10,22 @@ import {
 import * as m from "../paraglide/messages"
 import { ClerkProvider } from "./ClerkProvider"
 
-function NavBarInner({ locale = "en" }: { locale?: string }) {
+const PUBLISHABLE_KEY = import.meta.env.PUBLIC_CLERK_PUBLISHABLE_KEY
+
+function AuthAwareCTA() {
   const { isSignedIn, isLoaded } = useAuth()
+  return isLoaded && isSignedIn ? m.nav_dashboard() : m.nav_get_started()
+}
+
+function CTAButton() {
+  // Only use Clerk auth hook when the provider is actually available
+  if (!PUBLISHABLE_KEY) {
+    return m.nav_get_started()
+  }
+  return <AuthAwareCTA />
+}
+
+function NavBarInner({ locale = "en" }: { locale?: string }) {
   const l = (path: string) => locale === "en" ? path : `/${locale}${path}`
 
   const featureLinks = [
@@ -141,7 +155,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
           href="https://app.maple.dev"
           className="bg-accent text-accent-foreground px-4 py-1.5 text-xs font-medium hover:opacity-90 transition-opacity"
         >
-          {isLoaded && isSignedIn ? m.nav_dashboard() : m.nav_get_started()}
+          <CTAButton />
         </a>
       </div>
     </div>
