@@ -3,7 +3,6 @@ import {
   optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
-  requiredStringParam,
   type McpToolRegistrar,
   type McpToolResult,
 } from "./types"
@@ -16,10 +15,7 @@ import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
 import { Env } from "@/services/Env"
 import { QueryEngineService } from "@/services/QueryEngineService"
 import {
-  MetricType,
-  MetricsMetric,
   QuerySpec,
-  TracesMetric,
   type LogsFilters,
   type MetricsFilters,
   type QueryEngineExecuteResponse,
@@ -36,126 +32,41 @@ const commonTimeRangeFields = {
   end_time: optionalStringParam("End time (YYYY-MM-DD HH:mm:ss). Defaults to now"),
 }
 
-const commonTraceFilterFields = {
-  service_name: optionalStringParam("Filter by service name"),
-  span_name: optionalStringParam("Filter by span name"),
-  root_spans_only: optionalBooleanParam("Only root spans"),
-  environments: optionalStringParam("Comma-separated environments"),
-  commit_shas: optionalStringParam("Comma-separated commit SHAs"),
-  attribute_key: optionalStringParam("Attribute key for filtering or grouping"),
-  attribute_value: optionalStringParam("Attribute value filter; requires attribute_key"),
-}
-
-const tracesTimeseriesArgsSchema = Schema.Struct({
-  source: Schema.Literal("traces").annotations({ description: "Data source: traces" }),
-  kind: Schema.Literal("timeseries").annotations({ description: "Query type: timeseries" }),
-  metric: Schema.optional(TracesMetric).annotations({
-    description:
-      "Metric: count, avg_duration, p50_duration, p95_duration, p99_duration, or error_rate. Defaults to count.",
+// Flat schema to produce a JSON Schema with `type: "object"` (no `anyOf`).
+// The Anthropic API rejects `anyOf`/`oneOf`/`allOf` at the top level of tool input schemas,
+// which causes Claude Code to silently drop all tools from the MCP server.
+// Runtime validation of valid source/kind/metric combinations is handled by the QuerySpec decoder.
+export const queryDataArgsSchema = Schema.Struct({
+  source: Schema.Literal("traces", "logs", "metrics").annotations({
+    description: "Data source: traces, logs, or metrics",
   }),
-  group_by: Schema.optional(
-    Schema.Literal("service", "span_name", "status_code", "http_method", "attribute", "none"),
-  ).annotations({
-    description:
-      "Grouping: service, span_name, status_code, http_method, attribute, or none. Defaults to none.",
+  kind: Schema.Literal("timeseries", "breakdown").annotations({
+    description: "Query type: timeseries or breakdown",
   }),
-  bucket_seconds: optionalNumberParam("Bucket size in seconds (auto-computed if omitted)"),
-  ...commonTimeRangeFields,
-  ...commonTraceFilterFields,
-})
-
-const tracesBreakdownArgsSchema = Schema.Struct({
-  source: Schema.Literal("traces").annotations({ description: "Data source: traces" }),
-  kind: Schema.Literal("breakdown").annotations({ description: "Query type: breakdown" }),
-  metric: Schema.optional(TracesMetric).annotations({
-    description:
-      "Metric: count, avg_duration, p50_duration, p95_duration, p99_duration, or error_rate. Defaults to count.",
-  }),
-  group_by: Schema.optional(
-    Schema.Literal("service", "span_name", "status_code", "http_method", "attribute"),
-  ).annotations({
-    description:
-      "Grouping: service, span_name, status_code, http_method, or attribute. Defaults to service.",
-  }),
-  limit: optionalNumberParam("Max breakdown rows (default 10, max 100)"),
-  ...commonTimeRangeFields,
-  ...commonTraceFilterFields,
-})
-
-const logsTimeseriesArgsSchema = Schema.Struct({
-  source: Schema.Literal("logs").annotations({ description: "Data source: logs" }),
-  kind: Schema.Literal("timeseries").annotations({ description: "Query type: timeseries" }),
-  metric: Schema.optional(Schema.Literal("count")).annotations({
-    description: "Metric: count. Defaults to count.",
-  }),
-  group_by: Schema.optional(Schema.Literal("service", "severity", "none")).annotations({
-    description: "Grouping: service, severity, or none. Defaults to none.",
-  }),
-  bucket_seconds: optionalNumberParam("Bucket size in seconds (auto-computed if omitted)"),
+  metric: optionalStringParam(
+    "Metric to compute. Traces: count, avg_duration, p50_duration, p95_duration, p99_duration, error_rate. Logs: count. Metrics: avg, sum, min, max, count.",
+  ),
+  group_by: optionalStringParam(
+    "Grouping dimension. Traces: service, span_name, status_code, http_method, attribute, none. Logs: service, severity, none. Metrics: service, none.",
+  ),
+  bucket_seconds: optionalNumberParam("Bucket size in seconds (timeseries only, auto-computed if omitted)"),
+  limit: optionalNumberParam("Max breakdown rows (breakdown only, default 10, max 100)"),
   ...commonTimeRangeFields,
   service_name: optionalStringParam("Filter by service name"),
-  severity: optionalStringParam("Filter by severity (e.g. ERROR, WARN, INFO)"),
+  span_name: optionalStringParam("Filter by span name (traces only)"),
+  root_spans_only: optionalBooleanParam("Only root spans (traces only)"),
+  environments: optionalStringParam("Comma-separated environments (traces only)"),
+  commit_shas: optionalStringParam("Comma-separated commit SHAs (traces only)"),
+  attribute_key: optionalStringParam("Attribute key for filtering or grouping (traces only)"),
+  attribute_value: optionalStringParam("Attribute value filter; requires attribute_key (traces only)"),
+  severity: optionalStringParam("Filter by severity, e.g. ERROR, WARN, INFO (logs only)"),
+  metric_name: optionalStringParam(
+    "Metric name (required for metrics queries). Use list_metrics to discover available metrics.",
+  ),
+  metric_type: optionalStringParam(
+    "Metric type: sum, gauge, histogram, or exponential_histogram (required for metrics queries)",
+  ),
 })
-
-const logsBreakdownArgsSchema = Schema.Struct({
-  source: Schema.Literal("logs").annotations({ description: "Data source: logs" }),
-  kind: Schema.Literal("breakdown").annotations({ description: "Query type: breakdown" }),
-  metric: Schema.optional(Schema.Literal("count")).annotations({
-    description: "Metric: count. Defaults to count.",
-  }),
-  group_by: Schema.optional(Schema.Literal("service", "severity")).annotations({
-    description: "Grouping: service or severity. Defaults to service.",
-  }),
-  limit: optionalNumberParam("Max breakdown rows (default 10, max 100)"),
-  ...commonTimeRangeFields,
-  service_name: optionalStringParam("Filter by service name"),
-  severity: optionalStringParam("Filter by severity (e.g. ERROR, WARN, INFO)"),
-})
-
-const metricsTimeseriesArgsSchema = Schema.Struct({
-  source: Schema.Literal("metrics").annotations({ description: "Data source: metrics" }),
-  kind: Schema.Literal("timeseries").annotations({ description: "Query type: timeseries" }),
-  metric: Schema.optional(MetricsMetric).annotations({
-    description: "Metric: avg, sum, min, max, or count. Defaults to avg.",
-  }),
-  group_by: Schema.optional(Schema.Literal("service", "none")).annotations({
-    description: "Grouping: service or none. Defaults to none.",
-  }),
-  bucket_seconds: optionalNumberParam("Bucket size in seconds (auto-computed if omitted)"),
-  ...commonTimeRangeFields,
-  service_name: optionalStringParam("Filter by service name"),
-  metric_name: requiredStringParam("Metric name. Use list_metrics first to discover it."),
-  metric_type: MetricType.annotations({
-    description: "Metric type: sum, gauge, histogram, or exponential_histogram.",
-  }),
-})
-
-const metricsBreakdownArgsSchema = Schema.Struct({
-  source: Schema.Literal("metrics").annotations({ description: "Data source: metrics" }),
-  kind: Schema.Literal("breakdown").annotations({ description: "Query type: breakdown" }),
-  metric: Schema.optional(Schema.Literal("avg", "sum", "count")).annotations({
-    description: "Metric: avg, sum, or count. Defaults to avg.",
-  }),
-  group_by: Schema.optional(Schema.Literal("service")).annotations({
-    description: "Grouping: service. Defaults to service.",
-  }),
-  limit: optionalNumberParam("Max breakdown rows (default 10, max 100)"),
-  ...commonTimeRangeFields,
-  service_name: optionalStringParam("Filter by service name"),
-  metric_name: requiredStringParam("Metric name. Use list_metrics first to discover it."),
-  metric_type: MetricType.annotations({
-    description: "Metric type: sum, gauge, histogram, or exponential_histogram.",
-  }),
-})
-
-export const queryDataArgsSchema = Schema.Union(
-  tracesTimeseriesArgsSchema,
-  tracesBreakdownArgsSchema,
-  logsTimeseriesArgsSchema,
-  logsBreakdownArgsSchema,
-  metricsTimeseriesArgsSchema,
-  metricsBreakdownArgsSchema,
-)
 
 export type QueryDataArgs = Schema.Schema.Type<typeof queryDataArgsSchema>
 
@@ -187,15 +98,19 @@ const resolveTenant = Effect.gen(function* () {
   ),
 )
 
+// The flat MCP schema accepts strings for metric/group_by/metric_type, but QuerySpecType
+// expects specific literal unions. We cast here because the QuerySpec decoder (validateEither)
+// validates the actual values at runtime before execution.
 export function buildQuerySpec(args: QueryDataArgs): { spec: QuerySpecType } | { error: string } {
-  const attributeKey = "attribute_key" in args ? args.attribute_key : undefined
-  const attributeValue = "attribute_value" in args ? args.attribute_value : undefined
+  type AnySpec = Record<string, unknown>
+  const attributeKey = args.attribute_key
+  const attributeValue = args.attribute_value
 
   if (attributeValue && !attributeKey) {
     return { error: "`attribute_value` requires `attribute_key`." }
   }
 
-  if ("group_by" in args && args.group_by === "attribute" && !attributeKey) {
+  if (args.group_by === "attribute" && !attributeKey) {
     return { error: "`group_by=attribute` requires `attribute_key`." }
   }
 
@@ -220,7 +135,7 @@ export function buildQuerySpec(args: QueryDataArgs): { spec: QuerySpecType } | {
           groupBy: args.group_by ?? "none",
           ...(hasFilters && { filters }),
           ...(args.bucket_seconds && { bucketSeconds: args.bucket_seconds }),
-        },
+        } as AnySpec as QuerySpecType,
       }
     }
 
@@ -232,7 +147,7 @@ export function buildQuerySpec(args: QueryDataArgs): { spec: QuerySpecType } | {
         groupBy: args.group_by ?? "service",
         ...(hasFilters && { filters }),
         ...(args.limit && { limit: args.limit }),
-      },
+      } as AnySpec as QuerySpecType,
     }
   }
 
@@ -252,7 +167,7 @@ export function buildQuerySpec(args: QueryDataArgs): { spec: QuerySpecType } | {
           groupBy: args.group_by ?? "none",
           ...(hasFilters && { filters }),
           ...(args.bucket_seconds && { bucketSeconds: args.bucket_seconds }),
-        },
+        } as AnySpec as QuerySpecType,
       }
     }
 
@@ -264,13 +179,17 @@ export function buildQuerySpec(args: QueryDataArgs): { spec: QuerySpecType } | {
         groupBy: args.group_by ?? "service",
         ...(hasFilters && { filters }),
         ...(args.limit && { limit: args.limit }),
-      },
+      } as AnySpec as QuerySpecType,
     }
+  }
+
+  if (!args.metric_name || !args.metric_type) {
+    return { error: "`metric_name` and `metric_type` are required for metrics queries." }
   }
 
   const filters: MetricsFilters = {
     metricName: args.metric_name,
-    metricType: args.metric_type,
+    metricType: args.metric_type as MetricsFilters["metricType"],
     ...(args.service_name && { serviceName: args.service_name }),
   }
 
@@ -283,7 +202,7 @@ export function buildQuerySpec(args: QueryDataArgs): { spec: QuerySpecType } | {
         groupBy: args.group_by ?? "none",
         filters,
         ...(args.bucket_seconds && { bucketSeconds: args.bucket_seconds }),
-      },
+      } as AnySpec as QuerySpecType,
     }
   }
 
@@ -295,7 +214,7 @@ export function buildQuerySpec(args: QueryDataArgs): { spec: QuerySpecType } | {
       groupBy: "service",
       filters,
       ...(args.limit && { limit: args.limit }),
-    },
+    } as AnySpec as QuerySpecType,
   }
 }
 
@@ -465,7 +384,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           params.metric,
           st,
           et,
-          "group_by" in params ? params.group_by : undefined,
+          params.group_by,
         )
       }),
   )

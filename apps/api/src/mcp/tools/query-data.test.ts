@@ -1,36 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import * as JSONSchema from "effect/JSONSchema"
-import * as ParseResult from "effect/ParseResult"
-import * as Schema from "effect/Schema"
 import { buildQuerySpec, queryDataArgsSchema } from "./query-data"
 
 describe("query_data", () => {
-  const decode = Schema.validateEither(queryDataArgsSchema)
-
-  it("rejects metrics breakdown min via the public schema", () => {
-    const result = decode({
-      source: "metrics",
-      kind: "breakdown",
-      metric: "min",
-      metric_name: "request.duration",
-      metric_type: "histogram",
-    })
-
-    expect(result._tag).toBe("Left")
-  })
-
-  it("rejects metrics breakdown group_by=none via the public schema", () => {
-    const result = decode({
-      source: "metrics",
-      kind: "breakdown",
-      group_by: "none",
-      metric_name: "request.duration",
-      metric_type: "histogram",
-    })
-
-    expect(result._tag).toBe("Left")
-  })
-
   it("rejects traces attribute grouping without attribute_key", () => {
     const result = buildQuerySpec({
       source: "traces",
@@ -44,18 +16,15 @@ describe("query_data", () => {
   })
 
   it("requires metric_name and metric_type for metrics queries", () => {
-    const result = decode({
+    const result = buildQuerySpec({
       source: "metrics",
       kind: "timeseries",
       metric: "avg",
-    })
+    } as Parameters<typeof buildQuerySpec>[0])
 
-    expect(result._tag).toBe("Left")
-    if (result._tag === "Left") {
-      const message = ParseResult.TreeFormatter.formatErrorSync(result.left)
-      expect(message).toContain("metric_name")
-      expect(message).toContain("metric_type")
-    }
+    expect(result).toEqual({
+      error: "`metric_name` and `metric_type` are required for metrics queries.",
+    })
   })
 
   it("builds the expected QuerySpec for supported branches", () => {
@@ -171,11 +140,12 @@ describe("query_data", () => {
     }
   })
 
-  it("generates a union schema for tools/list", () => {
+  it("generates a flat object schema with no anyOf for Claude Code compatibility", () => {
     const schema = JSONSchema.make(queryDataArgsSchema) as unknown as Record<string, unknown>
-    const variants = (schema.oneOf ?? schema.anyOf) as Array<unknown> | undefined
 
-    expect(Array.isArray(variants)).toBe(true)
-    expect(variants?.length).toBe(6)
+    expect(schema.type).toBe("object")
+    expect("anyOf" in schema).toBe(false)
+    expect("oneOf" in schema).toBe(false)
+    expect("allOf" in schema).toBe(false)
   })
 })
