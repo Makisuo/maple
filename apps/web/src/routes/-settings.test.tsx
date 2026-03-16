@@ -131,11 +131,8 @@ describe("SettingsPage BYO entitlement gating", () => {
     mocks.sessionResult = { _tag: "success", value: { roles: ["org:admin"] } }
     mocks.customer = buildCustomer([
       buildProduct(),
-      buildProduct({
-        id: "bringyourowncloud",
-        is_add_on: true,
-      }),
     ])
+    mocks.customer!.features = { bringyourowncloud: true }
     mocks.isCustomerLoading = false
     mocks.orgSectionProps = []
     mocks.tabsValue = ""

@@ -27,7 +27,8 @@ vi.mock("@/lib/services/common/atom-client", () => ({
   },
 }))
 
-vi.mock("@effect-atom/atom-react", () => ({
+vi.mock("@effect-atom/atom-react", async () => ({
+  Atom: (await vi.importActual<typeof import("@effect-atom/atom-react")>("@effect-atom/atom-react")).Atom,
   Result: {
     builder: (result: MockResult) => ({
       onSuccess: (onSuccess: (value: unknown) => unknown) => ({
@@ -44,7 +45,11 @@ vi.mock("@effect-atom/atom-react", () => ({
     if (descriptor.name === "delete") return mocks.deleteSpy
     throw new Error(`Unexpected mutation ${descriptor.name}`)
   },
-  useAtomValue: () => mocks.settingsResult,
+  useAtomValue: (atom: { name?: string }) => {
+    if (atom?.name === "deploymentStatus") return { _tag: "success", value: { status: "synced", resources: [] } }
+    if (atom?.name === "instanceHealth") return { _tag: "success", value: { totalBytes: 0, totalRows: 0, datasources: [] } }
+    return mocks.settingsResult
+  },
 }))
 
 vi.mock("sonner", () => ({

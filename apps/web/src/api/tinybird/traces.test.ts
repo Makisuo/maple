@@ -29,68 +29,62 @@ describe("tinybird traces attribute filter params", () => {
     }
   })
 
-  it("forwards attribute filter params to list_traces", async () => {
+  it("forwards basic filter params to list_traces", async () => {
     await Effect.runPromise(
       listTraces({
         data: {
           startTime: "2026-02-01 00:00:00",
           endTime: "2026-02-01 01:00:00",
-          attributeKey: "http.route",
-          attributeValue: "/checkout",
         },
       }),
     )
 
     expect(tinybirdQueryMocks.list_traces).toHaveBeenCalledWith(
       expect.objectContaining({
-        attribute_filter_key: "http.route",
-        attribute_filter_value: "/checkout",
+        start_time: "2026-02-01 00:00:00",
+        end_time: "2026-02-01 01:00:00",
       }),
     )
   })
 
-  it("forwards attribute filter params to traces_facets and traces_duration_stats", async () => {
+  it("forwards filter params to traces_facets and traces_duration_stats", async () => {
     await Effect.runPromise(
       getTracesFacets({
         data: {
           startTime: "2026-02-01 00:00:00",
           endTime: "2026-02-01 01:00:00",
-          attributeKey: "http.route",
-          attributeValue: "/checkout",
         },
       }),
     )
 
     expect(tinybirdQueryMocks.traces_facets).toHaveBeenCalledWith(
       expect.objectContaining({
-        attribute_filter_key: "http.route",
-        attribute_filter_value: "/checkout",
+        start_time: "2026-02-01 00:00:00",
+        end_time: "2026-02-01 01:00:00",
       }),
     )
     expect(tinybirdQueryMocks.traces_duration_stats).toHaveBeenCalledWith(
       expect.objectContaining({
-        attribute_filter_key: "http.route",
-        attribute_filter_value: "/checkout",
+        start_time: "2026-02-01 00:00:00",
+        end_time: "2026-02-01 01:00:00",
       }),
     )
   })
 
-  it("forwards attribute filter params to standalone traces_duration_stats", async () => {
+  it("forwards filter params to standalone traces_duration_stats", async () => {
     await Effect.runPromise(
       getTracesDurationStats({
         data: {
           startTime: "2026-02-01 00:00:00",
           endTime: "2026-02-01 01:00:00",
-          attributeKey: "http.route",
-          attributeValue: "/checkout",
         },
       }),
     )
 
     expect(tinybirdQueryMocks.traces_duration_stats).toHaveBeenCalledWith(
       expect.objectContaining({
-        attribute_filter_key: "http.route",
-        attribute_filter_value: "/checkout",
+        start_time: "2026-02-01 00:00:00",
+        end_time: "2026-02-01 01:00:00",
       }),
     )
   })

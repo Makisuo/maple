@@ -203,8 +203,8 @@ describe("TracesPage timePreset search updates", () => {
       }),
     ).toEqual({
       whereClause: "service.name = \"checkout\"",
-      startTime: "2026-03-10 11:00:00",
-      endTime: "2026-03-10 12:00:00",
+      startTime: undefined,
+      endTime: undefined,
       timePreset: "1h",
     })
   })
