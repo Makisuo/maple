@@ -42,31 +42,74 @@ export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode
     [chartData, bucketSeconds],
   )
 
+  const hasSamplingData = useMemo(
+    () => chartData.some((p) => p.hasSampling === true),
+    [chartData],
+  )
+
+  const hasErrorData = useMemo(
+    () => chartData.some((p) => typeof p.errorRate === "number" && (p.errorRate as number) > 0),
+    [chartData],
+  )
+
   const { data: processedData, hasIncomplete, incompleteKeys } = useIncompleteSegments(chartData, VALUE_KEYS)
 
-  // Normalize throughput values to per-second rate when rateMode is "per_second"
+  // Normalize throughput values to per-second rate and derive error throughput
   const displayData = useMemo(() => {
-    if (!perSecond || !bucketSeconds) return processedData
-    return processedData.map((point) => ({
-      ...point,
-      throughput: point.throughput != null ? Number(point.throughput) / bucketSeconds : point.throughput,
-      throughput_incomplete: point.throughput_incomplete != null ? Number(point.throughput_incomplete) / bucketSeconds : point.throughput_incomplete,
-    }))
+    return processedData.map((point) => {
+      const errorRate = typeof point.errorRate === "number" ? Number(point.errorRate) : 0
+      const shouldDivide = perSecond && !!bucketSeconds
+      const divisor = shouldDivide ? bucketSeconds : 1
+
+      const throughput = point.throughput != null ? Number(point.throughput) / divisor : null
+      const throughputIncomplete = point.throughput_incomplete != null
+        ? Number(point.throughput_incomplete) / divisor
+        : null
+      const tracedThroughput = point.tracedThroughput != null
+        ? Number(point.tracedThroughput) / divisor
+        : undefined
+
+      return {
+        ...point,
+        throughput: throughput ?? point.throughput,
+        throughput_incomplete: throughputIncomplete ?? point.throughput_incomplete,
+        tracedThroughput,
+        errorThroughput: throughput != null ? throughput * errorRate / 100 : null,
+        errorThroughput_incomplete: throughputIncomplete != null
+          ? throughputIncomplete * errorRate / 100
+          : null,
+      }
+    })
   }, [processedData, perSecond, bucketSeconds])
 
-  const chartConfig = useMemo(
-    () =>
-      extendConfigWithIncomplete(
-        {
-          throughput: {
-            label: rateLabel ? `Throughput (${rateLabel})` : "Throughput",
-            color: "var(--chart-throughput)",
-          },
-        } satisfies ChartConfig,
-        incompleteKeys,
-      ),
-    [rateLabel, incompleteKeys],
-  )
+  const chartConfig = useMemo(() => {
+    const base: ChartConfig = {
+      throughput: {
+        label: rateLabel
+          ? `${hasSamplingData ? "~" : ""}Throughput (${rateLabel})`
+          : `${hasSamplingData ? "~" : ""}Throughput`,
+        color: "var(--chart-throughput)",
+      },
+    }
+    if (hasErrorData) {
+      base.errorThroughput = {
+        label: rateLabel ? `Errors (${rateLabel})` : "Errors",
+        color: "var(--chart-error)",
+      }
+      if (hasIncomplete) {
+        base.errorThroughput_incomplete = {
+          color: "var(--chart-error)",
+        }
+      }
+    }
+    if (hasSamplingData) {
+      base.tracedThroughput = {
+        label: rateLabel ? `Traced (${rateLabel})` : "Traced",
+        color: "var(--chart-throughput)",
+      }
+    }
+    return extendConfigWithIncomplete(base, incompleteKeys)
+  }, [rateLabel, incompleteKeys, hasSamplingData, hasErrorData, hasIncomplete])
 
   return (
     <ChartContainer config={chartConfig} className={className}>
@@ -106,15 +149,50 @@ export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode
                   const baseKey = isIncomplete ? nameStr.replace(/_incomplete$/, "") : nameStr
                   if (isIncomplete && item.payload?.[baseKey] != null) return null
                   if (!isIncomplete && value == null) return null
+
+                  if (nameStr === "errorThroughput" || nameStr === "errorThroughput_incomplete") {
+                    if (value == null || Number(value) === 0) return null
+                    return (
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="shrink-0 size-2.5 rounded-[2px] border border-dashed"
+                          style={{ borderColor: "var(--chart-error)" }}
+                        />
+                        <span className="text-muted-foreground">Errors</span>
+                        <span className="font-mono font-medium">
+                          {Number(value).toLocaleString()}{rateLabel}
+                        </span>
+                      </span>
+                    )
+                  }
+
+                  if (nameStr === "tracedThroughput") {
+                    return (
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="shrink-0 size-2.5 rounded-[2px] border border-dashed"
+                          style={{ borderColor: item.color }}
+                        />
+                        <span className="text-muted-foreground">Traced</span>
+                        <span className="font-mono font-medium">
+                          {Number(value).toLocaleString()}{rateLabel}
+                        </span>
+                      </span>
+                    )
+                  }
+
+                  const isSampled = item.payload?.hasSampling === true
                   return (
                     <span className="flex items-center gap-2">
                       <span
                         className="shrink-0 size-2.5 rounded-[2px]"
                         style={{ backgroundColor: item.color }}
                       />
-                      <span className="text-muted-foreground">Throughput</span>
+                      <span className="text-muted-foreground">
+                        {isSampled ? "Estimated" : "Throughput"}
+                      </span>
                       <span className="font-mono font-medium">
-                        {Number(value).toLocaleString()}{rateLabel}
+                        {isSampled ? "~" : ""}{Number(value).toLocaleString()}{rateLabel}
                       </span>
                     </span>
                   )
@@ -123,7 +201,7 @@ export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode
             }
           />
         )}
-        {legend === "visible" && <ChartLegend content={<ChartLegendContent />} />}
+        {(legend === "visible" || hasErrorData) && <ChartLegend content={<ChartLegendContent />} />}
         <Area
           type="linear"
           dataKey="throughput"
@@ -131,6 +209,32 @@ export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode
           fill={`url(#${gradientId})`}
           isAnimationActive={false}
         />
+        {hasErrorData && (
+          <Area
+            type="linear"
+            dataKey="errorThroughput"
+            stroke="var(--color-errorThroughput)"
+            fill="none"
+            strokeWidth={1.5}
+            strokeDasharray="3 3"
+            dot={false}
+            isAnimationActive={false}
+          />
+        )}
+        {hasSamplingData && (
+          <Area
+            type="linear"
+            dataKey="tracedThroughput"
+            stroke="var(--color-throughput)"
+            fill="none"
+            strokeWidth={1}
+            strokeDasharray="4 4"
+            strokeOpacity={0.5}
+            dot={false}
+            isAnimationActive={false}
+            legendType="none"
+          />
+        )}
         {hasIncomplete && (
           <Area
             type="linear"
@@ -139,6 +243,21 @@ export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode
             fill={`url(#${fadedGradientId})`}
             strokeWidth={2}
             strokeDasharray="4 4"
+            dot={false}
+            connectNulls
+            legendType="none"
+            isAnimationActive={false}
+          />
+        )}
+        {hasErrorData && hasIncomplete && (
+          <Area
+            type="linear"
+            dataKey="errorThroughput_incomplete"
+            stroke="var(--color-errorThroughput)"
+            fill="none"
+            strokeWidth={1.5}
+            strokeDasharray="3 3"
+            strokeOpacity={0.5}
             dot={false}
             connectNulls
             legendType="none"

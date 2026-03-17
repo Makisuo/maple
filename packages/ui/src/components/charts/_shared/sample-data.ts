@@ -86,12 +86,12 @@ export const latencyTimeSeriesData = [
 ]
 
 export const throughputTimeSeriesData = [
-  { bucket: "2024-01-01T00:00:00Z", throughput: 1240 },
-  { bucket: "2024-01-01T01:00:00Z", throughput: 1580 },
-  { bucket: "2024-01-01T02:00:00Z", throughput: 980 },
-  { bucket: "2024-01-01T03:00:00Z", throughput: 1720 },
-  { bucket: "2024-01-01T04:00:00Z", throughput: 1350 },
-  { bucket: "2024-01-01T05:00:00Z", throughput: 1100 },
+  { bucket: "2024-01-01T00:00:00Z", throughput: 1240, errorRate: 1.2 },
+  { bucket: "2024-01-01T01:00:00Z", throughput: 1580, errorRate: 2.5 },
+  { bucket: "2024-01-01T02:00:00Z", throughput: 980, errorRate: 0.8 },
+  { bucket: "2024-01-01T03:00:00Z", throughput: 1720, errorRate: 4.2 },
+  { bucket: "2024-01-01T04:00:00Z", throughput: 1350, errorRate: 1.8 },
+  { bucket: "2024-01-01T05:00:00Z", throughput: 1100, errorRate: 1.1 },
 ]
 
 export const apdexTimeSeriesData = [
