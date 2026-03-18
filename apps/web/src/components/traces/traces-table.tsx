@@ -41,7 +41,7 @@ function StatusBadge({ hasError }: { hasError: boolean }) {
     return (
       <Badge
         variant="secondary"
-        className="bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400"
+        className="bg-severity-error/15 text-severity-error"
       >
         Error
       </Badge>
@@ -50,7 +50,7 @@ function StatusBadge({ hasError }: { hasError: boolean }) {
   return (
     <Badge
       variant="secondary"
-      className="bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
+      className="bg-severity-info/15 text-severity-info"
     >
       OK
     </Badge>
@@ -63,12 +63,12 @@ function HttpStatusBadge({ statusCode }: { statusCode: number }) {
       variant="secondary"
       className={
         statusCode >= 500
-          ? "bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400"
+          ? "bg-severity-error/15 text-severity-error"
           : statusCode >= 400
-            ? "bg-amber-500/10 text-amber-600 dark:bg-amber-400/10 dark:text-amber-400"
+            ? "bg-severity-warn/15 text-severity-warn"
             : statusCode >= 300
-              ? "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
-              : "bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
+              ? "bg-chart-p50/15 text-chart-p50"
+              : "bg-severity-info/15 text-severity-info"
       }
     >
       {statusCode}

@@ -29,9 +29,9 @@ interface SpanDetailPanelProps {
 }
 
 const statusStyles: Record<string, string> = {
-  Ok: "bg-green-500/20 text-green-700 dark:bg-green-400/20 dark:text-green-400 border-green-500/30",
-  Error: "bg-red-500/20 text-red-700 dark:bg-red-400/20 dark:text-red-400 border-red-500/30",
-  Unset: "bg-gray-500/20 text-gray-600 dark:bg-gray-400/20 dark:text-gray-400 border-gray-500/30",
+  Ok: "bg-severity-info/15 text-severity-info border-severity-info/30",
+  Error: "bg-severity-error/15 text-severity-error border-severity-error/30",
+  Unset: "bg-muted text-muted-foreground border-border",
 }
 
 const kindLabels: Record<string, string> = {
@@ -43,16 +43,16 @@ const kindLabels: Record<string, string> = {
 }
 
 const severityStyles: Record<string, string> = {
-  TRACE: "text-gray-500",
-  DEBUG: "text-gray-500",
-  INFO: "text-blue-500",
-  WARN: "text-yellow-500",
-  ERROR: "text-red-500",
-  FATAL: "text-red-700",
+  TRACE: "text-severity-trace",
+  DEBUG: "text-severity-debug",
+  INFO: "text-severity-info",
+  WARN: "text-severity-warn",
+  ERROR: "text-severity-error",
+  FATAL: "text-severity-fatal",
 }
 
 function LogEntry({ log, timeZone, onClick }: { log: Log; timeZone: string; onClick?: (log: Log) => void }) {
-  const severityStyle = severityStyles[log.severityText] ?? "text-gray-500"
+  const severityStyle = severityStyles[log.severityText] ?? "text-severity-trace"
 
   return (
     <div

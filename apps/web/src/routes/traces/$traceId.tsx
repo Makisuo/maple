@@ -285,8 +285,8 @@ function TraceDetailPage() {
                 variant="secondary"
                 className={
                   hasError
-                    ? "bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400"
-                    : "bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
+                    ? "bg-severity-error/15 text-severity-error"
+                    : "bg-severity-info/15 text-severity-info"
                 }
               >
                 {hasError ? "Error" : "OK"}
@@ -299,12 +299,12 @@ function TraceDetailPage() {
                     variant="secondary"
                     className={
                       rootHttpInfo.statusCode >= 500
-                        ? "bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400"
+                        ? "bg-severity-error/15 text-severity-error"
                         : rootHttpInfo.statusCode >= 400
-                          ? "bg-amber-500/10 text-amber-600 dark:bg-amber-400/10 dark:text-amber-400"
+                          ? "bg-severity-warn/15 text-severity-warn"
                           : rootHttpInfo.statusCode >= 300
-                            ? "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
-                            : "bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
+                            ? "bg-chart-p50/15 text-chart-p50"
+                            : "bg-severity-info/15 text-severity-info"
                     }
                   >
                     {rootHttpInfo.statusCode}
@@ -319,8 +319,8 @@ function TraceDetailPage() {
                     variant="secondary"
                     className={
                       deploymentEnv === "production"
-                        ? "bg-orange-500/10 text-orange-600 dark:bg-orange-400/10 dark:text-orange-400"
-                        : "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
+                        ? "bg-severity-warn/15 text-severity-warn"
+                        : "bg-chart-p50/15 text-chart-p50"
                     }
                   >
                     {deploymentEnv}

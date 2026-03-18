@@ -193,7 +193,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({
         className={cn(
           "relative w-[280px] rounded-lg shadow-sm transition-all duration-200",
           "flex flex-col overflow-hidden hover:shadow-md",
-          isError && "shadow-red-500/10",
+          isError && "shadow-destructive/10",
           isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-md"
         )}
       >
@@ -201,7 +201,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({
         <div
           className={cn(
             "flex items-center justify-between gap-2 px-3 py-2 text-[11px]",
-            isError ? "bg-red-500 text-white" : ""
+            isError ? "bg-destructive text-white" : ""
           )}
           style={!isError ? colorStyle : undefined}
         >
@@ -216,7 +216,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({
         <div
           className={cn(
             "border border-dashed border-t-0 rounded-b-lg",
-            isError ? "border-red-500/40" : "border-foreground/20"
+            isError ? "border-destructive/40" : "border-foreground/20"
           )}
         >
           {/* Body - Cache, HTTP, or default */}
@@ -228,7 +228,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({
                   <span
                     className={cn(
                       "px-2 py-0.5 rounded font-mono text-[11px] font-bold text-white shrink-0",
-                      CACHE_OPERATION_COLORS[cacheInfo.operation.toUpperCase()] || "bg-gray-500"
+                      CACHE_OPERATION_COLORS[cacheInfo.operation.toUpperCase()] || "bg-[#5A5248]"
                     )}
                   >
                     {cacheInfo.operation.toUpperCase()}
@@ -264,7 +264,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({
                 <span
                   className={cn(
                     "px-2 py-0.5 rounded font-mono text-[11px] font-bold text-white shrink-0",
-                    HTTP_METHOD_COLORS[httpInfo.method] || "bg-gray-500"
+                    HTTP_METHOD_COLORS[httpInfo.method] || "bg-[#5A5248]"
                   )}
                 >
                   {httpInfo.method}
@@ -286,13 +286,13 @@ export const FlowSpanNode = memo(function FlowSpanNode({
                     className={cn(
                       "px-1.5 py-0.5 rounded font-mono font-bold",
                       httpInfo.statusCode >= 200 && httpInfo.statusCode < 300 &&
-                        "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+                        "bg-severity-info/15 text-severity-info",
                       httpInfo.statusCode >= 300 && httpInfo.statusCode < 400 &&
-                        "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+                        "bg-chart-p50/15 text-chart-p50",
                       httpInfo.statusCode >= 400 && httpInfo.statusCode < 500 &&
-                        "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+                        "bg-severity-warn/15 text-severity-warn",
                       httpInfo.statusCode >= 500 &&
-                        "bg-red-500/15 text-red-600 dark:text-red-400",
+                        "bg-severity-error/15 text-severity-error",
                       httpInfo.statusCode < 200 &&
                         "text-muted-foreground"
                     )}
@@ -345,11 +345,11 @@ export const FlowSpanNode = memo(function FlowSpanNode({
               {cacheInfo.result === "hit" ? "HIT" : "MISS"}
             </span>
           ) : isError ? (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-severity-error/15 text-severity-error">
               Error
             </span>
           ) : span.statusCode === "Ok" || (httpInfo?.statusCode != null && httpInfo.statusCode >= 200 && httpInfo.statusCode < 400) ? (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-severity-info/15 text-severity-info">
               OK
             </span>
           ) : (

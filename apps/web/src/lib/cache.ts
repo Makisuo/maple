@@ -23,12 +23,12 @@ export function getCacheInfo(attrs: Record<string, string>): CacheInfo | null {
 }
 
 export const cacheResultStyles = {
-  hit: "bg-amber-500/20 text-amber-700 dark:bg-amber-400/20 dark:text-amber-400 border-amber-500/30",
-  miss: "bg-sky-500/20 text-sky-700 dark:bg-sky-400/20 dark:text-sky-400 border-sky-500/30",
+  hit: "bg-primary/15 text-primary border-primary/30",
+  miss: "bg-chart-p50/15 text-chart-p50 border-chart-p50/30",
 }
 
 export const CACHE_OPERATION_COLORS: Record<string, string> = {
-  GET: "bg-amber-500",
-  SET: "bg-blue-500",
-  DELETE: "bg-red-500",
+  GET: "bg-[#E8872B]",
+  SET: "bg-[#4A9EFF]",
+  DELETE: "bg-[#E85D4A]",
 }

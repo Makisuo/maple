@@ -21,7 +21,7 @@ interface MinimapSpan {
   bgColor: string
 }
 
-const SERVICE_HUES = [210, 160, 280, 340, 30, 100, 50, 190]
+const SERVICE_HUES = [50, 155, 255, 25, 100, 310, 200, 340]
 
 function collectMinimapSpans(
   rootSpans: SpanNode[],
@@ -47,8 +47,8 @@ function collectMinimapSpans(
       leftPercent: Math.max(0, leftPercent),
       widthPercent: Math.min(widthPercent, 100 - Math.max(0, leftPercent)),
       bgColor: node.statusCode === "Error"
-        ? "oklch(0.45 0.15 25)"
-        : `oklch(0.45 0.12 ${hue})`,
+        ? "oklch(0.50 0.18 25)"
+        : `oklch(0.50 0.14 ${hue})`,
     })
 
     node.children.forEach(visit)

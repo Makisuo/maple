@@ -103,9 +103,9 @@ export function TraceTimelineTooltipContent({
         <span
           className={
             span.statusCode === "Error"
-              ? "text-red-500"
+              ? "text-severity-error"
               : span.statusCode === "Ok"
-                ? "text-green-500"
+                ? "text-severity-info"
                 : ""
           }
         >
@@ -122,9 +122,9 @@ export function TraceTimelineTooltipContent({
             <>
               <span className="text-muted-foreground">HTTP</span>
               <span className={
-                httpInfo.statusCode >= 400 ? "text-red-500" :
-                httpInfo.statusCode >= 300 ? "text-yellow-500" :
-                "text-green-500"
+                httpInfo.statusCode >= 400 ? "text-severity-error" :
+                httpInfo.statusCode >= 300 ? "text-severity-warn" :
+                "text-severity-info"
               }>
                 {httpInfo.statusCode}
               </span>

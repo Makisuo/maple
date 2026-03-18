@@ -45,11 +45,11 @@ export function getHttpInfo(spanName: string, attrs: Record<string, string>): Ht
 }
 
 export const HTTP_METHOD_COLORS: Record<string, string> = {
-  GET: "bg-emerald-500",
-  POST: "bg-blue-500",
-  PUT: "bg-amber-500",
-  PATCH: "bg-amber-500",
-  DELETE: "bg-red-500",
-  HEAD: "bg-purple-500",
-  OPTIONS: "bg-gray-500",
+  GET: "bg-[#4A9EFF]",
+  POST: "bg-[#E8872B]",
+  PUT: "bg-[#4AA865]",
+  PATCH: "bg-[#8A7F72]",
+  DELETE: "bg-[#E85D4A]",
+  HEAD: "bg-[#8A7F72]",
+  OPTIONS: "bg-[#5A5248]",
 }
