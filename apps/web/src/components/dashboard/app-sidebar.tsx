@@ -7,9 +7,6 @@ import {
   ChartLineIcon,
   ServerIcon,
   CircleWarningIcon,
-  CodeIcon,
-  KeyIcon,
-  DatabaseIcon,
   GearIcon,
   LogoutIcon,
   ChevronUpIcon,
@@ -98,21 +95,6 @@ const telemetryNavItems = [
 ]
 
 const configureNavItems = [
-  {
-    title: "MCP",
-    href: "/mcp",
-    icon: CodeIcon,
-  },
-  {
-    title: "Developer",
-    href: "/developer",
-    icon: KeyIcon,
-  },
-  {
-    title: "Connectors",
-    href: "/connectors",
-    icon: DatabaseIcon,
-  },
   {
     title: "Settings",
     href: "/settings",

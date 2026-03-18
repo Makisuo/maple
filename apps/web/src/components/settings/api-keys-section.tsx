@@ -160,15 +160,14 @@ export function ApiKeysSection() {
   const revokedKeys = keys.filter((k) => k.revoked)
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6">
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <CardTitle>API Keys</CardTitle>
               <CardDescription>
-                Create and manage API keys for programmatic access to Maple. Keys
-                are scoped to your current organization.
+                Manage keys for programmatic access to the Maple API.
               </CardDescription>
             </div>
             <Button onClick={() => setCreateOpen(true)} size="sm">

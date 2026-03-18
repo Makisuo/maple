@@ -112,39 +112,38 @@ export function BillingSection() {
 
   return (
     <div className="space-y-6">
-      <CurrentPlanCard />
+      <div className="grid grid-cols-2 gap-4">
+        <CurrentPlanCard />
 
-      {isLoading ? (
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-5 w-32" />
-            <Skeleton className="h-4 w-48" />
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-          </CardContent>
-        </Card>
-      ) : (
-        <UsageMeters
-          usage={usage}
-          limits={limits}
-          billingPeriodLabel={billingPeriodLabel}
-        />
-      )}
-
-      <div className="space-y-3">
-        <h3 className="text-sm font-medium">Plans</h3>
         {isLoading ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Skeleton className="h-48 w-full rounded-lg" />
-            <Skeleton className="h-48 w-full rounded-lg" />
-          </div>
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-4 w-48" />
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </CardContent>
+          </Card>
         ) : (
-          <PricingCards />
+          <UsageMeters
+            usage={usage}
+            limits={limits}
+            billingPeriodLabel={billingPeriodLabel}
+          />
         )}
       </div>
+
+      {isLoading ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Skeleton className="h-48 w-full rounded-lg" />
+          <Skeleton className="h-48 w-full rounded-lg" />
+        </div>
+      ) : (
+        <PricingCards />
+      )}
     </div>
   )
 }

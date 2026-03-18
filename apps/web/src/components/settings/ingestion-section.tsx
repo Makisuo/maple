@@ -245,12 +245,12 @@ export function IngestionSection() {
 
   return (
     <>
-      <div className="max-w-2xl space-y-6">
+      <div className="grid grid-cols-2 gap-4">
         <Card>
           <CardHeader>
             <CardTitle>Ingest Endpoint</CardTitle>
             <CardDescription>
-              Send your OpenTelemetry data to this endpoint.
+              Send telemetry data to this endpoint using OTLP.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -293,9 +293,7 @@ export function IngestionSection() {
           <CardHeader>
             <CardTitle>Ingest Keys</CardTitle>
             <CardDescription>
-              Use these keys to authenticate telemetry ingestion. The public key
-              is safe for client-side use. Keep your private key secret and never
-              expose it in frontend code.
+              Use these keys to authenticate ingestion requests.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

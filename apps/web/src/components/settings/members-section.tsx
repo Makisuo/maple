@@ -183,7 +183,7 @@ export function MembersSection() {
 
   if (!isLoaded) {
     return (
-      <div className="max-w-2xl space-y-6">
+      <div className="space-y-6">
         <Card>
           <CardHeader>
             <Skeleton className="h-5 w-32" />
@@ -207,7 +207,7 @@ export function MembersSection() {
 
   if (!organization) {
     return (
-      <div className="max-w-2xl">
+      <div>
         <Empty>
           <EmptyHeader>
             <EmptyMedia>
@@ -227,19 +227,14 @@ export function MembersSection() {
   const invitationList = invitations?.data ?? []
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <div className="space-y-1">
-            <CardTitle>Members</CardTitle>
-            <CardDescription>
-              Manage who has access to this organization.
-            </CardDescription>
-          </div>
+          <CardTitle>Team Members</CardTitle>
           {isAdmin && (
             <Button size="sm" onClick={() => setInviteOpen(true)}>
               <PlusIcon size={14} />
-              Invite member
+              Invite
             </Button>
           )}
         </CardHeader>
