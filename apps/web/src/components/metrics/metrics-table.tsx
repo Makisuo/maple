@@ -94,9 +94,9 @@ export function MetricsTable({
   return Result.builder(metricsResult)
     .onInitial(() => <LoadingState />)
     .onError((error) => (
-      <div className="rounded-md border border-red-500/50 bg-red-500/10 p-8">
-        <p className="font-medium text-red-600">Failed to load metrics</p>
-        <pre className="mt-2 text-xs text-red-500 whitespace-pre-wrap">{error.message}</pre>
+      <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
+        <p className="font-medium text-destructive">Failed to load metrics</p>
+        <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">{error.message}</pre>
       </div>
     ))
     .onSuccess((response, result) => (

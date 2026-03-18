@@ -319,7 +319,7 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                   <SidebarMenuBadge>
                     {isComplete ? (
-                      <CheckIcon size={12} className="text-emerald-500" />
+                      <CheckIcon size={12} className="text-severity-info" />
                     ) : (
                       <span className="text-[10px]">{progressPercent}%</span>
                     )}

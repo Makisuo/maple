@@ -48,7 +48,7 @@ function MeterRow({ icon: Icon, label, usedGB, limitGB }: MeterRowProps) {
             pct > 100
               ? "bg-destructive"
               : pct > 80
-                ? "bg-amber-500"
+                ? "bg-severity-warn"
                 : "bg-primary",
           )}
         />

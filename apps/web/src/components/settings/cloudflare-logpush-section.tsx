@@ -107,7 +107,7 @@ function CopyableField({
             title={copied ? "Copied!" : "Copy"}
           >
             {copied ? (
-              <CheckIcon size={14} className="text-emerald-500" />
+              <CheckIcon size={14} className="text-severity-info" />
             ) : (
               <CopyIcon size={14} />
             )}
@@ -394,7 +394,7 @@ export function CloudflareLogpushSection() {
                   className={cn(
                     "size-2 shrink-0 rounded-full",
                     connector.enabled
-                      ? "bg-emerald-500"
+                      ? "bg-severity-info"
                       : "bg-muted-foreground/30",
                   )}
                 />
@@ -421,7 +421,7 @@ export function CloudflareLogpushSection() {
                     </span>
                   </div>
                   {connector.lastError && (
-                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-severity-warn">
                       <AlertWarningIcon size={12} className="shrink-0" />
                       <span className="truncate">{connector.lastError}</span>
                     </div>
@@ -659,7 +659,7 @@ export function CloudflareLogpushSection() {
                 </div>
               </div>
 
-              <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+              <div className="space-y-2 rounded-md border border-severity-warn/30 bg-severity-warn/10 p-3">
                 <p className="text-sm font-medium">Validation</p>
                 <p className="text-sm">{setup.validationNote}</p>
                 <p className="text-sm">

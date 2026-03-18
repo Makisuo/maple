@@ -107,7 +107,7 @@ function ApiKeyRow({
             disabled={disabled}
           >
             {isCopied ? (
-              <CheckIcon size={14} className="text-emerald-500" />
+              <CheckIcon size={14} className="text-severity-info" />
             ) : (
               <CopyIcon size={14} />
             )}
@@ -267,7 +267,7 @@ export function IngestionSection() {
                   title={endpointCopied ? "Copied!" : "Copy"}
                 >
                   {endpointCopied ? (
-                    <CheckIcon size={14} className="text-emerald-500" />
+                    <CheckIcon size={14} className="text-severity-info" />
                   ) : (
                     <CopyIcon size={14} />
                   )}

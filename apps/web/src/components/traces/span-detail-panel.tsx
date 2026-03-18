@@ -129,14 +129,14 @@ function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSecti
   }
 
   return (
-    <Alert variant="destructive" className="mx-3 my-2 rounded-md border-red-500/30">
+    <Alert variant="destructive" className="mx-3 my-2 rounded-md border-destructive/30">
       <CircleWarningIcon size={14} />
       <AlertTitle className="flex items-center justify-between">
         <span>Error</span>
         <Button
           variant="ghost"
           size="sm"
-          className="h-5 px-1.5 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10"
+          className="h-5 px-1.5 text-[10px] text-destructive hover:text-destructive/80 hover:bg-destructive/10"
           onClick={handleCopyPrompt}
         >
           <CopyIcon size={10} className="mr-1" />
@@ -149,12 +149,12 @@ function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSecti
             {!expanded && (
               <p className="font-mono text-[11px] line-clamp-2">{message}</p>
             )}
-            <CollapsibleTrigger className="text-[10px] text-red-400 hover:text-red-300 mt-1 flex items-center gap-1">
+            <CollapsibleTrigger className="text-[10px] text-destructive hover:text-destructive/80 mt-1 flex items-center gap-1">
               {expanded ? "Show less" : "Show full error"}
               {expanded ? <ChevronUpIcon size={10} /> : <ChevronDownIcon size={10} />}
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <pre className="font-mono text-[11px] whitespace-pre-wrap break-all mt-2 p-2 bg-red-500/5 rounded max-h-48 overflow-auto">
+              <pre className="font-mono text-[11px] whitespace-pre-wrap break-all mt-2 p-2 bg-destructive/5 rounded max-h-48 overflow-auto">
                 {message}
               </pre>
             </CollapsibleContent>
@@ -204,7 +204,7 @@ function SpanLogs({
           </div>
         ))
         .onError(() => (
-          <div className="p-4 text-center text-sm text-red-500">
+          <div className="p-4 text-center text-sm text-destructive">
             Failed to load logs
           </div>
         ))

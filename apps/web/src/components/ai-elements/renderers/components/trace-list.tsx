@@ -55,12 +55,12 @@ export function TraceList({ props }: BaseComponentProps<TraceListProps>) {
                 <td className="py-1 pr-2">
                   <a
                     href={`/traces/${trace.traceId}`}
-                    className="font-mono text-blue-400 hover:underline"
+                    className="font-mono text-primary hover:underline"
                   >
                     {trace.traceId.slice(0, 12)}
                   </a>
                   {trace.hasError && (
-                    <span className="ml-1 inline-block size-1.5 rounded-full bg-red-500" />
+                    <span className="ml-1 inline-block size-1.5 rounded-full bg-severity-error" />
                   )}
                 </td>
                 <td className="max-w-[160px] py-1 pr-2">
@@ -69,8 +69,8 @@ export function TraceList({ props }: BaseComponentProps<TraceListProps>) {
                 <td
                   className={cn(
                     "py-1 pr-2 text-right font-mono",
-                    trace.durationMs > 1000 && "text-yellow-500",
-                    trace.durationMs > 5000 && "text-red-500"
+                    trace.durationMs > 1000 && "text-severity-warn",
+                    trace.durationMs > 5000 && "text-severity-error"
                   )}
                 >
                   {formatDuration(trace.durationMs)}

@@ -51,17 +51,17 @@ export function SystemHealthCard({
         <StatCell
           label="Total Errors"
           value={formatNumber(totalErrors)}
-          color={totalErrors > 0 ? "text-red-400" : undefined}
+          color={totalErrors > 0 ? "text-severity-error" : undefined}
         />
         <StatCell
           label="Error Rate"
           value={formatErrorRate(errorRate)}
           color={
             errorRate >= 5
-              ? "text-red-400"
+              ? "text-severity-error"
               : errorRate >= 1
-                ? "text-yellow-500"
-                : "text-emerald-500"
+                ? "text-severity-warn"
+                : "text-severity-info"
           }
         />
         <StatCell label="P50 Latency" value={formatDuration(latency.p50Ms)} />
@@ -77,7 +77,7 @@ export function SystemHealthCard({
               key={`${err.errorType}-${i}`}
               className="flex items-center gap-2 text-[11px]"
             >
-              <span className="min-w-0 flex-1 truncate text-red-400">
+              <span className="min-w-0 flex-1 truncate text-severity-error">
                 {err.errorType}
               </span>
               <span className="shrink-0 font-mono text-muted-foreground">

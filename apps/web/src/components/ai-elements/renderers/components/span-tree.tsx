@@ -39,7 +39,7 @@ function SpanNode({
         >
           {prefix}
         </span>
-        <span className={cn("shrink-0", isError ? "text-red-400" : "text-emerald-400")}>
+        <span className={cn("shrink-0", isError ? "text-severity-error" : "text-severity-info")}>
           {isError ? "\u2717" : "\u2713"}
         </span>
         <span className="truncate font-medium">{span.spanName}</span>
@@ -69,7 +69,7 @@ export function SpanTree({ props }: BaseComponentProps<SpanTreeProps>) {
         Trace{" "}
         <a
           href={`/traces/${traceId}`}
-          className="font-mono text-blue-400 hover:underline"
+          className="font-mono text-primary hover:underline"
         >
           {traceId.slice(0, 12)}
         </a>

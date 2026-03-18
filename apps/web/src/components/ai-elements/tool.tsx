@@ -199,7 +199,7 @@ export function Tool(props: ToolProps) {
             </>
           )}
           {status === "completed" && (
-            <CircleCheckIcon className="size-3.5 text-emerald-500" />
+            <CircleCheckIcon className="size-3.5 text-severity-info" />
           )}
           {status === "error" && (
             <CircleXmarkIcon className="size-3.5 text-destructive" />

@@ -43,7 +43,7 @@ export function LogList({ props }: BaseComponentProps<LogListProps>) {
               {log.traceId && (
                 <a
                   href={`/traces/${log.traceId}`}
-                  className="shrink-0 text-blue-400 hover:underline"
+                  className="shrink-0 text-primary hover:underline"
                   title={log.traceId}
                 >
                   trace

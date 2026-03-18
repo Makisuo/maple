@@ -250,7 +250,7 @@ export function ApiKeysSection() {
                       title={secretCopied ? "Copied!" : "Copy"}
                     >
                       {secretCopied ? (
-                        <CheckIcon size={14} className="text-emerald-500" />
+                        <CheckIcon size={14} className="text-severity-info" />
                       ) : (
                         <CopyIcon size={14} />
                       )}

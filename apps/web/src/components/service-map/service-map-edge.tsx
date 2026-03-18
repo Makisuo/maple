@@ -260,9 +260,9 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
               <span
                 className={
                   errorRate > 5
-                    ? " text-red-600 dark:text-red-400"
+                    ? " text-severity-error"
                     : errorRate > 1
-                      ? " text-amber-600 dark:text-amber-400"
+                      ? " text-severity-warn"
                       : ""
                 }
               >

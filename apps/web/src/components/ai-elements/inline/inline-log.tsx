@@ -23,7 +23,7 @@ export function InlineLog({ data }: { data: InlineLogData }) {
         <Link
           to="/traces/$traceId"
           params={{ traceId: data.traceId }}
-          className="shrink-0 text-blue-400 hover:underline"
+          className="shrink-0 text-primary hover:underline"
           title={data.traceId}
         >
           trace

@@ -127,13 +127,13 @@ export function transformSpansToFlow(
         target: nodeId,
         ...(count > 1 && {
           label: `×${count}`,
-          labelStyle: { fontSize: 11, fontWeight: 600, fill: 'oklch(0.7 0 0)' },
-          labelBgStyle: { fill: 'oklch(0.2 0 0)', fillOpacity: 0.9 },
+          labelStyle: { fontSize: 11, fontWeight: 600, fill: 'oklch(0.75 0.02 60)' },
+          labelBgStyle: { fill: 'oklch(0.18 0.01 60)', fillOpacity: 0.9 },
           labelBgPadding: [4, 6] as [number, number],
           labelBgBorderRadius: 4,
         }),
         ...(isError && {
-          style: { stroke: "oklch(0.6 0.2 25)", strokeWidth: 2 },
+          style: { stroke: "oklch(0.62 0.20 25)", strokeWidth: 2 },
         }),
       })
     }

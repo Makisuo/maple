@@ -89,7 +89,7 @@ function TraceTimelineBarInner({
         isSelected && "ring-1 ring-primary bg-primary/10 z-20",
         isFocused && "outline-2 outline-dashed outline-primary outline-offset-[-2px] z-10",
         isSearchActive && !isSearchMatch && "opacity-25",
-        isSearchActive && isSearchMatch && "ring-1 ring-amber-500/50 z-10",
+        isSearchActive && isSearchMatch && "ring-1 ring-primary/50 z-10",
         bar.span.isMissing && "border-dashed italic text-muted-foreground",
       )}
       style={barStyle}

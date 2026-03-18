@@ -68,7 +68,7 @@ export function WidgetProposalCard({ input, onAccept, disabledReason }: WidgetPr
           )}
         </div>
         {added ? (
-          <span className="flex items-center gap-1 text-emerald-600">
+          <span className="flex items-center gap-1 text-severity-info">
             <CheckIcon className="size-3.5" />
             Added
           </span>
