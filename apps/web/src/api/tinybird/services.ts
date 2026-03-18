@@ -206,6 +206,8 @@ const getServiceOverviewEffect = Effect.fn("Tinybird.getServiceOverview")(functi
 export interface ServiceTimeSeriesPoint {
   bucket: string;
   throughput: number;
+  tracedThroughput: number;
+  hasSampling: boolean;
   errorRate: number;
 }
 
@@ -319,6 +321,9 @@ const getServicesFacetsEffect = Effect.fn("Tinybird.getServicesFacets")(function
 export interface ServiceDetailTimeSeriesPoint {
   bucket: string;
   throughput: number;
+  tracedThroughput: number;
+  hasSampling: boolean;
+  samplingWeight: number;
   errorRate: number;
   p50LatencyMs: number;
   p95LatencyMs: number;

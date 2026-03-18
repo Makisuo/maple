@@ -731,6 +731,8 @@ export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
+    attribute_key: p.string().optional().describe("Filter by Attributes[key]"),
+    attribute_value: p.string().optional().describe("Value for attribute filter"),
   },
   nodes: [
     node({
@@ -755,6 +757,9 @@ export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
         {% end %}
         {% if defined(end_time) %}
           AND TimeUnix <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+        {% end %}
+        {% if defined(attribute_key) %}
+          AND Attributes[{{String(attribute_key)}}] = {{String(attribute_value, '')}}
         {% end %}
         GROUP BY bucket, ServiceName
         ORDER BY bucket ASC
@@ -2164,7 +2169,10 @@ export const customTracesTimeseries = defineEndpoint("custom_traces_timeseries",
           quantile(0.5)(Duration) / 1000000 AS p50Duration,
           quantile(0.95)(Duration) / 1000000 AS p95Duration,
           quantile(0.99)(Duration) / 1000000 AS p99Duration,
-          if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate
+          if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate,
+          countIf(TraceState LIKE '%th:%') AS sampledSpanCount,
+          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS unsampledSpanCount,
+          anyIf(extract(TraceState, 'th:([0-9a-f]+)'), TraceState LIKE '%th:%') AS dominantThreshold
         FROM traces
         WHERE Timestamp >= {{DateTime(start_time)}}
           AND OrgId = {{String(org_id, "")}}
@@ -2198,6 +2206,9 @@ export const customTracesTimeseries = defineEndpoint("custom_traces_timeseries",
     p95Duration: t.float64(),
     p99Duration: t.float64(),
     errorRate: t.float64(),
+    sampledSpanCount: t.uint64(),
+    unsampledSpanCount: t.uint64(),
+    dominantThreshold: t.string(),
   },
 });
 
