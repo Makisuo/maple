@@ -113,7 +113,7 @@ function CopyableInput({
             title={copied ? "Copied!" : "Copy"}
           >
             {copied ? (
-              <CheckIcon size={14} className="text-emerald-500 animate-in zoom-in-50 duration-200" />
+              <CheckIcon size={14} className="text-severity-info animate-in zoom-in-50 duration-200" />
             ) : (
               <CopyIcon size={14} />
             )}
@@ -354,7 +354,7 @@ function StepVerifyData({
                 initial={{ scale: 0, rotate: -180 }}
                 animate={{ scale: 1, rotate: 0 }}
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                className="text-emerald-500"
+                className="text-severity-info"
               >
                 <CircleCheckIcon size={40} />
               </motion.div>
@@ -381,11 +381,11 @@ function StepVerifyData({
             animate={{ opacity: 1, y: 0 }}
             className="text-center space-y-4 max-w-sm"
           >
-            <h3 className="text-xl font-semibold text-emerald-500">Data Detected!</h3>
+            <h3 className="text-xl font-semibold text-severity-info">Data Detected!</h3>
             <p className="text-sm text-muted-foreground">
               Your instrumentation is working perfectly. Telemetry data is flowing into Maple.
             </p>
-            <Button size="lg" onClick={onComplete} className="w-full group bg-emerald-500 hover:bg-emerald-600 text-white border-none">
+            <Button size="lg" onClick={onComplete} className="w-full group bg-severity-info hover:bg-severity-info/90 text-white border-none">
               Continue to Billing
               <motion.span
                 className="inline-block ml-2"
@@ -449,15 +449,15 @@ function StepSelectPlan({
   if (isComplete) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <div className="relative z-10 flex size-20 items-center justify-center rounded-2xl bg-card shadow-xl border border-emerald-500/30 overflow-hidden mb-8 text-emerald-500">
+        <div className="relative z-10 flex size-20 items-center justify-center rounded-2xl bg-card shadow-xl border border-severity-info/30 overflow-hidden mb-8 text-severity-info">
           <CircleCheckIcon size={40} />
         </div>
         <div className="text-center space-y-4 max-w-sm">
-          <h3 className="text-xl font-semibold text-emerald-500">Plan Selected!</h3>
+          <h3 className="text-xl font-semibold text-severity-info">Plan Selected!</h3>
           <p className="text-sm text-muted-foreground">
             Your workspace is fully activated and ready to go.
           </p>
-          <Button size="lg" onClick={onComplete} className="w-full group bg-emerald-500 hover:bg-emerald-600 text-white border-none mt-4">
+          <Button size="lg" onClick={onComplete} className="w-full group bg-severity-info hover:bg-severity-info/90 text-white border-none mt-4">
             Continue to Explore
             <motion.span
               className="inline-block ml-2"
@@ -502,27 +502,27 @@ function StepExplore({ onComplete }: { onComplete: () => void }) {
       description: "See your golden signals, error rates, and p99 latency at a glance across all services.",
       href: "/",
       icon: HouseIcon,
-      bg: "bg-blue-500/5",
-      border: "hover:border-blue-500/50 group-hover:bg-blue-500/10",
-      iconColor: "text-blue-500",
+      bg: "bg-chart-p50/5",
+      border: "hover:border-chart-p50/50 group-hover:bg-chart-p50/10",
+      iconColor: "text-chart-p50",
     },
     {
       title: "Traces",
       description: "Dive deep into distributed traces. Find the root cause of slow requests and unhandled exceptions.",
       href: "/traces",
       icon: PulseIcon,
-      bg: "bg-purple-500/5",
-      border: "hover:border-purple-500/50 group-hover:bg-purple-500/10",
-      iconColor: "text-purple-500",
+      bg: "bg-chart-4/5",
+      border: "hover:border-chart-4/50 group-hover:bg-chart-4/10",
+      iconColor: "text-chart-4",
     },
     {
       title: "Logs",
       description: "Search, filter, and alert on application logs correlated automatically with trace context.",
       href: "/logs",
       icon: FileIcon,
-      bg: "bg-emerald-500/5",
-      border: "hover:border-emerald-500/50 group-hover:bg-emerald-500/10",
-      iconColor: "text-emerald-500",
+      bg: "bg-severity-info/5",
+      border: "hover:border-severity-info/50 group-hover:bg-severity-info/10",
+      iconColor: "text-severity-info",
     },
   ]
 
@@ -708,7 +708,7 @@ function QuickStartPage() {
                       >
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background mt-0.5 shadow-[0_0_0_4px_hsl(var(--background))] z-10">
                           {complete ? (
-                            <span className="flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm ring-1 ring-emerald-500/20 transition-all group-hover:bg-emerald-600">
+                            <span className="flex size-7 items-center justify-center rounded-full bg-severity-info text-white shadow-sm ring-1 ring-severity-info/20 transition-all group-hover:bg-severity-info/90">
                               <CheckIcon size={14} className="stroke-[3]" />
                             </span>
                           ) : isActive ? (

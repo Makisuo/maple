@@ -342,7 +342,7 @@ export function OrgTinybirdSettingsSection({
                     </div>
                   ) : null}
                   {settings?.syncStatus === "out_of_sync" ? (
-                    <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-800">
+                    <div className="mt-3 rounded-md border border-severity-warn/30 bg-severity-warn/10 px-3 py-2 text-severity-warn">
                       Maple&apos;s Tinybird project definition changed since this org last synced. Resync the
                       project to keep BYO queries working.
                     </div>

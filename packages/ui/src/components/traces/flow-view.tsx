@@ -42,7 +42,7 @@ const defaultEdgeOptions = {
   animated: true,
   style: {
     strokeWidth: 2,
-    stroke: "oklch(0.6 0.02 250)",
+    stroke: "oklch(0.45 0.02 60)",
   },
 }
 
@@ -136,7 +136,7 @@ export function TraceFlowView({
             nodeColor={(node: Node) => {
               const data = node.data as FlowNodeData
               if (data.span.statusCode === "Error") {
-                return "oklch(0.6 0.2 25)"
+                return "oklch(0.62 0.20 25)"
               }
               return getServiceLegendColor(data.span.serviceName, data.services)
             }}
@@ -166,7 +166,7 @@ export function TraceFlowView({
         </div>
         <span className="flex-1" />
         <div className="flex items-center gap-1.5">
-          <div className="h-3 w-3" style={{ backgroundColor: "oklch(0.6 0.2 25)" }} />
+          <div className="h-3 w-3" style={{ backgroundColor: "oklch(0.62 0.20 25)" }} />
           <span className="font-medium">Error</span>
         </div>
       </div>

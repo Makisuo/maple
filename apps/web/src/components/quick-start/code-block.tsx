@@ -39,7 +39,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
           className="ml-auto flex items-center gap-1 text-xs hover:text-foreground transition-colors"
         >
           {copied ? (
-            <CheckIcon size={14} className="text-emerald-500 animate-in zoom-in-50 duration-200" />
+            <CheckIcon size={14} className="text-severity-info animate-in zoom-in-50 duration-200" />
           ) : (
             <CopyIcon size={14} />
           )}

@@ -7,6 +7,7 @@ interface SpanHierarchyProps {
   rootSpans: SpanNode[]
   totalDurationMs: number
   traceStartTime: string
+  services: string[]
   defaultExpandDepth?: number
   selectedSpanId?: string
   onSelectSpan?: (span: SpanNode) => void
@@ -28,6 +29,7 @@ export function SpanHierarchy({
   rootSpans,
   totalDurationMs,
   traceStartTime,
+  services,
   defaultExpandDepth = Infinity,
   selectedSpanId,
   onSelectSpan,
@@ -57,6 +59,7 @@ export function SpanHierarchy({
             span={node}
             totalDurationMs={totalDurationMs}
             traceStartTime={traceStartTime}
+            services={services}
             expanded={isExpanded}
             onToggle={() => toggleSpan(node.spanId)}
             isSelected={selectedSpanId === node.spanId}

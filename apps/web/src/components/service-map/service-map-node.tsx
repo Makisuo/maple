@@ -21,15 +21,15 @@ function formatLatency(ms: number): string {
 }
 
 function getHealthClass(errorRate: number): string {
-  if (errorRate > 5) return "ring-red-500/60"
-  if (errorRate > 1) return "ring-amber-500/60"
-  return "ring-emerald-500/40"
+  if (errorRate > 5) return "ring-severity-error/60"
+  if (errorRate > 1) return "ring-severity-warn/60"
+  return "ring-severity-info/40"
 }
 
 function getHealthDotClass(errorRate: number): string {
-  if (errorRate > 5) return "bg-red-500"
-  if (errorRate > 1) return "bg-amber-500"
-  return "bg-emerald-500"
+  if (errorRate > 5) return "bg-severity-error"
+  if (errorRate > 1) return "bg-severity-warn"
+  return "bg-severity-info"
 }
 
 interface ServiceMapNodeProps {
@@ -89,9 +89,9 @@ export const ServiceMapNode = memo(function ServiceMapNode({
               className={cn(
                 "font-mono font-semibold tabular-nums",
                 errorRate > 5
-                  ? "text-red-600 dark:text-red-400"
+                  ? "text-severity-error"
                   : errorRate > 1
-                    ? "text-amber-600 dark:text-amber-400"
+                    ? "text-severity-warn"
                     : "text-foreground",
               )}
             >

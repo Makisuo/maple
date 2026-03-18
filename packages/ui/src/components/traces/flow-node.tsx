@@ -93,14 +93,14 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
         className={cn(
           "relative w-[280px] shadow-sm transition-all duration-200",
           "flex flex-col overflow-hidden hover:shadow-md",
-          isError && "shadow-red-500/10",
+          isError && "shadow-destructive/10",
           isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-md"
         )}
       >
         <div
           className={cn(
             "flex items-center justify-between gap-2 px-3 py-2 text-[11px]",
-            isError ? "bg-red-500 text-white" : ""
+            isError ? "bg-destructive text-white" : ""
           )}
           style={!isError ? colorStyle : undefined}
         >
@@ -113,7 +113,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
 
         <div className={cn(
           "border border-dashed border-t-0",
-          isError ? "border-red-500/40" : "border-foreground/20"
+          isError ? "border-destructive/40" : "border-foreground/20"
         )}>
           <div className="flex-1 px-3 py-2.5 bg-card">
             {isHttpRequest && httpInfo ? (
@@ -121,7 +121,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
                 <div className="flex items-center gap-2">
                   <span className={cn(
                     "px-2 py-0.5 font-mono text-[11px] font-bold text-white shrink-0",
-                    HTTP_METHOD_COLORS[httpInfo.method] || "bg-gray-500"
+                    HTTP_METHOD_COLORS[httpInfo.method] || "bg-[#5A5248]"
                   )}>
                     {httpInfo.method}
                   </span>
@@ -137,10 +137,10 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
                   {httpInfo.statusCode != null && (
                     <span className={cn(
                       "px-1.5 py-0.5 font-mono font-bold",
-                      httpInfo.statusCode >= 200 && httpInfo.statusCode < 300 && "bg-emerald-500/15 text-emerald-400",
-                      httpInfo.statusCode >= 300 && httpInfo.statusCode < 400 && "bg-blue-500/15 text-blue-400",
-                      httpInfo.statusCode >= 400 && httpInfo.statusCode < 500 && "bg-amber-500/15 text-amber-400",
-                      httpInfo.statusCode >= 500 && "bg-red-500/15 text-red-400",
+                      httpInfo.statusCode >= 200 && httpInfo.statusCode < 300 && "bg-severity-info/15 text-severity-info",
+                      httpInfo.statusCode >= 300 && httpInfo.statusCode < 400 && "bg-chart-p50/15 text-chart-p50",
+                      httpInfo.statusCode >= 400 && httpInfo.statusCode < 500 && "bg-severity-warn/15 text-severity-warn",
+                      httpInfo.statusCode >= 500 && "bg-severity-error/15 text-severity-error",
                       httpInfo.statusCode < 200 && "text-muted-foreground"
                     )}>
                       {httpInfo.statusCode}
@@ -186,9 +186,9 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
 
           <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 border-t border-dashed border-foreground/10 text-[10px]">
             {isError ? (
-              <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-red-500/15 text-red-400">Error</span>
+              <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-severity-error/15 text-severity-error">Error</span>
             ) : span.statusCode === "Ok" || (httpInfo?.statusCode != null && httpInfo.statusCode >= 200 && httpInfo.statusCode < 400) ? (
-              <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-500/15 text-emerald-400">OK</span>
+              <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-severity-info/15 text-severity-info">OK</span>
             ) : (
               <span className="px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{span.statusCode}</span>
             )}

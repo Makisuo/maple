@@ -10,7 +10,7 @@ export function InlineService({ data }: { data: InlineServiceData }) {
       params={{ serviceName: data.name }}
       className="my-1 flex items-center gap-3 rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-[11px] transition-colors hover:bg-muted/60"
     >
-      <span className="font-medium text-blue-400">
+      <span className="font-medium text-primary">
         {data.name}
       </span>
       {data.throughput != null && (
@@ -22,9 +22,9 @@ export function InlineService({ data }: { data: InlineServiceData }) {
         <span
           className={cn(
             "font-mono text-[10px]",
-            data.errorRate < 1 && "text-emerald-500",
-            data.errorRate >= 1 && data.errorRate < 5 && "text-yellow-500",
-            data.errorRate >= 5 && "text-red-500",
+            data.errorRate < 1 && "text-severity-info",
+            data.errorRate >= 1 && data.errorRate < 5 && "text-severity-warn",
+            data.errorRate >= 5 && "text-severity-error",
           )}
         >
           {formatErrorRate(data.errorRate)} err

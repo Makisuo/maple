@@ -22,12 +22,12 @@ export function ErrorList({ props }: BaseComponentProps<ErrorListProps>) {
             key={`${err.errorType}-${i}`}
             className="flex items-start gap-2 rounded px-1 py-1 text-[11px] hover:bg-muted/50"
           >
-            <span className="min-w-0 flex-1 truncate text-red-400" title={err.errorType}>
+            <span className="min-w-0 flex-1 truncate text-severity-error" title={err.errorType}>
               {err.errorType.length > 60
                 ? `${err.errorType.slice(0, 60)}...`
                 : err.errorType}
             </span>
-            <span className="shrink-0 rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-[10px] text-red-400">
+            <span className="shrink-0 rounded bg-severity-error/10 px-1.5 py-0.5 font-mono text-[10px] text-severity-error">
               {err.count}
             </span>
             <div className="flex shrink-0 gap-1">

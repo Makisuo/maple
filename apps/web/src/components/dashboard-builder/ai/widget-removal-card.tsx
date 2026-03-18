@@ -63,7 +63,7 @@ export function WidgetRemovalCard({
           )}
         </div>
         {removed ? (
-          <span className="flex items-center gap-1 text-emerald-600">
+          <span className="flex items-center gap-1 text-severity-info">
             <CheckIcon className="size-3.5" />
             Removed
           </span>

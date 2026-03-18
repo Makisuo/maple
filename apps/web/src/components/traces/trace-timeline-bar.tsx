@@ -20,15 +20,15 @@ interface TraceTimelineBarProps {
   containerWidth: number
 }
 
+const SERVICE_HUES = [50, 155, 255, 25, 100, 310, 200, 340]
+
 function getBarBackground(serviceName: string, services: string[]): string {
-  const SERVICE_HUES = [210, 160, 280, 340, 30, 100, 50, 190]
   const index = services.indexOf(serviceName)
   const hue = SERVICE_HUES[index % SERVICE_HUES.length]
   return `oklch(0.22 0.015 ${hue})`
 }
 
 function getBarHoverBackground(serviceName: string, services: string[]): string {
-  const SERVICE_HUES = [210, 160, 280, 340, 30, 100, 50, 190]
   const index = services.indexOf(serviceName)
   const hue = SERVICE_HUES[index % SERVICE_HUES.length]
   return `oklch(0.28 0.025 ${hue})`
@@ -50,11 +50,11 @@ function TraceTimelineBarInner({
     : getServiceBorderColor(bar.span.serviceName, services)
 
   const bgColor = bar.isError
-    ? "oklch(0.20 0.04 25)"
+    ? "oklch(0.20 0.05 25)"
     : getBarBackground(bar.span.serviceName, services)
 
   const hoverBgColor = bar.isError
-    ? "oklch(0.24 0.05 25)"
+    ? "oklch(0.25 0.06 25)"
     : getBarHoverBackground(bar.span.serviceName, services)
 
   const cacheInfo = getCacheInfo(bar.span.spanAttributes)
@@ -89,7 +89,7 @@ function TraceTimelineBarInner({
         isSelected && "ring-1 ring-primary bg-primary/10 z-20",
         isFocused && "outline-2 outline-dashed outline-primary outline-offset-[-2px] z-10",
         isSearchActive && !isSearchMatch && "opacity-25",
-        isSearchActive && isSearchMatch && "ring-1 ring-amber-500/50 z-10",
+        isSearchActive && isSearchMatch && "ring-1 ring-primary/50 z-10",
         bar.span.isMissing && "border-dashed italic text-muted-foreground",
       )}
       style={barStyle}
@@ -126,8 +126,8 @@ function TraceTimelineBarInner({
               className={cn(
                 "text-[9px] font-semibold px-1 shrink-0",
                 cacheInfo.result === "hit"
-                  ? "text-amber-400"
-                  : "text-sky-400"
+                  ? "text-primary"
+                  : "text-chart-p50"
               )}
             >
               {cacheInfo.result === "hit" ? "HIT" : "MISS"}

@@ -10,11 +10,11 @@ export function InlineTrace({ data }: { data: InlineTraceData }) {
       params={{ traceId: data.id }}
       className="my-1 flex items-center gap-2 rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-[11px] transition-colors hover:bg-muted/60"
     >
-      <span className="font-mono text-blue-400">
+      <span className="font-mono text-primary">
         {data.id.slice(0, 12)}
       </span>
       {data.hasError && (
-        <span className="inline-block size-1.5 rounded-full bg-red-500" />
+        <span className="inline-block size-1.5 rounded-full bg-severity-error" />
       )}
       <span className="min-w-0 truncate text-foreground">
         {data.name}
@@ -23,9 +23,9 @@ export function InlineTrace({ data }: { data: InlineTraceData }) {
         className={cn(
           "ml-auto shrink-0 font-mono",
           data.durationMs > 5000
-            ? "text-red-500"
+            ? "text-severity-error"
             : data.durationMs > 1000
-              ? "text-yellow-500"
+              ? "text-severity-warn"
               : "text-muted-foreground",
         )}
       >

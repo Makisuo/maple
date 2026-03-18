@@ -108,7 +108,7 @@ function McpPage() {
                   title={endpointCopied ? "Copied!" : "Copy"}
                 >
                   {endpointCopied ? (
-                    <CheckIcon size={14} className="text-emerald-500" />
+                    <CheckIcon size={14} className="text-severity-info" />
                   ) : (
                     <CopyIcon size={14} />
                   )}
@@ -120,7 +120,7 @@ function McpPage() {
                 Authenticate with an API key.
               </p>
               {createdSecret ? (
-                <p className="text-emerald-600 text-xs font-medium">
+                <p className="text-severity-info text-xs font-medium">
                   Key created — config below is ready to copy.
                 </p>
               ) : (

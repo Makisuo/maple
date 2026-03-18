@@ -46,7 +46,7 @@ export function ServiceTable({
               <td className="py-1 pr-2">
                 <a
                   href={`/services/${svc.name}`}
-                  className="text-blue-400 hover:underline"
+                  className="text-primary hover:underline"
                 >
                   {svc.name}
                 </a>
@@ -57,9 +57,9 @@ export function ServiceTable({
               <td
                 className={cn(
                   "py-1 pr-2 text-right font-mono",
-                  svc.errorRate < 1 && "text-emerald-500",
-                  svc.errorRate >= 1 && svc.errorRate < 5 && "text-yellow-500",
-                  svc.errorRate >= 5 && "text-red-500"
+                  svc.errorRate < 1 && "text-severity-info",
+                  svc.errorRate >= 1 && svc.errorRate < 5 && "text-severity-warn",
+                  svc.errorRate >= 5 && "text-severity-error"
                 )}
               >
                 {formatErrorRate(svc.errorRate)}

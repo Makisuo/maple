@@ -309,8 +309,8 @@ export function ScrapeTargetsSection() {
                       : target.lastScrapeError
                         ? "bg-destructive"
                         : target.lastScrapeAt
-                          ? "bg-emerald-500"
-                          : "bg-amber-500",
+                          ? "bg-severity-info"
+                          : "bg-severity-warn",
                   )}
                 />
 

@@ -47,14 +47,22 @@ function hashString(str: string): number {
  * Using OKLCH for perceptually uniform colors
  */
 const SERVICE_HUES = [
-  210, // Blue
-  160, // Teal
-  280, // Purple
+  250, // Blue
+  185, // Teal
+  155, // Green
+  130, // Lime
+  90,  // Yellow
+  60,  // Amber
+  45,  // Orange
+  25,  // Red
+  0,   // Rose
   340, // Pink
-  30,  // Orange
-  100, // Green
-  50,  // Yellow
-  190, // Cyan
+  320, // Magenta
+  290, // Purple
+  270, // Violet
+  260, // Indigo
+  210, // Cyan
+  230, // Slate
 ]
 
 /**

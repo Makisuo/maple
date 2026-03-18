@@ -141,11 +141,11 @@ function EnvironmentBadge({ environment }: { environment: string }) {
   const getVariant = () => {
     switch (environment.toLowerCase()) {
       case "production":
-        return "bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
+        return "bg-severity-warn/15 text-severity-warn"
       case "staging":
-        return "bg-yellow-500/10 text-yellow-600 dark:bg-yellow-400/10 dark:text-yellow-400"
+        return "bg-chart-p50/15 text-chart-p50"
       case "development":
-        return "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
+        return "bg-severity-debug/15 text-severity-debug"
       default:
         return ""
     }
@@ -241,9 +241,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
   return Result.builder(Result.all([overviewResult, timeSeriesResult]))
     .onInitial(() => <LoadingState />)
     .onError((error) => (
-      <div className="rounded-md border border-red-500/50 bg-red-500/10 p-8">
-        <p className="font-medium text-red-600">Failed to load services</p>
-        <pre className="mt-2 text-xs text-red-500 whitespace-pre-wrap">{error.message}</pre>
+      <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
+        <p className="font-medium text-destructive">Failed to load services</p>
+        <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">{error.message}</pre>
       </div>
     ))
     .onSuccess(([overviewResponse, timeSeriesResponse], combinedResult) => {

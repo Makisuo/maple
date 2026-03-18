@@ -48,7 +48,7 @@ export function TimeRangeHeaderControls({
         </span>
         <RadioCheckedIcon
           className={cn(
-            "size-3 text-emerald-500 transition-opacity",
+            "size-3 text-severity-info transition-opacity",
             liveEnabled ? "opacity-100" : "opacity-0",
           )}
         />

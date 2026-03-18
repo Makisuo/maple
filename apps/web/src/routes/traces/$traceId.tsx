@@ -14,6 +14,7 @@ import {
   ResizableHandle,
 } from "@maple/ui/components/ui/resizable"
 import { formatDuration } from "@/lib/format"
+import { getServiceLegendColor } from "@maple/ui/lib/colors"
 import { type Span, type SpanNode } from "@/api/tinybird/traces"
 import { getSpanHierarchyResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { findSpanById } from "@/components/traces/flow-utils"
@@ -84,9 +85,9 @@ function TraceDetailPage() {
         title="Error"
         description="Failed to load trace"
       >
-        <div className="rounded-md border border-red-500/50 bg-red-500/10 p-8">
-          <p className="font-medium text-red-600">Failed to load trace details</p>
-          <pre className="mt-2 text-xs text-red-500 whitespace-pre-wrap">
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
+          <p className="font-medium text-destructive">Failed to load trace details</p>
+          <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
             {error.message}
           </pre>
         </div>
@@ -270,7 +271,7 @@ function TraceDetailPage() {
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <span className="text-xs text-muted-foreground">Services:</span>
               {services.map((service: string) => (
-                <Badge key={service} variant="outline" className="font-mono text-xs">
+                <Badge key={service} variant="outline" className="font-mono text-xs" style={{ color: getServiceLegendColor(service, services) }}>
                   {service}
                 </Badge>
               ))}
@@ -285,8 +286,8 @@ function TraceDetailPage() {
                 variant="secondary"
                 className={
                   hasError
-                    ? "bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400"
-                    : "bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
+                    ? "bg-severity-error/15 text-severity-error"
+                    : "bg-severity-info/15 text-severity-info"
                 }
               >
                 {hasError ? "Error" : "OK"}
@@ -299,12 +300,12 @@ function TraceDetailPage() {
                     variant="secondary"
                     className={
                       rootHttpInfo.statusCode >= 500
-                        ? "bg-red-500/10 text-red-600 dark:bg-red-400/10 dark:text-red-400"
+                        ? "bg-severity-error/15 text-severity-error"
                         : rootHttpInfo.statusCode >= 400
-                          ? "bg-amber-500/10 text-amber-600 dark:bg-amber-400/10 dark:text-amber-400"
+                          ? "bg-severity-warn/15 text-severity-warn"
                           : rootHttpInfo.statusCode >= 300
-                            ? "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
-                            : "bg-green-500/10 text-green-600 dark:bg-green-400/10 dark:text-green-400"
+                            ? "bg-chart-p50/15 text-chart-p50"
+                            : "bg-severity-info/15 text-severity-info"
                     }
                   >
                     {rootHttpInfo.statusCode}
@@ -319,8 +320,8 @@ function TraceDetailPage() {
                     variant="secondary"
                     className={
                       deploymentEnv === "production"
-                        ? "bg-orange-500/10 text-orange-600 dark:bg-orange-400/10 dark:text-orange-400"
-                        : "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
+                        ? "bg-severity-warn/15 text-severity-warn"
+                        : "bg-chart-p50/15 text-chart-p50"
                     }
                   >
                     {deploymentEnv}
@@ -358,6 +359,7 @@ function TraceDetailPage() {
                   <ResizablePanel defaultSize={40} minSize={25}>
                     <SpanDetailPanel
                       span={selectedSpan}
+                      services={services}
                       onClose={handleCloseSpanDetails}
                     />
                   </ResizablePanel>

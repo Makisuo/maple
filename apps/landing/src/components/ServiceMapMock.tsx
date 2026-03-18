@@ -80,7 +80,7 @@ const MockNode = memo(function MockNode({ data }: NodeProps<Node>) {
       >
         <div
           className="flex items-center justify-center gap-2 px-3 py-1.5 rounded-t-lg text-[10px] font-semibold truncate"
-          style={{ backgroundColor: color, color: "oklch(0.98 0 0)" }}
+          style={{ backgroundColor: color, color: "oklch(0.91 0.015 75)" }}
         >
           <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", getHealthDotClass(errorRate))} />
           <span className="truncate">{label}</span>
@@ -263,7 +263,7 @@ const MockEdge = memo(function MockEdge({
         id={pathId}
         d={edgePath}
         fill="none"
-        stroke="oklch(0.141 0.005 285.823)"
+        stroke="oklch(0.145 0.01 65)"
         strokeWidth={sw}
         strokeOpacity={0.5 + i * 0.2}
       />

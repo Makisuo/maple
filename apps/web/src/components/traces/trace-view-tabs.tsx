@@ -50,6 +50,7 @@ export function TraceViewTabs({
           rootSpans={rootSpans}
           totalDurationMs={totalDurationMs}
           traceStartTime={traceStartTime}
+          services={services}
           defaultExpandDepth={defaultExpandDepth}
           selectedSpanId={selectedSpanId}
           onSelectSpan={onSelectSpan}

@@ -15,6 +15,7 @@ import { LogDetailSheet } from "@/components/logs/log-detail-sheet"
 import { formatDuration } from "@/lib/format"
 import { cn } from "@maple/ui/utils"
 import { getCacheInfo, cacheResultStyles } from "@/lib/cache"
+import { getServiceLegendColor } from "@maple/ui/lib/colors"
 import type { SpanNode } from "@/api/tinybird/traces"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { listLogsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
@@ -25,13 +26,14 @@ import { HttpSpanLabel } from "./http-span-label"
 
 interface SpanDetailPanelProps {
   span: SpanNode
+  services: string[]
   onClose: () => void
 }
 
 const statusStyles: Record<string, string> = {
-  Ok: "bg-green-500/20 text-green-700 dark:bg-green-400/20 dark:text-green-400 border-green-500/30",
-  Error: "bg-red-500/20 text-red-700 dark:bg-red-400/20 dark:text-red-400 border-red-500/30",
-  Unset: "bg-gray-500/20 text-gray-600 dark:bg-gray-400/20 dark:text-gray-400 border-gray-500/30",
+  Ok: "bg-severity-info/15 text-severity-info border-severity-info/30",
+  Error: "bg-severity-error/15 text-severity-error border-severity-error/30",
+  Unset: "bg-muted text-muted-foreground border-border",
 }
 
 const kindLabels: Record<string, string> = {
@@ -43,16 +45,16 @@ const kindLabels: Record<string, string> = {
 }
 
 const severityStyles: Record<string, string> = {
-  TRACE: "text-gray-500",
-  DEBUG: "text-gray-500",
-  INFO: "text-blue-500",
-  WARN: "text-yellow-500",
-  ERROR: "text-red-500",
-  FATAL: "text-red-700",
+  TRACE: "text-severity-trace",
+  DEBUG: "text-severity-debug",
+  INFO: "text-severity-info",
+  WARN: "text-severity-warn",
+  ERROR: "text-severity-error",
+  FATAL: "text-severity-fatal",
 }
 
 function LogEntry({ log, timeZone, onClick }: { log: Log; timeZone: string; onClick?: (log: Log) => void }) {
-  const severityStyle = severityStyles[log.severityText] ?? "text-gray-500"
+  const severityStyle = severityStyles[log.severityText] ?? "text-severity-trace"
 
   return (
     <div
@@ -129,14 +131,14 @@ function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSecti
   }
 
   return (
-    <Alert variant="destructive" className="mx-3 my-2 rounded-md border-red-500/30">
+    <Alert variant="destructive" className="mx-3 my-2 rounded-md border-destructive/30">
       <CircleWarningIcon size={14} />
       <AlertTitle className="flex items-center justify-between">
         <span>Error</span>
         <Button
           variant="ghost"
           size="sm"
-          className="h-5 px-1.5 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10"
+          className="h-5 px-1.5 text-[10px] text-destructive hover:text-destructive/80 hover:bg-destructive/10"
           onClick={handleCopyPrompt}
         >
           <CopyIcon size={10} className="mr-1" />
@@ -149,12 +151,12 @@ function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSecti
             {!expanded && (
               <p className="font-mono text-[11px] line-clamp-2">{message}</p>
             )}
-            <CollapsibleTrigger className="text-[10px] text-red-400 hover:text-red-300 mt-1 flex items-center gap-1">
+            <CollapsibleTrigger className="text-[10px] text-destructive hover:text-destructive/80 mt-1 flex items-center gap-1">
               {expanded ? "Show less" : "Show full error"}
               {expanded ? <ChevronUpIcon size={10} /> : <ChevronDownIcon size={10} />}
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <pre className="font-mono text-[11px] whitespace-pre-wrap break-all mt-2 p-2 bg-red-500/5 rounded max-h-48 overflow-auto">
+              <pre className="font-mono text-[11px] whitespace-pre-wrap break-all mt-2 p-2 bg-destructive/5 rounded max-h-48 overflow-auto">
                 {message}
               </pre>
             </CollapsibleContent>
@@ -204,7 +206,7 @@ function SpanLogs({
           </div>
         ))
         .onError(() => (
-          <div className="p-4 text-center text-sm text-red-500">
+          <div className="p-4 text-center text-sm text-destructive">
             Failed to load logs
           </div>
         ))
@@ -233,7 +235,7 @@ function SpanLogs({
   )
 }
 
-export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
+export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProps) {
   const { effectiveTimezone } = useTimezonePreference()
   const cacheInfo = getCacheInfo(span.spanAttributes)
   const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
@@ -260,7 +262,7 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
             </div>
           </CopyableValue>
           <div className="flex items-center gap-2 mt-0.5">
-            <Badge variant="outline" className="font-mono text-[10px]">
+            <Badge variant="outline" className="font-mono text-[10px]" style={{ color: getServiceLegendColor(span.serviceName, services) }}>
               <CopyableValue value={span.serviceName}>{span.serviceName}</CopyableValue>
             </Badge>
             <span className="text-[10px] text-muted-foreground">{kindLabel}</span>
