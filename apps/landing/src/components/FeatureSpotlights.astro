@@ -118,28 +118,28 @@ const l = (path: string) => getRelativeLocaleUrl(locale, path);
                 <div class="border border-border bg-bg-elevated p-3 transition-colors duration-200 hover:border-accent/30">
                     <div class="text-[8px] text-fg-muted mb-2">{m.features_latency_p95()}</div>
                     <div class="flex items-end gap-[2px] h-10">
-                        <div class="flex-1 bg-chart-1/50 h-[40%]"></div><div class="flex-1 bg-chart-1/55 h-[48%]"></div><div class="flex-1 bg-chart-1/60 h-[55%]"></div><div class="flex-1 bg-chart-1/65 h-[62%]"></div><div class="flex-1 bg-chart-1/70 h-[70%]"></div><div class="flex-1 bg-chart-1/75 h-[72%]"></div><div class="flex-1 bg-chart-1 h-[75%]"></div><div class="flex-1 bg-chart-1 h-[68%]"></div>
+                        <div class="flex-1 bg-chart-p95/50 h-[40%]"></div><div class="flex-1 bg-chart-p95/55 h-[48%]"></div><div class="flex-1 bg-chart-p95/60 h-[55%]"></div><div class="flex-1 bg-chart-p95/65 h-[62%]"></div><div class="flex-1 bg-chart-p95/70 h-[70%]"></div><div class="flex-1 bg-chart-p95/75 h-[72%]"></div><div class="flex-1 bg-chart-p95 h-[75%]"></div><div class="flex-1 bg-chart-p95 h-[68%]"></div>
                     </div>
                 </div>
                 <!-- Throughput chart -->
                 <div class="border border-border bg-bg-elevated p-3 transition-colors duration-200 hover:border-accent/30">
                     <div class="text-[8px] text-fg-muted mb-2">{m.features_throughput()}</div>
                     <div class="flex items-end gap-[2px] h-10">
-                        <div class="flex-1 bg-chart-3/50 h-[60%]"></div><div class="flex-1 bg-chart-3/55 h-[70%]"></div><div class="flex-1 bg-chart-3/60 h-[58%]"></div><div class="flex-1 bg-chart-3/65 h-[80%]"></div><div class="flex-1 bg-chart-3/70 h-[85%]"></div><div class="flex-1 bg-chart-3/75 h-[82%]"></div><div class="flex-1 bg-chart-3 h-[92%]"></div><div class="flex-1 bg-chart-3 h-[85%]"></div>
+                        <div class="flex-1 bg-chart-throughput/50 h-[60%]"></div><div class="flex-1 bg-chart-throughput/55 h-[70%]"></div><div class="flex-1 bg-chart-throughput/60 h-[58%]"></div><div class="flex-1 bg-chart-throughput/65 h-[80%]"></div><div class="flex-1 bg-chart-throughput/70 h-[85%]"></div><div class="flex-1 bg-chart-throughput/75 h-[82%]"></div><div class="flex-1 bg-chart-throughput h-[92%]"></div><div class="flex-1 bg-chart-throughput h-[85%]"></div>
                     </div>
                 </div>
                 <!-- Apdex chart -->
                 <div class="border border-border bg-bg-elevated p-3 transition-colors duration-200 hover:border-accent/30">
                     <div class="text-[8px] text-fg-muted mb-2">{m.features_apdex()}</div>
                     <div class="flex items-end gap-[2px] h-10">
-                        <div class="flex-1 bg-chart-2/60 h-[92%]"></div><div class="flex-1 bg-chart-2/65 h-[90%]"></div><div class="flex-1 bg-chart-2/70 h-[88%]"></div><div class="flex-1 bg-chart-2/70 h-[85%]"></div><div class="flex-1 bg-chart-2/75 h-[82%]"></div><div class="flex-1 bg-chart-2/75 h-[86%]"></div><div class="flex-1 bg-chart-2 h-[90%]"></div><div class="flex-1 bg-chart-2 h-[92%]"></div>
+                        <div class="flex-1 bg-chart-apdex/60 h-[92%]"></div><div class="flex-1 bg-chart-apdex/65 h-[90%]"></div><div class="flex-1 bg-chart-apdex/70 h-[88%]"></div><div class="flex-1 bg-chart-apdex/70 h-[85%]"></div><div class="flex-1 bg-chart-apdex/75 h-[82%]"></div><div class="flex-1 bg-chart-apdex/75 h-[86%]"></div><div class="flex-1 bg-chart-apdex h-[90%]"></div><div class="flex-1 bg-chart-apdex h-[92%]"></div>
                     </div>
                 </div>
                 <!-- Error Rate chart -->
                 <div class="border border-border bg-bg-elevated p-3 transition-colors duration-200 hover:border-accent/30">
                     <div class="text-[8px] text-fg-muted mb-2">{m.features_error_rate()}</div>
                     <div class="flex items-end gap-[2px] h-10">
-                        <div class="flex-1 bg-destructive/40 h-[8%]"></div><div class="flex-1 bg-destructive/45 h-[12%]"></div><div class="flex-1 bg-destructive/50 h-[15%]"></div><div class="flex-1 bg-destructive/60 h-[35%]"></div><div class="flex-1 bg-destructive/55 h-[28%]"></div><div class="flex-1 bg-destructive/45 h-[15%]"></div><div class="flex-1 bg-destructive/40 h-[10%]"></div><div class="flex-1 bg-destructive/40 h-[8%]"></div>
+                        <div class="flex-1 bg-chart-error/40 h-[8%]"></div><div class="flex-1 bg-chart-error/45 h-[12%]"></div><div class="flex-1 bg-chart-error/50 h-[15%]"></div><div class="flex-1 bg-chart-error/60 h-[35%]"></div><div class="flex-1 bg-chart-error/55 h-[28%]"></div><div class="flex-1 bg-chart-error/45 h-[15%]"></div><div class="flex-1 bg-chart-error/40 h-[10%]"></div><div class="flex-1 bg-chart-error/40 h-[8%]"></div>
                     </div>
                 </div>
             </div>

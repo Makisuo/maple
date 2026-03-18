@@ -140,7 +140,7 @@ export function SpanRow({
       }}
     >
       {/* Left section: Toggle + Service + Kind + Span Name (variable width) */}
-      <div className="flex items-center gap-2 flex-1 min-w-0">
+      <div className="@container flex items-center gap-2 flex-1 min-w-0">
         {/* Indentation spacer based on depth */}
         {span.depth > 0 && <div style={{ width: `${span.depth * 24}px` }} className="shrink-0" />}
 
@@ -171,7 +171,7 @@ export function SpanRow({
         {httpInfo ? (
           <span className="flex-1 flex items-center gap-1.5 min-w-0 font-mono text-xs" title={httpInfo.route || span.spanName}>
             <span className={cn(
-              "px-1 py-0.5 rounded text-[10px] font-bold text-white shrink-0 leading-none",
+              "px-1 py-0.5 rounded text-[10px] font-bold text-white shrink-0 leading-none hidden @min-[500px]:inline-flex",
               HTTP_METHOD_COLORS[httpInfo.method] || "bg-[#5A5248]"
             )}>
               {httpInfo.method}

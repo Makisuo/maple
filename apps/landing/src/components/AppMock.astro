@@ -90,36 +90,36 @@ const uid = Math.random().toString(36).slice(2, 8);
                 <div class="border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">Request Volume</div>
                     <div class="flex items-end gap-[3px] h-14">
-                        <div class="flex-1 bg-chart-3/70 h-[45%]"></div>
-                        <div class="flex-1 bg-chart-3/70 h-[52%]"></div>
-                        <div class="flex-1 bg-chart-3/70 h-[68%]"></div>
-                        <div class="flex-1 bg-chart-3/70 h-[60%]"></div>
-                        <div class="flex-1 bg-chart-3/70 h-[82%]"></div>
-                        <div class="flex-1 bg-chart-3/70 h-[75%]"></div>
-                        <div class="flex-1 bg-chart-3/70 h-[90%]"></div>
-                        <div class="flex-1 bg-chart-3/70 h-[85%]"></div>
-                        <div class="flex-1 bg-chart-3 h-[100%]"></div>
-                        <div class="flex-1 bg-chart-3 h-[78%]"></div>
-                        <div class="flex-1 bg-chart-3 h-[65%]"></div>
-                        <div class="flex-1 bg-chart-3 h-[70%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[45%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[52%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[68%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[60%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[82%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[75%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[90%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[85%]"></div>
+                        <div class="flex-1 bg-chart-throughput h-[100%]"></div>
+                        <div class="flex-1 bg-chart-throughput h-[78%]"></div>
+                        <div class="flex-1 bg-chart-throughput h-[65%]"></div>
+                        <div class="flex-1 bg-chart-throughput h-[70%]"></div>
                     </div>
                 </div>
                 <!-- Error Rate -->
                 <div class="border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">Error Rate</div>
                     <div class="flex items-end gap-[3px] h-14">
-                        <div class="flex-1 bg-destructive/50 h-[12%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[8%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[15%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[10%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[22%]"></div>
-                        <div class="flex-1 bg-destructive/70 h-[45%]"></div>
-                        <div class="flex-1 bg-destructive/70 h-[38%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[18%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[12%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[8%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[14%]"></div>
-                        <div class="flex-1 bg-destructive/50 h-[10%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[12%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[8%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[15%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[10%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[22%]"></div>
+                        <div class="flex-1 bg-chart-error/70 h-[45%]"></div>
+                        <div class="flex-1 bg-chart-error/70 h-[38%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[18%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[12%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[8%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[14%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[10%]"></div>
                     </div>
                 </div>
                 <!-- Latency (p50/p95/p99) -->
@@ -127,23 +127,23 @@ const uid = Math.random().toString(36).slice(2, 8);
                     <div class="flex items-center justify-between mb-2">
                         <div class="text-[9px] text-fg-muted">Latency</div>
                         <div class="flex items-center gap-2">
-                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-1 inline-block"></span>p50</span>
-                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-3 inline-block"></span>p95</span>
-                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-5 inline-block"></span>p99</span>
+                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p50 inline-block"></span>p50</span>
+                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p95 inline-block"></span>p95</span>
+                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p99 inline-block"></span>p99</span>
                         </div>
                     </div>
                     <div class="relative h-14">
                         <!-- p99 (tallest) -->
                         <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
-                            <div class="flex-1 bg-chart-5/30 h-[80%]"></div><div class="flex-1 bg-chart-5/30 h-[75%]"></div><div class="flex-1 bg-chart-5/30 h-[90%]"></div><div class="flex-1 bg-chart-5/30 h-[85%]"></div><div class="flex-1 bg-chart-5/30 h-[70%]"></div><div class="flex-1 bg-chart-5/30 h-[95%]"></div><div class="flex-1 bg-chart-5/30 h-[88%]"></div><div class="flex-1 bg-chart-5/30 h-[78%]"></div><div class="flex-1 bg-chart-5/30 h-[82%]"></div><div class="flex-1 bg-chart-5/30 h-[75%]"></div><div class="flex-1 bg-chart-5/30 h-[80%]"></div><div class="flex-1 bg-chart-5/30 h-[72%]"></div>
+                            <div class="flex-1 bg-chart-p99/30 h-[80%]"></div><div class="flex-1 bg-chart-p99/30 h-[75%]"></div><div class="flex-1 bg-chart-p99/30 h-[90%]"></div><div class="flex-1 bg-chart-p99/30 h-[85%]"></div><div class="flex-1 bg-chart-p99/30 h-[70%]"></div><div class="flex-1 bg-chart-p99/30 h-[95%]"></div><div class="flex-1 bg-chart-p99/30 h-[88%]"></div><div class="flex-1 bg-chart-p99/30 h-[78%]"></div><div class="flex-1 bg-chart-p99/30 h-[82%]"></div><div class="flex-1 bg-chart-p99/30 h-[75%]"></div><div class="flex-1 bg-chart-p99/30 h-[80%]"></div><div class="flex-1 bg-chart-p99/30 h-[72%]"></div>
                         </div>
                         <!-- p95 -->
                         <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
-                            <div class="flex-1 bg-chart-3/40 h-[50%]"></div><div class="flex-1 bg-chart-3/40 h-[45%]"></div><div class="flex-1 bg-chart-3/40 h-[58%]"></div><div class="flex-1 bg-chart-3/40 h-[52%]"></div><div class="flex-1 bg-chart-3/40 h-[42%]"></div><div class="flex-1 bg-chart-3/40 h-[65%]"></div><div class="flex-1 bg-chart-3/40 h-[55%]"></div><div class="flex-1 bg-chart-3/40 h-[48%]"></div><div class="flex-1 bg-chart-3/40 h-[50%]"></div><div class="flex-1 bg-chart-3/40 h-[44%]"></div><div class="flex-1 bg-chart-3/40 h-[52%]"></div><div class="flex-1 bg-chart-3/40 h-[40%]"></div>
+                            <div class="flex-1 bg-chart-p95/40 h-[50%]"></div><div class="flex-1 bg-chart-p95/40 h-[45%]"></div><div class="flex-1 bg-chart-p95/40 h-[58%]"></div><div class="flex-1 bg-chart-p95/40 h-[52%]"></div><div class="flex-1 bg-chart-p95/40 h-[42%]"></div><div class="flex-1 bg-chart-p95/40 h-[65%]"></div><div class="flex-1 bg-chart-p95/40 h-[55%]"></div><div class="flex-1 bg-chart-p95/40 h-[48%]"></div><div class="flex-1 bg-chart-p95/40 h-[50%]"></div><div class="flex-1 bg-chart-p95/40 h-[44%]"></div><div class="flex-1 bg-chart-p95/40 h-[52%]"></div><div class="flex-1 bg-chart-p95/40 h-[40%]"></div>
                         </div>
                         <!-- p50 (shortest) -->
                         <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
-                            <div class="flex-1 bg-chart-1/60 h-[22%]"></div><div class="flex-1 bg-chart-1/60 h-[20%]"></div><div class="flex-1 bg-chart-1/60 h-[25%]"></div><div class="flex-1 bg-chart-1/60 h-[23%]"></div><div class="flex-1 bg-chart-1/60 h-[18%]"></div><div class="flex-1 bg-chart-1/60 h-[28%]"></div><div class="flex-1 bg-chart-1/60 h-[24%]"></div><div class="flex-1 bg-chart-1/60 h-[21%]"></div><div class="flex-1 bg-chart-1/60 h-[22%]"></div><div class="flex-1 bg-chart-1/60 h-[19%]"></div><div class="flex-1 bg-chart-1/60 h-[24%]"></div><div class="flex-1 bg-chart-1/60 h-[18%]"></div>
+                            <div class="flex-1 bg-chart-p50/60 h-[22%]"></div><div class="flex-1 bg-chart-p50/60 h-[20%]"></div><div class="flex-1 bg-chart-p50/60 h-[25%]"></div><div class="flex-1 bg-chart-p50/60 h-[23%]"></div><div class="flex-1 bg-chart-p50/60 h-[18%]"></div><div class="flex-1 bg-chart-p50/60 h-[28%]"></div><div class="flex-1 bg-chart-p50/60 h-[24%]"></div><div class="flex-1 bg-chart-p50/60 h-[21%]"></div><div class="flex-1 bg-chart-p50/60 h-[22%]"></div><div class="flex-1 bg-chart-p50/60 h-[19%]"></div><div class="flex-1 bg-chart-p50/60 h-[24%]"></div><div class="flex-1 bg-chart-p50/60 h-[18%]"></div>
                         </div>
                     </div>
                 </div>
@@ -520,14 +520,14 @@ const uid = Math.random().toString(36).slice(2, 8);
                     <div class="text-[9px] text-fg-muted mb-2">http.server.duration (p95)</div>
                     <!-- Area chart style with gradient effect -->
                     <div class="flex items-end gap-[2px] h-16">
-                        <div class="flex-1 bg-chart-1/50 h-[40%]"></div><div class="flex-1 bg-chart-1/50 h-[42%]"></div><div class="flex-1 bg-chart-1/55 h-[48%]"></div><div class="flex-1 bg-chart-1/55 h-[45%]"></div><div class="flex-1 bg-chart-1/60 h-[55%]"></div><div class="flex-1 bg-chart-1/60 h-[52%]"></div><div class="flex-1 bg-chart-1/65 h-[62%]"></div><div class="flex-1 bg-chart-1/65 h-[58%]"></div><div class="flex-1 bg-chart-1/70 h-[70%]"></div><div class="flex-1 bg-chart-1/70 h-[65%]"></div><div class="flex-1 bg-chart-1/75 h-[72%]"></div><div class="flex-1 bg-chart-1/75 h-[68%]"></div><div class="flex-1 bg-chart-1/80 h-[78%]"></div><div class="flex-1 bg-chart-1 h-[75%]"></div><div class="flex-1 bg-chart-1 h-[72%]"></div><div class="flex-1 bg-chart-1 h-[68%]"></div>
+                        <div class="flex-1 bg-chart-p95/50 h-[40%]"></div><div class="flex-1 bg-chart-p95/50 h-[42%]"></div><div class="flex-1 bg-chart-p95/55 h-[48%]"></div><div class="flex-1 bg-chart-p95/55 h-[45%]"></div><div class="flex-1 bg-chart-p95/60 h-[55%]"></div><div class="flex-1 bg-chart-p95/60 h-[52%]"></div><div class="flex-1 bg-chart-p95/65 h-[62%]"></div><div class="flex-1 bg-chart-p95/65 h-[58%]"></div><div class="flex-1 bg-chart-p95/70 h-[70%]"></div><div class="flex-1 bg-chart-p95/70 h-[65%]"></div><div class="flex-1 bg-chart-p95/75 h-[72%]"></div><div class="flex-1 bg-chart-p95/75 h-[68%]"></div><div class="flex-1 bg-chart-p95/80 h-[78%]"></div><div class="flex-1 bg-chart-p95 h-[75%]"></div><div class="flex-1 bg-chart-p95 h-[72%]"></div><div class="flex-1 bg-chart-p95 h-[68%]"></div>
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
                 <div class="border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">http.server.request.count</div>
                     <div class="flex items-end gap-[2px] h-16">
-                        <div class="flex-1 bg-chart-3/50 h-[60%]"></div><div class="flex-1 bg-chart-3/50 h-[65%]"></div><div class="flex-1 bg-chart-3/55 h-[70%]"></div><div class="flex-1 bg-chart-3/55 h-[62%]"></div><div class="flex-1 bg-chart-3/60 h-[58%]"></div><div class="flex-1 bg-chart-3/60 h-[72%]"></div><div class="flex-1 bg-chart-3/65 h-[80%]"></div><div class="flex-1 bg-chart-3/65 h-[75%]"></div><div class="flex-1 bg-chart-3/70 h-[85%]"></div><div class="flex-1 bg-chart-3/70 h-[90%]"></div><div class="flex-1 bg-chart-3/75 h-[82%]"></div><div class="flex-1 bg-chart-3/75 h-[78%]"></div><div class="flex-1 bg-chart-3/80 h-[88%]"></div><div class="flex-1 bg-chart-3 h-[92%]"></div><div class="flex-1 bg-chart-3 h-[85%]"></div><div class="flex-1 bg-chart-3 h-[80%]"></div>
+                        <div class="flex-1 bg-chart-throughput/50 h-[60%]"></div><div class="flex-1 bg-chart-throughput/50 h-[65%]"></div><div class="flex-1 bg-chart-throughput/55 h-[70%]"></div><div class="flex-1 bg-chart-throughput/55 h-[62%]"></div><div class="flex-1 bg-chart-throughput/60 h-[58%]"></div><div class="flex-1 bg-chart-throughput/60 h-[72%]"></div><div class="flex-1 bg-chart-throughput/65 h-[80%]"></div><div class="flex-1 bg-chart-throughput/65 h-[75%]"></div><div class="flex-1 bg-chart-throughput/70 h-[85%]"></div><div class="flex-1 bg-chart-throughput/70 h-[90%]"></div><div class="flex-1 bg-chart-throughput/75 h-[82%]"></div><div class="flex-1 bg-chart-throughput/75 h-[78%]"></div><div class="flex-1 bg-chart-throughput/80 h-[88%]"></div><div class="flex-1 bg-chart-throughput h-[92%]"></div><div class="flex-1 bg-chart-throughput h-[85%]"></div><div class="flex-1 bg-chart-throughput h-[80%]"></div>
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
