@@ -15,6 +15,7 @@ import { LogDetailSheet } from "@/components/logs/log-detail-sheet"
 import { formatDuration } from "@/lib/format"
 import { cn } from "@maple/ui/utils"
 import { getCacheInfo, cacheResultStyles } from "@/lib/cache"
+import { getServiceLegendColor } from "@maple/ui/lib/colors"
 import type { SpanNode } from "@/api/tinybird/traces"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { listLogsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
@@ -25,6 +26,7 @@ import { HttpSpanLabel } from "./http-span-label"
 
 interface SpanDetailPanelProps {
   span: SpanNode
+  services: string[]
   onClose: () => void
 }
 
@@ -233,7 +235,7 @@ function SpanLogs({
   )
 }
 
-export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
+export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProps) {
   const { effectiveTimezone } = useTimezonePreference()
   const cacheInfo = getCacheInfo(span.spanAttributes)
   const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
@@ -260,7 +262,7 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
             </div>
           </CopyableValue>
           <div className="flex items-center gap-2 mt-0.5">
-            <Badge variant="outline" className="font-mono text-[10px]">
+            <Badge variant="outline" className="font-mono text-[10px]" style={{ color: getServiceLegendColor(span.serviceName, services) }}>
               <CopyableValue value={span.serviceName}>{span.serviceName}</CopyableValue>
             </Badge>
             <span className="text-[10px] text-muted-foreground">{kindLabel}</span>

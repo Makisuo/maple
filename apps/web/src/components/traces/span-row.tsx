@@ -4,6 +4,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { cn } from "@maple/ui/utils"
 import { formatDuration } from "@/lib/format"
+import { getServiceLegendColor } from "@maple/ui/lib/colors"
 import { getCacheInfo, cacheResultStyles } from "@/lib/cache"
 import { getHttpInfo, HTTP_METHOD_COLORS } from "@maple/ui/lib/http"
 import { PixelDurationBar } from "./pixel-duration-bar"
@@ -13,6 +14,7 @@ interface SpanRowProps {
   span: SpanNode
   totalDurationMs: number
   traceStartTime: string
+  services: string[]
   expanded: boolean
   onToggle: () => void
   isSelected?: boolean
@@ -38,6 +40,7 @@ export function SpanRow({
   span,
   totalDurationMs,
   traceStartTime,
+  services,
   expanded,
   onToggle,
   isSelected,
@@ -165,7 +168,11 @@ export function SpanRow({
           variant="outline"
           className="shrink-0 font-mono text-[10px] px-1.5"
         >
-          {span.serviceName} · {kindLabel}
+          <span style={{ color: getServiceLegendColor(span.serviceName, services) }}>
+            {span.serviceName}
+          </span>
+          <span className="text-muted-foreground">·</span>
+          {kindLabel}
         </Badge>
 
         {httpInfo ? (

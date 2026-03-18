@@ -14,6 +14,7 @@ import {
   ResizableHandle,
 } from "@maple/ui/components/ui/resizable"
 import { formatDuration } from "@/lib/format"
+import { getServiceLegendColor } from "@maple/ui/lib/colors"
 import { type Span, type SpanNode } from "@/api/tinybird/traces"
 import { getSpanHierarchyResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { findSpanById } from "@/components/traces/flow-utils"
@@ -270,7 +271,7 @@ function TraceDetailPage() {
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <span className="text-xs text-muted-foreground">Services:</span>
               {services.map((service: string) => (
-                <Badge key={service} variant="outline" className="font-mono text-xs">
+                <Badge key={service} variant="outline" className="font-mono text-xs" style={{ color: getServiceLegendColor(service, services) }}>
                   {service}
                 </Badge>
               ))}
@@ -358,6 +359,7 @@ function TraceDetailPage() {
                   <ResizablePanel defaultSize={40} minSize={25}>
                     <SpanDetailPanel
                       span={selectedSpan}
+                      services={services}
                       onClose={handleCloseSpanDetails}
                     />
                   </ResizablePanel>
