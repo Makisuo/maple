@@ -6,6 +6,7 @@ import { cn } from "@maple/ui/utils"
 import { formatDuration } from "@/lib/format"
 import { getCacheInfo, cacheResultStyles } from "@/lib/cache"
 import { getHttpInfo, HTTP_METHOD_COLORS } from "@maple/ui/lib/http"
+import { PixelDurationBar } from "./pixel-duration-bar"
 import type { SpanNode } from "@/api/tinybird/traces"
 
 interface SpanRowProps {
@@ -112,6 +113,15 @@ export function SpanRow({
   const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
   const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
 
+  const barColor =
+    httpInfo?.statusCode && httpInfo.statusCode >= 500
+      ? "bg-destructive"
+      : httpInfo?.statusCode && httpInfo.statusCode >= 400
+        ? "bg-severity-warn"
+        : span.statusCode === "Error"
+          ? "bg-destructive"
+          : "bg-primary"
+
   return (
     <div
       className={cn(
@@ -177,28 +187,11 @@ export function SpanRow({
 
       {/* Right section: Duration bar + Duration text + Status (fixed widths, anchored right) */}
       <div className="flex items-center gap-2 shrink-0 ml-2">
-        <div className="w-48 h-1 bg-muted overflow-hidden relative">
-          <div
-            className={cn(
-              "h-full absolute",
-              httpInfo?.statusCode && httpInfo.statusCode >= 500
-                ? "bg-destructive"
-                : httpInfo?.statusCode && httpInfo.statusCode >= 400
-                  ? "bg-severity-warn"
-                  : span.statusCode === "Error"
-                    ? "bg-destructive"
-                    : cacheInfo?.result === "hit"
-                      ? "bg-primary"
-                      : cacheInfo?.result === "miss"
-                        ? "bg-chart-p50"
-                        : "bg-primary"
-            )}
-            style={{
-              left: `${leftPercent}%`,
-              width: `${Math.max(widthPercent, 1)}%`
-            }}
-          />
-        </div>
+        <PixelDurationBar
+          leftPercent={leftPercent}
+          widthPercent={Math.max(widthPercent, 1)}
+          color={barColor}
+        />
 
         <span className="w-16 text-right font-mono text-xs text-muted-foreground">
           {formatDuration(span.durationMs)}
