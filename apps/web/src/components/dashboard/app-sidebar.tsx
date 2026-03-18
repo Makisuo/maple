@@ -314,7 +314,7 @@ export function AppSidebar() {
                     tooltip="Quick Start"
                     isActive={currentPath === "/quick-start"}
                   >
-                    <RocketIcon size={16} />
+                    <RocketIcon size={18} />
                     <span>Quick Start</span>
                   </SidebarMenuButton>
                   <SidebarMenuBadge>
@@ -335,7 +335,7 @@ export function AppSidebar() {
                       tooltip={item.title}
                       isActive={isActive}
                     >
-                      <item.icon size={16} />
+                      <item.icon size={18} />
                       <span>{item.title}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -358,7 +358,7 @@ export function AppSidebar() {
                       tooltip={item.title}
                       isActive={isActive}
                     >
-                      <item.icon size={16} />
+                      <item.icon size={18} />
                       <span>{item.title}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -381,7 +381,7 @@ export function AppSidebar() {
                       tooltip={item.title}
                       isActive={isActive}
                     >
-                      <item.icon size={16} />
+                      <item.icon size={18} />
                       <span>{item.title}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -406,7 +406,7 @@ export function AppSidebar() {
                       tooltip={item.title}
                       isActive={isActive}
                     >
-                      <item.icon size={16} />
+                      <item.icon size={18} />
                       <span>{item.title}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
