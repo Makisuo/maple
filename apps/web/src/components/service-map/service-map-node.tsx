@@ -20,16 +20,16 @@ function formatLatency(ms: number): string {
   return `${ms.toFixed(1)}ms`
 }
 
-function getHealthClass(errorRate: number): string {
-  if (errorRate > 5) return "ring-severity-error/60"
-  if (errorRate > 1) return "ring-severity-warn/60"
-  return "ring-severity-info/40"
-}
-
 function getHealthDotClass(errorRate: number): string {
   if (errorRate > 5) return "bg-severity-error"
   if (errorRate > 1) return "bg-severity-warn"
   return "bg-severity-info"
+}
+
+function getSelectedBorderClass(errorRate: number): string {
+  if (errorRate > 5) return "border-severity-error shadow-[0_0_0_3px_oklch(0.5_0.2_25/0.15)]"
+  if (errorRate > 1) return "border-severity-warn shadow-[0_0_0_3px_oklch(0.6_0.15_60/0.15)]"
+  return "border-border-active shadow-[0_0_0_3px_oklch(0.3_0.02_60/0.2)]"
 }
 
 interface ServiceMapNodeProps {
@@ -39,8 +39,8 @@ interface ServiceMapNodeProps {
 export const ServiceMapNode = memo(function ServiceMapNode({
   data,
 }: ServiceMapNodeProps) {
-  const { label, throughput, tracedThroughput, hasSampling, samplingWeight, errorRate, avgLatencyMs, services } = data
-  const color = getServiceLegendColor(label, services)
+  const { label, throughput, tracedThroughput, hasSampling, samplingWeight, errorRate, avgLatencyMs, services, selected } = data
+  const accentColor = getServiceLegendColor(label, services)
 
   return (
     <>
@@ -53,55 +53,66 @@ export const ServiceMapNode = memo(function ServiceMapNode({
 
       <div
         className={cn(
-          "w-[200px] rounded-lg shadow-sm ring-2 transition-shadow hover:shadow-md bg-card",
-          getHealthClass(errorRate),
+          "w-[220px] rounded-lg bg-card border overflow-hidden flex cursor-pointer transition-[border-color,box-shadow] duration-150",
+          selected
+            ? getSelectedBorderClass(errorRate)
+            : "border-border hover:border-border-active",
         )}
       >
-        {/* Header */}
+        {/* Left accent stripe */}
         <div
-          className="flex items-center gap-2 px-3 py-2 rounded-t-lg text-xs font-semibold truncate"
-          style={{ backgroundColor: color, color: "oklch(0.98 0 0)" }}
-        >
-          <div
-            className={cn("h-2 w-2 rounded-full shrink-0", getHealthDotClass(errorRate))}
-          />
-          <span className="truncate">{label}</span>
-        </div>
+          className="w-[3px] shrink-0"
+          style={{ backgroundColor: accentColor }}
+        />
 
-        {/* Metrics */}
-        <div className="grid grid-cols-3 divide-x divide-border px-1 py-2 text-center text-[10px]">
-          <Tooltip>
-            <TooltipTrigger>
-              <div className="font-medium text-muted-foreground">req/s</div>
-              <div className="font-mono font-semibold text-foreground tabular-nums">
-                {hasSampling ? "~" : ""}{formatRate(throughput)}
-              </div>
-            </TooltipTrigger>
-            {hasSampling && (
-              <TooltipContent side="bottom">
-                <p>Estimated x{samplingWeight.toFixed(0)} from {formatRate(tracedThroughput)} traced req/s</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-          <div>
-            <div className="font-medium text-muted-foreground">err%</div>
+        <div className="flex flex-col gap-2 px-3 py-2.5 flex-1 min-w-0">
+          {/* Service name + health dot */}
+          <div className="flex items-center gap-1.5">
             <div
-              className={cn(
-                "font-mono font-semibold tabular-nums",
-                errorRate > 5
-                  ? "text-severity-error"
-                  : errorRate > 1
-                    ? "text-severity-warn"
-                    : "text-foreground",
-              )}
-            >
-              {errorRate.toFixed(1)}%
-            </div>
+              className={cn("h-1.5 w-1.5 rounded-full shrink-0", getHealthDotClass(errorRate))}
+            />
+            <span className="text-xs font-medium text-foreground truncate">{label}</span>
           </div>
-          <div>
-            <div className="font-medium text-muted-foreground">avg</div>
-            <div className="font-mono font-semibold text-foreground tabular-nums">
-              {formatLatency(avgLatencyMs)}
+
+          {/* Metrics row */}
+          <div className="flex gap-4">
+            <Tooltip>
+              <TooltipTrigger>
+                <div className="flex flex-col gap-px">
+                  <span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">req/s</span>
+                  <span className="text-[11px] font-medium text-secondary-foreground font-mono tabular-nums">
+                    {hasSampling ? "~" : ""}{formatRate(throughput)}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              {hasSampling && (
+                <TooltipContent side="bottom">
+                  <p>Estimated x{samplingWeight.toFixed(0)} from {formatRate(tracedThroughput)} traced req/s</p>
+                </TooltipContent>
+              )}
+            </Tooltip>
+
+            <div className="flex flex-col gap-px">
+              <span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">err%</span>
+              <span
+                className={cn(
+                  "text-[11px] font-medium font-mono tabular-nums",
+                  errorRate > 5
+                    ? "text-severity-error"
+                    : errorRate > 1
+                      ? "text-severity-warn"
+                      : "text-secondary-foreground",
+                )}
+              >
+                {errorRate.toFixed(1)}%
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-px">
+              <span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">avg</span>
+              <span className="text-[11px] font-medium text-secondary-foreground font-mono tabular-nums">
+                {formatLatency(avgLatencyMs)}
+              </span>
             </div>
           </div>
         </div>

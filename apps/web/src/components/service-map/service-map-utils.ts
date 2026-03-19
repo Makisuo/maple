@@ -21,6 +21,7 @@ export interface ServiceNodeData {
   errorRate: number
   avgLatencyMs: number
   services: string[]
+  selected: boolean
   [key: string]: unknown
 }
 
@@ -94,6 +95,7 @@ export function buildFlowElements(
         errorRate: overview?.errorRate ?? 0,
         avgLatencyMs: overview?.p50LatencyMs ?? 0,
         services,
+        selected: false,
       },
     }
   })
