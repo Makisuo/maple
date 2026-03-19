@@ -14,8 +14,8 @@ export function AuthLayout({
         className="absolute inset-0 -z-10 pointer-events-none"
         style={{
           backgroundImage: [
-            "linear-gradient(to right, oklch(1 0 0 / 8%) 1px, transparent 1px)",
-            "linear-gradient(to bottom, oklch(1 0 0 / 8%) 1px, transparent 1px)",
+            "linear-gradient(to right, oklch(0.91 0.016 74 / 8%) 1px, transparent 1px)",
+            "linear-gradient(to bottom, oklch(0.91 0.016 74 / 8%) 1px, transparent 1px)",
           ].join(", "),
           backgroundSize: "60px 60px",
           maskImage:
@@ -33,7 +33,7 @@ export function AuthLayout({
           left: "50%",
           transform: "translate(-50%, -50%)",
           background:
-            "radial-gradient(ellipse at center, oklch(0.68 0.15 237 / 0.12) 0%, oklch(0.68 0.15 237 / 0.04) 40%, transparent 70%)",
+            "radial-gradient(ellipse at center, oklch(0.714 0.154 59 / 0.12) 0%, oklch(0.714 0.154 59 / 0.04) 40%, transparent 70%)",
         }}
       />
 

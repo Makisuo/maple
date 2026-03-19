@@ -36,13 +36,20 @@ const categoryDefaults: Array<{
   { category: "line", chartId: "query-builder-line", previewChartId: "dotted-line", label: "Line Chart" },
 ]
 
-type PickerTab = "charts" | "stats" | "tables"
+type PickerTab = "all" | "charts" | "stats" | "tables"
 
 const tabs: { id: PickerTab; label: string }[] = [
+  { id: "all", label: "All" },
   { id: "charts", label: "Charts" },
   { id: "stats", label: "Stats" },
   { id: "tables", label: "Tables" },
 ]
+
+const chartDescriptions: Record<string, string> = {
+  "query-builder-bar": "Compare values across categories",
+  "query-builder-area": "Visualize trends over time",
+  "query-builder-line": "Track metrics over time",
+}
 
 // Sample values for stat previews
 const statSampleValues: Record<string, number> = {
@@ -136,7 +143,7 @@ interface WidgetPickerProps {
 }
 
 export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps) {
-  const [activeTab, setActiveTab] = useState<PickerTab>("charts")
+  const [activeTab, setActiveTab] = useState<PickerTab>("all")
 
   const handleSelectChart = (chartId: string) => {
     onSelect(
@@ -163,26 +170,30 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
     onOpenChange(false)
   }
 
+  const showCharts = activeTab === "all" || activeTab === "charts"
+  const showStats = activeTab === "all" || activeTab === "stats"
+  const showTables = activeTab === "all" || activeTab === "tables"
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Add Widget</DialogTitle>
           <DialogDescription>
-            Choose a widget type to add to your dashboard.
+            Choose a visualization type to add to your dashboard.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex gap-1 mb-1">
+        <div className="flex gap-0 border-b border-border -mx-6 px-6">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1.5 text-xs font-medium transition-all ${
+              className={`px-4 py-2.5 text-xs font-medium transition-all ${
                 activeTab === tab.id
-                  ? "ring-2 ring-foreground bg-foreground text-background"
-                  : "ring-1 ring-border hover:ring-foreground/30"
+                  ? "text-foreground border-b-2 border-primary"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {tab.label}
@@ -190,59 +201,101 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
           ))}
         </div>
 
-        {activeTab === "charts" && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {categoryDefaults.map(({ chartId, previewChartId, label }) => {
-              const entry = getChartById(previewChartId)
-              if (!entry) return null
-              const Component = entry.component
+        <div className="flex flex-col gap-5 max-h-[60vh] overflow-y-auto py-1">
+          {showCharts && (
+            <div className="flex flex-col gap-3">
+              {activeTab === "all" && (
+                <h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
+                  Charts
+                </h3>
+              )}
+              <div className="grid grid-cols-3 gap-3">
+                {categoryDefaults.map(({ chartId, previewChartId, label }) => {
+                  const entry = getChartById(previewChartId)
+                  if (!entry) return null
+                  const Component = entry.component
 
-              return (
-                <button
-                  key={chartId}
-                  type="button"
-                  onClick={() => handleSelectChart(chartId)}
-                  className="group ring-1 ring-border hover:ring-foreground/30 bg-card p-3 text-left transition-all flex flex-col gap-2"
-                >
-                  <ChartPreview component={Component} />
-                  <div className="text-xs font-medium">{label}</div>
-                </button>
-              )
-            })}
-          </div>
-        )}
+                  return (
+                    <button
+                      key={chartId}
+                      type="button"
+                      onClick={() => handleSelectChart(chartId)}
+                      className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+                    >
+                      <ChartPreview component={Component} />
+                      <div className="flex flex-col gap-0.5">
+                        <div className="text-xs font-medium">{label}</div>
+                        <div className="text-[11px] text-dim">
+                          {chartDescriptions[chartId] ?? ""}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
-        {activeTab === "stats" && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {statPresets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => handleSelectPreset(preset)}
-                className="group ring-1 ring-border hover:ring-foreground/30 bg-card p-3 text-left transition-all flex flex-col gap-2"
-              >
-                <StatPreviewCard preset={preset} />
-                <div className="text-xs font-medium">{preset.name}</div>
-              </button>
-            ))}
-          </div>
-        )}
+          {showStats && (
+            <div className="flex flex-col gap-3">
+              {activeTab === "all" && (
+                <h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
+                  Stats
+                </h3>
+              )}
+              <div className="grid grid-cols-3 gap-3">
+                {statPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(preset)}
+                    className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+                  >
+                    <StatPreviewCard preset={preset} />
+                    <div className="flex flex-col gap-0.5">
+                      <div className="text-xs font-medium">{preset.name}</div>
+                      {preset.description && (
+                        <div className="text-[11px] text-dim">
+                          {preset.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-        {activeTab === "tables" && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {tablePresets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() => handleSelectPreset(preset)}
-                className="group ring-1 ring-border hover:ring-foreground/30 bg-card p-3 text-left transition-all flex flex-col gap-2"
-              >
-                <TablePreviewCard preset={preset} />
-                <div className="text-xs font-medium">{preset.name}</div>
-              </button>
-            ))}
-          </div>
-        )}
+          {showTables && (
+            <div className="flex flex-col gap-3">
+              {activeTab === "all" && (
+                <h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
+                  Tables
+                </h3>
+              )}
+              <div className="grid grid-cols-3 gap-3">
+                {tablePresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(preset)}
+                    className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+                  >
+                    <TablePreviewCard preset={preset} />
+                    <div className="flex flex-col gap-0.5">
+                      <div className="text-xs font-medium">{preset.name}</div>
+                      {preset.description && (
+                        <div className="text-[11px] text-dim">
+                          {preset.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   )

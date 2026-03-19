@@ -20,6 +20,8 @@ import type {
 } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { DashboardAiPanel } from "@/components/dashboard-builder/ai"
+import { PlusIcon } from "@/components/icons"
+import { Button } from "@maple/ui/components/ui/button"
 
 const dashboardsSearchSchema = Schema.Struct({
   dashboardId: Schema.optional(Schema.String),
@@ -226,12 +228,24 @@ function DashboardsPage() {
             </div>
           )}
           {activeDashboard.widgets.length === 0 && effectiveMode === "view" ? (
-            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-2">
-              <p className="text-sm">This dashboard is empty.</p>
+            <div className="flex flex-col items-center justify-center py-24 gap-4">
+              <div className="flex gap-2">
+                <div className="w-8 h-8 rounded bg-primary/15" />
+                <div className="w-8 h-8 rounded bg-primary/10" />
+                <div className="w-8 h-8 rounded bg-primary/15" />
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-sm font-medium text-foreground">
+                  No widgets yet
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Add charts, stats, and tables to build your dashboard.
+                </p>
+              </div>
               <button
                 type="button"
                 disabled={readOnly}
-                className="text-xs text-primary hover:underline"
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
                 onClick={() => {
                   setMode("edit")
                   setChartPickerOpen(true)
@@ -266,6 +280,16 @@ function DashboardsPage() {
       breadcrumbs={[{ label: "Dashboards" }]}
       title="Dashboards"
       description="Create and manage custom dashboards."
+      headerActions={
+        <Button
+          size="sm"
+          disabled={readOnly}
+          onClick={handleCreate}
+        >
+          <PlusIcon size={14} data-icon="inline-start" />
+          Create Dashboard
+        </Button>
+      }
     >
       {persistenceError && (
         <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">

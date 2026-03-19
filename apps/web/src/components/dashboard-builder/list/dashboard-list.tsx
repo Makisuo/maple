@@ -1,8 +1,70 @@
 import { PlusIcon, TrashIcon } from "@/components/icons"
 
-import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@maple/ui/components/ui/card"
 import { Button } from "@maple/ui/components/ui/button"
-import type { Dashboard } from "@/components/dashboard-builder/types"
+import type { Dashboard, DashboardWidget } from "@/components/dashboard-builder/types"
+
+function formatTimeAgo(dateStr: string): string {
+  const now = Date.now()
+  const then = new Date(dateStr).getTime()
+  const diffMs = now - then
+  const diffMins = Math.floor(diffMs / 60000)
+  if (diffMins < 1) return "Just now"
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 30) return `${diffDays}d ago`
+  return new Date(dateStr).toLocaleDateString()
+}
+
+/** Renders a miniature silhouette of the dashboard's widget layout */
+function DashboardPreview({ widgets }: { widgets: DashboardWidget[] }) {
+  if (widgets.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full text-dim text-xs">
+        No widgets
+      </div>
+    )
+  }
+
+  // Find the grid bounds
+  const maxX = Math.max(...widgets.map((w) => (w.layout?.x ?? 0) + (w.layout?.w ?? 4)))
+  const maxY = Math.max(...widgets.map((w) => (w.layout?.y ?? 0) + (w.layout?.h ?? 4)))
+  const cols = Math.max(maxX, 12)
+  const rows = Math.max(maxY, 4)
+
+  return (
+    <div className="relative w-full h-full">
+      {widgets.map((widget) => {
+        const x = widget.layout?.x ?? 0
+        const y = widget.layout?.y ?? 0
+        const w = widget.layout?.w ?? 4
+        const h = widget.layout?.h ?? 4
+        const left = `${(x / cols) * 100}%`
+        const top = `${(y / rows) * 100}%`
+        const width = `${(w / cols) * 100}%`
+        const height = `${(h / rows) * 100}%`
+
+        const color =
+          widget.visualization === "chart"
+            ? "bg-primary/25"
+            : widget.visualization === "stat"
+              ? "bg-primary/20"
+              : "bg-muted/30"
+
+        return (
+          <div
+            key={widget.id}
+            className={`absolute rounded-sm ${color}`}
+            style={{ left, top, width, height, padding: "1px" }}
+          >
+            <div className="w-full h-full rounded-sm" />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 interface DashboardListProps {
   dashboards: Dashboard[]
@@ -21,53 +83,57 @@ export function DashboardList({
 }: DashboardListProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {dashboards.map((dashboard) => (
+        <button
+          key={dashboard.id}
+          type="button"
+          className="group ring-1 ring-border hover:ring-border-active bg-card text-left transition-all flex flex-col overflow-hidden rounded-md"
+          onClick={() => onSelect(dashboard.id)}
+        >
+          {/* Preview thumbnail */}
+          <div className="h-[100px] w-full bg-background border-b border-border p-3">
+            <DashboardPreview widgets={dashboard.widgets} />
+          </div>
+          {/* Card body */}
+          <div className="flex flex-col gap-1.5 p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-foreground truncate">
+                {dashboard.name}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                disabled={readOnly}
+                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete(dashboard.id)
+                }}
+              >
+                <TrashIcon size={14} />
+              </Button>
+            </div>
+            <div className="flex items-center gap-3 text-xs text-dim">
+              <span>
+                {dashboard.widgets.length} widget
+                {dashboard.widgets.length !== 1 ? "s" : ""}
+              </span>
+              <span>Updated {formatTimeAgo(dashboard.updatedAt)}</span>
+            </div>
+          </div>
+        </button>
+      ))}
+
+      {/* Create button */}
       <button
         type="button"
         onClick={onCreate}
         disabled={readOnly}
-        className="ring-1 ring-dashed ring-border hover:ring-foreground/30 bg-card flex flex-col items-center justify-center gap-2 p-8 transition-all text-muted-foreground hover:text-foreground min-h-[140px] disabled:opacity-50 disabled:cursor-not-allowed"
+        className="ring-1 ring-dashed ring-border hover:ring-border-active bg-card/50 flex flex-col items-center justify-center gap-2 p-8 transition-all text-muted hover:text-foreground min-h-[160px] disabled:opacity-50 disabled:cursor-not-allowed rounded-md"
       >
         <PlusIcon size={24} />
         <span className="text-xs font-medium">Create Dashboard</span>
       </button>
-
-      {dashboards.map((dashboard) => (
-        <Card
-          key={dashboard.id}
-          className="cursor-pointer hover:ring-foreground/20 transition-all"
-        >
-          <button
-            type="button"
-            className="w-full text-left"
-            onClick={() => onSelect(dashboard.id)}
-          >
-            <CardHeader>
-              <CardTitle>{dashboard.name}</CardTitle>
-              <CardAction>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  disabled={readOnly}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDelete(dashboard.id)
-                  }}
-                >
-                  <TrashIcon size={14} />
-                </Button>
-              </CardAction>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-3 text-muted-foreground">
-                <span>{dashboard.widgets.length} widget{dashboard.widgets.length !== 1 ? "s" : ""}</span>
-                <span>
-                  {new Date(dashboard.updatedAt).toLocaleDateString()}
-                </span>
-              </div>
-            </CardContent>
-          </button>
-        </Card>
-      ))}
     </div>
   )
 }
