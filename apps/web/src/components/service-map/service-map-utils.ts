@@ -1,13 +1,3 @@
-import {
-  forceSimulation,
-  forceLink,
-  forceManyBody,
-  forceCollide,
-  forceX,
-  forceY,
-  type SimulationNodeDatum,
-  type SimulationLinkDatum,
-} from "d3-force"
 import type { Node, Edge } from "@xyflow/react"
 import type { ServiceEdge } from "@/api/tinybird/service-map"
 import type { ServiceOverview } from "@/api/tinybird/services"
@@ -38,9 +28,14 @@ export interface ServiceEdgeData {
   [key: string]: unknown
 }
 
-interface SimNode extends SimulationNodeDatum {
-  id: string
-}
+// Layout constants
+const NODE_WIDTH = 220
+const NODE_HEIGHT = 70
+const LAYER_GAP_X = 350
+const NODE_GAP_Y = 40
+const COMPONENT_GAP_Y = 120
+const DISCONNECTED_GAP_X = 80
+const DISCONNECTED_MARGIN_Y = 100
 
 /**
  * Derive the unique list of services from edges + service overview data
@@ -124,6 +119,49 @@ export function buildFlowElements(
 }
 
 /**
+ * Find connected components using undirected BFS.
+ * Returns arrays of node IDs grouped by component, sorted largest-first.
+ */
+function findConnectedComponents(
+  nodes: Node<ServiceNodeData>[],
+  edges: Edge<ServiceEdgeData>[],
+): string[][] {
+  const undirected = new Map<string, string[]>()
+  for (const n of nodes) {
+    undirected.set(n.id, [])
+  }
+  for (const e of edges) {
+    undirected.get(e.source)?.push(e.target)
+    undirected.get(e.target)?.push(e.source)
+  }
+
+  const visited = new Set<string>()
+  const components: string[][] = []
+
+  for (const n of nodes) {
+    if (visited.has(n.id)) continue
+    const component: string[] = []
+    const queue = [n.id]
+    visited.add(n.id)
+    let head = 0
+    while (head < queue.length) {
+      const current = queue[head++]
+      component.push(current)
+      for (const neighbor of undirected.get(current) ?? []) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor)
+          queue.push(neighbor)
+        }
+      }
+    }
+    components.push(component)
+  }
+
+  components.sort((a, b) => b.length - a.length)
+  return components
+}
+
+/**
  * Compute hierarchical layer assignments via BFS on the call graph.
  * Returns a map from node ID to { layer, indexInLayer, layerSize }.
  */
@@ -178,7 +216,7 @@ function computeLayers(
     }
   }
 
-  // Assign disconnected nodes to maxDepth + 1
+  // Any unreached nodes (shouldn't happen within a connected component, but be safe)
   let maxDepth = 0
   for (const l of layerMap.values()) {
     if (l > maxDepth) maxDepth = l
@@ -265,8 +303,8 @@ function computeLayers(
 }
 
 /**
- * Run d3-force simulation synchronously to compute node positions.
- * Seeds positions from hierarchical BFS layers for a left-to-right layout.
+ * Compute node positions using pure hierarchical layout.
+ * Positions are deterministic: same input always produces same output.
  */
 export function layoutNodes(
   nodes: Node<ServiceNodeData>[],
@@ -274,68 +312,89 @@ export function layoutNodes(
 ): Node<ServiceNodeData>[] {
   if (nodes.length === 0) return nodes
 
-  const layers = computeLayers(nodes, edges)
+  const positions = new Map<string, { x: number; y: number }>()
 
-  const simNodes: SimNode[] = nodes.map((n) => {
-    const assignment = layers.get(n.id)!
-    return {
-      id: n.id,
-      x: assignment.layer * 300,
-      y: (assignment.indexInLayer - (assignment.layerSize - 1) / 2) * 150,
+  // Find connected components
+  const components = findConnectedComponents(nodes, edges)
+
+  // Separate true isolates (no edges at all) from connected components
+  const edgeNodeIds = new Set<string>()
+  for (const e of edges) {
+    edgeNodeIds.add(e.source)
+    edgeNodeIds.add(e.target)
+  }
+
+  const connectedComponents: string[][] = []
+  const isolates: string[] = []
+  for (const comp of components) {
+    if (comp.length === 1 && !edgeNodeIds.has(comp[0])) {
+      isolates.push(comp[0])
+    } else {
+      connectedComponents.push(comp)
     }
-  })
-  const simLinks: SimulationLinkDatum<SimNode>[] = edges.map((e) => ({
-    source: e.source,
-    target: e.target,
+  }
+
+  // Layout each connected component, stacking vertically
+  let currentYOffset = 0
+  const nodeById = new Map(nodes.map((n) => [n.id, n]))
+
+  for (const component of connectedComponents) {
+    const compNodes = component.map((id) => nodeById.get(id)!).filter(Boolean)
+    const compEdges = edges.filter(
+      (e) => component.includes(e.source) && component.includes(e.target),
+    )
+
+    const layers = computeLayers(compNodes, compEdges)
+
+    // Find the tallest layer to center vertically
+    let maxLayerSize = 0
+    for (const { layerSize } of layers.values()) {
+      maxLayerSize = Math.max(maxLayerSize, layerSize)
+    }
+
+    const cellHeight = NODE_HEIGHT + NODE_GAP_Y
+    const componentHeight = maxLayerSize * cellHeight
+
+    for (const [id, assignment] of layers) {
+      const x = assignment.layer * LAYER_GAP_X
+      // Center each layer's nodes vertically within the component's height
+      const layerHeight = assignment.layerSize * cellHeight
+      const layerOffsetY = (componentHeight - layerHeight) / 2
+      const y = currentYOffset + layerOffsetY + assignment.indexInLayer * cellHeight
+      positions.set(id, { x, y })
+    }
+
+    currentYOffset += componentHeight + COMPONENT_GAP_Y
+  }
+
+  // Place isolates in a horizontal row below the connected graph
+  if (isolates.length > 0) {
+    const rowY = currentYOffset + DISCONNECTED_MARGIN_Y
+    const totalWidth =
+      isolates.length * NODE_WIDTH + (isolates.length - 1) * DISCONNECTED_GAP_X
+
+    // Center the isolate row relative to the connected graph's horizontal extent
+    let minX = Infinity
+    let maxX = -Infinity
+    for (const { x } of positions.values()) {
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x + NODE_WIDTH)
+    }
+    const graphCenterX = positions.size > 0 ? (minX + maxX) / 2 : 0
+    const startX = graphCenterX - totalWidth / 2
+
+    for (let i = 0; i < isolates.length; i++) {
+      positions.set(isolates[i], {
+        x: startX + i * (NODE_WIDTH + DISCONNECTED_GAP_X),
+        y: rowY,
+      })
+    }
+  }
+
+  return nodes.map((node) => ({
+    ...node,
+    position: positions.get(node.id) ?? { x: 0, y: 0 },
   }))
-
-  const nodeMap = new Map<string, SimNode>()
-  for (const n of simNodes) {
-    nodeMap.set(n.id, n)
-  }
-
-  const simulation = forceSimulation(simNodes)
-    .force(
-      "link",
-      forceLink<SimNode, SimulationLinkDatum<SimNode>>(simLinks)
-        .id((d) => d.id)
-        .distance(280)
-        .strength(0.3),
-    )
-    .force("charge", forceManyBody().strength(-500))
-    .force(
-      "x",
-      forceX<SimNode>((d) => {
-        const assignment = layers.get(d.id)
-        return assignment ? assignment.layer * 300 : 0
-      }).strength(0.8),
-    )
-    .force(
-      "y",
-      forceY<SimNode>((d) => {
-        const assignment = layers.get(d.id)
-        if (!assignment) return 0
-        return (assignment.indexInLayer - (assignment.layerSize - 1) / 2) * 150
-      }).strength(0.5),
-    )
-    .force("collide", forceCollide(120))
-    .stop()
-
-  // Run synchronously
-  for (let i = 0; i < 120; i++) {
-    simulation.tick()
-  }
-
-  return nodes.map((node) => {
-    const simNode = nodeMap.get(node.id)
-    return {
-      ...node,
-      position: {
-        x: simNode?.x ?? 0,
-        y: simNode?.y ?? 0,
-      },
-    }
-  })
 }
 
 /**

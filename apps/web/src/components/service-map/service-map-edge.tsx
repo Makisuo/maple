@@ -245,10 +245,10 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
           </g>
         ))}
 
-      {/* Layer 6: Label */}
+      {/* Layer 6: Label — offset vertically based on edge direction to reduce overlap */}
       <foreignObject
         x={labelX - 40}
-        y={labelY - 12}
+        y={labelY + (targetY > sourceY ? -16 : 4) - 12}
         width={80}
         height={24}
         className="overflow-visible pointer-events-none"
