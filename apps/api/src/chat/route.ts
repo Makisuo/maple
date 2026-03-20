@@ -3,10 +3,16 @@ import { Effect } from "effect"
 import { AuthService } from "@/services/AuthService"
 import { ChatService } from "./chat-service"
 
-const toHeaderRecord = (headers: Record<string, string>): Record<string, string> => {
+const toHeaderRecord = (
+  headers: Record<string, string> | Headers,
+): Record<string, string> => {
   const record: Record<string, string> = {}
 
-  for (const [name, value] of Object.entries(headers)) {
+  const entries = headers instanceof Headers
+    ? headers.entries()
+    : Object.entries(headers)
+
+  for (const [name, value] of entries) {
     record[name.toLowerCase()] = value
   }
 
@@ -20,7 +26,7 @@ export const ChatRouter = HttpRouter.use((router) =>
 
     yield* router.add("POST", "/api/chat", (req) =>
       Effect.gen(function* () {
-        const headers = toHeaderRecord(req.headers as Record<string, string>)
+        const headers = toHeaderRecord(req.headers)
         const tenant = yield* authService.resolveTenant(headers)
         const body = yield* req.json
 

@@ -1,0 +1,181 @@
+import { optionalBooleanParam, optionalNumberParam, optionalStringParam } from "./types"
+import {
+  type LogsFilters,
+  type MetricsFilters,
+  QuerySpec,
+  type QuerySpec as QuerySpecType,
+  type TracesFilters,
+} from "@maple/domain"
+import { Schema } from "effect"
+
+const commonTimeRangeFields = {
+  start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss). Defaults to 1 hour ago"),
+  end_time: optionalStringParam("End time (YYYY-MM-DD HH:mm:ss). Defaults to now"),
+}
+
+// Flat schema to produce a JSON Schema with `type: "object"` (no `anyOf`).
+// The Anthropic API rejects `anyOf`/`oneOf`/`allOf` at the top level of tool input schemas.
+export const queryDataArgsSchema = Schema.Struct({
+  source: Schema.Literals(["traces", "logs", "metrics"]).annotate({
+    description: "Data source: traces, logs, or metrics",
+  }),
+  kind: Schema.Literals(["timeseries", "breakdown"]).annotate({
+    description: "Query type: timeseries or breakdown",
+  }),
+  metric: optionalStringParam(
+    "Metric to compute. Traces: count, avg_duration, p50_duration, p95_duration, p99_duration, error_rate. Logs: count. Metrics: avg, sum, min, max, count.",
+  ),
+  group_by: optionalStringParam(
+    "Grouping dimension. Traces: service, span_name, status_code, http_method, attribute, none. Logs: service, severity, none. Metrics: service, none.",
+  ),
+  bucket_seconds: optionalNumberParam("Bucket size in seconds (timeseries only, auto-computed if omitted)"),
+  limit: optionalNumberParam("Max breakdown rows (breakdown only, default 10, max 100)"),
+  ...commonTimeRangeFields,
+  service_name: optionalStringParam("Filter by service name"),
+  span_name: optionalStringParam("Filter by span name (traces only)"),
+  root_spans_only: optionalBooleanParam("Only root spans (traces only)"),
+  environments: optionalStringParam("Comma-separated environments (traces only)"),
+  commit_shas: optionalStringParam("Comma-separated commit SHAs (traces only)"),
+  attribute_key: optionalStringParam("Attribute key for filtering or grouping (traces only)"),
+  attribute_value: optionalStringParam("Attribute value filter; requires attribute_key (traces only)"),
+  severity: optionalStringParam("Filter by severity, e.g. ERROR, WARN, INFO (logs only)"),
+  metric_name: optionalStringParam(
+    "Metric name (required for metrics queries). Use list_metrics to discover available metrics.",
+  ),
+  metric_type: optionalStringParam(
+    "Metric type: sum, gauge, histogram, or exponential_histogram (required for metrics queries)",
+  ),
+})
+
+export type QueryDataArgs = Schema.Schema.Type<typeof queryDataArgsSchema>
+
+export const queryDataToolDescription =
+  "Execute a structured observability query with only supported combinations. " +
+  "Supported queries: traces timeseries, traces breakdown, logs timeseries, logs breakdown, metrics timeseries, and metrics breakdown. " +
+  "Metrics breakdown only supports metric=avg|sum|count grouped by service. " +
+  "Example: traces timeseries grouped by service to compare traffic over time. " +
+  "Example: call list_metrics first, then query a specific metric timeseries with metric_name and metric_type."
+
+export const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
+
+const splitCsv = (value: string): Array<string> =>
+  value.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+
+// The flat MCP schema accepts strings for metric/group_by/metric_type, but QuerySpecType
+// expects specific literal unions. The QuerySpec decoder validates the actual values at runtime.
+export function buildQuerySpec(args: QueryDataArgs): { spec: QuerySpecType } | { error: string } {
+  type AnySpec = Record<string, unknown>
+  const attributeKey = args.attribute_key
+  const attributeValue = args.attribute_value
+
+  if (attributeValue && !attributeKey) {
+    return { error: "`attribute_value` requires `attribute_key`." }
+  }
+
+  if (args.group_by === "attribute" && !attributeKey) {
+    return { error: "`group_by=attribute` requires `attribute_key`." }
+  }
+
+  if (args.source === "traces") {
+    const filters: TracesFilters = {
+      ...(args.service_name && { serviceName: args.service_name }),
+      ...(args.span_name && { spanName: args.span_name }),
+      ...(args.root_spans_only && { rootSpansOnly: args.root_spans_only }),
+      ...(args.environments && { environments: splitCsv(args.environments) }),
+      ...(args.commit_shas && { commitShas: splitCsv(args.commit_shas) }),
+      ...(attributeKey && { attributeKey }),
+      ...(attributeValue && { attributeValue }),
+    }
+    const hasFilters = Object.keys(filters).length > 0
+
+    if (args.kind === "timeseries") {
+      return {
+        spec: {
+          kind: "timeseries",
+          source: "traces",
+          metric: args.metric ?? "count",
+          groupBy: args.group_by ?? "none",
+          ...(hasFilters && { filters }),
+          ...(args.bucket_seconds && { bucketSeconds: args.bucket_seconds }),
+        } as AnySpec as QuerySpecType,
+      }
+    }
+
+    return {
+      spec: {
+        kind: "breakdown",
+        source: "traces",
+        metric: args.metric ?? "count",
+        groupBy: args.group_by ?? "service",
+        ...(hasFilters && { filters }),
+        ...(args.limit && { limit: args.limit }),
+      } as AnySpec as QuerySpecType,
+    }
+  }
+
+  if (args.source === "logs") {
+    const filters: LogsFilters = {
+      ...(args.service_name && { serviceName: args.service_name }),
+      ...(args.severity && { severity: args.severity }),
+    }
+    const hasFilters = Object.keys(filters).length > 0
+
+    if (args.kind === "timeseries") {
+      return {
+        spec: {
+          kind: "timeseries",
+          source: "logs",
+          metric: "count",
+          groupBy: args.group_by ?? "none",
+          ...(hasFilters && { filters }),
+          ...(args.bucket_seconds && { bucketSeconds: args.bucket_seconds }),
+        } as AnySpec as QuerySpecType,
+      }
+    }
+
+    return {
+      spec: {
+        kind: "breakdown",
+        source: "logs",
+        metric: "count",
+        groupBy: args.group_by ?? "service",
+        ...(hasFilters && { filters }),
+        ...(args.limit && { limit: args.limit }),
+      } as AnySpec as QuerySpecType,
+    }
+  }
+
+  if (!args.metric_name || !args.metric_type) {
+    return { error: "`metric_name` and `metric_type` are required for metrics queries." }
+  }
+
+  const filters: MetricsFilters = {
+    metricName: args.metric_name,
+    metricType: args.metric_type as MetricsFilters["metricType"],
+    ...(args.service_name && { serviceName: args.service_name }),
+  }
+
+  if (args.kind === "timeseries") {
+    return {
+      spec: {
+        kind: "timeseries",
+        source: "metrics",
+        metric: args.metric ?? "avg",
+        groupBy: args.group_by ?? "none",
+        filters,
+        ...(args.bucket_seconds && { bucketSeconds: args.bucket_seconds }),
+      } as AnySpec as QuerySpecType,
+    }
+  }
+
+  return {
+    spec: {
+      kind: "breakdown",
+      source: "metrics",
+      metric: args.metric ?? "avg",
+      groupBy: "service",
+      filters,
+      ...(args.limit && { limit: args.limit }),
+    } as AnySpec as QuerySpecType,
+  }
+}

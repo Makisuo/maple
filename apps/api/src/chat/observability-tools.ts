@@ -24,7 +24,6 @@ import {
   SystemHealthToolInput,
   type SystemHealthToolOutput,
 } from "@maple/domain"
-import { QuerySpec } from "@maple/domain"
 import type { TenantContext } from "@/services/AuthService"
 import {
   QueryEngineService,
@@ -43,7 +42,7 @@ import {
 } from "@/mcp/lib/format"
 import { resolveToolTenantContext } from "@/mcp/lib/current-tenant-context"
 import { McpQueryError, type McpToolError } from "@/mcp/tools/types"
-import { buildQuerySpec } from "@/mcp/tools/query-data"
+import { buildQuerySpec, decodeQuerySpecSync } from "@/mcp/tools/query-data-shared"
 import type { QueryEngineExecuteResponse, QuerySpec as QuerySpecType } from "@maple/domain"
 
 const SYSTEM_SPAN_PATTERNS = ["ClusterCron"]
@@ -69,8 +68,6 @@ const capitalize = (value: string): string =>
 
 const isSystemTrace = (rootSpanName: string): boolean =>
   SYSTEM_SPAN_PATTERNS.some((pattern) => rootSpanName.includes(pattern))
-
-const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
 
 type MutableSpanNode = Omit<SpanNodeData, "children"> & {
   children: Array<MutableSpanNode>

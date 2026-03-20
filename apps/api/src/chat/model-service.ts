@@ -40,5 +40,7 @@ export class ChatModelService extends ServiceMap.Service<ChatModelService>()("Ch
     }
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make)
+  static readonly layer = Layer.effect(this, this.make).pipe(
+    Layer.provide(Env.layer),
+  )
 }

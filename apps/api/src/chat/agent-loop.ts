@@ -30,12 +30,11 @@ export const streamAgentLoop = (options: {
         yield* LanguageModel.streamText({
           prompt: currentPrompt,
           toolkit: options.toolkit,
-          toolChoice: "auto" as any,
         }).pipe(
           Stream.timeout(IDLE_TIMEOUT),
           Stream.runForEach((part) => {
-            collectedParts.push(part as Response.AnyPart)
-            return Queue.offer(queue, part as Response.AnyPart)
+            collectedParts.push(part)
+            return Queue.offer(queue, part)
           }),
         )
 
