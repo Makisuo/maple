@@ -16,6 +16,7 @@ import {
   decodeInput,
   TinybirdApiError as TinybirdApiErrorClass,
 } from "@/api/tinybird/effect-utils"
+import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 
 const dateTimeString = Schema.String.check(
   Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/),
@@ -142,21 +143,7 @@ const decodeQueryEngineRequest = Schema.decodeUnknownSync(QueryEngineExecuteRequ
 const toEpochMs = (value: string): number => new Date(value.replace(" ", "T") + "Z").getTime()
 
 function computeAutoBucketSeconds(startTime: string, endTime: string): number {
-  const startMs = toEpochMs(startTime)
-  const endMs = toEpochMs(endTime)
-  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
-    return 60
-  }
-
-  const targetPoints = 40
-  const rangeSeconds = Math.max((endMs - startMs) / 1000, 1)
-  const raw = Math.ceil(rangeSeconds / targetPoints)
-  if (raw <= 60) return 60
-  if (raw <= 300) return 300
-  if (raw <= 900) return 900
-  if (raw <= 3600) return 3600
-  if (raw <= 14400) return 14400
-  return 86400
+  return computeBucketSeconds(startTime, endTime)
 }
 
 function resolveTimeseriesBucketSpec(spec: QuerySpec, startTime: string, endTime: string): QuerySpec {

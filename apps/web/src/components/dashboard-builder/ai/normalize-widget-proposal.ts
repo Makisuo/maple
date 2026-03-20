@@ -113,7 +113,7 @@ function toMetricName(
   return fallback
 }
 
-function toStepInterval(raw: Record<string, unknown>, fallback: string): string {
+function toStepInterval(raw: Record<string, unknown>): string {
   if (typeof raw.stepInterval === "string" && raw.stepInterval.trim().length > 0) {
     return raw.stepInterval
   }
@@ -126,7 +126,85 @@ function toStepInterval(raw: Record<string, unknown>, fallback: string): string 
     return String(raw.bucketSeconds)
   }
 
-  return fallback
+  return ""
+}
+
+function normalizeTraceAggregation(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return trimmed
+
+  const normalized = trimmed
+    .toLowerCase()
+    .replace(/[_\s-]+/g, "")
+    .replace(/[()]/g, "")
+
+  switch (normalized) {
+    case "count":
+      return "count"
+    case "avg":
+    case "avgduration":
+    case "avglatency":
+      return "avg_duration"
+    case "p50":
+    case "p50duration":
+    case "p50latency":
+      return "p50_duration"
+    case "p95":
+    case "p95duration":
+    case "p95latency":
+      return "p95_duration"
+    case "p99":
+    case "p99duration":
+    case "p99latency":
+      return "p99_duration"
+    case "errorrate":
+      return "error_rate"
+    default:
+      return trimmed
+  }
+}
+
+function normalizeAggregation(
+  dataSource: QueryBuilderDataSource,
+  value: unknown,
+  fallback: string,
+): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return fallback
+  }
+
+  if (dataSource === "traces") {
+    return normalizeTraceAggregation(value)
+  }
+
+  return value.trim()
+}
+
+function rewriteFriendlyTraceMetricText(value: string): string {
+  return value
+    .replace(/\bp50_duration\b/gi, "p50")
+    .replace(/\bp95_duration\b/gi, "p95")
+    .replace(/\bp99_duration\b/gi, "p99")
+    .replace(/\bavg_duration\b/gi, "avg duration")
+    .replace(/\berror_rate\b/gi, "error rate")
+}
+
+function rewriteFriendlyQueryLegend(query: QueryBuilderQueryDraft): QueryBuilderQueryDraft {
+  if (!query.legend.trim()) {
+    return query
+  }
+
+  return {
+    ...query,
+    legend: rewriteFriendlyTraceMetricText(query.legend),
+  }
+}
+
+function rewriteFriendlyFormulaLegend(formula: QueryBuilderFormulaDraft): QueryBuilderFormulaDraft {
+  return {
+    ...formula,
+    legend: rewriteFriendlyTraceMetricText(formula.legend),
+  }
 }
 
 function normalizeQueryEntry(
@@ -149,6 +227,12 @@ function normalizeQueryEntry(
   const defaultWhereClause = formatFiltersAsWhereClause({ filters: fallbackFilters })
   const groupBy = toQueryGroupByToken(queryRecord.groupBy)
   const addOns = asRecord(queryRecord.addOns)
+  const rawAggregation =
+    typeof queryRecord.aggregation === "string" && queryRecord.aggregation.trim().length > 0
+      ? queryRecord.aggregation
+      : typeof queryRecord.metric === "string" && queryRecord.metric.trim().length > 0
+        ? queryRecord.metric
+        : undefined
 
   return {
     hasInvalidMetricType,
@@ -174,13 +258,8 @@ function normalizeQueryEntry(
       typeof queryRecord.whereClause === "string"
         ? queryRecord.whereClause
         : defaultWhereClause,
-    aggregation:
-      typeof queryRecord.aggregation === "string" && queryRecord.aggregation.trim().length > 0
-        ? queryRecord.aggregation
-        : typeof queryRecord.metric === "string" && queryRecord.metric.trim().length > 0
-          ? queryRecord.metric
-          : queryBase.aggregation,
-    stepInterval: toStepInterval(queryRecord, queryBase.stepInterval),
+    aggregation: normalizeAggregation(dataSource, rawAggregation, queryBase.aggregation),
+    stepInterval: toStepInterval(queryRecord),
     orderByDirection:
       queryRecord.orderByDirection === "asc" || queryRecord.orderByDirection === "desc"
         ? queryRecord.orderByDirection
@@ -295,6 +374,7 @@ export function normalizeAiWidgetProposal(
   const normalizedFormulas = formulasInput
     .map((formula, index) => normalizeFormulaEntry(formula, index))
     .filter((formula): formula is QueryBuilderFormulaDraft => formula !== null)
+    .map(rewriteFriendlyFormulaLegend)
   const comparison = asRecord(params.comparison)
   const normalizedComparison = {
     mode:
@@ -311,7 +391,7 @@ export function normalizeAiWidgetProposal(
     ...input.dataSource,
     params: {
       ...params,
-      queries: normalizedQueries,
+      queries: normalizedQueries.map(rewriteFriendlyQueryLegend),
       formulas: normalizedFormulas,
       comparison: normalizedComparison,
       debug: params.debug === true,
@@ -322,6 +402,13 @@ export function normalizeAiWidgetProposal(
     kind: "valid",
     proposal: {
       ...input,
+      display: {
+        ...input.display,
+        title:
+          typeof input.display.title === "string"
+            ? rewriteFriendlyTraceMetricText(input.display.title)
+            : input.display.title,
+      },
       dataSource: normalizedDataSource,
     },
   }

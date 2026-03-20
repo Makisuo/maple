@@ -1,4 +1,5 @@
-const TARGET_POINTS = 40;
+const TARGET_POINTS = 30;
+const AUTO_BUCKET_LADDER = [300, 900, 1800, 3600, 14400, 86400] as const;
 const TINYBIRD_DATETIME_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(\.\d+)?$/;
 
 function toEpochMs(value: string): number {
@@ -30,23 +31,19 @@ export function toIsoBucket(value: string | Date): string {
 }
 
 export function computeBucketSeconds(startTime?: string, endTime?: string, targetPoints = TARGET_POINTS): number {
-  if (!startTime || !endTime) return 60;
+  if (!startTime || !endTime) return 300;
 
   const startMs = toEpochMs(startTime);
   const endMs = toEpochMs(endTime);
   if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
-    return 60;
+    return 300;
   }
 
   const rangeSeconds = Math.max((endMs - startMs) / 1000, 1);
   const raw = Math.ceil(rangeSeconds / targetPoints);
-
-  if (raw <= 60) return 60;
-  if (raw <= 300) return 300;
-  if (raw <= 900) return 900;
-  if (raw <= 3600) return 3600;
-  if (raw <= 14400) return 14400;
-  return 86400;
+  return AUTO_BUCKET_LADDER.reduce((best, candidate) => {
+    return Math.abs(candidate - raw) < Math.abs(best - raw) ? candidate : best;
+  }, AUTO_BUCKET_LADDER[0]);
 }
 
 export function buildBucketTimeline(

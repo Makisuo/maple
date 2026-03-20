@@ -5,6 +5,10 @@ import {
 } from "@/lib/query-builder/model"
 
 describe("query-builder model bucket parsing", () => {
+  it("defaults new drafts to auto-bucket", () => {
+    expect(createQueryDraft(0).stepInterval).toBe("")
+  })
+
   it("parses hour shorthand step intervals", () => {
     const query = {
       ...createQueryDraft(0),

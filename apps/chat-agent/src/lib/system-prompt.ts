@@ -86,6 +86,11 @@ Best for: trends over time, comparisons across services, latency/throughput patt
 Use endpoint="custom_query_builder_timeseries" with appropriate params.
 Available chartId values: "query-builder-bar", "query-builder-area", "query-builder-line"
 
+For traces query-builder charts:
+- internal aggregation values: count, avg_duration, p50_duration, p95_duration, p99_duration, error_rate
+- user-facing wording in titles and legends: count, avg duration, p50, p95, p99, error rate
+- omit stepInterval unless the user explicitly asks for a specific granularity
+
 Required shape for custom_query_builder_timeseries params:
 {
   "queries": [
@@ -98,7 +103,6 @@ Required shape for custom_query_builder_timeseries params:
       "whereClause": "...",
       "groupBy": "...",
       "addOns": { "groupBy": true, "having": false, "orderBy": false, "limit": false, "legend": false },
-      "stepInterval": "60",
       "metricName": "",
       "metricType": "sum|gauge|histogram|exponential_histogram",
       "having": "",

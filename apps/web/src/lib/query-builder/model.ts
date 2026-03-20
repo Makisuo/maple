@@ -126,7 +126,7 @@ export function createQueryDraft(index: number): QueryBuilderQueryDraft {
     metricType: "gauge",
     whereClause: defaultWhereClause(),
     aggregation: isDefaultErrorRateQuery ? "error_rate" : "count",
-    stepInterval: "60",
+    stepInterval: "",
     orderByDirection: "desc",
     addOns: {
       groupBy: true,

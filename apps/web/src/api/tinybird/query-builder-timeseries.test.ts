@@ -181,7 +181,7 @@ describe("query-builder timeseries strategy", () => {
       },
     )
 
-    expect(seenBucketSeconds).toEqual([300, 3600, 86400])
+    expect(seenBucketSeconds).toEqual([300, 3600, 14400])
     expect(result.fallbackUsed).toBe(true)
     expect(result.attempts).toHaveLength(3)
     expect(result.attempts[1].error).toContain("too expensive")
@@ -191,6 +191,12 @@ describe("query-builder timeseries strategy", () => {
         series: { total: 5 },
       },
     ])
+  })
+
+  it("uses the shared coarse auto bucket ladder", () => {
+    expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 00:30:00")).toBe(300)
+    expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-01 06:00:00")).toBe(900)
+    expect(__testables.computeAutoBucketSeconds("2026-01-01 00:00:00", "2026-01-08 00:00:00")).toBe(14400)
   })
 
   it("counts only query results with real series data", () => {

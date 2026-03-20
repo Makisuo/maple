@@ -163,7 +163,7 @@ describe("normalizeAiWidgetProposal", () => {
     expect(queries[0]?.enabled).toBe(true)
     expect(queries[0]?.dataSource).toBe("metrics")
     expect(typeof queries[0]?.whereClause).toBe("string")
-    expect(typeof queries[0]?.stepInterval).toBe("string")
+    expect(queries[0]?.stepInterval).toBe("")
     expect(typeof queries[0]?.addOns).toBe("object")
   })
 
@@ -203,6 +203,73 @@ describe("normalizeAiWidgetProposal", () => {
     expect(queries[0]?.metricName).toBe("queue.depth")
     expect(queries[0]?.metricType).toBe("gauge")
     expect(queries[0]?.stepInterval).toBe("120")
+  })
+
+  it("keeps step interval empty when AI does not specify one", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            {
+              dataSource: "traces",
+              aggregation: "count",
+              whereClause: "service.name = api",
+            },
+          ],
+        },
+      },
+      display: {
+        title: "Requests",
+        chartId: "query-builder-line",
+      },
+    })
+
+    expect(result.kind).toBe("valid")
+    if (result.kind !== "valid") return
+    const params = result.proposal.dataSource.params as Record<string, unknown>
+    const queries = params.queries as Array<Record<string, unknown>>
+    expect(queries[0]?.stepInterval).toBe("")
+  })
+
+  it("normalizes friendly trace percentile aliases and rewrites visible labels", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            {
+              dataSource: "traces",
+              aggregation: "p95",
+              legend: "p95_duration by service",
+              groupBy: "service",
+            },
+            {
+              dataSource: "traces",
+              aggregation: "avg latency",
+              legend: "avg_duration",
+            },
+          ],
+        },
+      },
+      display: {
+        title: "p95_duration and avg_duration",
+        chartId: "query-builder-line",
+      },
+    })
+
+    expect(result.kind).toBe("valid")
+    if (result.kind !== "valid") return
+
+    const params = result.proposal.dataSource.params as Record<string, unknown>
+    const queries = params.queries as Array<Record<string, unknown>>
+    expect(queries[0]?.aggregation).toBe("p95_duration")
+    expect(queries[0]?.legend).toBe("p95 by service")
+    expect(queries[1]?.aggregation).toBe("avg_duration")
+    expect(queries[1]?.legend).toBe("avg duration")
+    expect(result.proposal.display.title).toBe("p95 and avg duration")
   })
 
   it("drops malformed query entries and blocks when none remain", () => {
