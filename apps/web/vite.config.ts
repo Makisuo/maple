@@ -26,7 +26,7 @@ export default defineConfig(({ mode }) => {
     envDir,
     plugins: [
       devtools(),
-      tanstackRouter({ target: "react" }),
+      tanstackRouter({ target: "react", autoCodeSplitting: false }),
       viteTsConfigPaths({
         projects: ["./tsconfig.json"],
       }),
