@@ -6,6 +6,7 @@ import { Config, Layer } from "effect";
 import { HttpApiRoutes } from "./http";
 import { McpLive } from "./mcp/app";
 import { AutumnRouter } from "./routes/autumn.http";
+import { ChatRouter } from "./chat/route";
 import { ApiKeysService } from "./services/ApiKeysService";
 import { AuthorizationLive } from "./services/AuthorizationLive";
 import { CloudflareLogpushService } from "./services/CloudflareLogpushService";
@@ -39,6 +40,7 @@ const AllRoutes = Layer.mergeAll(
   DocsRoute,
   AutumnRouter,
   McpLive,
+  ChatRouter,
 ).pipe(
   Layer.provide(
     HttpRouter.cors({

@@ -13,7 +13,7 @@ import { registerListMetricsTool } from "./tools/list-metrics"
 import { registerQueryDataTool } from "./tools/query-data"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "./tools/types"
 
-interface ToolDefinition {
+export interface ToolDefinition {
   readonly name: string
   readonly description: string
   readonly schema: Schema.Top & { readonly DecodingServices: never }
@@ -65,7 +65,7 @@ const toDecodeErrorMessage = (definition: ToolDefinition, error: unknown): strin
   ].join("\n")
 }
 
-const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
+export const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
   const definitions: ToolDefinition[] = []
   const registrar: McpToolRegistrar = {
     tool(name, description, schema, handler) {

@@ -1,7 +1,7 @@
-import { useAgent } from "agents/react"
-import { useAgentChat } from "@cloudflare/ai-chat/react"
+import { useChat } from "@ai-sdk/react"
+import { DefaultChatTransport } from "ai"
 import { useAuth } from "@clerk/clerk-react"
-import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
+import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import {
   Conversation,
   ConversationContent,
@@ -77,27 +77,30 @@ export function DashboardAiConversation({
   onAddWidget,
   onRemoveWidget,
 }: DashboardAiConversationProps) {
-  const { orgId } = useAuth()
+  const { orgId, getToken } = useAuth()
 
-  const agent = useAgent({
-    agent: "ChatAgent",
-    name: `dashboard-${dashboardId}`,
-    host: chatAgentUrl,
-  })
-
-  const { messages, sendMessage, status, error } = useAgentChat({
-    agent,
-    body: {
-      orgId,
-      mode: "dashboard_builder",
-      dashboardContext: {
-        dashboardName,
-        existingWidgets: widgets.map((w) => ({
-          title: w.display.title ?? "Untitled",
-          visualization: w.visualization,
-        })),
+  const { messages, sendMessage, status, error } = useChat({
+    id: `dashboard-${dashboardId}`,
+    transport: new DefaultChatTransport({
+      api: `${apiBaseUrl}/api/chat`,
+      headers: async () => {
+        const token = await getToken()
+        return {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(orgId ? { "X-Org-Id": orgId } : {}),
+        }
       },
-    },
+      body: {
+        mode: "dashboard_builder",
+        dashboardContext: {
+          dashboardName,
+          existingWidgets: widgets.map((w) => ({
+            title: w.display.title ?? "Untitled",
+            visualization: w.visualization,
+          })),
+        },
+      },
+    }),
   })
 
   const isLoading = status === "streaming" || status === "submitted"
@@ -148,7 +151,7 @@ export function DashboardAiConversation({
                         if (part.type === "text") {
                           return <RichText key={i}>{part.text}</RichText>
                         }
-                        if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
+                        if (part.type === "tool-invocation") {
                           const toolPart = part as {
                             type: string
                             toolCallId: string
@@ -158,9 +161,7 @@ export function DashboardAiConversation({
                             output?: unknown
                             errorText?: string
                           }
-                          const toolName = part.type.startsWith("tool-")
-                            ? part.type.replace(/^tool-/, "")
-                            : (toolPart.toolName ?? "unknown")
+                          const toolName = toolPart.toolName ?? "unknown"
 
                           if (toolName === "add_dashboard_widget") {
                             const input = toolPart.input as {

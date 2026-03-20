@@ -20,6 +20,7 @@ export interface EnvShape {
   readonly AUTUMN_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
   readonly SD_INTERNAL_TOKEN: Option.Option<Redacted.Redacted<string>>
   readonly INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
+  readonly OPENROUTER_API_KEY: Option.Option<Redacted.Redacted<string>>
 }
 
 export class Env extends ServiceMap.Service<Env, EnvShape>()("Env", {
@@ -73,6 +74,9 @@ export class Env extends ServiceMap.Service<Env, EnvShape>()("Env", {
       INTERNAL_SERVICE_TOKEN: yield* Config.option(
         Config.redacted("INTERNAL_SERVICE_TOKEN"),
       ),
+      OPENROUTER_API_KEY: yield* Config.option(
+        Config.redacted("OPENROUTER_API_KEY"),
+      ),
     } as const;
 
     const normalizedEnv = {
@@ -86,6 +90,7 @@ export class Env extends ServiceMap.Service<Env, EnvShape>()("Env", {
       AUTUMN_SECRET_KEY: normalizeOptionalSecret(env.AUTUMN_SECRET_KEY),
       SD_INTERNAL_TOKEN: normalizeOptionalSecret(env.SD_INTERNAL_TOKEN),
       INTERNAL_SERVICE_TOKEN: normalizeOptionalSecret(env.INTERNAL_SERVICE_TOKEN),
+      OPENROUTER_API_KEY: normalizeOptionalSecret(env.OPENROUTER_API_KEY),
     } as const
 
     const authMode = normalizedEnv.MAPLE_AUTH_MODE.toLowerCase()

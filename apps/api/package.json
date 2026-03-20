@@ -26,6 +26,8 @@
     "autumn-js": "^0.1.75",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.1",
+    "@effect/ai-openrouter": "4.0.0-beta.33",
+    "ai": "^6.0.100",
     "effect": "4.0.0-beta.33"
   },
   "devDependencies": {

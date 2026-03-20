@@ -1,7 +1,7 @@
-import { useAgent } from "agents/react"
-import { useAgentChat } from "@cloudflare/ai-chat/react"
+import { useChat } from "@ai-sdk/react"
+import { DefaultChatTransport } from "ai"
 import { useAuth } from "@clerk/clerk-react"
-import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
+import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import {
   Conversation,
   ConversationContent,
@@ -56,17 +56,21 @@ interface ChatConversationProps {
 }
 
 export function ChatConversation({ tabId, onFirstMessage }: ChatConversationProps) {
-  const { orgId } = useAuth()
+  const { orgId, getToken } = useAuth()
 
-  const agent = useAgent({
-    agent: "ChatAgent",
-    name: tabId,
-    host: chatAgentUrl,
-  })
-
-  const { messages, sendMessage, status } = useAgentChat({
-    agent,
-    body: { orgId },
+  const { messages, sendMessage, status } = useChat({
+    id: tabId,
+    transport: new DefaultChatTransport({
+      api: `${apiBaseUrl}/api/chat`,
+      headers: async () => {
+        const token = await getToken()
+        return {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(orgId ? { "X-Org-Id": orgId } : {}),
+        }
+      },
+      body: { mode: "default" },
+    }),
   })
 
   const isLoading = status === "streaming" || status === "submitted"
@@ -117,7 +121,7 @@ export function ChatConversation({ tabId, onFirstMessage }: ChatConversationProp
                         if (part.type === "text") {
                           return <RichText key={i}>{part.text}</RichText>
                         }
-                        if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
+                        if (part.type === "tool-invocation") {
                           const toolPart = part as {
                             type: string
                             toolCallId: string
@@ -127,9 +131,7 @@ export function ChatConversation({ tabId, onFirstMessage }: ChatConversationProp
                             output?: unknown
                             errorText?: string
                           }
-                          const toolName = part.type.startsWith("tool-")
-                            ? part.type.replace(/^tool-/, "")
-                            : (toolPart.toolName ?? "unknown")
+                          const toolName = toolPart.toolName ?? "unknown"
                           return (
                             <Tool
                               key={toolPart.toolCallId ?? i}
