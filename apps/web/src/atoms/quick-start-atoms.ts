@@ -3,10 +3,10 @@ import { Schema } from "effect"
 import { localStorageRuntime } from "@/lib/services/common/storage-runtime"
 
 export const STEP_IDS = [
-  "setup-app",
-  "verify-data",
-  "select-plan",
-  "explore",
+  "welcome",
+  "connect",
+  "listening",
+  "plan",
 ] as const
 
 export type StepId = (typeof STEP_IDS)[number]
@@ -28,13 +28,13 @@ const DEFAULT_STATE: QuickStartState = {
   completedSteps: {},
   dismissed: false,
   selectedFramework: null,
-  activeStep: "setup-app",
+  activeStep: "welcome",
 }
 
 export const quickStartAtomFamily = Atom.family((orgId: string) =>
   Atom.kvs({
     runtime: localStorageRuntime,
-    key: `maple-quick-start-${orgId}`,
+    key: `maple-onboarding-v2-${orgId}`,
     schema: QuickStartSchema,
     defaultValue: () => DEFAULT_STATE,
   }),

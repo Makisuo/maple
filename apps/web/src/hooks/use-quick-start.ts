@@ -70,7 +70,7 @@ export function useQuickStart(orgId?: string | null) {
       completedSteps: {},
       dismissed: false,
       selectedFramework: null,
-      activeStep: "setup-app",
+      activeStep: "welcome",
     })
   }, [setState])
 

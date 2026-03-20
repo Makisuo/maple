@@ -77,6 +77,26 @@ export function GoIcon({ size = 24, className, ...props }: FrameworkIconProps) {
   )
 }
 
+export function OpenTelemetryIcon({ size = 24, className, ...props }: FrameworkIconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      {...props}
+    >
+      <circle cx="12" cy="12" r="3" fill="currentColor" />
+      <circle cx="6" cy="6" r="2" fill="currentColor" />
+      <circle cx="18" cy="6" r="2" fill="currentColor" />
+      <circle cx="6" cy="18" r="2" fill="currentColor" />
+      <circle cx="18" cy="18" r="2" fill="currentColor" />
+      <path d="M12 9V7.5M12 15v1.5M9 12H7.5M15 12h1.5M9.88 9.88L8 8M14.12 9.88L16 8M9.88 14.12L8 16M14.12 14.12L16 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function EffectIcon({ size = 24, className, ...props }: FrameworkIconProps) {
   return (
     <svg

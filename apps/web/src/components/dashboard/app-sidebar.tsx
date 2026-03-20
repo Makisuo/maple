@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router"
-import { useUser, useClerk, useAuth } from "@clerk/clerk-react"
+import { useUser, useClerk } from "@clerk/clerk-react"
 import {
   HouseIcon,
   FileIcon,
@@ -10,8 +10,6 @@ import {
   GearIcon,
   LogoutIcon,
   ChevronUpIcon,
-  RocketIcon,
-  CheckIcon,
   NetworkNodesIcon,
   ChatBubbleSparkleIcon,
 } from "@/components/icons"
@@ -40,7 +38,6 @@ import {
 } from "@maple/ui/components/ui/sidebar"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
-import { useQuickStart } from "@/hooks/use-quick-start"
 import { useTrialStatus } from "@/hooks/use-trial-status"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { ClockIcon } from "@/components/icons"
@@ -277,9 +274,6 @@ function PlanBadge() {
 export function AppSidebar() {
   const routerState = useRouterState()
   const currentPath = routerState.location.pathname
-  const { orgId } = useAuth()
-  const { isDismissed, isComplete, progressPercent } = useQuickStart(orgId)
-
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -289,25 +283,6 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {!isDismissed && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    render={<Link to="/quick-start" />}
-                    tooltip="Quick Start"
-                    isActive={currentPath === "/quick-start"}
-                  >
-                    <RocketIcon size={18} />
-                    <span>Quick Start</span>
-                  </SidebarMenuButton>
-                  <SidebarMenuBadge>
-                    {isComplete ? (
-                      <CheckIcon size={12} className="text-severity-info" />
-                    ) : (
-                      <span className="text-[10px]">{progressPercent}%</span>
-                    )}
-                  </SidebarMenuBadge>
-                </SidebarMenuItem>
-              )}
               {mainNavItems.map((item) => {
                 const isActive = currentPath === item.href
                 return (

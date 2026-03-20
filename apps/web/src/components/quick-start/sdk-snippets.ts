@@ -1,4 +1,4 @@
-export type FrameworkId = "nextjs" | "nodejs" | "python" | "go" | "effect"
+export type FrameworkId = "nextjs" | "nodejs" | "python" | "go" | "effect" | "otel"
 
 export interface SdkSnippet {
   language: FrameworkId
@@ -168,5 +168,19 @@ const program = Effect.gen(function* () {
 Effect.runPromise(
   program.pipe(Effect.provide(TracerLive))
 )`,
+  },
+  {
+    language: "otel",
+    label: "Custom / OpenTelemetry",
+    description: "Any language or runtime — just point your OTLP exporter at Maple",
+    iconKey: "otel",
+    install: `# Use your language's OpenTelemetry SDK
+# See https://opentelemetry.io/docs/languages/ for installation`,
+    instrument: `# Configure via environment variables
+export OTEL_EXPORTER_OTLP_ENDPOINT="{{INGEST_URL}}"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer {{API_KEY}}"
+export OTEL_SERVICE_NAME="my-service"
+
+# Then run your application with your language's OTel SDK enabled`,
   },
 ]
