@@ -1,25 +1,21 @@
-import { HttpServerRequest } from "effect/unstable/http"
 import type { TinybirdPipe } from "@maple/domain"
 import { Effect } from "effect"
-import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
 import { McpTenantError, McpQueryError } from "@/mcp/tools/types"
 import { TinybirdService } from "@/services/TinybirdService"
-import type { TenantContext } from "@/services/AuthService"
+import { resolveToolTenantContext } from "./current-tenant-context"
 
-const resolveTenant = Effect.gen(function* () {
-  const req = yield* HttpServerRequest.HttpServerRequest
-  const nativeReq = yield* HttpServerRequest.toWeb(req)
-  return yield* resolveMcpTenantContext(nativeReq)
-}).pipe(
+const resolveTenant = resolveToolTenantContext.pipe(
   Effect.mapError((error: unknown) =>
-    new McpTenantError({
-      message:
-        error instanceof Error
-          ? error.message
-          : typeof error === "object" && error !== null && "message" in error
-            ? String(error.message)
-            : String(error),
-    }),
+    error instanceof McpTenantError
+      ? error
+      : new McpTenantError({
+          message:
+            error instanceof Error
+              ? error.message
+              : typeof error === "object" && error !== null && "message" in error
+                ? String(error.message)
+                : String(error),
+        }),
   ),
 )
 

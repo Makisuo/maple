@@ -1,256 +1,255 @@
+import {
+  AddDashboardWidgetToolOutput,
+  DiagnoseServiceToolOutput,
+  ErrorDetailToolOutput,
+  FindErrorsToolOutput,
+  FindSlowTracesToolOutput,
+  InspectTraceToolOutput,
+  ListMetricsToolOutput,
+  QueryDataToolOutput,
+  RemoveDashboardWidgetToolOutput,
+  SearchLogsToolOutput,
+  SearchTracesToolOutput,
+  ServiceOverviewToolOutput,
+  SystemHealthToolOutput,
+  chatToolMetadata,
+  type ChatMode,
+  type DashboardWidgetProposal,
+  type DashboardWidgetRemoval,
+} from "@maple/domain"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import { Effect, Schema } from "effect"
-import { collectToolDefinitions, type ToolDefinition } from "@/mcp/server"
-import type { McpToolResult } from "@/mcp/tools/types"
+import { Effect, Layer, ServiceMap } from "effect"
+import { CurrentTenantContextLive } from "@/mcp/lib/current-tenant-context"
+import { ApiKeysService } from "@/services/ApiKeysService"
+import { AuthService } from "@/services/AuthService"
+import { Env } from "@/services/Env"
+import { QueryEngineService } from "@/services/QueryEngineService"
+import { TinybirdService } from "@/services/TinybirdService"
+import { ChatToolFailure } from "./errors"
+import { observabilityToolExecutors } from "./observability-tools"
+import { ChatRequestContext } from "./request-context"
 
-// ---------- Observability tool definitions (matching MCP tools) ----------
+const failureOptions = {
+  failure: ChatToolFailure,
+  failureMode: "return" as const,
+}
 
-const SystemHealth = Tool.make("system_health", {
-  description: "Get an overall health snapshot of the system: error rate, active services, latency stats, and top errors.",
-  parameters: Schema.Struct({
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-  }),
-  success: Schema.String,
+const SystemHealthTool = Tool.make("system_health", {
+  description: chatToolMetadata.system_health.description,
+  parameters: chatToolMetadata.system_health.inputSchema,
+  success: SystemHealthToolOutput,
+  ...failureOptions,
 })
 
-const FindErrors = Tool.make("find_errors", {
-  description: "Find and categorize errors by type, with counts, affected services, and timestamps.",
-  parameters: Schema.Struct({
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-    service: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number),
-  }),
-  success: Schema.String,
+const FindErrorsTool = Tool.make("find_errors", {
+  description: chatToolMetadata.find_errors.description,
+  parameters: chatToolMetadata.find_errors.inputSchema,
+  success: FindErrorsToolOutput,
+  ...failureOptions,
 })
 
-const InspectTrace = Tool.make("inspect_trace", {
-  description: "Deep-dive into a trace: shows the full span tree with durations and status, plus correlated logs.",
-  parameters: Schema.Struct({
-    trace_id: Schema.String,
-  }),
-  success: Schema.String,
+const InspectTraceTool = Tool.make("inspect_trace", {
+  description: chatToolMetadata.inspect_trace.description,
+  parameters: chatToolMetadata.inspect_trace.inputSchema,
+  success: InspectTraceToolOutput,
+  ...failureOptions,
 })
 
-const SearchLogs = Tool.make("search_logs", {
-  description: "Search and filter logs by service, severity, time range, or body text.",
-  parameters: Schema.Struct({
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-    service: Schema.optional(Schema.String),
-    severity: Schema.optional(Schema.String),
-    search: Schema.optional(Schema.String),
-    trace_id: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number),
-  }),
-  success: Schema.String,
+const SearchLogsTool = Tool.make("search_logs", {
+  description: chatToolMetadata.search_logs.description,
+  parameters: chatToolMetadata.search_logs.inputSchema,
+  success: SearchLogsToolOutput,
+  ...failureOptions,
 })
 
-const SearchTraces = Tool.make("search_traces", {
-  description: "Search and filter traces by service, duration, error status, HTTP method, and more.",
-  parameters: Schema.Struct({
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-    service: Schema.optional(Schema.String),
-    has_error: Schema.optional(Schema.Boolean),
-    min_duration_ms: Schema.optional(Schema.Number),
-    max_duration_ms: Schema.optional(Schema.Number),
-    http_method: Schema.optional(Schema.String),
-    span_name: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number),
-  }),
-  success: Schema.String,
+const SearchTracesTool = Tool.make("search_traces", {
+  description: chatToolMetadata.search_traces.description,
+  parameters: chatToolMetadata.search_traces.inputSchema,
+  success: SearchTracesToolOutput,
+  ...failureOptions,
 })
 
-const ServiceOverview = Tool.make("service_overview", {
-  description: "List all services with health metrics: latency (P50/P95/P99), error rate, and throughput.",
-  parameters: Schema.Struct({
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-  }),
-  success: Schema.String,
+const ServiceOverviewTool = Tool.make("service_overview", {
+  description: chatToolMetadata.service_overview.description,
+  parameters: chatToolMetadata.service_overview.inputSchema,
+  success: ServiceOverviewToolOutput,
+  ...failureOptions,
 })
 
-const DiagnoseService = Tool.make("diagnose_service", {
-  description: "Deep investigation of a single service: health metrics, top errors, recent logs, slow traces, and Apdex score.",
-  parameters: Schema.Struct({
-    service_name: Schema.String,
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-  }),
-  success: Schema.String,
+const DiagnoseServiceTool = Tool.make("diagnose_service", {
+  description: chatToolMetadata.diagnose_service.description,
+  parameters: chatToolMetadata.diagnose_service.inputSchema,
+  success: DiagnoseServiceToolOutput,
+  ...failureOptions,
 })
 
-const FindSlowTraces = Tool.make("find_slow_traces", {
-  description: "Find the slowest traces with percentile context (P50, P95 benchmarks).",
-  parameters: Schema.Struct({
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-    service: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number),
-  }),
-  success: Schema.String,
+const FindSlowTracesTool = Tool.make("find_slow_traces", {
+  description: chatToolMetadata.find_slow_traces.description,
+  parameters: chatToolMetadata.find_slow_traces.inputSchema,
+  success: FindSlowTracesToolOutput,
+  ...failureOptions,
 })
 
-const ErrorDetail = Tool.make("error_detail", {
-  description: "Investigate a specific error type: shows sample traces with their metadata and correlated logs.",
-  parameters: Schema.Struct({
-    error_type: Schema.String,
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-    service: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number),
-  }),
-  success: Schema.String,
+const ErrorDetailTool = Tool.make("error_detail", {
+  description: chatToolMetadata.error_detail.description,
+  parameters: chatToolMetadata.error_detail.inputSchema,
+  success: ErrorDetailToolOutput,
+  ...failureOptions,
 })
 
-const ListMetrics = Tool.make("list_metrics", {
-  description: "Discover available metrics with type, service, description, and data point counts.",
-  parameters: Schema.Struct({
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-    service: Schema.optional(Schema.String),
-    search: Schema.optional(Schema.String),
-    metric_type: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number),
-  }),
-  success: Schema.String,
+const ListMetricsTool = Tool.make("list_metrics", {
+  description: chatToolMetadata.list_metrics.description,
+  parameters: chatToolMetadata.list_metrics.inputSchema,
+  success: ListMetricsToolOutput,
+  ...failureOptions,
 })
 
-const QueryData = Tool.make("query_data", {
-  description: "Execute a structured observability query with only supported combinations. Supported queries: traces timeseries, traces breakdown, logs timeseries, logs breakdown, metrics timeseries, and metrics breakdown.",
-  parameters: Schema.Struct({
-    source: Schema.Literals(["traces", "logs", "metrics"] as const),
-    kind: Schema.Literals(["timeseries", "breakdown"] as const),
-    metric: Schema.optional(Schema.String),
-    group_by: Schema.optional(Schema.String),
-    bucket_seconds: Schema.optional(Schema.Number),
-    series_limit: Schema.optional(Schema.Number),
-    series_order: Schema.optional(Schema.String),
-    limit: Schema.optional(Schema.Number),
-    start_time: Schema.optional(Schema.String),
-    end_time: Schema.optional(Schema.String),
-    service_name: Schema.optional(Schema.String),
-    span_name: Schema.optional(Schema.String),
-    root_spans_only: Schema.optional(Schema.Boolean),
-    environments: Schema.optional(Schema.String),
-    commit_shas: Schema.optional(Schema.String),
-    status_codes: Schema.optional(Schema.String),
-    http_methods: Schema.optional(Schema.String),
-    http_routes: Schema.optional(Schema.String),
-    peer_services: Schema.optional(Schema.String),
-    severity: Schema.optional(Schema.String),
-    metric_name: Schema.optional(Schema.String),
-    metric_type: Schema.optional(Schema.String),
-  }),
-  success: Schema.String,
+const QueryDataTool = Tool.make("query_data", {
+  description: chatToolMetadata.query_data.description,
+  parameters: chatToolMetadata.query_data.inputSchema,
+  success: QueryDataToolOutput,
+  ...failureOptions,
 })
 
-// ---------- Dashboard builder tools ----------
-
-const AddDashboardWidget = Tool.make("add_dashboard_widget", {
-  description: "Add a widget to the user's dashboard. The widget will be previewed and the user can confirm adding it.",
-  parameters: Schema.Struct({
-    visualization: Schema.Literals(["stat", "chart", "table"] as const),
-    dataSource: Schema.Unknown,
-    display: Schema.Unknown,
-  }),
-  success: Schema.Unknown,
+const AddDashboardWidgetTool = Tool.make("add_dashboard_widget", {
+  description: chatToolMetadata.add_dashboard_widget.description,
+  parameters: chatToolMetadata.add_dashboard_widget.inputSchema,
+  success: AddDashboardWidgetToolOutput,
+  ...failureOptions,
 })
 
-const RemoveDashboardWidget = Tool.make("remove_dashboard_widget", {
-  description: "Remove a widget from the dashboard by its title.",
-  parameters: Schema.Struct({
-    widgetTitle: Schema.String,
-  }),
-  success: Schema.Unknown,
+const RemoveDashboardWidgetTool = Tool.make("remove_dashboard_widget", {
+  description: chatToolMetadata.remove_dashboard_widget.description,
+  parameters: chatToolMetadata.remove_dashboard_widget.inputSchema,
+  success: RemoveDashboardWidgetToolOutput,
+  ...failureOptions,
 })
 
-// ---------- Toolkit ----------
-
-export const ObservabilityToolkit = Toolkit.make(
-  SystemHealth,
-  FindErrors,
-  InspectTrace,
-  SearchLogs,
-  SearchTraces,
-  ServiceOverview,
-  DiagnoseService,
-  FindSlowTraces,
-  ErrorDetail,
-  ListMetrics,
-  QueryData,
+const ObservabilityToolkit = Toolkit.make(
+  SystemHealthTool,
+  FindErrorsTool,
+  InspectTraceTool,
+  SearchLogsTool,
+  SearchTracesTool,
+  ServiceOverviewTool,
+  DiagnoseServiceTool,
+  FindSlowTracesTool,
+  ErrorDetailTool,
+  ListMetricsTool,
+  QueryDataTool,
 )
 
-export const DashboardToolkit = Toolkit.merge(
+const DashboardToolkit = Toolkit.merge(
   ObservabilityToolkit,
-  Toolkit.make(AddDashboardWidget, RemoveDashboardWidget),
+  Toolkit.make(AddDashboardWidgetTool, RemoveDashboardWidgetTool),
 )
 
-// ---------- Handler builders ----------
+const toolFailure = (message: string, details?: string[]) =>
+  new ChatToolFailure({ message, details })
 
-const extractText = (result: McpToolResult): string =>
-  result.content.map((c) => c.text).join("\n")
+const makeObservabilityHandlers = Effect.gen(function* () {
+  const env = yield* Env
+  const tinybird = yield* TinybirdService
+  const queryEngine = yield* QueryEngineService
+  const auth = yield* AuthService
+  const apiKeys = yield* ApiKeysService
+  const requestContext = yield* ChatRequestContext
 
-/**
- * Build a handler map that delegates to the existing MCP tool handlers.
- * The MCP handlers are identified by name from `collectToolDefinitions()`.
- */
-export const buildMcpHandlers = () => {
-  const definitions = collectToolDefinitions()
-  const byName = new Map<string, ToolDefinition>()
-  for (const def of definitions) {
-    byName.set(def.name, def)
-  }
+  const serviceLayer = Layer.mergeAll(
+    CurrentTenantContextLive(requestContext.tenant),
+    Layer.succeed(TinybirdService)(tinybird),
+    Layer.succeed(QueryEngineService)(queryEngine),
+    Layer.succeed(Env)(env),
+    Layer.succeed(AuthService)(auth),
+    Layer.succeed(ApiKeysService)(apiKeys),
+  )
 
-  const callMcpTool = (name: string, params: unknown) => {
-    const def = byName.get(name)
-    if (!def) return Effect.succeed(`Unknown tool: ${name}`)
-
-    return def.handler(params).pipe(
-      Effect.map(extractText),
-      Effect.catch(() =>
-        Effect.succeed("Error executing tool"),
-      ),
-    )
-  }
+  const runTool = <TParams, TResult, TError extends { message: string }, R>(
+    name: string,
+    execute: (params: TParams) => Effect.Effect<TResult, TError, R>,
+  ) =>
+    (params: TParams): Effect.Effect<TResult, ChatToolFailure, never> =>
+      execute(params).pipe(
+        Effect.mapError((error) => toolFailure(error.message)),
+        Effect.catchDefect((defect) =>
+          Effect.fail(
+            toolFailure(`Internal error while executing ${name}`, [
+              defect instanceof Error ? defect.message : String(defect),
+            ]),
+          ),
+        ),
+        Effect.provide(serviceLayer),
+      ) as Effect.Effect<TResult, ChatToolFailure, never>
 
   return {
-    system_health: (params: any) => callMcpTool("system_health", params),
-    find_errors: (params: any) => callMcpTool("find_errors", params),
-    inspect_trace: (params: any) => callMcpTool("inspect_trace", params),
-    search_logs: (params: any) => callMcpTool("search_logs", params),
-    search_traces: (params: any) => callMcpTool("search_traces", params),
-    service_overview: (params: any) => callMcpTool("service_overview", params),
-    diagnose_service: (params: any) => callMcpTool("diagnose_service", params),
-    find_slow_traces: (params: any) => callMcpTool("find_slow_traces", params),
-    error_detail: (params: any) => callMcpTool("error_detail", params),
-    list_metrics: (params: any) => callMcpTool("list_metrics", params),
-    query_data: (params: any) => callMcpTool("query_data", params),
+    system_health: runTool("system_health", observabilityToolExecutors.system_health),
+    find_errors: runTool("find_errors", observabilityToolExecutors.find_errors),
+    inspect_trace: runTool("inspect_trace", observabilityToolExecutors.inspect_trace),
+    search_logs: runTool("search_logs", observabilityToolExecutors.search_logs),
+    search_traces: runTool("search_traces", observabilityToolExecutors.search_traces),
+    service_overview: runTool("service_overview", observabilityToolExecutors.service_overview),
+    diagnose_service: runTool("diagnose_service", observabilityToolExecutors.diagnose_service),
+    find_slow_traces: runTool("find_slow_traces", observabilityToolExecutors.find_slow_traces),
+    error_detail: runTool("error_detail", observabilityToolExecutors.error_detail),
+    list_metrics: runTool("list_metrics", observabilityToolExecutors.list_metrics),
+    query_data: runTool("query_data", observabilityToolExecutors.query_data),
   }
-}
+})
 
-const dashboardHandlers = {
-  add_dashboard_widget: () => Effect.succeed({ status: "proposed" }),
-  remove_dashboard_widget: () => Effect.succeed({ status: "proposed" }),
-}
+const addDashboardWidget = (params: DashboardWidgetProposal) =>
+  Effect.succeed({
+    tool: "add_dashboard_widget" as const,
+    summaryText: `Proposed ${params.visualization} widget "${params.display.title ?? "Untitled Widget"}".`,
+    data: params,
+  })
 
-/** Build the observability toolkit with handlers bound */
-export const buildObservabilityToolkit = () =>
-  Effect.gen(function* () {
-    return yield* ObservabilityToolkit
-  }).pipe(Effect.provide(ObservabilityToolkit.toLayer(buildMcpHandlers() as any)))
+const removeDashboardWidget = (params: DashboardWidgetRemoval) =>
+  Effect.succeed({
+    tool: "remove_dashboard_widget" as const,
+    summaryText: `Proposed removing widget "${params.widgetTitle}".`,
+    data: params,
+  })
 
-/** Build the dashboard toolkit with handlers bound (observability + dashboard tools) */
-export const buildDashboardToolkit = () =>
-  Effect.gen(function* () {
-    return yield* DashboardToolkit
-  }).pipe(
-    Effect.provide(
-      DashboardToolkit.toLayer({
-        ...buildMcpHandlers(),
-        ...dashboardHandlers,
-      } as any),
+const buildObservabilityToolkit = Effect.gen(function* () {
+  return yield* ObservabilityToolkit
+}).pipe(
+  Effect.provide(ObservabilityToolkit.toLayer(makeObservabilityHandlers)),
+)
+
+const buildDashboardToolkit = Effect.gen(function* () {
+  return yield* DashboardToolkit
+}).pipe(
+  Effect.provide(
+    DashboardToolkit.toLayer(
+      Effect.gen(function* () {
+        const observabilityHandlers = yield* makeObservabilityHandlers
+        return {
+          ...observabilityHandlers,
+          add_dashboard_widget: addDashboardWidget,
+          remove_dashboard_widget: removeDashboardWidget,
+        }
+      }),
     ),
-  )
+  ),
+)
+
+export class ChatToolkitService extends ServiceMap.Service<ChatToolkitService>()(
+  "ChatToolkitService",
+  {
+    make: Effect.gen(function* () {
+      const buildForMode = Effect.fn("ChatToolkitService.buildForMode")(function* (
+        mode: ChatMode,
+      ) {
+        return yield* (mode === "dashboard_builder"
+          ? buildDashboardToolkit
+          : buildObservabilityToolkit)
+      })
+
+      return {
+        buildForMode,
+      }
+    }),
+  },
+) {
+  static readonly layer = Layer.effect(this, this.make)
+}

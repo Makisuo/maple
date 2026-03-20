@@ -1,3 +1,4 @@
+export * from "./chat"
 export * from "./http"
 export * from "./mcp-structured-types"
 export * from "./primitives"

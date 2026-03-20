@@ -16,8 +16,7 @@ import {
   ServerIcon,
 } from "@/components/icons"
 import type { IconComponent } from "@/components/icons"
-import type { StructuredToolOutput } from "@maple/domain"
-import { STRUCTURED_MARKER } from "./renderers"
+import type { ChatToolResult, StructuredToolOutput } from "@maple/domain"
 
 const LazyToolRenderer = lazy(() =>
   import("./renderers/tool-renderer").then((m) => ({
@@ -75,30 +74,20 @@ function deriveStatus(state: string): ToolStatus {
   }
 }
 
-function extractStructuredData(
-  output: unknown
-): StructuredToolOutput | null {
-  if (output == null || typeof output !== "object") return null
-  if (!("content" in (output as Record<string, unknown>))) return null
-  const content = (output as { content: unknown[] }).content
-  if (!Array.isArray(content)) return null
+const isToolResult = (value: unknown): value is ChatToolResult => {
+  if (value == null || typeof value !== "object") return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.tool === "string" &&
+    typeof candidate.summaryText === "string" &&
+    "data" in candidate
+}
 
-  for (const item of content) {
-    if (typeof item !== "object" || item == null) continue
-    if (!("type" in item) || (item as { type: string }).type !== "text")
-      continue
-    if (!("text" in item)) continue
-    const text = (item as { text: string }).text
-    try {
-      const parsed = JSON.parse(text)
-      if (parsed && parsed[STRUCTURED_MARKER]) {
-        return parsed as StructuredToolOutput
-      }
-    } catch {
-      // Not JSON, skip
-    }
+function extractStructuredData(output: unknown): StructuredToolOutput | null {
+  if (!isToolResult(output)) return null
+  if (output.tool === "add_dashboard_widget" || output.tool === "remove_dashboard_widget") {
+    return null
   }
-  return null
+  return output
 }
 
 function extractOutputText(output: unknown): string | null {
@@ -120,18 +109,12 @@ function extractOutputText(output: unknown): string | null {
             (c as { type: string }).type === "text" &&
             "text" in c
         )
-        .filter((c) => {
-          try {
-            const parsed = JSON.parse(c.text)
-            return !(parsed && parsed[STRUCTURED_MARKER])
-          } catch {
-            return true
-          }
-        })
         .map((c) => c.text)
         .join("\n")
     }
   }
+
+  if (isToolResult(output)) return output.summaryText
 
   if (typeof output === "string") return output
 

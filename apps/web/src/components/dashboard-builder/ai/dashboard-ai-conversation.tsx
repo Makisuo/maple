@@ -1,7 +1,4 @@
-import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport } from "ai"
-import { useAuth } from "@clerk/clerk-react"
-import { apiBaseUrl } from "@/lib/services/common/api-base-url"
+import type { ReactNode } from "react"
 import {
   Conversation,
   ConversationContent,
@@ -9,30 +6,23 @@ import {
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation"
 import {
-  Message,
-  MessageContent,
-} from "@/components/ai-elements/message"
-import { RichText } from "@/components/ai-elements/rich-text"
-import {
   PromptInput,
-  PromptInputTextarea,
   PromptInputFooter,
   PromptInputSubmit,
+  PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input"
-import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
-import { Shimmer } from "@/components/ai-elements/shimmer"
-import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator"
-import { Tool } from "@/components/ai-elements/tool"
-import { WidgetProposalCard } from "./widget-proposal-card"
-import { WidgetRemovalCard } from "./widget-removal-card"
-import { normalizeAiWidgetProposal } from "./normalize-widget-proposal"
-import type { UIMessage } from "ai"
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import type {
   DashboardWidget,
   VisualizationType,
   WidgetDataSource,
   WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
+import { MapleChatMessages, type MapleToolPart } from "@/components/chat/maple-chat-messages"
+import { useMapleChat } from "@/components/chat/use-maple-chat"
+import { WidgetProposalCard } from "./widget-proposal-card"
+import { WidgetRemovalCard } from "./widget-removal-card"
+import { normalizeAiWidgetProposal } from "./normalize-widget-proposal"
 
 const DASHBOARD_SUGGESTIONS = [
   "Add an error rate stat widget",
@@ -40,23 +30,6 @@ const DASHBOARD_SUGGESTIONS = [
   "Create a latency chart by service",
   "Build a dashboard to monitor my services",
 ]
-
-function shouldShowThinkingIndicator(
-  message: UIMessage,
-  isLoading: boolean,
-  isLastMessage: boolean,
-): boolean {
-  if (!isLoading || !isLastMessage || message.role !== "assistant") return false
-  const parts = message.parts
-  if (parts.length === 0) return true
-  const lastPart = parts[parts.length - 1]
-  if (
-    lastPart.type === "text" &&
-    (lastPart as { state?: string }).state === "streaming"
-  )
-    return false
-  return true
-}
 
 interface DashboardAiConversationProps {
   dashboardId: string
@@ -70,6 +43,25 @@ interface DashboardAiConversationProps {
   onRemoveWidget: (widgetId: string) => void
 }
 
+const isWidgetProposalInput = (
+  value: unknown,
+): value is {
+  visualization: VisualizationType
+  dataSource: WidgetDataSource
+  display: WidgetDisplayConfig
+} =>
+  typeof value === "object" &&
+  value !== null &&
+  "visualization" in value &&
+  "dataSource" in value &&
+  "display" in value
+
+const isWidgetRemovalInput = (value: unknown): value is { widgetTitle: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  "widgetTitle" in value &&
+  typeof value.widgetTitle === "string"
+
 export function DashboardAiConversation({
   dashboardId,
   dashboardName,
@@ -77,41 +69,59 @@ export function DashboardAiConversation({
   onAddWidget,
   onRemoveWidget,
 }: DashboardAiConversationProps) {
-  const { orgId, getToken } = useAuth()
-
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, status, error, isLoading, sendText } = useMapleChat({
     id: `dashboard-${dashboardId}`,
-    transport: new DefaultChatTransport({
-      api: `${apiBaseUrl}/api/chat`,
-      headers: async () => {
-        const token = await getToken()
-        return {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(orgId ? { "X-Org-Id": orgId } : {}),
-        }
-      },
-      body: {
-        mode: "dashboard_builder",
-        dashboardContext: {
-          dashboardName,
-          existingWidgets: widgets.map((w) => ({
-            title: w.display.title ?? "Untitled",
-            visualization: w.visualization,
-          })),
-        },
-      },
-    }),
+    mode: "dashboard_builder",
+    dashboardContext: {
+      dashboardName,
+      existingWidgets: widgets.map((widget) => ({
+        title: widget.display.title ?? "Untitled",
+        visualization: widget.visualization,
+      })),
+    },
   })
 
-  const isLoading = status === "streaming" || status === "submitted"
+  const renderToolPart = (part: MapleToolPart, fallback: ReactNode) => {
+    if (part.toolName === "add_dashboard_widget" && isWidgetProposalInput(part.input)) {
+      const normalized = normalizeAiWidgetProposal(part.input)
 
-  const handleSend = (text: string) => {
-    if (!text.trim() || isLoading) return
-    sendMessage({ text: text.trim() })
-  }
+      if (normalized.kind === "blocked") {
+        return (
+          <WidgetProposalCard
+            key={part.toolCallId}
+            input={normalized.proposal}
+            disabledReason={normalized.reason}
+          />
+        )
+      }
 
-  if (error) {
-    console.error("[dashboard-ai]", error)
+      return (
+        <WidgetProposalCard
+          key={part.toolCallId}
+          input={normalized.proposal}
+          onAccept={() => {
+            onAddWidget(
+              normalized.proposal.visualization,
+              normalized.proposal.dataSource,
+              normalized.proposal.display,
+            )
+          }}
+        />
+      )
+    }
+
+    if (part.toolName === "remove_dashboard_widget" && isWidgetRemovalInput(part.input)) {
+      return (
+        <WidgetRemovalCard
+          key={part.toolCallId}
+          input={{ widgetTitle: part.input.widgetTitle }}
+          widgets={widgets}
+          onConfirm={onRemoveWidget}
+        />
+      )
+    }
+
+    return fallback
   }
 
   return (
@@ -121,7 +131,7 @@ export function DashboardAiConversation({
           {error.message || "Connection error"}
         </div>
       )}
-      <Conversation className="flex-1 min-h-0">
+      <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full gap-4 px-4 py-4">
           {messages.length === 0 ? (
             <ConversationEmptyState
@@ -130,145 +140,22 @@ export function DashboardAiConversation({
             >
               <div className="mt-3 flex flex-col items-center gap-2">
                 <Suggestions className="mt-1 flex-wrap justify-center">
-                  {DASHBOARD_SUGGESTIONS.map((s) => (
+                  {DASHBOARD_SUGGESTIONS.map((suggestion) => (
                     <Suggestion
-                      key={s}
-                      suggestion={s}
-                      onClick={() => handleSend(s)}
+                      key={suggestion}
+                      suggestion={suggestion}
+                      onClick={() => sendText(suggestion)}
                     />
                   ))}
                 </Suggestions>
               </div>
             </ConversationEmptyState>
           ) : (
-            <>
-              {messages.map((message, messageIndex) => {
-                const isLastMessage = messageIndex === messages.length - 1
-                return (
-                  <Message key={message.id} from={message.role}>
-                    <MessageContent>
-                      {message.parts.map((part, i) => {
-                        if (part.type === "text") {
-                          return <RichText key={i}>{part.text}</RichText>
-                        }
-                        if (part.type === "tool-invocation") {
-                          const toolPart = part as {
-                            type: string
-                            toolCallId: string
-                            toolName?: string
-                            state: string
-                            input?: unknown
-                            output?: unknown
-                            errorText?: string
-                          }
-                          const toolName = toolPart.toolName ?? "unknown"
-
-                          if (toolName === "add_dashboard_widget") {
-                            const input = toolPart.input as {
-                              visualization?: VisualizationType
-                              dataSource?: WidgetDataSource
-                              display?: WidgetDisplayConfig
-                            } | undefined
-                            if (!input?.visualization || !input.dataSource || !input.display) {
-                              return (
-                                <Tool
-                                  key={toolPart.toolCallId ?? i}
-                                  toolName={toolName}
-                                  toolCallId={toolPart.toolCallId}
-                                  state={toolPart.state}
-                                  input={toolPart.input}
-                                  output={toolPart.output}
-                                  errorText={toolPart.errorText}
-                                />
-                              )
-                            }
-                            const normalized = normalizeAiWidgetProposal({
-                              visualization: input.visualization,
-                              dataSource: input.dataSource,
-                              display: input.display,
-                            })
-
-                            if (normalized.kind === "blocked") {
-                              return (
-                                <WidgetProposalCard
-                                  key={toolPart.toolCallId ?? i}
-                                  input={normalized.proposal}
-                                  disabledReason={normalized.reason}
-                                />
-                              )
-                            }
-
-                            return (
-                              <WidgetProposalCard
-                                key={toolPart.toolCallId ?? i}
-                                input={normalized.proposal}
-                                onAccept={() => {
-                                  onAddWidget(
-                                    normalized.proposal.visualization,
-                                    normalized.proposal.dataSource,
-                                    normalized.proposal.display,
-                                  )
-                                }}
-                              />
-                            )
-                          }
-
-                          if (toolName === "remove_dashboard_widget") {
-                            const input = toolPart.input as {
-                              widgetTitle?: string
-                            } | undefined
-                            if (!input?.widgetTitle) {
-                              return (
-                                <Tool
-                                  key={toolPart.toolCallId ?? i}
-                                  toolName={toolName}
-                                  toolCallId={toolPart.toolCallId}
-                                  state={toolPart.state}
-                                  input={toolPart.input}
-                                  output={toolPart.output}
-                                  errorText={toolPart.errorText}
-                                />
-                              )
-                            }
-                            return (
-                              <WidgetRemovalCard
-                                key={toolPart.toolCallId ?? i}
-                                input={{ widgetTitle: input.widgetTitle }}
-                                widgets={widgets}
-                                onConfirm={onRemoveWidget}
-                              />
-                            )
-                          }
-
-                          return (
-                            <Tool
-                              key={toolPart.toolCallId ?? i}
-                              toolName={toolName}
-                              toolCallId={toolPart.toolCallId}
-                              state={toolPart.state}
-                              input={toolPart.input}
-                              output={toolPart.output}
-                              errorText={toolPart.errorText}
-                            />
-                          )
-                        }
-                        return null
-                      })}
-                      {shouldShowThinkingIndicator(message, isLoading, isLastMessage) && (
-                        <ThinkingIndicator />
-                      )}
-                    </MessageContent>
-                  </Message>
-                )
-              })}
-              {isLoading && messages[messages.length - 1]?.role === "user" && (
-                <Message from="assistant">
-                  <MessageContent>
-                    <Shimmer>Thinking...</Shimmer>
-                  </MessageContent>
-                </Message>
-              )}
-            </>
+            <MapleChatMessages
+              messages={messages}
+              isLoading={isLoading}
+              renderToolPart={renderToolPart}
+            />
           )}
         </ConversationContent>
         <ConversationScrollButton />
@@ -276,7 +163,7 @@ export function DashboardAiConversation({
 
       <div className="w-full px-4 pb-4">
         <PromptInput
-          onSubmit={({ text }) => handleSend(text)}
+          onSubmit={({ text }) => sendText(text)}
           className="rounded-lg border shadow-sm"
         >
           <PromptInputTextarea

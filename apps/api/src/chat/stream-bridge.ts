@@ -1,26 +1,101 @@
-import { createUIMessageStream, createUIMessageStreamResponse } from "ai"
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type UIMessageChunk,
+} from "ai"
 import type { Response as AiResponse } from "effect/unstable/ai"
 import { Effect, Stream } from "effect"
 
-/**
- * Bridge Effect AI stream parts to a Vercel AI SDK UIMessageStreamResponse.
- *
- * Effect AI parts carry internal properties (`~effect/ai/Content/Part`, `metadata`)
- * that fail the AI SDK's strict Zod validation. This bridge constructs clean objects
- * with only the exact fields each UIMessageChunk type expects.
- *
- * Mapping:
- *   Effect AI              → AI SDK UIMessageChunk
- *   text-start/delta/end   → text-start/delta/end (same type, pick {id, delta})
- *   reasoning-*            → reasoning-* (same type, pick {id, delta})
- *   tool-params-start      → tool-input-start {toolCallId, toolName}
- *   tool-params-delta      → tool-input-delta {toolCallId, inputTextDelta}
- *   tool-call              → tool-input-available {toolCallId, toolName, input}
- *   tool-result            → tool-output-available {toolCallId, output}
- *   finish                 → finish {finishReason}
- *   error                  → error {errorText}
- *   response-metadata, tool-params-end → (skipped)
- */
+const toToolFailureText = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value
+  }
+
+  if (typeof value === "object" && value !== null && "message" in value) {
+    const message = value.message
+    if (typeof message === "string") {
+      return message
+    }
+  }
+
+  return JSON.stringify(value, null, 2)
+}
+
+const toFinishReason = (reason: AiResponse.AnyPart extends never ? never : string) => {
+  switch (reason) {
+    case "stop":
+    case "length":
+    case "tool-calls":
+    case "content-filter":
+    case "error":
+    case "other":
+      return reason
+    default:
+      return "other"
+  }
+}
+
+const toChunk = (part: AiResponse.AnyPart): UIMessageChunk | null => {
+  switch (part.type) {
+    case "text-start":
+      return { type: "text-start", id: part.id }
+    case "text-delta":
+      return { type: "text-delta", id: part.id, delta: part.delta }
+    case "text-end":
+      return { type: "text-end", id: part.id }
+    case "reasoning-start":
+      return { type: "reasoning-start", id: part.id }
+    case "reasoning-delta":
+      return { type: "reasoning-delta", id: part.id, delta: part.delta }
+    case "reasoning-end":
+      return { type: "reasoning-end", id: part.id }
+    case "tool-params-start":
+      return {
+        type: "tool-input-start",
+        toolCallId: part.id,
+        toolName: part.name,
+        dynamic: true,
+      }
+    case "tool-params-delta":
+      return {
+        type: "tool-input-delta",
+        toolCallId: part.id,
+        inputTextDelta: part.delta,
+      }
+    case "tool-call":
+      return {
+        type: "tool-input-available",
+        toolCallId: part.id,
+        toolName: part.name,
+        input: part.params,
+        dynamic: true,
+      }
+    case "tool-result":
+      return part.isFailure
+        ? {
+            type: "tool-output-error",
+            toolCallId: part.id,
+            errorText: toToolFailureText(part.encodedResult),
+          }
+        : {
+            type: "tool-output-available",
+            toolCallId: part.id,
+            output: part.encodedResult,
+            preliminary: part.preliminary,
+            dynamic: true,
+          }
+    case "finish":
+      return { type: "finish", finishReason: toFinishReason(part.reason) }
+    case "error":
+      return {
+        type: "error",
+        errorText: part.error instanceof Error ? part.error.message : String(part.error),
+      }
+    default:
+      return null
+  }
+}
+
 export const effectStreamToResponse = (
   stream: Stream.Stream<AiResponse.AnyPart, unknown, never>,
 ): Response => {
@@ -30,89 +105,18 @@ export const effectStreamToResponse = (
         stream.pipe(
           Stream.runForEach((part) =>
             Effect.sync(() => {
-              const p = part as any
-              switch (part.type) {
-                // ── Text lifecycle ──────────────────────────────
-                case "text-start":
-                  writer.write({ type: "text-start", id: p.id })
-                  break
-                case "text-delta":
-                  writer.write({ type: "text-delta", id: p.id, delta: p.delta })
-                  break
-                case "text-end":
-                  writer.write({ type: "text-end", id: p.id })
-                  break
-
-                // ── Reasoning lifecycle ────────────────────────
-                case "reasoning-start":
-                  writer.write({ type: "reasoning-start", id: p.id })
-                  break
-                case "reasoning-delta":
-                  writer.write({ type: "reasoning-delta", id: p.id, delta: p.delta })
-                  break
-                case "reasoning-end":
-                  writer.write({ type: "reasoning-end", id: p.id })
-                  break
-
-                // ── Tool input streaming ───────────────────────
-                case "tool-params-start":
-                  writer.write({
-                    type: "tool-input-start",
-                    toolCallId: p.id,
-                    toolName: p.name,
-                  })
-                  break
-                case "tool-params-delta":
-                  writer.write({
-                    type: "tool-input-delta",
-                    toolCallId: p.id,
-                    inputTextDelta: p.delta,
-                  })
-                  break
-
-                // ── Tool call complete ─────────────────────────
-                case "tool-call":
-                  writer.write({
-                    type: "tool-input-available",
-                    toolCallId: p.id,
-                    toolName: p.name,
-                    input: p.params,
-                  } as any)
-                  break
-
-                // ── Tool result ────────────────────────────────
-                case "tool-result":
-                  writer.write({
-                    type: "tool-output-available",
-                    toolCallId: p.id,
-                    output: p.encodedResult,
-                  } as any)
-                  break
-
-                // ── Finish ─────────────────────────────────────
-                case "finish":
-                  writer.write({ type: "finish", finishReason: p.reason })
-                  break
-
-                // ── Error ──────────────────────────────────────
-                case "error":
-                  writer.write({
-                    type: "error",
-                    errorText:
-                      p.error instanceof Error
-                        ? p.error.message
-                        : String(p.error),
-                  })
-                  break
-
-                // response-metadata, tool-params-end, etc. → skip
+              const chunk = toChunk(part)
+              if (chunk !== null) {
+                writer.write(chunk)
               }
             }),
           ),
         ),
       ).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error)
-        writer.write({ type: "error", errorText: message } as any)
+        writer.write({
+          type: "error",
+          errorText: error instanceof Error ? error.message : String(error),
+        })
       })
     },
     onError: (error: unknown) =>

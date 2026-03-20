@@ -1,3 +1,4 @@
+import type { StructuredToolOutput } from "@maple/domain"
 import type { Effect } from "effect"
 import * as Schema from "effect/Schema"
 
@@ -16,6 +17,8 @@ export type McpToolError = McpTenantError | McpQueryError
 export interface McpToolResult {
   content: Array<{ type: "text"; text: string }>
   isError?: boolean
+  summaryText?: string
+  structuredData?: StructuredToolOutput
 }
 
 export interface McpToolRegistrar {

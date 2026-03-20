@@ -7,6 +7,7 @@ import { HttpApiRoutes } from "./http";
 import { McpLive } from "./mcp/app";
 import { AutumnRouter } from "./routes/autumn.http";
 import { ChatRouter } from "./chat/route";
+import { ChatService } from "./chat/chat-service";
 import { ApiKeysService } from "./services/ApiKeysService";
 import { AuthorizationLive } from "./services/AuthorizationLive";
 import { CloudflareLogpushService } from "./services/CloudflareLogpushService";
@@ -57,6 +58,7 @@ const MainLive = Layer.mergeAll(
   TinybirdService.layer,
   QueryEngineService.layer,
   AuthService.layer,
+  ChatService.layer,
   ApiKeysService.layer,
   CloudflareLogpushService.layer,
   DashboardPersistenceService.layer,
