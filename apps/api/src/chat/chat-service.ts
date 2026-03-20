@@ -1,4 +1,4 @@
-import { LanguageModel, type Response, type Toolkit } from "effect/unstable/ai"
+import { LanguageModel, type Response } from "effect/unstable/ai"
 import { Effect, Layer, ServiceMap, Stream } from "effect"
 import type { TenantContext } from "@/services/AuthService"
 import { ApiKeysService } from "@/services/ApiKeysService"
@@ -38,32 +38,47 @@ export class ChatService extends ServiceMap.Service<ChatService>()("ChatService"
         headers: request.headers,
       })
 
-      const toolkit = yield* chatToolkitService.buildForMode(decodedRequest.mode).pipe(
+      const model = yield* chatModelService.getDefaultModel()
+      const prompt = buildPrompt(decodedRequest)
+
+      if (decodedRequest.mode === "dashboard_builder") {
+        const toolkit = yield* chatToolkitService.buildForMode("dashboard_builder").pipe(
+          Effect.provide(requestContextLayer),
+        )
+        return effectStreamToResponse(
+          streamAgentLoop({
+            prompt,
+            toolkit,
+          }).pipe(
+            Stream.provideService(LanguageModel.LanguageModel, model),
+          ),
+        )
+      }
+
+      const toolkit = yield* chatToolkitService.buildForMode("default").pipe(
         Effect.provide(requestContextLayer),
       )
-      const model = yield* chatModelService.getDefaultModel()
-
-      const stream = streamAgentLoop({
-        prompt: buildPrompt(decodedRequest),
-        toolkit,
-      }).pipe(
-        Stream.provideService(LanguageModel.LanguageModel, model),
-      ) as Stream.Stream<Response.AnyPart, unknown, never>
-
-      return effectStreamToResponse(stream)
+      return effectStreamToResponse(
+        streamAgentLoop({
+          prompt,
+          toolkit,
+        }).pipe(
+          Stream.provideService(LanguageModel.LanguageModel, model),
+        ),
+      )
     })
 
-      return {
-        handleRequest,
-      } satisfies {
-        readonly handleRequest: (
-          request: ChatServiceRequest,
-        ) => Effect.Effect<
-          Response,
-          InvalidChatRequestError | ChatConfigurationError,
-          Env | ApiKeysService | AuthService | TinybirdService | QueryEngineService
-        >
-      }
+    return {
+      handleRequest,
+    } satisfies {
+      readonly handleRequest: (
+        request: ChatServiceRequest,
+      ) => Effect.Effect<
+        Response,
+        InvalidChatRequestError | ChatConfigurationError,
+        Env | ApiKeysService | AuthService | TinybirdService | QueryEngineService
+      >
+    }
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make).pipe(

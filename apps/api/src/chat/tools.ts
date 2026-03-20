@@ -26,8 +26,14 @@ import { Env } from "@/services/Env"
 import { QueryEngineService } from "@/services/QueryEngineService"
 import { TinybirdService } from "@/services/TinybirdService"
 import { ChatToolFailure } from "./errors"
-import { observabilityToolExecutors } from "./observability-tools"
-import { ChatRequestContext } from "./request-context"
+import {
+  type ChatToolExecutionEnvironment,
+  observabilityToolExecutors,
+} from "./observability-tools"
+import {
+  ChatRequestContext,
+  type ChatRequestContextValue,
+} from "./request-context"
 
 const failureOptions = {
   failure: ChatToolFailure,
@@ -147,28 +153,50 @@ const DashboardToolkit = Toolkit.merge(
 const toolFailure = (message: string, details?: string[]) =>
   new ChatToolFailure({ message, details })
 
-const makeObservabilityHandlers = Effect.gen(function* () {
-  const env = yield* Env
-  const tinybird = yield* TinybirdService
-  const queryEngine = yield* QueryEngineService
-  const auth = yield* AuthService
-  const apiKeys = yield* ApiKeysService
-  const requestContext = yield* ChatRequestContext
-
-  const serviceLayer = Layer.mergeAll(
+const buildChatToolExecutionLayer = (
+  requestContext: ChatRequestContextValue,
+  env: typeof Env.Service,
+  auth: typeof AuthService.Service,
+  apiKeys: typeof ApiKeysService.Service,
+  tinybird: typeof TinybirdService.Service,
+  queryEngine: typeof QueryEngineService.Service,
+): Layer.Layer<ChatToolExecutionEnvironment> =>
+  Layer.mergeAll(
     CurrentTenantContextLive(requestContext.tenant),
-    Layer.succeed(TinybirdService)(tinybird),
-    Layer.succeed(QueryEngineService)(queryEngine),
     Layer.succeed(Env)(env),
     Layer.succeed(AuthService)(auth),
     Layer.succeed(ApiKeysService)(apiKeys),
+    Layer.succeed(TinybirdService)(tinybird),
+    Layer.succeed(QueryEngineService)(queryEngine),
   )
 
-  const runTool = <TParams, TResult, TError extends { message: string }, R>(
+const makeObservabilityHandlers = Effect.gen(function* () {
+  const env = yield* Env
+  const auth = yield* AuthService
+  const apiKeys = yield* ApiKeysService
+  const tinybird = yield* TinybirdService
+  const queryEngine = yield* QueryEngineService
+  const requestContext = yield* ChatRequestContext
+
+  const serviceLayer = buildChatToolExecutionLayer(
+    requestContext,
+    env,
+    auth,
+    apiKeys,
+    tinybird,
+    queryEngine,
+  )
+
+  const runTool = <
+    TParams,
+    TResult,
+    TError extends { message: string },
+    R extends ChatToolExecutionEnvironment,
+  >(
     name: string,
     execute: (params: TParams) => Effect.Effect<TResult, TError, R>,
   ) =>
-    (params: TParams): Effect.Effect<TResult, ChatToolFailure, never> =>
+    (params: TParams) =>
       execute(params).pipe(
         Effect.mapError((error) => toolFailure(error.message)),
         Effect.catchDefect((defect) =>
@@ -179,7 +207,7 @@ const makeObservabilityHandlers = Effect.gen(function* () {
           ),
         ),
         Effect.provide(serviceLayer),
-      ) as Effect.Effect<TResult, ChatToolFailure, never>
+      )
 
   return {
     system_health: runTool("system_health", observabilityToolExecutors.system_health),
@@ -253,3 +281,5 @@ export class ChatToolkitService extends ServiceMap.Service<ChatToolkitService>()
 ) {
   static readonly layer = Layer.effect(this, this.make)
 }
+
+export { buildChatToolExecutionLayer }

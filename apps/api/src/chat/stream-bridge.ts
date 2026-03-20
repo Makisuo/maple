@@ -3,7 +3,7 @@ import {
   createUIMessageStreamResponse,
   type UIMessageChunk,
 } from "ai"
-import type { Response as AiResponse } from "effect/unstable/ai"
+import { Tool, type Response as AiResponse } from "effect/unstable/ai"
 import { Effect, Stream } from "effect"
 
 const toToolFailureText = (value: unknown): string => {
@@ -35,7 +35,9 @@ const toFinishReason = (reason: AiResponse.AnyPart extends never ? never : strin
   }
 }
 
-const toChunk = (part: AiResponse.AnyPart): UIMessageChunk | null => {
+const toChunk = <TTools extends Record<string, Tool.Any>>(
+  part: AiResponse.StreamPart<TTools>,
+): UIMessageChunk | null => {
   switch (part.type) {
     case "text-start":
       return { type: "text-start", id: part.id }
@@ -96,8 +98,10 @@ const toChunk = (part: AiResponse.AnyPart): UIMessageChunk | null => {
   }
 }
 
-export const effectStreamToResponse = (
-  stream: Stream.Stream<AiResponse.AnyPart, unknown, never>,
+export const effectStreamToResponse = <
+  TTools extends Record<string, Tool.Any>,
+>(
+  stream: Stream.Stream<AiResponse.StreamPart<TTools>, unknown, never>,
 ): Response => {
   const uiStream = createUIMessageStream({
     execute: async ({ writer }) => {

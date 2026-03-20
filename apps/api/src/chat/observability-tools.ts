@@ -28,6 +28,7 @@ import type { TenantContext } from "@/services/AuthService"
 import {
   QueryEngineService,
 } from "@/services/QueryEngineService"
+import { TinybirdService } from "@/services/TinybirdService"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { queryTinybird } from "@/mcp/lib/query-tinybird"
@@ -40,12 +41,36 @@ import {
   formatTable,
   truncate,
 } from "@/mcp/lib/format"
-import { resolveToolTenantContext } from "@/mcp/lib/current-tenant-context"
+import {
+  CurrentTenantContext,
+  resolveToolTenantContext,
+} from "@/mcp/lib/current-tenant-context"
 import { McpQueryError, type McpToolError } from "@/mcp/tools/types"
+import { ApiKeysService } from "@/services/ApiKeysService"
+import { AuthService } from "@/services/AuthService"
+import { Env } from "@/services/Env"
 import { buildQuerySpec, decodeQuerySpecSync } from "@/mcp/tools/query-data-shared"
 import type { QueryEngineExecuteResponse, QuerySpec as QuerySpecType } from "@maple/domain"
 
 const SYSTEM_SPAN_PATTERNS = ["ClusterCron"]
+
+export type TinybirdToolExecutorEnvironment =
+  | Env
+  | ApiKeysService
+  | AuthService
+  | CurrentTenantContext
+  | TinybirdService
+
+export type QueryDataToolExecutorEnvironment =
+  | Env
+  | ApiKeysService
+  | AuthService
+  | CurrentTenantContext
+  | QueryEngineService
+
+export type ChatToolExecutionEnvironment =
+  | TinybirdToolExecutorEnvironment
+  | QueryDataToolExecutorEnvironment
 
 const summaryText = (lines: Array<string>): string => lines.join("\n")
 
@@ -198,7 +223,7 @@ const toInvalidQuerySpecMessage = (error: unknown): string =>
 
 export const executeSystemHealthTool = (
   { start_time, end_time }: Schema.Schema.Type<typeof SystemHealthToolInput>,
-): Effect.Effect<SystemHealthToolOutput, McpToolError, unknown> =>
+): Effect.Effect<SystemHealthToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = start_time ?? startTime
@@ -292,7 +317,7 @@ export const executeSystemHealthTool = (
 
 export const executeFindErrorsTool = (
   { start_time, end_time, service, limit }: Schema.Schema.Type<typeof FindErrorsToolInput>,
-): Effect.Effect<FindErrorsToolOutput, McpToolError, unknown> =>
+): Effect.Effect<FindErrorsToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = start_time ?? startTime
@@ -341,7 +366,7 @@ export const executeFindErrorsTool = (
 
 export const executeInspectTraceTool = (
   { trace_id }: Schema.Schema.Type<typeof InspectTraceToolInput>,
-): Effect.Effect<InspectTraceToolOutput, McpToolError, unknown> =>
+): Effect.Effect<InspectTraceToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const [spansResult, logsResult] = yield* Effect.all(
       [
@@ -472,7 +497,7 @@ export const executeSearchLogsTool = (
     trace_id,
     limit,
   }: Schema.Schema.Type<typeof SearchLogsToolInput>,
-): Effect.Effect<SearchLogsToolOutput, McpToolError, unknown> =>
+): Effect.Effect<SearchLogsToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = start_time ?? startTime
@@ -570,7 +595,7 @@ export const executeSearchLogsTool = (
 
 export const executeSearchTracesTool = (
   params: Schema.Schema.Type<typeof SearchTracesToolInput>,
-): Effect.Effect<SearchTracesToolOutput, McpToolError, unknown> =>
+): Effect.Effect<SearchTracesToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = params.start_time ?? startTime
@@ -629,7 +654,7 @@ export const executeSearchTracesTool = (
 
 export const executeServiceOverviewTool = (
   { start_time, end_time }: Schema.Schema.Type<typeof ServiceOverviewToolInput>,
-): Effect.Effect<ServiceOverviewToolOutput, McpToolError, unknown> =>
+): Effect.Effect<ServiceOverviewToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = start_time ?? startTime
@@ -757,7 +782,7 @@ export const executeServiceOverviewTool = (
 
 export const executeDiagnoseServiceTool = (
   { service_name, start_time, end_time }: Schema.Schema.Type<typeof DiagnoseServiceToolInput>,
-): Effect.Effect<DiagnoseServiceToolOutput, McpToolError, unknown> =>
+): Effect.Effect<DiagnoseServiceToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = start_time ?? startTime
@@ -904,7 +929,7 @@ export const executeDiagnoseServiceTool = (
 
 export const executeFindSlowTracesTool = (
   { start_time, end_time, service, limit }: Schema.Schema.Type<typeof FindSlowTracesToolInput>,
-): Effect.Effect<FindSlowTracesToolOutput, McpToolError, unknown> =>
+): Effect.Effect<FindSlowTracesToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = start_time ?? startTime
@@ -996,7 +1021,7 @@ export const executeFindSlowTracesTool = (
 
 export const executeErrorDetailTool = (
   { error_type, start_time, end_time, service, limit }: Schema.Schema.Type<typeof ErrorDetailToolInput>,
-): Effect.Effect<ErrorDetailToolOutput, McpToolError, unknown> =>
+): Effect.Effect<ErrorDetailToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = start_time ?? startTime
@@ -1098,7 +1123,7 @@ export const executeErrorDetailTool = (
 
 export const executeListMetricsTool = (
   { start_time, end_time, service, search, metric_type, limit }: Schema.Schema.Type<typeof ListMetricsToolInput>,
-): Effect.Effect<ListMetricsToolOutput, McpToolError, unknown> =>
+): Effect.Effect<ListMetricsToolOutput, McpToolError, TinybirdToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = start_time ?? startTime
@@ -1181,7 +1206,7 @@ export const executeListMetricsTool = (
 
 export const executeQueryDataTool = (
   params: Schema.Schema.Type<typeof QueryDataToolInput>,
-): Effect.Effect<QueryDataToolOutput, McpToolError, unknown> =>
+): Effect.Effect<QueryDataToolOutput, McpToolError, QueryDataToolExecutorEnvironment> =>
   Effect.gen(function* () {
     const { startTime, endTime } = defaultTimeRange(1)
     const st = params.start_time ?? startTime
@@ -1241,4 +1266,7 @@ export const observabilityToolExecutors = {
   error_detail: executeErrorDetailTool,
   list_metrics: executeListMetricsTool,
   query_data: executeQueryDataTool,
-} satisfies Record<string, (...args: never) => Effect.Effect<unknown, McpToolError, unknown>>
+} satisfies Record<
+  string,
+  (...args: never) => Effect.Effect<unknown, McpToolError, ChatToolExecutionEnvironment>
+>

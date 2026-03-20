@@ -1,4 +1,4 @@
-import { LanguageModel, Prompt, type Response, type Toolkit } from "effect/unstable/ai"
+import { LanguageModel, Prompt, type Response } from "effect/unstable/ai"
 import { Cause, Duration, Effect, Queue, Stream } from "effect"
 
 const MAX_ITERATIONS = 10
@@ -14,23 +14,31 @@ const IDLE_TIMEOUT = Duration.seconds(30)
  * All stream parts (text deltas, tool calls, tool results) from every
  * iteration are emitted in real-time via a Queue-backed stream.
  */
-export const streamAgentLoop = (options: {
-  prompt: Prompt.RawInput
-  toolkit: Toolkit.WithHandler<any>
-}): Stream.Stream<Response.AnyPart, unknown, LanguageModel.LanguageModel> =>
+export const streamAgentLoop = <
+  TToolkit extends LanguageModel.ToolkitOption<any>,
+>(options: {
+  readonly prompt: Prompt.RawInput
+  readonly toolkit: TToolkit
+}) =>
   Effect.gen(function* () {
-    const queue = yield* Queue.make<Response.AnyPart, unknown | Cause.Done>()
+    type TTools = LanguageModel.ExtractTools<{ readonly toolkit: TToolkit }>
+
+    const queue = yield* Queue.make<Response.StreamPart<TTools>, unknown | Cause.Done>()
+    const streamText = LanguageModel.streamText as unknown as (
+      options: LanguageModel.GenerateTextOptions<TTools>,
+    ) => Stream.Stream<Response.StreamPart<TTools>, unknown, LanguageModel.LanguageModel>
 
     yield* Effect.gen(function* () {
       let currentPrompt = Prompt.make(options.prompt)
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
-        const collectedParts: Array<Response.AnyPart> = []
-
-        yield* LanguageModel.streamText({
+        const collectedParts: Array<Response.StreamPart<TTools>> = []
+        const request: LanguageModel.GenerateTextOptions<TTools> = {
           prompt: currentPrompt,
-          toolkit: options.toolkit,
-        }).pipe(
+          toolkit: options.toolkit as unknown as LanguageModel.ToolkitOption<TTools>,
+        }
+
+        yield* streamText(request).pipe(
           Stream.timeout(IDLE_TIMEOUT),
           Stream.runForEach((part) => {
             collectedParts.push(part)
@@ -48,4 +56,4 @@ export const streamAgentLoop = (options: {
     }).pipe(Queue.into(queue), Effect.forkScoped)
 
     return Stream.fromQueue(queue)
-  }).pipe(Stream.unwrap) as Stream.Stream<Response.AnyPart, unknown, LanguageModel.LanguageModel>
+  }).pipe(Stream.unwrap)
