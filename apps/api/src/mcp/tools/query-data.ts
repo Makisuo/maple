@@ -84,17 +84,15 @@ const resolveTenant = Effect.gen(function* () {
   const nativeReq = yield* HttpServerRequest.toWeb(req)
   return yield* resolveMcpTenantContext(nativeReq)
 }).pipe(
-  Effect.catchIf(() => true, (error) =>
-    Effect.fail(
-      new McpTenantError({
-        message:
-          error instanceof Error
-            ? error.message
-            : typeof error === "object" && error !== null && "message" in error
-              ? String(error.message)
-              : String(error),
-      }),
-    ),
+  Effect.mapError((error: unknown) =>
+    new McpTenantError({
+      message:
+        error instanceof Error
+          ? error.message
+          : typeof error === "object" && error !== null && "message" in error
+            ? String(error.message)
+            : String(error),
+    }),
   ),
 )
 
