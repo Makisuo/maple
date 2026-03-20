@@ -228,19 +228,22 @@ function findLastConjunctionBoundary(expression: string, cursor: number): number
       continue
     }
 
-    if (expression.slice(index, index + 3).toLowerCase() !== "and") {
+    const maybeAnd = expression.slice(index, index + 3).toLowerCase() === "and"
+    const maybeOr = expression.slice(index, index + 2).toLowerCase() === "or"
+    const keywordLength = maybeAnd ? 3 : maybeOr ? 2 : 0
+    if (keywordLength === 0) {
       continue
     }
 
     const before = index === 0 ? undefined : expression[index - 1]
-    const after = expression[index + 3]
+    const after = expression[index + keywordLength]
     if (!isSpace(before) || !isSpace(after)) {
       continue
     }
 
-    if (index + 3 <= cursor) {
-      boundary = index + 3
-      index += 2
+    if (index + keywordLength <= cursor) {
+      boundary = index + keywordLength
+      index += keywordLength - 1
     }
   }
 
@@ -250,10 +253,24 @@ function findLastConjunctionBoundary(expression: string, cursor: number): number
 interface OperatorMatch {
   position: number
   length: number
-  operator: "=" | "contains"
+  operator: string
 }
 
 function findFirstOperator(segment: string): OperatorMatch | null {
+  const operatorTokens = [
+    "not exists",
+    "not contains",
+    "not in",
+    "exists",
+    "contains",
+    "in",
+    ">=",
+    "<=",
+    "!=",
+    "=",
+    ">",
+    "<",
+  ] as const
   let quote: "\"" | "'" | null = null
 
   for (let index = 0; index < segment.length; index += 1) {
@@ -271,16 +288,24 @@ function findFirstOperator(segment: string): OperatorMatch | null {
       continue
     }
 
-    if (char === "=") {
-      return { position: index, length: 1, operator: "=" }
-    }
-
-    if (segment.slice(index, index + 8).toLowerCase() === "contains") {
-      const before = index === 0 ? undefined : segment[index - 1]
-      const after = segment[index + 8]
-      if (isSpace(before) && (isSpace(after) || after === undefined)) {
-        return { position: index, length: 8, operator: "contains" }
+    for (const operator of operatorTokens) {
+      if (segment.slice(index, index + operator.length).toLowerCase() !== operator) {
+        continue
       }
+
+      const before = index === 0 ? undefined : segment[index - 1]
+      const after = segment[index + operator.length]
+      const startsWithAlpha = /[a-z]/i.test(operator[0] ?? "")
+      const endsWithAlpha = /[a-z]/i.test(operator[operator.length - 1] ?? "")
+
+      if (startsWithAlpha && !isSpace(before)) {
+        continue
+      }
+      if (endsWithAlpha && after !== undefined && !isSpace(after) && after !== "(") {
+        continue
+      }
+
+      return { position: index, length: operator.length, operator }
     }
   }
 
@@ -833,6 +858,69 @@ function buildSuggestions(
         insertText: "contains",
         description: "Substring match",
       },
+      {
+        id: "operator:not-equal",
+        kind: "operator",
+        label: "!=",
+        insertText: "!=",
+        description: "Not equal",
+      },
+      {
+        id: "operator:in",
+        kind: "operator",
+        label: "IN",
+        insertText: "IN",
+        description: "Match any value in a list",
+      },
+      {
+        id: "operator:not-in",
+        kind: "operator",
+        label: "NOT IN",
+        insertText: "NOT IN",
+        description: "Exclude values in a list",
+      },
+      {
+        id: "operator:exists",
+        kind: "operator",
+        label: "EXISTS",
+        insertText: "EXISTS",
+        description: "Field has a value",
+      },
+      {
+        id: "operator:not-exists",
+        kind: "operator",
+        label: "NOT EXISTS",
+        insertText: "NOT EXISTS",
+        description: "Field is empty or missing",
+      },
+      {
+        id: "operator:gt",
+        kind: "operator",
+        label: ">",
+        insertText: ">",
+        description: "Greater than",
+      },
+      {
+        id: "operator:gte",
+        kind: "operator",
+        label: ">=",
+        insertText: ">=",
+        description: "Greater than or equal",
+      },
+      {
+        id: "operator:lt",
+        kind: "operator",
+        label: "<",
+        insertText: "<",
+        description: "Less than",
+      },
+      {
+        id: "operator:lte",
+        kind: "operator",
+        label: "<=",
+        insertText: "<=",
+        description: "Less than or equal",
+      },
     ]
 
     return filterAndRankSuggestions(operatorSuggestions, parsed.query, maxSuggestions)
@@ -855,6 +943,13 @@ function buildSuggestions(
       label: "AND",
       insertText: "AND",
       description: "Add another clause",
+    },
+    {
+      id: "conjunction:or",
+      kind: "conjunction",
+      label: "OR",
+      insertText: "OR",
+      description: "Match either clause",
     },
   ]
 

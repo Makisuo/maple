@@ -52,6 +52,8 @@ interface QueryPanelProps {
   onRemove: () => void
   onToggleCollapse: () => void
   onDataSourceChange: (ds: QueryBuilderDataSource) => void
+  onActiveAttributeKey?: (key: string | null) => void
+  onActiveResourceAttributeKey?: (key: string | null) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +216,8 @@ export function QueryPanel({
   onRemove,
   onToggleCollapse,
   onDataSourceChange,
+  onActiveAttributeKey,
+  onActiveResourceAttributeKey,
 }: QueryPanelProps) {
   const badgeColor = queryBadgeColor(index)
   const aggregateOptions = AGGREGATIONS_BY_SOURCE[query.dataSource]
@@ -309,6 +313,8 @@ export function QueryPanel({
               aggregateOptions={aggregateOptions}
               autocompleteValues={autocompleteValues}
               onUpdate={onUpdate}
+              onActiveAttributeKey={onActiveAttributeKey}
+              onActiveResourceAttributeKey={onActiveResourceAttributeKey}
             />
           )}
 
@@ -356,6 +362,8 @@ function TracesLogsBody({
   aggregateOptions,
   autocompleteValues,
   onUpdate,
+  onActiveAttributeKey,
+  onActiveResourceAttributeKey,
 }: {
   query: QueryBuilderQueryDraft
   aggregateOptions: Array<{ label: string; value: string }>
@@ -363,6 +371,8 @@ function TracesLogsBody({
   onUpdate: (
     updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft,
   ) => void
+  onActiveAttributeKey?: (key: string | null) => void
+  onActiveResourceAttributeKey?: (key: string | null) => void
 }) {
   return (
     <>
@@ -379,6 +389,8 @@ function TracesLogsBody({
               whereClause: nextWhereClause,
             }))
           }
+          onActiveAttributeKey={onActiveAttributeKey}
+          onActiveResourceAttributeKey={onActiveResourceAttributeKey}
           placeholder='service.name = "checkout" AND status.code = "Error"'
           textareaClassName="min-h-[32px] resize-y text-xs"
           ariaLabel={`Where clause for query ${query.name}`}

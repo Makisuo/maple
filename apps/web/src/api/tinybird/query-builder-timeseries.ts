@@ -1,5 +1,9 @@
 import { Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest, type QuerySpec } from "@maple/domain"
+import {
+  QueryBuilderExecuteRequest,
+  type QueryBuilderPlanResult,
+  type QueryBuilderRequest,
+} from "@maple/domain"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { formatForTinybird } from "@/lib/time-utils"
 import {
@@ -107,7 +111,8 @@ interface QueryExecutionDebug {
   queryId: string
   queryName: string
   source: string
-  spec: QuerySpec | null
+  request: QueryBuilderRequest | null
+  plan?: QueryBuilderPlanResult
   attempts: QueryExecutionAttempt[]
   fallbackUsed: boolean
 }
@@ -138,7 +143,6 @@ export interface QueryBuilderTimeseriesResponse {
   debug?: QueryBuilderTimeseriesDebug
 }
 
-const decodeQueryEngineRequest = Schema.decodeUnknownSync(QueryEngineExecuteRequest)
 const toEpochMs = (value: string): number => new Date(value.replace(" ", "T") + "Z").getTime()
 
 function computeAutoBucketSeconds(startTime: string, endTime: string): number {
@@ -159,7 +163,11 @@ function computeAutoBucketSeconds(startTime: string, endTime: string): number {
   return 86400
 }
 
-function resolveTimeseriesBucketSpec(spec: QuerySpec, startTime: string, endTime: string): QuerySpec {
+function resolveTimeseriesBucketSpec(
+  spec: QueryBuilderRequest,
+  startTime: string,
+  endTime: string,
+): QueryBuilderRequest {
   if (spec.kind !== "timeseries" || spec.bucketSeconds) {
     return spec
   }
@@ -167,13 +175,13 @@ function resolveTimeseriesBucketSpec(spec: QuerySpec, startTime: string, endTime
   return {
     ...spec,
     bucketSeconds: computeAutoBucketSeconds(startTime, endTime),
-  } satisfies QuerySpec
+  } satisfies QueryBuilderRequest
 }
 
 function resolveExecutionSpecForWindow(
-  spec: QuerySpec,
+  spec: QueryBuilderRequest,
   window: { startTime: string; endTime: string; kind: "primary" | "fallback" },
-): QuerySpec {
+): QueryBuilderRequest {
   const resolved = resolveTimeseriesBucketSpec(spec, window.startTime, window.endTime)
   if (resolved.kind !== "timeseries") {
     return resolved
@@ -297,45 +305,55 @@ function buildExecutionWindows(
 async function executeTimeseriesQuery(
   startTime: string,
   endTime: string,
-  spec: QuerySpec,
-): Promise<TimeseriesPoint[]> {
-  const payload = decodeQueryEngineRequest({
+  spec: QueryBuilderRequest,
+): Promise<{ points: TimeseriesPoint[]; plan: QueryBuilderPlanResult }> {
+  const payload = new QueryBuilderExecuteRequest({
     startTime,
     endTime,
     query: spec,
   })
 
-  const response = await Effect.runPromise(
-    executeTimeseriesQueryEffect(payload).pipe(Effect.provide(MapleApiAtomClient.layer)),
-  )
+  const response = (await Effect.runPromise(
+    executeTimeseriesQueryEffect(payload) as never,
+  )) as {
+    plan: QueryBuilderPlanResult
+    result: {
+      kind: "timeseries"
+      data: Array<{ bucket: string; series: Record<string, number> }>
+    }
+  }
 
   if (response.result.kind !== "timeseries") {
     return Promise.reject(new Error("Unexpected non-timeseries result"))
   }
 
-  return response.result.data.map((point) => ({
-    bucket: point.bucket,
-    series: { ...point.series },
-  }))
+  return {
+    plan: response.plan,
+    points: response.result.data.map((point) => ({
+      bucket: point.bucket,
+      series: { ...point.series },
+    })),
+  }
 }
 
-const executeTimeseriesQueryEffect = Effect.fn("Tinybird.executeTimeseriesQuery")(
-  function* (payload: QueryEngineExecuteRequest) {
+function executeTimeseriesQueryEffect(payload: QueryBuilderExecuteRequest) {
+  return Effect.gen(function* () {
     const client = yield* MapleApiAtomClient
-    return yield* client.queryEngine.execute({
-      payload: new QueryEngineExecuteRequest(payload),
+    return yield* client.queryEngine.builderExecute({
+      payload,
     })
-  },
-)
+  }).pipe(Effect.provide(MapleApiAtomClient.layer))
+}
 
 async function executeTimeseriesQueryWithFallback(
   startTime: string,
   endTime: string,
-  spec: QuerySpec,
+  spec: QueryBuilderRequest,
   strategy: ReturnType<typeof resolveStrategy>,
   allowFallback: boolean,
 ): Promise<{
   points: TimeseriesPoint[]
+  plan?: QueryBuilderPlanResult
   attempts: QueryExecutionAttempt[]
   fallbackUsed: boolean
 }> {
@@ -352,29 +370,33 @@ async function executeTimeseriesQueryWithFallback(
 async function executeTimeseriesQueryWithFallbackUsing(
   startTime: string,
   endTime: string,
-  spec: QuerySpec,
+  spec: QueryBuilderRequest,
   strategy: ReturnType<typeof resolveStrategy>,
   allowFallback: boolean,
   executeFn: (
     startTime: string,
     endTime: string,
-    spec: QuerySpec,
-  ) => Promise<TimeseriesPoint[]>,
+    spec: QueryBuilderRequest,
+  ) => Promise<{ points: TimeseriesPoint[]; plan?: QueryBuilderPlanResult }>,
 ): Promise<{
   points: TimeseriesPoint[]
+  plan?: QueryBuilderPlanResult
   attempts: QueryExecutionAttempt[]
   fallbackUsed: boolean
 }> {
   const windows = buildExecutionWindows(startTime, endTime, strategy, allowFallback)
   const attempts: QueryExecutionAttempt[] = []
   let lastPoints: TimeseriesPoint[] = []
+  let lastPlan: QueryBuilderPlanResult | undefined
 
   for (const [index, window] of windows.entries()) {
     const windowSpec = resolveExecutionSpecForWindow(spec, window)
 
     try {
-      const points = await executeFn(window.startTime, window.endTime, windowSpec)
+      const execution = await executeFn(window.startTime, window.endTime, windowSpec)
+      const points = execution.points
       const hasSeries = hasAnySeriesData(points)
+      lastPlan = execution.plan
 
       attempts.push({
         startTime: window.startTime,
@@ -388,6 +410,7 @@ async function executeTimeseriesQueryWithFallbackUsing(
       if (hasSeries) {
         return {
           points,
+          plan: execution.plan,
           attempts,
           fallbackUsed: index > 0,
         }
@@ -413,6 +436,7 @@ async function executeTimeseriesQueryWithFallbackUsing(
 
   return {
     points: lastPoints,
+    plan: lastPlan,
     attempts,
     fallbackUsed: false,
   }
@@ -636,7 +660,7 @@ async function runQueryWindow(
           queryId: query.id,
           queryName: query.name,
           source: query.dataSource,
-          spec: null,
+          request: null,
           attempts: [],
           fallbackUsed: false,
         })
@@ -652,13 +676,13 @@ async function runQueryWindow(
         }
       }
 
-      const querySpec = resolveTimeseriesBucketSpec(built.query, startTime, endTime)
+      const queryRequest = resolveTimeseriesBucketSpec(built.query, startTime, endTime)
 
       try {
         const execution = await executeTimeseriesQueryWithFallback(
           startTime,
           endTime,
-          querySpec,
+          queryRequest,
           strategy,
           allowFallback,
         )
@@ -666,12 +690,16 @@ async function runQueryWindow(
           queryId: query.id,
           queryName: query.name,
           source: query.dataSource,
-          spec: querySpec,
+          request: queryRequest,
+          plan: execution.plan,
           attempts: execution.attempts,
           fallbackUsed: execution.fallbackUsed,
         })
 
         const warnings = [...built.warnings]
+        if (execution.plan) {
+          warnings.push(...execution.plan.warnings.map((warning) => warning.message))
+        }
         if (execution.fallbackUsed) {
           const selectedAttempt = execution.attempts[execution.attempts.length - 1]
           warnings.push(
@@ -693,7 +721,7 @@ async function runQueryWindow(
           queryId: query.id,
           queryName: query.name,
           source: query.dataSource,
-          spec: querySpec,
+          request: queryRequest,
           attempts: [],
           fallbackUsed: false,
         })

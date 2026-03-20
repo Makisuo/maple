@@ -15,6 +15,7 @@ import { DashboardPersistenceService } from "./services/DashboardPersistenceServ
 import { Env } from "./services/Env";
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService";
 import { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService";
+import { QueryBuilderService } from "./services/QueryBuilderService";
 import { QueryEngineService } from "./services/QueryEngineService";
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService";
 import { TinybirdService } from "./services/TinybirdService";
@@ -56,6 +57,7 @@ const AllRoutes = Layer.mergeAll(
 const MainLive = Layer.mergeAll(
   Env.layer,
   TinybirdService.layer,
+  QueryBuilderService.layer,
   QueryEngineService.layer,
   AuthService.layer,
   ChatService.layer,

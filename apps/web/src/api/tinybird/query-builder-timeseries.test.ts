@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { QuerySpec } from "@maple/domain"
+import type { QueryBuilderRequest } from "@maple/domain"
 import { __testables } from "@/api/tinybird/query-builder-timeseries"
 import type { QueryRunResult } from "@/components/query-builder/formula-results"
 
@@ -18,11 +18,12 @@ function makeQueryResult(overrides: Partial<QueryRunResult> = {}): QueryRunResul
 
 describe("query-builder timeseries strategy", () => {
   it("resolves deterministic auto bucket seconds for timeseries specs", () => {
-    const spec: QuerySpec = {
+    const spec: QueryBuilderRequest = {
       kind: "timeseries",
-      source: "traces",
+      signal: "traces",
       metric: "count",
-      groupBy: "service",
+      groupBy: ["service.name"],
+      allowSlowPath: true,
     }
 
     const resolved = __testables.resolveTimeseriesBucketSpec(
@@ -40,11 +41,12 @@ describe("query-builder timeseries strategy", () => {
   })
 
   it("does not mutate explicit bucket seconds", () => {
-    const spec: QuerySpec = {
+    const spec: QueryBuilderRequest = {
       kind: "timeseries",
-      source: "logs",
+      signal: "logs",
       metric: "count",
       bucketSeconds: 900,
+      allowSlowPath: true,
     }
 
     const resolved = __testables.resolveTimeseriesBucketSpec(
@@ -83,10 +85,11 @@ describe("query-builder timeseries strategy", () => {
   })
 
   it("resolves auto bucket per execution window (primary + fallback)", () => {
-    const spec: QuerySpec = {
+    const spec: QueryBuilderRequest = {
       kind: "timeseries",
-      source: "traces",
+      signal: "traces",
       metric: "count",
+      allowSlowPath: true,
     }
 
     const primary = __testables.resolveExecutionSpecForWindow(spec, {
@@ -111,11 +114,12 @@ describe("query-builder timeseries strategy", () => {
   })
 
   it("widens explicit bucket on fallback windows to stay within point budget", () => {
-    const spec: QuerySpec = {
+    const spec: QueryBuilderRequest = {
       kind: "timeseries",
-      source: "traces",
+      signal: "traces",
       metric: "count",
       bucketSeconds: 60,
+      allowSlowPath: true,
     }
 
     const primary = __testables.resolveExecutionSpecForWindow(spec, {
@@ -140,10 +144,11 @@ describe("query-builder timeseries strategy", () => {
   })
 
   it("continues fallback execution after an error and recomputes window buckets", async () => {
-    const spec: QuerySpec = {
+    const spec: QueryBuilderRequest = {
       kind: "timeseries",
-      source: "traces",
+      signal: "traces",
       metric: "count",
+      allowSlowPath: true,
     }
 
     const seenBucketSeconds: number[] = []
@@ -159,25 +164,27 @@ describe("query-builder timeseries strategy", () => {
       true,
       async (windowStart, _windowEnd, windowSpec) => {
         if (windowSpec.kind !== "timeseries") {
-          return []
+          return { points: [] }
         }
 
         seenBucketSeconds.push(windowSpec.bucketSeconds ?? -1)
 
         if (windowStart === "2026-01-02 00:00:00") {
-          return []
+          return { points: [] }
         }
 
         if (windowStart === "2026-01-01 01:00:00") {
           return Promise.reject(new Error("Timeseries query too expensive"))
         }
 
-        return [
-          {
-            bucket: "2026-01-01T00:00:00.000Z",
-            series: { total: 5 },
-          },
-        ]
+        return {
+          points: [
+            {
+              bucket: "2026-01-01T00:00:00.000Z",
+              series: { total: 5 },
+            },
+          ],
+        }
       },
     )
 

@@ -1,6 +1,17 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { QueryEngineExecuteRequest, QueryEngineExecuteResponse } from "../query-engine"
+import {
+  QueryBuilderExecuteRequest,
+  QueryBuilderExecuteResponse,
+  QueryBuilderFieldValuesRequest,
+  QueryBuilderFieldValuesResponse,
+  QueryBuilderMetadataRequest,
+  QueryBuilderMetadataResponse,
+  QueryBuilderPlanRequest,
+  QueryBuilderPlanResponse,
+  QueryEngineExecuteRequest,
+  QueryEngineExecuteResponse,
+} from "../query-engine"
 import { tinybirdPipes } from "../tinybird-pipes"
 import { Authorization } from "./current-tenant"
 
@@ -30,6 +41,34 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
     HttpApiEndpoint.post("execute", "/execute", {
       payload: QueryEngineExecuteRequest,
       success: QueryEngineExecuteResponse,
+      error: [QueryEngineValidationError, QueryEngineExecutionError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("builderMetadata", "/builder/metadata", {
+      payload: QueryBuilderMetadataRequest,
+      success: QueryBuilderMetadataResponse,
+      error: [QueryEngineValidationError, QueryEngineExecutionError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("builderFieldValues", "/builder/field-values", {
+      payload: QueryBuilderFieldValuesRequest,
+      success: QueryBuilderFieldValuesResponse,
+      error: [QueryEngineValidationError, QueryEngineExecutionError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("builderPlan", "/builder/plan", {
+      payload: QueryBuilderPlanRequest,
+      success: QueryBuilderPlanResponse,
+      error: [QueryEngineValidationError, QueryEngineExecutionError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("builderExecute", "/builder/execute", {
+      payload: QueryBuilderExecuteRequest,
+      success: QueryBuilderExecuteResponse,
       error: [QueryEngineValidationError, QueryEngineExecutionError],
     }),
   )

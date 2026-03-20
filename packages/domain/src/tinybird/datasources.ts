@@ -253,6 +253,85 @@ export const serviceOverviewSpans = defineDatasource("service_overview_spans", {
 export type ServiceOverviewSpansRow = InferRow<typeof serviceOverviewSpans>;
 
 /**
+ * Narrow projection of spans for query-builder trace workloads.
+ * Extracts commonly-used span/resource attributes at write time so
+ * planner fast paths avoid scanning Map columns in the raw traces table.
+ */
+export const traceQuerySpans = defineDatasource("trace_query_spans", {
+  description:
+    "Narrow projection of spans for query-builder trace workloads. Populated by materialized view.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Timestamp: t.dateTime(),
+    ParentSpanId: t.string(),
+    ServiceName: t.string().lowCardinality(),
+    SpanName: t.string().lowCardinality(),
+    StatusCode: t.string().lowCardinality(),
+    Duration: t.uint64(),
+    TraceState: t.string(),
+    DeploymentEnv: t.string().lowCardinality(),
+    CommitSha: t.string().lowCardinality(),
+    HttpMethod: t.string().lowCardinality(),
+    HttpRoute: t.string(),
+    PeerService: t.string(),
+  },
+  engine: engine.mergeTree({
+    partitionKey: "toDate(Timestamp)",
+    sortingKey: ["OrgId", "ServiceName", "Timestamp", "SpanName", "HttpRoute", "PeerService"],
+    ttl: "Timestamp + INTERVAL 90 DAY",
+  }),
+});
+
+export type TraceQuerySpansRow = InferRow<typeof traceQuerySpans>;
+
+/**
+ * 1-minute rollup for common trace query-builder metrics.
+ * Stores additive aggregates so grouped trace charts can query a much
+ * smaller table for count, error rate, and average duration.
+ */
+export const traceQueryRollup1m = defineDatasource("trace_query_rollup_1m", {
+  description:
+    "1-minute rollup for common trace query-builder metrics. Populated by materialized view.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Bucket: t.dateTime(),
+    ServiceName: t.string().lowCardinality(),
+    SpanName: t.string().lowCardinality(),
+    StatusCode: t.string().lowCardinality(),
+    HttpMethod: t.string().lowCardinality(),
+    HttpRoute: t.string(),
+    PeerService: t.string(),
+    DeploymentEnv: t.string().lowCardinality(),
+    CommitSha: t.string().lowCardinality(),
+    IsRoot: t.uint8(),
+    SpanCount: t.uint64(),
+    ErrorCount: t.uint64(),
+    DurationSum: t.uint64(),
+    DurationCount: t.uint64(),
+  },
+  engine: engine.summingMergeTree({
+    sortingKey: [
+      "OrgId",
+      "Bucket",
+      "ServiceName",
+      "SpanName",
+      "StatusCode",
+      "HttpMethod",
+      "HttpRoute",
+      "PeerService",
+      "DeploymentEnv",
+      "CommitSha",
+      "IsRoot",
+    ],
+    ttl: "Bucket + INTERVAL 90 DAY",
+  }),
+});
+
+export type TraceQueryRollup1mRow = InferRow<typeof traceQueryRollup1m>;
+
+/**
  * Pre-materialized error spans for the errors page.
  * Pre-filters to StatusCode='Error' and pre-extracts deployment.environment
  * so error queries avoid scanning the full traces table and Map columns.

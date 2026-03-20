@@ -32,6 +32,10 @@ import {
 } from "@/lib/query-builder/model"
 import {
   getLogsFacetsResultAtom,
+  getResourceAttributeKeysResultAtom,
+  getResourceAttributeValuesResultAtom,
+  getSpanAttributeKeysResultAtom,
+  getSpanAttributeValuesResultAtom,
   getTracesFacetsResultAtom,
   listMetricsResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
@@ -316,6 +320,8 @@ export function WidgetQueryBuilderPage({
   )
   const [validationError, setValidationError] = React.useState<string | null>(null)
   const [collapsedQueries, setCollapsedQueries] = React.useState<Set<string>>(new Set())
+  const [activeAttributeKey, setActiveAttributeKey] = React.useState<string | null>(null)
+  const [activeResourceAttributeKey, setActiveResourceAttributeKey] = React.useState<string | null>(null)
 
   const metricsResult = useAtomValue(
     listMetricsResultAtom({ data: { limit: 300 } }),
@@ -327,6 +333,30 @@ export function WidgetQueryBuilderPage({
 
   const logsFacetsResult = useAtomValue(
     getLogsFacetsResultAtom({ data: {} }),
+  )
+
+  const spanAttributeKeysResult = useAtomValue(
+    getSpanAttributeKeysResultAtom({ data: {} }),
+  )
+
+  const spanAttributeValuesResult = useAtomValue(
+    getSpanAttributeValuesResultAtom({
+      data: {
+        attributeKey: activeAttributeKey ?? "",
+      },
+    }),
+  )
+
+  const resourceAttributeKeysResult = useAtomValue(
+    getResourceAttributeKeysResultAtom({ data: {} }),
+  )
+
+  const resourceAttributeValuesResult = useAtomValue(
+    getResourceAttributeValuesResultAtom({
+      data: {
+        attributeKey: activeResourceAttributeKey ?? "",
+      },
+    }),
   )
 
   const metricRows = React.useMemo(
@@ -371,6 +401,26 @@ export function WidgetQueryBuilderPage({
         severities: [],
       }))
 
+    const attributeKeys = Result.builder(spanAttributeKeysResult)
+      .onSuccess((response) => response.data.map((row) => row.attributeKey))
+      .orElse(() => [])
+
+    const attributeValues = activeAttributeKey
+      ? Result.builder(spanAttributeValuesResult)
+          .onSuccess((response) => response.data.map((row) => row.attributeValue))
+          .orElse(() => [])
+      : []
+
+    const resourceAttributeKeys = Result.builder(resourceAttributeKeysResult)
+      .onSuccess((response) => response.data.map((row) => row.attributeKey))
+      .orElse(() => [])
+
+    const resourceAttributeValues = activeResourceAttributeKey
+      ? Result.builder(resourceAttributeValuesResult)
+          .onSuccess((response) => response.data.map((row) => row.attributeValue))
+          .orElse(() => [])
+      : []
+
     const toNames = (items: Array<{ name: string }>): string[] => {
       const seen = new Set<string>()
       const values: string[] = []
@@ -394,6 +444,10 @@ export function WidgetQueryBuilderPage({
         services: toNames(tracesFacets.services),
         spanNames: toNames(tracesFacets.spanNames),
         environments: toNames(tracesFacets.deploymentEnvs),
+        attributeKeys,
+        attributeValues,
+        resourceAttributeKeys,
+        resourceAttributeValues,
       },
       logs: {
         services: toNames(logsFacets.services),
@@ -404,7 +458,17 @@ export function WidgetQueryBuilderPage({
         metricTypes: [...QUERY_BUILDER_METRIC_TYPES],
       },
     }
-  }, [logsFacetsResult, metricRows, tracesFacetsResult])
+  }, [
+    activeAttributeKey,
+    activeResourceAttributeKey,
+    logsFacetsResult,
+    metricRows,
+    resourceAttributeKeysResult,
+    resourceAttributeValuesResult,
+    spanAttributeKeysResult,
+    spanAttributeValuesResult,
+    tracesFacetsResult,
+  ])
 
   React.useEffect(() => {
     if (metricSelectionOptions.length === 0) return
@@ -631,6 +695,8 @@ export function WidgetQueryBuilderPage({
                     resetQueryForDataSource(current, ds)
                   )
                 }
+                onActiveAttributeKey={setActiveAttributeKey}
+                onActiveResourceAttributeKey={setActiveResourceAttributeKey}
               />
             ))}
           </div>

@@ -4,6 +4,8 @@ import {
   serviceMapSpans,
   serviceMapChildren,
   serviceOverviewSpans,
+  traceQueryRollup1m,
+  traceQuerySpans,
   errorSpans,
   traceListMv,
 } from "./datasources";
@@ -297,6 +299,76 @@ export const serviceOverviewSpansMv = defineMaterializedView(
     ],
   }
 );
+
+export const traceQuerySpansMv = defineMaterializedView("trace_query_spans_mv", {
+  description:
+    "Projects traces into a narrow span datasource for query-builder fast paths.",
+  datasource: traceQuerySpans,
+  nodes: [
+    node({
+      name: "trace_query_spans_mv_node",
+      sql: `
+        SELECT
+          OrgId,
+          toDateTime(Timestamp) AS Timestamp,
+          ParentSpanId,
+          ServiceName,
+          SpanName,
+          StatusCode,
+          Duration,
+          TraceState,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ResourceAttributes['deployment.commit_sha'] AS CommitSha,
+          if(SpanAttributes['http.method'] != '', SpanAttributes['http.method'], SpanAttributes['http.request.method']) AS HttpMethod,
+          if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], if(SpanAttributes['url.path'] != '', SpanAttributes['url.path'], SpanAttributes['http.target'])) AS HttpRoute,
+          SpanAttributes['peer.service'] AS PeerService
+        FROM traces
+      `,
+    }),
+  ],
+});
+
+export const traceQueryRollup1mMv = defineMaterializedView("trace_query_rollup_1m_mv", {
+  description:
+    "Aggregates 1-minute trace query-builder metrics from trace_query_spans.",
+  datasource: traceQueryRollup1m,
+  nodes: [
+    node({
+      name: "trace_query_rollup_1m_mv_node",
+      sql: `
+        SELECT
+          OrgId,
+          toStartOfMinute(Timestamp) AS Bucket,
+          ServiceName,
+          SpanName,
+          StatusCode,
+          HttpMethod,
+          HttpRoute,
+          PeerService,
+          DeploymentEnv,
+          CommitSha,
+          toUInt8(ParentSpanId = '') AS IsRoot,
+          count() AS SpanCount,
+          countIf(StatusCode = 'Error') AS ErrorCount,
+          sum(Duration) AS DurationSum,
+          count() AS DurationCount
+        FROM trace_query_spans
+        GROUP BY
+          OrgId,
+          Bucket,
+          ServiceName,
+          SpanName,
+          StatusCode,
+          HttpMethod,
+          HttpRoute,
+          PeerService,
+          DeploymentEnv,
+          CommitSha,
+          IsRoot
+      `,
+    }),
+  ],
+});
 
 /**
  * Materialized view populating trace_list_mv from root spans.

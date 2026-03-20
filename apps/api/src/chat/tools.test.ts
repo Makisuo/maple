@@ -71,6 +71,7 @@ const apiKeysStub: typeof ApiKeysService.Service = {
 
 const tinybirdStub: typeof TinybirdService.Service = {
   query: (_tenant, _payload) => unexpectedTinybirdCall(),
+  sql: (_tenant, _sql) => unexpectedTinybirdCall(),
   customTracesTimeseriesQuery: (_tenant, _params) => unexpectedTinybirdCall(),
   customTracesBreakdownQuery: (_tenant, _params) => unexpectedTinybirdCall(),
   customLogsTimeseriesQuery: (_tenant, _params) => unexpectedTinybirdCall(),

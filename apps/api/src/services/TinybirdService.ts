@@ -23,6 +23,10 @@ export interface TinybirdServiceShape {
     tenant: TenantContext,
     payload: TinybirdQueryRequest,
   ) => Effect.Effect<TinybirdQueryResponse, TinybirdQueryError>
+  readonly sql: (
+    tenant: TenantContext,
+    sql: string,
+  ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, Error>
   readonly customTracesTimeseriesQuery: (
     tenant: TenantContext,
     params: Omit<CustomTracesTimeseriesParams, "org_id">,
@@ -204,6 +208,12 @@ const createClient = (baseUrl: string, token: string): TinybirdClient =>
 
 let tinybirdClientFactory: typeof createClient = createClient
 
+interface TinybirdConnection {
+  readonly cacheKey: string
+  readonly host: string
+  readonly token: string
+}
+
 export class TinybirdService extends ServiceMap.Service<TinybirdService, TinybirdServiceShape>()("TinybirdService", {
   make: Effect.gen(function* () {
     const env = yield* Env
@@ -226,19 +236,41 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       return client
     }
 
-      const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
-        tenant: TenantContext,
-        pipe: TinybirdQueryRequest["pipe"],
-      ) {
+    const resolveConnection = Effect.fn("TinybirdService.resolveConnection")(function* (
+      tenant: TenantContext,
+    ) {
       const override = yield* orgTinybirdSettings
         .resolveRuntimeConfig(tenant.orgId)
-        .pipe(Effect.mapError((error) => toTinybirdQueryError(pipe, error)))
+        .pipe(Effect.mapError((error) => new Error(error instanceof Error ? error.message : "Failed to resolve Tinybird runtime config")))
 
       if (Option.isSome(override)) {
-        return getCachedOrCreateClient(tenant.orgId, override.value.host, override.value.token)
+        return {
+          cacheKey: tenant.orgId,
+          host: override.value.host,
+          token: override.value.token,
+        } satisfies TinybirdConnection
       }
 
-      return getCachedOrCreateClient("__managed__", env.TINYBIRD_HOST, Redacted.value(env.TINYBIRD_TOKEN))
+      return {
+        cacheKey: "__managed__",
+        host: env.TINYBIRD_HOST,
+        token: Redacted.value(env.TINYBIRD_TOKEN),
+      } satisfies TinybirdConnection
+    })
+
+    const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
+      tenant: TenantContext,
+      pipe: TinybirdQueryRequest["pipe"],
+    ) {
+      const connection = yield* resolveConnection(tenant).pipe(
+        Effect.mapError((error) => toTinybirdQueryError(pipe, error)),
+      )
+
+      return getCachedOrCreateClient(
+        connection.cacheKey,
+        connection.host,
+        connection.token,
+      )
     })
 
     const runPipe = Effect.fn("TinybirdService.runPipe")(function* <
@@ -300,6 +332,38 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       return new TinybirdQueryResponse({
         data: Array.from(result.data ?? []),
       })
+    })
+
+    const sql = Effect.fn("TinybirdService.sql")(function* (
+      tenant: TenantContext,
+      sql: string,
+    ) {
+      const connection = yield* resolveConnection(tenant)
+      const baseUrl = connection.host.replace(/\/+$/, "")
+
+      const response = yield* Effect.tryPromise({
+        try: async () => {
+          const res = await fetch(
+            `${baseUrl}/v0/sql?q=${encodeURIComponent(`${sql} FORMAT JSON`)}`,
+            {
+              headers: {
+                Authorization: `Bearer ${connection.token}`,
+              },
+            },
+          )
+
+          if (!res.ok) {
+            throw new Error(`Tinybird SQL error: ${res.status} ${res.statusText}`)
+          }
+
+          const json = (await res.json()) as { data?: ReadonlyArray<Record<string, unknown>> }
+          return Array.from(json.data ?? [])
+        },
+        catch: (error) =>
+          error instanceof Error ? error : new Error("Tinybird SQL query failed"),
+      })
+
+      return response
     })
 
     const customTracesTimeseriesQuery = Effect.fn("TinybirdService.customTracesTimeseriesQuery")(function* (
@@ -421,6 +485,7 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
 
     return {
       query,
+      sql,
       customTracesTimeseriesQuery,
       customTracesBreakdownQuery,
       customLogsTimeseriesQuery,

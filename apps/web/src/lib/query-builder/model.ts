@@ -1,4 +1,8 @@
-import type { QuerySpec } from "@maple/domain"
+import type { QueryBuilderRequest } from "@maple/domain"
+import {
+  QueryBuilderParseError,
+  parseFilterExpression,
+} from "@/lib/query-builder/filter-language"
 
 export type QueryBuilderDataSource = "traces" | "logs" | "metrics"
 export type QueryBuilderAddOnKey = "groupBy" | "having" | "orderBy" | "limit" | "legend"
@@ -24,19 +28,11 @@ export interface QueryBuilderQueryDraft {
   legend: string
 }
 
-interface ParsedClause {
-  key: string
-  value: string
-}
-
 export interface BuildSpecResult {
-  query: QuerySpec | null
+  query: QueryBuilderRequest | null
   warnings: string[]
   error: string | null
 }
-
-const TRUE_VALUES = new Set(["1", "true", "yes", "y"])
-const FALSE_VALUES = new Set(["0", "false", "no", "n"])
 
 export const AGGREGATIONS_BY_SOURCE: Record<
   QueryBuilderDataSource,
@@ -176,54 +172,27 @@ export function resetQueryForDataSource(
   }
 }
 
-function splitCsv(input: string): string[] {
-  return input
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
+function parsePositiveInteger(raw: string): number | undefined {
+  const parsed = Number.parseInt(raw.trim(), 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined
+  return parsed
 }
 
-function toBoolean(value: string): boolean | null {
-  const normalized = value.trim().toLowerCase()
-  if (TRUE_VALUES.has(normalized)) return true
-  if (FALSE_VALUES.has(normalized)) return false
-  return null
-}
+function normalizeGroupBy(
+  dataSource: QueryBuilderDataSource,
+  raw: string,
+): string[] | undefined {
+  const token = raw.trim().toLowerCase()
+  if (!token || token === "none" || token === "all") return undefined
 
-function parseWhereClause(expression: string): {
-  clauses: ParsedClause[]
-  warnings: string[]
-} {
-  const trimmed = expression.trim()
-  if (!trimmed) {
-    return { clauses: [], warnings: [] }
+  if (dataSource === "traces") {
+    if (token === "service") return ["service.name"]
+    if (token === "span") return ["span.name"]
+    if (token === "status") return ["status.code"]
   }
 
-  const parts = trimmed
-    .split(/\s+AND\s+/i)
-    .map((part) => part.trim())
-    .filter(Boolean)
-
-  const clauses: ParsedClause[] = []
-  const warnings: string[] = []
-
-  for (const part of parts) {
-    const match = part.match(
-      /^([a-zA-Z0-9_.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/
-    )
-
-    if (!match) {
-      warnings.push(`Unsupported clause syntax ignored: ${part}`)
-      continue
-    }
-
-    clauses.push({
-      key: match[1].trim().toLowerCase(),
-      value: (match[2] ?? match[3] ?? match[4] ?? "").trim(),
-    })
-  }
-
-  return { clauses, warnings }
+  if (token === "service") return ["service.name"]
+  return [token]
 }
 
 function parseBucketSeconds(raw: string): number | undefined {
@@ -264,13 +233,61 @@ export function buildTimeseriesQuerySpec(
   query: QueryBuilderQueryDraft
 ): BuildSpecResult {
   const warnings: string[] = []
-  const { clauses, warnings: parseWarnings } = parseWhereClause(query.whereClause)
-  warnings.push(...parseWarnings)
+  let filters: QueryBuilderRequest["filters"] | undefined
+  let having: QueryBuilderRequest["having"] | undefined
 
   const bucketSeconds = parseBucketSeconds(query.stepInterval)
   if (query.stepInterval.trim() && !bucketSeconds) {
     warnings.push("Invalid step interval ignored; auto interval will be used")
   }
+
+  try {
+    filters = parseFilterExpression(query.whereClause) ?? undefined
+  } catch (error) {
+    if (error instanceof QueryBuilderParseError) {
+      return {
+        query: null,
+        warnings,
+        error: `Where clause parse error at ${error.index + 1}: ${error.message}`,
+      }
+    }
+    throw error
+  }
+
+  if (query.addOns.having && query.having.trim()) {
+    try {
+      having = parseFilterExpression(query.having) ?? undefined
+    } catch (error) {
+      if (error instanceof QueryBuilderParseError) {
+        return {
+          query: null,
+          warnings,
+          error: `Having parse error at ${error.index + 1}: ${error.message}`,
+        }
+      }
+      throw error
+    }
+  }
+
+  const groupBy = query.addOns.groupBy
+    ? normalizeGroupBy(query.dataSource, query.groupBy)
+    : undefined
+  const limit = query.addOns.limit ? parsePositiveInteger(query.limit) : undefined
+  if (query.addOns.limit && query.limit.trim() && !limit) {
+    return {
+      query: null,
+      warnings,
+      error: "Limit must be a positive integer",
+    }
+  }
+
+  const orderBy =
+    query.addOns.orderBy && query.orderBy.trim()
+      ? {
+          field: query.orderBy.trim().toLowerCase(),
+          direction: query.orderByDirection,
+        }
+      : undefined
 
   if (query.dataSource === "traces") {
     const allowedMetrics = new Set([
@@ -290,142 +307,19 @@ export function buildTimeseriesQuerySpec(
       }
     }
 
-    const filters: {
-      serviceName?: string
-      spanName?: string
-      rootSpansOnly?: boolean
-      environments?: string[]
-      commitShas?: string[]
-      attributeKey?: string
-      attributeValue?: string
-      resourceAttributeKey?: string
-      resourceAttributeValue?: string
-    } = {}
-
-    for (const clause of clauses) {
-      if (clause.key === "service" || clause.key === "service.name") {
-        filters.serviceName = clause.value
-        continue
-      }
-
-      if (clause.key === "span" || clause.key === "span.name") {
-        filters.spanName = clause.value
-        continue
-      }
-
-      if (
-        clause.key === "deployment.environment" ||
-        clause.key === "environment" ||
-        clause.key === "env"
-      ) {
-        filters.environments = splitCsv(clause.value)
-        continue
-      }
-
-      if (
-        clause.key === "deployment.commit_sha" ||
-        clause.key === "commit_sha"
-      ) {
-        filters.commitShas = splitCsv(clause.value)
-        continue
-      }
-
-      if (clause.key === "root_only" || clause.key === "root.only") {
-        const boolValue = toBoolean(clause.value)
-        if (boolValue == null) {
-          warnings.push(`Invalid root_only value ignored: ${clause.value}`)
-        } else {
-          filters.rootSpansOnly = boolValue
-        }
-        continue
-      }
-
-      if (clause.key.startsWith("attr.")) {
-        const attributeKey = clause.key.slice(5)
-        if (!filters.attributeKey) {
-          filters.attributeKey = attributeKey
-          filters.attributeValue = clause.value
-        } else {
-          warnings.push(
-            `Multiple attr.* filters found; only ${filters.attributeKey} is used`
-          )
-        }
-        continue
-      }
-
-      if (clause.key.startsWith("resource.")) {
-        const resourceKey = clause.key.slice(9)
-        if (!filters.resourceAttributeKey) {
-          filters.resourceAttributeKey = resourceKey
-          filters.resourceAttributeValue = clause.value
-        } else {
-          warnings.push(
-            `Multiple resource.* filters found; only ${filters.resourceAttributeKey} is used`
-          )
-        }
-        continue
-      }
-
-      warnings.push(`Unsupported traces filter ignored: ${clause.key}`)
-    }
-
-    let groupBy:
-      | "service"
-      | "span_name"
-      | "status_code"
-      | "http_method"
-      | "attribute"
-      | "none"
-      | undefined
-
-    if (query.addOns.groupBy && query.groupBy.trim()) {
-      const token = query.groupBy.trim().toLowerCase()
-      if (token === "service" || token === "service.name") {
-        groupBy = "service"
-      } else if (token === "span" || token === "span.name") {
-        groupBy = "span_name"
-      } else if (token === "status" || token === "status.code") {
-        groupBy = "status_code"
-      } else if (token === "http.method") {
-        groupBy = "http_method"
-      } else if (token === "none" || token === "all") {
-        groupBy = "none"
-      } else if (token.startsWith("attr.")) {
-        const attributeKey = token.slice(5)
-        if (!attributeKey) {
-          warnings.push("Invalid attr.* group by ignored")
-        } else {
-          groupBy = "attribute"
-          filters.attributeKey = filters.attributeKey ?? attributeKey
-        }
-      } else {
-        warnings.push(`Unsupported traces group by ignored: ${query.groupBy}`)
-      }
-    }
-
-    if (groupBy === "attribute" && !filters.attributeKey) {
-      return {
-        query: null,
-        warnings,
-        error: "groupBy=attribute requires attr.<key> in Group By or Where clause",
-      }
-    }
-
     return {
       query: {
         kind: "timeseries",
-        source: "traces",
-        metric: query.aggregation as
-          | "count"
-          | "avg_duration"
-          | "p50_duration"
-          | "p95_duration"
-          | "p99_duration"
-          | "error_rate",
+        signal: "traces",
+        metric: query.aggregation,
+        filters,
+        having,
         groupBy,
-        filters: Object.keys(filters).length ? filters : undefined,
+        orderBy,
+        limit,
         bucketSeconds,
-      } as QuerySpec,
+        allowSlowPath: true,
+      } satisfies QueryBuilderRequest,
       warnings,
       error: null,
     }
@@ -440,49 +334,19 @@ export function buildTimeseriesQuerySpec(
       }
     }
 
-    const filters: {
-      serviceName?: string
-      severity?: string
-    } = {}
-
-    for (const clause of clauses) {
-      if (clause.key === "service" || clause.key === "service.name") {
-        filters.serviceName = clause.value
-        continue
-      }
-
-      if (clause.key === "severity") {
-        filters.severity = clause.value
-        continue
-      }
-
-      warnings.push(`Unsupported logs filter ignored: ${clause.key}`)
-    }
-
-    let groupBy: "service" | "severity" | "none" | undefined
-
-    if (query.addOns.groupBy && query.groupBy.trim()) {
-      const token = query.groupBy.trim().toLowerCase()
-      if (token === "service" || token === "service.name") {
-        groupBy = "service"
-      } else if (token === "severity") {
-        groupBy = "severity"
-      } else if (token === "none" || token === "all") {
-        groupBy = "none"
-      } else {
-        warnings.push(`Unsupported logs group by ignored: ${query.groupBy}`)
-      }
-    }
-
     return {
       query: {
         kind: "timeseries",
-        source: "logs",
+        signal: "logs",
         metric: "count",
+        filters,
+        having,
         groupBy,
-        filters: Object.keys(filters).length ? filters : undefined,
+        orderBy,
+        limit,
         bucketSeconds,
-      } as QuerySpec,
+        allowSlowPath: true,
+      } satisfies QueryBuilderRequest,
       warnings,
       error: null,
     }
@@ -505,54 +369,21 @@ export function buildTimeseriesQuerySpec(
     }
   }
 
-  const filters: {
-    metricName: string
-    metricType: QueryBuilderMetricType
-    serviceName?: string
-  } = {
-    metricName: query.metricName,
-    metricType: query.metricType,
-  }
-
-  for (const clause of clauses) {
-    if (clause.key === "service" || clause.key === "service.name") {
-      filters.serviceName = clause.value
-      continue
-    }
-
-    if (clause.key === "metric.type") {
-      if (QUERY_BUILDER_METRIC_TYPES.includes(clause.value as QueryBuilderMetricType)) {
-        filters.metricType = clause.value as QueryBuilderMetricType
-      } else {
-        warnings.push(`Invalid metric.type ignored: ${clause.value}`)
-      }
-      continue
-    }
-
-    warnings.push(`Unsupported metrics filter ignored: ${clause.key}`)
-  }
-
-  let groupBy: "service" | "none" | undefined
-  if (query.addOns.groupBy && query.groupBy.trim()) {
-    const token = query.groupBy.trim().toLowerCase()
-    if (token === "service" || token === "service.name") {
-      groupBy = "service"
-    } else if (token === "none" || token === "all") {
-      groupBy = "none"
-    } else {
-      warnings.push(`Unsupported metrics group by ignored: ${query.groupBy}`)
-    }
-  }
-
   return {
     query: {
       kind: "timeseries",
-      source: "metrics",
-      metric: query.aggregation as "avg" | "sum" | "min" | "max" | "count",
-      groupBy,
+      signal: "metrics",
+      metric: query.aggregation,
+      metricName: query.metricName,
+      metricType: query.metricType,
       filters,
+      having,
+      groupBy,
+      orderBy,
+      limit,
       bucketSeconds,
-    } as QuerySpec,
+      allowSlowPath: true,
+    } satisfies QueryBuilderRequest,
     warnings,
     error: null,
   }
