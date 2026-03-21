@@ -92,6 +92,42 @@ export const statPresets: WidgetPresetDefinition[] = [
     },
   },
   {
+    id: "stat-root-error-rate",
+    name: "Root Error Rate",
+    description: "Error rate for root spans only",
+    icon: AlertWarningIcon,
+    visualization: "stat",
+    dataSource: {
+      endpoint: "errors_summary",
+      params: { rootOnly: true },
+      transform: {
+        reduceToValue: { field: "errorRate", aggregate: "first" },
+      },
+    },
+    display: {
+      title: "Root Error Rate",
+      unit: "percent",
+    },
+  },
+  {
+    id: "stat-root-total-errors",
+    name: "Root Errors",
+    description: "Total number of errors on root spans",
+    icon: XmarkIcon,
+    visualization: "stat",
+    dataSource: {
+      endpoint: "errors_summary",
+      params: { rootOnly: true },
+      transform: {
+        reduceToValue: { field: "totalErrors", aggregate: "first" },
+      },
+    },
+    display: {
+      title: "Root Errors",
+      unit: "number",
+    },
+  },
+  {
     id: "stat-total-services",
     name: "Active Services",
     description: "Number of active services",
@@ -142,6 +178,25 @@ export const tablePresets: WidgetPresetDefinition[] = [
     },
     display: {
       title: "Errors by Type",
+      columns: [
+        { field: "errorType", header: "Error Type" },
+        { field: "count", header: "Count", unit: "number", align: "right" },
+        { field: "affectedServicesCount", header: "Services", align: "right" },
+      ],
+    },
+  },
+  {
+    id: "table-root-errors",
+    name: "Root Errors by Type",
+    description: "Error types on root spans only",
+    visualization: "table",
+    dataSource: {
+      endpoint: "errors_by_type",
+      params: { limit: 5, rootOnly: true },
+      transform: { limit: 5 },
+    },
+    display: {
+      title: "Root Errors by Type",
       columns: [
         { field: "errorType", header: "Error Type" },
         { field: "count", header: "Count", unit: "number", align: "right" },

@@ -268,6 +268,7 @@ export const errorSpans = defineDatasource("error_spans", {
     Timestamp: t.dateTime(),
     TraceId: t.string(),
     SpanId: t.string(),
+    ParentSpanId: t.string().default("__unset__"),
     ServiceName: t.string().lowCardinality(),
     StatusMessage: t.string(),
     Duration: t.uint64(),

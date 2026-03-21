@@ -36,6 +36,7 @@ const GetErrorsByTypeInputSchema = Schema.Struct({
   errorTypes: OptionalStringArray,
   limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
   showSpam: Schema.optional(Schema.Boolean),
+  rootOnly: Schema.optional(Schema.Boolean),
 })
 
 export type GetErrorsByTypeInput = Schema.Schema.Type<typeof GetErrorsByTypeInputSchema>
@@ -76,6 +77,7 @@ const getErrorsByTypeEffect = Effect.fn("Tinybird.getErrorsByType")(function* ({
         error_types: input.errorTypes?.join(","),
         limit: input.limit,
         exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+        root_only: input.rootOnly ? "1" : undefined,
       }),
     )
 
@@ -106,6 +108,7 @@ const GetErrorsFacetsInputSchema = Schema.Struct({
   deploymentEnvs: OptionalStringArray,
   errorTypes: OptionalStringArray,
   showSpam: Schema.optional(Schema.Boolean),
+  rootOnly: Schema.optional(Schema.Boolean),
 })
 
 export type GetErrorsFacetsInput = Schema.Schema.Type<typeof GetErrorsFacetsInputSchema>
@@ -157,6 +160,7 @@ const getErrorsFacetsEffect = Effect.fn("Tinybird.getErrorsFacets")(function* ({
         deployment_envs: input.deploymentEnvs?.join(","),
         error_types: input.errorTypes?.join(","),
         exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+        root_only: input.rootOnly ? "1" : undefined,
       }),
     )
 
@@ -184,6 +188,7 @@ const GetErrorsSummaryInputSchema = Schema.Struct({
   deploymentEnvs: OptionalStringArray,
   errorTypes: OptionalStringArray,
   showSpam: Schema.optional(Schema.Boolean),
+  rootOnly: Schema.optional(Schema.Boolean),
 })
 
 export type GetErrorsSummaryInput = Schema.Schema.Type<typeof GetErrorsSummaryInputSchema>
@@ -222,6 +227,7 @@ const getErrorsSummaryEffect = Effect.fn("Tinybird.getErrorsSummary")(function* 
         deployment_envs: input.deploymentEnvs?.join(","),
         error_types: input.errorTypes?.join(","),
         exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+        root_only: input.rootOnly ? "1" : undefined,
       }),
     )
 
@@ -252,6 +258,7 @@ const GetErrorDetailTracesInputSchema = Schema.Struct({
   services: OptionalStringArray,
   limit: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
   showSpam: Schema.optional(Schema.Boolean),
+  rootOnly: Schema.optional(Schema.Boolean),
 })
 
 export type GetErrorDetailTracesInput = Schema.Schema.Type<typeof GetErrorDetailTracesInputSchema>
@@ -296,6 +303,7 @@ const getErrorDetailTracesEffect = Effect.fn("Tinybird.getErrorDetailTraces")(fu
         services: input.services?.join(","),
         limit: input.limit,
         exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+        root_only: input.rootOnly ? "1" : undefined,
       }),
     )
 

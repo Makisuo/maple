@@ -1,6 +1,7 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
+import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { DashboardList } from "@/components/dashboard-builder/list/dashboard-list"
@@ -13,6 +14,7 @@ import {
   DashboardTimeRangeProvider,
 } from "@/components/dashboard-builder/dashboard-providers"
 import type {
+  Dashboard,
   VisualizationType,
   WidgetDataSource,
   WidgetDisplayConfig,
@@ -20,7 +22,7 @@ import type {
 } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { DashboardAiPanel } from "@/components/dashboard-builder/ai"
-import { PlusIcon } from "@/components/icons"
+import { PlusIcon, UploadIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 
 const dashboardsSearchSchema = Schema.Struct({
@@ -42,6 +44,7 @@ function DashboardsPage() {
     readOnly,
     persistenceError,
     createDashboard,
+    importDashboard,
     updateDashboard,
     deleteDashboard,
     updateDashboardTimeRange,
@@ -59,11 +62,52 @@ function DashboardsPage() {
   const [configureWidgetId, setConfigureWidgetId] = useState<string | null>(null)
   const [configureOpen, setConfigureOpen] = useState(false)
   const [aiPanelOpen, setAiPanelOpen] = useState(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   const activeDashboardId = search.dashboardId
   const activeDashboard = dashboards.find((d) => d.id === activeDashboardId)
 
   const effectiveMode: WidgetMode = readOnly ? "view" : mode
+
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    // Reset so the same file can be re-imported
+    event.target.value = ""
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result as string)
+
+        // Validate required fields
+        if (
+          typeof parsed.name !== "string" ||
+          !Array.isArray(parsed.widgets) ||
+          typeof parsed.timeRange !== "object" ||
+          parsed.timeRange === null
+        ) {
+          toast.error("Invalid dashboard file")
+          return
+        }
+
+        const imported: Omit<Dashboard, "id" | "createdAt" | "updatedAt"> = {
+          name: parsed.name,
+          description: parsed.description,
+          tags: parsed.tags,
+          timeRange: parsed.timeRange,
+          widgets: parsed.widgets,
+        }
+
+        const dashboard = importDashboard(imported)
+        navigate({ search: { dashboardId: dashboard.id } })
+        toast.success(`Dashboard "${dashboard.name}" imported`)
+      } catch {
+        toast.error("Failed to parse dashboard file")
+      }
+    }
+    reader.readAsText(file)
+  }
 
   const handleCreate = () => {
     if (readOnly) return
@@ -209,6 +253,7 @@ function DashboardsPage() {
             <DashboardToolbar
               mode={effectiveMode}
               readOnly={readOnly}
+              dashboard={activeDashboard}
               onToggleEdit={() =>
                 setMode((current) => (current === "edit" ? "view" : "edit"))
               }
@@ -290,14 +335,32 @@ function DashboardsPage() {
       title="Dashboards"
       description="Create and manage custom dashboards."
       headerActions={
-        <Button
-          size="sm"
-          disabled={readOnly}
-          onClick={handleCreate}
-        >
-          <PlusIcon size={14} data-icon="inline-start" />
-          Create Dashboard
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={readOnly}
+            onClick={() => importInputRef.current?.click()}
+          >
+            <UploadIcon size={14} data-icon="inline-start" />
+            Import
+          </Button>
+          <Button
+            size="sm"
+            disabled={readOnly}
+            onClick={handleCreate}
+          >
+            <PlusIcon size={14} data-icon="inline-start" />
+            Create Dashboard
+          </Button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleImport}
+          />
+        </div>
       }
     >
       {persistenceError && (

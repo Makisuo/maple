@@ -1698,6 +1698,7 @@ export const errorsByType = defineEndpoint("errors_by_type", {
     error_types: p.string().optional().describe("Comma-separated list of error types to filter"),
     limit: p.int32().optional(50).describe("Maximum number of results"),
     exclude_spam_patterns: p.string().optional().describe("Comma-separated spam patterns to exclude"),
+    root_only: p.string().optional().describe("Filter to root error spans only"),
   },
   nodes: [
     node({
@@ -1712,6 +1713,7 @@ export const errorsByType = defineEndpoint("errors_by_type", {
           max(Timestamp) AS lastSeen
         FROM error_spans
         WHERE OrgId = {{String(org_id, "")}}
+        {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1767,6 +1769,7 @@ export const errorDetailTraces = defineEndpoint("error_detail_traces", {
     services: p.string().optional().describe("Comma-separated list of services to filter"),
     limit: p.int32().optional(10).describe("Maximum number of sample traces"),
     exclude_spam_patterns: p.string().optional().describe("Comma-separated spam patterns to exclude"),
+    root_only: p.string().optional().describe("Filter to root error spans only"),
   },
   nodes: [
     node({
@@ -1776,6 +1779,7 @@ export const errorDetailTraces = defineEndpoint("error_detail_traces", {
         FROM error_spans
         WHERE OrgId = {{String(org_id, "")}}
         AND ${ERROR_FINGERPRINT_SQL} = {{String(error_type)}}
+        {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1861,6 +1865,7 @@ export const errorsFacets = defineEndpoint("errors_facets", {
     deployment_envs: p.string().optional().describe("Comma-separated list of environments to filter"),
     error_types: p.string().optional().describe("Comma-separated list of error types to filter"),
     exclude_spam_patterns: p.string().optional().describe("Comma-separated spam patterns to exclude"),
+    root_only: p.string().optional().describe("Filter to root error spans only"),
   },
   nodes: [
     node({
@@ -1872,6 +1877,7 @@ export const errorsFacets = defineEndpoint("errors_facets", {
           ${ERROR_FINGERPRINT_SQL} AS errorType
         FROM error_spans
         WHERE OrgId = {{String(org_id, "")}}
+        {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1982,6 +1988,7 @@ export const errorsSummary = defineEndpoint("errors_summary", {
     deployment_envs: p.string().optional().describe("Comma-separated list of environments to filter"),
     error_types: p.string().optional().describe("Comma-separated list of error types to filter"),
     exclude_spam_patterns: p.string().optional().describe("Comma-separated spam patterns to exclude"),
+    root_only: p.string().optional().describe("Filter to root error spans only"),
   },
   nodes: [
     node({
@@ -1993,6 +2000,7 @@ export const errorsSummary = defineEndpoint("errors_summary", {
           uniq(TraceId) AS affectedTracesCount
         FROM error_spans
         WHERE OrgId = {{String(org_id, "")}}
+        {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}

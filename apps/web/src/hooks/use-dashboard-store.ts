@@ -186,6 +186,35 @@ export function useDashboardStore() {
 
   const isLoading = !isHydrated && Result.isInitial(listResult)
 
+  const importDashboard = useCallback(
+    (imported: Omit<Dashboard, "id" | "createdAt" | "updatedAt">): Dashboard => {
+      if (readOnly) {
+        throw new Error("Dashboards are read-only")
+      }
+
+      const now = new Date().toISOString()
+      const dashboard: Dashboard = {
+        ...imported,
+        id: generateId(),
+        widgets: imported.widgets.map((w) => ({
+          ...w,
+          id: generateId(),
+        })),
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      setDashboards((previous) => {
+        const next = [...previous, dashboard]
+        persistUpsert(previous, dashboard)
+        return next
+      })
+
+      return dashboard
+    },
+    [persistUpsert, readOnly],
+  )
+
   const createDashboard = useCallback(
     (name: string): Dashboard => {
       if (readOnly) {
@@ -459,6 +488,7 @@ export function useDashboardStore() {
     readOnly,
     persistenceError,
     createDashboard,
+    importDashboard,
     updateDashboard,
     deleteDashboard,
     updateDashboardTimeRange,

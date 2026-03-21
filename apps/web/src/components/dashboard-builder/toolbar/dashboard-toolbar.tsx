@@ -1,14 +1,21 @@
-import { PlusIcon, PencilIcon, CheckIcon, GridIcon, ChatBubbleSparkleIcon } from "@/components/icons"
+import { PlusIcon, PencilIcon, CheckIcon, GridIcon, ChatBubbleSparkleIcon, DotsVerticalIcon, DownloadIcon } from "@/components/icons"
 
 import { Button } from "@maple/ui/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@maple/ui/components/ui/dropdown-menu"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { relativeToAbsolute } from "@/lib/time-utils"
-import type { TimeRange, WidgetMode } from "@/components/dashboard-builder/types"
+import type { Dashboard, TimeRange, WidgetMode } from "@/components/dashboard-builder/types"
 
 interface DashboardToolbarProps {
   mode: WidgetMode
   readOnly?: boolean
+  dashboard: Dashboard
   onToggleEdit: () => void
   onAddWidget: () => void
   onAutoLayout: () => void
@@ -28,9 +35,24 @@ function resolveForPicker(timeRange: TimeRange): {
     : {}
 }
 
+function exportDashboard(dashboard: Dashboard) {
+  const { id: _, createdAt: __, updatedAt: ___, ...exportData } = dashboard
+  const json = JSON.stringify(exportData, null, 2)
+  const blob = new Blob([json], { type: "application/json" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = `${dashboard.name.replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "dashboard"}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 export function DashboardToolbar({
   mode,
   readOnly = false,
+  dashboard,
   onToggleEdit,
   onAddWidget,
   onAutoLayout,
@@ -93,6 +115,19 @@ export function DashboardToolbar({
         {mode === "edit" ? <CheckIcon size={14} data-icon="inline-start" /> : <PencilIcon size={14} data-icon="inline-start" />}
         {mode === "edit" ? "Done" : "Edit"}
       </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<Button variant="ghost" size="icon-xs" />}
+        >
+          <DotsVerticalIcon size={16} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[160px]">
+          <DropdownMenuItem onClick={() => exportDashboard(dashboard)} className="whitespace-nowrap">
+            <DownloadIcon size={14} />
+            Export as JSON
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }

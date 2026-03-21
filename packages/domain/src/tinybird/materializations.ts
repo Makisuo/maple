@@ -356,6 +356,7 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
           toDateTime(Timestamp) AS Timestamp,
           TraceId,
           SpanId,
+          ParentSpanId,
           ServiceName,
           StatusMessage,
           Duration,
