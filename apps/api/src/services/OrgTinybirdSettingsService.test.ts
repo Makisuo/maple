@@ -330,8 +330,8 @@ describe("OrgTinybirdSettingsService", () => {
     })
   })
 
-  it("fails runtime resolution when the bundled Tinybird revision changes without mutating the stored config", async () => {
-    const { url, dbPath } = createTempDbUrl()
+  it("allows runtime resolution when the bundled Tinybird revision is outdated (graceful degradation)", async () => {
+    const { url } = createTempDbUrl()
     __testables.setSyncProjectImpl(async () => ({
       projectRevision: "rev-1",
       result: "success",
@@ -353,40 +353,15 @@ describe("OrgTinybirdSettingsService", () => {
     )
 
     __testables.setGetProjectRevisionImpl(async () => "rev-2")
-    let syncCalls = 0
-    __testables.setSyncProjectImpl(async () => {
-      syncCalls += 1
-      throw new Error("runtime sync should not execute")
-    })
 
-    const exit = await Effect.runPromiseExit(
+    const result = await Effect.runPromise(
       OrgTinybirdSettingsService.resolveRuntimeConfig(asOrgId("org_a")).pipe(
         Effect.provide(layer),
       ),
     )
 
-    expect(getError(exit)).toBeInstanceOf(OrgTinybirdSettingsSyncError)
-    const error = getError(exit) as OrgTinybirdSettingsSyncError
-    expect(error.message).toContain("Please resync the project in settings")
-    expect(syncCalls).toBe(0)
-
-    const db = new Database(dbPath, { readonly: true })
-    const row = db
-      .query("SELECT sync_status, last_sync_error, project_revision FROM org_tinybird_settings WHERE org_id = ?")
-      .get("org_a") as
-      | {
-          sync_status: string
-          last_sync_error: string | null
-          project_revision: string
-        }
-      | undefined
-    db.close()
-
-    expect(row).toEqual({
-      sync_status: "active",
-      last_sync_error: null,
-      project_revision: "rev-1",
-    })
+    expect(Option.isSome(result)).toBe(true)
+    expect(result.pipe(Option.map((c) => c.host), Option.getOrElse(() => ""))).toBe("https://customer.tinybird.co")
   })
 
   it("reports stored error states without masking them as out_of_sync", async () => {

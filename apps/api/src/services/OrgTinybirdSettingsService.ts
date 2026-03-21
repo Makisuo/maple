@@ -426,19 +426,13 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
           return Option.none<RuntimeTinybirdConfig>()
         }
 
+        // Don't block on revision mismatch — the old schema is usually good enough.
+        // Individual queries may fail on missing columns, but that's better than
+        // blocking everything until the user manually resyncs.
         if (row.value.syncStatus !== "active") {
           return yield* Effect.fail(
             new OrgTinybirdSettingsSyncError({
               message: row.value.lastSyncError ?? "BYO Tinybird is configured but not healthy",
-            }),
-          )
-        }
-
-        const currentRevision = yield* getCurrentProjectRevision()
-        if (row.value.projectRevision !== currentRevision) {
-          return yield* Effect.fail(
-            new OrgTinybirdSettingsSyncError({
-              message: OUT_OF_SYNC_MESSAGE,
             }),
           )
         }
