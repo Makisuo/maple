@@ -576,5 +576,5 @@ export class QueryEngineService extends ServiceMap.Service<QueryEngineService, Q
     }
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(TinybirdService.layer))
+  static readonly layer = Layer.effect(this, this.make)
 }

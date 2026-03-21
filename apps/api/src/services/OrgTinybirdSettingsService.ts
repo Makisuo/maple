@@ -24,7 +24,7 @@ import {
   parseBase64Aes256GcmKey,
   type EncryptedValue,
 } from "./Crypto"
-import { Database, DatabaseLive } from "./DatabaseLive"
+import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
 
 interface RuntimeTinybirdConfig {
@@ -147,36 +147,43 @@ const decryptToken = (
 const normalizeHost = (
   raw: string,
 ): Effect.Effect<string, OrgTinybirdSettingsValidationError> =>
-  Effect.try({
-    try: () => {
-      const trimmed = raw.trim()
-      if (trimmed.length === 0) {
-        throw new Error("Tinybird host is required")
-      }
+  Effect.sync(() => raw.trim()).pipe(
+    Effect.flatMap((trimmed) =>
+      Effect.try({
+        try: () => {
+          if (trimmed.length === 0) {
+            throw new Error("Tinybird host is required")
+          }
 
-      const url = new URL(trimmed)
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        throw new Error("Tinybird host must use http or https")
-      }
+          const url = new URL(trimmed)
+          if (url.protocol !== "http:" && url.protocol !== "https:") {
+            throw new Error("Tinybird host must use http or https")
+          }
 
-      return trimmed.replace(/\/+$/, "")
-    },
-    catch: (error) =>
-      new OrgTinybirdSettingsValidationError({
-        message: error instanceof Error ? error.message : "Invalid Tinybird host",
+          return trimmed.replace(/\/+$/, "")
+        },
+        catch: (error) =>
+          new OrgTinybirdSettingsValidationError({
+            message: error instanceof Error ? error.message : "Invalid Tinybird host",
+          }),
       }),
-  })
+    ),
+  )
 
 const normalizeToken = (
   raw: string,
-): Effect.Effect<string, OrgTinybirdSettingsValidationError> => {
-  const trimmed = raw.trim()
-  if (trimmed.length === 0) {
-    return Effect.fail(new OrgTinybirdSettingsValidationError({ message: "Tinybird token is required" }))
-  }
-
-  return Effect.succeed(trimmed)
-}
+): Effect.Effect<string, OrgTinybirdSettingsValidationError> =>
+  Effect.sync(() => raw.trim()).pipe(
+    Effect.flatMap((trimmed) =>
+      trimmed.length > 0
+        ? Effect.succeed(trimmed)
+        : Effect.fail(
+            new OrgTinybirdSettingsValidationError({
+              message: "Tinybird token is required",
+            }),
+          ),
+    ),
+  )
 
 const isOrgAdmin = (roles: ReadonlyArray<RoleName>) =>
   roles.includes("root" as RoleName) || roles.includes("org:admin" as RoleName)
@@ -331,7 +338,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
                   updatedBy: userId,
                 })
                 .where(eq(orgTinybirdSettings.orgId, orgId)),
-            ).pipe(Effect.ignore),
+            ).pipe(Effect.mapError(toPersistenceError), Effect.ignore),
           ),
         )
         const encryptedToken = yield* encryptToken(token, encryptionKey)
@@ -422,7 +429,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
                   updatedBy: userId,
                 })
                 .where(eq(orgTinybirdSettings.orgId, orgId)),
-            ).pipe(Effect.ignore),
+            ).pipe(Effect.mapError(toPersistenceError), Effect.ignore),
           ),
         )
         const now = Date.now()
@@ -572,10 +579,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(DatabaseLive),
-    Layer.provide(Env.layer),
-  )
+  static readonly layer = Layer.effect(this, this.make)
   static readonly Live = this.layer
   static readonly Default = this.layer
 

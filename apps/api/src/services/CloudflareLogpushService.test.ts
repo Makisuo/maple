@@ -12,6 +12,7 @@ import {
   OrgId,
   UserId,
 } from "@maple/domain/http";
+import { Database as DatabaseService } from "./DatabaseLive";
 import { Env } from "./Env";
 import { CloudflareLogpushService } from "./CloudflareLogpushService";
 
@@ -59,6 +60,7 @@ const makeConfigProvider = (
 
 const makeLayer = (url: string, ingestPublicUrl?: string) =>
   CloudflareLogpushService.Live.pipe(
+    Layer.provide(DatabaseService.Default),
     Layer.provide(Env.Default),
     Layer.provide(makeConfigProvider(url, ingestPublicUrl)),
   );

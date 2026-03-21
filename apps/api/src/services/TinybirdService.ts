@@ -433,10 +433,7 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
     } satisfies TinybirdServiceShape
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(OrgTinybirdSettingsService.layer),
-    Layer.provide(Env.layer),
-  )
+  static readonly layer = Layer.effect(this, this.make)
   static readonly Live = this.layer
   static readonly Default = this.layer
 

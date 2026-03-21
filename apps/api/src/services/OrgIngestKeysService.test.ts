@@ -11,6 +11,7 @@ import {
   UserId,
 } from "@maple/domain/http"
 import { hashIngestKey } from "@maple/db"
+import { Database as DatabaseService } from "./DatabaseLive"
 import { Env } from "./Env"
 import { OrgIngestKeysService } from "./OrgIngestKeysService"
 
@@ -69,6 +70,7 @@ const makeConfigProvider = (
 
 const makeLayer = (url: string, encryptionKey = Buffer.alloc(32, 7).toString("base64")) =>
   OrgIngestKeysService.Live.pipe(
+    Layer.provide(DatabaseService.Default),
     Layer.provide(Env.Default),
     Layer.provide(makeConfigProvider(url, encryptionKey)),
   )
@@ -330,6 +332,7 @@ describe("OrgIngestKeysService", () => {
   it("fails when encryption key config is missing", async () => {
     const { url } = createTempDbUrl()
     const layer = OrgIngestKeysService.Live.pipe(
+      Layer.provide(DatabaseService.Default),
       Layer.provide(Env.Default),
       Layer.provide(makeConfigProvider(url)),
     )

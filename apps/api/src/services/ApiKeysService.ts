@@ -18,7 +18,7 @@ import {
 } from "@maple/db"
 import { and, desc, eq } from "drizzle-orm"
 import { Effect, Layer, Option, Redacted, Schema, ServiceMap } from "effect"
-import { Database, DatabaseLive } from "./DatabaseLive"
+import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
 
 export interface ResolvedApiKey {
@@ -211,8 +211,5 @@ export class ApiKeysService extends ServiceMap.Service<ApiKeysService>()(
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(DatabaseLive),
-    Layer.provide(Env.layer),
-  )
+  static readonly layer = Layer.effect(this, this.make)
 }

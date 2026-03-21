@@ -12,11 +12,8 @@ import {
 import { dashboards } from "@maple/db"
 import { and, desc, eq } from "drizzle-orm"
 import { Effect, Layer, Option, Schema, ServiceMap } from "effect"
-import { Database, DatabaseLive } from "./DatabaseLive"
+import { Database } from "./DatabaseLive"
 
-const decodeDashboardDocumentSync = Schema.decodeUnknownSync(
-  Schema.Array(DashboardDocument),
-)
 const decodeDashboardIdSync = Schema.decodeUnknownSync(DashboardId)
 
 const toPersistenceError = (error: unknown) =>
@@ -41,13 +38,13 @@ const parseTimestamp = (field: "createdAt" | "updatedAt", value: string) => {
 }
 
 const parsePayload = (payloadJson: string) =>
-  Effect.try({
-    try: () => JSON.parse(payloadJson),
-    catch: () =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(DashboardDocument))(payloadJson).pipe(
+    Effect.mapError(() =>
       new DashboardPersistenceError({
         message: "Stored dashboard payload is invalid JSON",
       }),
-  })
+    ),
+  )
 
 const stringifyPayload = (dashboard: DashboardDocument) =>
   Effect.try({
@@ -78,17 +75,9 @@ export class DashboardPersistenceService extends ServiceMap.Service<DashboardPer
             .orderBy(desc(dashboards.updatedAt)),
         ).pipe(Effect.mapError(toPersistenceError))
 
-        const payloads: ReadonlyArray<unknown> = yield* Effect.forEach(rows, (row) =>
+        const dashboardDocuments = yield* Effect.forEach(rows, (row) =>
           parsePayload(row.payloadJson),
         )
-
-        const dashboardDocuments = yield* Effect.try({
-          try: () => decodeDashboardDocumentSync(payloads),
-          catch: () =>
-            new DashboardPersistenceError({
-              message: "Stored dashboard payload does not match schema",
-            }),
-        })
 
         return new DashboardsListResponse({ dashboards: dashboardDocuments })
       })
@@ -169,7 +158,7 @@ export class DashboardPersistenceService extends ServiceMap.Service<DashboardPer
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(DatabaseLive))
+  static readonly layer = Layer.effect(this, this.make)
   static readonly Live = this.layer
   static readonly Default = this.layer
 

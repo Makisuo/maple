@@ -32,7 +32,7 @@ import {
   parseBase64Aes256GcmKey,
   type EncryptedValue,
 } from "./Crypto"
-import { Database, DatabaseLive } from "./DatabaseLive"
+import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
 
 const DATASET = "http_requests"
@@ -193,18 +193,18 @@ const normalizeIngestPublicUrl = (raw: string): string => {
 const cleanRequiredString = (
   label: string,
   value: string,
-): Effect.Effect<string, CloudflareLogpushValidationError> => {
-  const trimmed = value.trim()
-  if (trimmed.length === 0) {
-    return Effect.fail(
-      new CloudflareLogpushValidationError({
-        message: `${label} is required`,
-      }),
-    )
-  }
-
-  return Effect.succeed(trimmed)
-}
+): Effect.Effect<string, CloudflareLogpushValidationError> =>
+  Effect.sync(() => value.trim()).pipe(
+    Effect.flatMap((trimmed) =>
+      trimmed.length > 0
+        ? Effect.succeed(trimmed)
+        : Effect.fail(
+            new CloudflareLogpushValidationError({
+              message: `${label} is required`,
+            }),
+          ),
+    ),
+  )
 
 const cleanOptionalServiceName = (
   value: string | null | undefined,
@@ -542,10 +542,7 @@ export class CloudflareLogpushService extends ServiceMap.Service<CloudflareLogpu
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(DatabaseLive),
-    Layer.provide(Env.layer),
-  )
+  static readonly layer = Layer.effect(this, this.make)
   static readonly Live = this.layer
   static readonly Default = this.layer
 

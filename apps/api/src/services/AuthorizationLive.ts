@@ -20,7 +20,7 @@ export const AuthorizationLive = Layer.effect(
             CurrentTenant.Context,
             new CurrentTenant.TenantSchema(tenant),
           )
-        }),
+      }),
     })
   }),
-).pipe(Layer.provide(Env.layer))
+)

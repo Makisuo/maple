@@ -12,16 +12,20 @@ import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http";
 import { HttpServiceDiscoveryLive } from "./routes/sd.http";
 import { HttpTinybirdLive } from "./routes/tinybird.http";
 
+const HttpGroupsLive = Layer.mergeAll(
+  HttpAuthPublicLive,
+  HttpAuthLive,
+  HttpApiKeysLive,
+  HttpCloudflareLogpushLive,
+  HttpDashboardsLive,
+  HttpIngestKeysLive,
+  HttpOrgTinybirdSettingsLive,
+  HttpScrapeTargetsLive,
+  HttpServiceDiscoveryLive,
+  HttpTinybirdLive,
+  HttpQueryEngineLive,
+)
+
 export const HttpApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
-  Layer.provide(HttpAuthPublicLive),
-  Layer.provide(HttpAuthLive),
-  Layer.provide(HttpApiKeysLive),
-  Layer.provide(HttpCloudflareLogpushLive),
-  Layer.provide(HttpDashboardsLive),
-  Layer.provide(HttpIngestKeysLive),
-  Layer.provide(HttpOrgTinybirdSettingsLive),
-  Layer.provide(HttpScrapeTargetsLive),
-  Layer.provide(HttpServiceDiscoveryLive),
-  Layer.provide(HttpTinybirdLive),
-  Layer.provide(HttpQueryEngineLive),
+  Layer.provide(HttpGroupsLive),
 );

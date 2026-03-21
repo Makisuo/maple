@@ -23,7 +23,7 @@ import {
   parseBase64Aes256GcmKey,
   type EncryptedValue,
 } from "./Crypto"
-import { Database, DatabaseLive } from "./DatabaseLive"
+import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
 
 const toPersistenceError = (error: unknown) =>
@@ -300,10 +300,7 @@ export class OrgIngestKeysService extends ServiceMap.Service<OrgIngestKeysServic
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(DatabaseLive),
-    Layer.provide(Env.layer),
-  )
+  static readonly layer = Layer.effect(this, this.make)
   static readonly Live = this.layer
   static readonly Default = this.layer
 

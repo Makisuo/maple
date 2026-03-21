@@ -10,6 +10,7 @@ import { ApiKeysService } from "./services/ApiKeysService";
 import { AuthorizationLive } from "./services/AuthorizationLive";
 import { CloudflareLogpushService } from "./services/CloudflareLogpushService";
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService";
+import { Database } from "./services/DatabaseLive";
 import { Env } from "./services/Env";
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService";
 import { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService";
@@ -40,7 +41,7 @@ const AllRoutes = Layer.mergeAll(
   AutumnRouter,
   McpLive,
 ).pipe(
-  Layer.provide(
+  Layer.provideMerge(
     HttpRouter.cors({
       allowedOrigins: ["*"],
       allowedMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -52,6 +53,7 @@ const AllRoutes = Layer.mergeAll(
 
 const MainLive = Layer.mergeAll(
   Env.layer,
+  Database.layer,
   TinybirdService.layer,
   QueryEngineService.layer,
   AuthService.layer,
@@ -63,25 +65,23 @@ const MainLive = Layer.mergeAll(
   ScrapeTargetsService.layer,
 );
 
-const app = HttpRouter.serve(AllRoutes).pipe(
-  Layer.provide(
-    Layer.succeed(
-      HttpMiddleware.TracerDisabledWhen,
-      (request: { url: string; method: string }) =>
-        request.url === "/health" || request.method === "OPTIONS",
-    ),
+const RuntimeLive = Layer.mergeAll(
+  MainLive,
+  TracerLive,
+  AuthorizationLive,
+  Layer.succeed(
+    HttpMiddleware.TracerDisabledWhen,
+    (request: { url: string; method: string }) =>
+      request.url === "/health" || request.method === "OPTIONS",
   ),
-  Layer.provide(MainLive),
-  Layer.provide(TracerLive),
-  Layer.provide(AuthorizationLive),
-  Layer.provide(
-    BunHttpServer.layerConfig(
-      Config.all({
-        port: Config.number("PORT").pipe(Config.withDefault(3472)),
-        idleTimeout: Config.succeed(120),
-      }),
-    ).pipe(Layer.orDie),
-  ),
-);
+  BunHttpServer.layerConfig(
+    Config.all({
+      port: Config.number("PORT").pipe(Config.withDefault(3472)),
+      idleTimeout: Config.succeed(120),
+    }),
+  ).pipe(Layer.orDie),
+)
+
+const app = HttpRouter.serve(AllRoutes).pipe(Layer.provide(RuntimeLive));
 
 BunRuntime.runMain(app.pipe(Layer.launch as never));

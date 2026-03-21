@@ -20,8 +20,6 @@ export interface DatabaseShape {
   readonly execute: <T>(fn: (db: DatabaseClient) => Promise<T>) => Effect.Effect<T, DatabaseError>
 }
 
-export class Database extends ServiceMap.Service<Database, DatabaseShape>()("Database") {}
-
 const toDatabaseError = (cause: unknown) =>
   new DatabaseError({
     message: cause instanceof Error ? cause.message : "Database operation failed",
@@ -64,6 +62,10 @@ const makeDatabase = Effect.gen(function* () {
   } satisfies DatabaseShape
 })
 
-export const DatabaseLive = Layer.effect(Database, makeDatabase).pipe(
-  Layer.provide(Env.layer),
-)
+export class Database extends ServiceMap.Service<Database, DatabaseShape>()("Database") {
+  static readonly layer = Layer.effect(this, makeDatabase)
+  static readonly Live = this.layer
+  static readonly Default = this.layer
+}
+
+export const DatabaseLive = Database.layer

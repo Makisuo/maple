@@ -37,9 +37,21 @@ type JwtPayload = {
   iat?: number
   org_id?: string
   authMode?: AuthMode
-  roles?: string[] | string
+  roles?: readonly string[] | string
 }
 
+const JwtHeaderSchema = Schema.Struct({
+  alg: Schema.optional(Schema.String),
+})
+const JwtPayloadSchema = Schema.Struct({
+  sub: Schema.optional(Schema.String),
+  exp: Schema.optional(Schema.Number),
+  nbf: Schema.optional(Schema.Number),
+  iat: Schema.optional(Schema.Number),
+  org_id: Schema.optional(Schema.String),
+  authMode: Schema.optional(AuthMode),
+  roles: Schema.optional(Schema.Union([Schema.Array(Schema.String), Schema.String])),
+})
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
@@ -53,28 +65,25 @@ const decodeOrgId = (
   value: string,
   message: string,
 ): Effect.Effect<OrgId, UnauthorizedError> =>
-  Effect.try({
-    try: () => decodeOrgIdSync(value),
-    catch: () => unauthorized(message),
-  })
+  Schema.decodeUnknownEffect(OrgId)(value).pipe(
+    Effect.mapError(() => unauthorized(message)),
+  )
 
 const decodeUserId = (
   value: string,
   message: string,
 ): Effect.Effect<UserId, UnauthorizedError> =>
-  Effect.try({
-    try: () => decodeUserIdSync(value),
-    catch: () => unauthorized(message),
-  })
+  Schema.decodeUnknownEffect(UserId)(value).pipe(
+    Effect.mapError(() => unauthorized(message)),
+  )
 
 const decodeRoleName = (
   value: string,
   message: string,
 ): Effect.Effect<RoleName, UnauthorizedError> =>
-  Effect.try({
-    try: () => decodeRoleNameSync(value),
-    catch: () => unauthorized(message),
-  })
+  Schema.decodeUnknownEffect(RoleName)(value).pipe(
+    Effect.mapError(() => unauthorized(message)),
+  )
 
 const getHeader = (headers: HeaderRecord, key: string): string | undefined => {
   const exact = headers[key]
@@ -131,10 +140,11 @@ const verifyHs256Jwt = Effect.fn("AuthService.verifyHs256Jwt")(function* (
   }
 
   const [encodedHeader, encodedPayload, encodedSignature] = parts
-  const header = yield* Effect.try({
-    try: () => JSON.parse(decodeBase64Url(encodedHeader)) as { alg?: string },
-    catch: () => unauthorized("Invalid JWT header"),
-  })
+  const header = yield* Schema.decodeUnknownEffect(
+    Schema.fromJsonString(JwtHeaderSchema),
+  )(decodeBase64Url(encodedHeader)).pipe(
+    Effect.mapError(() => unauthorized("Invalid JWT header")),
+  )
   if (header.alg !== "HS256") {
     return yield* unauthorized("Unsupported JWT algorithm")
   }
@@ -151,10 +161,11 @@ const verifyHs256Jwt = Effect.fn("AuthService.verifyHs256Jwt")(function* (
     return yield* unauthorized("Invalid JWT signature")
   }
 
-  const payload = yield* Effect.try({
-    try: () => JSON.parse(decodeBase64Url(encodedPayload)) as JwtPayload,
-    catch: () => unauthorized("Invalid JWT payload"),
-  })
+  const payload = yield* Schema.decodeUnknownEffect(
+    Schema.fromJsonString(JwtPayloadSchema),
+  )(decodeBase64Url(encodedPayload)).pipe(
+    Effect.mapError(() => unauthorized("Invalid JWT payload")),
+  )
   const now = Math.floor(Date.now() / 1000)
 
   if (payload.nbf && now < payload.nbf) {
@@ -472,5 +483,5 @@ export class AuthService extends ServiceMap.Service<AuthService, AuthServiceShap
     }
   }),
 }) {
-  static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(Env.layer))
+  static readonly layer = Layer.effect(this, this.make)
 }

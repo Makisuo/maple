@@ -34,7 +34,7 @@ import {
   parseBase64Aes256GcmKey,
   type EncryptedValue,
 } from "./Crypto"
-import { Database, DatabaseLive } from "./DatabaseLive"
+import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
@@ -100,6 +100,14 @@ const decodeScrapeIntervalSecondsSync = Schema.decodeUnknownSync(
   ScrapeIntervalSeconds,
 )
 const decodeScrapeAuthTypeSync = Schema.decodeUnknownSync(ScrapeAuthType)
+const ScrapeLabelsSchema = Schema.Record(Schema.String, Schema.String)
+const BearerCredentialsSchema = Schema.Struct({
+  token: Schema.String,
+})
+const BasicCredentialsSchema = Schema.Struct({
+  username: Schema.String,
+  password: Schema.String,
+})
 
 const parseEncryptionKey = (
   raw: string,
@@ -168,40 +176,21 @@ const validateAuthCredentials = (
     )
   }
 
-  try {
-    const parsed = JSON.parse(authCredentials)
-    if (authType === "bearer") {
-      if (!parsed.token || typeof parsed.token !== "string") {
-        return Effect.fail(
-          new ScrapeTargetValidationError({
-            message: 'Bearer auth credentials must include a "token" string field',
-          }),
-        )
-      }
-    } else if (authType === "basic") {
-      if (
-        !parsed.username ||
-        typeof parsed.username !== "string" ||
-        !parsed.password ||
-        typeof parsed.password !== "string"
-      ) {
-        return Effect.fail(
-          new ScrapeTargetValidationError({
-            message:
-              'Basic auth credentials must include "username" and "password" string fields',
-          }),
-        )
-      }
-    }
-  } catch {
-    return Effect.fail(
+  return Schema.decodeUnknownEffect(
+    Schema.fromJsonString(
+      authType === "bearer" ? BearerCredentialsSchema : BasicCredentialsSchema,
+    ),
+  )(authCredentials).pipe(
+    Effect.mapError(() =>
       new ScrapeTargetValidationError({
-        message: "Auth credentials must be valid JSON",
+        message:
+          authType === "bearer"
+            ? 'Bearer auth credentials must include a "token" string field'
+            : 'Basic auth credentials must include "username" and "password" string fields',
       }),
-    )
-  }
-
-  return Effect.succeed(authCredentials)
+    ),
+    Effect.as(authCredentials),
+  )
 }
 
 const rowToResponse = (row: ScrapeTargetRow): ScrapeTargetResponse =>
@@ -229,18 +218,24 @@ const MIN_SCRAPE_INTERVAL = 5
 const MAX_SCRAPE_INTERVAL = 300
 
 const validateUrl = (url: string) => {
-  const trimmed = url.trim()
-  if (!trimmed) {
-    return Effect.fail(new ScrapeTargetValidationError({ message: "URL is required" }))
-  }
-  try {
-    new URL(trimmed)
-  } catch {
-    return Effect.fail(
-      new ScrapeTargetValidationError({ message: `Invalid URL: ${trimmed}` }),
-    )
-  }
-  return Effect.succeed(trimmed)
+  return Effect.sync(() => url.trim()).pipe(
+    Effect.flatMap((trimmed) =>
+      Effect.try({
+        try: () => {
+          if (trimmed.length === 0) {
+            throw new Error("URL is required")
+          }
+
+          new URL(trimmed)
+          return trimmed
+        },
+        catch: (error) =>
+          new ScrapeTargetValidationError({
+            message: error instanceof Error ? error.message : `Invalid URL: ${trimmed}`,
+          }),
+      }),
+    ),
+  )
 }
 
 const validateInterval = (seconds: number | undefined) => {
@@ -261,26 +256,16 @@ const validateInterval = (seconds: number | undefined) => {
 
 const validateLabelsJson = (labelsJson: string | null | undefined) => {
   if (labelsJson === undefined || labelsJson === null) return Effect.succeed(labelsJson)
-  try {
-    const parsed = JSON.parse(labelsJson)
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return Effect.fail(
-        new ScrapeTargetValidationError({ message: "labelsJson must be a JSON object" }),
-      )
-    }
-    for (const value of Object.values(parsed)) {
-      if (typeof value !== "string") {
-        return Effect.fail(
-          new ScrapeTargetValidationError({ message: "labelsJson values must be strings" }),
-        )
-      }
-    }
-  } catch {
-    return Effect.fail(
-      new ScrapeTargetValidationError({ message: "labelsJson must be valid JSON" }),
-    )
-  }
-  return Effect.succeed(labelsJson)
+  return Schema.decodeUnknownEffect(
+    Schema.fromJsonString(ScrapeLabelsSchema),
+  )(labelsJson).pipe(
+    Effect.mapError(() =>
+      new ScrapeTargetValidationError({
+        message: "labelsJson must be a JSON object with string values",
+      }),
+    ),
+    Effect.as(labelsJson),
+  )
 }
 
 export class ScrapeTargetsService extends ServiceMap.Service<ScrapeTargetsService, ScrapeTargetsServiceShape>()(
@@ -526,10 +511,27 @@ export class ScrapeTargetsService extends ServiceMap.Service<ScrapeTargetsServic
             },
             encryptionKey,
           )
-          const credentials = JSON.parse(credentialsJson) as Record<string, string>
           if (row.authType === "bearer") {
+            const credentials = yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(BearerCredentialsSchema),
+            )(credentialsJson).pipe(
+              Effect.mapError(() =>
+                new ScrapeTargetEncryptionError({
+                  message: "Failed to decode auth credentials",
+                }),
+              ),
+            )
             headers.Authorization = `Bearer ${credentials.token}`
           } else if (row.authType === "basic") {
+            const credentials = yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(BasicCredentialsSchema),
+            )(credentialsJson).pipe(
+              Effect.mapError(() =>
+                new ScrapeTargetEncryptionError({
+                  message: "Failed to decode auth credentials",
+                }),
+              ),
+            )
             const encoded = Buffer.from(
               `${credentials.username}:${credentials.password}`,
             ).toString("base64")
@@ -574,7 +576,7 @@ export class ScrapeTargetsService extends ServiceMap.Service<ScrapeTargetsServic
               .set({
                 lastScrapeError: Cause.pretty(requestExit.cause),
                 updatedAt: now,
-              })
+                })
               .where(eq(scrapeTargets.id, targetId)),
           ).pipe(Effect.mapError(toPersistenceError))
         }
@@ -618,8 +620,5 @@ export class ScrapeTargetsService extends ServiceMap.Service<ScrapeTargetsServic
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(DatabaseLive),
-    Layer.provide(Env.layer),
-  )
+  static readonly layer = Layer.effect(this, this.make)
 }
