@@ -146,6 +146,7 @@ export function QueryBuilderLineChart({ data, className, legend, tooltip, curveT
                   const label = labelByChartKey.get(baseKey) ?? baseKey
                   return (
                     <span className="flex items-center gap-2">
+                      <span className="shrink-0 size-2.5 rounded-[2px]" style={{ backgroundColor: item.color }} />
                       <span className="text-muted-foreground">{label}</span>
                       <span className="font-mono font-medium">
                         {formatNumber(asFiniteNumber(value))}

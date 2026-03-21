@@ -113,10 +113,11 @@ export function QueryBuilderBarChart({ data, className, legend, tooltip, stacked
                   if (!payload?.[0]?.payload?.bucket) return ""
                   return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
                 }}
-                formatter={(value, name) => {
+                formatter={(value, name, item) => {
                   const label = labelByChartKey.get(String(name)) ?? String(name)
                   return (
                     <span className="flex items-center gap-2">
+                      <span className="shrink-0 size-2.5 rounded-[2px]" style={{ backgroundColor: item.color }} />
                       <span className="text-muted-foreground">{label}</span>
                       <span className="font-mono font-medium">
                         {formatNumber(asFiniteNumber(value))}
