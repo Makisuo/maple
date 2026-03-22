@@ -89,59 +89,62 @@ function LogsTableContent({
 
   return (
     <>
-      <div className={`flex-1 min-h-0 flex flex-col gap-4 transition-opacity ${waiting ? "opacity-60" : ""}`}>
-        <div
-          ref={scrollContainerRef}
-          className="flex-1 min-h-0 overflow-auto rounded-md border"
-        >
+      <div className={`flex-1 min-h-0 flex flex-col transition-opacity ${waiting ? "opacity-60" : ""}`}>
+        <div className="flex-1 min-h-0 relative">
           <div
-            style={{ height: virtualizer.getTotalSize(), position: "relative" }}
-            role="log"
+            ref={scrollContainerRef}
+            className="absolute inset-0 overflow-auto rounded-md border"
           >
-            {virtualItems.map((virtualRow) => {
-              const log = allData[virtualRow.index]
-              return (
-                <div
-                  key={virtualRow.index}
-                  ref={virtualizer.measureElement}
-                  data-index={virtualRow.index}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                    borderLeftColor: getSeverityColor(log.severityText),
-                  }}
-                  className="border-l-2 flex items-center gap-2 px-3 py-1 text-xs font-mono cursor-pointer border-b border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
-                  tabIndex={0}
-                  role="listitem"
-                  onClick={() => handleRowClick(log)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault()
-                      handleRowClick(log)
-                    }
-                  }}
-                >
-                  <span className="shrink-0 text-muted-foreground tabular-nums">
-                    {formatCompactTimeInTimezone(log.timestamp, {
-                      timeZone: effectiveTimezone,
-                    })}
-                  </span>
-                  <span className="shrink-0 text-muted-foreground/60 truncate max-w-[120px] hidden md:inline">
-                    {log.serviceName}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-foreground">
-                    {log.body}
-                  </span>
-                </div>
-              )
-            })}
+            <div
+              style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+              role="log"
+            >
+              {virtualItems.map((virtualRow) => {
+                const log = allData[virtualRow.index]
+                return (
+                  <div
+                    key={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                      borderLeftColor: getSeverityColor(log.severityText),
+                    }}
+                    className="border-l-2 flex items-center gap-2 px-3 py-1 text-xs font-mono cursor-pointer border-b border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+                    tabIndex={0}
+                    role="listitem"
+                    onClick={() => handleRowClick(log)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        handleRowClick(log)
+                      }
+                    }}
+                  >
+                    <span className="shrink-0 text-muted-foreground tabular-nums">
+                      {formatCompactTimeInTimezone(log.timestamp, {
+                        timeZone: effectiveTimezone,
+                      })}
+                    </span>
+                    <span className="shrink-0 text-muted-foreground/60 truncate max-w-[120px] hidden md:inline">
+                      {log.serviceName}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-foreground">
+                      {log.body}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
+          <div className="absolute bottom-0 left-0 right-0 h-12 pointer-events-none rounded-b-md bg-gradient-to-t from-background to-transparent" />
         </div>
 
-        <div className="text-sm text-muted-foreground shrink-0">
+        <div className="text-sm text-muted-foreground shrink-0 mt-1.5">
           Showing {allData.length} logs
           {!hasNextPage && allData.length > 0 && " (all loaded)"}
         </div>
