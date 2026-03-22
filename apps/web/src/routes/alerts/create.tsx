@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Cause, Exit, Option, Schema } from "effect"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -14,36 +14,31 @@ import {
   buildRuleRequest,
   buildRuleTestRequest,
   isRulePreviewReady,
-  signalLabels,
   comparatorLabels,
   metricTypeLabels,
   metricAggregationLabels,
   destinationTypeLabels,
+  signalLabels,
   formatSignalValue,
   signalToQueryParams,
 } from "@/lib/alerts/form-utils"
 import {
-  AlertRuleUpsertRequest,
   AlertDestinationDocument,
   AlertRuleDocument,
   type AlertComparator,
-  type AlertDestinationType,
   type AlertMetricAggregation,
   type AlertMetricType,
-  type AlertSeverity,
   type AlertSignalType,
 } from "@maple/domain/http"
 import {
-  BellIcon,
-  CheckIcon,
   EyeIcon,
   LoaderIcon,
-  XIcon,
 } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
+import { Checkbox } from "@maple/ui/components/ui/checkbox"
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import {
@@ -53,12 +48,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@maple/ui/components/ui/select"
-import { Switch } from "@maple/ui/components/ui/switch"
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-} from "@maple/ui/components/ui/tabs"
 import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
@@ -91,13 +80,21 @@ function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string
   return fallback
 }
 
-const CHART_BUCKET_TARGET = 96 // ~15min buckets for 24h
+const CHART_BUCKET_TARGET = 96
+
+const signalTypes: { value: AlertSignalType; label: string }[] = [
+  { value: "error_rate", label: "Error Rate" },
+  { value: "p95_latency", label: "P95 Latency" },
+  { value: "p99_latency", label: "P99 Latency" },
+  { value: "apdex", label: "Apdex" },
+  { value: "throughput", label: "Throughput" },
+  { value: "metric", label: "Metric" },
+]
 
 function AlertCreatePage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
 
-  // Fetch destinations and rules for the pickers / edit mode
   const destinationsQueryAtom = MapleApiAtomClient.query("alerts", "listDestinations", {})
   const rulesQueryAtom = MapleApiAtomClient.query("alerts", "listRules", {})
   const destinationsResult = useAtomValue(destinationsQueryAtom)
@@ -115,16 +112,12 @@ function AlertCreatePage() {
     .onSuccess((response) => [...response.rules] as AlertRuleDocument[])
     .orElse(() => [])
 
-  // Edit mode: find existing rule
   const editingRule = useMemo(() => {
     if (!search.ruleId) return null
     return rules.find((r) => r.id === search.ruleId) ?? null
   }, [search.ruleId, rules])
 
-  // Form state
-  const [ruleForm, setRuleForm] = useState<RuleFormState>(() =>
-    defaultRuleForm(search.serviceName),
-  )
+  const [ruleForm, setRuleForm] = useState<RuleFormState>(() => defaultRuleForm(search.serviceName))
   const [savingRule, setSavingRule] = useState(false)
   const [previewingRule, setPreviewingRule] = useState(false)
   const [previewResult, setPreviewResult] = useState<{
@@ -135,7 +128,6 @@ function AlertCreatePage() {
   } | null>(null)
   const [initialized, setInitialized] = useState(false)
 
-  // Populate form when editing
   useEffect(() => {
     if (editingRule && !initialized) {
       setRuleForm(ruleToFormState(editingRule))
@@ -143,14 +135,12 @@ function AlertCreatePage() {
     }
   }, [editingRule, initialized])
 
-  // Time range for chart: last 24 hours
   const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "24h")
   const bucketSeconds = useMemo(
     () => computeBucketSeconds(startTime, endTime, CHART_BUCKET_TARGET),
     [startTime, endTime],
   )
 
-  // Build chart query from form state
   const queryParams = useMemo(() => signalToQueryParams(ruleForm), [ruleForm])
 
   const chartQueryInput = useMemo(() => {
@@ -183,7 +173,6 @@ function AlertCreatePage() {
         }),
   )
 
-  // Flatten chart data from { bucket, series: { key: val } } → { bucket, key: val }
   const chartData = useMemo(() => {
     if (!chartQueryInput) return []
     return Result.builder(chartResult)
@@ -199,7 +188,6 @@ function AlertCreatePage() {
   const chartLoading = !chartQueryInput || Result.isInitial(chartResult)
   const threshold = Number(ruleForm.threshold)
 
-  // Handlers
   async function handleSave() {
     setSavingRule(true)
     const payload = buildRuleRequest(ruleForm)
@@ -238,154 +226,166 @@ function AlertCreatePage() {
     setPreviewingRule(false)
   }
 
-  const pageTitle = editingRule ? "Edit Alert Rule" : "New Alert Rule"
+  const pageTitle = editingRule ? "Edit Alert Rule" : "Create Alert Rule"
 
   return (
     <DashboardLayout
       breadcrumbs={[
-        { label: "Alerts", href: "/alerts" },
-        { label: pageTitle },
+        { label: "Alert Rules", href: "/alerts?tab=rules" },
+        { label: editingRule ? "Edit Rule" : "New Rule" },
       ]}
       title={pageTitle}
-      description="Define a threshold, preview the signal, and save the alert rule."
+      headerActions={
+        <div className="flex items-center gap-2">
+          <Button variant="outline" render={<Link to="/alerts" search={{ tab: "rules" }} />}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={savingRule || destinations.length === 0}
+          >
+            {savingRule && <LoaderIcon size={14} className="animate-spin" />}
+            Save Rule
+          </Button>
+        </div>
+      }
     >
-      <div className="space-y-6 max-w-4xl">
-        {/* Chart Preview */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm font-medium text-muted-foreground">
-                Signal Preview — last 24 hours
-              </div>
-              {previewResult && (
-                <Badge
-                  variant="outline"
+      <div className="flex gap-6">
+        {/* ─── Left Column: Form ─── */}
+        <div className="flex-1 min-w-0 space-y-6">
+          {/* Signal Type */}
+          <div>
+            <Label className="mb-2 block">Signal Type</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {signalTypes.map((st) => (
+                <button
+                  key={st.value}
+                  type="button"
+                  onClick={() => setRuleForm((c) => ({ ...c, signalType: st.value }))}
                   className={cn(
-                    previewResult.status === "breached"
-                      ? "border-destructive/30 text-destructive"
-                      : previewResult.status === "healthy"
-                        ? "border-green-500/30 text-green-600"
-                        : "text-muted-foreground",
+                    "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
+                    ruleForm.signalType === st.value
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
                   )}
                 >
-                  {previewResult.status} · {formatSignalValue(ruleForm.signalType, previewResult.value)}
-                </Badge>
-              )}
+                  {st.label}
+                </button>
+              ))}
             </div>
-            <AlertPreviewChart
-              data={chartData}
-              threshold={Number.isFinite(threshold) ? threshold : 0}
-              signalType={ruleForm.signalType}
-              loading={chartLoading}
-              className="h-[280px] w-full"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Signal Type Tabs */}
-        <div>
-          <Label className="mb-2 block">Signal Type</Label>
-          <Tabs
-            value={ruleForm.signalType}
-            onValueChange={(value) =>
-              setRuleForm((current) => ({
-                ...current,
-                signalType: value as AlertSignalType,
-              }))
-            }
-          >
-            <TabsList variant="line">
-              <TabsTrigger value="error_rate">Error Rate</TabsTrigger>
-              <TabsTrigger value="p95_latency">P95 Latency</TabsTrigger>
-              <TabsTrigger value="p99_latency">P99 Latency</TabsTrigger>
-              <TabsTrigger value="apdex">Apdex</TabsTrigger>
-              <TabsTrigger value="throughput">Throughput</TabsTrigger>
-              <TabsTrigger value="metric">Metric</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-
-        {/* Metric-specific fields */}
-        {ruleForm.signalType === "metric" && (
-          <Card>
-            <CardContent className="grid gap-4 p-4 sm:grid-cols-3">
-              <div className="space-y-2 sm:col-span-3">
-                <Label htmlFor="metric-name">Metric name</Label>
-                <Input
-                  id="metric-name"
-                  value={ruleForm.metricName}
-                  onChange={(e) => setRuleForm((c) => ({ ...c, metricName: e.target.value }))}
-                  placeholder="http.server.duration"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Metric type</Label>
-                <Select
-                  value={ruleForm.metricType}
-                  onValueChange={(value) =>
-                    setRuleForm((c) => ({ ...c, metricType: value as AlertMetricType }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(metricTypeLabels).map(([val, label]) => (
-                      <SelectItem key={val} value={val}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Aggregation</Label>
-                <Select
-                  value={ruleForm.metricAggregation}
-                  onValueChange={(value) =>
-                    setRuleForm((c) => ({ ...c, metricAggregation: value as AlertMetricAggregation }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(metricAggregationLabels).map(([val, label]) => (
-                      <SelectItem key={val} value={val}>{label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Apdex threshold */}
-        {ruleForm.signalType === "apdex" && (
-          <div className="space-y-2">
-            <Label htmlFor="apdex-threshold">Apdex threshold (ms)</Label>
-            <Input
-              id="apdex-threshold"
-              type="number"
-              value={ruleForm.apdexThresholdMs}
-              onChange={(e) => setRuleForm((c) => ({ ...c, apdexThresholdMs: e.target.value }))}
-              className="max-w-[200px]"
-            />
           </div>
-        )}
 
-        {/* Main Form */}
-        <div className="space-y-4">
+          {/* Condition - inline builder */}
+          <div>
+            <Label className="mb-2 block">Condition</Label>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="shrink-0 text-sm py-1.5 px-3">
+                {signalLabels[ruleForm.signalType]}
+              </Badge>
+              <Select
+                value={ruleForm.comparator}
+                onValueChange={(value) => setRuleForm((c) => ({ ...c, comparator: value as AlertComparator }))}
+              >
+                <SelectTrigger className="w-[70px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(comparatorLabels).map(([val, label]) => (
+                    <SelectItem key={val} value={val}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                type="number"
+                value={ruleForm.threshold}
+                onChange={(e) => setRuleForm((c) => ({ ...c, threshold: e.target.value }))}
+                className="w-[100px]"
+                placeholder="5"
+              />
+              <span className="text-muted-foreground text-sm shrink-0">over</span>
+              <Input
+                type="number"
+                value={ruleForm.windowMinutes}
+                onChange={(e) => setRuleForm((c) => ({ ...c, windowMinutes: e.target.value }))}
+                className="w-[80px]"
+                placeholder="5"
+              />
+              <span className="text-muted-foreground text-sm shrink-0">min</span>
+            </div>
+          </div>
+
+          {/* Metric-specific fields */}
+          {ruleForm.signalType === "metric" && (
+            <Card>
+              <CardContent className="grid gap-4 p-4 sm:grid-cols-3">
+                <div className="space-y-2 sm:col-span-3">
+                  <Label htmlFor="metric-name">Metric name</Label>
+                  <Input
+                    id="metric-name"
+                    value={ruleForm.metricName}
+                    onChange={(e) => setRuleForm((c) => ({ ...c, metricName: e.target.value }))}
+                    placeholder="http.server.duration"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Metric type</Label>
+                  <Select
+                    value={ruleForm.metricType}
+                    onValueChange={(value) => setRuleForm((c) => ({ ...c, metricType: value as AlertMetricType }))}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(metricTypeLabels).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Aggregation</Label>
+                  <Select
+                    value={ruleForm.metricAggregation}
+                    onValueChange={(value) => setRuleForm((c) => ({ ...c, metricAggregation: value as AlertMetricAggregation }))}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(metricAggregationLabels).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Apdex threshold */}
+          {ruleForm.signalType === "apdex" && (
+            <div className="space-y-2">
+              <Label htmlFor="apdex-threshold">Apdex threshold (ms)</Label>
+              <Input
+                id="apdex-threshold"
+                type="number"
+                value={ruleForm.apdexThresholdMs}
+                onChange={(e) => setRuleForm((c) => ({ ...c, apdexThresholdMs: e.target.value }))}
+                className="max-w-[200px]"
+              />
+            </div>
+          )}
+
+          {/* Rule Name + Service */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="rule-name">Rule name</Label>
+              <Label htmlFor="rule-name">Rule Name</Label>
               <Input
                 id="rule-name"
                 value={ruleForm.name}
                 onChange={(e) => setRuleForm((c) => ({ ...c, name: e.target.value }))}
-                placeholder="Checkout error rate"
+                placeholder="Error Rate — Payments"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="rule-service">Service scope</Label>
+              <Label htmlFor="rule-service">Service</Label>
               <Input
                 id="rule-service"
                 value={ruleForm.serviceName}
@@ -395,129 +395,64 @@ function AlertCreatePage() {
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          {/* Severity + Consecutive Breaches */}
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Severity</Label>
-              <Select
-                value={ruleForm.severity}
-                onValueChange={(value) =>
-                  setRuleForm((c) => ({ ...c, severity: value as AlertSeverity }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="warning">Warning</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Comparator</Label>
-              <Select
-                value={ruleForm.comparator}
-                onValueChange={(value) =>
-                  setRuleForm((c) => ({ ...c, comparator: value as AlertComparator }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(comparatorLabels).map(([val, label]) => (
-                    <SelectItem key={val} value={val}>
-                      {label} ({val === "gt" ? "Greater than" : val === "gte" ? "Greater or equal" : val === "lt" ? "Less than" : "Less or equal"})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="rule-threshold">Threshold</Label>
-              <Input
-                id="rule-threshold"
-                type="number"
-                value={ruleForm.threshold}
-                onChange={(e) => setRuleForm((c) => ({ ...c, threshold: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="rule-window">Window (minutes)</Label>
-              <Input
-                id="rule-window"
-                type="number"
-                value={ruleForm.windowMinutes}
-                onChange={(e) => setRuleForm((c) => ({ ...c, windowMinutes: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="rule-min-samples">Minimum samples</Label>
-              <Input
-                id="rule-min-samples"
-                type="number"
-                value={ruleForm.minimumSampleCount}
-                onChange={(e) => setRuleForm((c) => ({ ...c, minimumSampleCount: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="rule-breaches">Breaches to open</Label>
-              <Input
-                id="rule-breaches"
-                type="number"
-                value={ruleForm.consecutiveBreachesRequired}
-                onChange={(e) => setRuleForm((c) => ({ ...c, consecutiveBreachesRequired: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="rule-healthy">Healthy runs to resolve</Label>
-              <Input
-                id="rule-healthy"
-                type="number"
-                value={ruleForm.consecutiveHealthyRequired}
-                onChange={(e) => setRuleForm((c) => ({ ...c, consecutiveHealthyRequired: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="rule-renotify">Renotify interval (min)</Label>
-              <Input
-                id="rule-renotify"
-                type="number"
-                value={ruleForm.renotifyIntervalMinutes}
-                onChange={(e) => setRuleForm((c) => ({ ...c, renotifyIntervalMinutes: e.target.value }))}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Destinations */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium">Destinations</div>
-                <div className="text-muted-foreground text-xs">
-                  Pick one or more reusable destinations for this rule.
-                </div>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setRuleForm((c) => ({ ...c, severity: "warning" }))}
+                  className={cn(
+                    "rounded-md border px-4 py-1.5 text-sm font-medium transition-colors",
+                    ruleForm.severity === "warning"
+                      ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-500"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Warning
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRuleForm((c) => ({ ...c, severity: "critical" }))}
+                  className={cn(
+                    "rounded-md border px-4 py-1.5 text-sm font-medium transition-colors",
+                    ruleForm.severity === "critical"
+                      ? "border-red-500/50 bg-red-500/10 text-red-500"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Critical
+                </button>
               </div>
-              <Badge variant="outline">{ruleForm.destinationIds.length} selected</Badge>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="rule-breaches">Consecutive Breaches</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="rule-breaches"
+                  type="number"
+                  value={ruleForm.consecutiveBreachesRequired}
+                  onChange={(e) => setRuleForm((c) => ({ ...c, consecutiveBreachesRequired: e.target.value }))}
+                  className="w-[80px]"
+                />
+                <span className="text-sm text-muted-foreground">times before alerting</span>
+              </div>
+            </div>
+          </div>
 
+          {/* Notify via */}
+          <div>
+            <Label className="mb-2 block">Notify via</Label>
             {destinations.length === 0 ? (
-              <div className="text-muted-foreground mt-3 text-sm">
+              <div className="text-muted-foreground text-sm">
                 <Link to="/alerts" search={{ tab: "destinations" }} className="underline">
                   Create a destination
                 </Link>{" "}
                 before saving this rule.
               </div>
             ) : (
-              <div className="mt-3 grid gap-2">
+              <div className="flex flex-wrap gap-2">
                 {destinations.map((destination) => {
                   const selected = ruleForm.destinationIds.includes(destination.id)
                   return (
@@ -525,8 +460,10 @@ function AlertCreatePage() {
                       key={destination.id}
                       type="button"
                       className={cn(
-                        "flex items-center justify-between rounded-md border px-3 py-2 text-left transition-colors",
-                        selected ? "border-primary/40 bg-primary/5" : "hover:bg-muted/50",
+                        "flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors",
+                        selected
+                          ? "border-primary/40 bg-primary/5"
+                          : "border-border hover:border-foreground/30",
                       )}
                       onClick={() =>
                         setRuleForm((current) => ({
@@ -537,65 +474,117 @@ function AlertCreatePage() {
                         }))
                       }
                     >
-                      <div>
-                        <div className="text-sm font-medium">{destination.name}</div>
-                        <div className="text-muted-foreground text-xs">
-                          {destinationTypeLabels[destination.type]} · {destination.summary}
-                        </div>
-                      </div>
-                      <Badge variant={selected ? "default" : "outline"}>
-                        {selected ? "Selected" : "Select"}
-                      </Badge>
+                      <Checkbox checked={selected} />
+                      <span className="font-medium">{destination.name}</span>
+                      <span className="text-muted-foreground text-xs">{destinationTypeLabels[destination.type]}</span>
                     </button>
                   )
                 })}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Enabled toggle */}
-        <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-          <div>
-            <div className="text-sm font-medium">Rule enabled</div>
-            <div className="text-muted-foreground text-xs">
-              Disabled rules stay saved but won't be evaluated by the worker.
-            </div>
           </div>
-          <Switch
-            checked={ruleForm.enabled}
-            onCheckedChange={(enabled) => setRuleForm((c) => ({ ...c, enabled }))}
-          />
         </div>
 
-        {/* Bottom action bar */}
-        <div className="flex items-center justify-between border-t pt-4">
-          <Button variant="outline" asChild>
-            <Link to="/alerts" search={{ tab: "rules" }}>
-              Discard
-            </Link>
-          </Button>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleTestNotification}
-              disabled={previewingRule}
-            >
-              {previewingRule ? (
-                <LoaderIcon size={14} className="animate-spin" />
-              ) : (
-                <EyeIcon size={14} />
+        {/* ─── Right Column: Live Preview ─── */}
+        <div className="w-[380px] shrink-0 hidden lg:block">
+          <Card className="sticky top-0">
+            <CardContent className="p-5 space-y-5">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold">Live Preview</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestNotification}
+                  disabled={previewingRule}
+                >
+                  {previewingRule ? (
+                    <LoaderIcon size={14} className="animate-spin" />
+                  ) : (
+                    <EyeIcon size={14} />
+                  )}
+                  Test Rule
+                </Button>
+              </div>
+
+              {/* Current Value */}
+              {previewResult && (
+                <div className="space-y-1">
+                  <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Current Value</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className={cn(
+                      "text-2xl font-bold font-mono tabular-nums",
+                      previewResult.status === "breached" ? "text-red-500" : "text-green-500",
+                    )}>
+                      {formatSignalValue(ruleForm.signalType, previewResult.value)}
+                    </span>
+                    <span className="text-muted-foreground text-sm">
+                      threshold: {formatSignalValue(ruleForm.signalType, threshold)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-sm">
+                    <span className={cn(
+                      "size-1.5 rounded-full",
+                      previewResult.status === "breached" ? "bg-red-500" : "bg-green-500",
+                    )} />
+                    <span className={cn(
+                      previewResult.status === "breached" ? "text-red-500" : "text-green-500",
+                    )}>
+                      {previewResult.status === "breached" ? "Would trigger alert" : "Within threshold"}
+                    </span>
+                  </div>
+                </div>
               )}
-              Test Notification
-            </Button>
-            <Button
-              onClick={handleSave}
-              disabled={savingRule || destinations.length === 0}
-            >
-              {savingRule ? <LoaderIcon size={14} className="animate-spin" /> : <CheckIcon size={14} />}
-              {editingRule ? "Save Changes" : "Save Alert Rule"}
-            </Button>
-          </div>
+
+              {/* Chart */}
+              <div className="space-y-2">
+                <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+                  {signalLabels[ruleForm.signalType]} — Last 24h
+                </span>
+                <AlertPreviewChart
+                  data={chartData}
+                  threshold={Number.isFinite(threshold) ? threshold : 0}
+                  signalType={ruleForm.signalType}
+                  loading={chartLoading}
+                  className="h-[180px] w-full"
+                />
+              </div>
+
+              {/* Rule Summary */}
+              <div className="space-y-2">
+                <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Rule Summary</span>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Signal</dt>
+                    <dd className="font-medium">{signalLabels[ruleForm.signalType]}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Condition</dt>
+                    <dd className="font-mono font-medium">
+                      {comparatorLabels[ruleForm.comparator]} {ruleForm.threshold} over {ruleForm.windowMinutes}min
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Service</dt>
+                    <dd className="font-mono font-medium">{ruleForm.serviceName || "all"}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Severity</dt>
+                    <dd className={cn(
+                      "font-medium capitalize",
+                      ruleForm.severity === "critical" ? "text-red-500" : "text-yellow-500",
+                    )}>
+                      {ruleForm.severity}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Destinations</dt>
+                    <dd className="font-medium">{ruleForm.destinationIds.length} selected</dd>
+                  </div>
+                </dl>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </DashboardLayout>

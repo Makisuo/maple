@@ -9,7 +9,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@maple/ui/components/ui/chart"
-import { formatNumber, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "@maple/ui/lib/format"
+import { inferBucketSeconds, inferRangeMs, formatBucketLabel } from "@maple/ui/lib/format"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 interface AlertPreviewChartProps {
@@ -155,13 +155,13 @@ export function AlertPreviewChart({
 
         <ReferenceLine
           y={threshold}
-          stroke="hsl(var(--destructive))"
+          stroke="var(--destructive)"
           strokeDasharray="6 4"
           strokeWidth={1.5}
           label={{
             value: `Threshold: ${formatSignalValue(signalType, threshold)}`,
             position: "insideTopRight",
-            fill: "hsl(var(--destructive))",
+            fill: "var(--destructive)",
             fontSize: 11,
           }}
         />

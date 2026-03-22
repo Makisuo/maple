@@ -6,23 +6,19 @@ import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatLatency, formatNumber, formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime } from "@/lib/format"
 import {
   AlertDeliveryEventDocument,
   AlertDestinationDocument,
   AlertRuleDocument,
-  AlertRuleTestRequest,
   AlertRuleUpsertRequest,
   type AlertDestinationType,
-  type AlertSeverity,
 } from "@maple/domain/http"
 import {
   severityTone,
   signalLabels,
   comparatorLabels,
   destinationTypeLabels,
-  metricTypeLabels,
-  metricAggregationLabels,
   formatSignalValue,
 } from "@/lib/alerts/form-utils"
 import {
@@ -30,10 +26,12 @@ import {
   BellIcon,
   CheckIcon,
   CircleWarningIcon,
+  ClockIcon,
   DotsVerticalIcon,
-  EyeIcon,
   FireIcon,
   LoaderIcon,
+  MagnifierIcon,
+  PaperPlaneIcon,
   PencilIcon,
   PlusIcon,
   ServerIcon,
@@ -90,8 +88,13 @@ import {
   TableHeader,
   TableRow,
 } from "@maple/ui/components/ui/table"
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from "@maple/ui/components/ui/tabs"
 
-const tabValues = ["rules", "incidents", "destinations"] as const
+const tabValues = ["overview", "rules", "incidents", "destinations"] as const
 type AlertsTab = (typeof tabValues)[number]
 
 const AlertsSearch = Schema.Struct({
@@ -119,14 +122,10 @@ type DestinationFormState = {
   signingSecret: string
 }
 
-
 function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
   if (Exit.isSuccess(exit)) return fallback
-
   const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-  if (failure instanceof Error && failure.message.trim().length > 0) {
-    return failure.message
-  }
+  if (failure instanceof Error && failure.message.trim().length > 0) return failure.message
   if (
     typeof failure === "object" &&
     failure !== null &&
@@ -136,12 +135,8 @@ function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string
   ) {
     return failure.message
   }
-
   const defect = Cause.squash(exit.cause)
-  if (defect instanceof Error && defect.message.trim().length > 0) {
-    return defect.message
-  }
-
+  if (defect instanceof Error && defect.message.trim().length > 0) return defect.message
   return fallback
 }
 
@@ -182,47 +177,260 @@ function destinationToFormState(destination: AlertDestination): DestinationFormS
   }
 }
 
-function AlertNav({
-  activeTab,
-  onSelect,
+/* -------------------------------------------------------------------------- */
+/*  Signal badge colors                                                       */
+/* -------------------------------------------------------------------------- */
+
+const signalBadgeClass: Record<string, string> = {
+  error_rate: "border-red-500/30 text-red-500",
+  p95_latency: "border-blue-500/30 text-blue-500",
+  p99_latency: "border-blue-500/30 text-blue-500",
+  apdex: "border-yellow-500/30 text-yellow-500",
+  throughput: "border-emerald-500/30 text-emerald-500",
+  metric: "border-zinc-400/30 text-zinc-400",
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Overview Tab                                                              */
+/* -------------------------------------------------------------------------- */
+
+function OverviewTab({
+  rules,
+  incidents,
+  destinations,
+  deliveryEvents,
+  rulesResult,
+  incidentsResult,
+  onTabSelect,
 }: {
-  activeTab: AlertsTab
-  onSelect: (tab: AlertsTab) => void
+  rules: AlertRule[]
+  incidents: { status: string; severity: string; ruleName: string; serviceName?: string | null; signalType: string; lastObservedValue: number | null; comparator: string; threshold: number; lastTriggeredAt: string | null; lastNotifiedAt: string | null; ruleId: string }[]
+  destinations: AlertDestination[]
+  deliveryEvents: AlertDeliveryEvent[]
+  rulesResult: unknown
+  incidentsResult: unknown
+  onTabSelect: (tab: AlertsTab) => void
 }) {
-  const items: Array<{ id: AlertsTab; label: string; description: string }> = [
-    { id: "rules", label: "Rules", description: "Create service-first thresholds and preview evaluations." },
-    { id: "incidents", label: "Incidents", description: "Track open alerts, resolutions, and notification history." },
-    { id: "destinations", label: "Destinations", description: "Manage reusable Slack, PagerDuty, and webhook endpoints." },
-  ]
+  const openIncidents = useMemo(() => incidents.filter((i) => i.status === "open"), [incidents])
+  const criticalCount = openIncidents.filter((i) => i.severity === "critical").length
+  const warningCount = openIncidents.filter((i) => i.severity === "warning").length
+  const enabledRules = rules.filter((r) => r.enabled).length
+
+  const destinationSummary = useMemo(() => {
+    const byType: Record<string, number> = {}
+    for (const d of destinations) {
+      byType[d.type] = (byType[d.type] ?? 0) + 1
+    }
+    return Object.entries(byType)
+      .map(([type, count]) => `${count} ${destinationTypeLabels[type as AlertDestinationType]}`)
+      .join(", ")
+  }, [destinations])
+
+  const rulesById = useMemo(
+    () => new Map(rules.map((r) => [r.id, r])),
+    [rules],
+  )
+
+  const loading = Result.isInitial(rulesResult as never) || Result.isInitial(incidentsResult as never)
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-3 gap-4">
+          <Skeleton className="h-[98px]" />
+          <Skeleton className="h-[98px]" />
+          <Skeleton className="h-[98px]" />
+        </div>
+        <Skeleton className="h-48" />
+      </div>
+    )
+  }
 
   return (
-    <nav className="flex flex-col gap-1">
-      {items.map((item) => {
-        const isActive = item.id === activeTab
-        return (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => onSelect(item.id)}
-            className={cn(
-              "rounded-lg border px-3 py-2 text-left transition-colors",
-              isActive
-                ? "border-primary/30 bg-primary/5"
-                : "border-transparent hover:border-border hover:bg-muted/50",
+    <div className="space-y-8">
+      {/* Stats strip */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Active Incidents</span>
+              {openIncidents.length > 0 && (
+                <span className="size-2 rounded-full bg-red-500" />
+              )}
+            </div>
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="text-3xl font-bold tabular-nums">{openIncidents.length}</span>
+              <span className="text-muted-foreground text-sm">
+                {criticalCount > 0 && `${criticalCount} critical`}
+                {criticalCount > 0 && warningCount > 0 && ", "}
+                {warningCount > 0 && `${warningCount} warning`}
+                {openIncidents.length === 0 && "none"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Rules Enabled</span>
+              <ClockIcon size={16} className="text-muted-foreground" />
+            </div>
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="text-3xl font-bold tabular-nums">{enabledRules}</span>
+              <span className="text-muted-foreground text-sm">of {rules.length} rules</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Destinations</span>
+              <PaperPlaneIcon size={16} className="text-muted-foreground" />
+            </div>
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="text-3xl font-bold tabular-nums">{destinations.length}</span>
+              <span className="text-muted-foreground text-sm">{destinationSummary || "none configured"}</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Active Incidents */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold">Active Incidents</h2>
+            {openIncidents.length > 0 && (
+              <Badge variant="secondary" className="rounded-full tabular-nums">{openIncidents.length}</Badge>
             )}
+          </div>
+          <button
+            type="button"
+            className="text-sm text-primary hover:underline"
+            onClick={() => onTabSelect("incidents")}
           >
-            <div className={cn("text-sm font-medium", isActive ? "text-foreground" : "text-muted-foreground")}>
-              {item.label}
-            </div>
-            <div className="text-muted-foreground mt-1 text-xs leading-relaxed">
-              {item.description}
-            </div>
+            View all incidents
           </button>
-        )
-      })}
-    </nav>
+        </div>
+
+        {openIncidents.length === 0 ? (
+          <div className="text-muted-foreground py-8 text-center text-sm">
+            No active incidents — all systems healthy.
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[90px]">Severity</TableHead>
+                <TableHead>Rule</TableHead>
+                <TableHead>Service</TableHead>
+                <TableHead>Current Value</TableHead>
+                <TableHead className="w-[100px]">Duration</TableHead>
+                <TableHead>Last Notified</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {openIncidents.map((incident, idx) => {
+                const duration = incident.lastTriggeredAt
+                  ? formatRelativeTime(incident.lastTriggeredAt)
+                  : "—"
+                return (
+                  <TableRow key={idx}>
+                    <TableCell>
+                      <Badge variant="outline" className={severityTone[incident.severity as "warning" | "critical"]}>
+                        {incident.severity === "critical" ? "Critical" : "Warning"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {incident.ruleName}
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-mono text-muted-foreground">{incident.serviceName ?? "all"}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-mono text-orange-500">
+                        {formatSignalValue(incident.signalType as never, incident.lastObservedValue)}
+                      </span>
+                      <span className="text-muted-foreground text-xs ml-1">
+                        / {formatSignalValue(incident.signalType as never, incident.threshold)}
+                      </span>
+                    </TableCell>
+                    <TableCell>{duration}</TableCell>
+                    <TableCell>
+                      {incident.lastNotifiedAt ? formatRelativeTime(incident.lastNotifiedAt) : "Never"}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      {/* Recent Activity */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Recent Activity</h2>
+          <button
+            type="button"
+            className="text-sm text-primary hover:underline"
+            onClick={() => onTabSelect("incidents")}
+          >
+            View delivery log
+          </button>
+        </div>
+
+        {deliveryEvents.length === 0 ? (
+          <div className="text-muted-foreground py-6 text-center text-sm">
+            No recent activity.
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {deliveryEvents.slice(0, 5).map((event, idx) => {
+              const rule = rulesById.get(event.ruleId)
+              const typeLabel =
+                event.eventType === "trigger" ? "Triggered"
+                : event.eventType === "resolve" ? "Resolved"
+                : event.eventType === "renotify" ? "Renotify"
+                : "Test"
+              const dotColor =
+                event.eventType === "trigger" ? "bg-red-500"
+                : event.eventType === "resolve" ? "bg-green-500"
+                : event.eventType === "renotify" ? "bg-orange-500"
+                : "bg-zinc-400"
+              const textColor =
+                event.eventType === "trigger" ? "text-red-500"
+                : event.eventType === "resolve" ? "text-green-500"
+                : event.eventType === "renotify" ? "text-orange-500"
+                : "text-muted-foreground"
+
+              const description = rule
+                ? `${rule.name} on ${rule.serviceName ?? "all services"}${event.eventType === "renotify" ? ` via ${event.destinationName}` : ""}`
+                : event.destinationName
+
+              return (
+                <div key={idx} className="flex items-center gap-3 py-2">
+                  <span className={cn("size-1.5 shrink-0 rounded-full", dotColor)} />
+                  <span className={cn("text-sm font-medium w-[80px] shrink-0", textColor)}>{typeLabel}</span>
+                  <span className="text-sm text-muted-foreground truncate flex-1">{description}</span>
+                  <span className="text-sm text-muted-foreground shrink-0 tabular-nums">
+                    {event.scheduledAt ? formatRelativeTime(event.scheduledAt) : "—"}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Main Page                                                                 */
+/* -------------------------------------------------------------------------- */
 
 function AlertsPage() {
   const search = Route.useSearch()
@@ -241,7 +449,7 @@ function AlertsPage() {
 
   const refreshDestinations = useAtomRefresh(destinationsQueryAtom)
   const refreshRules = useAtomRefresh(rulesQueryAtom)
-  const refreshIncidents = useAtomRefresh(incidentsQueryAtom)
+
   const refreshDeliveryEvents = useAtomRefresh(deliveryEventsQueryAtom)
 
   const createDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "createDestination"), { mode: "promiseExit" })
@@ -250,11 +458,10 @@ function AlertsPage() {
   const testDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "testDestination"), { mode: "promiseExit" })
 
   const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), { mode: "promiseExit" })
-  const deleteRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "deleteRule"), { mode: "promiseExit" })
 
   const activeTab: AlertsTab = tabValues.includes(search.tab as AlertsTab)
     ? (search.tab as AlertsTab)
-    : "rules"
+    : "overview"
 
   const destinations = Result.builder(destinationsResult)
     .onSuccess((response) => [...response.destinations] as AlertDestination[])
@@ -273,11 +480,16 @@ function AlertsPage() {
     .onSuccess((session) => session.roles.some((role) => role === "root" || role === "org:admin"))
     .orElse(() => false)
 
-  const destinationsById = useMemo(
-    () => new Map(destinations.map((destination) => [destination.id, destination])),
-    [destinations],
-  )
+  // Rules tab: build firing status from open incidents
+  const firingRuleIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const incident of incidents) {
+      if (incident.status === "open") ids.add(incident.ruleId)
+    }
+    return ids
+  }, [incidents])
 
+  const [searchQuery, setSearchQuery] = useState("")
   const [destinationDialogOpen, setDestinationDialogOpen] = useState(false)
   const [destinationForm, setDestinationForm] = useState<DestinationFormState>(defaultDestinationForm())
   const [editingDestination, setEditingDestination] = useState<AlertDestination | null>(null)
@@ -285,16 +497,10 @@ function AlertsPage() {
   const [testingDestinationId, setTestingDestinationId] = useState<AlertDestination["id"] | null>(null)
   const [deletingDestinationId, setDeletingDestinationId] = useState<AlertDestination["id"] | null>(null)
 
-  const [testingRuleId, setTestingRuleId] = useState<AlertRule["id"] | null>(null)
-  const [deletingRuleId, setDeletingRuleId] = useState<AlertRule["id"] | null>(null)
+
 
   function handleTabSelect(tab: AlertsTab) {
-    navigate({
-      search: (prev) => ({
-        ...prev,
-        tab,
-      }),
-    })
+    navigate({ search: (prev) => ({ ...prev, tab }) })
   }
 
   function openDestinationDialog(destination?: AlertDestination) {
@@ -306,7 +512,6 @@ function AlertsPage() {
   async function handleDestinationSave() {
     setSavingDestination(true)
     const form = destinationForm
-
     let result: Exit.Exit<unknown, unknown>
 
     if (editingDestination) {
@@ -314,72 +519,32 @@ function AlertsPage() {
         case "slack":
           result = await updateDestination({
             params: { destinationId: editingDestination.id },
-            payload: {
-              type: "slack",
-              name: form.name.trim() || undefined,
-              enabled: form.enabled,
-              channelLabel: form.channelLabel.trim() || undefined,
-              webhookUrl: form.webhookUrl.trim() || undefined,
-            },
+            payload: { type: "slack", name: form.name.trim() || undefined, enabled: form.enabled, channelLabel: form.channelLabel.trim() || undefined, webhookUrl: form.webhookUrl.trim() || undefined },
           })
           break
         case "pagerduty":
           result = await updateDestination({
             params: { destinationId: editingDestination.id },
-            payload: {
-              type: "pagerduty",
-              name: form.name.trim() || undefined,
-              enabled: form.enabled,
-              integrationKey: form.integrationKey.trim() || undefined,
-            },
+            payload: { type: "pagerduty", name: form.name.trim() || undefined, enabled: form.enabled, integrationKey: form.integrationKey.trim() || undefined },
           })
           break
         case "webhook":
           result = await updateDestination({
             params: { destinationId: editingDestination.id },
-            payload: {
-              type: "webhook",
-              name: form.name.trim() || undefined,
-              enabled: form.enabled,
-              url: form.url.trim() || undefined,
-              signingSecret: form.signingSecret.trim() || undefined,
-            },
+            payload: { type: "webhook", name: form.name.trim() || undefined, enabled: form.enabled, url: form.url.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined },
           })
           break
       }
     } else {
       switch (form.type) {
         case "slack":
-          result = await createDestination({
-            payload: {
-              type: "slack",
-              name: form.name.trim(),
-              enabled: form.enabled,
-              webhookUrl: form.webhookUrl.trim(),
-              channelLabel: form.channelLabel.trim() || undefined,
-            },
-          })
+          result = await createDestination({ payload: { type: "slack", name: form.name.trim(), enabled: form.enabled, webhookUrl: form.webhookUrl.trim(), channelLabel: form.channelLabel.trim() || undefined } })
           break
         case "pagerduty":
-          result = await createDestination({
-            payload: {
-              type: "pagerduty",
-              name: form.name.trim(),
-              enabled: form.enabled,
-              integrationKey: form.integrationKey.trim(),
-            },
-          })
+          result = await createDestination({ payload: { type: "pagerduty", name: form.name.trim(), enabled: form.enabled, integrationKey: form.integrationKey.trim() } })
           break
         case "webhook":
-          result = await createDestination({
-            payload: {
-              type: "webhook",
-              name: form.name.trim(),
-              enabled: form.enabled,
-              url: form.url.trim(),
-              signingSecret: form.signingSecret.trim() || undefined,
-            },
-          })
+          result = await createDestination({ payload: { type: "webhook", name: form.name.trim(), enabled: form.enabled, url: form.url.trim(), signingSecret: form.signingSecret.trim() || undefined } })
           break
       }
     }
@@ -391,7 +556,6 @@ function AlertsPage() {
     } else {
       toast.error(getExitErrorMessage(result, "Failed to save destination"))
     }
-
     setSavingDestination(false)
   }
 
@@ -410,34 +574,8 @@ function AlertsPage() {
   }
 
   async function handleDestinationToggle(destination: AlertDestination) {
-    const result = await (() => {
-      switch (destination.type) {
-        case "slack":
-          return updateDestination({
-            params: { destinationId: destination.id },
-            payload: {
-              type: "slack",
-              enabled: !destination.enabled,
-            },
-          })
-        case "pagerduty":
-          return updateDestination({
-            params: { destinationId: destination.id },
-            payload: {
-              type: "pagerduty",
-              enabled: !destination.enabled,
-            },
-          })
-        case "webhook":
-          return updateDestination({
-            params: { destinationId: destination.id },
-            payload: {
-              type: "webhook",
-              enabled: !destination.enabled,
-            },
-          })
-      }
-    })()
+    const payload = { type: destination.type, enabled: !destination.enabled } as never
+    const result = await updateDestination({ params: { destinationId: destination.id }, payload })
     if (Exit.isSuccess(result)) {
       refreshDestinations()
     } else {
@@ -472,7 +610,6 @@ function AlertsPage() {
         destinationIds: [...rule.destinationIds],
       }),
     })
-
     if (Exit.isSuccess(result)) {
       refreshRules()
     } else {
@@ -480,117 +617,80 @@ function AlertsPage() {
     }
   }
 
-  async function handleRuleSendTest(rule: AlertRule) {
-    setTestingRuleId(rule.id)
-    const result = await testRule({
-      payload: new AlertRuleTestRequest({
-        rule: new AlertRuleUpsertRequest({
-          ...rule,
-          serviceName: rule.serviceName ?? null,
-          metricName: rule.metricName ?? null,
-          metricType: rule.metricType ?? null,
-          metricAggregation: rule.metricAggregation ?? null,
-          apdexThresholdMs: rule.apdexThresholdMs ?? null,
-          destinationIds: [...rule.destinationIds],
-        }),
-        sendNotification: true,
-      }),
-    })
+  const filteredRules = useMemo(() => {
+    if (!searchQuery.trim()) return rules
+    const q = searchQuery.toLowerCase()
+    return rules.filter((r) =>
+      r.name.toLowerCase().includes(q) ||
+      (r.serviceName && r.serviceName.toLowerCase().includes(q))
+    )
+  }, [rules, searchQuery])
 
-    if (Exit.isSuccess(result)) {
-      toast.success("Rule test sent")
-      refreshDeliveryEvents()
-      refreshDestinations()
-    } else {
-      toast.error(getExitErrorMessage(result, "Failed to send rule test"))
-    }
-
-    setTestingRuleId(null)
-  }
-
-  async function handleRuleDelete(rule: AlertRule) {
-    setDeletingRuleId(rule.id)
-    const result = await deleteRule({ params: { ruleId: rule.id } })
-    if (Exit.isSuccess(result)) {
-      toast.success("Rule deleted")
-      refreshRules()
-      refreshIncidents()
-    } else {
-      toast.error(getExitErrorMessage(result, "Failed to delete rule"))
-    }
-    setDeletingRuleId(null)
-  }
-
-  const title = activeTab === "rules"
-    ? "Alert Rules"
-    : activeTab === "incidents"
-      ? "Incidents"
-      : "Destinations"
-  const description = activeTab === "rules"
-    ? "Build threshold-based service alerts with previewable evaluations and reusable destinations."
-    : activeTab === "incidents"
-      ? "Track open incidents, recoveries, and every delivery attempt emitted by Maple."
-      : "Manage reusable Slack, PagerDuty, and signed webhook destinations."
+  const tabBar = (
+    <Tabs value={activeTab} onValueChange={(v) => handleTabSelect(v as AlertsTab)}>
+      <TabsList variant="line">
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="rules">Rules</TabsTrigger>
+        <TabsTrigger value="incidents">Incidents</TabsTrigger>
+        <TabsTrigger value="destinations">Destinations</TabsTrigger>
+      </TabsList>
+    </Tabs>
+  )
 
   return (
     <>
       <DashboardLayout
-        breadcrumbs={[
-          { label: "Alerts", href: "/alerts" },
-          { label: title },
-        ]}
-        title={title}
-        description={description}
-        filterSidebar={<AlertNav activeTab={activeTab} onSelect={handleTabSelect} />}
+        breadcrumbs={[{ label: "Alerts" }]}
+        title="Alerts"
+        description="Monitor your services and get notified when things go wrong."
+        headerActions={
+          <Button size="sm" render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}>
+            <PlusIcon size={14} />
+            New Rule
+          </Button>
+        }
+        stickyContent={tabBar}
       >
         <div className="space-y-6">
-          {search.serviceName && activeTab === "rules" && (
-            <Card>
-              <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="text-sm font-medium">Prefilled for service</div>
-                  <div className="text-muted-foreground mt-1 text-sm">
-                    New rules will default to <span className="font-mono">{search.serviceName}</span>.
-                  </div>
-                </div>
-                {isAdmin && (
-                  <Button size="sm" asChild>
-                    <Link to="/alerts/create" search={{ serviceName: search.serviceName }}>
-                      <PlusIcon size={14} />
-                      Create Rule
-                    </Link>
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+          {/* ─── Overview Tab ─── */}
+          {activeTab === "overview" && (
+            <OverviewTab
+              rules={rules}
+              incidents={incidents}
+              destinations={destinations}
+              deliveryEvents={deliveryEvents}
+              rulesResult={rulesResult}
+              incidentsResult={incidentsResult}
+              onTabSelect={handleTabSelect}
+            />
           )}
 
+          {/* ─── Rules Tab ─── */}
           {activeTab === "rules" && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-muted-foreground text-sm">
-                  Threshold-only rules evaluate every minute and open incidents after consecutive breaches.
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1 max-w-xs">
+                  <MagnifierIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Search rules..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
                 </div>
-                {isAdmin && (
-                  <Button size="sm" asChild>
-                    <Link to="/alerts/create" search={{ serviceName: search.serviceName }}>
-                      <PlusIcon size={14} />
-                      Add Rule
-                    </Link>
-                  </Button>
-                )}
               </div>
 
               {Result.isInitial(rulesResult) ? (
                 <div className="space-y-3">
-                  <Skeleton className="h-28 w-full" />
-                  <Skeleton className="h-28 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
                 </div>
               ) : !Result.isSuccess(rulesResult) ? (
                 <div className="text-muted-foreground py-8 text-center text-sm">
                   Failed to load alert rules.
                 </div>
-              ) : rules.length === 0 ? (
+              ) : filteredRules.length === 0 && rules.length === 0 ? (
                 <Empty className="py-12">
                   <EmptyHeader>
                     <EmptyMedia variant="icon">
@@ -602,113 +702,97 @@ function AlertsPage() {
                     </EmptyDescription>
                   </EmptyHeader>
                   {isAdmin && (
-                    <Button size="sm" asChild>
-                      <Link to="/alerts/create" search={{ serviceName: search.serviceName }}>
-                        <PlusIcon size={14} />
-                        Add Rule
-                      </Link>
+                    <Button size="sm" render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}>
+                      <PlusIcon size={14} />
+                      Add Rule
                     </Button>
                   )}
                 </Empty>
               ) : (
-                <div className="space-y-3">
-                  {rules.map((rule) => (
-                    <Card key={rule.id}>
-                      <CardContent className="space-y-4 p-4">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-sm font-semibold">{rule.name}</div>
-                              <Badge variant="outline" className={severityTone[rule.severity]}>
-                                {rule.severity}
-                              </Badge>
-                              <Badge variant="outline">
-                                {rule.enabled ? "Enabled" : "Disabled"}
-                              </Badge>
-                              <Badge variant="outline">{signalLabels[rule.signalType]}</Badge>
-                            </div>
-                            <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                              <span>{rule.serviceName ? `Service: ${rule.serviceName}` : "Scope: all services"}</span>
-                              <span>
-                                Condition: {comparatorLabels[rule.comparator]} {formatSignalValue(rule.signalType, rule.threshold)}
-                              </span>
-                              <span>Window: {rule.windowMinutes}m</span>
-                              <span>Min samples: {rule.minimumSampleCount}</span>
-                              <span>Renotify: {rule.renotifyIntervalMinutes}m</span>
-                            </div>
-                            {rule.signalType === "metric" && (
-                              <div className="text-muted-foreground text-xs">
-                                Metric: <span className="font-mono">{rule.metricName}</span>
-                                {" · "}
-                                {rule.metricType ? metricTypeLabels[rule.metricType] : "Unknown"}
-                                {" · "}
-                                {rule.metricAggregation ? metricAggregationLabels[rule.metricAggregation] : "Unknown"}
-                              </div>
-                            )}
-                            {rule.signalType === "apdex" && rule.apdexThresholdMs != null && (
-                              <div className="text-muted-foreground text-xs">
-                                Apdex threshold: {formatLatency(rule.apdexThresholdMs)}
-                              </div>
-                            )}
-                            <div className="flex flex-wrap gap-2">
-                              {rule.destinationIds.map((destinationId) => {
-                                const destination = destinationsById.get(destinationId)
-                                return (
-                                  <Badge key={destinationId} variant="secondary">
-                                    {destination?.name ?? destinationId}
-                                  </Badge>
-                                )
-                              })}
-                            </div>
-                          </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[40px]" />
+                      <TableHead className="min-w-[200px]">Name</TableHead>
+                      <TableHead className="w-[100px]">Signal</TableHead>
+                      <TableHead className="w-[130px]">Service</TableHead>
+                      <TableHead className="w-[160px]">Condition</TableHead>
+                      <TableHead className="w-[80px]">Severity</TableHead>
+                      <TableHead className="w-[70px]">Notify</TableHead>
+                      <TableHead className="w-[90px]">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRules.map((rule) => {
+                      const isFiring = firingRuleIds.has(rule.id)
+                      const status = !rule.enabled
+                        ? { label: "Disabled", dot: "bg-zinc-400" }
+                        : isFiring
+                          ? { label: "Firing", dot: "bg-red-500" }
+                          : { label: "OK", dot: "bg-green-500" }
 
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Switch checked={rule.enabled} onCheckedChange={() => handleRuleToggle(rule)} disabled={!isAdmin} />
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRuleSendTest(rule)}
-                              disabled={!isAdmin || testingRuleId === rule.id}
-                            >
-                              {testingRuleId === rule.id ? <LoaderIcon size={14} className="animate-spin" /> : <EyeIcon size={14} />}
-                              Send Test
-                            </Button>
-                            {isAdmin && (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger
-                                  render={<Button variant="ghost" size="icon-sm" className="shrink-0" />}
-                                >
-                                  <DotsVerticalIcon size={14} />
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    onClick={() => navigate({ to: "/alerts/create", search: { ruleId: rule.id } })}
-                                  >
-                                    <PencilIcon size={14} />
-                                    Edit
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    variant="destructive"
-                                    onClick={() => handleRuleDelete(rule)}
-                                    disabled={deletingRuleId === rule.id}
-                                  >
-                                    <TrashIcon size={14} />
-                                    Delete
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                      return (
+                        <TableRow
+                          key={rule.id}
+                          className="cursor-pointer"
+                          onClick={() => navigate({ to: "/alerts/$ruleId", params: { ruleId: rule.id } })}
+                        >
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Switch
+                              checked={rule.enabled}
+                              onCheckedChange={() => handleRuleToggle(rule)}
+                              disabled={!isAdmin}
+                            />
+                          </TableCell>
+                          <TableCell className={cn("font-medium", !rule.enabled && "text-muted-foreground")}>
+                            {rule.name}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={cn("text-xs", signalBadgeClass[rule.signalType])}>
+                              {signalLabels[rule.signalType]}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-mono text-muted-foreground text-sm">{rule.serviceName ?? "all"}</span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-mono text-sm">
+                              {comparatorLabels[rule.comparator]} {formatSignalValue(rule.signalType, rule.threshold)} / {rule.windowMinutes}min
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={severityTone[rule.severity]}>
+                              {rule.severity === "critical" ? "Critical" : "Warning"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                              {rule.destinationIds.length}
+                              <PaperPlaneIcon size={12} />
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="flex items-center gap-1.5 text-sm">
+                              <span className={cn("size-1.5 rounded-full", status.dot)} />
+                              <span className={cn(
+                                status.label === "Firing" && "text-red-500 font-medium",
+                                status.label === "Disabled" && "text-muted-foreground",
+                                status.label === "OK" && "text-green-500",
+                              )}>
+                                {status.label}
+                              </span>
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
               )}
             </div>
           )}
 
+          {/* ─── Incidents Tab ─── */}
           {activeTab === "incidents" && (
             <div className="space-y-4">
               {Result.isInitial(incidentsResult) ? (
@@ -755,9 +839,6 @@ function AlertsPage() {
                               </span>
                               <span>
                                 Threshold: {comparatorLabels[incident.comparator]} {formatSignalValue(incident.signalType, incident.threshold)}
-                              </span>
-                              <span>
-                                Samples: {incident.lastSampleCount == null ? "n/a" : formatNumber(incident.lastSampleCount)}
                               </span>
                               <span>Triggered {formatRelativeTime(incident.lastTriggeredAt)}</span>
                               <span>Last notified {formatDateTime(incident.lastNotifiedAt)}</span>
@@ -865,6 +946,7 @@ function AlertsPage() {
             </div>
           )}
 
+          {/* ─── Destinations Tab ─── */}
           {activeTab === "destinations" && (
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
@@ -979,6 +1061,7 @@ function AlertsPage() {
         </div>
       </DashboardLayout>
 
+      {/* Destination Dialog */}
       <Dialog open={destinationDialogOpen} onOpenChange={setDestinationDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -1083,7 +1166,7 @@ function AlertsPage() {
               <div>
                 <div className="text-sm font-medium">Enabled</div>
                 <div className="text-muted-foreground text-xs">
-                  Disabled destinations stay attached to rules but won’t receive notifications.
+                  Disabled destinations stay attached to rules but won't receive notifications.
                 </div>
               </div>
               <Switch
@@ -1104,7 +1187,6 @@ function AlertsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
     </>
   )
 }
