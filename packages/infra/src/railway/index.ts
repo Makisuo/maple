@@ -44,6 +44,7 @@ export interface ProvisionRailwayStackOutput {
   ingestUrl: string;
   services: {
     api: RailwayService;
+    alerting: RailwayService;
     ingest: RailwayService;
     otelCollector: RailwayService;
   };
@@ -64,6 +65,7 @@ export async function provisionRailwayStack(
 
   const serviceNames = {
     api: resolveRailwayServiceName("api", target),
+    alerting: resolveRailwayServiceName("alerting", target),
     ingest: resolveRailwayServiceName("ingest", target),
     otelCollector: resolveRailwayServiceName("otel-collector", target),
   };
@@ -190,6 +192,7 @@ export async function provisionRailwayStack(
   });
 
   const authMode = env.MAPLE_AUTH_MODE?.trim() || "self_hosted";
+  const appBaseUrl = resolveAppBaseUrl(target, env);
 
   await Variable("api-service-variables", {
     project,
@@ -218,9 +221,71 @@ export async function provisionRailwayStack(
       SD_INTERNAL_TOKEN: env.SD_INTERNAL_TOKEN?.trim() || "",
       INTERNAL_SERVICE_TOKEN: env.INTERNAL_SERVICE_TOKEN?.trim() || "",
       AUTUMN_SECRET_KEY: env.AUTUMN_SECRET_KEY?.trim() || "",
+      MAPLE_APP_BASE_URL: appBaseUrl,
       OTEL_ENVIRONMENT: "production",
       OTEL_BASE_URL: toIngestPrivateEndpoint(serviceNames.ingest),
       MAPLE_OTEL_INGEST_KEY: env.MAPLE_OTEL_INGEST_KEY?.trim() || "",
+    },
+  });
+
+  // --- Alerting Service ---
+
+  const alertingService = await Service("alerting-service", {
+    project,
+    environment,
+    name: serviceNames.alerting,
+    source: { repo: "Makisuo/maple" },
+    ...(deploymentTriggerBranch
+      ? {
+          deploymentTrigger: {
+            branch: deploymentTriggerBranch,
+            rootDirectory: "/",
+          },
+        }
+      : {}),
+    adopt: true,
+  });
+
+  await updateServiceInstanceMonorepoConfig({
+    serviceId: alertingService.serviceId,
+    environmentId,
+    rootDirectory: "/",
+    dockerfilePath: "apps/alerting/Dockerfile",
+    watchPatterns: [
+      "apps/alerting/**",
+      "apps/api/**",
+      "packages/**",
+      "package.json",
+      "bun.lock",
+      "turbo.json",
+    ],
+  });
+
+  await Variable("alerting-service-variables", {
+    project,
+    environment: environmentId,
+    service: alertingService,
+    variables: {
+      TINYBIRD_HOST: reqEnv("TINYBIRD_HOST"),
+      TINYBIRD_TOKEN: reqEnv("TINYBIRD_TOKEN"),
+      MAPLE_DB_URL: reqEnv("MAPLE_DB_URL"),
+      MAPLE_DB_AUTH_TOKEN: reqEnv("MAPLE_DB_AUTH_TOKEN"),
+      MAPLE_AUTH_MODE: authMode,
+      MAPLE_ROOT_PASSWORD:
+        authMode === "clerk"
+          ? env.MAPLE_ROOT_PASSWORD?.trim() || ""
+          : reqEnv("MAPLE_ROOT_PASSWORD"),
+      MAPLE_DEFAULT_ORG_ID: env.MAPLE_DEFAULT_ORG_ID?.trim() || "default",
+      MAPLE_INGEST_KEY_ENCRYPTION_KEY: reqEnv(
+        "MAPLE_INGEST_KEY_ENCRYPTION_KEY",
+      ),
+      MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: reqEnv(
+        "MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY",
+      ),
+      CLERK_SECRET_KEY: env.CLERK_SECRET_KEY?.trim() || "",
+      CLERK_PUBLISHABLE_KEY: env.CLERK_PUBLISHABLE_KEY?.trim() || "",
+      CLERK_JWT_KEY: env.CLERK_JWT_KEY?.trim() || "",
+      MAPLE_APP_BASE_URL: appBaseUrl,
     },
   });
 
@@ -313,6 +378,7 @@ export async function provisionRailwayStack(
     ingestUrl: toHttpsUrl(ingestDomain.domain),
     services: {
       api: apiService,
+      alerting: alertingService,
       ingest: ingestService,
       otelCollector: otelService,
     },
@@ -331,6 +397,25 @@ function toIngestPrivateEndpoint(serviceName: string): string {
 
 function toHttpsUrl(domain: string): string {
   return `https://${domain}`;
+}
+
+function resolveAppBaseUrl(
+  target: RailwayDeploymentTarget,
+  env: EnvMap,
+): string {
+  const configured = env.MAPLE_APP_BASE_URL?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  switch (target.kind) {
+    case "prd":
+      return "https://app.maple.dev";
+    case "stg":
+      return "https://staging.maple.dev";
+    case "pr":
+      return "http://127.0.0.1:3471";
+  }
 }
 
 function requireEnv(name: string, env: EnvMap): string {

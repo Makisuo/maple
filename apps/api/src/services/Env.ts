@@ -13,6 +13,7 @@ export interface EnvShape {
   readonly MAPLE_INGEST_KEY_ENCRYPTION_KEY: Redacted.Redacted<string>
   readonly MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Redacted.Redacted<string>
   readonly MAPLE_INGEST_PUBLIC_URL: string
+  readonly MAPLE_APP_BASE_URL: string
   readonly CLERK_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
   readonly CLERK_PUBLISHABLE_KEY: Option.Option<string>
   readonly CLERK_JWT_KEY: Option.Option<Redacted.Redacted<string>>
@@ -60,6 +61,9 @@ export class Env extends ServiceMap.Service<Env, EnvShape>()("Env", {
       MAPLE_INGEST_PUBLIC_URL: yield* Config.string(
         "MAPLE_INGEST_PUBLIC_URL",
       ).pipe(Config.withDefault("http://127.0.0.1:3474")),
+      MAPLE_APP_BASE_URL: yield* Config.string("MAPLE_APP_BASE_URL").pipe(
+        Config.withDefault("http://127.0.0.1:3471"),
+      ),
       CLERK_SECRET_KEY: yield* Config.option(Config.redacted("CLERK_SECRET_KEY")),
       CLERK_PUBLISHABLE_KEY: yield* Config.option(
         Config.string("CLERK_PUBLISHABLE_KEY"),

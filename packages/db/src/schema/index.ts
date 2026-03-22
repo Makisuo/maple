@@ -1,3 +1,4 @@
+export * from "./alerts";
 export * from "./api-keys";
 export * from "./cloudflare-logpush-connectors";
 export * from "./dashboards";

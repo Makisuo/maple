@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "dev": "turbo dev --ui=tui",
+    "dev:alerting": "bun --filter=@maple/alerting dev",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",

@@ -28,8 +28,10 @@ import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as ServicesIndexRouteImport } from './routes/services/index'
+import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 import { Route as ServicesServiceNameRouteImport } from './routes/services/$serviceName'
+import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
 
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
@@ -126,6 +128,11 @@ const ServicesIndexRoute = ServicesIndexRouteImport.update({
   path: '/services/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AlertsIndexRoute = AlertsIndexRouteImport.update({
+  id: '/alerts/',
+  path: '/alerts/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
   id: '/traces/$traceId',
   path: '/traces/$traceId',
@@ -134,6 +141,11 @@ const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
 const ServicesServiceNameRoute = ServicesServiceNameRouteImport.update({
   id: '/services/$serviceName',
   path: '/services/$serviceName',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlertsCreateRoute = AlertsCreateRouteImport.update({
+  id: '/alerts/create',
+  path: '/alerts/create',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -155,8 +167,10 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/alerts/create': typeof AlertsCreateRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/alerts/': typeof AlertsIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
 }
@@ -178,8 +192,10 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/alerts/create': typeof AlertsCreateRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/alerts': typeof AlertsIndexRoute
   '/services': typeof ServicesIndexRoute
   '/traces': typeof TracesIndexRoute
 }
@@ -202,8 +218,10 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/alerts/create': typeof AlertsCreateRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/alerts/': typeof AlertsIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
 }
@@ -227,8 +245,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/alerts/create'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/alerts/'
     | '/services/'
     | '/traces/'
   fileRoutesByTo: FileRoutesByTo
@@ -250,8 +270,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/alerts/create'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/alerts'
     | '/services'
     | '/traces'
   id:
@@ -273,8 +295,10 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/alerts/create'
     | '/services/$serviceName'
     | '/traces/$traceId'
+    | '/alerts/'
     | '/services/'
     | '/traces/'
   fileRoutesById: FileRoutesById
@@ -297,8 +321,10 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
+  AlertsCreateRoute: typeof AlertsCreateRoute
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
+  AlertsIndexRoute: typeof AlertsIndexRoute
   ServicesIndexRoute: typeof ServicesIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
 }
@@ -438,6 +464,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ServicesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/alerts/': {
+      id: '/alerts/'
+      path: '/alerts'
+      fullPath: '/alerts/'
+      preLoaderRoute: typeof AlertsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/traces/$traceId': {
       id: '/traces/$traceId'
       path: '/traces/$traceId'
@@ -450,6 +483,13 @@ declare module '@tanstack/react-router' {
       path: '/services/$serviceName'
       fullPath: '/services/$serviceName'
       preLoaderRoute: typeof ServicesServiceNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/alerts/create': {
+      id: '/alerts/create'
+      path: '/alerts/create'
+      fullPath: '/alerts/create'
+      preLoaderRoute: typeof AlertsCreateRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -473,8 +513,10 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
+  AlertsCreateRoute: AlertsCreateRoute,
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
+  AlertsIndexRoute: AlertsIndexRoute,
   ServicesIndexRoute: ServicesIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
 }

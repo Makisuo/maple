@@ -1,0 +1,567 @@
+import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { Schema } from "effect"
+import {
+  AlertDeliveryEventId,
+  AlertDestinationId,
+  AlertIncidentId,
+  AlertRuleId,
+  IsoDateTimeString,
+  RoleName,
+} from "../primitives"
+import { Authorization } from "./current-tenant"
+
+export const AlertDestinationType = Schema.Literals([
+  "slack",
+  "pagerduty",
+  "webhook",
+]).annotate({
+  identifier: "@maple/AlertDestinationType",
+  title: "Alert Destination Type",
+})
+export type AlertDestinationType = Schema.Schema.Type<typeof AlertDestinationType>
+
+export const AlertSeverity = Schema.Literals(["warning", "critical"]).annotate({
+  identifier: "@maple/AlertSeverity",
+  title: "Alert Severity",
+})
+export type AlertSeverity = Schema.Schema.Type<typeof AlertSeverity>
+
+export const AlertSignalType = Schema.Literals([
+  "error_rate",
+  "p95_latency",
+  "p99_latency",
+  "apdex",
+  "throughput",
+  "metric",
+]).annotate({
+  identifier: "@maple/AlertSignalType",
+  title: "Alert Signal Type",
+})
+export type AlertSignalType = Schema.Schema.Type<typeof AlertSignalType>
+
+export const AlertComparator = Schema.Literals(["gt", "gte", "lt", "lte"]).annotate({
+  identifier: "@maple/AlertComparator",
+  title: "Alert Comparator",
+})
+export type AlertComparator = Schema.Schema.Type<typeof AlertComparator>
+
+export const AlertMetricType = Schema.Literals([
+  "sum",
+  "gauge",
+  "histogram",
+  "exponential_histogram",
+]).annotate({
+  identifier: "@maple/AlertMetricType",
+  title: "Alert Metric Type",
+})
+export type AlertMetricType = Schema.Schema.Type<typeof AlertMetricType>
+
+export const AlertMetricAggregation = Schema.Literals([
+  "avg",
+  "min",
+  "max",
+  "sum",
+  "count",
+]).annotate({
+  identifier: "@maple/AlertMetricAggregation",
+  title: "Alert Metric Aggregation",
+})
+export type AlertMetricAggregation = Schema.Schema.Type<
+  typeof AlertMetricAggregation
+>
+
+export const AlertIncidentStatus = Schema.Literals(["open", "resolved"]).annotate({
+  identifier: "@maple/AlertIncidentStatus",
+  title: "Alert Incident Status",
+})
+export type AlertIncidentStatus = Schema.Schema.Type<typeof AlertIncidentStatus>
+
+export const AlertEventType = Schema.Literals([
+  "trigger",
+  "resolve",
+  "renotify",
+  "test",
+]).annotate({
+  identifier: "@maple/AlertEventType",
+  title: "Alert Event Type",
+})
+export type AlertEventType = Schema.Schema.Type<typeof AlertEventType>
+
+export const AlertDeliveryStatus = Schema.Literals([
+  "queued",
+  "success",
+  "failed",
+]).annotate({
+  identifier: "@maple/AlertDeliveryStatus",
+  title: "Alert Delivery Status",
+})
+export type AlertDeliveryStatus = Schema.Schema.Type<typeof AlertDeliveryStatus>
+
+export const AlertEvaluationStatus = Schema.Literals([
+  "breached",
+  "healthy",
+  "skipped",
+]).annotate({
+  identifier: "@maple/AlertEvaluationStatus",
+  title: "Alert Evaluation Status",
+})
+export type AlertEvaluationStatus = Schema.Schema.Type<
+  typeof AlertEvaluationStatus
+>
+
+const ChannelLabel = Schema.String.pipe(
+  Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
+)
+
+const OptionalNonEmptyString = Schema.optional(
+  Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed())),
+)
+
+const PositiveInt = Schema.Number.pipe(
+  Schema.check(Schema.isInt(), Schema.isGreaterThan(0)),
+)
+
+const NonNegativeInt = Schema.Number.pipe(
+  Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+)
+
+const PositiveFloat = Schema.Number.pipe(
+  Schema.check(Schema.isFinite(), Schema.isGreaterThan(0)),
+)
+
+export class SlackAlertDestinationConfig extends Schema.Class<SlackAlertDestinationConfig>(
+  "SlackAlertDestinationConfig",
+)({
+  type: Schema.Literal("slack"),
+  name: ChannelLabel,
+  webhookUrl: Schema.String,
+  channelLabel: OptionalNonEmptyString,
+  enabled: Schema.optional(Schema.Boolean),
+}) {}
+
+export class PagerDutyAlertDestinationConfig extends Schema.Class<PagerDutyAlertDestinationConfig>(
+  "PagerDutyAlertDestinationConfig",
+)({
+  type: Schema.Literal("pagerduty"),
+  name: ChannelLabel,
+  integrationKey: Schema.String,
+  enabled: Schema.optional(Schema.Boolean),
+}) {}
+
+export class WebhookAlertDestinationConfig extends Schema.Class<WebhookAlertDestinationConfig>(
+  "WebhookAlertDestinationConfig",
+)({
+  type: Schema.Literal("webhook"),
+  name: ChannelLabel,
+  url: Schema.String,
+  signingSecret: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Boolean),
+}) {}
+
+export const AlertDestinationCreateRequest = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("slack"),
+    name: ChannelLabel,
+    webhookUrl: Schema.String,
+    channelLabel: OptionalNonEmptyString,
+    enabled: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("pagerduty"),
+    name: ChannelLabel,
+    integrationKey: Schema.String,
+    enabled: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("webhook"),
+    name: ChannelLabel,
+    url: Schema.String,
+    signingSecret: Schema.optional(Schema.String),
+    enabled: Schema.optional(Schema.Boolean),
+  }),
+])
+export type AlertDestinationCreateRequest = Schema.Schema.Type<
+  typeof AlertDestinationCreateRequest
+>
+
+export class UpdateSlackAlertDestinationConfig extends Schema.Class<UpdateSlackAlertDestinationConfig>(
+  "UpdateSlackAlertDestinationConfig",
+)({
+  name: OptionalNonEmptyString,
+  webhookUrl: Schema.optional(Schema.String),
+  channelLabel: OptionalNonEmptyString,
+  enabled: Schema.optional(Schema.Boolean),
+}) {}
+
+export class UpdatePagerDutyAlertDestinationConfig extends Schema.Class<UpdatePagerDutyAlertDestinationConfig>(
+  "UpdatePagerDutyAlertDestinationConfig",
+)({
+  name: OptionalNonEmptyString,
+  integrationKey: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Boolean),
+}) {}
+
+export class UpdateWebhookAlertDestinationConfig extends Schema.Class<UpdateWebhookAlertDestinationConfig>(
+  "UpdateWebhookAlertDestinationConfig",
+)({
+  name: OptionalNonEmptyString,
+  url: Schema.optional(Schema.String),
+  signingSecret: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Boolean),
+}) {}
+
+export const AlertDestinationUpdateRequest = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("slack"),
+    ...UpdateSlackAlertDestinationConfig.fields,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("pagerduty"),
+    ...UpdatePagerDutyAlertDestinationConfig.fields,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("webhook"),
+    ...UpdateWebhookAlertDestinationConfig.fields,
+  }),
+])
+export type AlertDestinationUpdateRequest = Schema.Schema.Type<
+  typeof AlertDestinationUpdateRequest
+>
+
+export class AlertDestinationDocument extends Schema.Class<AlertDestinationDocument>(
+  "AlertDestinationDocument",
+)({
+  id: AlertDestinationId,
+  name: Schema.String,
+  type: AlertDestinationType,
+  enabled: Schema.Boolean,
+  summary: Schema.String,
+  channelLabel: Schema.NullOr(Schema.String),
+  lastTestedAt: Schema.NullOr(IsoDateTimeString),
+  lastTestError: Schema.NullOr(Schema.String),
+  createdAt: IsoDateTimeString,
+  updatedAt: IsoDateTimeString,
+}) {}
+
+export class AlertDestinationDeleteResponse extends Schema.Class<AlertDestinationDeleteResponse>(
+  "AlertDestinationDeleteResponse",
+)({
+  id: AlertDestinationId,
+}) {}
+
+export class AlertDestinationsListResponse extends Schema.Class<AlertDestinationsListResponse>(
+  "AlertDestinationsListResponse",
+)({
+  destinations: Schema.Array(AlertDestinationDocument),
+}) {}
+
+export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRuleDocument")({
+  id: AlertRuleId,
+  name: Schema.String,
+  enabled: Schema.Boolean,
+  severity: AlertSeverity,
+  serviceName: Schema.NullOr(Schema.String),
+  signalType: AlertSignalType,
+  comparator: AlertComparator,
+  threshold: Schema.Number,
+  windowMinutes: PositiveInt,
+  minimumSampleCount: NonNegativeInt,
+  consecutiveBreachesRequired: PositiveInt,
+  consecutiveHealthyRequired: PositiveInt,
+  renotifyIntervalMinutes: PositiveInt,
+  metricName: Schema.NullOr(Schema.String),
+  metricType: Schema.NullOr(AlertMetricType),
+  metricAggregation: Schema.NullOr(AlertMetricAggregation),
+  apdexThresholdMs: Schema.NullOr(PositiveFloat),
+  destinationIds: Schema.Array(AlertDestinationId),
+  createdAt: IsoDateTimeString,
+  updatedAt: IsoDateTimeString,
+  createdBy: Schema.String,
+  updatedBy: Schema.String,
+}) {}
+
+export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>(
+  "AlertRuleUpsertRequest",
+)({
+  name: ChannelLabel,
+  enabled: Schema.optional(Schema.Boolean),
+  severity: AlertSeverity,
+  serviceName: Schema.optional(Schema.NullOr(Schema.String)),
+  signalType: AlertSignalType,
+  comparator: AlertComparator,
+  threshold: Schema.Number,
+  windowMinutes: PositiveInt,
+  minimumSampleCount: Schema.optional(NonNegativeInt),
+  consecutiveBreachesRequired: Schema.optional(PositiveInt),
+  consecutiveHealthyRequired: Schema.optional(PositiveInt),
+  renotifyIntervalMinutes: Schema.optional(PositiveInt),
+  metricName: Schema.optional(Schema.NullOr(Schema.String)),
+  metricType: Schema.optional(Schema.NullOr(AlertMetricType)),
+  metricAggregation: Schema.optional(Schema.NullOr(AlertMetricAggregation)),
+  apdexThresholdMs: Schema.optional(Schema.NullOr(PositiveFloat)),
+  destinationIds: Schema.Array(AlertDestinationId),
+}) {}
+
+export class AlertRulesListResponse extends Schema.Class<AlertRulesListResponse>(
+  "AlertRulesListResponse",
+)({
+  rules: Schema.Array(AlertRuleDocument),
+}) {}
+
+export class AlertRuleDeleteResponse extends Schema.Class<AlertRuleDeleteResponse>(
+  "AlertRuleDeleteResponse",
+)({
+  id: AlertRuleId,
+}) {}
+
+export class AlertRuleTestRequest extends Schema.Class<AlertRuleTestRequest>(
+  "AlertRuleTestRequest",
+)({
+  rule: AlertRuleUpsertRequest,
+  sendNotification: Schema.optional(Schema.Boolean),
+}) {}
+
+export class AlertEvaluationResult extends Schema.Class<AlertEvaluationResult>(
+  "AlertEvaluationResult",
+)({
+  status: AlertEvaluationStatus,
+  value: Schema.NullOr(Schema.Number),
+  sampleCount: Schema.Number,
+  threshold: Schema.Number,
+  comparator: AlertComparator,
+  reason: Schema.String,
+}) {}
+
+export class AlertIncidentDocument extends Schema.Class<AlertIncidentDocument>(
+  "AlertIncidentDocument",
+)({
+  id: AlertIncidentId,
+  ruleId: AlertRuleId,
+  ruleName: Schema.String,
+  serviceName: Schema.NullOr(Schema.String),
+  signalType: AlertSignalType,
+  severity: AlertSeverity,
+  status: AlertIncidentStatus,
+  comparator: AlertComparator,
+  threshold: Schema.Number,
+  firstTriggeredAt: IsoDateTimeString,
+  lastTriggeredAt: IsoDateTimeString,
+  resolvedAt: Schema.NullOr(IsoDateTimeString),
+  lastObservedValue: Schema.NullOr(Schema.Number),
+  lastSampleCount: Schema.NullOr(Schema.Number),
+  dedupeKey: Schema.String,
+  lastDeliveredEventType: Schema.NullOr(AlertEventType),
+  lastNotifiedAt: Schema.NullOr(IsoDateTimeString),
+}) {}
+
+export class AlertIncidentsListResponse extends Schema.Class<AlertIncidentsListResponse>(
+  "AlertIncidentsListResponse",
+)({
+  incidents: Schema.Array(AlertIncidentDocument),
+}) {}
+
+export class AlertDeliveryEventDocument extends Schema.Class<AlertDeliveryEventDocument>(
+  "AlertDeliveryEventDocument",
+)({
+  id: AlertDeliveryEventId,
+  incidentId: Schema.NullOr(AlertIncidentId),
+  ruleId: AlertRuleId,
+  destinationId: AlertDestinationId,
+  destinationName: Schema.String,
+  destinationType: AlertDestinationType,
+  deliveryKey: Schema.String,
+  eventType: AlertEventType,
+  attemptNumber: PositiveInt,
+  status: AlertDeliveryStatus,
+  scheduledAt: IsoDateTimeString,
+  attemptedAt: Schema.NullOr(IsoDateTimeString),
+  providerMessage: Schema.NullOr(Schema.String),
+  providerReference: Schema.NullOr(Schema.String),
+  responseCode: Schema.NullOr(Schema.Number),
+  errorMessage: Schema.NullOr(Schema.String),
+}) {}
+
+export class AlertDeliveryEventsListResponse extends Schema.Class<AlertDeliveryEventsListResponse>(
+  "AlertDeliveryEventsListResponse",
+)({
+  events: Schema.Array(AlertDeliveryEventDocument),
+}) {}
+
+export class AlertDestinationTestResponse extends Schema.Class<AlertDestinationTestResponse>(
+  "AlertDestinationTestResponse",
+)({
+  success: Schema.Boolean,
+  message: Schema.String,
+}) {}
+
+export class AlertForbiddenError extends Schema.TaggedErrorClass<AlertForbiddenError>()(
+  "AlertForbiddenError",
+  {
+    message: Schema.String,
+    roles: Schema.optional(Schema.Array(RoleName)),
+  },
+  { httpApiStatus: 403 },
+) {}
+
+export class AlertValidationError extends Schema.TaggedErrorClass<AlertValidationError>()(
+  "AlertValidationError",
+  {
+    message: Schema.String,
+    details: Schema.Array(Schema.String),
+  },
+  { httpApiStatus: 400 },
+) {}
+
+export class AlertPersistenceError extends Schema.TaggedErrorClass<AlertPersistenceError>()(
+  "AlertPersistenceError",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 503 },
+) {}
+
+export class AlertNotFoundError extends Schema.TaggedErrorClass<AlertNotFoundError>()(
+  "AlertNotFoundError",
+  {
+    message: Schema.String,
+    resourceType: Schema.String,
+    resourceId: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
+export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryError>()(
+  "AlertDeliveryError",
+  {
+    message: Schema.String,
+    destinationType: Schema.optional(AlertDestinationType),
+  },
+  { httpApiStatus: 502 },
+) {}
+
+export class AlertsApiGroup extends HttpApiGroup.make("alerts")
+  .add(
+    HttpApiEndpoint.get("listDestinations", "/destinations", {
+      success: AlertDestinationsListResponse,
+      error: AlertPersistenceError,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("createDestination", "/destinations", {
+      payload: AlertDestinationCreateRequest,
+      success: AlertDestinationDocument,
+      error: [
+        AlertForbiddenError,
+        AlertValidationError,
+        AlertPersistenceError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.patch("updateDestination", "/destinations/:destinationId", {
+      params: {
+        destinationId: AlertDestinationId,
+      },
+      payload: AlertDestinationUpdateRequest,
+      success: AlertDestinationDocument,
+      error: [
+        AlertForbiddenError,
+        AlertValidationError,
+        AlertPersistenceError,
+        AlertNotFoundError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.delete("deleteDestination", "/destinations/:destinationId", {
+      params: {
+        destinationId: AlertDestinationId,
+      },
+      success: AlertDestinationDeleteResponse,
+      error: [AlertForbiddenError, AlertPersistenceError, AlertNotFoundError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("testDestination", "/destinations/:destinationId/test", {
+      params: {
+        destinationId: AlertDestinationId,
+      },
+      success: AlertDestinationTestResponse,
+      error: [
+        AlertForbiddenError,
+        AlertValidationError,
+        AlertPersistenceError,
+        AlertNotFoundError,
+        AlertDeliveryError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("listRules", "/rules", {
+      success: AlertRulesListResponse,
+      error: AlertPersistenceError,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("createRule", "/rules", {
+      payload: AlertRuleUpsertRequest,
+      success: AlertRuleDocument,
+      error: [
+        AlertForbiddenError,
+        AlertValidationError,
+        AlertPersistenceError,
+        AlertNotFoundError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.patch("updateRule", "/rules/:ruleId", {
+      params: {
+        ruleId: AlertRuleId,
+      },
+      payload: AlertRuleUpsertRequest,
+      success: AlertRuleDocument,
+      error: [
+        AlertForbiddenError,
+        AlertValidationError,
+        AlertPersistenceError,
+        AlertNotFoundError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.delete("deleteRule", "/rules/:ruleId", {
+      params: {
+        ruleId: AlertRuleId,
+      },
+      success: AlertRuleDeleteResponse,
+      error: [AlertForbiddenError, AlertPersistenceError, AlertNotFoundError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("testRule", "/rules/test", {
+      payload: AlertRuleTestRequest,
+      success: AlertEvaluationResult,
+      error: [
+        AlertForbiddenError,
+        AlertValidationError,
+        AlertPersistenceError,
+        AlertNotFoundError,
+        AlertDeliveryError,
+      ],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("listIncidents", "/incidents", {
+      success: AlertIncidentsListResponse,
+      error: AlertPersistenceError,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("listDeliveryEvents", "/delivery-events", {
+      success: AlertDeliveryEventsListResponse,
+      error: AlertPersistenceError,
+    }),
+  )
+  .prefix("/api/alerts")
+  .middleware(Authorization) {}

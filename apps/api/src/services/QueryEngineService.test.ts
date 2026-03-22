@@ -1,8 +1,14 @@
 import { describe, expect, it } from "bun:test"
 import { Effect, Exit, Option, Schema } from "effect"
 import { OrgId, UserId } from "@maple/domain"
-import type { QueryEngineExecuteRequest } from "@maple/query-engine"
-import { makeQueryEngineExecute } from "./QueryEngineService"
+import type {
+  QueryEngineEvaluateRequest,
+  QueryEngineExecuteRequest,
+} from "@maple/query-engine"
+import {
+  makeQueryEngineEvaluate,
+  makeQueryEngineExecute,
+} from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -14,6 +20,41 @@ const tenant: TenantContext = {
   roles: [],
   authMode: "self_hosted",
 }
+
+const makeTraceTimeseriesRow = (
+  overrides: Partial<{
+    bucket: string
+    groupName: string
+    count: number
+    avgDuration: number
+    p50Duration: number
+    p95Duration: number
+    p99Duration: number
+    errorRate: number
+    satisfiedCount: number
+    toleratingCount: number
+    apdexScore: number
+    sampledSpanCount: number
+    unsampledSpanCount: number
+    dominantThreshold: string
+  }> = {},
+) => ({
+  bucket: "2026-01-01 00:00:00",
+  groupName: "checkout",
+  count: 0,
+  avgDuration: 0,
+  p50Duration: 0,
+  p95Duration: 0,
+  p99Duration: 0,
+  errorRate: 0,
+  satisfiedCount: 0,
+  toleratingCount: 0,
+  apdexScore: 0,
+  sampledSpanCount: 0,
+  unsampledSpanCount: 0,
+  dominantThreshold: "",
+  ...overrides,
+})
 
 function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineExecute>[0]> = {}) {
   const unexpected = (name: string) =>
@@ -32,6 +73,8 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
     customTracesBreakdownQuery: unexpected("customTracesBreakdownQuery"),
     customLogsBreakdownQuery: unexpected("customLogsBreakdownQuery"),
     customMetricsBreakdownQuery: unexpected("customMetricsBreakdownQuery"),
+    alertTracesAggregateQuery: unexpected("alertTracesAggregateQuery"),
+    alertMetricsAggregateQuery: unexpected("alertMetricsAggregateQuery"),
     ...overrides,
   } satisfies Parameters<typeof makeQueryEngineExecute>[0]
 }
@@ -45,32 +88,11 @@ describe("makeQueryEngineExecute", () => {
       makeTinybirdStub({
         customTracesTimeseriesQuery: () =>
           Effect.succeed([
-            {
-              bucket: "2026-01-01 00:00:00",
-              groupName: "checkout",
-              count: 2,
-              avgDuration: 0,
-              p50Duration: 0,
-              p95Duration: 0,
-              p99Duration: 0,
-              errorRate: 0,
-              sampledSpanCount: 0,
-              unsampledSpanCount: 0,
-              dominantThreshold: "",
-            },
-            {
+            makeTraceTimeseriesRow({ count: 2 }),
+            makeTraceTimeseriesRow({
               bucket: "2026-01-01 00:10:00",
-              groupName: "checkout",
               count: 5,
-              avgDuration: 0,
-              p50Duration: 0,
-              p95Duration: 0,
-              p99Duration: 0,
-              errorRate: 0,
-              sampledSpanCount: 0,
-              unsampledSpanCount: 0,
-              dominantThreshold: "",
-            },
+            }),
           ]),
       }),
     )
@@ -115,32 +137,11 @@ describe("makeQueryEngineExecute", () => {
       makeTinybirdStub({
         customTracesTimeseriesQuery: () =>
           Effect.succeed([
-            {
-              bucket: "2026-01-01 00:00:00",
-              groupName: "checkout",
-              count: 2,
-              avgDuration: 0,
-              p50Duration: 0,
-              p95Duration: 0,
-              p99Duration: 0,
-              errorRate: 0,
-              sampledSpanCount: 0,
-              unsampledSpanCount: 0,
-              dominantThreshold: "",
-            },
-            {
+            makeTraceTimeseriesRow({ count: 2 }),
+            makeTraceTimeseriesRow({
               bucket: "2026-01-01 00:10:00",
-              groupName: "checkout",
               count: 5,
-              avgDuration: 0,
-              p50Duration: 0,
-              p95Duration: 0,
-              p99Duration: 0,
-              errorRate: 0,
-              sampledSpanCount: 0,
-              unsampledSpanCount: 0,
-              dominantThreshold: "",
-            },
+            }),
           ]),
       }),
     )
@@ -234,19 +235,10 @@ describe("makeQueryEngineExecute", () => {
         customTracesTimeseriesQuery: (_tenant, params) => {
           receivedParams = params as Record<string, unknown>
           return Effect.succeed([
-            {
-              bucket: "2026-01-01 00:00:00",
+            makeTraceTimeseriesRow({
               groupName: "GET",
               count: 3,
-              avgDuration: 0,
-              p50Duration: 0,
-              p95Duration: 0,
-              p99Duration: 0,
-              errorRate: 0,
-              sampledSpanCount: 0,
-              unsampledSpanCount: 0,
-              dominantThreshold: "",
-            },
+            }),
           ])
         },
       }),
@@ -276,6 +268,57 @@ describe("makeQueryEngineExecute", () => {
         {
           bucket: "2026-01-01T00:00:00.000Z",
           series: { GET: 3 },
+        },
+        {
+          bucket: "2026-01-01T00:05:00.000Z",
+          series: {},
+        },
+      ],
+    })
+  })
+
+  it("maps apdex traces execution and forwards the apdex threshold", async () => {
+    let receivedParams: Record<string, unknown> | undefined
+
+    const execute = makeQueryEngineExecute(
+      makeTinybirdStub({
+        customTracesTimeseriesQuery: (_tenant, params) => {
+          receivedParams = params as Record<string, unknown>
+          return Effect.succeed([
+            makeTraceTimeseriesRow({
+              count: 20,
+              satisfiedCount: 15,
+              toleratingCount: 2,
+              apdexScore: 0.8,
+            }),
+          ])
+        },
+      }),
+    )
+
+    const response = await Effect.runPromise(execute(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-01 00:05:00",
+      query: {
+        kind: "timeseries",
+        source: "traces",
+        metric: "apdex",
+        groupBy: ["service"],
+        bucketSeconds: 300,
+        apdexThresholdMs: 300,
+      },
+    }))
+
+    expect(receivedParams).toMatchObject({
+      apdex_threshold_ms: 300,
+    })
+    expect(response.result).toEqual({
+      kind: "timeseries",
+      source: "traces",
+      data: [
+        {
+          bucket: "2026-01-01T00:00:00.000Z",
+          series: { checkout: 0.8 },
         },
         {
           bucket: "2026-01-01T00:05:00.000Z",
@@ -404,6 +447,200 @@ describe("makeQueryEngineExecute", () => {
           series: {},
         },
       ],
+    })
+  })
+})
+
+describe("makeQueryEngineEvaluate", () => {
+  it("evaluates traces error rate alerts from the aggregate path", async () => {
+    const evaluate = makeQueryEngineEvaluate(
+      makeTinybirdStub({
+        alertTracesAggregateQuery: () =>
+          Effect.succeed([
+            {
+              count: 200,
+              avgDuration: 12,
+              p50Duration: 10,
+              p95Duration: 120,
+              p99Duration: 240,
+              errorRate: 7.5,
+              satisfiedCount: 180,
+              toleratingCount: 10,
+              apdexScore: 0.925,
+            },
+          ]),
+      }),
+    )
+
+    const request: QueryEngineEvaluateRequest = {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-01 00:05:00",
+      reducer: "identity",
+      sampleCountStrategy: "trace_count",
+      query: {
+        kind: "timeseries",
+        source: "traces",
+        metric: "error_rate",
+        groupBy: ["none"],
+      },
+    }
+
+    const response = await Effect.runPromise(evaluate(tenant, request))
+
+    expect(response).toMatchObject({
+      value: 7.5,
+      sampleCount: 200,
+      hasData: true,
+      reducer: "identity",
+    })
+  })
+
+  it("evaluates traces apdex alerts and forwards the apdex threshold", async () => {
+    let receivedParams: Record<string, unknown> | undefined
+
+    const evaluate = makeQueryEngineEvaluate(
+      makeTinybirdStub({
+        alertTracesAggregateQuery: (_tenant, params) => {
+          receivedParams = params as Record<string, unknown>
+          return Effect.succeed([
+            {
+              count: 40,
+              avgDuration: 0,
+              p50Duration: 0,
+              p95Duration: 0,
+              p99Duration: 0,
+              errorRate: 0,
+              satisfiedCount: 30,
+              toleratingCount: 6,
+              apdexScore: 0.825,
+            },
+          ])
+        },
+      }),
+    )
+
+    const response = await Effect.runPromise(evaluate(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-01 00:05:00",
+      reducer: "identity",
+      sampleCountStrategy: "trace_count",
+      query: {
+        kind: "timeseries",
+        source: "traces",
+        metric: "apdex",
+        groupBy: ["none"],
+        apdexThresholdMs: 350,
+      },
+    }))
+
+    expect(receivedParams).toMatchObject({
+      apdex_threshold_ms: 350,
+    })
+    expect(response.value).toBe(0.825)
+    expect(response.sampleCount).toBe(40)
+  })
+
+  it("evaluates metrics alerts with metric data point sample counts", async () => {
+    const evaluate = makeQueryEngineEvaluate(
+      makeTinybirdStub({
+        alertMetricsAggregateQuery: () =>
+          Effect.succeed([
+            {
+              avgValue: 18,
+              minValue: 5,
+              maxValue: 40,
+              sumValue: 90,
+              dataPointCount: 5,
+            },
+          ]),
+      }),
+    )
+
+    const response = await Effect.runPromise(evaluate(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-01 00:05:00",
+      reducer: "identity",
+      sampleCountStrategy: "metric_data_points",
+      query: {
+        kind: "timeseries",
+        source: "metrics",
+        metric: "avg",
+        groupBy: ["none"],
+        filters: {
+          metricName: "cpu.usage",
+          metricType: "gauge",
+        },
+      },
+    }))
+
+    expect(response).toMatchObject({
+      value: 18,
+      sampleCount: 5,
+      hasData: true,
+    })
+  })
+
+  it("returns hasData=false when the aggregate response has zero samples", async () => {
+    const evaluate = makeQueryEngineEvaluate(
+      makeTinybirdStub({
+        alertMetricsAggregateQuery: () =>
+          Effect.succeed([
+            {
+              avgValue: 0,
+              minValue: 0,
+              maxValue: 0,
+              sumValue: 0,
+              dataPointCount: 0,
+            },
+          ]),
+      }),
+    )
+
+    const response = await Effect.runPromise(evaluate(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-01 00:05:00",
+      reducer: "identity",
+      sampleCountStrategy: "metric_data_points",
+      query: {
+        kind: "timeseries",
+        source: "metrics",
+        metric: "sum",
+        groupBy: ["none"],
+        filters: {
+          metricName: "requests",
+          metricType: "sum",
+        },
+      },
+    }))
+
+    expect(response).toMatchObject({
+      value: null,
+      sampleCount: 0,
+      hasData: false,
+    })
+  })
+
+  it("rejects grouped queries for alert evaluation", async () => {
+    const evaluate = makeQueryEngineEvaluate(makeTinybirdStub())
+
+    const exit = await Effect.runPromiseExit(evaluate(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-01 00:05:00",
+      reducer: "identity",
+      sampleCountStrategy: "trace_count",
+      query: {
+        kind: "timeseries",
+        source: "traces",
+        metric: "count",
+        groupBy: ["service"],
+      },
+    }))
+
+    const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(failure).toMatchObject({
+      _tag: "QueryEngineValidationError",
+      message: "Unsupported alert evaluation query",
     })
   })
 })

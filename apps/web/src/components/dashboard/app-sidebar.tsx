@@ -6,6 +6,7 @@ import {
   PulseIcon,
   ChartLineIcon,
   ServerIcon,
+  BellIcon,
   CircleWarningIcon,
   GearIcon,
   LogoutIcon,
@@ -80,6 +81,11 @@ const servicesNavItems = [
 ]
 
 const telemetryNavItems = [
+  {
+    title: "Alerts",
+    href: "/alerts",
+    icon: BellIcon,
+  },
   {
     title: "Errors",
     href: "/errors",

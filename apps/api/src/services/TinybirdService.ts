@@ -59,9 +59,23 @@ export interface TinybirdServiceShape {
     tenant: TenantContext,
     params: Omit<MetricTimeSeriesExpHistogramParams, "org_id">,
   ) => Effect.Effect<ReadonlyArray<MetricTimeSeriesExpHistogramOutput>, TinybirdQueryError>
+  readonly alertTracesAggregateQuery: (
+    tenant: TenantContext,
+    params: Omit<AlertTracesAggregateParams, "org_id">,
+  ) => Effect.Effect<ReadonlyArray<AlertTracesAggregateOutput>, TinybirdQueryError>
+  readonly alertMetricsAggregateQuery: (
+    tenant: TenantContext,
+    params: Omit<AlertMetricsAggregateParams, "org_id">,
+  ) => Effect.Effect<ReadonlyArray<AlertMetricsAggregateOutput>, TinybirdQueryError>
 }
 const clientCache = new Map<string, CachedClient>()
 import {
+  type AlertMetricsAggregateOutput,
+  type AlertMetricsAggregateParams,
+  alertMetricsAggregate,
+  type AlertTracesAggregateOutput,
+  type AlertTracesAggregateParams,
+  alertTracesAggregate,
   type CustomLogsBreakdownOutput,
   type CustomLogsBreakdownParams,
   type CustomLogsTimeseriesOutput,
@@ -137,6 +151,8 @@ const pipes = {
   errors_facets: errorsFacets,
   errors_summary: errorsSummary,
   service_apdex_time_series: serviceApdexTimeSeries,
+  alert_traces_aggregate: alertTracesAggregate,
+  alert_metrics_aggregate: alertMetricsAggregate,
   custom_traces_timeseries: customTracesTimeseries,
   custom_traces_breakdown: customTracesBreakdown,
   custom_logs_timeseries: customLogsTimeseries,
@@ -191,6 +207,14 @@ interface TinybirdClient {
   readonly metric_time_series_exp_histogram: TinybirdPipeQuery<
     Omit<MetricTimeSeriesExpHistogramParams, "org_id">,
     MetricTimeSeriesExpHistogramOutput
+  >
+  readonly alert_traces_aggregate: TinybirdPipeQuery<
+    Omit<AlertTracesAggregateParams, "org_id">,
+    AlertTracesAggregateOutput
+  >
+  readonly alert_metrics_aggregate: TinybirdPipeQuery<
+    Omit<AlertMetricsAggregateParams, "org_id">,
+    AlertMetricsAggregateOutput
   >
 }
 
@@ -419,6 +443,30 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       )
     })
 
+    const alertTracesAggregateQuery = Effect.fn("TinybirdService.alertTracesAggregateQuery")(function* (
+      tenant: TenantContext,
+      params: Omit<AlertTracesAggregateParams, "org_id">,
+    ) {
+      const client = yield* resolveClient(tenant, "alert_traces_aggregate")
+      return yield* runPipe<
+        "alert_traces_aggregate",
+        Omit<AlertTracesAggregateParams, "org_id">,
+        AlertTracesAggregateOutput
+      >("alert_traces_aggregate", tenant, params, client.alert_traces_aggregate.query)
+    })
+
+    const alertMetricsAggregateQuery = Effect.fn("TinybirdService.alertMetricsAggregateQuery")(function* (
+      tenant: TenantContext,
+      params: Omit<AlertMetricsAggregateParams, "org_id">,
+    ) {
+      const client = yield* resolveClient(tenant, "alert_metrics_aggregate")
+      return yield* runPipe<
+        "alert_metrics_aggregate",
+        Omit<AlertMetricsAggregateParams, "org_id">,
+        AlertMetricsAggregateOutput
+      >("alert_metrics_aggregate", tenant, params, client.alert_metrics_aggregate.query)
+    })
+
     return {
       query,
       customTracesTimeseriesQuery,
@@ -430,6 +478,8 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       metricTimeSeriesGaugeQuery,
       metricTimeSeriesHistogramQuery,
       metricTimeSeriesExpHistogramQuery,
+      alertTracesAggregateQuery,
+      alertMetricsAggregateQuery,
     } satisfies TinybirdServiceShape
   }),
 }) {

@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result } from "@/lib/effect-atom"
 import { Schema } from "effect"
 
@@ -17,6 +17,8 @@ import {
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
+import { Button } from "@maple/ui/components/ui/button"
+import { BellIcon } from "@/components/icons"
 
 const serviceDetailSearchSchema = Schema.Struct({
   startTime: Schema.optional(Schema.String),
@@ -134,12 +136,26 @@ function ServiceDetailContent() {
       ]}
       title={serviceName}
       headerActions={
-        <TimeRangeHeaderControls
-          startTime={search.startTime}
-          endTime={search.endTime}
-          presetValue={search.timePreset ?? "12h"}
-          onTimeChange={handleTimeChange}
-        />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <TimeRangeHeaderControls
+            startTime={search.startTime}
+            endTime={search.endTime}
+            presetValue={search.timePreset ?? "12h"}
+            onTimeChange={handleTimeChange}
+          />
+          <Button
+            variant="outline"
+            render={
+              <Link
+                to="/alerts/create"
+                search={{ serviceName }}
+              />
+            }
+          >
+            <BellIcon size={14} />
+            Create Alert
+          </Button>
+        </div>
       }
     >
       <MetricsGrid items={metrics} waiting={!!isWaiting} />

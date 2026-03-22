@@ -2,6 +2,7 @@ import { MapleApi } from "@maple/domain/http";
 import { Layer } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { HttpApiKeysLive } from "./routes/api-keys.http";
+import { HttpAlertsLive } from "./routes/alerts.http";
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http";
 import { HttpCloudflareLogpushLive } from "./routes/cloudflare-logpush.http";
 import { HttpDashboardsLive } from "./routes/dashboards.http";
@@ -16,6 +17,7 @@ export const HttpApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
   Layer.provide(HttpAuthPublicLive),
   Layer.provide(HttpAuthLive),
   Layer.provide(HttpApiKeysLive),
+  Layer.provide(HttpAlertsLive),
   Layer.provide(HttpCloudflareLogpushLive),
   Layer.provide(HttpDashboardsLive),
   Layer.provide(HttpIngestKeysLive),

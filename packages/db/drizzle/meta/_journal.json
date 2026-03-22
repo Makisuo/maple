@@ -64,6 +64,20 @@
       "when": 1773800000000,
       "tag": "0008_grey_scarlet_spider",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774100000000,
+      "tag": "0009_brisk_nova",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1774200000000,
+      "tag": "0010_query_engine_alerts",
+      "breakpoints": true
     }
   ]
 }

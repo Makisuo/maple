@@ -44,6 +44,19 @@ services:
       otel-collector:
         condition: service_started
 
+  alerting:
+    build:
+      context: .
+      dockerfile: apps/alerting/Dockerfile
+    env_file: .env
+    environment:
+      MAPLE_APP_BASE_URL: ${MAPLE_APP_BASE_URL:-http://web}
+    depends_on:
+      api:
+        condition: service_healthy
+      ingest:
+        condition: service_started
+
   otel-collector:
     build:
       context: .

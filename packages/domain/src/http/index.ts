@@ -1,5 +1,6 @@
 export * from "./api";
 export * from "./api-keys";
+export * from "./alerts";
 export * from "./auth";
 export * from "./cloudflare-logpush";
 export * as CurrentTenant from "./current-tenant";

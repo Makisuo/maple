@@ -17,6 +17,7 @@ export const TracesMetric = Schema.Literals([
   "p95_duration",
   "p99_duration",
   "error_rate",
+  "apdex",
 ])
 export type TracesMetric = Schema.Schema.Type<typeof TracesMetric>
 
@@ -65,6 +66,9 @@ export const TracesTimeseriesQuery = Schema.Struct({
   kind: Schema.Literal("timeseries"),
   source: Schema.Literal("traces"),
   metric: TracesMetric,
+  apdexThresholdMs: Schema.optional(
+    Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0)),
+  ),
   groupBy: Schema.optional(
     Schema.Array(Schema.Literals([
       "service",
@@ -110,6 +114,9 @@ export const TracesBreakdownQuery = Schema.Struct({
   kind: Schema.Literal("breakdown"),
   source: Schema.Literal("traces"),
   metric: TracesMetric,
+  apdexThresholdMs: Schema.optional(
+    Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0)),
+  ),
   groupBy: Schema.Literals([
     "service",
     "span_name",
@@ -208,4 +215,78 @@ export class QueryEngineExecuteResponse extends Schema.Class<QueryEngineExecuteR
   "QueryEngineExecuteResponse",
 )({
   result: QueryEngineResult,
+}) {}
+
+export const QueryEngineAlertReducer = Schema.Literals([
+  "identity",
+  "sum",
+  "avg",
+  "min",
+  "max",
+]).annotate({
+  identifier: "@maple/QueryEngineAlertReducer",
+})
+export type QueryEngineAlertReducer = Schema.Schema.Type<
+  typeof QueryEngineAlertReducer
+>
+
+export const QueryEngineSampleCountStrategy = Schema.Literals([
+  "trace_count",
+  "metric_data_points",
+  "log_count",
+]).annotate({
+  identifier: "@maple/QueryEngineSampleCountStrategy",
+})
+export type QueryEngineSampleCountStrategy = Schema.Schema.Type<
+  typeof QueryEngineSampleCountStrategy
+>
+
+export const QueryEngineNoDataBehavior = Schema.Literals([
+  "skip",
+  "zero",
+]).annotate({
+  identifier: "@maple/QueryEngineNoDataBehavior",
+})
+export type QueryEngineNoDataBehavior = Schema.Schema.Type<
+  typeof QueryEngineNoDataBehavior
+>
+
+export const QueryEngineAlertObservation = Schema.Struct({
+  value: Schema.NullOr(Schema.Number),
+  sampleCount: Schema.Number,
+  hasData: Schema.Boolean,
+  label: Schema.optional(Schema.String),
+})
+export type QueryEngineAlertObservation = Schema.Schema.Type<
+  typeof QueryEngineAlertObservation
+>
+
+export class QueryEngineEvaluateRequest extends Schema.Class<QueryEngineEvaluateRequest>(
+  "QueryEngineEvaluateRequest",
+)({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  query: QuerySpec,
+  reducer: QueryEngineAlertReducer,
+  sampleCountStrategy: QueryEngineSampleCountStrategy,
+}) {}
+
+export class QueryEngineEvaluateResponse extends Schema.Class<QueryEngineEvaluateResponse>(
+  "QueryEngineEvaluateResponse",
+)({
+  value: Schema.NullOr(Schema.Number),
+  sampleCount: Schema.Number,
+  hasData: Schema.Boolean,
+  reason: Schema.optional(Schema.String),
+  reducer: QueryEngineAlertReducer,
+  observations: Schema.Array(QueryEngineAlertObservation),
+}) {}
+
+export class CompiledAlertQueryPlan extends Schema.Class<CompiledAlertQueryPlan>(
+  "CompiledAlertQueryPlan",
+)({
+  query: QuerySpec,
+  reducer: QueryEngineAlertReducer,
+  sampleCountStrategy: QueryEngineSampleCountStrategy,
+  noDataBehavior: QueryEngineNoDataBehavior,
 }) {}

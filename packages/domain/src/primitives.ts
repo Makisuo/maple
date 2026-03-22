@@ -47,6 +47,29 @@ export type CloudflareLogpushConnectorId = Schema.Schema.Type<
   typeof CloudflareLogpushConnectorId
 >
 
+export const AlertDestinationId = MapleUuidId(
+  "@maple/AlertDestinationId",
+  "Alert Destination ID",
+)
+export type AlertDestinationId = Schema.Schema.Type<typeof AlertDestinationId>
+
+export const AlertRuleId = MapleUuidId("@maple/AlertRuleId", "Alert Rule ID")
+export type AlertRuleId = Schema.Schema.Type<typeof AlertRuleId>
+
+export const AlertIncidentId = MapleUuidId(
+  "@maple/AlertIncidentId",
+  "Alert Incident ID",
+)
+export type AlertIncidentId = Schema.Schema.Type<typeof AlertIncidentId>
+
+export const AlertDeliveryEventId = MapleUuidId(
+  "@maple/AlertDeliveryEventId",
+  "Alert Delivery Event ID",
+)
+export type AlertDeliveryEventId = Schema.Schema.Type<
+  typeof AlertDeliveryEventId
+>
+
 export const AuthMode = Schema.Literals(["clerk", "self_hosted"]).annotate({
   identifier: "@maple/AuthMode",
   title: "Auth Mode",
