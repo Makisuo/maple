@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useCallback } from "react"
 
 export function InlineEditableTitle({
   value,
@@ -13,22 +13,17 @@ export function InlineEditableTitle({
   const [draft, setDraft] = useState(value)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
+  const startEditing = useCallback(() => {
+    if (readOnly) return
     setDraft(value)
-  }, [value])
-
-  useEffect(() => {
-    if (isEditing) {
-      inputRef.current?.select()
-    }
-  }, [isEditing])
+    setIsEditing(true)
+    requestAnimationFrame(() => inputRef.current?.select())
+  }, [readOnly, value])
 
   const handleSubmit = () => {
     const trimmed = draft.trim()
     if (trimmed && trimmed !== value) {
       onChange(trimmed)
-    } else {
-      setDraft(value)
     }
     setIsEditing(false)
   }
@@ -62,15 +57,11 @@ export function InlineEditableTitle({
     <h1
       role="button"
       tabIndex={0}
-      onClick={() => {
-        if (readOnly) return
-        setIsEditing(true)
-      }}
+      onClick={startEditing}
       onKeyDown={(e) => {
-        if (readOnly) return
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()
-          setIsEditing(true)
+          startEditing()
         }
       }}
       aria-disabled={readOnly}

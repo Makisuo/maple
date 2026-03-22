@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Calendar } from "@maple/ui/components/ui/calendar"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
@@ -32,22 +32,6 @@ export function CustomRangePicker({
   const [endTimeInput, setEndTimeInput] = useState(() => {
     return endTime ? format(new Date(endTime), "HH:mm") : "23:59"
   })
-
-  useEffect(() => {
-    const from = startTime ? new Date(startTime) : undefined
-    const to = endTime ? new Date(endTime) : undefined
-
-    if (from) {
-      setStartTimeInput(format(from, "HH:mm"))
-    }
-    if (to) {
-      setEndTimeInput(format(to, "HH:mm"))
-    }
-
-    if (from || to) {
-      setDateRange({ from, to })
-    }
-  }, [startTime, endTime])
 
   const handleApply = () => {
     if (!dateRange?.from || !dateRange?.to) return

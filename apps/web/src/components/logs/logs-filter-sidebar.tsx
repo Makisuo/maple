@@ -1,5 +1,5 @@
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { useEffect, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { XmarkIcon, MagnifierIcon } from "@/components/icons"
 
@@ -31,22 +31,21 @@ export function LogsFilterSidebar() {
     useEffectiveTimeRange(search.startTime, search.endTime, search.timePreset ?? "12h")
 
   const [searchText, setSearchText] = useState(search.search ?? "")
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => {
-    setSearchText(search.search ?? "")
-  }, [search.search])
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const value = searchText.trim() || undefined
-      if (value !== search.search) {
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      setSearchText(value)
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => {
+        const trimmed = value.trim() || undefined
         navigate({
-          search: (prev) => ({ ...prev, search: value }),
+          search: (prev) => ({ ...prev, search: trimmed }),
         })
-      }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [searchText, search.search, navigate])
+      }, 300)
+    },
+    [navigate],
+  )
 
   const facetsResult = useAtomValue(
     getLogsFacetsResultAtom({
@@ -111,14 +110,14 @@ export function LogsFilterSidebar() {
                 <input
                   type="text"
                   value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
+                  onChange={(e) => handleSearchChange(e.target.value)}
                   placeholder="Search log messages..."
                   className="h-7 w-full rounded-md border border-input bg-background pl-7 pr-7 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
                 {searchText && (
                   <button
                     type="button"
-                    onClick={() => setSearchText("")}
+                    onClick={() => handleSearchChange("")}
                     className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
                   >
                     <XmarkIcon strokeWidth={2} className="size-3" />

@@ -555,31 +555,35 @@ export function WidgetQueryBuilderPage({
     }
   }, [logsFacetsResult, metricRows, tracesFacetsResult, attributeKeys, attributeValues, resourceAttributeKeys, resourceAttributeValues])
 
-  React.useEffect(() => {
-    if (metricSelectionOptions.length === 0) return
-    setState((current) => {
-      const [defaultMetricName, defaultMetricTypeRaw] = metricSelectionOptions[0].value.split("::")
-      const defaultMetricType = defaultMetricTypeRaw as QueryBuilderMetricType
-      let changed = false
-      const queries = current.queries.map((query) => {
-        if (query.dataSource !== "metrics" || query.metricName || !defaultMetricName || !defaultMetricType) return query
-        changed = true
-        return { ...query, metricName: defaultMetricName, metricType: defaultMetricType }
+  const appliedMetricDefaultRef = React.useRef(false)
+  if (metricSelectionOptions.length > 0 && !appliedMetricDefaultRef.current) {
+    const [defaultMetricName, defaultMetricTypeRaw] = metricSelectionOptions[0].value.split("::")
+    const defaultMetricType = defaultMetricTypeRaw as QueryBuilderMetricType
+    const needsDefault = state.queries.some(
+      (query) => query.dataSource === "metrics" && !query.metricName && defaultMetricName && defaultMetricType,
+    )
+    if (needsDefault) {
+      appliedMetricDefaultRef.current = true
+      setState((current) => {
+        let changed = false
+        const queries = current.queries.map((query) => {
+          if (query.dataSource !== "metrics" || query.metricName || !defaultMetricName || !defaultMetricType) return query
+          changed = true
+          return { ...query, metricName: defaultMetricName, metricType: defaultMetricType }
+        })
+        return changed ? { ...current, queries } : current
       })
-      return changed ? { ...current, queries } : current
-    })
-  }, [metricSelectionOptions])
+    }
+  }
 
   const seriesFieldOptions = React.useMemo(() => toSeriesFieldOptions(state), [state])
 
-  React.useEffect(() => {
-    if (state.visualization !== "stat" || seriesFieldOptions.length === 0) return
-    if (state.statValueField && seriesFieldOptions.includes(state.statValueField)) return
-    setState((current) => {
-      if (current.statValueField && seriesFieldOptions.includes(current.statValueField)) return current
-      return { ...current, statValueField: seriesFieldOptions[0] }
-    })
-  }, [widget, state, seriesFieldOptions])
+  const effectiveStatValueField =
+    state.visualization === "stat" &&
+    seriesFieldOptions.length > 0 &&
+    (!state.statValueField || !seriesFieldOptions.includes(state.statValueField))
+      ? seriesFieldOptions[0]
+      : state.statValueField
 
   const previewWidget = React.useMemo(() => {
     const previewState = stagedState ?? state
@@ -754,7 +758,7 @@ export function WidgetQueryBuilderPage({
             includePercentChange={state.includePercentChange}
             debug={state.debug}
             statAggregate={state.statAggregate}
-            statValueField={state.statValueField}
+            statValueField={effectiveStatValueField}
             unit={state.unit}
             tableLimit={state.tableLimit}
             seriesFieldOptions={seriesFieldOptions}

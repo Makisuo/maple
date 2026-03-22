@@ -126,9 +126,11 @@ function GroupByMultiSelect({
 
   const isOpen = isFocused && !isDismissed && suggestions.length > 0
 
-  React.useEffect(() => {
+  const handleInputChange = React.useCallback((nextValue: string) => {
+    setInputValue(nextValue)
     setActiveIndex(0)
-  }, [suggestions.length, inputValue])
+    setIsDismissed(false)
+  }, [])
 
   const addKey = React.useCallback(
     (key: string) => {
@@ -194,10 +196,7 @@ function GroupByMultiSelect({
             setIsDismissed(false)
           }}
           onBlur={() => setIsFocused(false)}
-          onChange={(event) => {
-            setInputValue(event.target.value)
-            setIsDismissed(false)
-          }}
+          onChange={(event) => handleInputChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Backspace" && !inputValue && value.length > 0) {
               removeKey(value[value.length - 1])
