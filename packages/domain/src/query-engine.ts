@@ -44,6 +44,7 @@ export const TracesFilters = Schema.Struct({
   resourceAttributeKey: Schema.optional(Schema.String),
   resourceAttributeValue: Schema.optional(Schema.String),
   resourceAttributeFilterMode: Schema.optional(Schema.Literals(["equals", "exists"])),
+  errorsOnly: Schema.optional(Schema.Boolean),
 })
 export type TracesFilters = Schema.Schema.Type<typeof TracesFilters>
 

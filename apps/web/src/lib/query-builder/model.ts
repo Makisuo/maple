@@ -305,6 +305,7 @@ export function buildTimeseriesQuerySpec(
       serviceName?: string
       spanName?: string
       rootSpansOnly?: boolean
+      errorsOnly?: boolean
       environments?: string[]
       commitShas?: string[]
       attributeKey?: string
@@ -350,6 +351,16 @@ export function buildTimeseriesQuerySpec(
           warnings.push(`Invalid root_only value ignored: ${clause.value}`)
         } else {
           filters.rootSpansOnly = boolValue
+        }
+        continue
+      }
+
+      if (clause.key === "has_error" || clause.key === "errors_only") {
+        const boolValue = toBoolean(clause.value)
+        if (boolValue == null) {
+          warnings.push(`Invalid has_error value ignored: ${clause.value}`)
+        } else {
+          filters.errorsOnly = boolValue
         }
         continue
       }

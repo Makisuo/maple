@@ -103,6 +103,11 @@ const KEY_DEFINITIONS: Record<QueryBuilderDataSource, KeyDefinition[]> = {
       description: "true or false",
     },
     {
+      label: "has_error",
+      insertText: "has_error",
+      description: "Filter to error spans only (true or false)",
+    },
+    {
       label: "attr.<key>",
       insertText: "attr.",
       description: "Filter by a single span attribute",
@@ -674,7 +679,7 @@ function buildValueSuggestions(
     ]
   }
 
-  if (scope === "trace_search" && normalizedKey === "has_error") {
+  if (normalizedKey === "has_error") {
     return [
       {
         id: "value:has_error:true",

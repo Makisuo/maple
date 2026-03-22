@@ -47,9 +47,40 @@ export function WhereClauseEditor({
   const [isDismissed, setIsDismissed] = React.useState(false)
   const [activeIndex, setActiveIndex] = React.useState(0)
 
-  React.useEffect(() => {
-    setCursor((current) => Math.min(current, value.length))
-  }, [value])
+  const lastAttrKeyRef = React.useRef<string | null>(null)
+  const lastResourceKeyRef = React.useRef<string | null>(null)
+
+  const notifyActiveKeys = React.useCallback(
+    (expression: string, cursorPos: number) => {
+      const ac = getWhereClauseAutocomplete({
+        expression,
+        cursor: cursorPos,
+        dataSource,
+        values,
+        scope: autocompleteScope,
+        maxSuggestions,
+      })
+
+      const nextAttrKey =
+        ac.context === "value" && ac.key?.startsWith("attr.")
+          ? ac.key.slice(5)
+          : null
+      if (nextAttrKey !== lastAttrKeyRef.current) {
+        lastAttrKeyRef.current = nextAttrKey
+        onActiveAttributeKey?.(nextAttrKey)
+      }
+
+      const nextResourceKey =
+        ac.context === "value" && ac.key?.startsWith("resource.")
+          ? ac.key.slice(9)
+          : null
+      if (nextResourceKey !== lastResourceKeyRef.current) {
+        lastResourceKeyRef.current = nextResourceKey
+        onActiveResourceAttributeKey?.(nextResourceKey)
+      }
+    },
+    [autocompleteScope, dataSource, maxSuggestions, onActiveAttributeKey, onActiveResourceAttributeKey, values],
+  )
 
   const autocomplete = React.useMemo(
     () =>
@@ -64,37 +95,19 @@ export function WhereClauseEditor({
     [autocompleteScope, cursor, dataSource, maxSuggestions, value, values],
   )
 
-  // Notify parent when user is editing a value for an attr.* key
-  React.useEffect(() => {
-    if (!onActiveAttributeKey) return
-    if (autocomplete.context === "value" && autocomplete.key?.startsWith("attr.")) {
-      onActiveAttributeKey(autocomplete.key.slice(5))
-    } else {
-      onActiveAttributeKey(null)
-    }
-  }, [autocomplete.context, autocomplete.key, onActiveAttributeKey])
-
-  // Notify parent when user is editing a value for a resource.* key
-  React.useEffect(() => {
-    if (!onActiveResourceAttributeKey) return
-    if (autocomplete.context === "value" && autocomplete.key?.startsWith("resource.")) {
-      onActiveResourceAttributeKey(autocomplete.key.slice(9))
-    } else {
-      onActiveResourceAttributeKey(null)
-    }
-  }, [autocomplete.context, autocomplete.key, onActiveResourceAttributeKey])
-
   const suggestions = autocomplete.suggestions
   const isOpen = isFocused && !isDismissed && suggestions.length > 0
 
-  React.useEffect(() => {
-    setActiveIndex(0)
-  }, [autocomplete.context, autocomplete.query, suggestions.length])
-
-  const syncCursor = React.useCallback((target: HTMLTextAreaElement) => {
-    setCursor(target.selectionStart ?? target.value.length)
-    setIsDismissed(false)
-  }, [])
+  const syncCursor = React.useCallback(
+    (target: HTMLTextAreaElement) => {
+      const pos = target.selectionStart ?? target.value.length
+      setCursor(pos)
+      setIsDismissed(false)
+      setActiveIndex(0)
+      notifyActiveKeys(target.value, pos)
+    },
+    [notifyActiveKeys],
+  )
 
   const applySuggestion = React.useCallback(
     (index: number) => {
@@ -114,6 +127,7 @@ export function WhereClauseEditor({
       onChange(applied.expression)
       setCursor(applied.cursor)
       setIsDismissed(false)
+      notifyActiveKeys(applied.expression, applied.cursor)
 
       const schedule = (callback: () => void) => {
         if (typeof window !== "undefined" && window.requestAnimationFrame) {
@@ -134,7 +148,7 @@ export function WhereClauseEditor({
         textarea.setSelectionRange(applied.cursor, applied.cursor)
       })
     },
-    [autocomplete.context, autocomplete.replaceEnd, autocomplete.replaceStart, onChange, suggestions, value],
+    [autocomplete.context, autocomplete.replaceEnd, autocomplete.replaceStart, notifyActiveKeys, onChange, suggestions, value],
   )
 
   return (
@@ -155,8 +169,12 @@ export function WhereClauseEditor({
           setIsFocused(false)
         }}
         onChange={(event) => {
-          syncCursor(event.currentTarget)
+          const pos = event.currentTarget.selectionStart ?? event.currentTarget.value.length
+          setCursor(pos)
+          setIsDismissed(false)
+          setActiveIndex(0)
           onChange(event.target.value)
+          notifyActiveKeys(event.target.value, pos)
         }}
         onClick={(event) => syncCursor(event.currentTarget)}
         onSelect={(event) => syncCursor(event.currentTarget)}

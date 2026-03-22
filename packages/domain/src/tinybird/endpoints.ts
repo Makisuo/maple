@@ -2154,6 +2154,7 @@ export const customTracesTimeseries = defineEndpoint("custom_traces_timeseries",
     resource_filter_key: p.string().optional().describe("Filter where ResourceAttributes[key] = value"),
     resource_filter_value: p.string().optional().describe("Value for resource attribute filter"),
     resource_filter_exists: p.string().optional().describe("If '1', check key existence instead of equality"),
+    errors_only: p.string().optional().describe("If '1', filter to StatusCode = 'Error' only"),
   },
   nodes: [
     node({
@@ -2189,6 +2190,7 @@ export const customTracesTimeseries = defineEndpoint("custom_traces_timeseries",
           {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
           {% if defined(span_name) %}AND SpanName = {{String(span_name)}}{% end %}
           {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
+          {% if defined(errors_only) %}AND StatusCode = 'Error'{% end %}
           {% if defined(environments) %}
             AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
           {% end %}
@@ -2258,6 +2260,7 @@ export const customTracesBreakdown = defineEndpoint("custom_traces_breakdown", {
     resource_filter_key: p.string().optional().describe("Filter where ResourceAttributes[key] = value"),
     resource_filter_value: p.string().optional().describe("Value for resource attribute filter"),
     resource_filter_exists: p.string().optional().describe("If '1', check key existence instead of equality"),
+    errors_only: p.string().optional().describe("If '1', filter to StatusCode = 'Error' only"),
   },
   nodes: [
     node({
@@ -2290,6 +2293,7 @@ export const customTracesBreakdown = defineEndpoint("custom_traces_breakdown", {
           {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
           {% if defined(span_name) %}AND SpanName = {{String(span_name)}}{% end %}
           {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
+          {% if defined(errors_only) %}AND StatusCode = 'Error'{% end %}
           {% if defined(environments) %}
             AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
           {% end %}
