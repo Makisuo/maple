@@ -10,8 +10,10 @@ import {
   GearIcon,
   LogoutIcon,
   ChevronUpIcon,
+  ChevronRightIcon,
   NetworkNodesIcon,
   ChatBubbleSparkleIcon,
+  GridIcon,
 } from "@/components/icons"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
 import {
@@ -35,10 +37,19 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
 } from "@maple/ui/components/ui/sidebar"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@maple/ui/components/ui/collapsible"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { useTrialStatus } from "@/hooks/use-trial-status"
+import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { ClockIcon } from "@/components/icons"
 
@@ -274,6 +285,12 @@ function PlanBadge() {
 export function AppSidebar() {
   const routerState = useRouterState()
   const currentPath = routerState.location.pathname
+  const { dashboards, isLoading } = useDashboardStore()
+
+  const activeDashboardId = (routerState.location.search as Record<string, unknown>)?.dashboardId as string | undefined
+
+  const isDashboardsRoute = currentPath === "/dashboards"
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -301,6 +318,53 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <Collapsible defaultOpen className="group/dashboards">
+          <SidebarGroup>
+            <SidebarGroupLabel render={<CollapsibleTrigger />}>
+              <GridIcon size={14} className="mr-1 !size-3.5" />
+              Dashboards
+              <ChevronRightIcon size={14} className="ml-auto !size-3.5 transition-transform group-data-[open]/dashboards:rotate-90" />
+            </SidebarGroupLabel>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      render={<Link to="/dashboards" />}
+                      tooltip="All Dashboards"
+                      isActive={isDashboardsRoute && !activeDashboardId}
+                    >
+                      <span>All Dashboards</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  {!isLoading && dashboards.length > 0 && (
+                    <SidebarMenuSub>
+                      {dashboards.map((dashboard) => (
+                        <SidebarMenuSubItem key={dashboard.id}>
+                          <SidebarMenuSubButton
+                            render={
+                              <Link
+                                to="/dashboards"
+                                search={{ dashboardId: dashboard.id }}
+                              />
+                            }
+                            isActive={
+                              isDashboardsRoute &&
+                              activeDashboardId === dashboard.id
+                            }
+                          >
+                            <span>{dashboard.name}</span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                    </SidebarMenuSub>
+                  )}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
 
         <SidebarGroup>
           <SidebarGroupLabel>Services</SidebarGroupLabel>
