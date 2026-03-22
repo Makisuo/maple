@@ -130,7 +130,7 @@ function LogsTableContent({
                         timeZone: effectiveTimezone,
                       })}
                     </span>
-                    <span className="shrink-0 text-muted-foreground/60 truncate max-w-[120px] hidden md:inline">
+                    <span className="shrink-0 text-muted-foreground/60 truncate w-[120px] hidden md:inline-block">
                       {log.serviceName}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-foreground">
