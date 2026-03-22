@@ -178,7 +178,12 @@ export function WhereClauseEditor({
         }}
         onClick={(event) => syncCursor(event.currentTarget)}
         onSelect={(event) => syncCursor(event.currentTarget)}
-        onKeyUp={(event) => syncCursor(event.currentTarget)}
+        onKeyUp={(event) => {
+          if (isOpen && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+            return
+          }
+          syncCursor(event.currentTarget)
+        }}
         onKeyDown={(event) => {
           // Always prevent Enter from inserting newlines (where clauses are single-line)
           if (event.key === "Enter") {

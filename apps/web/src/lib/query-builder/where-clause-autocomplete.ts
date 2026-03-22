@@ -255,7 +255,7 @@ function findLastConjunctionBoundary(expression: string, cursor: number): number
 interface OperatorMatch {
   position: number
   length: number
-  operator: "=" | "contains" | "exists"
+  operator: "=" | ">" | "<" | ">=" | "<=" | "contains" | "exists"
 }
 
 function findFirstOperator(segment: string): OperatorMatch | null {
@@ -274,6 +274,20 @@ function findFirstOperator(segment: string): OperatorMatch | null {
     if (char === "\"" || char === "'") {
       quote = char
       continue
+    }
+
+    if (char === "<") {
+      if (segment[index + 1] === "=") {
+        return { position: index, length: 2, operator: "<=" }
+      }
+      return { position: index, length: 1, operator: "<" }
+    }
+
+    if (char === ">") {
+      if (segment[index + 1] === "=") {
+        return { position: index, length: 2, operator: ">=" }
+      }
+      return { position: index, length: 1, operator: ">" }
     }
 
     if (char === "=") {
@@ -851,6 +865,34 @@ function buildSuggestions(
         label: "=",
         insertText: "=",
         description: "Exact match",
+      },
+      {
+        id: "operator:gt",
+        kind: "operator",
+        label: ">",
+        insertText: ">",
+        description: "Greater than",
+      },
+      {
+        id: "operator:lt",
+        kind: "operator",
+        label: "<",
+        insertText: "<",
+        description: "Less than",
+      },
+      {
+        id: "operator:gte",
+        kind: "operator",
+        label: ">=",
+        insertText: ">=",
+        description: "Greater than or equal",
+      },
+      {
+        id: "operator:lte",
+        kind: "operator",
+        label: "<=",
+        insertText: "<=",
+        description: "Less than or equal",
       },
       {
         id: "operator:contains",

@@ -27,7 +27,7 @@ export interface QueryBuilderQueryDraft {
 interface ParsedClause {
   key: string
   value: string
-  operator?: "=" | "contains" | "exists"
+  operator?: "=" | ">" | "<" | ">=" | "<=" | "contains" | "exists"
 }
 
 export interface BuildSpecResult {
@@ -220,7 +220,7 @@ function parseWhereClause(expression: string): {
     }
 
     const match = part.match(
-      /^([a-zA-Z0-9_.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/
+      /^([a-zA-Z0-9_.-]+)\s*(<=|>=|<|>|=)\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/
     )
 
     if (!match) {
@@ -230,7 +230,8 @@ function parseWhereClause(expression: string): {
 
     clauses.push({
       key: match[1].trim().toLowerCase(),
-      value: (match[2] ?? match[3] ?? match[4] ?? "").trim(),
+      value: (match[3] ?? match[4] ?? match[5] ?? "").trim(),
+      operator: match[2] as ParsedClause["operator"],
     })
   }
 

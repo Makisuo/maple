@@ -44,7 +44,7 @@ export interface ParsedWhereClauseFilters {
 const TRUE_VALUES = new Set(["1", "true", "yes", "y"])
 const FALSE_VALUES = new Set(["0", "false", "no", "n"])
 
-const CLAUSE_RE = /^([a-zA-Z0-9_.-]+)\s*(=|contains)\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/i
+const CLAUSE_RE = /^([a-zA-Z0-9_.-]+)\s*(<=|>=|<|>|=|contains)\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/i
 
 function parseBoolean(value: string): boolean | null {
   const normalized = value.trim().toLowerCase()
