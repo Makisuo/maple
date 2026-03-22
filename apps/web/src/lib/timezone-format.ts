@@ -70,3 +70,22 @@ export function formatTimeInTimezone(
 
   return formatter.format(date)
 }
+
+export function formatCompactTimeInTimezone(
+  input: TimezoneFormatInput,
+  options: { timeZone: string },
+): string {
+  const date = toValidDate(input)
+  if (!date) return "-"
+
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: resolveTimeZone(options.timeZone),
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+    hour12: false,
+  })
+
+  return formatter.format(date)
+}

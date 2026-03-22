@@ -1,29 +1,17 @@
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table"
 import { useVirtualizer } from "@tanstack/react-virtual"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Log } from "@/api/tinybird/logs"
-import { SeverityBadge } from "./severity-badge"
 import { LogDetailSheet } from "./log-detail-sheet"
 import type { LogsSearchParams } from "@/routes/logs"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
-import { formatTimestampInTimezone } from "@/lib/timezone-format"
-import { formatRelativeTime } from "@/lib/format"
+import { formatCompactTimeInTimezone } from "@/lib/timezone-format"
+import { getSeverityColor } from "@/lib/severity"
 import { useInfiniteLogs, FETCH_THRESHOLD } from "@/hooks/use-infinite-logs"
 
-function truncateBody(body: string, maxLength = 100): string {
-  if (body.length <= maxLength) return body
-  return body.slice(0, maxLength) + "..."
-}
-
-const ROW_HEIGHT = 44
+const ROW_HEIGHT = 28
 
 interface LogsTableProps {
   filters?: LogsSearchParams
@@ -31,28 +19,18 @@ interface LogsTableProps {
 
 function LoadingState() {
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4">
-      <div className="rounded-md border">
-        <table className="w-full caption-bottom text-sm">
-          <thead className="[&_tr]:border-b">
-            <tr className="border-b transition-colors hover:bg-muted/50">
-              <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[160px]">Timestamp</th>
-              <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[120px]">Service</th>
-              <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[80px]">Severity</th>
-              <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Message</th>
-            </tr>
-          </thead>
-          <tbody className="[&_tr:last-child]:border-0">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <tr key={i} className="border-b transition-colors">
-                <td className="p-2 align-middle"><Skeleton className="h-4 w-32" /></td>
-                <td className="p-2 align-middle"><Skeleton className="h-4 w-20" /></td>
-                <td className="p-2 align-middle"><Skeleton className="h-4 w-12" /></td>
-                <td className="p-2 align-middle"><Skeleton className="h-4 w-full" /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="rounded-md border overflow-hidden flex-1 min-h-0">
+        {Array.from({ length: 40 }).map((_, i) => (
+          <div
+            key={i}
+            className="border-l-2 border-l-transparent flex items-center gap-2 px-3 py-1 border-b border-border"
+          >
+            <Skeleton className="h-3 w-[72px] shrink-0" />
+            <Skeleton className="h-3 w-16 shrink-0" />
+            <Skeleton className="h-3 flex-1" />
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -81,60 +59,8 @@ function LogsTableContent({
     setSheetOpen(true)
   }, [])
 
-  const columns = React.useMemo<ColumnDef<Log>[]>(
-    () => [
-      {
-        accessorKey: "timestamp",
-        header: "Timestamp",
-        size: 160,
-        cell: ({ row }) => (
-          <span className="font-mono text-muted-foreground">
-            {formatTimestampInTimezone(row.original.timestamp, {
-              timeZone: effectiveTimezone,
-            })}{" "}
-            <span className="text-muted-foreground/60">
-              ({formatRelativeTime(row.original.timestamp)})
-            </span>
-          </span>
-        ),
-      },
-      {
-        accessorKey: "serviceName",
-        header: "Service",
-        size: 120,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">{row.original.serviceName}</span>
-        ),
-      },
-      {
-        accessorKey: "severityText",
-        header: "Severity",
-        size: 80,
-        cell: ({ row }) => (
-          <SeverityBadge severity={row.original.severityText} />
-        ),
-      },
-      {
-        accessorKey: "body",
-        header: "Message",
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">{truncateBody(row.original.body)}</span>
-        ),
-      },
-    ],
-    [effectiveTimezone],
-  )
-
-  const table = useReactTable({
-    data: allData,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  })
-
-  const { rows } = table.getRowModel()
-
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: allData.length,
     getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
@@ -146,31 +72,16 @@ function LogsTableContent({
     const lastItem = virtualItems[virtualItems.length - 1]
     if (!lastItem) return
 
-    if (lastItem.index >= rows.length - FETCH_THRESHOLD && hasNextPage && !isFetchingNextPage) {
+    if (lastItem.index >= allData.length - FETCH_THRESHOLD && hasNextPage && !isFetchingNextPage) {
       fetchNextPage()
     }
-  }, [virtualItems, rows.length, hasNextPage, isFetchingNextPage, fetchNextPage])
+  }, [virtualItems, allData.length, hasNextPage, isFetchingNextPage, fetchNextPage])
 
   if (allData.length === 0) {
     return (
       <div className="flex-1 min-h-0 flex flex-col gap-4">
-        <div className="rounded-md border">
-          <table className="w-full caption-bottom text-sm">
-            <thead className="[&_tr]:border-b">
-              <tr className="border-b transition-colors hover:bg-muted/50">
-                <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground" colSpan={4}>
-                  <span className="sr-only">Log columns</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td colSpan={4} className="h-24 text-center">
-                  No logs found
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div className="rounded-md border flex items-center justify-center h-48">
+          <span className="text-sm text-muted-foreground">No logs found</span>
         </div>
       </div>
     )
@@ -183,81 +94,51 @@ function LogsTableContent({
           ref={scrollContainerRef}
           className="flex-1 min-h-0 overflow-auto rounded-md border"
         >
-          <table className="w-full caption-bottom text-sm" aria-label="Logs">
-            <thead className="[&_tr]:border-b sticky top-0 z-10 bg-background">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id} className="border-b transition-colors hover:bg-muted/50">
-                  {headerGroup.headers.map((header) => (
-                    <th
-                      key={header.id}
-                      className={`h-10 px-2 text-left align-middle font-medium text-muted-foreground ${
-                        header.id === "serviceName" ? "hidden md:table-cell" : ""
-                      }`}
-                      style={{ width: header.getSize() !== 150 ? header.getSize() : undefined }}
-                    >
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(header.column.columnDef.header, header.getContext())}
-                    </th>
-                  ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody className="[&_tr:last-child]:border-0">
-              {virtualItems.length > 0 && (
-                <tr style={{ height: virtualItems[0].start }} aria-hidden="true">
-                  <td />
-                </tr>
-              )}
-              {virtualItems.map((virtualRow) => {
-                const row = rows[virtualRow.index]
-                return (
-                  <tr
-                    key={row.id}
-                    ref={virtualizer.measureElement}
-                    data-index={virtualRow.index}
-                    className="border-b transition-colors hover:bg-muted/50 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
-                    tabIndex={0}
-                    onClick={() => handleRowClick(row.original)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        handleRowClick(row.original)
-                      }
-                    }}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td
-                        key={cell.id}
-                        className={`p-2 align-middle [&:has([role=checkbox])]:pr-0 ${
-                          cell.column.id === "serviceName" ? "hidden md:table-cell" : ""
-                        }${cell.column.id === "body" ? " max-w-md" : ""}`}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                )
-              })}
-              {virtualItems.length > 0 && (
-                <tr
+          <div
+            style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+            role="log"
+          >
+            {virtualItems.map((virtualRow) => {
+              const log = allData[virtualRow.index]
+              return (
+                <div
+                  key={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
                   style={{
-                    height: virtualizer.getTotalSize() - (virtualItems[virtualItems.length - 1].end),
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualRow.start}px)`,
+                    borderLeftColor: getSeverityColor(log.severityText),
                   }}
-                  aria-hidden="true"
+                  className="border-l-2 flex items-center gap-2 px-3 py-1 text-xs font-mono cursor-pointer border-b border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+                  tabIndex={0}
+                  role="listitem"
+                  onClick={() => handleRowClick(log)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      handleRowClick(log)
+                    }
+                  }}
                 >
-                  <td />
-                </tr>
-              )}
-              {isFetchingNextPage && (
-                <tr className="border-b transition-colors">
-                  <td colSpan={4} className="p-2 text-center text-sm text-muted-foreground">
-                    Loading more logs...
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                  <span className="shrink-0 text-muted-foreground tabular-nums">
+                    {formatCompactTimeInTimezone(log.timestamp, {
+                      timeZone: effectiveTimezone,
+                    })}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground/60 truncate max-w-[120px] hidden md:inline">
+                    {log.serviceName}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-foreground">
+                    {log.body}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
         </div>
 
         <div className="text-sm text-muted-foreground shrink-0">
