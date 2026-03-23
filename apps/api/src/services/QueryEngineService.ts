@@ -42,6 +42,13 @@ interface MetricTimeseriesRow {
 
 type AlertObservation = QueryEngineAlertObservation
 
+export interface GroupedAlertObservation {
+  readonly groupKey: string
+  readonly value: number | null
+  readonly sampleCount: number
+  readonly hasData: boolean
+}
+
 export interface QueryEngineServiceShape {
   readonly execute: (
     tenant: TenantContext,
@@ -55,6 +62,14 @@ export interface QueryEngineServiceShape {
     request: QueryEngineEvaluateRequest,
   ) => Effect.Effect<
     QueryEngineEvaluateResponse,
+    QueryEngineValidationError | QueryEngineExecutionError
+  >
+  readonly evaluateGrouped: (
+    tenant: TenantContext,
+    request: QueryEngineEvaluateRequest,
+    groupBy: "service",
+  ) => Effect.Effect<
+    ReadonlyArray<GroupedAlertObservation>,
     QueryEngineValidationError | QueryEngineExecutionError
   >
 }
@@ -333,6 +348,8 @@ type QueryEngineTinybird = Pick<
   | "customMetricsBreakdownQuery"
   | "alertTracesAggregateQuery"
   | "alertMetricsAggregateQuery"
+  | "alertTracesAggregateByServiceQuery"
+  | "alertMetricsAggregateByServiceQuery"
 >
 
 const tracesMetricFieldMap = {
@@ -796,15 +813,103 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
     })
   })
 
+export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
+  Effect.fn("QueryEngineService.evaluateGrouped")(function* (
+    tenant: TenantContext,
+    request: QueryEngineEvaluateRequest,
+    groupBy: "service",
+  ): Effect.fn.Return<
+    ReadonlyArray<GroupedAlertObservation>,
+    QueryEngineValidationError | QueryEngineExecutionError
+  > {
+    yield* validateEvaluate(request)
+
+    if (request.query.kind !== "timeseries" || (request.query.source !== "traces" && request.query.source !== "metrics")) {
+      return yield* new QueryEngineValidationError({
+        message: "Unsupported grouped alert evaluation query",
+        details: ["Grouped alert evaluation supports traces and metrics timeseries queries only"],
+      })
+    }
+
+    if (groupBy === "service") {
+      if (request.query.source === "traces") {
+        const rows = yield* mapTinybirdError(
+          tinybird.alertTracesAggregateByServiceQuery(tenant, {
+            start_time: request.startTime,
+            end_time: request.endTime,
+            span_name: request.query.filters?.spanName,
+            root_only: request.query.filters?.rootSpansOnly ? "1" : undefined,
+            errors_only: request.query.filters?.errorsOnly ? "1" : undefined,
+            environments: request.query.filters?.environments?.join(","),
+            commit_shas: request.query.filters?.commitShas?.join(","),
+            attribute_filter_key: request.query.filters?.attributeKey,
+            attribute_filter_value:
+              request.query.filters?.attributeFilterMode === "exists"
+                ? undefined
+                : request.query.filters?.attributeValue,
+            attribute_filter_exists:
+              request.query.filters?.attributeFilterMode === "exists" ? "1" : undefined,
+            resource_filter_key: request.query.filters?.resourceAttributeKey,
+            resource_filter_value:
+              request.query.filters?.resourceAttributeFilterMode === "exists"
+                ? undefined
+                : request.query.filters?.resourceAttributeValue,
+            resource_filter_exists:
+              request.query.filters?.resourceAttributeFilterMode === "exists"
+                ? "1"
+                : undefined,
+            apdex_threshold_ms:
+              request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
+          }),
+          "Failed to evaluate grouped traces alert query",
+        )
+
+        return rows.map((row) => {
+          const sampleCount = Number(row.count ?? 0)
+          return {
+            groupKey: row.serviceName,
+            value: sampleCount > 0 ? tracesAggregateValueForMetric(request.query.metric as Extract<QuerySpec, { source: "traces" }>["metric"], row) : null,
+            sampleCount,
+            hasData: sampleCount > 0,
+          }
+        })
+      } else {
+        const rows = yield* mapTinybirdError(
+          tinybird.alertMetricsAggregateByServiceQuery(tenant, {
+            metric_name: (request.query as Extract<QuerySpec, { source: "metrics" }>).filters.metricName,
+            metric_type: (request.query as Extract<QuerySpec, { source: "metrics" }>).filters.metricType,
+            start_time: request.startTime,
+            end_time: request.endTime,
+          }),
+          "Failed to evaluate grouped metrics alert query",
+        )
+
+        return rows.map((row) => {
+          const sampleCount = Number(row.dataPointCount ?? 0)
+          return {
+            groupKey: row.serviceName,
+            value: sampleCount > 0 ? metricsAggregateValueForMetric(request.query.metric as Extract<QuerySpec, { source: "metrics" }>["metric"], row) : null,
+            sampleCount,
+            hasData: sampleCount > 0,
+          }
+        })
+      }
+    }
+
+    return []
+  })
+
 export class QueryEngineService extends ServiceMap.Service<QueryEngineService, QueryEngineServiceShape>()("QueryEngineService", {
   make: Effect.gen(function* () {
     const tinybird = yield* TinybirdService
     const execute = makeQueryEngineExecute(tinybird)
     const evaluate = makeQueryEngineEvaluate(tinybird)
+    const evaluateGrouped = makeQueryEngineEvaluateGrouped(tinybird)
 
     return {
       execute,
       evaluate,
+      evaluateGrouped,
     }
   }),
 }) {

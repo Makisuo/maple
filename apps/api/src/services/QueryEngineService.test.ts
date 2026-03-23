@@ -75,6 +75,8 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
     customMetricsBreakdownQuery: unexpected("customMetricsBreakdownQuery"),
     alertTracesAggregateQuery: unexpected("alertTracesAggregateQuery"),
     alertMetricsAggregateQuery: unexpected("alertMetricsAggregateQuery"),
+    alertTracesAggregateByServiceQuery: unexpected("alertTracesAggregateByServiceQuery"),
+    alertMetricsAggregateByServiceQuery: unexpected("alertMetricsAggregateByServiceQuery"),
     ...overrides,
   } satisfies Parameters<typeof makeQueryEngineExecute>[0]
 }

@@ -48,6 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@maple/ui/components/ui/select"
+import { Switch } from "@maple/ui/components/ui/switch"
 import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
@@ -389,9 +390,24 @@ function AlertCreatePage() {
               <Input
                 id="rule-service"
                 value={ruleForm.serviceName}
-                onChange={(e) => setRuleForm((c) => ({ ...c, serviceName: e.target.value }))}
+                onChange={(e) => setRuleForm((c) => ({
+                  ...c,
+                  serviceName: e.target.value,
+                  groupBy: e.target.value.trim() ? null : c.groupBy,
+                }))}
                 placeholder="Leave blank for all services"
               />
+              {!ruleForm.serviceName.trim() && (
+                <div className="flex items-center gap-2 mt-1">
+                  <Switch
+                    checked={ruleForm.groupBy === "service"}
+                    onCheckedChange={(checked) =>
+                      setRuleForm((c) => ({ ...c, groupBy: checked ? "service" : null }))
+                    }
+                  />
+                  <span className="text-sm">Evaluate each service independently</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -566,7 +582,9 @@ function AlertCreatePage() {
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Service</dt>
-                    <dd className="font-mono font-medium">{ruleForm.serviceName || "all"}</dd>
+                    <dd className="font-mono font-medium">
+                      {ruleForm.serviceName || (ruleForm.groupBy === "service" ? "all (per service)" : "all")}
+                    </dd>
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Severity</dt>

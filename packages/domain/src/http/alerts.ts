@@ -39,6 +39,12 @@ export const AlertSignalType = Schema.Literals([
 })
 export type AlertSignalType = Schema.Schema.Type<typeof AlertSignalType>
 
+export const AlertGroupBy = Schema.Literal("service").annotate({
+  identifier: "@maple/AlertGroupBy",
+  title: "Alert Group By",
+})
+export type AlertGroupBy = Schema.Schema.Type<typeof AlertGroupBy>
+
 export const AlertComparator = Schema.Literals(["gt", "gte", "lt", "lte"]).annotate({
   identifier: "@maple/AlertComparator",
   title: "Alert Comparator",
@@ -261,6 +267,7 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
   enabled: Schema.Boolean,
   severity: AlertSeverity,
   serviceName: Schema.NullOr(Schema.String),
+  groupBy: Schema.NullOr(AlertGroupBy),
   signalType: AlertSignalType,
   comparator: AlertComparator,
   threshold: Schema.Number,
@@ -287,6 +294,7 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
   enabled: Schema.optional(Schema.Boolean),
   severity: AlertSeverity,
   serviceName: Schema.optional(Schema.NullOr(Schema.String)),
+  groupBy: Schema.optional(Schema.NullOr(AlertGroupBy)),
   signalType: AlertSignalType,
   comparator: AlertComparator,
   threshold: Schema.Number,

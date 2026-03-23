@@ -94,6 +94,8 @@ function makeTinybirdStub(state: {
       succeedRows(state.tracesAggregateRows ?? emptyTinybirdRows),
     alertMetricsAggregateQuery: () =>
       succeedRows(state.metricsAggregateRows ?? emptyTinybirdRows),
+    alertTracesAggregateByServiceQuery: () => succeedRows(emptyTinybirdRows),
+    alertMetricsAggregateByServiceQuery: () => succeedRows(emptyTinybirdRows),
   }
 }
 

@@ -2305,6 +2305,180 @@ export const alertMetricsAggregate = defineEndpoint("alert_metrics_aggregate", {
 export type AlertMetricsAggregateParams = InferParams<typeof alertMetricsAggregate>;
 export type AlertMetricsAggregateOutput = InferOutputRow<typeof alertMetricsAggregate>;
 
+export const alertTracesAggregateByService = defineEndpoint("alert_traces_aggregate_by_service", {
+  description: "Aggregate trace metrics for alert evaluation, grouped by service.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    span_name: p.string().optional().describe("Filter by span name"),
+    root_only: p.string().optional().describe("Filter to root spans only"),
+    environments: p.string().optional().describe("Comma-separated environments filter"),
+    commit_shas: p.string().optional().describe("Comma-separated commit SHA filter"),
+    attribute_filter_key: p.string().optional().describe("Filter where SpanAttributes[key] = value"),
+    attribute_filter_value: p.string().optional().describe("Value for attribute filter"),
+    attribute_filter_exists: p.string().optional().describe("If '1', check key existence instead of equality"),
+    resource_filter_key: p.string().optional().describe("Filter where ResourceAttributes[key] = value"),
+    resource_filter_value: p.string().optional().describe("Value for resource attribute filter"),
+    resource_filter_exists: p.string().optional().describe("If '1', check key existence instead of equality"),
+    errors_only: p.string().optional().describe("If '1', filter to StatusCode = 'Error' only"),
+    apdex_threshold_ms: p.float64().optional(500).describe("Apdex threshold T in milliseconds"),
+  },
+  nodes: [
+    node({
+      name: "alert_traces_aggregate_by_service_node",
+      sql: `
+        SELECT
+          ServiceName AS serviceName,
+          count() AS count,
+          avg(Duration) / 1000000 AS avgDuration,
+          quantile(0.5)(Duration) / 1000000 AS p50Duration,
+          quantile(0.95)(Duration) / 1000000 AS p95Duration,
+          quantile(0.99)(Duration) / 1000000 AS p99Duration,
+          if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate,
+          countIf(Duration / 1000000 < {{Float64(apdex_threshold_ms, 500)}}) AS satisfiedCount,
+          countIf(Duration / 1000000 >= {{Float64(apdex_threshold_ms, 500)}}
+            AND Duration / 1000000 < {{Float64(apdex_threshold_ms, 500)}} * 4) AS toleratingCount,
+          if(count() > 0,
+            round((countIf(Duration / 1000000 < {{Float64(apdex_threshold_ms, 500)}})
+              + countIf(Duration / 1000000 >= {{Float64(apdex_threshold_ms, 500)}}
+                  AND Duration / 1000000 < {{Float64(apdex_threshold_ms, 500)}} * 4) * 0.5
+            ) / count(), 4), 0
+          ) AS apdexScore
+        FROM traces
+        WHERE Timestamp >= {{DateTime(start_time)}}
+          AND OrgId = {{String(org_id, "")}}
+          AND Timestamp <= {{DateTime(end_time)}}
+          {% if defined(span_name) %}AND SpanName = {{String(span_name)}}{% end %}
+          {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
+          {% if defined(errors_only) %}AND StatusCode = 'Error'{% end %}
+          {% if defined(environments) %}
+            AND ResourceAttributes['deployment.environment'] IN splitByChar(',', {{String(environments, "")}})
+          {% end %}
+          {% if defined(commit_shas) %}
+            AND ResourceAttributes['deployment.commit_sha'] IN splitByChar(',', {{String(commit_shas, "")}})
+          {% end %}
+          {% if defined(attribute_filter_key) %}
+            {% if defined(attribute_filter_exists) %}
+              AND mapContains(SpanAttributes, {{String(attribute_filter_key)}})
+            {% else %}
+              AND SpanAttributes[{{String(attribute_filter_key)}}] = {{String(attribute_filter_value, '')}}
+            {% end %}
+          {% end %}
+          {% if defined(resource_filter_key) %}
+            {% if defined(resource_filter_exists) %}
+              AND mapContains(ResourceAttributes, {{String(resource_filter_key)}})
+            {% else %}
+              AND ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, '')}}
+            {% end %}
+          {% end %}
+        GROUP BY ServiceName
+      `,
+    }),
+  ],
+  output: {
+    serviceName: t.string(),
+    count: t.uint64(),
+    avgDuration: t.float64(),
+    p50Duration: t.float64(),
+    p95Duration: t.float64(),
+    p99Duration: t.float64(),
+    errorRate: t.float64(),
+    satisfiedCount: t.uint64(),
+    toleratingCount: t.uint64(),
+    apdexScore: t.float64(),
+  },
+});
+
+export type AlertTracesAggregateByServiceParams = InferParams<typeof alertTracesAggregateByService>;
+export type AlertTracesAggregateByServiceOutput = InferOutputRow<typeof alertTracesAggregateByService>;
+
+export const alertMetricsAggregateByService = defineEndpoint("alert_metrics_aggregate_by_service", {
+  description: "Aggregate metric values for alert evaluation, grouped by service.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    metric_name: p.string().describe("Metric name (required)"),
+    metric_type: p.string().describe("Metric type"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+  },
+  nodes: [
+    node({
+      name: "alert_metrics_aggregate_by_service_node",
+      sql: `
+        {% if defined(metric_type) and metric_type == 'sum' %}
+          SELECT
+            ServiceName AS serviceName,
+            avg(Value) AS avgValue,
+            min(Value) AS minValue,
+            max(Value) AS maxValue,
+            sum(Value) AS sumValue,
+            count() AS dataPointCount
+          FROM metrics_sum
+          WHERE MetricName = {{String(metric_name)}}
+            AND OrgId = {{String(org_id, "")}}
+          AND TimeUnix >= {{DateTime(start_time)}}
+          AND TimeUnix <= {{DateTime(end_time)}}
+          GROUP BY ServiceName
+        {% elif defined(metric_type) and metric_type == 'gauge' %}
+          SELECT
+            ServiceName AS serviceName,
+            avg(Value) AS avgValue,
+            min(Value) AS minValue,
+            max(Value) AS maxValue,
+            sum(Value) AS sumValue,
+            count() AS dataPointCount
+          FROM metrics_gauge
+          WHERE MetricName = {{String(metric_name)}}
+            AND OrgId = {{String(org_id, "")}}
+          AND TimeUnix >= {{DateTime(start_time)}}
+          AND TimeUnix <= {{DateTime(end_time)}}
+          GROUP BY ServiceName
+        {% elif defined(metric_type) and metric_type == 'histogram' %}
+          SELECT
+            ServiceName AS serviceName,
+            if(sum(Count) > 0, sum(Sum) / sum(Count), 0) AS avgValue,
+            min(Min) AS minValue,
+            max(Max) AS maxValue,
+            sum(Sum) AS sumValue,
+            sum(Count) AS dataPointCount
+          FROM metrics_histogram
+          WHERE MetricName = {{String(metric_name)}}
+            AND OrgId = {{String(org_id, "")}}
+          AND TimeUnix >= {{DateTime(start_time)}}
+          AND TimeUnix <= {{DateTime(end_time)}}
+          GROUP BY ServiceName
+        {% else %}
+          SELECT
+            ServiceName AS serviceName,
+            if(sum(Count) > 0, sum(Sum) / sum(Count), 0) AS avgValue,
+            min(Min) AS minValue,
+            max(Max) AS maxValue,
+            sum(Sum) AS sumValue,
+            sum(Count) AS dataPointCount
+          FROM metrics_exponential_histogram
+          WHERE MetricName = {{String(metric_name)}}
+            AND OrgId = {{String(org_id, "")}}
+          AND TimeUnix >= {{DateTime(start_time)}}
+          AND TimeUnix <= {{DateTime(end_time)}}
+          GROUP BY ServiceName
+        {% end %}
+      `,
+    }),
+  ],
+  output: {
+    serviceName: t.string(),
+    avgValue: t.float64(),
+    minValue: t.float64(),
+    maxValue: t.float64(),
+    sumValue: t.float64(),
+    dataPointCount: t.uint64(),
+  },
+});
+
+export type AlertMetricsAggregateByServiceParams = InferParams<typeof alertMetricsAggregateByService>;
+export type AlertMetricsAggregateByServiceOutput = InferOutputRow<typeof alertMetricsAggregateByService>;
+
 /**
  * Custom traces time series endpoint - flexible time-bucketed trace metrics
  */

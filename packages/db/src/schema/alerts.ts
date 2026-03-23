@@ -71,6 +71,7 @@ export const alertRules = sqliteTable(
     metricType: text("metric_type"),
     metricAggregation: text("metric_aggregation"),
     apdexThresholdMs: real("apdex_threshold_ms"),
+    groupBy: text("group_by"),
     destinationIdsJson: text("destination_ids_json").notNull(),
     querySpecJson: text("query_spec_json").notNull(),
     reducer: text("reducer").notNull(),
@@ -94,6 +95,7 @@ export const alertRuleStates = sqliteTable(
   {
     orgId: text("org_id").notNull(),
     ruleId: text("rule_id").notNull(),
+    groupKey: text("group_key").notNull().default("__total__"),
     consecutiveBreaches: integer("consecutive_breaches", { mode: "number" })
       .notNull()
       .default(0),
@@ -108,7 +110,7 @@ export const alertRuleStates = sqliteTable(
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.orgId, table.ruleId] }),
+    primaryKey({ columns: [table.orgId, table.ruleId, table.groupKey] }),
     index("alert_rule_states_org_idx").on(table.orgId),
   ],
 )

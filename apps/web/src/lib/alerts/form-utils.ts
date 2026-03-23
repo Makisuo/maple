@@ -18,6 +18,7 @@ export type RuleFormState = {
   enabled: boolean
   severity: AlertSeverity
   serviceName: string
+  groupBy: "service" | null
   signalType: AlertSignalType
   comparator: AlertComparator
   threshold: string
@@ -110,6 +111,7 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
     enabled: true,
     severity: "warning",
     serviceName: serviceName ?? "",
+    groupBy: null,
     signalType: "error_rate",
     comparator: "gt",
     threshold: "5",
@@ -132,6 +134,7 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
     enabled: rule.enabled,
     severity: rule.severity,
     serviceName: rule.serviceName ?? "",
+    groupBy: rule.groupBy ?? null,
     signalType: rule.signalType,
     comparator: rule.comparator,
     threshold: String(rule.threshold),
@@ -155,6 +158,7 @@ export function buildRuleRequest(form: RuleFormState): AlertRuleUpsertRequest {
     enabled: form.enabled,
     severity: form.severity,
     serviceName: form.serviceName.trim() ? form.serviceName.trim() : null,
+    groupBy: form.groupBy,
     signalType,
     comparator: form.comparator,
     threshold: Number(form.threshold),

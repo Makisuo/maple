@@ -37,6 +37,7 @@ import {
   type AlertRuleUpsertRequest,
   type AlertSeverity,
   type AlertSignalType,
+  type AlertGroupBy,
   type OrgId,
   QueryEngineExecutionError,
   QueryEngineValidationError,
@@ -76,7 +77,7 @@ import {
 } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
-import { QueryEngineService } from "./QueryEngineService"
+import { QueryEngineService, type GroupedAlertObservation } from "./QueryEngineService"
 
 
 interface DestinationPublicConfig {
@@ -99,6 +100,7 @@ interface NormalizedRule {
   readonly enabled: boolean
   readonly severity: AlertSeverity
   readonly serviceName: string | null
+  readonly groupBy: AlertGroupBy | null
   readonly signalType: AlertSignalType
   readonly comparator: AlertComparator
   readonly threshold: number
@@ -518,6 +520,7 @@ const rowToRuleDocument = (row: AlertRuleRow, destinationIds: ReadonlyArray<stri
     enabled: row.enabled === 1,
     severity: row.severity as AlertSeverity,
     serviceName: row.serviceName,
+    groupBy: (row.groupBy as AlertGroupBy | null) ?? null,
     signalType: row.signalType as AlertSignalType,
     comparator: row.comparator as AlertComparator,
     threshold: row.threshold,
@@ -905,6 +908,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           enabled: row.enabled === 1,
           severity: row.severity as AlertSeverity,
           serviceName: row.serviceName,
+          groupBy: (row.groupBy as AlertGroupBy | null) ?? null,
           signalType: row.signalType as AlertSignalType,
           comparator: row.comparator as AlertComparator,
           threshold: row.threshold,
@@ -959,6 +963,10 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         if (request.signalType !== "metric" && request.metricAggregation) {
           details.push("metricAggregation is only supported for metric alerts")
         }
+        const groupBy = request.groupBy ?? null
+        if (groupBy != null && serviceName != null) {
+          details.push("groupBy is only supported when no service is specified")
+        }
 
         if (details.length > 0) {
           return yield* Effect.fail(
@@ -972,6 +980,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           enabled: request.enabled ?? true,
           severity: request.severity,
           serviceName,
+          groupBy,
           signalType: request.signalType,
           comparator: request.comparator,
           threshold: request.threshold,
@@ -1111,6 +1120,105 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             evaluated.reason ??
             `${rule.signalType} ${formatComparator(rule.comparator)} ${rule.threshold}`,
         }
+      })
+
+      const applyEvaluationLogic = (
+        rule: NormalizedRule,
+        obs: GroupedAlertObservation,
+      ): EvaluatedRule => {
+        const noDataBehavior = rule.compiledPlan.noDataBehavior
+        const sampleCount = obs.sampleCount
+        const value = obs.hasData
+          ? obs.value
+          : noDataBehavior === "zero"
+            ? 0
+            : null
+
+        if (!obs.hasData && noDataBehavior === "skip") {
+          return {
+            status: "skipped",
+            value: null,
+            sampleCount,
+            threshold: rule.threshold,
+            comparator: rule.comparator,
+            reason:
+              rule.signalType === "metric"
+                ? "No metric data in the selected window"
+                : "No data in the selected window",
+          }
+        }
+
+        if (sampleCount < rule.minimumSampleCount) {
+          return {
+            status: "skipped",
+            value,
+            sampleCount,
+            threshold: rule.threshold,
+            comparator: rule.comparator,
+            reason: `Sample count ${sampleCount} is below minimum ${rule.minimumSampleCount}`,
+          }
+        }
+
+        if (value == null) {
+          return {
+            status: "skipped",
+            value: null,
+            sampleCount,
+            threshold: rule.threshold,
+            comparator: rule.comparator,
+            reason: "Alert evaluation did not return a scalar value",
+          }
+        }
+
+        return {
+          status: compareThreshold(value, rule.comparator, rule.threshold)
+            ? "breached"
+            : "healthy",
+          value,
+          sampleCount,
+          threshold: rule.threshold,
+          comparator: rule.comparator,
+          reason: `${rule.signalType} ${formatComparator(rule.comparator)} ${rule.threshold}`,
+        }
+      }
+
+      const evaluateGroupedRule = Effect.fn("AlertsService.evaluateGroupedRule")(function* (
+        orgId: OrgId,
+        rule: NormalizedRule,
+      ): Effect.fn.Return<
+        Array<{ evaluation: EvaluatedRule; groupKey: string }>,
+        AlertValidationError | AlertDeliveryError
+      > {
+        const tenant: TenantContext = {
+          orgId,
+          userId: decodeUserIdSync("system-alerting"),
+          roles: [decodeRoleNameSync("root")],
+          authMode: "self_hosted",
+        }
+        const endMs = now()
+        const startMs = endMs - rule.windowMinutes * 60_000
+        const groupedResults = yield* queryEngine.evaluateGrouped(tenant, {
+          startTime: toTinybirdDateTime(startMs),
+          endTime: toTinybirdDateTime(endMs),
+          query: rule.compiledPlan.query,
+          reducer: rule.compiledPlan.reducer,
+          sampleCountStrategy: rule.compiledPlan.sampleCountStrategy,
+        }, rule.groupBy as "service").pipe(
+          Effect.mapError((error) => {
+            if (error instanceof QueryEngineValidationError) {
+              return makeValidationError(error.message, error.details)
+            }
+            if (error instanceof QueryEngineExecutionError) {
+              return makeDeliveryError(error.message)
+            }
+            return makeDeliveryError("Grouped alert evaluation failed")
+          }),
+        )
+
+        return groupedResults.map((obs) => ({
+          evaluation: applyEvaluationLogic(rule, obs),
+          groupKey: obs.groupKey,
+        }))
       })
 
       const insertDeliveryEvent = Effect.fn("AlertsService.insertDeliveryEvent")(function* (
@@ -1787,6 +1895,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               enabled: normalized.enabled ? 1 : 0,
               severity: normalized.severity,
               serviceName: normalized.serviceName,
+              groupBy: normalized.groupBy,
               signalType: normalized.signalType,
               comparator: normalized.comparator,
               threshold: normalized.threshold,
@@ -1819,6 +1928,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 enabled: normalized.enabled ? 1 : 0,
                 severity: normalized.severity,
                 serviceName: normalized.serviceName,
+                groupBy: normalized.groupBy,
                 signalType: normalized.signalType,
                 comparator: normalized.comparator,
                 threshold: normalized.threshold,
@@ -1911,7 +2021,22 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         yield* requireAdmin(roles)
         const normalized = yield* normalizeRule(request)
         yield* requireDestinationIds(orgId, normalized.destinationIds)
-        const evaluation = yield* evaluateRule(orgId, normalized)
+
+        let evaluation: EvaluatedRule
+        if (normalized.groupBy != null && normalized.serviceName == null) {
+          const results = yield* evaluateGroupedRule(orgId, normalized)
+          const breached = results.find((r) => r.evaluation.status === "breached")
+          evaluation = breached?.evaluation ?? results[0]?.evaluation ?? {
+            status: "skipped" as const,
+            value: null,
+            sampleCount: 0,
+            threshold: normalized.threshold,
+            comparator: normalized.comparator,
+            reason: "No services found",
+          }
+        } else {
+          evaluation = yield* evaluateRule(orgId, normalized)
+        }
 
         if (sendNotification) {
           const rows = yield* database.execute((db) =>
@@ -2220,6 +2345,245 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         return processed
       })
 
+      const processEvaluation = Effect.fn("AlertsService.processEvaluation")(function* (
+        row: AlertRuleRow,
+        normalized: NormalizedRule,
+        evaluation: EvaluatedRule,
+        groupKey: string,
+        serviceName: string | null,
+        timestamp: number,
+      ) {
+        const stateConflictTarget: [typeof alertRuleStates.orgId, typeof alertRuleStates.ruleId, typeof alertRuleStates.groupKey] = [alertRuleStates.orgId, alertRuleStates.ruleId, alertRuleStates.groupKey]
+
+        const state =
+          (
+            yield* database.execute((db) =>
+              db
+                .select()
+                .from(alertRuleStates)
+                .where(
+                  and(
+                    eq(alertRuleStates.orgId, row.orgId),
+                    eq(alertRuleStates.ruleId, row.id),
+                    eq(alertRuleStates.groupKey, groupKey),
+                  ),
+                )
+                .limit(1),
+            ).pipe(Effect.mapError(makePersistenceError))
+          )[0] ?? null
+
+        const incidentServiceFilter = serviceName != null
+          ? eq(alertIncidents.serviceName, serviceName)
+          : sql`${alertIncidents.serviceName} IS NULL`
+
+        const openIncident =
+          (
+            yield* database.execute((db) =>
+              db
+                .select()
+                .from(alertIncidents)
+                .where(
+                  and(
+                    eq(alertIncidents.orgId, row.orgId),
+                    eq(alertIncidents.ruleId, row.id),
+                    eq(alertIncidents.status, "open"),
+                    incidentServiceFilter,
+                  ),
+                )
+                .limit(1),
+            ).pipe(Effect.mapError(makePersistenceError))
+          )[0] ?? null
+
+        if (evaluation.status === "skipped") {
+          yield* database.execute((db) =>
+            db
+              .insert(alertRuleStates)
+              .values({
+                orgId: row.orgId,
+                ruleId: row.id,
+                groupKey,
+                consecutiveBreaches: state?.consecutiveBreaches ?? 0,
+                consecutiveHealthy: state?.consecutiveHealthy ?? 0,
+                lastStatus: evaluation.status,
+                lastValue: evaluation.value,
+                lastSampleCount: evaluation.sampleCount,
+                lastEvaluatedAt: timestamp,
+                lastError: null,
+                updatedAt: timestamp,
+              })
+              .onConflictDoUpdate({
+                target: stateConflictTarget,
+                set: {
+                  lastStatus: evaluation.status,
+                  lastValue: evaluation.value,
+                  lastSampleCount: evaluation.sampleCount,
+                  lastEvaluatedAt: timestamp,
+                  lastError: null,
+                  updatedAt: timestamp,
+                },
+              }),
+          ).pipe(Effect.mapError(makePersistenceError))
+          return
+        }
+
+        const consecutiveBreaches =
+          evaluation.status === "breached"
+            ? (state?.consecutiveBreaches ?? 0) + 1
+            : 0
+        const consecutiveHealthy =
+          evaluation.status === "healthy"
+            ? (state?.consecutiveHealthy ?? 0) + 1
+            : 0
+
+        yield* database.execute((db) =>
+          db
+            .insert(alertRuleStates)
+            .values({
+              orgId: row.orgId,
+              ruleId: row.id,
+              groupKey,
+              consecutiveBreaches,
+              consecutiveHealthy,
+              lastStatus: evaluation.status,
+              lastValue: evaluation.value,
+              lastSampleCount: evaluation.sampleCount,
+              lastEvaluatedAt: timestamp,
+              lastError: null,
+              updatedAt: timestamp,
+            })
+            .onConflictDoUpdate({
+              target: stateConflictTarget,
+              set: {
+                consecutiveBreaches,
+                consecutiveHealthy,
+                lastStatus: evaluation.status,
+                lastValue: evaluation.value,
+                lastSampleCount: evaluation.sampleCount,
+                lastEvaluatedAt: timestamp,
+                lastError: null,
+                updatedAt: timestamp,
+              },
+            }),
+        ).pipe(Effect.mapError(makePersistenceError))
+
+        if (
+          evaluation.status === "breached" &&
+          openIncident == null &&
+          consecutiveBreaches >= normalized.consecutiveBreachesRequired
+        ) {
+          const incidentId = randomUUID()
+          const incidentKey = `${row.orgId}:${row.id}:${groupKey}`
+          const incident: AlertIncidentRow = {
+            id: incidentId,
+            orgId: row.orgId,
+            ruleId: row.id,
+            incidentKey,
+            ruleName: row.name,
+            serviceName,
+            signalType: normalized.signalType,
+            severity: normalized.severity,
+            status: "open",
+            comparator: normalized.comparator,
+            threshold: normalized.threshold,
+            firstTriggeredAt: timestamp,
+            lastTriggeredAt: timestamp,
+            resolvedAt: null,
+            lastObservedValue: evaluation.value,
+            lastSampleCount: evaluation.sampleCount,
+            lastEvaluatedAt: timestamp,
+            dedupeKey: incidentKey,
+            lastDeliveredEventType: null,
+            lastNotifiedAt: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }
+          yield* database.execute((db) =>
+            db.insert(alertIncidents).values(incident),
+          ).pipe(Effect.mapError(makePersistenceError))
+          yield* queueIncidentNotifications(
+            row.orgId as OrgId,
+            normalized,
+            incident,
+            evaluation,
+            "trigger",
+          )
+          return
+        }
+
+        if (evaluation.status === "breached" && openIncident != null) {
+          yield* database.execute((db) =>
+            db
+              .update(alertIncidents)
+              .set({
+                lastTriggeredAt: timestamp,
+                lastObservedValue: evaluation.value,
+                lastSampleCount: evaluation.sampleCount,
+                lastEvaluatedAt: timestamp,
+                updatedAt: timestamp,
+              })
+              .where(eq(alertIncidents.id, openIncident.id)),
+          ).pipe(Effect.mapError(makePersistenceError))
+
+          const renotifyDueAt =
+            (openIncident.lastNotifiedAt ?? openIncident.firstTriggeredAt) +
+            normalized.renotifyIntervalMinutes * 60_000
+          if (renotifyDueAt <= timestamp) {
+            const refreshedIncident = {
+              ...openIncident,
+              lastTriggeredAt: timestamp,
+              lastObservedValue: evaluation.value,
+              lastSampleCount: evaluation.sampleCount,
+              lastEvaluatedAt: timestamp,
+              updatedAt: timestamp,
+            }
+            yield* queueIncidentNotifications(
+              row.orgId as OrgId,
+              normalized,
+              refreshedIncident,
+              evaluation,
+              "renotify",
+            )
+          }
+          return
+        }
+
+        if (
+          evaluation.status === "healthy" &&
+          openIncident != null &&
+          consecutiveHealthy >= normalized.consecutiveHealthyRequired
+        ) {
+          const resolvedIncident = {
+            ...openIncident,
+            status: "resolved",
+            resolvedAt: timestamp,
+            lastObservedValue: evaluation.value,
+            lastSampleCount: evaluation.sampleCount,
+            lastEvaluatedAt: timestamp,
+            updatedAt: timestamp,
+          }
+          yield* database.execute((db) =>
+            db
+              .update(alertIncidents)
+              .set({
+                status: "resolved",
+                resolvedAt: timestamp,
+                lastObservedValue: evaluation.value,
+                lastSampleCount: evaluation.sampleCount,
+                lastEvaluatedAt: timestamp,
+                updatedAt: timestamp,
+              })
+              .where(eq(alertIncidents.id, openIncident.id)),
+          ).pipe(Effect.mapError(makePersistenceError))
+          yield* queueIncidentNotifications(
+            row.orgId as OrgId,
+            normalized,
+            resolvedIncident,
+            evaluation,
+            "resolve",
+          )
+        }
+      })
+
       const runSchedulerTick = Effect.fn("AlertsService.runSchedulerTick")(function* () {
         const rows = yield* database.execute((db) =>
           db
@@ -2234,228 +2598,16 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         for (const row of rows) {
           evaluatedCount += 1
           const normalized = yield* normalizeRuleRow(row)
-
-          const state =
-            (
-              yield* database.execute((db) =>
-                db
-                  .select()
-                  .from(alertRuleStates)
-                  .where(
-                    and(
-                      eq(alertRuleStates.orgId, row.orgId),
-                      eq(alertRuleStates.ruleId, row.id),
-                    ),
-                  )
-                  .limit(1),
-              ).pipe(Effect.mapError(makePersistenceError))
-            )[0] ?? null
-
-          const openIncident =
-            (
-              yield* database.execute((db) =>
-                db
-                  .select()
-                  .from(alertIncidents)
-                  .where(
-                    and(
-                      eq(alertIncidents.orgId, row.orgId),
-                      eq(alertIncidents.ruleId, row.id),
-                      eq(alertIncidents.status, "open"),
-                    ),
-                  )
-                  .limit(1),
-              ).pipe(Effect.mapError(makePersistenceError))
-            )[0] ?? null
-
-          const evaluation = yield* evaluateRule(row.orgId as OrgId, normalized)
           const timestamp = now()
 
-          if (evaluation.status === "skipped") {
-            yield* database.execute((db) =>
-              db
-                .insert(alertRuleStates)
-                .values({
-                  orgId: row.orgId,
-                  ruleId: row.id,
-                  consecutiveBreaches: state?.consecutiveBreaches ?? 0,
-                  consecutiveHealthy: state?.consecutiveHealthy ?? 0,
-                  lastStatus: evaluation.status,
-                  lastValue: evaluation.value,
-                  lastSampleCount: evaluation.sampleCount,
-                  lastEvaluatedAt: timestamp,
-                  lastError: null,
-                  updatedAt: timestamp,
-                })
-                .onConflictDoUpdate({
-                  target: [alertRuleStates.orgId, alertRuleStates.ruleId],
-                  set: {
-                    lastStatus: evaluation.status,
-                    lastValue: evaluation.value,
-                    lastSampleCount: evaluation.sampleCount,
-                    lastEvaluatedAt: timestamp,
-                    lastError: null,
-                    updatedAt: timestamp,
-                  },
-                }),
-            ).pipe(Effect.mapError(makePersistenceError))
-            continue
-          }
-
-          const consecutiveBreaches =
-            evaluation.status === "breached"
-              ? (state?.consecutiveBreaches ?? 0) + 1
-              : 0
-          const consecutiveHealthy =
-            evaluation.status === "healthy"
-              ? (state?.consecutiveHealthy ?? 0) + 1
-              : 0
-
-          yield* database.execute((db) =>
-            db
-              .insert(alertRuleStates)
-              .values({
-                orgId: row.orgId,
-                ruleId: row.id,
-                consecutiveBreaches,
-                consecutiveHealthy,
-                lastStatus: evaluation.status,
-                lastValue: evaluation.value,
-                lastSampleCount: evaluation.sampleCount,
-                lastEvaluatedAt: timestamp,
-                lastError: null,
-                updatedAt: timestamp,
-              })
-              .onConflictDoUpdate({
-                target: [alertRuleStates.orgId, alertRuleStates.ruleId],
-                set: {
-                  consecutiveBreaches,
-                  consecutiveHealthy,
-                  lastStatus: evaluation.status,
-                  lastValue: evaluation.value,
-                  lastSampleCount: evaluation.sampleCount,
-                  lastEvaluatedAt: timestamp,
-                  lastError: null,
-                  updatedAt: timestamp,
-                },
-              }),
-          ).pipe(Effect.mapError(makePersistenceError))
-
-          if (
-            evaluation.status === "breached" &&
-            openIncident == null &&
-            consecutiveBreaches >= normalized.consecutiveBreachesRequired
-          ) {
-            const incidentId = randomUUID()
-            const incidentKey = `${row.orgId}:${row.id}:${normalized.serviceName ?? "__all__"}`
-            const incident: AlertIncidentRow = {
-              id: incidentId,
-              orgId: row.orgId,
-              ruleId: row.id,
-              incidentKey,
-              ruleName: row.name,
-              serviceName: normalized.serviceName,
-              signalType: normalized.signalType,
-              severity: normalized.severity,
-              status: "open",
-              comparator: normalized.comparator,
-              threshold: normalized.threshold,
-              firstTriggeredAt: timestamp,
-              lastTriggeredAt: timestamp,
-              resolvedAt: null,
-              lastObservedValue: evaluation.value,
-              lastSampleCount: evaluation.sampleCount,
-              lastEvaluatedAt: timestamp,
-              dedupeKey: incidentKey,
-              lastDeliveredEventType: null,
-              lastNotifiedAt: null,
-              createdAt: timestamp,
-              updatedAt: timestamp,
+          if (normalized.groupBy != null && normalized.serviceName == null) {
+            const results = yield* evaluateGroupedRule(row.orgId as OrgId, normalized)
+            for (const { evaluation, groupKey } of results) {
+              yield* processEvaluation(row, normalized, evaluation, groupKey, groupKey, timestamp)
             }
-            yield* database.execute((db) =>
-              db.insert(alertIncidents).values(incident),
-            ).pipe(Effect.mapError(makePersistenceError))
-            yield* queueIncidentNotifications(
-              row.orgId as OrgId,
-              normalized,
-              incident,
-              evaluation,
-              "trigger",
-            )
-            continue
-          }
-
-          if (evaluation.status === "breached" && openIncident != null) {
-            yield* database.execute((db) =>
-              db
-                .update(alertIncidents)
-                .set({
-                  lastTriggeredAt: timestamp,
-                  lastObservedValue: evaluation.value,
-                  lastSampleCount: evaluation.sampleCount,
-                  lastEvaluatedAt: timestamp,
-                  updatedAt: timestamp,
-                })
-                .where(eq(alertIncidents.id, openIncident.id)),
-            ).pipe(Effect.mapError(makePersistenceError))
-
-            const renotifyDueAt =
-              (openIncident.lastNotifiedAt ?? openIncident.firstTriggeredAt) +
-              normalized.renotifyIntervalMinutes * 60_000
-            if (renotifyDueAt <= timestamp) {
-              const refreshedIncident = {
-                ...openIncident,
-                lastTriggeredAt: timestamp,
-                lastObservedValue: evaluation.value,
-                lastSampleCount: evaluation.sampleCount,
-                lastEvaluatedAt: timestamp,
-                updatedAt: timestamp,
-              }
-              yield* queueIncidentNotifications(
-                row.orgId as OrgId,
-                normalized,
-                refreshedIncident,
-                evaluation,
-                "renotify",
-              )
-            }
-            continue
-          }
-
-          if (
-            evaluation.status === "healthy" &&
-            openIncident != null &&
-            consecutiveHealthy >= normalized.consecutiveHealthyRequired
-          ) {
-            const resolvedIncident = {
-              ...openIncident,
-              status: "resolved",
-              resolvedAt: timestamp,
-              lastObservedValue: evaluation.value,
-              lastSampleCount: evaluation.sampleCount,
-              lastEvaluatedAt: timestamp,
-              updatedAt: timestamp,
-            }
-            yield* database.execute((db) =>
-              db
-                .update(alertIncidents)
-                .set({
-                  status: "resolved",
-                  resolvedAt: timestamp,
-                  lastObservedValue: evaluation.value,
-                  lastSampleCount: evaluation.sampleCount,
-                  lastEvaluatedAt: timestamp,
-                  updatedAt: timestamp,
-                })
-                .where(eq(alertIncidents.id, openIncident.id)),
-            ).pipe(Effect.mapError(makePersistenceError))
-            yield* queueIncidentNotifications(
-              row.orgId as OrgId,
-              normalized,
-              resolvedIncident,
-              evaluation,
-              "resolve",
-            )
+          } else {
+            const evaluation = yield* evaluateRule(row.orgId as OrgId, normalized)
+            yield* processEvaluation(row, normalized, evaluation, "__total__", normalized.serviceName, timestamp)
           }
         }
 
