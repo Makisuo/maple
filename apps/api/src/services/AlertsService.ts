@@ -144,6 +144,7 @@ interface DispatchContext {
   readonly incidentId: string | null
   readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
   readonly dedupeKey: string
+  readonly windowMinutes: number
   readonly value: number | null
   readonly sampleCount: number | null
 }
@@ -649,6 +650,12 @@ const formatSlackThreshold = (
 const round = (value: number, decimals = 2): string => {
   const factor = 10 ** decimals
   return (Math.round(value * factor) / factor).toString()
+}
+
+const formatWindow = (minutes: number): string => {
+  if (minutes < 60) return `${minutes}m`
+  const hours = minutes / 60
+  return hours % 1 === 0 ? `${hours}h` : `${minutes}m`
 }
 
 const slackAttachmentColor = (
@@ -1218,6 +1225,10 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                                 type: "mrkdwn",
                                 text: `*Observed*\n${formatSlackValue(context.value, context.signalType)} ${formatComparator(context.comparator)} ${formatSlackThreshold(context.threshold, context.signalType)}`,
                               },
+                              {
+                                type: "mrkdwn",
+                                text: `*Window*\n${formatWindow(context.windowMinutes)}`,
+                              },
                             ],
                           },
                           { type: "divider" },
@@ -1383,6 +1394,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           serviceName: context.serviceName,
           comparator: context.comparator,
           threshold: context.threshold,
+          windowMinutes: context.windowMinutes,
         },
         observed: {
           value: context.value,
@@ -1468,6 +1480,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               severity: rule.severity,
               comparator: rule.comparator,
               threshold: rule.threshold,
+              windowMinutes: rule.windowMinutes,
               eventType,
               incidentId: incident.id,
               incidentStatus: incident.status as Schema.Schema.Type<
@@ -1722,6 +1735,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           severity: "warning",
           comparator: "lt",
           threshold: 1,
+          windowMinutes: 5,
           eventType: "test",
           incidentId: null,
           incidentStatus: "resolved",
@@ -1918,6 +1932,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               severity: normalized.severity,
               comparator: normalized.comparator,
               threshold: normalized.threshold,
+              windowMinutes: normalized.windowMinutes,
               eventType: "test",
               incidentId: null,
               incidentStatus: "resolved",
@@ -2109,6 +2124,11 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 incidentRow?.threshold ??
                 Number(
                   (payload.rule as Record<string, unknown> | undefined)?.threshold ?? 0,
+                ),
+              windowMinutes:
+                ruleRow?.windowMinutes ??
+                Number(
+                  (payload.rule as Record<string, unknown> | undefined)?.windowMinutes ?? 5,
                 ),
               eventType: row.eventType as AlertEventTypeValue,
               incidentId: row.incidentId,

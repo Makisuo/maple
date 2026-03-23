@@ -872,6 +872,7 @@ function AlertsPage() {
                 </div>
               )}
 
+              {deliveryEvents.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle>Delivery History</CardTitle>
@@ -888,10 +889,6 @@ function AlertsPage() {
                   ) : !Result.isSuccess(deliveryEventsResult) ? (
                     <div className="text-muted-foreground py-8 text-center text-sm">
                       Failed to load delivery history.
-                    </div>
-                  ) : deliveryEvents.length === 0 ? (
-                    <div className="text-muted-foreground py-8 text-center text-sm">
-                      No delivery events yet.
                     </div>
                   ) : (
                     <Table>
@@ -948,6 +945,7 @@ function AlertsPage() {
                   )}
                 </CardContent>
               </Card>
+              )}
             </div>
           )}
 
