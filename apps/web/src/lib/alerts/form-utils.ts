@@ -11,6 +11,7 @@ import {
   type AlertSeverity,
   type AlertSignalType,
 } from "@maple/domain/http"
+import { Cause, Exit, Option } from "effect"
 import { formatErrorRate, formatLatency, formatNumber } from "@/lib/format"
 
 export type RuleFormState = {
@@ -74,6 +75,24 @@ export const metricAggregationLabels: Record<AlertMetricAggregation, string> = {
   max: "Maximum",
   sum: "Sum",
   count: "Count",
+}
+
+export function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
+  if (Exit.isSuccess(exit)) return fallback
+  const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
+  if (failure instanceof Error && failure.message.trim().length > 0) return failure.message
+  if (
+    typeof failure === "object" &&
+    failure !== null &&
+    "message" in failure &&
+    typeof failure.message === "string" &&
+    failure.message.trim().length > 0
+  ) {
+    return failure.message
+  }
+  const defect = Cause.squash(exit.cause)
+  if (defect instanceof Error && defect.message.trim().length > 0) return defect.message
+  return fallback
 }
 
 export function formatSignalValue(signalType: AlertSignalType, value: number | null): string {

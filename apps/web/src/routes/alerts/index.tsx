@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { Cause, Exit, Option, Schema } from "effect"
+import { Exit, Schema } from "effect"
 import { useState, useMemo } from "react"
 import { toast } from "sonner"
 
@@ -20,6 +20,7 @@ import {
   comparatorLabels,
   destinationTypeLabels,
   formatSignalValue,
+  getExitErrorMessage,
 } from "@/lib/alerts/form-utils"
 import {
   AlertWarningIcon,
@@ -120,24 +121,6 @@ type DestinationFormState = {
   integrationKey: string
   url: string
   signingSecret: string
-}
-
-function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
-  if (Exit.isSuccess(exit)) return fallback
-  const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-  if (failure instanceof Error && failure.message.trim().length > 0) return failure.message
-  if (
-    typeof failure === "object" &&
-    failure !== null &&
-    "message" in failure &&
-    typeof failure.message === "string" &&
-    failure.message.trim().length > 0
-  ) {
-    return failure.message
-  }
-  const defect = Cause.squash(exit.cause)
-  if (defect instanceof Error && defect.message.trim().length > 0) return defect.message
-  return fallback
 }
 
 function formatDateTime(value: string | null): string {

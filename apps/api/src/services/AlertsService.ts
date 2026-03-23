@@ -14,13 +14,11 @@ import {
   AlertDestinationDocument,
   AlertDestinationTestResponse,
   AlertDestinationsListResponse,
-  AlertEventType,
   AlertEvaluationResult,
   AlertForbiddenError,
   AlertIncidentDocument,
   AlertIncidentsListResponse,
   AlertIncidentStatus,
-  AlertMetricAggregation,
   AlertNotFoundError,
   AlertPersistenceError,
   AlertRuleDeleteResponse,
@@ -55,7 +53,6 @@ import {
   alertRules,
   type AlertRuleRow,
   alertRuleStates,
-  type AlertRuleStateRow,
 } from "@maple/db"
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import {
@@ -611,7 +608,7 @@ const formatEventTypeLabel = (type: string) => {
   return map[type] ?? type
 }
 
-const formatSlackValue = (
+const formatSignalMetric = (
   value: number | null,
   signalType: string,
 ): string => {
@@ -628,25 +625,6 @@ const formatSlackValue = (
       return `${round(value)} rpm`
     default:
       return `${round(value)}`
-  }
-}
-
-const formatSlackThreshold = (
-  threshold: number,
-  signalType: string,
-): string => {
-  switch (signalType) {
-    case "error_rate":
-      return `${round(threshold)}%`
-    case "p95_latency":
-    case "p99_latency":
-      return `${round(threshold)}ms`
-    case "apdex":
-      return `${round(threshold, 3)}`
-    case "throughput":
-      return `${round(threshold)} rpm`
-    default:
-      return `${round(threshold)}`
   }
 }
 
@@ -1064,67 +1042,13 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           }),
         )
 
-        const noDataBehavior = rule.compiledPlan.noDataBehavior
-        const sampleCount = evaluated.sampleCount
-        const value = evaluated.hasData
-          ? evaluated.value
-          : noDataBehavior === "zero"
-            ? 0
-            : null
-
-        if (!evaluated.hasData && noDataBehavior === "skip") {
-          return {
-            status: "skipped",
-            value: null,
-            sampleCount,
-            threshold: rule.threshold,
-            comparator: rule.comparator,
-            reason:
-              rule.signalType === "metric"
-                ? "No metric data in the selected window"
-                : "No data in the selected window",
-          }
-        }
-
-        if (sampleCount < rule.minimumSampleCount) {
-          return {
-            status: "skipped",
-            value,
-            sampleCount,
-            threshold: rule.threshold,
-            comparator: rule.comparator,
-            reason: `Sample count ${sampleCount} is below minimum ${rule.minimumSampleCount}`,
-          }
-        }
-
-        if (value == null) {
-          return {
-            status: "skipped",
-            value: null,
-            sampleCount,
-            threshold: rule.threshold,
-            comparator: rule.comparator,
-            reason: "Alert evaluation did not return a scalar value",
-          }
-        }
-
-        return {
-          status: compareThreshold(value, rule.comparator, rule.threshold)
-            ? "breached"
-            : "healthy",
-          value,
-          sampleCount,
-          threshold: rule.threshold,
-          comparator: rule.comparator,
-          reason:
-            evaluated.reason ??
-            `${rule.signalType} ${formatComparator(rule.comparator)} ${rule.threshold}`,
-        }
+        return applyEvaluationLogic(rule, evaluated, evaluated.reason ?? undefined)
       })
 
       const applyEvaluationLogic = (
         rule: NormalizedRule,
-        obs: GroupedAlertObservation,
+        obs: Pick<GroupedAlertObservation, "value" | "sampleCount" | "hasData">,
+        reasonOverride?: string,
       ): EvaluatedRule => {
         const noDataBehavior = rule.compiledPlan.noDataBehavior
         const sampleCount = obs.sampleCount
@@ -1178,7 +1102,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           sampleCount,
           threshold: rule.threshold,
           comparator: rule.comparator,
-          reason: `${rule.signalType} ${formatComparator(rule.comparator)} ${rule.threshold}`,
+          reason:
+            reasonOverride ??
+            `${rule.signalType} ${formatComparator(rule.comparator)} ${rule.threshold}`,
         }
       }
 
@@ -1331,7 +1257,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                               },
                               {
                                 type: "mrkdwn",
-                                text: `*Observed*\n${formatSlackValue(context.value, context.signalType)} ${formatComparator(context.comparator)} ${formatSlackThreshold(context.threshold, context.signalType)}`,
+                                text: `*Observed*\n${formatSignalMetric(context.value, context.signalType)} ${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`,
                               },
                               {
                                 type: "mrkdwn",
@@ -1645,46 +1571,29 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         )
         const timestamp = now()
 
+        const row = {
+          id: destinationId,
+          orgId,
+          name: request.name.trim(),
+          type: request.type,
+          enabled: request.enabled === false ? 0 : 1,
+          configJson: JSON.stringify(publicConfig),
+          secretCiphertext: encryptedSecret.ciphertext,
+          secretIv: encryptedSecret.iv,
+          secretTag: encryptedSecret.tag,
+          lastTestedAt: null,
+          lastTestError: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          createdBy: userId,
+          updatedBy: userId,
+        }
+
         yield* database.execute((db) =>
-          db.insert(alertDestinations).values({
-            id: destinationId,
-            orgId,
-            name: request.name.trim(),
-            type: request.type,
-            enabled: request.enabled === false ? 0 : 1,
-            configJson: JSON.stringify(publicConfig),
-            secretCiphertext: encryptedSecret.ciphertext,
-            secretIv: encryptedSecret.iv,
-            secretTag: encryptedSecret.tag,
-            lastTestedAt: null,
-            lastTestError: null,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-            createdBy: userId,
-            updatedBy: userId,
-          }),
+          db.insert(alertDestinations).values(row),
         ).pipe(Effect.mapError(makePersistenceError))
 
-        return rowToDestinationDocument(
-          {
-            id: destinationId,
-            orgId,
-            name: request.name.trim(),
-            type: request.type,
-            enabled: request.enabled === false ? 0 : 1,
-            configJson: JSON.stringify(publicConfig),
-            secretCiphertext: encryptedSecret.ciphertext,
-            secretIv: encryptedSecret.iv,
-            secretTag: encryptedSecret.tag,
-            lastTestedAt: null,
-            lastTestError: null,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-            createdBy: userId,
-            updatedBy: userId,
-          },
-          publicConfig,
-        )
+        return rowToDestinationDocument(row, publicConfig)
       })
 
       const updateDestination = Effect.fn("AlertsService.updateDestination")(function* (
@@ -2079,7 +1988,8 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             .select()
             .from(alertIncidents)
             .where(eq(alertIncidents.orgId, orgId))
-            .orderBy(desc(alertIncidents.status), desc(alertIncidents.lastTriggeredAt)),
+            .orderBy(desc(alertIncidents.status), desc(alertIncidents.lastTriggeredAt))
+            .limit(100),
         ).pipe(Effect.mapError(makePersistenceError))
         return new AlertIncidentsListResponse({
           incidents: rows.map(rowToIncidentDocument),
@@ -2094,7 +2004,8 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             .select()
             .from(alertDeliveryEvents)
             .where(eq(alertDeliveryEvents.orgId, orgId))
-            .orderBy(desc(alertDeliveryEvents.createdAt)),
+            .orderBy(desc(alertDeliveryEvents.createdAt))
+            .limit(100),
         ).pipe(Effect.mapError(makePersistenceError))
 
         const destinationRows = yield* database.execute((db) =>
@@ -2156,18 +2067,50 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             .orderBy(asc(alertDeliveryEvents.scheduledAt)),
         ).pipe(Effect.mapError(makePersistenceError))
 
+        if (rows.length === 0) return 0
+
+        const uniqueDestinationIds = [...new Set(rows.map((r) => r.destinationId))]
+        const uniqueRuleIds = [...new Set(rows.map((r) => r.ruleId))]
+        const uniqueIncidentIds = [...new Set(rows.filter((r) => r.incidentId != null).map((r) => r.incidentId!))]
+
+        const [allDestinations, allRules, allIncidents] = yield* Effect.all([
+          database.execute((db) =>
+            db.select().from(alertDestinations).where(inArray(alertDestinations.id, uniqueDestinationIds)),
+          ),
+          database.execute((db) =>
+            db.select().from(alertRules).where(inArray(alertRules.id, uniqueRuleIds)),
+          ),
+          uniqueIncidentIds.length > 0
+            ? database.execute((db) =>
+                db.select().from(alertIncidents).where(inArray(alertIncidents.id, uniqueIncidentIds)),
+              )
+            : Effect.succeed([] as AlertIncidentRow[]),
+        ], { concurrency: "unbounded" }).pipe(Effect.mapError(makePersistenceError))
+
+        const destinationMap = new Map(allDestinations.map((r) => [r.id, r]))
+        const ruleMap = new Map(allRules.map((r) => [r.id, r]))
+        const incidentMap = new Map(allIncidents.map((r) => [r.id, r]))
+
         let processed = 0
 
         for (const row of rows) {
           processed += 1
-          const destinationRow = yield* requireDestinationRow(
-            row.orgId as OrgId,
-            decodeAlertDestinationIdSync(row.destinationId),
-          ).pipe(
-            Effect.catchTag("AlertNotFoundError", (error) =>
-              Effect.fail(makeDeliveryError(error.message)),
-            ),
-          )
+          const destinationRow = destinationMap.get(row.destinationId)
+
+          if (!destinationRow) {
+            yield* database.execute((db) =>
+              db
+                .update(alertDeliveryEvents)
+                .set({
+                  status: "failed",
+                  attemptedAt: currentTime,
+                  errorMessage: "Destination not found",
+                  updatedAt: currentTime,
+                })
+                .where(eq(alertDeliveryEvents.id, row.id)),
+            ).pipe(Effect.mapError(makePersistenceError))
+            continue
+          }
 
           if (destinationRow.enabled !== 1) {
             yield* database.execute((db) =>
@@ -2184,30 +2127,11 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             continue
           }
 
-          let incidentRow: AlertIncidentRow | null = null
-          if (row.incidentId != null) {
-            incidentRow =
-              (
-                yield* database.execute((db) =>
-                  db
-                    .select()
-                    .from(alertIncidents)
-                    .where(eq(alertIncidents.id, row.incidentId!))
-                    .limit(1),
-                ).pipe(Effect.mapError(makePersistenceError))
-              )[0] ?? null
-          }
+          const incidentRow: AlertIncidentRow | null = row.incidentId != null
+            ? incidentMap.get(row.incidentId) ?? null
+            : null
 
-          const ruleRow =
-            (
-              yield* database.execute((db) =>
-                db
-                  .select()
-                  .from(alertRules)
-                  .where(eq(alertRules.id, row.ruleId))
-                  .limit(1),
-              ).pipe(Effect.mapError(makePersistenceError))
-            )[0] ?? null
+          const ruleRow = ruleMap.get(row.ruleId) ?? null
 
           const hydrated = yield* hydrateDestination(destinationRow)
           const payload = yield* parseJson<Record<string, unknown>>(
@@ -2593,26 +2517,26 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             .orderBy(asc(alertRules.updatedAt)),
         ).pipe(Effect.mapError(makePersistenceError))
 
-        let evaluatedCount = 0
+        yield* Effect.forEach(rows, (row) =>
+          Effect.gen(function* () {
+            const normalized = yield* normalizeRuleRow(row)
+            const timestamp = now()
 
-        for (const row of rows) {
-          evaluatedCount += 1
-          const normalized = yield* normalizeRuleRow(row)
-          const timestamp = now()
-
-          if (normalized.groupBy != null && normalized.serviceName == null) {
-            const results = yield* evaluateGroupedRule(row.orgId as OrgId, normalized)
-            for (const { evaluation, groupKey } of results) {
-              yield* processEvaluation(row, normalized, evaluation, groupKey, groupKey, timestamp)
+            if (normalized.groupBy != null && normalized.serviceName == null) {
+              const results = yield* evaluateGroupedRule(row.orgId as OrgId, normalized)
+              for (const { evaluation, groupKey } of results) {
+                yield* processEvaluation(row, normalized, evaluation, groupKey, groupKey, timestamp)
+              }
+            } else {
+              const evaluation = yield* evaluateRule(row.orgId as OrgId, normalized)
+              yield* processEvaluation(row, normalized, evaluation, "__total__", normalized.serviceName, timestamp)
             }
-          } else {
-            const evaluation = yield* evaluateRule(row.orgId as OrgId, normalized)
-            yield* processEvaluation(row, normalized, evaluation, "__total__", normalized.serviceName, timestamp)
-          }
-        }
+          }),
+          { concurrency: 5 },
+        )
 
         const processedCount = yield* processQueuedDeliveries()
-        return { evaluatedCount, processedCount }
+        return { evaluatedCount: rows.length, processedCount }
       })
 
       return {

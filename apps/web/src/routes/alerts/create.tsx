@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { Cause, Exit, Option, Schema } from "effect"
+import { Atom, Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Exit, Schema } from "effect"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
@@ -14,6 +14,7 @@ import {
   buildRuleRequest,
   buildRuleTestRequest,
   isRulePreviewReady,
+  getExitErrorMessage,
   comparatorLabels,
   metricTypeLabels,
   metricAggregationLabels,
@@ -63,34 +64,13 @@ export const Route = createFileRoute("/alerts/create")({
   validateSearch: Schema.toStandardSchemaV1(AlertCreateSearch),
 })
 
-function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
-  if (Exit.isSuccess(exit)) return fallback
-  const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-  if (failure instanceof Error && failure.message.trim().length > 0) return failure.message
-  if (
-    typeof failure === "object" &&
-    failure !== null &&
-    "message" in failure &&
-    typeof failure.message === "string" &&
-    failure.message.trim().length > 0
-  ) {
-    return failure.message
-  }
-  const defect = Cause.squash(exit.cause)
-  if (defect instanceof Error && defect.message.trim().length > 0) return defect.message
-  return fallback
-}
-
 const CHART_BUCKET_TARGET = 96
+const emptyChartAtom = Atom.make(Result.initial())
 
-const signalTypes: { value: AlertSignalType; label: string }[] = [
-  { value: "error_rate", label: "Error Rate" },
-  { value: "p95_latency", label: "P95 Latency" },
-  { value: "p99_latency", label: "P99 Latency" },
-  { value: "apdex", label: "Apdex" },
-  { value: "throughput", label: "Throughput" },
-  { value: "metric", label: "Metric" },
-]
+const signalTypes = Object.entries(signalLabels).map(([value, label]) => ({
+  value: value as AlertSignalType,
+  label,
+}))
 
 function AlertCreatePage() {
   const search = Route.useSearch()
@@ -166,16 +146,7 @@ function AlertCreatePage() {
   const chartResult = useAtomValue(
     chartQueryInput
       ? getCustomChartTimeSeriesResultAtom(chartQueryInput)
-      : getCustomChartTimeSeriesResultAtom({
-          data: {
-            source: "traces",
-            metric: "count",
-            groupBy: "none",
-            startTime,
-            endTime,
-            bucketSeconds,
-          },
-        }),
+      : emptyChartAtom,
   )
 
   const chartData = useMemo(() => {

@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
 import { useMemo, useState } from "react"
 
@@ -95,6 +95,7 @@ function formatDateTimeFull(value: string | null): string {
 }
 
 const CHART_BUCKET_TARGET = 96
+const emptyChartAtom = Atom.make(Result.initial())
 
 function RuleDetailPage() {
   const { ruleId } = Route.useParams()
@@ -218,9 +219,7 @@ function RuleDetailPage() {
   const chartResult = useAtomValue(
     chartQueryInput
       ? getCustomChartTimeSeriesResultAtom(chartQueryInput)
-      : getCustomChartTimeSeriesResultAtom({
-          data: { source: "traces", metric: "count", groupBy: "none", startTime, endTime, bucketSeconds },
-        }),
+      : emptyChartAtom,
   )
 
   const chartData = useMemo(() => {
