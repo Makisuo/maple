@@ -264,7 +264,7 @@ function OverviewTab({
                 {criticalCount > 0 && `${criticalCount} critical`}
                 {criticalCount > 0 && warningCount > 0 && ", "}
                 {warningCount > 0 && `${warningCount} warning`}
-                {openIncidents.length === 0 && "none"}
+                {openIncidents.length === 0 && "all clear"}
               </span>
             </div>
           </CardContent>
@@ -297,29 +297,38 @@ function OverviewTab({
         </Card>
       </div>
 
-      {/* Active Incidents */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold">Active Incidents</h2>
-            {openIncidents.length > 0 && (
-              <Badge variant="secondary" className="rounded-full tabular-nums">{openIncidents.length}</Badge>
-            )}
-          </div>
-          <button
-            type="button"
-            className="text-sm text-primary hover:underline"
-            onClick={() => onTabSelect("incidents")}
-          >
-            View all incidents
-          </button>
-        </div>
+      {/* Combined empty state when nothing to show */}
+      {openIncidents.length === 0 && deliveryEvents.length === 0 && (
+        <Empty className="py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <CheckIcon size={18} />
+            </EmptyMedia>
+            <EmptyTitle>All clear</EmptyTitle>
+            <EmptyDescription>
+              No active incidents or recent notifications. Rules are evaluating normally.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
 
-        {openIncidents.length === 0 ? (
-          <div className="text-muted-foreground py-8 text-center text-sm">
-            No active incidents — all systems healthy.
+      {/* Active Incidents — only shown when there are incidents */}
+      {openIncidents.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Active Incidents</h2>
+              <Badge variant="secondary" className="rounded-full tabular-nums">{openIncidents.length}</Badge>
+            </div>
+            <button
+              type="button"
+              className="text-sm text-primary hover:underline"
+              onClick={() => onTabSelect("incidents")}
+            >
+              View all incidents
+            </button>
           </div>
-        ) : (
+
           <Table>
             <TableHeader>
               <TableRow>
@@ -366,27 +375,23 @@ function OverviewTab({
               })}
             </TableBody>
           </Table>
-        )}
-      </div>
-
-      {/* Recent Activity */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Recent Activity</h2>
-          <button
-            type="button"
-            className="text-sm text-primary hover:underline"
-            onClick={() => onTabSelect("incidents")}
-          >
-            View delivery log
-          </button>
         </div>
+      )}
 
-        {deliveryEvents.length === 0 ? (
-          <div className="text-muted-foreground py-6 text-center text-sm">
-            No recent activity.
+      {/* Recent Activity — only shown when there are events */}
+      {deliveryEvents.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Recent Activity</h2>
+            <button
+              type="button"
+              className="text-sm text-primary hover:underline"
+              onClick={() => onTabSelect("incidents")}
+            >
+              View delivery log
+            </button>
           </div>
-        ) : (
+
           <div className="space-y-1">
             {deliveryEvents.slice(0, 5).map((event, idx) => {
               const rule = rulesById.get(event.ruleId)
@@ -422,8 +427,8 @@ function OverviewTab({
               )
             })}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -575,6 +575,92 @@ const formatComparator = (value: AlertComparator) => {
   }
 }
 
+const formatSignalLabel = (signal: string) => {
+  const labels: Record<string, string> = {
+    error_rate: "Error Rate",
+    p95_latency: "P95 Latency",
+    p99_latency: "P99 Latency",
+    apdex: "Apdex",
+    throughput: "Throughput",
+    metric: "Metric",
+  }
+  return labels[signal] ?? signal
+}
+
+const eventTypeEmoji = (type: string) => {
+  const map: Record<string, string> = {
+    trigger: "\u{1F6A8}",
+    resolve: "\u2705",
+    renotify: "\u{1F514}",
+    test: "\u{1F9EA}",
+  }
+  return map[type] ?? "\u{1F4E2}"
+}
+
+const formatEventTypeLabel = (type: string) => {
+  const map: Record<string, string> = {
+    trigger: "Triggered",
+    resolve: "Resolved",
+    renotify: "Re-notification",
+    test: "Test",
+  }
+  return map[type] ?? type
+}
+
+const formatSlackValue = (
+  value: number | null,
+  signalType: string,
+): string => {
+  if (value == null) return "n/a"
+  switch (signalType) {
+    case "error_rate":
+      return `${round(value)}%`
+    case "p95_latency":
+    case "p99_latency":
+      return `${round(value)}ms`
+    case "apdex":
+      return `${round(value, 3)}`
+    case "throughput":
+      return `${round(value)} rpm`
+    default:
+      return `${round(value)}`
+  }
+}
+
+const formatSlackThreshold = (
+  threshold: number,
+  signalType: string,
+): string => {
+  switch (signalType) {
+    case "error_rate":
+      return `${round(threshold)}%`
+    case "p95_latency":
+    case "p99_latency":
+      return `${round(threshold)}ms`
+    case "apdex":
+      return `${round(threshold, 3)}`
+    case "throughput":
+      return `${round(threshold)} rpm`
+    default:
+      return `${round(threshold)}`
+  }
+}
+
+const round = (value: number, decimals = 2): string => {
+  const factor = 10 ** decimals
+  return (Math.round(value * factor) / factor).toString()
+}
+
+const slackAttachmentColor = (
+  eventType: string,
+  severity: string,
+): string => {
+  if (eventType === "resolve") return "#2eb67d"
+  if (eventType === "test") return "#36c5f0"
+  if (severity === "critical") return "#e01e5a"
+  return "#ecb22e" // warning
+}
+
 let alertFetchImpl: typeof fetch = fetch
 
 export const __testables = {
@@ -1097,22 +1183,71 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                   method: "POST",
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify({
-                    text: `${context.ruleName}: ${context.eventType}`,
-                    blocks: [
+                    text: `${context.ruleName}: ${formatEventTypeLabel(context.eventType)}`,
+                    attachments: [
                       {
-                        type: "section",
-                        text: {
-                          type: "mrkdwn",
-                          text:
-                            `*${context.ruleName}* (${context.eventType})\n` +
-                            `Severity: ${context.severity}\n` +
-                            `Signal: ${context.signalType}\n` +
-                            `Value: ${context.value ?? "n/a"} ${formatComparator(
-                              context.comparator,
-                            )} ${context.threshold}\n` +
-                            `Service: ${context.serviceName ?? "All services"}\n` +
-                            `<${composeLinkUrl(context.serviceName)}|Open in Maple>`,
-                        },
+                        color: slackAttachmentColor(
+                          context.eventType,
+                          context.severity,
+                        ),
+                        blocks: [
+                          {
+                            type: "header",
+                            text: {
+                              type: "plain_text",
+                              text: `${eventTypeEmoji(context.eventType)} ${context.ruleName} — ${formatEventTypeLabel(context.eventType)}`,
+                              emoji: true,
+                            },
+                          },
+                          {
+                            type: "section",
+                            fields: [
+                              {
+                                type: "mrkdwn",
+                                text: `*Severity*\n${context.severity}`,
+                              },
+                              {
+                                type: "mrkdwn",
+                                text: `*Signal*\n${formatSignalLabel(context.signalType)}`,
+                              },
+                              {
+                                type: "mrkdwn",
+                                text: `*Service*\n${context.serviceName ?? "All services"}`,
+                              },
+                              {
+                                type: "mrkdwn",
+                                text: `*Observed*\n${formatSlackValue(context.value, context.signalType)} ${formatComparator(context.comparator)} ${formatSlackThreshold(context.threshold, context.signalType)}`,
+                              },
+                            ],
+                          },
+                          { type: "divider" },
+                          {
+                            type: "actions",
+                            elements: [
+                              {
+                                type: "button",
+                                text: {
+                                  type: "plain_text",
+                                  text: "Open in Maple",
+                                  emoji: true,
+                                },
+                                url: composeLinkUrl(context.serviceName),
+                                ...(context.eventType !== "resolve" && {
+                                  style: "danger",
+                                }),
+                              },
+                            ],
+                          },
+                          {
+                            type: "context",
+                            elements: [
+                              {
+                                type: "mrkdwn",
+                                text: "\u{1F341} Maple Alerts",
+                              },
+                            ],
+                          },
+                        ],
                       },
                     ],
                   }),
