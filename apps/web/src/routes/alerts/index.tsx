@@ -1007,8 +1007,6 @@ function AlertsPage() {
                             <span>
                               Last tested {destination.lastTestedAt ? formatRelativeTime(destination.lastTestedAt) : "never"}
                             </span>
-                            <span>{formatDateTime(destination.lastTestedAt)}</span>
-                            {destination.channelLabel && <span>Channel {destination.channelLabel}</span>}
                           </div>
                           {destination.lastTestError && (
                             <div className="flex items-center gap-2 text-xs text-destructive">
