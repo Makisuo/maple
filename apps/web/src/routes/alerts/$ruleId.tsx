@@ -17,6 +17,7 @@ import {
 } from "@/lib/alerts/form-utils"
 import type { AlertRuleDocument } from "@maple/domain/http"
 import {
+  CheckIcon,
   PencilIcon,
   DotsVerticalIcon,
 } from "@/components/icons"
@@ -24,6 +25,13 @@ import { cn } from "@maple/ui/utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@maple/ui/components/ui/empty"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import {
   Table,
@@ -116,7 +124,7 @@ function RuleDetailPage() {
 
   const activeTab: RuleDetailTab = tabValues.includes(search.tab as RuleDetailTab)
     ? (search.tab as RuleDetailTab)
-    : "history"
+    : "overview"
 
   const [stateFilter, setStateFilter] = useState<"all" | "open" | "resolved">("all")
 
@@ -391,7 +399,7 @@ function RuleDetailPage() {
                 <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Top Contributors</span>
                 <div className="mt-3 space-y-2">
                   {topContributors.length === 0 ? (
-                    <span className="text-muted-foreground text-sm">No data</span>
+                    <span className="text-3xl font-bold">—</span>
                   ) : (
                     topContributors.map(([service, count]) => (
                       <div key={service} className="flex items-center gap-2">
@@ -473,9 +481,17 @@ function RuleDetailPage() {
 
           {/* Event table */}
           {filteredIncidents.length === 0 ? (
-            <div className="text-muted-foreground py-8 text-center text-sm">
-              No incidents recorded for this rule.
-            </div>
+            <Empty className="py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <CheckIcon size={18} />
+                </EmptyMedia>
+                <EmptyTitle>No incidents</EmptyTitle>
+                <EmptyDescription>
+                  This rule hasn't triggered any incidents yet.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <Table>
               <TableHeader>
