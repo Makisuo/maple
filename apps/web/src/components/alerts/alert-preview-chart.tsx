@@ -29,6 +29,14 @@ function formatBucketTime(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
 
+const SERIES_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+]
+
 export function AlertPreviewChart({
   data,
   threshold,
@@ -36,30 +44,46 @@ export function AlertPreviewChart({
   loading,
   className,
 }: AlertPreviewChartProps) {
-  const { chartData, seriesKey, seriesLabel } = React.useMemo(() => {
+  const { chartData, seriesKeys, seriesLabels } = React.useMemo(() => {
     if (!Array.isArray(data) || data.length === 0) {
-      return { chartData: [], seriesKey: "value", seriesLabel: "value" }
+      return { chartData: [], seriesKeys: ["value"], seriesLabels: ["value"] }
     }
 
-    // Find the first non-bucket key as the series
-    let seriesLabel = "value"
+    // Collect all non-bucket keys across all rows
+    const keySet = new Set<string>()
     for (const row of data) {
       for (const key of Object.keys(row)) {
-        if (key !== "bucket") {
-          seriesLabel = key
-          break
-        }
+        if (key !== "bucket") keySet.add(key)
       }
-      if (seriesLabel !== "value") break
+    }
+    const allKeys = Array.from(keySet)
+
+    if (allKeys.length === 0) {
+      return { chartData: [], seriesKeys: ["value"], seriesLabels: ["value"] }
     }
 
-    const chartData = data.map((row) => ({
-      bucket: row.bucket,
-      value: asFiniteNumber(row[seriesLabel]),
-    }))
+    // Single series: flatten to "value" key (preserves old behavior)
+    if (allKeys.length === 1) {
+      const label = allKeys[0]!
+      const chartData: Record<string, unknown>[] = data.map((row) => ({
+        bucket: row.bucket,
+        value: asFiniteNumber(row[label]),
+      }))
+      return { chartData, seriesKeys: ["value"], seriesLabels: [label] }
+    }
 
-    return { chartData, seriesKey: "value", seriesLabel }
+    // Multiple series: keep each service as its own key
+    const chartData: Record<string, unknown>[] = data.map((row) => {
+      const point: Record<string, unknown> = { bucket: row.bucket }
+      for (const key of allKeys) {
+        point[key] = asFiniteNumber(row[key])
+      }
+      return point
+    })
+    return { chartData, seriesKeys: allKeys, seriesLabels: allKeys }
   }, [data])
+
+  const isMultiSeries = seriesKeys.length > 1
 
   const axisContext = React.useMemo(
     () => ({
@@ -73,15 +97,16 @@ export function AlertPreviewChart({
     [chartData],
   )
 
-  const chartConfig: ChartConfig = React.useMemo(
-    () => ({
-      value: {
-        label: seriesLabel,
-        color: "var(--chart-1)",
-      },
-    }),
-    [seriesLabel],
-  )
+  const chartConfig: ChartConfig = React.useMemo(() => {
+    const config: ChartConfig = {}
+    for (let i = 0; i < seriesKeys.length; i++) {
+      config[seriesKeys[i]!] = {
+        label: seriesLabels[i]!,
+        color: SERIES_COLORS[i % SERIES_COLORS.length]!,
+      }
+    }
+    return config
+  }, [seriesKeys, seriesLabels])
 
   const yAxisFormatter = React.useCallback(
     (value: unknown) => formatSignalValue(signalType, asFiniteNumber(value)),
@@ -91,10 +116,15 @@ export function AlertPreviewChart({
   // Ensure the threshold line is visible in the y-axis domain
   const yDomain = React.useMemo(() => {
     if (chartData.length === 0) return [0, threshold * 1.5]
-    const maxVal = Math.max(...chartData.map((d) => d.value))
+    let maxVal = 0
+    for (const d of chartData) {
+      for (const key of seriesKeys) {
+        maxVal = Math.max(maxVal, asFiniteNumber(d[key]))
+      }
+    }
     const upper = Math.max(maxVal * 1.15, threshold * 1.3)
     return [0, upper]
-  }, [chartData, threshold])
+  }, [chartData, threshold, seriesKeys])
 
   if (loading) {
     return <Skeleton className={className ?? "h-[300px] w-full"} />
@@ -112,10 +142,12 @@ export function AlertPreviewChart({
     <ChartContainer config={chartConfig} className={className}>
       <AreaChart data={chartData} accessibilityLayer>
         <defs>
-          <linearGradient id="alert-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="var(--color-value)" stopOpacity={0.8} />
-            <stop offset="95%" stopColor="var(--color-value)" stopOpacity={0.1} />
-          </linearGradient>
+          {seriesKeys.map((key, i) => (
+            <linearGradient key={key} id={`alert-fill-${i}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={SERIES_COLORS[i % SERIES_COLORS.length]} stopOpacity={isMultiSeries ? 0.4 : 0.8} />
+              <stop offset="95%" stopColor={SERIES_COLORS[i % SERIES_COLORS.length]} stopOpacity={0.05} />
+            </linearGradient>
+          ))}
         </defs>
         <CartesianGrid vertical={false} />
         <XAxis
@@ -140,10 +172,13 @@ export function AlertPreviewChart({
                 if (!payload?.[0]?.payload?.bucket) return ""
                 return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
               }}
-              formatter={(value) => (
+              formatter={(value, name) => (
                 <span className="flex items-center gap-2">
-                  <span className="shrink-0 size-2.5 rounded-[2px]" style={{ backgroundColor: "var(--color-value)" }} />
-                  <span className="text-muted-foreground">{seriesLabel}</span>
+                  <span
+                    className="shrink-0 size-2.5 rounded-[2px]"
+                    style={{ backgroundColor: chartConfig[name as string]?.color ?? "var(--chart-1)" }}
+                  />
+                  <span className="text-muted-foreground">{chartConfig[name as string]?.label ?? name}</span>
                   <span className="font-mono font-medium">
                     {formatSignalValue(signalType, asFiniteNumber(value))}
                   </span>
@@ -166,14 +201,17 @@ export function AlertPreviewChart({
           }}
         />
 
-        <Area
-          type="monotone"
-          dataKey={seriesKey}
-          stroke="var(--color-value)"
-          fill="url(#alert-fill)"
-          strokeWidth={2}
-          isAnimationActive={false}
-        />
+        {seriesKeys.map((key, i) => (
+          <Area
+            key={key}
+            type="monotone"
+            dataKey={key}
+            stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
+            fill={`url(#alert-fill-${i})`}
+            strokeWidth={isMultiSeries ? 1.5 : 2}
+            isAnimationActive={false}
+          />
+        ))}
       </AreaChart>
     </ChartContainer>
   )

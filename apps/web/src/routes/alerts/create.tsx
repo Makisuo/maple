@@ -144,20 +144,24 @@ function AlertCreatePage() {
 
   const queryParams = useMemo(() => signalToQueryParams(ruleForm), [ruleForm])
 
+  const chartGroupBy = ruleForm.groupBy === "service" && !ruleForm.serviceName.trim()
+    ? "service" as const
+    : "none" as const
+
   const chartQueryInput = useMemo(() => {
     if (!queryParams) return null
     return {
       data: {
         source: queryParams.source as "traces" | "metrics",
         metric: queryParams.metric,
-        groupBy: "none" as const,
+        groupBy: chartGroupBy,
         startTime,
         endTime,
         bucketSeconds,
         filters: queryParams.filters as Record<string, string | boolean | string[] | undefined>,
       },
     }
-  }, [queryParams, startTime, endTime, bucketSeconds])
+  }, [queryParams, startTime, endTime, bucketSeconds, chartGroupBy])
 
   const chartResult = useAtomValue(
     chartQueryInput

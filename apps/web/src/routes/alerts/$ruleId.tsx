@@ -196,20 +196,24 @@ function RuleDetailPage() {
   const formState = useMemo(() => rule ? ruleToFormState(rule) : defaultRuleForm(), [rule])
   const queryParams = useMemo(() => signalToQueryParams(formState), [formState])
 
+  const chartGroupBy = rule?.groupBy === "service" && !rule?.serviceName
+    ? "service" as const
+    : "none" as const
+
   const chartQueryInput = useMemo(() => {
     if (!queryParams) return null
     return {
       data: {
         source: queryParams.source as "traces" | "metrics",
         metric: queryParams.metric,
-        groupBy: "none" as const,
+        groupBy: chartGroupBy,
         startTime,
         endTime,
         bucketSeconds,
         filters: queryParams.filters as Record<string, string | boolean | string[] | undefined>,
       },
     }
-  }, [queryParams, startTime, endTime, bucketSeconds])
+  }, [queryParams, startTime, endTime, bucketSeconds, chartGroupBy])
 
   const chartResult = useAtomValue(
     chartQueryInput
@@ -323,7 +327,9 @@ function RuleDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Service</dt>
-                  <dd className="font-mono font-medium">{rule.serviceName ?? "all"}</dd>
+                  <dd className="font-mono font-medium">
+                    {rule.serviceName ?? (rule.groupBy === "service" ? "all (per service)" : "all")}
+                  </dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Condition</dt>
