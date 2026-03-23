@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, CartesianGrid, Legend, ReferenceLine, XAxis, YAxis } from "recharts"
 
 import type { AlertSignalType } from "@maple/domain/http"
 import { formatSignalValue } from "@/lib/alerts/form-utils"
@@ -187,6 +187,19 @@ export function AlertPreviewChart({
             />
           }
         />
+
+        {isMultiSeries && (
+          <Legend
+            verticalAlign="top"
+            height={28}
+            iconType="circle"
+            iconSize={8}
+            wrapperStyle={{ overflowX: "auto", overflowY: "hidden", whiteSpace: "nowrap" }}
+            formatter={(value: string) => (
+              <span className="text-xs text-muted-foreground">{value}</span>
+            )}
+          />
+        )}
 
         <ReferenceLine
           y={threshold}
