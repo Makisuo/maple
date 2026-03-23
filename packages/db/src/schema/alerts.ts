@@ -77,6 +77,7 @@ export const alertRules = sqliteTable(
     reducer: text("reducer").notNull(),
     sampleCountStrategy: text("sample_count_strategy").notNull(),
     noDataBehavior: text("no_data_behavior").notNull(),
+    lastScheduledAt: integer("last_scheduled_at", { mode: "number" }),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
     createdBy: text("created_by").notNull(),

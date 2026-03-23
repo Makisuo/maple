@@ -85,6 +85,13 @@
       "when": 1774400000000,
       "tag": "0011_alert_group_by",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1774500000000,
+      "tag": "0012_scheduler_lock",
+      "breakpoints": true
     }
   ]
 }

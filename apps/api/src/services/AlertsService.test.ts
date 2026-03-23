@@ -131,6 +131,15 @@ const createWebhookDestination = (
     signingSecret: "webhook-secret",
   })
 
+const useAdvancingClock = () => {
+  let tick = Date.now()
+  __testables.setNow(() => {
+    const t = tick
+    tick += 60_000
+    return t
+  })
+}
+
 const createErrorRateRule = (
   alerts: AlertsServiceShape,
   orgId: ReturnType<typeof asOrgId>,
@@ -160,6 +169,7 @@ const createErrorRateRule = (
 
 describe("AlertsService", () => {
   it("opens an incident after consecutive breaches and delivers the webhook notification", async () => {
+    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: [
@@ -217,6 +227,7 @@ describe("AlertsService", () => {
   })
 
   it("skips no-data error-rate rules instead of opening incidents", async () => {
+    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: emptyTinybirdRows,
@@ -244,6 +255,7 @@ describe("AlertsService", () => {
   })
 
   it("treats no data as a breach for throughput-below-threshold rules", async () => {
+    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: emptyTinybirdRows,
@@ -336,6 +348,7 @@ describe("AlertsService", () => {
   })
 
   it("resolves an open incident after consecutive healthy evaluations", async () => {
+    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: [

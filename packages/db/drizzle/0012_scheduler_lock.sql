@@ -1,0 +1,1 @@
+ALTER TABLE `alert_rules` ADD `last_scheduled_at` integer;

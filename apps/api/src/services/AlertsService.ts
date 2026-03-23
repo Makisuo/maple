@@ -181,7 +181,8 @@ type IsoDateTimeValue = Schema.Schema.Type<
 
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 
-const now = () => Date.now()
+let nowImpl = () => Date.now()
+const now = () => nowImpl()
 
 const toIso = (value: number | null | undefined): IsoDateTimeValue | null =>
   value == null ? null : decodeIsoDateTimeStringSync(new Date(value).toISOString())
@@ -655,8 +656,12 @@ export const __testables = {
   setFetchImpl: (impl: typeof fetch) => {
     alertFetchImpl = impl
   },
+  setNow: (impl: () => number) => {
+    nowImpl = impl
+  },
   reset: () => {
     alertFetchImpl = fetch
+    nowImpl = () => Date.now()
   },
 }
 
@@ -1115,6 +1120,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         Array<{ evaluation: EvaluatedRule; groupKey: string }>,
         AlertValidationError | AlertDeliveryError
       > {
+        if (rule.groupBy !== "service") {
+          return yield* Effect.fail(makeValidationError(`Unsupported groupBy dimension: ${rule.groupBy}`))
+        }
         const tenant: TenantContext = {
           orgId,
           userId: decodeUserIdSync("system-alerting"),
@@ -1129,7 +1137,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           query: rule.compiledPlan.query,
           reducer: rule.compiledPlan.reducer,
           sampleCountStrategy: rule.compiledPlan.sampleCountStrategy,
-        }, rule.groupBy as "service").pipe(
+        }, rule.groupBy).pipe(
           Effect.mapError((error) => {
             if (error instanceof QueryEngineValidationError) {
               return makeValidationError(error.message, error.details)
@@ -1915,6 +1923,15 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         yield* requireAdmin(roles)
         yield* requireRuleRow(orgId, ruleId)
         yield* database.execute((db) =>
+          db.delete(alertDeliveryEvents).where(and(eq(alertDeliveryEvents.orgId, orgId), eq(alertDeliveryEvents.ruleId, ruleId))),
+        ).pipe(Effect.mapError(makePersistenceError))
+        yield* database.execute((db) =>
+          db.delete(alertIncidents).where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.ruleId, ruleId))),
+        ).pipe(Effect.mapError(makePersistenceError))
+        yield* database.execute((db) =>
+          db.delete(alertRuleStates).where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId))),
+        ).pipe(Effect.mapError(makePersistenceError))
+        yield* database.execute((db) =>
           db.delete(alertRules).where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId))),
         ).pipe(Effect.mapError(makePersistenceError))
         return new AlertRuleDeleteResponse({ id: ruleId })
@@ -2508,6 +2525,21 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         }
       })
 
+      const SCHEDULER_LOCK_TTL_MS = 30_000
+
+      const claimRule = (ruleId: string, timestamp: number) =>
+        database.execute((db) =>
+          db
+            .update(alertRules)
+            .set({ lastScheduledAt: timestamp })
+            .where(
+              and(
+                eq(alertRules.id, ruleId),
+                sql`(${alertRules.lastScheduledAt} IS NULL OR ${alertRules.lastScheduledAt} < ${timestamp - SCHEDULER_LOCK_TTL_MS})`,
+              ),
+            ),
+        ).pipe(Effect.mapError(makePersistenceError))
+
       const runSchedulerTick = Effect.fn("AlertsService.runSchedulerTick")(function* () {
         const rows = yield* database.execute((db) =>
           db
@@ -2519,8 +2551,11 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
         yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
-            const normalized = yield* normalizeRuleRow(row)
             const timestamp = now()
+            const claimed = yield* claimRule(row.id, timestamp)
+            if (claimed.rowsAffected === 0) return
+
+            const normalized = yield* normalizeRuleRow(row)
 
             if (normalized.groupBy != null && normalized.serviceName == null) {
               const results = yield* evaluateGroupedRule(row.orgId as OrgId, normalized)
