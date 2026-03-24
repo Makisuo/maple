@@ -15,6 +15,16 @@ export const HttpDashboardsLive = HttpApiBuilder.group(
       const persistence = yield* DashboardPersistenceService
 
       return handlers
+        .handle("create", ({ payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            return yield* persistence.create(
+              tenant.orgId,
+              tenant.userId,
+              payload.dashboard,
+            )
+          }),
+        )
         .handle("list", () =>
           Effect.gen(function* () {
             const tenant = yield* CurrentTenant.Context

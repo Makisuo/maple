@@ -2,12 +2,15 @@ import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { useCallback, useEffect, useState } from "react"
 import { Exit, Schema } from "effect"
 import {
+  DashboardCreateRequest,
   DashboardDocument,
   DashboardId,
   DashboardUpsertRequest,
   IsoDateTimeString,
+  PortableDashboardDocument,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import type { PortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import type {
   Dashboard,
   DashboardWidget,
@@ -96,6 +99,24 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
   })
 }
 
+function toPortableDashboardDocument(
+  dashboard: PortableDashboard,
+): PortableDashboardDocument {
+  return new PortableDashboardDocument({
+    ...dashboard,
+    tags: dashboard.tags ? [...dashboard.tags] : undefined,
+    widgets: structuredClone(dashboard.widgets),
+    timeRange:
+      dashboard.timeRange.type === "absolute"
+        ? {
+            type: "absolute",
+            startTime: asIsoDateTimeString(dashboard.timeRange.startTime),
+            endTime: asIsoDateTimeString(dashboard.timeRange.endTime),
+          }
+        : dashboard.timeRange,
+  })
+}
+
 export function useDashboardStore() {
   const [dashboards, setDashboards] = useState<Dashboard[]>([])
   const [isHydrated, setIsHydrated] = useState(false)
@@ -103,6 +124,7 @@ export function useDashboardStore() {
   const [persistenceError, setPersistenceError] = useState<string | null>(null)
 
   const listResult = useAtomValue(MapleApiAtomClient.query("dashboards", "list", {}))
+  const createMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "create"), { mode: "promiseExit" })
   const upsertMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "upsert"), { mode: "promiseExit" })
   const deleteMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "delete"), { mode: "promiseExit" })
 
@@ -187,59 +209,73 @@ export function useDashboardStore() {
   const isLoading = !isHydrated && Result.isInitial(listResult)
 
   const importDashboard = useCallback(
-    (imported: Omit<Dashboard, "id" | "createdAt" | "updatedAt">): Dashboard => {
+    async (imported: PortableDashboard): Promise<Dashboard> => {
       if (readOnly) {
         throw new Error("Dashboards are read-only")
       }
 
-      const now = new Date().toISOString()
-      const dashboard: Dashboard = {
-        ...imported,
-        id: generateId(),
-        widgets: imported.widgets.map((w) => ({
-          ...w,
-          id: generateId(),
-        })),
-        createdAt: now,
-        updatedAt: now,
+      const result = await createMutation({
+        payload: new DashboardCreateRequest({
+          dashboard: toPortableDashboardDocument(imported),
+        }),
+      })
+
+      if (Exit.isFailure(result)) {
+        setPersistenceFailure(result)
+        throw new Error(getErrorMessage(result))
       }
 
-      setDashboards((previous) => {
-        const next = [...previous, dashboard]
-        persistUpsert(previous, dashboard)
-        return next
-      })
+      const dashboard = ensureDashboard(result.value)
+
+      if (dashboard === null) {
+        throw new Error("Created dashboard payload is invalid")
+      }
+
+      setDashboards((previous) => [
+        dashboard,
+        ...previous.filter((item) => item.id !== dashboard.id),
+      ])
 
       return dashboard
     },
-    [persistUpsert, readOnly],
+    [createMutation, readOnly, setPersistenceFailure],
   )
 
   const createDashboard = useCallback(
-    (name: string): Dashboard => {
+    async (name: string): Promise<Dashboard> => {
       if (readOnly) {
         throw new Error("Dashboards are read-only")
       }
 
-      const now = new Date().toISOString()
-      const dashboard: Dashboard = {
-        id: generateId(),
-        name,
-        timeRange: { type: "relative", value: "12h" },
-        createdAt: now,
-        updatedAt: now,
-        widgets: [],
+      const result = await createMutation({
+        payload: new DashboardCreateRequest({
+          dashboard: toPortableDashboardDocument({
+            name,
+            timeRange: { type: "relative", value: "12h" },
+            widgets: [],
+          }),
+        }),
+      })
+
+      if (Exit.isFailure(result)) {
+        setPersistenceFailure(result)
+        throw new Error(getErrorMessage(result))
       }
 
-      setDashboards((previous) => {
-        const next = [...previous, dashboard]
-        persistUpsert(previous, dashboard)
-        return next
-      })
+      const dashboard = ensureDashboard(result.value)
+
+      if (dashboard === null) {
+        throw new Error("Created dashboard payload is invalid")
+      }
+
+      setDashboards((previous) => [
+        dashboard,
+        ...previous.filter((item) => item.id !== dashboard.id),
+      ])
 
       return dashboard
     },
-    [persistUpsert, readOnly],
+    [createMutation, readOnly, setPersistenceFailure],
   )
 
   const updateDashboard = useCallback(

@@ -13,8 +13,10 @@ import { InlineEditableTitle } from "@/components/dashboard-builder/inline-edita
 import {
   DashboardTimeRangeProvider,
 } from "@/components/dashboard-builder/dashboard-providers"
+import {
+  parsePortableDashboardJson,
+} from "@/components/dashboard-builder/portable-dashboard"
 import type {
-  Dashboard,
   VisualizationType,
   WidgetDataSource,
   WidgetDisplayConfig,
@@ -77,43 +79,39 @@ function DashboardsPage() {
 
     const reader = new FileReader()
     reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result as string)
-
-        // Validate required fields
-        if (
-          typeof parsed.name !== "string" ||
-          !Array.isArray(parsed.widgets) ||
-          typeof parsed.timeRange !== "object" ||
-          parsed.timeRange === null
-        ) {
-          toast.error("Invalid dashboard file")
-          return
+      void (async () => {
+        try {
+          const imported = parsePortableDashboardJson(reader.result as string)
+          const dashboard = await importDashboard(imported)
+          navigate({ search: { dashboardId: dashboard.id } })
+          toast.success(`Dashboard "${dashboard.name}" imported`)
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Failed to parse dashboard file",
+          )
         }
-
-        const imported: Omit<Dashboard, "id" | "createdAt" | "updatedAt"> = {
-          name: parsed.name,
-          description: parsed.description,
-          tags: parsed.tags,
-          timeRange: parsed.timeRange,
-          widgets: parsed.widgets,
-        }
-
-        const dashboard = importDashboard(imported)
-        navigate({ search: { dashboardId: dashboard.id } })
-        toast.success(`Dashboard "${dashboard.name}" imported`)
-      } catch {
-        toast.error("Failed to parse dashboard file")
-      }
+      })()
     }
     reader.readAsText(file)
   }
 
   const handleCreate = () => {
     if (readOnly) return
-    const dashboard = createDashboard("Untitled Dashboard")
-    navigate({ search: { dashboardId: dashboard.id } })
-    setMode("edit")
+    void (async () => {
+      try {
+        const dashboard = await createDashboard("Untitled Dashboard")
+        navigate({ search: { dashboardId: dashboard.id } })
+        setMode("edit")
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Failed to create dashboard",
+        )
+      }
+    })()
   }
 
   const handleSelect = (id: string) => {

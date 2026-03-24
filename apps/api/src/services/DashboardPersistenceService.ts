@@ -6,15 +6,19 @@ import {
   DashboardValidationError,
   DashboardDocument,
   DashboardsListResponse,
+  IsoDateTimeString,
   OrgId,
+  PortableDashboardDocument,
   UserId,
 } from "@maple/domain/http"
 import { dashboards } from "@maple/db"
 import { and, desc, eq } from "drizzle-orm"
 import { Effect, Layer, Option, Schema, ServiceMap } from "effect"
+import { randomUUID } from "node:crypto"
 import { Database } from "./DatabaseLive"
 
 const decodeDashboardIdSync = Schema.decodeUnknownSync(DashboardId)
+const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 
 const toPersistenceError = (error: unknown) =>
   new DashboardPersistenceError({
@@ -55,6 +59,21 @@ const stringifyPayload = (dashboard: DashboardDocument) =>
         details: ["Dashboard contains non-serializable values"],
       }),
   })
+
+const createDashboardDocument = (portableDashboard: PortableDashboardDocument) => {
+  const now = new Date().toISOString()
+
+  return new DashboardDocument({
+    id: decodeDashboardIdSync(randomUUID()),
+    name: portableDashboard.name,
+    description: portableDashboard.description,
+    tags: portableDashboard.tags,
+    timeRange: portableDashboard.timeRange,
+    widgets: portableDashboard.widgets,
+    createdAt: decodeIsoDateTimeStringSync(now),
+    updatedAt: decodeIsoDateTimeStringSync(now),
+  })
+}
 
 export class DashboardPersistenceService extends ServiceMap.Service<DashboardPersistenceService>()(
   "DashboardPersistenceService",
@@ -118,6 +137,15 @@ export class DashboardPersistenceService extends ServiceMap.Service<DashboardPer
         return dashboard
       })
 
+      const create = Effect.fn("DashboardPersistenceService.create")(function* (
+        orgId: OrgId,
+        userId: UserId,
+        dashboard: PortableDashboardDocument,
+      ) {
+        const createdDashboard = createDashboardDocument(dashboard)
+        return yield* upsert(orgId, userId, createdDashboard)
+      })
+
       const remove = Effect.fn("DashboardPersistenceService.delete")(function* (
         orgId: OrgId,
         dashboardId: DashboardId,
@@ -151,6 +179,7 @@ export class DashboardPersistenceService extends ServiceMap.Service<DashboardPer
       })
 
       return {
+        create,
         list,
         upsert,
         delete: remove,
@@ -164,6 +193,12 @@ export class DashboardPersistenceService extends ServiceMap.Service<DashboardPer
 
   static readonly list = (orgId: OrgId) =>
     this.use((service) => service.list(orgId))
+
+  static readonly create = (
+    orgId: OrgId,
+    userId: UserId,
+    dashboard: PortableDashboardDocument,
+  ) => this.use((service) => service.create(orgId, userId, dashboard))
 
   static readonly upsert = (
     orgId: OrgId,

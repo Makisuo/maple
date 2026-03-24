@@ -19,6 +19,7 @@ import {
   DashboardPersistenceError,
   IsoDateTimeString,
   OrgId,
+  PortableDashboardDocument,
   UserId,
 } from "@maple/domain/http"
 import { Database as DatabaseService } from "./DatabaseLive"
@@ -101,6 +102,19 @@ const makeDashboard = (
     ...overrides,
   })
 
+const makePortableDashboard = (
+  overrides: Partial<PortableDashboardDocument> = {},
+): PortableDashboardDocument =>
+  new PortableDashboardDocument({
+    name: "Portable Dashboard",
+    timeRange: {
+      type: "relative",
+      value: "12h",
+    },
+    widgets: [],
+    ...overrides,
+  })
+
 describe("DashboardPersistenceService", () => {
   it("lists dashboards only for the requested org", async () => {
     const dbUrl = createTempDbUrl()
@@ -152,6 +166,38 @@ describe("DashboardPersistenceService", () => {
     expect(dashboards.dashboards).toHaveLength(1)
     expect(dashboards.dashboards[0]!.name).toBe("Second Name")
     expect(dashboards.dashboards[0]!.updatedAt).toBe(updated.updatedAt)
+  })
+
+  it("creates dashboards from the portable import payload with fresh metadata", async () => {
+    const dbUrl = createTempDbUrl()
+
+    const program = Effect.gen(function* () {
+      const created = yield* DashboardPersistenceService.create(
+        asOrgId("org_a"),
+        asUserId("user_a"),
+        makePortableDashboard({
+          name: "Imported Dashboard",
+          description: "Imported from JSON",
+          tags: ["imported"],
+        }),
+      )
+
+      const listed = yield* DashboardPersistenceService.list(asOrgId("org_a"))
+
+      return { created, listed }
+    }).pipe(Effect.provide(makeLayer(dbUrl)))
+
+    const { created, listed } = await Effect.runPromise(program)
+
+    expect(created.id).toBeTypeOf("string")
+    expect(created.name).toBe("Imported Dashboard")
+    expect(created.description).toBe("Imported from JSON")
+    expect(created.tags).toEqual(["imported"])
+    expect(created.widgets).toEqual([])
+    expect(created.createdAt).toBeTypeOf("string")
+    expect(created.updatedAt).toBeTypeOf("string")
+    expect(listed.dashboards).toHaveLength(1)
+    expect(listed.dashboards[0]!.id).toBe(created.id)
   })
 
   it("returns DashboardNotFoundError when deleting a missing dashboard", async () => {

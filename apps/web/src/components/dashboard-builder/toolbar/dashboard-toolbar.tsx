@@ -9,6 +9,7 @@ import {
 } from "@maple/ui/components/ui/dropdown-menu"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
+import { downloadPortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import { relativeToAbsolute } from "@/lib/time-utils"
 import type { Dashboard, TimeRange, WidgetMode } from "@/components/dashboard-builder/types"
 
@@ -33,20 +34,6 @@ function resolveForPicker(timeRange: TimeRange): {
   return resolved
     ? { startTime: resolved.startTime, endTime: resolved.endTime }
     : {}
-}
-
-function exportDashboard(dashboard: Dashboard) {
-  const { id: _, createdAt: __, updatedAt: ___, ...exportData } = dashboard
-  const json = JSON.stringify(exportData, null, 2)
-  const blob = new Blob([json], { type: "application/json" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = `${dashboard.name.replace(/[^a-zA-Z0-9-_ ]/g, "").trim() || "dashboard"}.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
 }
 
 export function DashboardToolbar({
@@ -122,7 +109,7 @@ export function DashboardToolbar({
           <DotsVerticalIcon size={16} />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[160px]">
-          <DropdownMenuItem onClick={() => exportDashboard(dashboard)} className="whitespace-nowrap">
+          <DropdownMenuItem onClick={() => downloadPortableDashboard(dashboard)} className="whitespace-nowrap">
             <DownloadIcon size={14} />
             Export as JSON
           </DropdownMenuItem>
