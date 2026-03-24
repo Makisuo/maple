@@ -92,6 +92,13 @@
       "when": 1774500000000,
       "tag": "0012_scheduler_lock",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1774600000000,
+      "tag": "0013_alert_custom_query",
+      "breakpoints": true
     }
   ]
 }

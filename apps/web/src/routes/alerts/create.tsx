@@ -53,6 +53,8 @@ import { Switch } from "@maple/ui/components/ui/switch"
 import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { AGGREGATIONS_BY_SOURCE } from "@/lib/query-builder/model"
+import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 
 const AlertCreateSearch = Schema.Struct({
   serviceName: Schema.optional(Schema.String),
@@ -132,7 +134,7 @@ function AlertCreatePage() {
     if (!queryParams) return null
     return {
       data: {
-        source: queryParams.source as "traces" | "metrics",
+        source: queryParams.source as "traces" | "logs" | "metrics",
         metric: queryParams.metric,
         groupBy: chartGroupBy,
         startTime,
@@ -256,7 +258,9 @@ function AlertCreatePage() {
             <Label className="mb-2 block">Condition</Label>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="shrink-0 text-sm py-1.5 px-3">
-                {signalLabels[ruleForm.signalType]}
+                {ruleForm.signalType === "query"
+                  ? `${ruleForm.queryDataSource}.${ruleForm.queryAggregation}`
+                  : signalLabels[ruleForm.signalType]}
               </Badge>
               <Select
                 value={ruleForm.comparator}
@@ -347,6 +351,94 @@ function AlertCreatePage() {
                 className="max-w-[200px]"
               />
             </div>
+          )}
+
+          {/* Custom Query builder */}
+          {ruleForm.signalType === "query" && (
+            <Card>
+              <CardContent className="grid gap-4 p-4">
+                <div className="space-y-2">
+                  <Label>Data Source</Label>
+                  <div className="flex gap-1.5">
+                    {(["traces", "logs", "metrics"] as const).map((ds) => (
+                      <button
+                        key={ds}
+                        type="button"
+                        onClick={() =>
+                          setRuleForm((c) => ({
+                            ...c,
+                            queryDataSource: ds,
+                            queryAggregation: AGGREGATIONS_BY_SOURCE[ds][0].value,
+                          }))
+                        }
+                        className={cn(
+                          "rounded-md border px-3 py-1.5 text-sm font-medium capitalize transition-colors",
+                          ruleForm.queryDataSource === ds
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+                        )}
+                      >
+                        {ds}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Aggregation</Label>
+                  <Select
+                    value={ruleForm.queryAggregation}
+                    onValueChange={(value) => { if (value) setRuleForm((c) => ({ ...c, queryAggregation: value })) }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {AGGREGATIONS_BY_SOURCE[ruleForm.queryDataSource].map((agg) => (
+                        <SelectItem key={agg.value} value={agg.value}>{agg.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {ruleForm.queryDataSource === "metrics" && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="query-metric-name">Metric name</Label>
+                      <Input
+                        id="query-metric-name"
+                        value={ruleForm.metricName}
+                        onChange={(e) => setRuleForm((c) => ({ ...c, metricName: e.target.value }))}
+                        placeholder="http.server.duration"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Metric type</Label>
+                      <Select
+                        value={ruleForm.metricType}
+                        onValueChange={(value) => setRuleForm((c) => ({ ...c, metricType: value as AlertMetricType }))}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(metricTypeLabels).map(([val, label]) => (
+                            <SelectItem key={val} value={val}>{label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Where</Label>
+                  <WhereClauseEditor
+                    dataSource={ruleForm.queryDataSource}
+                    value={ruleForm.queryWhereClause}
+                    onChange={(value) => setRuleForm((c) => ({ ...c, queryWhereClause: value }))}
+                    rows={2}
+                    placeholder='service.name = "payments" AND has_error = true'
+                  />
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* Rule Name + Service */}

@@ -205,7 +205,7 @@ function RuleDetailPage() {
     if (!queryParams) return null
     return {
       data: {
-        source: queryParams.source as "traces" | "metrics",
+        source: queryParams.source as "traces" | "logs" | "metrics",
         metric: queryParams.metric,
         groupBy: chartGroupBy,
         startTime,
@@ -358,6 +358,24 @@ function RuleDetailPage() {
                   <dt className="text-muted-foreground">Renotify interval</dt>
                   <dd className="font-medium">{rule.renotifyIntervalMinutes}min</dd>
                 </div>
+                {rule.signalType === "query" && rule.queryDataSource && (
+                  <>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Data source</dt>
+                      <dd className="font-mono font-medium capitalize">{rule.queryDataSource}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Aggregation</dt>
+                      <dd className="font-mono font-medium">{rule.queryAggregation}</dd>
+                    </div>
+                    {rule.queryWhereClause && (
+                      <div className="flex justify-between col-span-2">
+                        <dt className="text-muted-foreground">Where</dt>
+                        <dd className="font-mono font-medium text-right">{rule.queryWhereClause}</dd>
+                      </div>
+                    )}
+                  </>
+                )}
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Destinations</dt>
                   <dd className="font-medium">{rule.destinationIds.length} configured</dd>

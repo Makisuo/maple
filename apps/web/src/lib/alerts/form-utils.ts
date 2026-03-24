@@ -7,6 +7,7 @@ import {
   type AlertDestinationType,
   type AlertMetricAggregation,
   type AlertMetricType,
+  type AlertQueryAggregation,
   type AlertRuleTestRequest as AlertRuleTestRequestType,
   type AlertSeverity,
   type AlertSignalType,
@@ -32,6 +33,9 @@ export type RuleFormState = {
   metricType: AlertMetricType
   metricAggregation: AlertMetricAggregation
   apdexThresholdMs: string
+  queryDataSource: "traces" | "logs" | "metrics"
+  queryAggregation: string
+  queryWhereClause: string
   destinationIds: AlertDestinationId[]
 }
 
@@ -47,6 +51,7 @@ export const signalLabels: Record<AlertSignalType, string> = {
   apdex: "Apdex",
   throughput: "Throughput",
   metric: "Metric",
+  query: "Custom Query",
 }
 
 export const comparatorLabels: Record<AlertComparator, string> = {
@@ -108,6 +113,7 @@ export function formatSignalValue(signalType: AlertSignalType, value: number | n
       return value.toFixed(3)
     case "throughput":
     case "metric":
+    case "query":
       return formatNumber(value)
   }
 }
@@ -143,6 +149,9 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
     metricType: "gauge",
     metricAggregation: "avg",
     apdexThresholdMs: "500",
+    queryDataSource: "traces",
+    queryAggregation: "count",
+    queryWhereClause: "",
     destinationIds: [],
   }
 }
@@ -166,6 +175,9 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
     metricType: rule.metricType ?? "gauge",
     metricAggregation: rule.metricAggregation ?? "avg",
     apdexThresholdMs: rule.apdexThresholdMs == null ? "500" : String(rule.apdexThresholdMs),
+    queryDataSource: rule.queryDataSource ?? "traces",
+    queryAggregation: rule.queryAggregation ?? "count",
+    queryWhereClause: rule.queryWhereClause ?? "",
     destinationIds: [...rule.destinationIds],
   }
 }
@@ -186,10 +198,21 @@ export function buildRuleRequest(form: RuleFormState): AlertRuleUpsertRequest {
     consecutiveBreachesRequired: parsePositiveNumber(form.consecutiveBreachesRequired, 2),
     consecutiveHealthyRequired: parsePositiveNumber(form.consecutiveHealthyRequired, 2),
     renotifyIntervalMinutes: parsePositiveNumber(form.renotifyIntervalMinutes, 30),
-    metricName: signalType === "metric" ? (form.metricName.trim() || null) : null,
-    metricType: signalType === "metric" ? form.metricType : null,
+    metricName: signalType === "metric"
+      ? (form.metricName.trim() || null)
+      : signalType === "query" && form.queryDataSource === "metrics"
+        ? (form.metricName.trim() || null)
+        : null,
+    metricType: signalType === "metric"
+      ? form.metricType
+      : signalType === "query" && form.queryDataSource === "metrics"
+        ? form.metricType
+        : null,
     metricAggregation: signalType === "metric" ? form.metricAggregation : null,
     apdexThresholdMs: signalType === "apdex" ? parsePositiveNumber(form.apdexThresholdMs, 500) : null,
+    queryDataSource: signalType === "query" ? form.queryDataSource : null,
+    queryAggregation: signalType === "query" ? (form.queryAggregation as AlertQueryAggregation) : null,
+    queryWhereClause: signalType === "query" ? (form.queryWhereClause.trim() || null) : null,
     destinationIds: [...form.destinationIds],
   })
 }
@@ -202,12 +225,17 @@ export function buildRuleTestRequest(form: RuleFormState, sendNotification: bool
 }
 
 export function isRulePreviewReady(form: RuleFormState): boolean {
-  return form.name.trim().length > 0 && Number.isFinite(Number(form.threshold))
+  if (form.name.trim().length === 0) return false
+  if (!Number.isFinite(Number(form.threshold))) return false
+  if (form.signalType === "query" && form.queryDataSource === "metrics") {
+    return form.metricName.trim().length > 0
+  }
+  return true
 }
 
 /** Map signal type to the query engine source and metric fields */
 export function signalToQueryParams(form: RuleFormState): {
-  source: "traces" | "metrics"
+  source: "traces" | "logs" | "metrics"
   metric: string
   filters: Record<string, unknown>
 } | null {
@@ -240,6 +268,26 @@ export function signalToQueryParams(form: RuleFormState): {
           metricType: form.metricType,
           ...baseFilters,
         },
+      }
+    }
+    case "query": {
+      const ds = form.queryDataSource
+      if (ds === "metrics") {
+        if (!form.metricName.trim() || !form.metricType) return null
+        return {
+          source: "metrics",
+          metric: form.queryAggregation,
+          filters: {
+            metricName: form.metricName.trim(),
+            metricType: form.metricType,
+            ...baseFilters,
+          },
+        }
+      }
+      return {
+        source: ds,
+        metric: ds === "logs" ? "count" : form.queryAggregation,
+        filters: baseFilters,
       }
     }
   }
