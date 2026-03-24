@@ -5,6 +5,7 @@ import {
   type QueryEngineSampleCountStrategy,
   QuerySpec,
 } from "@maple/query-engine"
+import { normalizeKey, parseWhereClause } from "@maple/query-engine/where-clause"
 import {
   AlertDeliveryError,
   AlertDeliveryEventDocument,
@@ -32,6 +33,7 @@ import {
   type AlertEventType as AlertEventTypeValue,
   type AlertMetricAggregation as AlertMetricAggregationValue,
   type AlertMetricType,
+  type AlertQueryDataSource,
   type AlertRuleUpsertRequest,
   type AlertSeverity,
   type AlertSignalType,
@@ -110,6 +112,9 @@ interface NormalizedRule {
   readonly metricType: AlertMetricType | null
   readonly metricAggregation: AlertMetricAggregationValue | null
   readonly apdexThresholdMs: number | null
+  readonly queryDataSource: string | null
+  readonly queryAggregation: string | null
+  readonly queryWhereClause: string | null
   readonly destinationIds: ReadonlyArray<string>
   readonly compiledPlan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>
   readonly createdAt: number
@@ -364,6 +369,9 @@ const compileRulePlan = (rule: {
   readonly metricType: AlertMetricType | null
   readonly metricAggregation: AlertMetricAggregationValue | null
   readonly apdexThresholdMs: number | null
+  readonly queryDataSource: string | null
+  readonly queryAggregation: string | null
+  readonly queryWhereClause: string | null
   readonly comparator: AlertComparator
   readonly windowMinutes: number
 }): Effect.Effect<
@@ -391,7 +399,10 @@ const compileRulePlan = (rule: {
         metric: "error_rate",
         groupBy: ["none"],
         bucketSeconds,
-        filters: baseTraceFilters,
+        filters: {
+          ...(baseTraceFilters ?? {}),
+          rootSpansOnly: true,
+        },
       })
       sampleCountStrategy = "trace_count"
       break
@@ -402,7 +413,10 @@ const compileRulePlan = (rule: {
         metric: "p95_duration",
         groupBy: ["none"],
         bucketSeconds,
-        filters: baseTraceFilters,
+        filters: {
+          ...(baseTraceFilters ?? {}),
+          rootSpansOnly: true,
+        },
       })
       sampleCountStrategy = "trace_count"
       break
@@ -413,7 +427,10 @@ const compileRulePlan = (rule: {
         metric: "p99_duration",
         groupBy: ["none"],
         bucketSeconds,
-        filters: baseTraceFilters,
+        filters: {
+          ...(baseTraceFilters ?? {}),
+          rootSpansOnly: true,
+        },
       })
       sampleCountStrategy = "trace_count"
       break
@@ -424,7 +441,10 @@ const compileRulePlan = (rule: {
         metric: "count",
         groupBy: ["none"],
         bucketSeconds,
-        filters: baseTraceFilters,
+        filters: {
+          ...(baseTraceFilters ?? {}),
+          rootSpansOnly: true,
+        },
       })
       sampleCountStrategy = "trace_count"
       break
@@ -463,6 +483,76 @@ const compileRulePlan = (rule: {
       })
       sampleCountStrategy = "metric_data_points"
       break
+    case "query": {
+      if (rule.queryDataSource == null || rule.queryAggregation == null) {
+        return Effect.fail(
+          makeValidationError("query alerts require queryDataSource and queryAggregation"),
+        )
+      }
+      const { clauses } = parseWhereClause(rule.queryWhereClause ?? "")
+
+      if (rule.queryDataSource === "traces") {
+        const filters: Record<string, unknown> = {}
+        if (rule.serviceName) filters.serviceName = rule.serviceName
+        for (const c of clauses) {
+          const key = normalizeKey(c.key)
+          if (key === "service.name") filters.serviceName = c.value
+          else if (key === "span.name") filters.spanName = c.value
+          else if (key === "root_only" && (c.value === "true" || c.value === "1")) filters.rootSpansOnly = true
+          else if (key === "has_error" && (c.value === "true" || c.value === "1")) filters.errorsOnly = true
+        }
+        query = decodeQuerySpecSync({
+          kind: "timeseries",
+          source: "traces",
+          metric: rule.queryAggregation,
+          groupBy: ["none"],
+          bucketSeconds,
+          filters: Object.keys(filters).length ? filters : undefined,
+        })
+        sampleCountStrategy = "trace_count"
+      } else if (rule.queryDataSource === "logs") {
+        const filters: Record<string, unknown> = {}
+        for (const c of clauses) {
+          const key = normalizeKey(c.key)
+          if (key === "service.name") filters.serviceName = c.value
+          else if (key === "severity") filters.severity = c.value
+        }
+        query = decodeQuerySpecSync({
+          kind: "timeseries",
+          source: "logs",
+          metric: "count",
+          groupBy: ["none"],
+          bucketSeconds,
+          filters: Object.keys(filters).length ? filters : undefined,
+        })
+        sampleCountStrategy = "log_count"
+      } else {
+        if (rule.metricName == null || rule.metricType == null) {
+          return Effect.fail(
+            makeValidationError("metrics query alerts require metricName and metricType"),
+          )
+        }
+        const metricsFilters: Record<string, unknown> = {
+          metricName: rule.metricName,
+          metricType: rule.metricType,
+        }
+        if (rule.serviceName) metricsFilters.serviceName = rule.serviceName
+        for (const c of clauses) {
+          const key = normalizeKey(c.key)
+          if (key === "service.name") metricsFilters.serviceName = c.value
+        }
+        query = decodeQuerySpecSync({
+          kind: "timeseries",
+          source: "metrics",
+          metric: rule.queryAggregation,
+          groupBy: ["none"],
+          bucketSeconds,
+          filters: metricsFilters,
+        })
+        sampleCountStrategy = "metric_data_points"
+      }
+      break
+    }
   }
 
   return Effect.try({
@@ -905,6 +995,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           metricAggregation:
             (row.metricAggregation as AlertMetricAggregationValue | null) ?? null,
           apdexThresholdMs: row.apdexThresholdMs,
+          queryDataSource: row.queryDataSource ?? null,
+          queryAggregation: row.queryAggregation ?? null,
+          queryWhereClause: row.queryWhereClause ?? null,
           destinationIds: yield* parseDestinationIds(row.destinationIdsJson),
           compiledPlan: yield* parseCompiledPlan(row),
           createdAt: row.createdAt,
@@ -937,11 +1030,21 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             details.push("metricAggregation is required for metric alerts")
           }
         }
-        if (request.signalType !== "metric" && request.metricType) {
-          details.push("metricType is only supported for metric alerts")
+        if (request.signalType === "query") {
+          if (!request.queryDataSource) details.push("queryDataSource is required for query alerts")
+          if (!request.queryAggregation) details.push("queryAggregation is required for query alerts")
+          if (request.queryDataSource === "metrics") {
+            if (!metricName) details.push("metricName is required for metrics query alerts")
+            if (!request.metricType) details.push("metricType is required for metrics query alerts")
+          }
         }
-        if (request.signalType !== "metric" && metricName) {
-          details.push("metricName is only supported for metric alerts")
+        const allowsMetricFields = request.signalType === "metric" ||
+          (request.signalType === "query" && request.queryDataSource === "metrics")
+        if (!allowsMetricFields && request.metricType) {
+          details.push("metricType is only supported for metric or query alerts")
+        }
+        if (!allowsMetricFields && metricName) {
+          details.push("metricName is only supported for metric or query alerts")
         }
         if (request.signalType !== "metric" && request.metricAggregation) {
           details.push("metricAggregation is only supported for metric alerts")
@@ -976,6 +1079,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           metricType: request.metricType ?? null,
           metricAggregation: request.metricAggregation ?? null,
           apdexThresholdMs: request.apdexThresholdMs ?? (request.signalType === "apdex" ? 500 : null),
+          queryDataSource: request.queryDataSource ?? null,
+          queryAggregation: request.queryAggregation ?? null,
+          queryWhereClause: request.queryWhereClause ?? null,
           destinationIds,
           createdAt: now(),
           updatedAt: now(),

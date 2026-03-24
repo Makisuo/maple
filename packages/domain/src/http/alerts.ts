@@ -33,11 +33,35 @@ export const AlertSignalType = Schema.Literals([
   "apdex",
   "throughput",
   "metric",
+  "query",
 ]).annotate({
   identifier: "@maple/AlertSignalType",
   title: "Alert Signal Type",
 })
 export type AlertSignalType = Schema.Schema.Type<typeof AlertSignalType>
+
+export const AlertQueryDataSource = Schema.Literals(["traces", "logs", "metrics"]).annotate({
+  identifier: "@maple/AlertQueryDataSource",
+  title: "Alert Query Data Source",
+})
+export type AlertQueryDataSource = Schema.Schema.Type<typeof AlertQueryDataSource>
+
+export const AlertQueryAggregation = Schema.Literals([
+  "count",
+  "avg_duration",
+  "p50_duration",
+  "p95_duration",
+  "p99_duration",
+  "error_rate",
+  "avg",
+  "sum",
+  "min",
+  "max",
+]).annotate({
+  identifier: "@maple/AlertQueryAggregation",
+  title: "Alert Query Aggregation",
+})
+export type AlertQueryAggregation = Schema.Schema.Type<typeof AlertQueryAggregation>
 
 export const AlertGroupBy = Schema.Literal("service").annotate({
   identifier: "@maple/AlertGroupBy",
@@ -280,6 +304,9 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
   metricType: Schema.NullOr(AlertMetricType),
   metricAggregation: Schema.NullOr(AlertMetricAggregation),
   apdexThresholdMs: Schema.NullOr(PositiveFloat),
+  queryDataSource: Schema.NullOr(AlertQueryDataSource),
+  queryAggregation: Schema.NullOr(AlertQueryAggregation),
+  queryWhereClause: Schema.NullOr(Schema.String),
   destinationIds: Schema.Array(AlertDestinationId),
   createdAt: IsoDateTimeString,
   updatedAt: IsoDateTimeString,
@@ -307,6 +334,9 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
   metricType: Schema.optional(Schema.NullOr(AlertMetricType)),
   metricAggregation: Schema.optional(Schema.NullOr(AlertMetricAggregation)),
   apdexThresholdMs: Schema.optional(Schema.NullOr(PositiveFloat)),
+  queryDataSource: Schema.optional(Schema.NullOr(AlertQueryDataSource)),
+  queryAggregation: Schema.optional(Schema.NullOr(AlertQueryAggregation)),
+  queryWhereClause: Schema.optional(Schema.NullOr(Schema.String)),
   destinationIds: Schema.Array(AlertDestinationId),
 }) {}
 
