@@ -43,6 +43,7 @@ export const alertRules = sqliteTable(
     enabled: integer("enabled", { mode: "number" }).notNull().default(1),
     severity: text("severity").notNull(),
     serviceName: text("service_name"),
+    serviceNamesJson: text("service_names_json"),
     signalType: text("signal_type").notNull(),
     comparator: text("comparator").notNull(),
     threshold: real("threshold").notNull(),

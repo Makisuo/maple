@@ -395,7 +395,7 @@ function OverviewTab({
                 : "text-muted-foreground"
 
               const description = rule
-                ? `${rule.name} on ${rule.serviceName ?? "all services"}${event.eventType === "renotify" ? ` via ${event.destinationName}` : ""}`
+                ? `${rule.name} on ${rule.serviceNames?.length > 0 ? rule.serviceNames.join(", ") : "all services"}${event.eventType === "renotify" ? ` via ${event.destinationName}` : ""}`
                 : event.destinationName
 
               return (
@@ -591,6 +591,7 @@ function AlertsPage() {
         ...rule,
         enabled: !rule.enabled,
         serviceName: rule.serviceName ?? null,
+        serviceNames: rule.serviceNames?.length > 0 ? [...rule.serviceNames] : undefined,
         metricName: rule.metricName ?? null,
         metricType: rule.metricType ?? null,
         metricAggregation: rule.metricAggregation ?? null,
@@ -610,6 +611,7 @@ function AlertsPage() {
     const q = searchQuery.toLowerCase()
     return rules.filter((r) =>
       r.name.toLowerCase().includes(q) ||
+      (r.serviceNames?.some((s) => s.toLowerCase().includes(q))) ||
       (r.serviceName && r.serviceName.toLowerCase().includes(q))
     )
   }, [rules, searchQuery])
@@ -741,7 +743,7 @@ function AlertsPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <span className="font-mono text-muted-foreground text-sm">{rule.serviceName ?? "all"}</span>
+                            <span className="font-mono text-muted-foreground text-sm">{rule.serviceNames?.length > 0 ? rule.serviceNames.join(", ") : "all"}</span>
                           </TableCell>
                           <TableCell>
                             <span className="font-mono text-sm">

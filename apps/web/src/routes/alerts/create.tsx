@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Atom, Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -50,7 +50,17 @@ import {
   SelectValue,
 } from "@maple/ui/components/ui/select"
 import { Switch } from "@maple/ui/components/ui/switch"
-import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import {
+  Combobox,
+  ComboboxChips,
+  ComboboxChip,
+  ComboboxChipsInput,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+} from "@maple/ui/components/ui/combobox"
+import { getCustomChartTimeSeriesResultAtom, getTracesFacetsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { AGGREGATIONS_BY_SOURCE } from "@/lib/query-builder/model"
@@ -86,6 +96,14 @@ function AlertCreatePage() {
   const createRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "createRule"), { mode: "promiseExit" })
   const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), { mode: "promiseExit" })
   const testRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "testRule"), { mode: "promiseExit" })
+
+  const facetsResult = useAtomValue(getTracesFacetsResultAtom({ data: {} }))
+  const serviceNameOptions = useMemo(() =>
+    Result.builder(facetsResult)
+      .onSuccess((response) => response.data.services.map((s) => s.name))
+      .orElse(() => [] as string[]),
+    [facetsResult],
+  )
 
   const destinations = Result.builder(destinationsResult)
     .onSuccess((response) => [...response.destinations] as AlertDestinationDocument[])
@@ -126,7 +144,7 @@ function AlertCreatePage() {
 
   const queryParams = useMemo(() => signalToQueryParams(ruleForm), [ruleForm])
 
-  const chartGroupBy = ruleForm.groupBy === "service" && !ruleForm.serviceName.trim()
+  const chartGroupBy = ruleForm.groupBy === "service" && ruleForm.serviceNames.length === 0
     ? "service" as const
     : "none" as const
 
@@ -453,18 +471,17 @@ function AlertCreatePage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="rule-service">Service</Label>
-              <Input
-                id="rule-service"
-                value={ruleForm.serviceName}
-                onChange={(e) => setRuleForm((c) => ({
+              <Label>Services</Label>
+              <ServiceCombobox
+                serviceNames={ruleForm.serviceNames}
+                options={serviceNameOptions}
+                onChange={(values) => setRuleForm((c) => ({
                   ...c,
-                  serviceName: e.target.value,
-                  groupBy: e.target.value.trim() ? null : c.groupBy,
+                  serviceNames: values,
+                  groupBy: values.length > 0 ? null : c.groupBy,
                 }))}
-                placeholder="Leave blank for all services"
               />
-              {!ruleForm.serviceName.trim() && (
+              {ruleForm.serviceNames.length === 0 && (
                 <div className="flex items-center gap-2 mt-1">
                   <Switch
                     checked={ruleForm.groupBy === "service"}
@@ -650,7 +667,7 @@ function AlertCreatePage() {
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Service</dt>
                     <dd className="font-mono font-medium">
-                      {ruleForm.serviceName || (ruleForm.groupBy === "service" ? "all (per service)" : "all")}
+                      {ruleForm.serviceNames.length > 0 ? ruleForm.serviceNames.join(", ") : (ruleForm.groupBy === "service" ? "all (per service)" : "all")}
                     </dd>
                   </div>
                   <div className="flex justify-between">
@@ -673,5 +690,39 @@ function AlertCreatePage() {
         </div>
       </div>
     </DashboardLayout>
+  )
+}
+
+function ServiceCombobox({
+  serviceNames,
+  options,
+  onChange,
+}: {
+  serviceNames: string[]
+  options: string[]
+  onChange: (values: string[]) => void
+}) {
+  const anchor = useRef<HTMLDivElement | null>(null)
+  return (
+    <Combobox multiple value={serviceNames} onValueChange={onChange}>
+      <ComboboxChips ref={anchor}>
+        {serviceNames.map((name) => (
+          <ComboboxChip key={name}>
+            {name}
+          </ComboboxChip>
+        ))}
+        <ComboboxChipsInput placeholder={serviceNames.length === 0 ? "All services" : "Add service..."} />
+      </ComboboxChips>
+      <ComboboxContent anchor={anchor}>
+        <ComboboxEmpty>No services found.</ComboboxEmpty>
+        <ComboboxList>
+          {options.map((svc) => (
+            <ComboboxItem key={svc} value={svc}>
+              {svc}
+            </ComboboxItem>
+          ))}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
 }

@@ -100,6 +100,7 @@ interface NormalizedRule {
   readonly enabled: boolean
   readonly severity: AlertSeverity
   readonly serviceName: string | null
+  readonly serviceNames: ReadonlyArray<string>
   readonly groupBy: AlertGroupBy | null
   readonly signalType: AlertSignalType
   readonly comparator: AlertComparator
@@ -354,7 +355,7 @@ const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfi
   }
 }
 
-const safeParseDestinationIds = (value: string): ReadonlyArray<string> => {
+const safeParseStringArray = (value: string): ReadonlyArray<string> => {
   try {
     const parsed = JSON.parse(value)
     return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : []
@@ -362,6 +363,8 @@ const safeParseDestinationIds = (value: string): ReadonlyArray<string> => {
     return []
   }
 }
+
+const safeParseDestinationIds = safeParseStringArray
 
 const compileRulePlan = (rule: {
   readonly signalType: AlertSignalType
@@ -602,13 +605,22 @@ const rowToDestinationDocument = (
     updatedAt: decodeIsoDateTimeStringSync(new Date(row.updatedAt).toISOString()),
   })
 
-const rowToRuleDocument = (row: AlertRuleRow, destinationIds: ReadonlyArray<string>) =>
-  new AlertRuleDocument({
+const serviceNamesFromRow = (row: AlertRuleRow): ReadonlyArray<string> =>
+  row.serviceNamesJson
+    ? safeParseStringArray(row.serviceNamesJson)
+    : row.serviceName
+      ? [row.serviceName]
+      : []
+
+const rowToRuleDocument = (row: AlertRuleRow, destinationIds: ReadonlyArray<string>) => {
+  const serviceNames = serviceNamesFromRow(row)
+  return new AlertRuleDocument({
     id: decodeAlertRuleIdSync(row.id),
     name: row.name,
     enabled: row.enabled === 1,
     severity: row.severity as AlertSeverity,
-    serviceName: row.serviceName,
+    serviceName: serviceNames.length === 1 ? serviceNames[0] : row.serviceName,
+    serviceNames: [...serviceNames],
     groupBy: (row.groupBy as AlertGroupBy | null) ?? null,
     signalType: row.signalType as AlertSignalType,
     comparator: row.comparator as AlertComparator,
@@ -632,6 +644,7 @@ const rowToRuleDocument = (row: AlertRuleRow, destinationIds: ReadonlyArray<stri
     createdBy: row.createdBy,
     updatedBy: row.updatedBy,
   })
+}
 
 const rowToIncidentDocument = (row: AlertIncidentRow) =>
   new AlertIncidentDocument({
@@ -979,12 +992,14 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const normalizeRuleRow = Effect.fn("AlertsService.normalizeRuleRow")(function* (
         row: AlertRuleRow,
       ): Effect.fn.Return<NormalizedRule, AlertValidationError> {
+        const serviceNames = serviceNamesFromRow(row)
         return {
           id: row.id,
           name: row.name,
           enabled: row.enabled === 1,
           severity: row.severity as AlertSeverity,
-          serviceName: row.serviceName,
+          serviceName: serviceNames.length === 1 ? serviceNames[0] : row.serviceName,
+          serviceNames,
           groupBy: (row.groupBy as AlertGroupBy | null) ?? null,
           signalType: row.signalType as AlertSignalType,
           comparator: row.comparator as AlertComparator,
@@ -1015,7 +1030,10 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         request: AlertRuleUpsertRequest,
       ): Effect.fn.Return<NormalizedRule, AlertValidationError> {
         const name = request.name.trim()
-        const serviceName = normalizeOptionalString(request.serviceName)
+        const serviceNames = request.serviceNames && request.serviceNames.length > 0
+          ? request.serviceNames.map((s) => s.trim()).filter((s) => s.length > 0)
+          : request.serviceName?.trim() ? [request.serviceName.trim()] : []
+        const serviceName = serviceNames.length === 1 ? serviceNames[0] : (serviceNames.length === 0 ? null : null)
         const metricName = normalizeOptionalString(request.metricName)
         const destinationIds = request.destinationIds.map((id) => id as string)
 
@@ -1054,7 +1072,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           details.push("metricAggregation is only supported for metric alerts")
         }
         const groupBy = request.groupBy ?? null
-        if (groupBy != null && serviceName != null) {
+        if (groupBy != null && serviceNames.length > 0) {
           details.push("groupBy is only supported when no service is specified")
         }
 
@@ -1070,6 +1088,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           enabled: request.enabled ?? true,
           severity: request.severity,
           serviceName,
+          serviceNames,
           groupBy,
           signalType: request.signalType,
           comparator: request.comparator,
@@ -1922,6 +1941,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               enabled: normalized.enabled ? 1 : 0,
               severity: normalized.severity,
               serviceName: normalized.serviceName,
+              serviceNamesJson: normalized.serviceNames.length > 0 ? JSON.stringify(normalized.serviceNames) : null,
               groupBy: normalized.groupBy,
               signalType: normalized.signalType,
               comparator: normalized.comparator,
@@ -1958,6 +1978,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 enabled: normalized.enabled ? 1 : 0,
                 severity: normalized.severity,
                 serviceName: normalized.serviceName,
+                serviceNamesJson: normalized.serviceNames.length > 0 ? JSON.stringify(normalized.serviceNames) : null,
                 groupBy: normalized.groupBy,
                 signalType: normalized.signalType,
                 comparator: normalized.comparator,
@@ -2065,7 +2086,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         yield* requireDestinationIds(orgId, normalized.destinationIds)
 
         let evaluation: EvaluatedRule
-        if (normalized.groupBy != null && normalized.serviceName == null) {
+        if (normalized.groupBy != null && normalized.serviceNames.length === 0) {
           const results = yield* evaluateGroupedRule(orgId, normalized)
           const breached = results.find((r) => r.evaluation.status === "breached")
           evaluation = breached?.evaluation ?? results[0]?.evaluation ?? {
@@ -2075,6 +2096,21 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             threshold: normalized.threshold,
             comparator: normalized.comparator,
             reason: "No services found",
+          }
+        } else if (normalized.serviceNames.length > 1) {
+          const results: EvaluatedRule[] = []
+          for (const svcName of normalized.serviceNames) {
+            const perServicePlan = yield* compileRulePlan({ ...normalized, serviceName: svcName })
+            const perService = { ...normalized, serviceName: svcName, compiledPlan: perServicePlan }
+            results.push(yield* evaluateRule(orgId, perService))
+          }
+          evaluation = results.find((r) => r.status === "breached") ?? results[0] ?? {
+            status: "skipped" as const,
+            value: null,
+            sampleCount: 0,
+            threshold: normalized.threshold,
+            comparator: normalized.comparator,
+            reason: "No data",
           }
         } else {
           evaluation = yield* evaluateRule(orgId, normalized)
@@ -2673,10 +2709,17 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
             const normalized = yield* normalizeRuleRow(row)
 
-            if (normalized.groupBy != null && normalized.serviceName == null) {
+            if (normalized.groupBy != null && normalized.serviceNames.length === 0) {
               const results = yield* evaluateGroupedRule(row.orgId as OrgId, normalized)
               for (const { evaluation, groupKey } of results) {
                 yield* processEvaluation(row, normalized, evaluation, groupKey, groupKey, timestamp)
+              }
+            } else if (normalized.serviceNames.length > 1) {
+              for (const svcName of normalized.serviceNames) {
+                const perServicePlan = yield* compileRulePlan({ ...normalized, serviceName: svcName })
+                const perService = { ...normalized, serviceName: svcName, compiledPlan: perServicePlan }
+                const evaluation = yield* evaluateRule(row.orgId as OrgId, perService)
+                yield* processEvaluation(row, normalized, evaluation, svcName, svcName, timestamp)
               }
             } else {
               const evaluation = yield* evaluateRule(row.orgId as OrgId, normalized)

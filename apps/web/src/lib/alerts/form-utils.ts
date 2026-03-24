@@ -19,7 +19,7 @@ export type RuleFormState = {
   name: string
   enabled: boolean
   severity: AlertSeverity
-  serviceName: string
+  serviceNames: string[]
   groupBy: "service" | null
   signalType: AlertSignalType
   comparator: AlertComparator
@@ -135,7 +135,7 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
     name: "",
     enabled: true,
     severity: "warning",
-    serviceName: serviceName ?? "",
+    serviceNames: serviceName ? [serviceName] : [],
     groupBy: null,
     signalType: "error_rate",
     comparator: "gt",
@@ -161,7 +161,7 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
     name: rule.name,
     enabled: rule.enabled,
     severity: rule.severity,
-    serviceName: rule.serviceName ?? "",
+    serviceNames: rule.serviceNames?.length > 0 ? [...rule.serviceNames] : (rule.serviceName ? [rule.serviceName] : []),
     groupBy: rule.groupBy ?? null,
     signalType: rule.signalType,
     comparator: rule.comparator,
@@ -188,7 +188,8 @@ export function buildRuleRequest(form: RuleFormState): AlertRuleUpsertRequest {
     name: form.name.trim(),
     enabled: form.enabled,
     severity: form.severity,
-    serviceName: form.serviceName.trim() ? form.serviceName.trim() : null,
+    serviceNames: form.serviceNames.filter((s) => s.trim().length > 0),
+    serviceName: form.serviceNames.length === 1 ? form.serviceNames[0] : null,
     groupBy: form.groupBy,
     signalType,
     comparator: form.comparator,
@@ -239,8 +240,8 @@ export function signalToQueryParams(form: RuleFormState): {
   metric: string
   filters: Record<string, unknown>
 } | null {
-  const baseFilters = form.serviceName.trim()
-    ? { serviceName: form.serviceName.trim() }
+  const baseFilters = form.serviceNames.length === 1
+    ? { serviceName: form.serviceNames[0] }
     : {}
 
   switch (form.signalType) {

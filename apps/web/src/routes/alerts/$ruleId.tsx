@@ -197,7 +197,7 @@ function RuleDetailPage() {
   const formState = useMemo(() => rule ? ruleToFormState(rule) : defaultRuleForm(), [rule])
   const queryParams = useMemo(() => signalToQueryParams(formState), [formState])
 
-  const chartGroupBy = rule?.groupBy === "service" && !rule?.serviceName
+  const chartGroupBy = rule?.groupBy === "service" && (!rule?.serviceNames || rule.serviceNames.length === 0)
     ? "service" as const
     : "none" as const
 
@@ -255,7 +255,7 @@ function RuleDetailPage() {
   }
 
   const isFiring = ruleIncidents.some((i) => i.status === "open")
-  const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceName ? ` on ${rule.serviceName}` : ""}`
+  const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceNames?.length > 0 ? ` on ${rule.serviceNames.join(", ")}` : ""}`
 
   const tabBar = (
     <Tabs
@@ -327,7 +327,7 @@ function RuleDetailPage() {
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Service</dt>
                   <dd className="font-mono font-medium">
-                    {rule.serviceName ?? (rule.groupBy === "service" ? "all (per service)" : "all")}
+                    {rule.serviceNames?.length > 0 ? rule.serviceNames.join(", ") : (rule.groupBy === "service" ? "all (per service)" : "all")}
                   </dd>
                 </div>
                 <div className="flex justify-between">
