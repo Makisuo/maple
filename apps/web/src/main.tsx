@@ -31,29 +31,39 @@ if (import.meta.env.DEV && isClerkAuthEnabled && !clerkPublishableKey) {
   throw new Error("VITE_CLERK_PUBLISHABLE_KEY is required when VITE_MAPLE_AUTH_MODE=clerk")
 }
 
-function AutumnProviderWithClerk({ children }: { children: React.ReactNode }) {
+/**
+ * Intercept fetch for Autumn API calls to inject the Clerk bearer token.
+ *
+ * Autumn SDK v1 removed the `getBearerToken` provider prop and doesn't expose
+ * any other extension point for custom auth headers. The SDK's internal client
+ * calls `window.fetch` directly, so this interceptor is the only way to attach
+ * the Clerk JWT without forking the SDK.
+ */
+function useAutumnFetchAuth() {
   const { getToken } = useAuth()
   const getTokenRef = useRef(getToken)
   getTokenRef.current = getToken
 
   useEffect(() => {
-    const originalFetch = window.fetch
-    window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
+    const original = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
       if (url.includes("/api/autumn/")) {
         const token = await getTokenRef.current()
         if (token) {
           const headers = new Headers(init?.headers)
           headers.set("Authorization", `Bearer ${token}`)
-          return originalFetch.call(window, input, { ...init, headers })
+          return original(input, { ...init, headers })
         }
       }
-      return originalFetch.call(window, input, init)
+      return original(input, init)
     }
-    return () => {
-      window.fetch = originalFetch
-    }
+    return () => { window.fetch = original }
   }, [])
+}
+
+function AutumnProviderWithClerk({ children }: { children: React.ReactNode }) {
+  useAutumnFetchAuth()
 
   return (
     <AutumnProvider backendUrl={apiBaseUrl}>
