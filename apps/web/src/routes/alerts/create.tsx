@@ -666,8 +666,10 @@ function AlertCreatePage() {
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Service</dt>
-                    <dd className="font-mono font-medium">
-                      {ruleForm.serviceNames.length > 0 ? ruleForm.serviceNames.join(", ") : (ruleForm.groupBy === "service" ? "all (per service)" : "all")}
+                    <dd className="flex flex-wrap gap-1 justify-end">
+                      {ruleForm.serviceNames.length > 0
+                        ? ruleForm.serviceNames.map((s) => <Badge key={s} variant="outline" className="text-xs">{s}</Badge>)
+                        : <span className="font-mono font-medium">{ruleForm.groupBy === "service" ? "all (per service)" : "all"}</span>}
                     </dd>
                   </div>
                   <div className="flex justify-between">

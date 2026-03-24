@@ -326,8 +326,10 @@ function RuleDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Service</dt>
-                  <dd className="font-mono font-medium">
-                    {rule.serviceNames?.length > 0 ? rule.serviceNames.join(", ") : (rule.groupBy === "service" ? "all (per service)" : "all")}
+                  <dd className="flex flex-wrap gap-1 justify-end">
+                    {rule.serviceNames?.length > 0
+                      ? rule.serviceNames.map((s) => <Badge key={s} variant="outline" className="text-xs">{s}</Badge>)
+                      : <span className="font-mono font-medium">{rule.groupBy === "service" ? "all (per service)" : "all"}</span>}
                   </dd>
                 </div>
                 <div className="flex justify-between">

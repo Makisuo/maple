@@ -743,7 +743,9 @@ function AlertsPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <span className="font-mono text-muted-foreground text-sm">{rule.serviceNames?.length > 0 ? rule.serviceNames.join(", ") : "all"}</span>
+                            {rule.serviceNames?.length > 0
+                              ? <div className="flex flex-wrap gap-1">{rule.serviceNames.map((s) => <Badge key={s} variant="outline" className="text-xs">{s}</Badge>)}</div>
+                              : <span className="font-mono text-muted-foreground text-sm">all</span>}
                           </TableCell>
                           <TableCell>
                             <span className="font-mono text-sm">
