@@ -1,9 +1,48 @@
 import { describe, expect, it } from "vitest"
-import { useCustomer } from "autumn-js/react"
+import type { BillingCustomerResponse, BillingSubscription, BillingPlanResponse } from "@maple/domain/http"
 import { hasBringYourOwnCloudAddOn, hasSelectedPlan } from "./plan-gating"
 
-type Customer = NonNullable<ReturnType<typeof useCustomer>["data"]>
-type Subscription = Customer["subscriptions"][number]
+type Customer = BillingCustomerResponse
+type Subscription = BillingSubscription
+
+function buildPlan(overrides: Partial<BillingPlanResponse> = {}): BillingPlanResponse {
+  return {
+    id: "starter",
+    name: "Starter",
+    description: null,
+    group: null,
+    version: 1,
+    addOn: false,
+    autoEnable: false,
+    price: null,
+    items: [],
+    createdAt: Date.now(),
+    env: "sandbox",
+    archived: false,
+    baseVariantId: null,
+    ...overrides,
+  } as BillingPlanResponse
+}
+
+function buildSubscription(partial: Partial<Subscription> = {}): Subscription {
+  return {
+    id: "sub_1",
+    planId: "starter",
+    plan: buildPlan(),
+    autoEnable: false,
+    addOn: false,
+    status: "active",
+    pastDue: false,
+    canceledAt: null,
+    expiresAt: null,
+    trialEndsAt: null,
+    startedAt: Date.now(),
+    currentPeriodStart: null,
+    currentPeriodEnd: null,
+    quantity: 1,
+    ...partial,
+  } as Subscription
+}
 
 function buildCustomer(
   subscriptions: Subscription[],
@@ -16,7 +55,7 @@ function buildCustomer(
     email: "test@maple.dev",
     fingerprint: null,
     stripeId: null,
-    env: "sandbox" as Customer["env"],
+    env: "sandbox",
     metadata: {},
     sendEmailReceipts: false,
     billingControls: {},
@@ -24,29 +63,7 @@ function buildCustomer(
     purchases: [],
     balances: overrides.balances ?? {},
     flags: overrides.flags ?? {},
-  }
-}
-
-function buildSubscription(
-  partial: Partial<Subscription> = {},
-): Subscription {
-  return {
-    id: "sub_1",
-    planId: "starter",
-    plan: { id: "starter", name: "Starter", description: null, group: null, version: 1, addOn: false, autoEnable: false, price: null, items: [], createdAt: Date.now(), env: "sandbox", archived: false, baseVariantId: null },
-    autoEnable: false,
-    addOn: false,
-    status: "active" as Subscription["status"],
-    pastDue: false,
-    canceledAt: null,
-    expiresAt: null,
-    trialEndsAt: null,
-    startedAt: Date.now(),
-    currentPeriodStart: null,
-    currentPeriodEnd: null,
-    quantity: 1,
-    ...partial,
-  }
+  } as Customer
 }
 
 describe("hasSelectedPlan", () => {
@@ -69,12 +86,15 @@ describe("hasSelectedPlan", () => {
 
   it("returns false for free, add-on, auto-enabled, or scheduled-only subscriptions", () => {
     const freeCustomer = buildCustomer([
-      buildSubscription({ planId: "free", plan: { id: "free", name: "Free", description: null, group: null, version: 1, addOn: false, autoEnable: true, price: null, items: [], createdAt: Date.now(), env: "sandbox", archived: false, baseVariantId: null } }),
+      buildSubscription({
+        planId: "free",
+        plan: buildPlan({ id: "free", name: "Free", autoEnable: true }),
+      }),
     ])
     const addOnCustomer = buildCustomer([buildSubscription({ addOn: true })])
     const defaultCustomer = buildCustomer([buildSubscription({ autoEnable: true })])
     const scheduledCustomer = buildCustomer([
-      buildSubscription({ status: "scheduled" as Subscription["status"] }),
+      buildSubscription({ status: "scheduled" }),
     ])
 
     expect(hasSelectedPlan(freeCustomer)).toBe(false)

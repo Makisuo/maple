@@ -5,7 +5,6 @@ import { MapleApi } from "@maple/domain/http";
 import { Config, Layer } from "effect";
 import { HttpApiRoutes } from "./http";
 import { McpLive } from "./mcp/app";
-import { AutumnRouter } from "./routes/autumn.http";
 import { ApiKeysService } from "./services/ApiKeysService";
 import { AuthorizationLive } from "./services/AuthorizationLive";
 import { CloudflareLogpushService } from "./services/CloudflareLogpushService";
@@ -18,6 +17,7 @@ import { QueryEngineService } from "./services/QueryEngineService";
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService";
 import { TinybirdService } from "./services/TinybirdService";
 import { AuthService } from "./services/AuthService";
+import { AutumnService } from "./services/AutumnService";
 import { TracerLive } from "./services/Telemetry";
 
 const HealthRouter = HttpRouter.use((router) =>
@@ -40,6 +40,7 @@ const InfraLive = Database.layer.pipe(
 const CoreServicesLive = Layer.mergeAll(
   AuthService.layer,
   ApiKeysService.layer,
+  AutumnService.layer,
   CloudflareLogpushService.layer,
   DashboardPersistenceService.layer,
   OrgIngestKeysService.layer,
@@ -65,7 +66,6 @@ const MainLive = Layer.mergeAll(
 
 const AllRoutes = Layer.mergeAll(
   HttpApiRoutes,
-  AutumnRouter,
   McpLive,
   HealthRouter,
   McpGetFallback,

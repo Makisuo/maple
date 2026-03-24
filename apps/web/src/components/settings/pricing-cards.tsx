@@ -1,9 +1,16 @@
 import { useState } from "react"
-import { useCustomer, useListPlans } from "autumn-js/react"
+import { Exit } from "effect"
 import { toast } from "sonner"
+import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import {
+  BillingAttachRequest,
+  type BillingPlanResponse,
+  type BillingPlanItem,
+} from "@maple/domain/http"
 
-type Plan = NonNullable<ReturnType<typeof useListPlans>["data"]>[number]
-type PlanItem = Plan["items"][number]
+type Plan = BillingPlanResponse
+type PlanItem = BillingPlanItem
 
 import { cn } from "@maple/ui/utils"
 import { getPlanFeatures, getPlanDescription } from "@/lib/billing/plans"
@@ -164,8 +171,27 @@ interface CheckoutPreview {
 }
 
 export function PricingCards() {
-  const { data: plans, isLoading, error } = useListPlans()
-  const { attach, previewAttach, refetch } = useCustomer()
+  const plansResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "listPlans", {}),
+  )
+  const plans = Result.builder(plansResult)
+    .onSuccess((r) => r.plans)
+    .orElse(() => null)
+  const isLoading = Result.isInitial(plansResult)
+  const error = Result.isFailure(plansResult)
+
+  const attachMutation = useAtomSet(
+    MapleApiAtomClient.mutation("billing", "attach"),
+    { mode: "promiseExit" },
+  )
+  const previewAttachMutation = useAtomSet(
+    MapleApiAtomClient.mutation("billing", "previewAttach"),
+    { mode: "promiseExit" },
+  )
+  const refreshCustomer = useAtomRefresh(
+    MapleApiAtomClient.query("billing", "getCustomer", {}),
+  )
+
   const { isTrialing, daysRemaining } = useTrialStatus()
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<CheckoutPreview | null>(
@@ -221,8 +247,12 @@ export function PricingCards() {
     // For upgrades/downgrades, show a preview first
     if (scenario === "upgrade" || scenario === "downgrade") {
       setLoadingPlanId(planId)
-      try {
-        const preview = await previewAttach({ planId })
+      const previewResult = await previewAttachMutation({
+        payload: new BillingAttachRequest({ planId }),
+      })
+      setLoadingPlanId(null)
+      if (Exit.isSuccess(previewResult)) {
+        const preview = previewResult.value
         setConfirmDialog({
           planId,
           planName: plan?.name ?? planId,
@@ -236,53 +266,48 @@ export function PricingCards() {
             ? { starts_at: preview.nextCycle.startsAt, total: preview.nextCycle.total }
             : undefined,
         })
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-        toast.error(message)
-      } finally {
-        setLoadingPlanId(null)
+      } else {
+        toast.error("Something went wrong. Please try again.")
       }
       return
     }
 
     // For new subscriptions, attach directly (redirects to checkout if needed)
     setLoadingPlanId(planId)
-    try {
-      const result = await attach({ planId })
-
-      if (result.paymentUrl) {
-        window.location.href = result.paymentUrl
+    const attachResult = await attachMutation({
+      payload: new BillingAttachRequest({ planId }),
+    })
+    if (Exit.isSuccess(attachResult)) {
+      if (attachResult.value.paymentUrl) {
+        window.location.href = attachResult.value.paymentUrl
         return
       }
-
       toast.success("Plan updated successfully.")
-      await refetch()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-      toast.error(message)
-    } finally {
-      setLoadingPlanId(null)
+      refreshCustomer()
+    } else {
+      toast.error("Something went wrong. Please try again.")
     }
+    setLoadingPlanId(null)
   }
 
   async function handleConfirmAttach() {
     if (!confirmDialog) return
     setIsAttaching(true)
-    try {
-      const result = await attach({ planId: confirmDialog.planId })
-      if (result.paymentUrl) {
-        window.location.href = result.paymentUrl
+    const attachResult = await attachMutation({
+      payload: new BillingAttachRequest({ planId: confirmDialog.planId }),
+    })
+    if (Exit.isSuccess(attachResult)) {
+      if (attachResult.value.paymentUrl) {
+        window.location.href = attachResult.value.paymentUrl
         return
       }
       toast.success("Plan updated successfully.")
-      await refetch()
+      refreshCustomer()
       setConfirmDialog(null)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
-      toast.error(message)
-    } finally {
-      setIsAttaching(false)
+    } else {
+      toast.error("Something went wrong. Please try again.")
     }
+    setIsAttaching(false)
   }
 
   function handleEnterpriseContact() {

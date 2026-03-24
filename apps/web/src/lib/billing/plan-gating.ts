@@ -1,8 +1,7 @@
-import { useCustomer } from "autumn-js/react"
+import type { BillingCustomerResponse, BillingSubscription } from "@maple/domain/http"
 
-type Customer = NonNullable<ReturnType<typeof useCustomer>["data"]>
-
-type Subscription = Customer["subscriptions"][number]
+type Customer = BillingCustomerResponse
+type Subscription = BillingSubscription
 
 function isLegacyFreePlan(sub: Subscription): boolean {
   if (sub.planId.toLowerCase() === "free") return true

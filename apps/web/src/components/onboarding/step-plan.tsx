@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { motion } from "motion/react"
-import { useCustomer } from "autumn-js/react"
+import { Result, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
 import { PricingCards } from "@/components/settings/pricing-cards"
 import { PulseIcon } from "@/components/icons"
@@ -12,7 +13,13 @@ export function StepPlan({
   isComplete: boolean
   onComplete: () => void
 }) {
-  const { data: customer, isLoading } = useCustomer()
+  const customerResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "getCustomer", {}),
+  )
+  const customer = Result.builder(customerResult)
+    .onSuccess((c) => c)
+    .orElse(() => null)
+  const isLoading = Result.isInitial(customerResult)
   const selectedPlan = hasSelectedPlan(customer)
 
   useEffect(() => {

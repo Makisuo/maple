@@ -3,8 +3,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useAuth } from "@clerk/clerk-react"
 import { AnimatePresence, motion } from "motion/react"
-import { useCustomer } from "autumn-js/react"
-
 import { OnboardingLayout } from "@/components/onboarding/onboarding-layout"
 import { StepWelcome } from "@/components/onboarding/step-welcome"
 import { StepConnect } from "@/components/onboarding/step-connect"
@@ -48,7 +46,12 @@ function QuickStartPage() {
   const apiKey = Result.isSuccess(keysResult) ? keysResult.value.publicKey : "Loading..."
 
   // Auto-complete plan step when plan is selected
-  const { data: customer } = useCustomer()
+  const customerResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "getCustomer", {}),
+  )
+  const customer = Result.builder(customerResult)
+    .onSuccess((c) => c)
+    .orElse(() => null)
   useEffect(() => {
     if (isStepComplete("plan")) return
     if (hasSelectedPlan(customer)) {

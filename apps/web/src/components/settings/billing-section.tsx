@@ -1,5 +1,11 @@
 import { useMemo } from "react"
-import { useCustomer, useAggregateEvents } from "autumn-js/react"
+import { Exit } from "effect"
+import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import {
+  BillingAggregateEventsRequest,
+  BillingCustomerPortalRequest,
+} from "@maple/domain/http"
 import { PricingCards } from "./pricing-cards"
 import { format } from "date-fns"
 
@@ -28,7 +34,10 @@ function limitsFromCustomer(balances: CustomerBalances): PlanLimits | null {
 
 function CurrentPlanCard() {
   const { isTrialing, daysRemaining, trialEndsAt, planName, planStatus, isLoading } = useTrialStatus()
-  const { openCustomerPortal } = useCustomer()
+  const portalMutation = useAtomSet(
+    MapleApiAtomClient.mutation("billing", "openCustomerPortal"),
+    { mode: "promiseExit" },
+  )
 
   if (isLoading) {
     return (
@@ -42,6 +51,17 @@ function CurrentPlanCard() {
   }
 
   if (!planStatus) return null
+
+  async function handleOpenPortal() {
+    const result = await portalMutation({
+      payload: new BillingCustomerPortalRequest({
+        returnUrl: window.location.href,
+      }),
+    })
+    if (Exit.isSuccess(result)) {
+      window.location.href = result.value.url
+    }
+  }
 
   return (
     <Card>
@@ -71,7 +91,7 @@ function CurrentPlanCard() {
         )}
       </CardHeader>
       <CardContent className="pt-0">
-        <Button variant="outline" size="sm" onClick={() => openCustomerPortal({ returnUrl: window.location.href })}>
+        <Button variant="outline" size="sm" onClick={handleOpenPortal}>
           Manage billing
         </Button>
       </CardContent>
@@ -80,11 +100,26 @@ function CurrentPlanCard() {
 }
 
 export function BillingSection() {
-  const { data: customer, isLoading: isCustomerLoading } = useCustomer()
-  const { total, isLoading: isUsageLoading } = useAggregateEvents({
-    featureId: ["logs", "traces", "metrics"],
-    range: "1bc",
-  })
+  const customerResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "getCustomer", {}),
+  )
+  const customer = Result.builder(customerResult)
+    .onSuccess((c) => c)
+    .orElse(() => null)
+  const isCustomerLoading = Result.isInitial(customerResult)
+
+  const usageResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "aggregateEvents", {
+      payload: new BillingAggregateEventsRequest({
+        featureId: ["logs", "traces", "metrics"],
+        range: "1bc",
+      }),
+    }),
+  )
+  const total = Result.builder(usageResult)
+    .onSuccess((r) => r.total)
+    .orElse(() => null)
+  const isUsageLoading = Result.isInitial(usageResult)
 
   const isLoading = isCustomerLoading || isUsageLoading
 
@@ -103,7 +138,7 @@ export function BillingSection() {
     return `${format(startOfMonth, "MMM d")} – ${format(now, "MMM d, yyyy")}`
   }, [customer])
 
-  const limits = limitsFromCustomer(customer?.balances) ?? getPlanLimits("starter")
+  const limits = limitsFromCustomer(customer?.balances as CustomerBalances) ?? getPlanLimits("starter")
   const usage: AggregatedUsage = {
     logsGB: total?.logs?.sum ?? 0,
     tracesGB: total?.traces?.sum ?? 0,

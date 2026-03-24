@@ -1,9 +1,16 @@
 import { useMemo } from "react"
-import { useCustomer } from "autumn-js/react"
+import { Result, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { getActivePlan } from "@/lib/billing/plan-gating"
 
 export function useTrialStatus() {
-  const { data: customer, isLoading } = useCustomer()
+  const customerResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "getCustomer", {}),
+  )
+  const customer = Result.builder(customerResult)
+    .onSuccess((c) => c)
+    .orElse(() => null)
+  const isLoading = Result.isInitial(customerResult)
 
   return useMemo(() => {
     const sub = getActivePlan(customer)

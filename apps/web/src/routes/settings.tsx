@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { useCustomer } from "autumn-js/react"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -103,7 +102,12 @@ export function SettingsPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
-  const { data: customer, isLoading: isCustomerLoading } = useCustomer()
+  const customerResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "getCustomer", {}),
+  )
+  const customer = Result.builder(customerResult)
+    .onSuccess((c) => c)
+    .orElse(() => null)
 
   const isAdmin = Result.builder(sessionResult)
     .onSuccess((session) =>
@@ -129,7 +133,7 @@ export function SettingsPage() {
     navigate({ search: { tab } })
   }
 
-  if (Result.isInitial(sessionResult) || (isAdmin && isCustomerLoading)) {
+  if (Result.isInitial(sessionResult) || (isAdmin && Result.isInitial(customerResult))) {
     return (
       <DashboardLayout
         breadcrumbs={[{ label: "Settings" }]}

@@ -1,6 +1,7 @@
 import { HttpApi, OpenApi } from "effect/unstable/httpapi";
 import { ApiKeysApiGroup } from "./api-keys";
 import { AuthApiGroup, AuthPublicApiGroup } from "./auth";
+import { BillingApiGroup } from "./billing";
 import { CloudflareLogpushApiGroup } from "./cloudflare-logpush";
 import { DashboardsApiGroup } from "./dashboards";
 import { IngestKeysApiGroup } from "./ingest-keys";
@@ -14,6 +15,7 @@ export class MapleApi extends HttpApi.make("MapleApi")
   .add(AuthPublicApiGroup)
   .add(AuthApiGroup)
   .add(ApiKeysApiGroup)
+  .add(BillingApiGroup)
   .add(CloudflareLogpushApiGroup)
   .add(DashboardsApiGroup)
   .add(IngestKeysApiGroup)

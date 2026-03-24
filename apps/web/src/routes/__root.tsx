@@ -1,6 +1,7 @@
 import { useAuth } from "@clerk/clerk-react"
-import { useCustomer } from "autumn-js/react"
 import { Navigate, Outlet, createRootRouteWithContext, redirect, useRouterState } from "@tanstack/react-router"
+import { Result, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { Toaster } from "@maple/ui/components/ui/sonner"
@@ -64,7 +65,14 @@ function ClerkReverseRedirects() {
     }),
   })
   const { isSignedIn, orgId } = useAuth()
-  const { data: customer, isLoading: isCustomerLoading, error: customerError } = useCustomer()
+  const customerResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "getCustomer", {}),
+  )
+  const customer = Result.builder(customerResult)
+    .onSuccess((c) => c)
+    .orElse(() => null)
+  const isCustomerLoading = Result.isInitial(customerResult)
+  const customerError = Result.isFailure(customerResult)
 
   const redirectUrl = pathname + (searchStr ?? "")
   const selectedPlan = hasSelectedPlan(customer)

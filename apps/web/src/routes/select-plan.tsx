@@ -1,7 +1,8 @@
 import { useAuth } from "@clerk/clerk-react"
-import { useCustomer } from "autumn-js/react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
+import { Result, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { RocketIcon } from "@/components/icons"
 import { PricingCards } from "@/components/settings/pricing-cards"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
@@ -28,7 +29,13 @@ function SelectPlanPage() {
   }
 
   const { isLoaded, isSignedIn, orgId } = useAuth()
-  const { data: customer, isLoading: isCustomerLoading } = useCustomer()
+  const customerResult = useAtomValue(
+    MapleApiAtomClient.query("billing", "getCustomer", {}),
+  )
+  const customer = Result.builder(customerResult)
+    .onSuccess((c) => c)
+    .orElse(() => null)
+  const isCustomerLoading = Result.isInitial(customerResult)
   const { redirect_url } = Route.useSearch()
 
   if (!isLoaded || isCustomerLoading) {
@@ -56,7 +63,7 @@ function SelectPlanPage() {
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
       </div>
-      
+
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute top-[20%] left-[50%] -translate-x-1/2 -translate-y-1/2 h-[40rem] w-[40rem] rounded-full bg-primary/5 blur-[100px]" />
       </div>
