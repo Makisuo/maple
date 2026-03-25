@@ -29,6 +29,7 @@ CREATE TABLE `alert_rules` (
 	`enabled` integer DEFAULT 1 NOT NULL,
 	`severity` text NOT NULL,
 	`service_name` text,
+	`service_names_json` text,
 	`signal_type` text NOT NULL,
 	`comparator` text NOT NULL,
 	`threshold` real NOT NULL,
@@ -41,7 +42,16 @@ CREATE TABLE `alert_rules` (
 	`metric_type` text,
 	`metric_aggregation` text,
 	`apdex_threshold_ms` real,
+	`query_data_source` text,
+	`query_aggregation` text,
+	`query_where_clause` text,
+	`group_by` text,
 	`destination_ids_json` text NOT NULL,
+	`query_spec_json` text NOT NULL,
+	`reducer` text NOT NULL,
+	`sample_count_strategy` text NOT NULL,
+	`no_data_behavior` text NOT NULL,
+	`last_scheduled_at` integer,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
 	`created_by` text NOT NULL,
@@ -59,6 +69,7 @@ CREATE INDEX `alert_rules_org_service_idx` ON `alert_rules` (`org_id`,`service_n
 CREATE TABLE `alert_rule_states` (
 	`org_id` text NOT NULL,
 	`rule_id` text NOT NULL,
+	`group_key` text DEFAULT '__total__' NOT NULL,
 	`consecutive_breaches` integer DEFAULT 0 NOT NULL,
 	`consecutive_healthy` integer DEFAULT 0 NOT NULL,
 	`last_status` text,
@@ -67,7 +78,7 @@ CREATE TABLE `alert_rule_states` (
 	`last_evaluated_at` integer,
 	`last_error` text,
 	`updated_at` integer NOT NULL,
-	PRIMARY KEY(`org_id`, `rule_id`)
+	PRIMARY KEY(`org_id`, `rule_id`, `group_key`)
 );
 --> statement-breakpoint
 CREATE INDEX `alert_rule_states_org_idx` ON `alert_rule_states` (`org_id`);
@@ -116,6 +127,9 @@ CREATE TABLE `alert_delivery_events` (
 	`attempt_number` integer NOT NULL,
 	`status` text NOT NULL,
 	`scheduled_at` integer NOT NULL,
+	`claimed_at` integer,
+	`claim_expires_at` integer,
+	`claimed_by` text,
 	`attempted_at` integer,
 	`provider_message` text,
 	`provider_reference` text,
@@ -133,3 +147,5 @@ CREATE INDEX `alert_delivery_events_org_idx` ON `alert_delivery_events` (`org_id
 CREATE INDEX `alert_delivery_events_org_incident_idx` ON `alert_delivery_events` (`org_id`,`incident_id`);
 --> statement-breakpoint
 CREATE INDEX `alert_delivery_events_due_idx` ON `alert_delivery_events` (`status`,`scheduled_at`);
+--> statement-breakpoint
+CREATE INDEX `alert_delivery_events_claim_idx` ON `alert_delivery_events` (`status`,`claim_expires_at`,`scheduled_at`);
