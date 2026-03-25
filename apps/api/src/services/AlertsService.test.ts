@@ -167,6 +167,78 @@ const createErrorRateRule = (
     }),
   )
 
+const useFixedClock = (timestamp: number) => {
+  __testables.setNow(() => timestamp)
+}
+
+const useUuidSequence = (...values: string[]) => {
+  let index = 0
+  __testables.setRandomUuid(() => values[index++] ?? `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`)
+}
+
+const insertDeliveryEventRow = (
+  dbPath: string,
+  row: {
+    id: string
+    orgId: string
+    incidentId: string | null
+    ruleId: string
+    destinationId: string
+    deliveryKey: string
+    eventType: string
+    attemptNumber: number
+    status: string
+    scheduledAt: number
+    payloadJson: string
+    createdAt?: number
+    updatedAt?: number
+  },
+) => {
+  const db = new Database(dbPath)
+  db
+    .query(`
+      insert into alert_delivery_events (
+        id,
+        org_id,
+        incident_id,
+        rule_id,
+        destination_id,
+        delivery_key,
+        event_type,
+        attempt_number,
+        status,
+        scheduled_at,
+        claimed_at,
+        claim_expires_at,
+        claimed_by,
+        attempted_at,
+        provider_message,
+        provider_reference,
+        response_code,
+        error_message,
+        payload_json,
+        created_at,
+        updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, null, null, null, null, null, null, null, ?, ?, ?)
+    `)
+    .run(
+      row.id,
+      row.orgId,
+      row.incidentId,
+      row.ruleId,
+      row.destinationId,
+      row.deliveryKey,
+      row.eventType,
+      row.attemptNumber,
+      row.status,
+      row.scheduledAt,
+      row.payloadJson,
+      row.createdAt ?? row.scheduledAt,
+      row.updatedAt ?? row.scheduledAt,
+    )
+  db.close()
+}
+
 describe("AlertsService", () => {
   it("opens an incident after consecutive breaches and delivers the webhook notification", async () => {
     useAdvancingClock()
@@ -224,6 +296,12 @@ describe("AlertsService", () => {
     expect(requests[0]?.url).toBe("https://example.com/maple-alerts")
     expect(requests[0]?.headers.get("x-maple-signature")).toBeTruthy()
     expect(requests[0]?.headers.get("x-maple-event-type")).toBe("trigger")
+    expect(requests[0]?.headers.get("x-maple-delivery-key")).toBe(
+      result.events.events[0]?.deliveryKey,
+    )
+    expect(requests[0]?.headers.get("x-maple-delivery-key")).not.toBe(
+      result.incidentsAfterSecondTick.incidents[0]?.dedupeKey,
+    )
   })
 
   it("skips no-data error-rate rules instead of opening incidents", async () => {

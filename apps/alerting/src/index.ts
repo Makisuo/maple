@@ -49,13 +49,15 @@ const program = Effect.gen(function* () {
 
   yield* alerts.runSchedulerTick().pipe(
     Effect.tap((result) =>
-      Effect.logInfo("Alerting worker tick complete").pipe(
-        Effect.annotateLogs({
-          evaluatedCount: result.evaluatedCount,
-          processedCount: result.processedCount,
-        }),
+        Effect.logInfo("Alerting worker tick complete").pipe(
+          Effect.annotateLogs({
+            evaluatedCount: result.evaluatedCount,
+            processedCount: result.processedCount,
+            evaluationFailureCount: result.evaluationFailureCount,
+            deliveryFailureCount: result.deliveryFailureCount,
+          }),
+        ),
       ),
-    ),
     Effect.catchCause((cause) =>
       Effect.logError("Alerting worker tick failed").pipe(
         Effect.annotateLogs({ error: Cause.pretty(cause) }),
