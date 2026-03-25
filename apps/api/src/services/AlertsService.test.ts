@@ -515,6 +515,439 @@ describe("AlertsService", () => {
     expect(requests[0]?.body).toContain("\"eventType\":\"test\"")
   })
 
+  it("keeps processing queued deliveries when a rule evaluation fails", async () => {
+    const fixedTime = 1_710_000_000_000
+    useFixedClock(fixedTime)
+    const { url, dbPath } = createTempDbUrl()
+    const requests: Array<{ headers: Headers }> = []
+    __testables.setFetchImpl((async (_input, init) => {
+      requests.push({ headers: new Headers(init?.headers) })
+      return new Response("ok", { status: 200 })
+    }) as typeof fetch)
+
+    const setup = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_eval_failure")
+        const userId = asUserId("user_eval_failure")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+        const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+        return { orgId, destination, rule }
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+    )
+
+    const db = new Database(dbPath)
+    db.query("update alert_rules set query_spec_json = ? where id = ?").run("{", setup.rule.id)
+    db.close()
+
+    insertDeliveryEventRow(dbPath, {
+      id: "00000000-0000-4000-8000-000000000101",
+      orgId: setup.orgId,
+      incidentId: null,
+      ruleId: setup.rule.id,
+      destinationId: setup.destination.id,
+      deliveryKey: "manual-delivery-key",
+      eventType: "test",
+      attemptNumber: 1,
+      status: "queued",
+      scheduledAt: fixedTime - 1,
+      payloadJson: JSON.stringify({
+        eventType: "test",
+        incidentId: null,
+        incidentStatus: "resolved",
+        dedupeKey: "manual-dedupe-key",
+        rule: {
+          id: setup.rule.id,
+          name: setup.rule.name,
+          signalType: setup.rule.signalType,
+          severity: setup.rule.severity,
+          serviceName: setup.rule.serviceName,
+          comparator: setup.rule.comparator,
+          threshold: setup.rule.threshold,
+          windowMinutes: setup.rule.windowMinutes,
+        },
+        observed: {
+          value: 0,
+          sampleCount: 0,
+        },
+        linkUrl: "http://127.0.0.1:3471/alerts",
+        sentAt: new Date(fixedTime).toISOString(),
+      }),
+    })
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const tick = yield* alerts.runSchedulerTick()
+        const events = yield* alerts.listDeliveryEvents(setup.orgId)
+        return { tick, events }
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+    )
+
+    expect(result.tick.evaluationFailureCount).toBe(1)
+    expect(result.tick.processedCount).toBe(1)
+    expect(result.tick.deliveryFailureCount).toBe(0)
+    expect(requests).toHaveLength(1)
+    expect(result.events.events[0]?.status).toBe("success")
+  })
+
+  it("suppresses duplicate delivery sends across concurrent service instances", async () => {
+    const fixedTime = 1_710_000_100_000
+    useFixedClock(fixedTime)
+    const { url, dbPath } = createTempDbUrl()
+    let requestCount = 0
+    __testables.setFetchImpl((async () => {
+      requestCount += 1
+      return new Response("ok", { status: 200 })
+    }) as typeof fetch)
+
+    const setup = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_dupe_guard")
+        const userId = asUserId("user_dupe_guard")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+        const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+        return { orgId, destination, rule }
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+    )
+
+    const db = new Database(dbPath)
+    db.query("update alert_rules set query_spec_json = ? where id = ?").run("{", setup.rule.id)
+    db.close()
+
+    insertDeliveryEventRow(dbPath, {
+      id: "00000000-0000-4000-8000-000000000102",
+      orgId: setup.orgId,
+      incidentId: null,
+      ruleId: setup.rule.id,
+      destinationId: setup.destination.id,
+      deliveryKey: "shared-delivery-key",
+      eventType: "test",
+      attemptNumber: 1,
+      status: "queued",
+      scheduledAt: fixedTime - 1,
+      payloadJson: JSON.stringify({
+        eventType: "test",
+        incidentId: null,
+        incidentStatus: "resolved",
+        dedupeKey: "shared-dedupe-key",
+        rule: {
+          id: setup.rule.id,
+          name: setup.rule.name,
+          signalType: setup.rule.signalType,
+          severity: setup.rule.severity,
+          serviceName: setup.rule.serviceName,
+          comparator: setup.rule.comparator,
+          threshold: setup.rule.threshold,
+          windowMinutes: setup.rule.windowMinutes,
+        },
+        observed: {
+          value: 0,
+          sampleCount: 0,
+        },
+        linkUrl: "http://127.0.0.1:3471/alerts",
+        sentAt: new Date(fixedTime).toISOString(),
+      }),
+    })
+
+    const stub = makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })
+    const layerA = makeLayer(url, stub)
+    const layerB = makeLayer(url, stub)
+
+    const [tickA, tickB] = await Promise.all([
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const alerts = yield* AlertsService
+          return yield* alerts.runSchedulerTick()
+        }).pipe(Effect.provide(layerA)),
+      ),
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const alerts = yield* AlertsService
+          return yield* alerts.runSchedulerTick()
+        }).pipe(Effect.provide(layerB)),
+      ),
+    ])
+
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        return yield* alerts.listDeliveryEvents(setup.orgId)
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+    )
+
+    expect(requestCount).toBe(1)
+    expect(tickA.processedCount + tickB.processedCount).toBe(1)
+    expect(events.events.find((event) => event.deliveryKey === "shared-delivery-key")?.status).toBe("success")
+  })
+
+  it("rolls back incident creation when notification enqueue fails", async () => {
+    const fixedTime = 1_710_000_200_000
+    useFixedClock(fixedTime)
+    useUuidSequence(
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+      "00000000-0000-4000-8000-000000000003",
+      "00000000-0000-4000-8000-000000000004",
+      "00000000-0000-4000-8000-000000000005",
+    )
+    const { url, dbPath } = createTempDbUrl()
+    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as typeof fetch)
+
+    const state = {
+      tracesAggregateRows: [
+        {
+          count: 200,
+          avgDuration: 40,
+          p50Duration: 20,
+          p95Duration: 120,
+          p99Duration: 240,
+          errorRate: 10,
+          satisfiedCount: 180,
+          toleratingCount: 10,
+          apdexScore: 0.925,
+        },
+      ],
+    }
+    const layer = makeLayer(url, makeTinybirdStub(state))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_tx_rollback")
+        const userId = asUserId("user_tx_rollback")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+        const rule = yield* alerts.createRule(
+          orgId,
+          userId,
+          adminRoles,
+          new AlertRuleUpsertRequest({
+            name: "Immediate trigger",
+            severity: "critical",
+            enabled: true,
+            serviceName: "checkout",
+            signalType: "error_rate",
+            comparator: "gt",
+            threshold: 5,
+            windowMinutes: 5,
+            minimumSampleCount: 10,
+            consecutiveBreachesRequired: 1,
+            consecutiveHealthyRequired: 1,
+            renotifyIntervalMinutes: 30,
+            destinationIds: [destination.id],
+          }),
+        )
+        yield* Effect.sync(() =>
+          insertDeliveryEventRow(dbPath, {
+            id: "00000000-0000-4000-8000-000000000099",
+            orgId,
+            incidentId: null,
+            ruleId: rule.id,
+            destinationId: destination.id,
+            deliveryKey: `${"00000000-0000-4000-8000-000000000004"}:${destination.id}:trigger:${fixedTime}`,
+            eventType: "trigger",
+            attemptNumber: 1,
+            status: "queued",
+            scheduledAt: fixedTime + 60_000,
+            payloadJson: JSON.stringify({
+              eventType: "trigger",
+              incidentId: null,
+              incidentStatus: "resolved",
+              dedupeKey: "conflict-dedupe",
+              rule: {
+                id: rule.id,
+                name: rule.name,
+                signalType: rule.signalType,
+                severity: rule.severity,
+                serviceName: rule.serviceName,
+                comparator: rule.comparator,
+                threshold: rule.threshold,
+                windowMinutes: rule.windowMinutes,
+              },
+              observed: {
+                value: 10,
+                sampleCount: 200,
+              },
+              linkUrl: "http://127.0.0.1:3471/alerts",
+              sentAt: new Date(fixedTime).toISOString(),
+            }),
+          }),
+        )
+
+        const tick = yield* alerts.runSchedulerTick()
+        const incidents = yield* alerts.listIncidents(orgId)
+        const events = yield* alerts.listDeliveryEvents(orgId)
+        return { tick, incidents, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.tick.evaluationFailureCount).toBe(1)
+    expect(result.incidents.incidents).toHaveLength(0)
+    expect(result.events.events).toHaveLength(1)
+    expect(result.events.events[0]?.deliveryKey).toContain(":trigger:")
+  })
+
+  it("times out stuck deliveries and enqueues a retry attempt", async () => {
+    const fixedTime = 1_710_000_300_000
+    useFixedClock(fixedTime)
+    __testables.setDeliveryTimeoutMs(() => 10)
+    const { url, dbPath } = createTempDbUrl()
+    __testables.setFetchImpl(((input, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+      })) as typeof fetch)
+
+    const setup = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_timeout")
+        const userId = asUserId("user_timeout")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+        const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+        return { orgId, destination, rule }
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+    )
+
+    insertDeliveryEventRow(dbPath, {
+      id: "00000000-0000-4000-8000-000000000103",
+      orgId: setup.orgId,
+      incidentId: null,
+      ruleId: setup.rule.id,
+      destinationId: setup.destination.id,
+      deliveryKey: "timeout-delivery-key",
+      eventType: "test",
+      attemptNumber: 1,
+      status: "queued",
+      scheduledAt: fixedTime - 1,
+      payloadJson: JSON.stringify({
+        eventType: "test",
+        incidentId: null,
+        incidentStatus: "resolved",
+        dedupeKey: "timeout-dedupe-key",
+        rule: {
+          id: setup.rule.id,
+          name: setup.rule.name,
+          signalType: setup.rule.signalType,
+          severity: setup.rule.severity,
+          serviceName: setup.rule.serviceName,
+          comparator: setup.rule.comparator,
+          threshold: setup.rule.threshold,
+          windowMinutes: setup.rule.windowMinutes,
+        },
+        observed: {
+          value: 0,
+          sampleCount: 0,
+        },
+        linkUrl: "http://127.0.0.1:3471/alerts",
+        sentAt: new Date(fixedTime).toISOString(),
+      }),
+    })
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const tick = yield* alerts.runSchedulerTick()
+        const events = yield* alerts.listDeliveryEvents(setup.orgId)
+        return { tick, events }
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+    )
+
+    expect(result.tick.processedCount).toBe(1)
+    expect(result.tick.deliveryFailureCount).toBe(1)
+    const timeoutEvent = result.events.events.find((event) => event.deliveryKey === "timeout-delivery-key" && event.attemptNumber === 1)
+    const retryEvent = result.events.events.find((event) => event.deliveryKey === "timeout-delivery-key" && event.attemptNumber === 2)
+    expect(timeoutEvent?.status).toBe("failed")
+    expect(timeoutEvent?.errorMessage).toContain("timed out")
+    expect(retryEvent?.status).toBe("queued")
+  })
+
+  it("marks corrupted queued payloads as failed without blocking later deliveries", async () => {
+    const fixedTime = 1_710_000_400_000
+    useFixedClock(fixedTime)
+    const { url, dbPath } = createTempDbUrl()
+    let requestCount = 0
+    __testables.setFetchImpl((async () => {
+      requestCount += 1
+      return new Response("ok", { status: 200 })
+    }) as typeof fetch)
+
+    const setup = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_payload_isolation")
+        const userId = asUserId("user_payload_isolation")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+        const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+        return { orgId, destination, rule }
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+    )
+
+    insertDeliveryEventRow(dbPath, {
+      id: "00000000-0000-4000-8000-000000000104",
+      orgId: setup.orgId,
+      incidentId: null,
+      ruleId: setup.rule.id,
+      destinationId: setup.destination.id,
+      deliveryKey: "bad-payload-key",
+      eventType: "test",
+      attemptNumber: 1,
+      status: "queued",
+      scheduledAt: fixedTime - 2,
+      payloadJson: "{",
+    })
+    insertDeliveryEventRow(dbPath, {
+      id: "00000000-0000-4000-8000-000000000105",
+      orgId: setup.orgId,
+      incidentId: null,
+      ruleId: setup.rule.id,
+      destinationId: setup.destination.id,
+      deliveryKey: "good-payload-key",
+      eventType: "test",
+      attemptNumber: 1,
+      status: "queued",
+      scheduledAt: fixedTime - 1,
+      payloadJson: JSON.stringify({
+        eventType: "test",
+        incidentId: null,
+        incidentStatus: "resolved",
+        dedupeKey: "good-payload-dedupe",
+        rule: {
+          id: setup.rule.id,
+          name: setup.rule.name,
+          signalType: setup.rule.signalType,
+          severity: setup.rule.severity,
+          serviceName: setup.rule.serviceName,
+          comparator: setup.rule.comparator,
+          threshold: setup.rule.threshold,
+          windowMinutes: setup.rule.windowMinutes,
+        },
+        observed: {
+          value: 0,
+          sampleCount: 0,
+        },
+        linkUrl: "http://127.0.0.1:3471/alerts",
+        sentAt: new Date(fixedTime).toISOString(),
+      }),
+    })
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const tick = yield* alerts.runSchedulerTick()
+        const events = yield* alerts.listDeliveryEvents(setup.orgId)
+        return { tick, events }
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+    )
+
+    expect(result.tick.processedCount).toBe(2)
+    expect(result.tick.deliveryFailureCount).toBe(1)
+    expect(requestCount).toBe(1)
+    expect(result.events.events.find((event) => event.deliveryKey === "bad-payload-key")?.status).toBe("failed")
+    expect(result.events.events.find((event) => event.deliveryKey === "good-payload-key")?.status).toBe("success")
+  })
+
   it("rejects destination creation for non-admin members", async () => {
     const { url } = createTempDbUrl()
 
