@@ -219,7 +219,7 @@ const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 
 let nowImpl = () => Date.now()
 const now = () => nowImpl()
-let randomUuidImpl = () => randomUUID()
+let randomUuidImpl: typeof randomUUID = randomUUID
 const makeUuid = () => randomUuidImpl()
 let deliveryTimeoutMsImpl = () => DELIVERY_TIMEOUT_MS_DEFAULT
 const deliveryTimeoutMs = () => deliveryTimeoutMsImpl()
@@ -797,7 +797,7 @@ export const __testables = {
   setNow: (impl: () => number) => {
     nowImpl = impl
   },
-  setRandomUuid: (impl: () => string) => {
+  setRandomUuid: (impl: typeof randomUUID) => {
     randomUuidImpl = impl
   },
   setDeliveryTimeoutMs: (impl: () => number) => {

@@ -173,7 +173,9 @@ const useFixedClock = (timestamp: number) => {
 
 const useUuidSequence = (...values: string[]) => {
   let index = 0
-  __testables.setRandomUuid(() => values[index++] ?? `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`)
+  __testables.setRandomUuid(() =>
+    (values[index++] ?? `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`) as ReturnType<typeof crypto.randomUUID>,
+  )
 }
 
 const insertDeliveryEventRow = (
@@ -599,7 +601,7 @@ describe("AlertsService", () => {
     __testables.setFetchImpl((async () => {
       requestCount += 1
       return new Response("ok", { status: 200 })
-    }) as typeof fetch)
+    }) as unknown as typeof fetch)
 
     const setup = await Effect.runPromise(
       Effect.gen(function* () {
@@ -693,7 +695,7 @@ describe("AlertsService", () => {
       "00000000-0000-4000-8000-000000000005",
     )
     const { url, dbPath } = createTempDbUrl()
-    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as typeof fetch)
+    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
 
     const state = {
       tracesAggregateRows: [
@@ -871,7 +873,7 @@ describe("AlertsService", () => {
     __testables.setFetchImpl((async () => {
       requestCount += 1
       return new Response("ok", { status: 200 })
-    }) as typeof fetch)
+    }) as unknown as typeof fetch)
 
     const setup = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1064,9 +1066,11 @@ describe("AlertsService", () => {
       apdexScore: 0.9825,
     }
 
-    const stub = makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })
-    stub.alertTracesAggregateByServiceQuery = () =>
-      Effect.succeed([breachingRow, healthyRow]) as never
+    const stub: TinybirdServiceShape = {
+      ...makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }),
+      alertTracesAggregateByServiceQuery: () =>
+        Effect.succeed([breachingRow, healthyRow]) as never,
+    }
 
     __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
 
