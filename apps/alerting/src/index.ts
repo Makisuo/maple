@@ -65,7 +65,7 @@ const program = Effect.gen(function* () {
     ),
     Effect.repeat(
       Schedule.spaced(Duration.seconds(60)).pipe(
-        Schedule.jittered({ min: 0.8, max: 1.2 }),
+        Schedule.jittered,
       ),
     ),
   )

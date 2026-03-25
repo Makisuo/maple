@@ -247,10 +247,10 @@ const StoredDeliveryPayloadSchema = Schema.Struct({
 
 const StringArraySchema = Schema.Array(Schema.String)
 
-const PublicConfigFromJson = Schema.parseJson(DestinationPublicConfigSchema)
-const SecretConfigFromJson = Schema.parseJson(DestinationSecretConfigSchema)
-const DeliveryPayloadFromJson = Schema.parseJson(StoredDeliveryPayloadSchema)
-const StringArrayFromJson = Schema.parseJson(StringArraySchema)
+const PublicConfigFromJson = Schema.fromJsonString(DestinationPublicConfigSchema)
+const SecretConfigFromJson = Schema.fromJsonString(DestinationSecretConfigSchema)
+const DeliveryPayloadFromJson = Schema.fromJsonString(StoredDeliveryPayloadSchema)
+const StringArrayFromJson = Schema.fromJsonString(StringArraySchema)
 
 const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(
   AlertDestinationDocument.fields.id,
@@ -289,12 +289,26 @@ type IsoDateTimeValue = Schema.Schema.Type<
 
 const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 
-let nowImpl = () => Date.now()
-const now = () => nowImpl()
-let randomUuidImpl: typeof randomUUID = randomUUID
-const makeUuid = () => randomUuidImpl()
-let deliveryTimeoutMsImpl = () => DELIVERY_TIMEOUT_MS_DEFAULT
-const deliveryTimeoutMs = () => deliveryTimeoutMsImpl()
+export interface AlertRuntimeShape {
+  readonly now: () => number
+  readonly makeUuid: () => string
+  readonly fetch: typeof fetch
+  readonly deliveryTimeoutMs: () => number
+}
+
+export class AlertRuntime extends ServiceMap.Service<AlertRuntime, AlertRuntimeShape>()(
+  "AlertRuntime",
+  {
+    make: Effect.succeed({
+      now: () => Date.now(),
+      makeUuid: () => randomUUID(),
+      fetch: globalThis.fetch as typeof fetch,
+      deliveryTimeoutMs: () => DELIVERY_TIMEOUT_MS_DEFAULT,
+    }),
+  },
+) {
+  static readonly Default = Layer.effect(this, this.make)
+}
 
 const toIso = (value: number | null | undefined): IsoDateTimeValue | null =>
   value == null ? null : decodeIsoDateTimeStringSync(new Date(value).toISOString())
@@ -384,19 +398,19 @@ const decryptSecret = (
   )
 
 const parsePublicConfig = (row: AlertDestinationRow): Effect.Effect<DestinationPublicConfig, AlertValidationError> =>
-  Schema.decodeUnknown(PublicConfigFromJson)(row.configJson).pipe(
+  Schema.decodeUnknownEffect(PublicConfigFromJson)(row.configJson).pipe(
     Effect.mapError(() => makeValidationError("Stored destination config is invalid")),
   )
 
 const parseSecretConfig = (json: string): Effect.Effect<DestinationSecretConfig, AlertValidationError> =>
-  Schema.decodeUnknown(SecretConfigFromJson)(json).pipe(
+  Schema.decodeUnknownEffect(SecretConfigFromJson)(json).pipe(
     Effect.mapError(() => makeValidationError("Stored destination secret is invalid")),
   )
 
 type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
 
 const parseDeliveryPayload = (json: string): Effect.Effect<StoredDeliveryPayloadType, AlertValidationError> =>
-  Schema.decodeUnknown(DeliveryPayloadFromJson)(json).pipe(
+  Schema.decodeUnknownEffect(DeliveryPayloadFromJson)(json).pipe(
     Effect.mapError(() => makeValidationError("Stored delivery payload is invalid")),
   )
 
@@ -656,7 +670,7 @@ const compileRulePlan = (rule: {
     }
   }
 
-  return Schema.decodeUnknown(CompiledAlertQueryPlan)({
+  return Schema.decodeUnknownEffect(CompiledAlertQueryPlan)({
     query,
     reducer: "identity",
     sampleCountStrategy,
@@ -666,7 +680,7 @@ const compileRulePlan = (rule: {
   )
 }
 
-const QuerySpecFromJson = Schema.parseJson(QuerySpec)
+const QuerySpecFromJson = Schema.fromJsonString(QuerySpec)
 
 const parseCompiledPlan = (
   row: Pick<
@@ -674,9 +688,9 @@ const parseCompiledPlan = (
     "querySpecJson" | "reducer" | "sampleCountStrategy" | "noDataBehavior"
   >,
 ): Effect.Effect<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> =>
-  Schema.decodeUnknown(QuerySpecFromJson)(row.querySpecJson).pipe(
+  Schema.decodeUnknownEffect(QuerySpecFromJson)(row.querySpecJson).pipe(
     Effect.flatMap((query) =>
-      Schema.decodeUnknown(CompiledAlertQueryPlan)({
+      Schema.decodeUnknownEffect(CompiledAlertQueryPlan)({
         query,
         reducer: row.reducer,
         sampleCountStrategy: row.sampleCountStrategy,
@@ -853,29 +867,6 @@ const slackAttachmentColor = (
   if (eventType === "test") return "#36c5f0"
   if (severity === "critical") return "#e01e5a"
   return "#ecb22e" // warning
-}
-
-let alertFetchImpl: typeof fetch = fetch
-
-export const __testables = {
-  setFetchImpl: (impl: typeof fetch) => {
-    alertFetchImpl = impl
-  },
-  setNow: (impl: () => number) => {
-    nowImpl = impl
-  },
-  setRandomUuid: (impl: typeof randomUUID) => {
-    randomUuidImpl = impl
-  },
-  setDeliveryTimeoutMs: (impl: () => number) => {
-    deliveryTimeoutMsImpl = impl
-  },
-  reset: () => {
-    alertFetchImpl = fetch
-    nowImpl = () => Date.now()
-    randomUuidImpl = () => randomUUID()
-    deliveryTimeoutMsImpl = () => DELIVERY_TIMEOUT_MS_DEFAULT
-  },
 }
 
 export interface AlertsServiceShape {
@@ -1081,7 +1072,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       })
 
       const parseDestinationIds = (value: string): Effect.Effect<ReadonlyArray<string>, AlertValidationError> =>
-        Schema.decodeUnknown(StringArrayFromJson)(value).pipe(
+        Schema.decodeUnknownEffect(StringArrayFromJson)(value).pipe(
           Effect.mapError(() => makeValidationError("Stored rule destinations are invalid")),
         )
 
@@ -2596,7 +2587,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
         for (const row of rows) {
           yield* processOneDelivery(row).pipe(
-            Effect.catchAll((error) => {
+            Effect.catch((error) => {
               const failure = toDeliveryAttemptFailure(error)
               failureCount += 1
               return Effect.gen(function* () {
@@ -2956,7 +2947,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                   timestamp,
                 )
               }).pipe(
-                Effect.catchAll((error) => {
+                Effect.catch((error) => {
                   evaluationFailureCount += 1
                   return Effect.logError("Alert rule evaluation failed").pipe(
                     Effect.annotateLogs({
