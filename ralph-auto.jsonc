@@ -1,0 +1,18 @@
+{
+  // Ralph Auto configuration for Effect TypeScript monorepo
+  "specsDir": ".specs",
+  "model": "opus",
+  "commitPrefix": "feat(auto)",
+  "checks": [
+    { "name": "Lint", "command": "pnpm lint-fix" },
+    { "name": "Type Check", "command": "pnpm check:tsgo" },
+    { "name": "Build", "command": "pnpm build:tsgo" },
+    { "name": "Test", "command": "CI=true pnpm test" }
+  ],
+  "commands": [
+    { "name": "Run specific test", "command": "pnpm test <file>" },
+    { "name": "Verify JSDoc examples", "command": "pnpm docgen" },
+    { "name": "Clean build artifacts", "command": "pnpm clean" },
+    { "name": "Check circular deps", "command": "pnpm circular" }
+  ]
+}
