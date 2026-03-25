@@ -28,7 +28,7 @@ function SelectPlanPage() {
   }
 
   const { isLoaded, isSignedIn, orgId } = useAuth()
-  const { customer, isLoading: isCustomerLoading } = useCustomer()
+  const { data: customer, isLoading: isCustomerLoading } = useCustomer()
   const { redirect_url } = Route.useSearch()
 
   if (!isLoaded || isCustomerLoading) {

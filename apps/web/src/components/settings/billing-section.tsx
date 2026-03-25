@@ -13,22 +13,22 @@ import { UsageMeters } from "./usage-meters"
 import { useTrialStatus } from "@/hooks/use-trial-status"
 import { ClockIcon } from "@/components/icons"
 
-type CustomerFeatures = Record<string, { usage?: number | null; included_usage?: number | null; balance?: number | null }> | undefined
+type CustomerBalances = Record<string, { usage?: number; granted?: number; remaining?: number }> | undefined
 
-function limitsFromCustomer(features: CustomerFeatures): PlanLimits | null {
-  if (!features) return null
+function limitsFromCustomer(balances: CustomerBalances): PlanLimits | null {
+  if (!balances) return null
   const defaults = getPlanLimits("starter")
   return {
-    logsGB: features.logs?.included_usage ?? defaults.logsGB,
-    tracesGB: features.traces?.included_usage ?? defaults.tracesGB,
-    metricsGB: features.metrics?.included_usage ?? defaults.metricsGB,
-    retentionDays: features.retention_days?.balance ?? defaults.retentionDays,
+    logsGB: balances.logs?.granted ?? defaults.logsGB,
+    tracesGB: balances.traces?.granted ?? defaults.tracesGB,
+    metricsGB: balances.metrics?.granted ?? defaults.metricsGB,
+    retentionDays: balances.retention_days?.remaining ?? defaults.retentionDays,
   }
 }
 
 function CurrentPlanCard() {
   const { isTrialing, daysRemaining, trialEndsAt, planName, planStatus, isLoading } = useTrialStatus()
-  const { openBillingPortal } = useCustomer()
+  const { openCustomerPortal } = useCustomer()
 
   if (isLoading) {
     return (
@@ -71,7 +71,7 @@ function CurrentPlanCard() {
         )}
       </CardHeader>
       <CardContent className="pt-0">
-        <Button variant="outline" size="sm" onClick={() => openBillingPortal({ returnUrl: window.location.href })}>
+        <Button variant="outline" size="sm" onClick={() => openCustomerPortal({ returnUrl: window.location.href })}>
           Manage billing
         </Button>
       </CardContent>
@@ -80,7 +80,7 @@ function CurrentPlanCard() {
 }
 
 export function BillingSection() {
-  const { customer, isLoading: isCustomerLoading } = useCustomer()
+  const { data: customer, isLoading: isCustomerLoading } = useCustomer()
   const { total, isLoading: isUsageLoading } = useAggregateEvents({
     featureId: ["logs", "traces", "metrics"],
     range: "1bc",
@@ -89,12 +89,12 @@ export function BillingSection() {
   const isLoading = isCustomerLoading || isUsageLoading
 
   const billingPeriodLabel = useMemo(() => {
-    const activeProduct = customer?.products?.find(
-      (p) => p.status === "active" || p.status === "trialing",
+    const activeSub = customer?.subscriptions?.find(
+      (s) => s.status === "active",
     )
-    if (activeProduct?.current_period_start && activeProduct?.current_period_end) {
-      const start = new Date(activeProduct.current_period_start)
-      const end = new Date(activeProduct.current_period_end)
+    if (activeSub?.currentPeriodStart && activeSub?.currentPeriodEnd) {
+      const start = new Date(activeSub.currentPeriodStart)
+      const end = new Date(activeSub.currentPeriodEnd)
       return `${format(start, "MMM d")} – ${format(end, "MMM d, yyyy")}`
     }
     // Fallback: calendar month → today
@@ -103,7 +103,7 @@ export function BillingSection() {
     return `${format(startOfMonth, "MMM d")} – ${format(now, "MMM d, yyyy")}`
   }, [customer])
 
-  const limits = limitsFromCustomer(customer?.features) ?? getPlanLimits("starter")
+  const limits = limitsFromCustomer(customer?.balances) ?? getPlanLimits("starter")
   const usage: AggregatedUsage = {
     logsGB: total?.logs?.sum ?? 0,
     tracesGB: total?.traces?.sum ?? 0,

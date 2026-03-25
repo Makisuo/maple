@@ -64,7 +64,7 @@ function ClerkReverseRedirects() {
     }),
   })
   const { isSignedIn, orgId } = useAuth()
-  const { customer, isLoading: isCustomerLoading } = useCustomer()
+  const { data: customer, isLoading: isCustomerLoading, error: customerError } = useCustomer()
 
   const redirectUrl = pathname + (searchStr ?? "")
   const selectedPlan = hasSelectedPlan(customer)
@@ -85,6 +85,10 @@ function ClerkReverseRedirects() {
   }
 
   if (isSignedIn && orgId) {
+    // If Autumn is down, let users through rather than blocking them
+    if (customerError) {
+      return <AppFrame />
+    }
     if (isCustomerLoading) {
       return null
     }

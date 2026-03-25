@@ -48,7 +48,7 @@ function QuickStartPage() {
   const apiKey = Result.isSuccess(keysResult) ? keysResult.value.publicKey : "Loading..."
 
   // Auto-complete plan step when plan is selected
-  const { customer } = useCustomer()
+  const { data: customer } = useCustomer()
   useEffect(() => {
     if (isStepComplete("plan")) return
     if (hasSelectedPlan(customer)) {

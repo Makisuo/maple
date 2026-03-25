@@ -15,7 +15,7 @@
     "db:studio": "drizzle-kit studio --config ./drizzle.config.ts"
   },
   "dependencies": {
-    "@libsql/client": "^0.15.15",
+    "@libsql/client": "0.15.15",
     "drizzle-orm": "^0.45.1",
     "effect": "4.0.0-beta.33"
   },

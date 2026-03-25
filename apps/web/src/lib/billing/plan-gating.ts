@@ -1,19 +1,21 @@
-import type { Customer } from "autumn-js"
+import { useCustomer } from "autumn-js/react"
 
-const ALLOWED_PRODUCT_STATUSES = new Set(["active", "trialing", "past_due"])
+type Customer = NonNullable<ReturnType<typeof useCustomer>["data"]>
 
-function isLegacyFreeProduct(product: Customer["products"][number]): boolean {
-  if (product.id.toLowerCase() === "free") return true
-  return product.name?.toLowerCase() === "free"
+type Subscription = Customer["subscriptions"][number]
+
+function isLegacyFreePlan(sub: Subscription): boolean {
+  if (sub.planId.toLowerCase() === "free") return true
+  return sub.plan?.name?.toLowerCase() === "free"
 }
 
-export function getActivePlan(customer: Customer | null | undefined): Customer["products"][number] | null {
+export function getActivePlan(customer: Customer | null | undefined): Subscription | null {
   if (!customer) return null
 
-  return customer.products.find((product) => {
-    if (product.is_add_on || product.is_default) return false
-    if (isLegacyFreeProduct(product)) return false
-    return ALLOWED_PRODUCT_STATUSES.has(product.status)
+  return customer.subscriptions.find((sub) => {
+    if (sub.addOn || sub.autoEnable) return false
+    if (isLegacyFreePlan(sub)) return false
+    return sub.status === "active"
   }) ?? null
 }
 
@@ -24,6 +26,5 @@ export function hasSelectedPlan(customer: Customer | null | undefined): boolean 
 export function hasBringYourOwnCloudAddOn(customer: Customer | null | undefined): boolean {
   if (!customer) return false
 
-
-  return !!customer.features.bringyourowncloud
+  return !!customer.flags.bringyourowncloud
 }

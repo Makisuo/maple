@@ -12,7 +12,7 @@ export function StepPlan({
   isComplete: boolean
   onComplete: () => void
 }) {
-  const { customer, isLoading } = useCustomer()
+  const { data: customer, isLoading } = useCustomer()
   const selectedPlan = hasSelectedPlan(customer)
 
   useEffect(() => {

@@ -20,10 +20,7 @@ export const AutumnRouter = HttpRouter.use((router) =>
           req.headers as Record<string, string>,
         )
 
-        let body: unknown = undefined
-        if (req.method !== "GET" && req.method !== "HEAD") {
-          body = yield* req.json
-        }
+        const body = yield* req.json
 
         const result = yield* Effect.tryPromise(() =>
           autumnHandler({
@@ -39,23 +36,24 @@ export const AutumnRouter = HttpRouter.use((router) =>
       })
 
     const routes = [
-      ["POST", "/api/autumn/customers"],
-      ["GET", "/api/autumn/customers"],
-      ["GET", "/api/autumn/components/pricing_table"],
-      ["POST", "/api/autumn/checkout"],
-      ["POST", "/api/autumn/attach"],
-      ["POST", "/api/autumn/cancel"],
-      ["POST", "/api/autumn/check"],
-      ["POST", "/api/autumn/track"],
-      ["POST", "/api/autumn/billing_portal"],
-      ["POST", "/api/autumn/setup_payment"],
-      ["POST", "/api/autumn/query"],
-      ["POST", "/api/autumn/events/aggregate"],
-      ["GET", "/api/autumn/products"],
+      "getOrCreateCustomer",
+      "attach",
+      "previewAttach",
+      "updateSubscription",
+      "previewUpdateSubscription",
+      "openCustomerPortal",
+      "createReferralCode",
+      "redeemReferralCode",
+      "multiAttach",
+      "previewMultiAttach",
+      "setupPayment",
+      "listPlans",
+      "listEvents",
+      "aggregateEvents",
     ] as const
 
-    for (const [method, path] of routes) {
-      yield* router.add(method, path, handle)
+    for (const route of routes) {
+      yield* router.add("POST", `/api/autumn/${route}`, handle)
     }
   }),
 )

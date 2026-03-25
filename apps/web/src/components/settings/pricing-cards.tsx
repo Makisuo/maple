@@ -1,11 +1,9 @@
 import { useState } from "react"
-import { useCustomer, usePricingTable } from "autumn-js/react"
+import { useCustomer, useListPlans } from "autumn-js/react"
 import { toast } from "sonner"
 
-type Product = NonNullable<
-  ReturnType<typeof usePricingTable>["products"]
->[number]
-type ProductItem = Product["items"][number]
+type Plan = NonNullable<ReturnType<typeof useListPlans>["data"]>[number]
+type PlanItem = Plan["items"][number]
 
 import { cn } from "@maple/ui/utils"
 import { getPlanFeatures, getPlanDescription } from "@/lib/billing/plans"
@@ -45,36 +43,33 @@ const FEATURE_ICONS: Record<string, IconComponent> = {
   metrics: ChartLineIcon,
 }
 
-function getProductSlug(product: Product): string {
-  if (product.properties.is_free) return "starter"
-  const id = product.id?.toLowerCase()
+function getPlanSlug(plan: Plan): string {
+  if (plan.autoEnable) return "starter"
+  const id = plan.id?.toLowerCase()
   if (id === "starter" || id === "startup") return id
-  const name = product.name?.toLowerCase()
+  const name = plan.name?.toLowerCase()
   if (name === "starter" || name === "startup") return name
   return "startup"
 }
 
-function getProductPrice(product: Product): {
+function getPlanPrice(plan: Plan): {
   price: string
   interval?: string
 } {
-  if (product.properties.is_free) return { price: "$0" }
-  const baseItem = product.items.find(
-    (i) => !i.feature_id && i.price != null,
-  )
-  if (baseItem?.price != null) {
+  if (plan.autoEnable) return { price: "$0" }
+  if (plan.price) {
     return {
-      price: `$${baseItem.price}`,
-      interval: baseItem.interval ? `/${baseItem.interval}` : undefined,
+      price: `$${plan.price.amount}`,
+      interval: plan.price.interval ? `/${plan.price.interval}` : undefined,
     }
   }
-  return { price: product.display?.name ?? product.name }
+  return { price: plan.name }
 }
 
-function formatIncludedUsage(item: ProductItem): string {
-  if (item.included_usage === "inf") return "Unlimited"
-  if (item.included_usage != null) {
-    return `${Number(item.included_usage)} GB`
+function formatIncludedUsage(item: PlanItem): string {
+  if (item.unlimited) return "Unlimited"
+  if (item.included != null) {
+    return `${Number(item.included)} GB`
   }
   return ""
 }
@@ -83,15 +78,15 @@ function normalizeDetailText(text: string): string {
   return text.replace(/\bper\s+(?:[\d,]+\s+)?(?:logs?|traces?|metrics?)\b/i, "per GB")
 }
 
-function getFeatureRows(product: Product) {
-  return product.items
-    .filter((item) => item.feature_id)
+function getFeatureRows(plan: Plan) {
+  return plan.items
+    .filter((item) => item.featureId)
     .map((item) => ({
-      featureId: item.feature_id ?? "",
-      label: item.feature?.name ?? item.feature_id ?? "",
+      featureId: item.featureId,
+      label: item.feature?.name ?? item.featureId,
       value: formatIncludedUsage(item),
-      detail: item.display?.secondary_text
-        ? normalizeDetailText(item.display.secondary_text)
+      detail: item.display?.secondaryText
+        ? normalizeDetailText(item.display.secondaryText)
         : undefined,
     }))
 }
@@ -102,20 +97,20 @@ const ENTERPRISE_DATA_FEATURES = [
   { featureId: "metrics", label: "Metrics", value: "Custom" },
 ]
 
-function getButtonConfig(product: Product) {
-  const { scenario, properties } = product
+function getScenario(plan: Plan): string {
+  const eligibility = plan.customerEligibility
+  if (!eligibility) return "new"
+  if (eligibility.status === "active") return "active"
+  if (eligibility.status === "scheduled") return "scheduled"
+  return eligibility.attachAction === "upgrade"
+    ? "upgrade"
+    : eligibility.attachAction === "downgrade"
+      ? "downgrade"
+      : "new"
+}
 
-  if (product.display?.button_text) {
-    const disabled = scenario === "active" && !properties.updateable
-    return {
-      label: product.display.button_text,
-      variant: (scenario === "active" ? "secondary" : "default") as
-        | "default"
-        | "secondary"
-        | "outline",
-      disabled,
-    }
-  }
+function getButtonConfig(plan: Plan) {
+  const scenario = getScenario(plan)
 
   switch (scenario) {
     case "active":
@@ -142,14 +137,6 @@ function getButtonConfig(product: Product) {
         variant: "outline" as const,
         disabled: false,
       }
-    case "cancel":
-      return {
-        label: "Resubscribe",
-        variant: "outline" as const,
-        disabled: false,
-      }
-    case "new":
-    case "renew":
     default:
       return {
         label: "Subscribe",
@@ -168,8 +155,8 @@ function formatCurrency(amount: number, currency: string): string {
 }
 
 interface CheckoutPreview {
-  productId: string
-  productName: string
+  planId: string
+  planName: string
   lines: { description: string; amount: number }[]
   total: number
   currency: string
@@ -177,10 +164,10 @@ interface CheckoutPreview {
 }
 
 export function PricingCards() {
-  const { products, isLoading, error } = usePricingTable()
-  const { checkout, attach, refetch } = useCustomer()
+  const { data: plans, isLoading, error } = useListPlans()
+  const { attach, previewAttach, refetch } = useCustomer()
   const { isTrialing, daysRemaining } = useTrialStatus()
-  const [loadingProductId, setLoadingProductId] = useState<string | null>(null)
+  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<CheckoutPreview | null>(
     null,
   )
@@ -216,7 +203,7 @@ export function PricingCards() {
     )
   }
 
-  if (error || !products) {
+  if (error || !plans) {
     return (
       <p className="text-muted-foreground text-sm">
         Unable to load pricing plans.
@@ -224,41 +211,57 @@ export function PricingCards() {
     )
   }
 
-  async function handleCheckout(productId: string, buttonUrl?: string) {
-    if (buttonUrl) {
-      window.open(buttonUrl, "_blank", "noopener")
+  // Filter out add-on and auto-enabled (free) plans for the main grid
+  const visiblePlans = plans.filter((p) => !p.addOn && !p.autoEnable)
+
+  async function handleCheckout(planId: string) {
+    const plan = plans?.find((p) => p.id === planId)
+    const scenario = plan ? getScenario(plan) : "new"
+
+    // For upgrades/downgrades, show a preview first
+    if (scenario === "upgrade" || scenario === "downgrade") {
+      setLoadingPlanId(planId)
+      try {
+        const preview = await previewAttach({ planId })
+        setConfirmDialog({
+          planId,
+          planName: plan?.name ?? planId,
+          lines: preview.lineItems.map((l) => ({
+            description: l.description,
+            amount: l.total,
+          })),
+          total: preview.total,
+          currency: preview.currency,
+          nextCycle: preview.nextCycle
+            ? { starts_at: preview.nextCycle.startsAt, total: preview.nextCycle.total }
+            : undefined,
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
+        toast.error(message)
+      } finally {
+        setLoadingPlanId(null)
+      }
       return
     }
 
-    setLoadingProductId(productId)
+    // For new subscriptions, attach directly (redirects to checkout if needed)
+    setLoadingPlanId(planId)
     try {
-      const result = await checkout({ productId })
+      const result = await attach({ planId })
 
-      if (result.error) {
-        toast.error(result.error.message)
+      if (result.paymentUrl) {
+        window.location.href = result.paymentUrl
         return
       }
 
-      if (result.data.url) {
-        window.location.href = result.data.url
-        return
-      }
-
-      setConfirmDialog({
-        productId,
-        productName: result.data.product?.name ?? productId,
-        lines: result.data.lines.map((l) => ({
-          description: l.description,
-          amount: l.amount,
-        })),
-        total: result.data.total,
-        currency: result.data.currency,
-        nextCycle: result.data.next_cycle,
-      })
-    } catch {
-      toast.error("Something went wrong. Please try again.")
+      toast.success("Plan updated successfully.")
+      await refetch()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
+      toast.error(message)
     } finally {
-      setLoadingProductId(null)
+      setLoadingPlanId(null)
     }
   }
 
@@ -266,16 +269,17 @@ export function PricingCards() {
     if (!confirmDialog) return
     setIsAttaching(true)
     try {
-      const result = await attach({ productId: confirmDialog.productId })
-      if (result.error) {
-        toast.error(result.error.message)
+      const result = await attach({ planId: confirmDialog.planId })
+      if (result.paymentUrl) {
+        window.location.href = result.paymentUrl
         return
       }
       toast.success("Plan updated successfully.")
       await refetch()
       setConfirmDialog(null)
-    } catch {
-      toast.error("Something went wrong. Please try again.")
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Something went wrong. Please try again."
+      toast.error(message)
     } finally {
       setIsAttaching(false)
     }
@@ -293,23 +297,23 @@ export function PricingCards() {
       <div
         className={cn(
           "grid grid-cols-1 gap-4",
-          products.length === 2 && "sm:grid-cols-2",
-          products.length >= 3 && "sm:grid-cols-3",
+          visiblePlans.length === 2 && "sm:grid-cols-2",
+          visiblePlans.length >= 3 && "sm:grid-cols-3",
         )}
       >
-        {products.map((product) => {
-          const isActive = product.scenario === "active"
-          const isUpgrade =
-            !isActive && product.scenario === "upgrade"
-          const { price, interval } = getProductPrice(product)
-          const features = getFeatureRows(product)
-          const planFeatures = getPlanFeatures(getProductSlug(product))
-          const btn = getButtonConfig(product)
-          const trialAvailable = product.free_trial?.trial_available
+        {visiblePlans.map((plan) => {
+          const scenario = getScenario(plan)
+          const isActive = scenario === "active"
+          const isUpgrade = !isActive && scenario === "upgrade"
+          const { price, interval } = getPlanPrice(plan)
+          const features = getFeatureRows(plan)
+          const planFeatures = getPlanFeatures(getPlanSlug(plan))
+          const btn = getButtonConfig(plan)
+          const trialAvailable = plan.customerEligibility?.trialAvailable
 
           return (
             <Card
-              key={product.id}
+              key={plan.id}
               className={cn(
                 "flex flex-col relative transition-all duration-300 ease-out",
                 isActive && "ring-primary/20 bg-muted/30",
@@ -331,7 +335,7 @@ export function PricingCards() {
                     "text-[11px] font-semibold uppercase tracking-widest",
                     isUpgrade ? "text-primary" : "text-muted-foreground"
                   )}>
-                    {product.display?.name ?? product.name}
+                    {plan.name}
                   </CardTitle>
                   <div className="flex gap-2">
                     {isActive && isTrialing && daysRemaining != null ? (
@@ -343,11 +347,6 @@ export function PricingCards() {
                         Current
                       </Badge>
                     ) : null}
-                    {product.display?.recommend_text && !isActive && (
-                      <Badge variant="default" className="text-[10px] font-medium shadow-sm">
-                        {product.display.recommend_text}
-                      </Badge>
-                    )}
                   </div>
                 </div>
                 <div className="mt-4 flex items-baseline gap-1">
@@ -361,17 +360,12 @@ export function PricingCards() {
                   )}
                 </div>
                 <CardDescription className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                  {product.display?.description ?? getPlanDescription(getProductSlug(product))}
+                  {plan.description ?? getPlanDescription(getPlanSlug(plan))}
                 </CardDescription>
-                {getProductSlug(product) === "starter" && (
+                {getPlanSlug(plan) === "starter" && (
                   <div className="mt-3 rounded-md bg-primary/10 px-3 py-1.5 text-center text-xs font-medium text-primary">
                     Predictable pricing — no usage-based charges
                   </div>
-                )}
-                {product.display?.everything_from && (
-                  <p className="text-muted-foreground mt-3 text-xs font-medium">
-                    Everything in <span className="text-foreground">{product.display.everything_from}</span>, plus:
-                  </p>
                 )}
               </CardHeader>
 
@@ -440,20 +434,18 @@ export function PricingCards() {
               <CardFooter className="mt-auto pt-4 pb-6 px-6 flex-col gap-2">
                 <Button
                   variant={trialAvailable && !btn.disabled ? "default" : btn.variant}
-                  disabled={btn.disabled || loadingProductId === product.id}
+                  disabled={btn.disabled || loadingPlanId === plan.id}
                   className={cn(
                     "w-full h-10 transition-all",
                     isUpgrade && "shadow-md hover:shadow-lg font-medium",
                     !isUpgrade && "font-medium"
                   )}
-                  onClick={() =>
-                    handleCheckout(product.id, product.display?.button_url)
-                  }
+                  onClick={() => handleCheckout(plan.id)}
                 >
-                  {loadingProductId === product.id ? (
+                  {loadingPlanId === plan.id ? (
                     <Spinner className="size-4" />
                   ) : trialAvailable && !btn.disabled ? (
-                    `Start ${product.free_trial?.length}-day free trial`
+                    `Start ${plan.freeTrial?.durationLength}-day free trial`
                   ) : isActive && isTrialing ? (
                     "Trialing"
                   ) : (
@@ -462,7 +454,7 @@ export function PricingCards() {
                 </Button>
                 {trialAvailable && !btn.disabled && (
                   <p className="text-[11px] text-muted-foreground text-center">
-                    $0 due today · You won't be charged for {product.free_trial?.length} days
+                    $0 due today · You won't be charged for {plan.freeTrial?.durationLength} days
                   </p>
                 )}
               </CardFooter>
@@ -559,7 +551,7 @@ export function PricingCards() {
             <DialogDescription>
               You're switching to{" "}
               <span className="text-foreground font-medium">
-                {confirmDialog?.productName}
+                {confirmDialog?.planName}
               </span>
               .
             </DialogDescription>
@@ -593,7 +585,7 @@ export function PricingCards() {
                   )}{" "}
                   starting{" "}
                   {new Date(
-                    confirmDialog.nextCycle.starts_at * 1000,
+                    confirmDialog.nextCycle.starts_at,
                   ).toLocaleDateString()}
                 </p>
               )}

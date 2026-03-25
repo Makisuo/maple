@@ -103,7 +103,7 @@ export function SettingsPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
-  const { customer, isLoading: isCustomerLoading } = useCustomer()
+  const { data: customer, isLoading: isCustomerLoading } = useCustomer()
 
   const isAdmin = Result.builder(sessionResult)
     .onSuccess((session) =>
