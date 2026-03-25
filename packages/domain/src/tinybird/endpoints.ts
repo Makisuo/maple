@@ -2305,6 +2305,38 @@ export const alertMetricsAggregate = defineEndpoint("alert_metrics_aggregate", {
 export type AlertMetricsAggregateParams = InferParams<typeof alertMetricsAggregate>;
 export type AlertMetricsAggregateOutput = InferOutputRow<typeof alertMetricsAggregate>;
 
+export const alertLogsAggregate = defineEndpoint("alert_logs_aggregate", {
+  description: "Aggregate log counts for alert evaluation across a full window.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    service_name: p.string().optional().describe("Filter by service name"),
+    severity: p.string().optional().describe("Filter by severity"),
+  },
+  nodes: [
+    node({
+      name: "alert_logs_aggregate_node",
+      sql: `
+        SELECT
+          count() AS count
+        FROM logs
+        WHERE Timestamp >= {{DateTime(start_time)}}
+          AND OrgId = {{String(org_id, "")}}
+          AND Timestamp <= {{DateTime(end_time)}}
+          {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
+          {% if defined(severity) %}AND SeverityText = {{String(severity)}}{% end %}
+      `,
+    }),
+  ],
+  output: {
+    count: t.uint64(),
+  },
+});
+
+export type AlertLogsAggregateParams = InferParams<typeof alertLogsAggregate>;
+export type AlertLogsAggregateOutput = InferOutputRow<typeof alertLogsAggregate>;
+
 export const alertTracesAggregateByService = defineEndpoint("alert_traces_aggregate_by_service", {
   description: "Aggregate trace metrics for alert evaluation, grouped by service.",
   params: {
@@ -2478,6 +2510,39 @@ export const alertMetricsAggregateByService = defineEndpoint("alert_metrics_aggr
 
 export type AlertMetricsAggregateByServiceParams = InferParams<typeof alertMetricsAggregateByService>;
 export type AlertMetricsAggregateByServiceOutput = InferOutputRow<typeof alertMetricsAggregateByService>;
+
+export const alertLogsAggregateByService = defineEndpoint("alert_logs_aggregate_by_service", {
+  description: "Aggregate log counts for alert evaluation, grouped by service.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    severity: p.string().optional().describe("Filter by severity"),
+  },
+  nodes: [
+    node({
+      name: "alert_logs_aggregate_by_service_node",
+      sql: `
+        SELECT
+          ServiceName AS serviceName,
+          count() AS count
+        FROM logs
+        WHERE Timestamp >= {{DateTime(start_time)}}
+          AND OrgId = {{String(org_id, "")}}
+          AND Timestamp <= {{DateTime(end_time)}}
+          {% if defined(severity) %}AND SeverityText = {{String(severity)}}{% end %}
+        GROUP BY ServiceName
+      `,
+    }),
+  ],
+  output: {
+    serviceName: t.string(),
+    count: t.uint64(),
+  },
+});
+
+export type AlertLogsAggregateByServiceParams = InferParams<typeof alertLogsAggregateByService>;
+export type AlertLogsAggregateByServiceOutput = InferOutputRow<typeof alertLogsAggregateByService>;
 
 /**
  * Custom traces time series endpoint - flexible time-bucketed trace metrics

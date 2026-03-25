@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import {
+  AlertDestinationInUseError,
   AlertForbiddenError,
   type AlertDestinationId,
   AlertRuleUpsertRequest,
@@ -73,6 +74,8 @@ const emptyTinybirdRows = [] as ReadonlyArray<Record<string, unknown>>
 function makeTinybirdStub(state: {
   tracesAggregateRows?: ReadonlyArray<Record<string, unknown>>
   metricsAggregateRows?: ReadonlyArray<Record<string, unknown>>
+  logsAggregateRows?: ReadonlyArray<Record<string, unknown>>
+  logsAggregateByServiceRows?: ReadonlyArray<Record<string, unknown>>
 }): TinybirdServiceShape {
   const succeedRows = (rows: ReadonlyArray<Record<string, unknown>>) =>
     Effect.succeed(rows as never)
@@ -93,8 +96,12 @@ function makeTinybirdStub(state: {
       succeedRows(state.tracesAggregateRows ?? emptyTinybirdRows),
     alertMetricsAggregateQuery: () =>
       succeedRows(state.metricsAggregateRows ?? emptyTinybirdRows),
+    alertLogsAggregateQuery: () =>
+      succeedRows(state.logsAggregateRows ?? emptyTinybirdRows),
     alertTracesAggregateByServiceQuery: () => succeedRows(emptyTinybirdRows),
     alertMetricsAggregateByServiceQuery: () => succeedRows(emptyTinybirdRows),
+    alertLogsAggregateByServiceQuery: () =>
+      succeedRows(state.logsAggregateByServiceRows ?? emptyTinybirdRows),
   }
 }
 
@@ -950,6 +957,137 @@ describe("AlertsService", () => {
     expect(requestCount).toBe(1)
     expect(result.events.events.find((event) => event.deliveryKey === "bad-payload-key")?.status).toBe("failed")
     expect(result.events.events.find((event) => event.deliveryKey === "good-payload-key")?.status).toBe("success")
+  })
+
+  it("evaluates logs query alerts in testRule without failing validation", async () => {
+    const { url } = createTempDbUrl()
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_logs_test")
+        const userId = asUserId("user_logs_test")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+        return yield* alerts.testRule(
+          orgId,
+          userId,
+          adminRoles,
+          new AlertRuleUpsertRequest({
+            name: "Checkout error logs",
+            severity: "critical",
+            enabled: true,
+            signalType: "query",
+            queryDataSource: "logs",
+            queryAggregation: "count",
+            queryWhereClause: 'service.name = "checkout" AND severity = "error"',
+            comparator: "gt",
+            threshold: 10,
+            windowMinutes: 5,
+            minimumSampleCount: 1,
+            consecutiveBreachesRequired: 2,
+            consecutiveHealthyRequired: 2,
+            renotifyIntervalMinutes: 30,
+            destinationIds: [destination.id],
+          }),
+        )
+      }).pipe(
+        Effect.provide(makeLayer(
+          url,
+          makeTinybirdStub({
+            logsAggregateRows: [{ count: 42 }],
+          }),
+        )),
+      ),
+    )
+
+    expect(result.status).toBe("breached")
+    expect(result.value).toBe(42)
+    expect(result.sampleCount).toBe(42)
+  })
+
+  it("opens per-service incidents for grouped logs query alerts", async () => {
+    const { url } = createTempDbUrl()
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_logs_grouped")
+        const userId = asUserId("user_logs_grouped")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+        yield* alerts.createRule(
+          orgId,
+          userId,
+          adminRoles,
+          new AlertRuleUpsertRequest({
+            name: "All services error logs",
+            severity: "critical",
+            enabled: true,
+            signalType: "query",
+            queryDataSource: "logs",
+            queryAggregation: "count",
+            queryWhereClause: 'severity = "error"',
+            groupBy: "service",
+            comparator: "gt",
+            threshold: 10,
+            windowMinutes: 5,
+            minimumSampleCount: 1,
+            consecutiveBreachesRequired: 2,
+            consecutiveHealthyRequired: 2,
+            renotifyIntervalMinutes: 30,
+            destinationIds: [destination.id],
+          }),
+        )
+
+        yield* alerts.runSchedulerTick()
+        yield* alerts.runSchedulerTick()
+
+        return yield* alerts.listIncidents(orgId)
+      }).pipe(
+        Effect.provide(makeLayer(
+          url,
+          makeTinybirdStub({
+            logsAggregateByServiceRows: [
+              { serviceName: "svc-breach", count: 14 },
+              { serviceName: "svc-healthy", count: 3 },
+            ],
+          }),
+          { ...makeAdvancingClock(), fetch: okFetch },
+        )),
+      ),
+    )
+
+    expect(result.incidents).toHaveLength(1)
+    expect(result.incidents[0]?.serviceName).toBe("svc-breach")
+    expect(result.incidents[0]?.status).toBe("open")
+  })
+
+  it("blocks destination deletion when rules still reference it", async () => {
+    const { url } = createTempDbUrl()
+
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_delete_guard")
+        const userId = asUserId("user_delete_guard")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+        yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+
+        return yield* alerts.deleteDestination(orgId, adminRoles, destination.id)
+      }).pipe(
+        Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }))),
+      ),
+    )
+
+    const failure = getError(exit)
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(failure).toBeInstanceOf(AlertDestinationInUseError)
+    expect(failure).toMatchObject({
+      destinationId: expect.any(String),
+      ruleNames: ["Checkout error rate"],
+    })
   })
 
   it("rejects destination creation for non-admin members", async () => {

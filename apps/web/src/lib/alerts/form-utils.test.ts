@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { flattenAlertChartData } from "./form-utils"
+import { defaultRuleForm, flattenAlertChartData, signalToQueryParams } from "./form-utils"
 
 const makePoint = (bucket: string, series: Record<string, number>) => ({ bucket, series })
 
@@ -71,5 +71,69 @@ describe("flattenAlertChartData", () => {
   it("handles empty points array", () => {
     expect(flattenAlertChartData([], ["svc-a"])).toEqual([])
     expect(flattenAlertChartData([], [])).toEqual([])
+  })
+})
+
+describe("signalToQueryParams", () => {
+  it("parses traces query filters from the where clause for alert previews", () => {
+    const form = {
+      ...defaultRuleForm(),
+      signalType: "query" as const,
+      queryDataSource: "traces" as const,
+      queryAggregation: "count",
+      queryWhereClause:
+        'service.name = "checkout" AND span.name = "GET /checkout" AND has_error = true',
+    }
+
+    expect(signalToQueryParams(form)).toEqual({
+      source: "traces",
+      metric: "count",
+      filters: {
+        serviceName: "checkout",
+        spanName: "GET /checkout",
+        errorsOnly: true,
+      },
+    })
+  })
+
+  it("parses logs query filters from the where clause for alert previews", () => {
+    const form = {
+      ...defaultRuleForm(),
+      signalType: "query" as const,
+      queryDataSource: "logs" as const,
+      queryAggregation: "count",
+      queryWhereClause: 'service.name = "checkout" AND severity = "error"',
+    }
+
+    expect(signalToQueryParams(form)).toEqual({
+      source: "logs",
+      metric: "count",
+      filters: {
+        serviceName: "checkout",
+        severity: "error",
+      },
+    })
+  })
+
+  it("parses metrics query service filters from the where clause for alert previews", () => {
+    const form = {
+      ...defaultRuleForm(),
+      signalType: "query" as const,
+      queryDataSource: "metrics" as const,
+      queryAggregation: "avg",
+      metricName: "cpu.usage",
+      metricType: "gauge" as const,
+      queryWhereClause: 'service.name = "worker"',
+    }
+
+    expect(signalToQueryParams(form)).toEqual({
+      source: "metrics",
+      metric: "avg",
+      filters: {
+        metricName: "cpu.usage",
+        metricType: "gauge",
+        serviceName: "worker",
+      },
+    })
   })
 })

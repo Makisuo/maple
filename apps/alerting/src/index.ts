@@ -1,11 +1,6 @@
 import { BunRuntime } from "@effect/platform-bun"
+import { AlertRuntime, AlertsService, Database, Env, OrgTinybirdSettingsService, QueryEngineService, TinybirdService } from "@maple/api/alerting"
 import { Cause, Duration, Effect, Layer, Schedule } from "effect"
-import { AlertRuntime, AlertsService } from "../../api/src/services/AlertsService"
-import { Database } from "../../api/src/services/DatabaseLive"
-import { Env } from "../../api/src/services/Env"
-import { OrgTinybirdSettingsService } from "../../api/src/services/OrgTinybirdSettingsService"
-import { QueryEngineService } from "../../api/src/services/QueryEngineService"
-import { TinybirdService } from "../../api/src/services/TinybirdService"
 
 const DatabaseLive = Database.Default.pipe(
   Layer.provide(Env.Default),

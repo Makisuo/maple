@@ -1,5 +1,6 @@
 import {
   AlertDestinationDocument,
+  buildAlertQueryFilterSet,
   AlertIncidentDocument,
   AlertRuleDocument,
   AlertRuleTestRequest,
@@ -276,23 +277,21 @@ export function signalToQueryParams(form: RuleFormState): {
       }
     }
     case "query": {
-      const ds = form.queryDataSource
-      if (ds === "metrics") {
-        if (!form.metricName.trim() || !form.metricType) return null
-        return {
-          source: "metrics",
-          metric: form.queryAggregation,
-          filters: {
-            metricName: form.metricName.trim(),
-            metricType: form.metricType,
-            ...baseFilters,
-          },
-        }
-      }
+      const filterSet = buildAlertQueryFilterSet({
+        queryDataSource: form.queryDataSource,
+        serviceName: form.serviceNames.length === 1 ? form.serviceNames[0]! : null,
+        metricName: form.metricName.trim() || null,
+        metricType: form.metricType,
+        queryWhereClause: form.queryWhereClause,
+      })
+
+      if (filterSet == null) return null
+
+      const ds = filterSet.source
       return {
         source: ds,
         metric: ds === "logs" ? "count" : form.queryAggregation,
-        filters: baseFilters,
+        filters: filterSet.filters ?? {},
       }
     }
   }

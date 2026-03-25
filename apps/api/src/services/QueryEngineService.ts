@@ -348,8 +348,10 @@ type QueryEngineTinybird = Pick<
   | "customMetricsBreakdownQuery"
   | "alertTracesAggregateQuery"
   | "alertMetricsAggregateQuery"
+  | "alertLogsAggregateQuery"
   | "alertTracesAggregateByServiceQuery"
   | "alertMetricsAggregateByServiceQuery"
+  | "alertLogsAggregateByServiceQuery"
 >
 
 const tracesMetricFieldMap = {
@@ -433,12 +435,12 @@ const sampleCountForStrategy = (
 
 const isScalarAlertQuery = (
   query: QuerySpec,
-): query is Extract<QuerySpec, { kind: "timeseries"; source: "traces" | "metrics" }> => {
+): query is Extract<QuerySpec, { kind: "timeseries"; source: "traces" | "logs" | "metrics" }> => {
   if (query.kind !== "timeseries") {
     return false
   }
 
-  if (query.source !== "traces" && query.source !== "metrics") {
+  if (query.source !== "traces" && query.source !== "metrics" && query.source !== "logs") {
     return false
   }
 
@@ -729,7 +731,7 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
       return yield* new QueryEngineValidationError({
         message: "Unsupported alert evaluation query",
         details: [
-          "Alert evaluation currently supports collapsed traces and metrics timeseries queries only",
+          "Alert evaluation currently supports collapsed traces, logs, and metrics timeseries queries only",
         ],
       })
     }
@@ -779,6 +781,24 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
         sampleCount,
         hasData: sampleCount > 0,
       }]
+    } else if (request.query.source === "logs") {
+      const rows = yield* mapTinybirdError(
+        tinybird.alertLogsAggregateQuery(tenant, {
+          service_name: request.query.filters?.serviceName,
+          severity: request.query.filters?.severity,
+          start_time: request.startTime,
+          end_time: request.endTime,
+        }),
+        "Failed to evaluate logs alert query",
+      )
+
+      const row = rows[0]
+      const sampleCount = Number(row?.count ?? 0)
+      observations = [{
+        value: sampleCount > 0 ? sampleCount : null,
+        sampleCount,
+        hasData: sampleCount > 0,
+      }]
     } else {
       const rows = yield* mapTinybirdError(
         tinybird.alertMetricsAggregateQuery(tenant, {
@@ -824,10 +844,15 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
   > {
     yield* validateEvaluate(request)
 
-    if (request.query.kind !== "timeseries" || (request.query.source !== "traces" && request.query.source !== "metrics")) {
+    if (
+      request.query.kind !== "timeseries" ||
+      (request.query.source !== "traces" &&
+        request.query.source !== "metrics" &&
+        request.query.source !== "logs")
+    ) {
       return yield* new QueryEngineValidationError({
         message: "Unsupported grouped alert evaluation query",
-        details: ["Grouped alert evaluation supports traces and metrics timeseries queries only"],
+        details: ["Grouped alert evaluation supports traces, logs, and metrics timeseries queries only"],
       })
     }
 
@@ -869,6 +894,25 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
           return {
             groupKey: row.serviceName,
             value: sampleCount > 0 ? tracesAggregateValueForMetric(request.query.metric as Extract<QuerySpec, { source: "traces" }>["metric"], row) : null,
+            sampleCount,
+            hasData: sampleCount > 0,
+          }
+        })
+      } else if (request.query.source === "logs") {
+        const rows = yield* mapTinybirdError(
+          tinybird.alertLogsAggregateByServiceQuery(tenant, {
+            severity: request.query.filters?.severity,
+            start_time: request.startTime,
+            end_time: request.endTime,
+          }),
+          "Failed to evaluate grouped logs alert query",
+        )
+
+        return rows.map((row) => {
+          const sampleCount = Number(row.count ?? 0)
+          return {
+            groupKey: row.serviceName,
+            value: sampleCount > 0 ? sampleCount : null,
             sampleCount,
             hasData: sampleCount > 0,
           }

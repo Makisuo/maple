@@ -67,6 +67,10 @@ export interface TinybirdServiceShape {
     tenant: TenantContext,
     params: Omit<AlertMetricsAggregateParams, "org_id">,
   ) => Effect.Effect<ReadonlyArray<AlertMetricsAggregateOutput>, TinybirdQueryError>
+  readonly alertLogsAggregateQuery: (
+    tenant: TenantContext,
+    params: Omit<AlertLogsAggregateParams, "org_id">,
+  ) => Effect.Effect<ReadonlyArray<AlertLogsAggregateOutput>, TinybirdQueryError>
   readonly alertTracesAggregateByServiceQuery: (
     tenant: TenantContext,
     params: Omit<AlertTracesAggregateByServiceParams, "org_id">,
@@ -75,6 +79,10 @@ export interface TinybirdServiceShape {
     tenant: TenantContext,
     params: Omit<AlertMetricsAggregateByServiceParams, "org_id">,
   ) => Effect.Effect<ReadonlyArray<AlertMetricsAggregateByServiceOutput>, TinybirdQueryError>
+  readonly alertLogsAggregateByServiceQuery: (
+    tenant: TenantContext,
+    params: Omit<AlertLogsAggregateByServiceParams, "org_id">,
+  ) => Effect.Effect<ReadonlyArray<AlertLogsAggregateByServiceOutput>, TinybirdQueryError>
 }
 const clientCache = new Map<string, CachedClient>()
 import {
@@ -84,6 +92,12 @@ import {
   type AlertMetricsAggregateOutput,
   type AlertMetricsAggregateParams,
   alertMetricsAggregate,
+  type AlertLogsAggregateByServiceOutput,
+  type AlertLogsAggregateByServiceParams,
+  alertLogsAggregateByService,
+  type AlertLogsAggregateOutput,
+  type AlertLogsAggregateParams,
+  alertLogsAggregate,
   type AlertTracesAggregateByServiceOutput,
   type AlertTracesAggregateByServiceParams,
   alertTracesAggregateByService,
@@ -167,6 +181,10 @@ const pipes = {
   service_apdex_time_series: serviceApdexTimeSeries,
   alert_traces_aggregate: alertTracesAggregate,
   alert_metrics_aggregate: alertMetricsAggregate,
+  alert_logs_aggregate: alertLogsAggregate,
+  alert_traces_aggregate_by_service: alertTracesAggregateByService,
+  alert_metrics_aggregate_by_service: alertMetricsAggregateByService,
+  alert_logs_aggregate_by_service: alertLogsAggregateByService,
   custom_traces_timeseries: customTracesTimeseries,
   custom_traces_breakdown: customTracesBreakdown,
   custom_logs_timeseries: customLogsTimeseries,
@@ -230,6 +248,10 @@ interface TinybirdClient {
     Omit<AlertMetricsAggregateParams, "org_id">,
     AlertMetricsAggregateOutput
   >
+  readonly alert_logs_aggregate: TinybirdPipeQuery<
+    Omit<AlertLogsAggregateParams, "org_id">,
+    AlertLogsAggregateOutput
+  >
   readonly alert_traces_aggregate_by_service: TinybirdPipeQuery<
     Omit<AlertTracesAggregateByServiceParams, "org_id">,
     AlertTracesAggregateByServiceOutput
@@ -237,6 +259,10 @@ interface TinybirdClient {
   readonly alert_metrics_aggregate_by_service: TinybirdPipeQuery<
     Omit<AlertMetricsAggregateByServiceParams, "org_id">,
     AlertMetricsAggregateByServiceOutput
+  >
+  readonly alert_logs_aggregate_by_service: TinybirdPipeQuery<
+    Omit<AlertLogsAggregateByServiceParams, "org_id">,
+    AlertLogsAggregateByServiceOutput
   >
 }
 
@@ -489,6 +515,18 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       >("alert_metrics_aggregate", tenant, params, client.alert_metrics_aggregate.query)
     })
 
+    const alertLogsAggregateQuery = Effect.fn("TinybirdService.alertLogsAggregateQuery")(function* (
+      tenant: TenantContext,
+      params: Omit<AlertLogsAggregateParams, "org_id">,
+    ) {
+      const client = yield* resolveClient(tenant, "alert_logs_aggregate")
+      return yield* runPipe<
+        "alert_logs_aggregate",
+        Omit<AlertLogsAggregateParams, "org_id">,
+        AlertLogsAggregateOutput
+      >("alert_logs_aggregate", tenant, params, client.alert_logs_aggregate.query)
+    })
+
     const alertTracesAggregateByServiceQuery = Effect.fn("TinybirdService.alertTracesAggregateByServiceQuery")(function* (
       tenant: TenantContext,
       params: Omit<AlertTracesAggregateByServiceParams, "org_id">,
@@ -513,6 +551,18 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       >("alert_metrics_aggregate_by_service", tenant, params, client.alert_metrics_aggregate_by_service.query)
     })
 
+    const alertLogsAggregateByServiceQuery = Effect.fn("TinybirdService.alertLogsAggregateByServiceQuery")(function* (
+      tenant: TenantContext,
+      params: Omit<AlertLogsAggregateByServiceParams, "org_id">,
+    ) {
+      const client = yield* resolveClient(tenant, "alert_logs_aggregate_by_service")
+      return yield* runPipe<
+        "alert_logs_aggregate_by_service",
+        Omit<AlertLogsAggregateByServiceParams, "org_id">,
+        AlertLogsAggregateByServiceOutput
+      >("alert_logs_aggregate_by_service", tenant, params, client.alert_logs_aggregate_by_service.query)
+    })
+
     return {
       query,
       customTracesTimeseriesQuery,
@@ -526,8 +576,10 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       metricTimeSeriesExpHistogramQuery,
       alertTracesAggregateQuery,
       alertMetricsAggregateQuery,
+      alertLogsAggregateQuery,
       alertTracesAggregateByServiceQuery,
       alertMetricsAggregateByServiceQuery,
+      alertLogsAggregateByServiceQuery,
     } satisfies TinybirdServiceShape
   }),
 }) {

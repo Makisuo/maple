@@ -7,6 +7,7 @@ import type {
 } from "@maple/query-engine"
 import {
   makeQueryEngineEvaluate,
+  makeQueryEngineEvaluateGrouped,
   makeQueryEngineExecute,
 } from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
@@ -75,8 +76,10 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
     customMetricsBreakdownQuery: unexpected("customMetricsBreakdownQuery"),
     alertTracesAggregateQuery: unexpected("alertTracesAggregateQuery"),
     alertMetricsAggregateQuery: unexpected("alertMetricsAggregateQuery"),
+    alertLogsAggregateQuery: unexpected("alertLogsAggregateQuery"),
     alertTracesAggregateByServiceQuery: unexpected("alertTracesAggregateByServiceQuery"),
     alertMetricsAggregateByServiceQuery: unexpected("alertMetricsAggregateByServiceQuery"),
+    alertLogsAggregateByServiceQuery: unexpected("alertLogsAggregateByServiceQuery"),
     ...overrides,
   } satisfies Parameters<typeof makeQueryEngineExecute>[0]
 }
@@ -622,6 +625,43 @@ describe("makeQueryEngineEvaluate", () => {
     })
   })
 
+  it("evaluates logs alerts with log-count sample counts", async () => {
+    const evaluate = makeQueryEngineEvaluate(
+      makeTinybirdStub({
+        alertLogsAggregateQuery: () =>
+          Effect.succeed([
+            {
+              count: 42,
+            },
+          ]),
+      }),
+    )
+
+    const response = await Effect.runPromise(evaluate(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-01 00:05:00",
+      reducer: "identity",
+      sampleCountStrategy: "log_count",
+      query: {
+        kind: "timeseries",
+        source: "logs",
+        metric: "count",
+        groupBy: ["none"],
+        filters: {
+          serviceName: "checkout",
+          severity: "error",
+        },
+      },
+    }))
+
+    expect(response).toMatchObject({
+      value: 42,
+      sampleCount: 42,
+      hasData: true,
+      reducer: "identity",
+    })
+  })
+
   it("rejects grouped queries for alert evaluation", async () => {
     const evaluate = makeQueryEngineEvaluate(makeTinybirdStub())
 
@@ -644,5 +684,56 @@ describe("makeQueryEngineEvaluate", () => {
       _tag: "QueryEngineValidationError",
       message: "Unsupported alert evaluation query",
     })
+  })
+})
+
+describe("makeQueryEngineEvaluateGrouped", () => {
+  it("evaluates grouped logs alerts by service", async () => {
+    const evaluateGrouped = makeQueryEngineEvaluateGrouped(
+      makeTinybirdStub({
+        alertLogsAggregateByServiceQuery: () =>
+          Effect.succeed([
+            {
+              serviceName: "checkout",
+              count: 11,
+            },
+            {
+              serviceName: "billing",
+              count: 3,
+            },
+          ]),
+      }),
+    )
+
+    const response = await Effect.runPromise(evaluateGrouped(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-01 00:05:00",
+      reducer: "identity",
+      sampleCountStrategy: "log_count",
+      query: {
+        kind: "timeseries",
+        source: "logs",
+        metric: "count",
+        groupBy: ["none"],
+        filters: {
+          severity: "error",
+        },
+      },
+    }, "service"))
+
+    expect(response).toEqual([
+      {
+        groupKey: "checkout",
+        value: 11,
+        sampleCount: 11,
+        hasData: true,
+      },
+      {
+        groupKey: "billing",
+        value: 3,
+        sampleCount: 3,
+        hasData: true,
+      },
+    ])
   })
 })

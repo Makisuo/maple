@@ -143,8 +143,10 @@ const SharedFiltersSchema = Schema.Struct({
   commitShas: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
   attributeKey: Schema.optional(Schema.String),
   attributeValue: Schema.optional(Schema.String),
+  attributeFilterMode: Schema.optional(Schema.Literals(["equals", "exists"])),
   resourceAttributeKey: Schema.optional(Schema.String),
   resourceAttributeValue: Schema.optional(Schema.String),
+  resourceAttributeFilterMode: Schema.optional(Schema.Literals(["equals", "exists"])),
 })
 
 const CustomChartTimeSeriesInputSchema = Schema.Struct({
@@ -234,8 +236,10 @@ function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesInput): QuerySpec |
         commitShas: data.filters?.commitShas,
         attributeKey: data.filters?.attributeKey,
         attributeValue: data.filters?.attributeValue,
+        attributeFilterMode: data.filters?.attributeFilterMode,
         resourceAttributeKey: data.filters?.resourceAttributeKey,
         resourceAttributeValue: data.filters?.resourceAttributeValue,
+        resourceAttributeFilterMode: data.filters?.resourceAttributeFilterMode,
       },
       bucketSeconds: data.bucketSeconds,
     }
@@ -394,8 +398,10 @@ function buildBreakdownQuerySpec(data: CustomChartBreakdownInput): QuerySpec | s
         commitShas: data.filters?.commitShas,
         attributeKey: data.filters?.attributeKey,
         attributeValue: data.filters?.attributeValue,
+        attributeFilterMode: data.filters?.attributeFilterMode,
         resourceAttributeKey: data.filters?.resourceAttributeKey,
         resourceAttributeValue: data.filters?.resourceAttributeValue,
+        resourceAttributeFilterMode: data.filters?.resourceAttributeFilterMode,
       },
       limit: data.limit,
     }

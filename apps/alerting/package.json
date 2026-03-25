@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@effect/platform-bun": "4.0.0-beta.33",
+    "@maple/api": "workspace:*",
     "@maple/db": "workspace:*",
     "@maple/domain": "workspace:*",
     "effect": "4.0.0-beta.33"

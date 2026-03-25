@@ -122,7 +122,7 @@ open "~/Library/Application Support/Nucleo/icons/sets/{set_id}/{id}.svg"
 
 ## Effect Patterns Reference
 
-Use `/Users/maki/Documents/superwall/app` as the reference implementation for Effect patterns (HTTP middleware, services, layers). Effect source code is at `/Users/maki/Documents/superwall/app/.context/effect`.
+Use `/Users/maki/Documents/superwall/app` as the reference implementation for Effect patterns (HTTP middleware, services, layers). Effect source code is at `.context/effect/` (git subtree of [Effect-TS/effect-smol](https://github.com/Effect-TS/effect-smol)).
 
 ## Data Conventions
 

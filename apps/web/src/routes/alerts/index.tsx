@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { Exit, Schema } from "effect"
+import { Exit, Option, Schema } from "effect"
 import { useState, useMemo } from "react"
 import { toast } from "sonner"
 
@@ -495,7 +495,24 @@ function AlertsPage() {
       refreshDestinations()
       refreshRules()
     } else {
-      toast.error(getExitErrorMessage(result, "Failed to delete destination"))
+      const failure = Option.getOrUndefined(Exit.findErrorOption(result))
+      if (
+        typeof failure === "object" &&
+        failure !== null &&
+        "_tag" in failure &&
+        failure._tag === "AlertDestinationInUseError" &&
+        "ruleNames" in failure &&
+        Array.isArray(failure.ruleNames)
+      ) {
+        const ruleNames = failure.ruleNames.filter((name): name is string => typeof name === "string")
+        toast.error(
+          ruleNames.length > 0
+            ? `Remove this destination from these rules first: ${ruleNames.join(", ")}`
+            : getExitErrorMessage(result, "Failed to delete destination"),
+        )
+      } else {
+        toast.error(getExitErrorMessage(result, "Failed to delete destination"))
+      }
     }
     setDeletingDestinationId(null)
   }

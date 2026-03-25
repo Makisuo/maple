@@ -1,5 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import type { LogsFilters, MetricsFilters, TracesFilters } from "@maple/query-engine"
+import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "@maple/query-engine/where-clause"
 import {
   AlertDeliveryEventId,
   AlertDestinationId,
@@ -139,6 +141,11 @@ export const AlertEvaluationStatus = Schema.Literals([
 export type AlertEvaluationStatus = Schema.Schema.Type<
   typeof AlertEvaluationStatus
 >
+
+export type AlertQueryFilterSet =
+  | { readonly source: "traces"; readonly filters: TracesFilters | undefined }
+  | { readonly source: "logs"; readonly filters: LogsFilters | undefined }
+  | { readonly source: "metrics"; readonly filters: MetricsFilters }
 
 const ChannelLabel = Schema.String.pipe(
   Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
@@ -484,6 +491,137 @@ export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryErr
   { httpApiStatus: 502 },
 ) {}
 
+export class AlertDestinationInUseError extends Schema.TaggedErrorClass<AlertDestinationInUseError>()(
+  "AlertDestinationInUseError",
+  {
+    message: Schema.String,
+    destinationId: AlertDestinationId,
+    ruleIds: Schema.Array(AlertRuleId),
+    ruleNames: Schema.Array(Schema.String),
+  },
+  { httpApiStatus: 409 },
+) {}
+
+export function buildAlertQueryFilterSet(params: {
+  readonly queryDataSource: AlertQueryDataSource
+  readonly serviceName: string | null
+  readonly metricName: string | null
+  readonly metricType: AlertMetricType | null
+  readonly queryWhereClause: string | null | undefined
+}): AlertQueryFilterSet | null {
+  const { clauses } = parseWhereClause(params.queryWhereClause ?? "")
+
+  if (params.queryDataSource === "traces") {
+    const filters: Record<string, unknown> = params.serviceName == null
+      ? {}
+      : { serviceName: params.serviceName }
+
+    for (const clause of clauses) {
+      const key = normalizeKey(clause.key)
+
+      if (key.startsWith("attr.")) {
+        if (filters.attributeKey == null) {
+          filters.attributeKey = key.slice(5)
+          if (clause.operator === "exists") {
+            filters.attributeFilterMode = "exists"
+          } else {
+            filters.attributeValue = clause.value
+          }
+        }
+        continue
+      }
+
+      if (key.startsWith("resource.")) {
+        if (filters.resourceAttributeKey == null) {
+          filters.resourceAttributeKey = key.slice(9)
+          if (clause.operator === "exists") {
+            filters.resourceAttributeFilterMode = "exists"
+          } else {
+            filters.resourceAttributeValue = clause.value
+          }
+        }
+        continue
+      }
+
+      switch (key) {
+        case "service.name":
+          filters.serviceName = clause.value
+          break
+        case "span.name":
+          filters.spanName = clause.value
+          break
+        case "deployment.environment":
+          filters.environments = splitCsv(clause.value)
+          break
+        case "deployment.commit_sha":
+          filters.commitShas = splitCsv(clause.value)
+          break
+        case "root_only": {
+          const boolValue = parseBoolean(clause.value)
+          if (boolValue != null) {
+            filters.rootSpansOnly = boolValue
+          }
+          break
+        }
+        case "has_error": {
+          const boolValue = parseBoolean(clause.value)
+          if (boolValue != null) {
+            filters.errorsOnly = boolValue
+          }
+          break
+        }
+      }
+    }
+
+    return {
+      source: "traces",
+      filters: Object.keys(filters).length > 0 ? filters as TracesFilters : undefined,
+    }
+  }
+
+  if (params.queryDataSource === "logs") {
+    const filters: Record<string, unknown> = params.serviceName == null
+      ? {}
+      : { serviceName: params.serviceName }
+
+    for (const clause of clauses) {
+      const key = normalizeKey(clause.key)
+      if (key === "service.name") filters.serviceName = clause.value
+      else if (key === "severity") filters.severity = clause.value
+    }
+
+    return {
+      source: "logs",
+      filters: Object.keys(filters).length > 0 ? filters as LogsFilters : undefined,
+    }
+  }
+
+  if (params.metricName == null || params.metricType == null) {
+    return null
+  }
+
+  const filters: Record<string, unknown> = {
+    metricName: params.metricName,
+    metricType: params.metricType,
+  }
+
+  if (params.serviceName != null) {
+    filters.serviceName = params.serviceName
+  }
+
+  for (const clause of clauses) {
+    const key = normalizeKey(clause.key)
+    if (key === "service.name") {
+      filters.serviceName = clause.value
+    }
+  }
+
+  return {
+    source: "metrics",
+    filters: filters as MetricsFilters,
+  }
+}
+
 export class AlertsApiGroup extends HttpApiGroup.make("alerts")
   .add(
     HttpApiEndpoint.get("listDestinations", "/destinations", {
@@ -523,7 +661,12 @@ export class AlertsApiGroup extends HttpApiGroup.make("alerts")
         destinationId: AlertDestinationId,
       },
       success: AlertDestinationDeleteResponse,
-      error: [AlertForbiddenError, AlertPersistenceError, AlertNotFoundError],
+      error: [
+        AlertForbiddenError,
+        AlertPersistenceError,
+        AlertNotFoundError,
+        AlertDestinationInUseError,
+      ],
     }),
   )
   .add(

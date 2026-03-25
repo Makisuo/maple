@@ -5,8 +5,8 @@ import {
   type QueryEngineSampleCountStrategy,
   QuerySpec,
 } from "@maple/query-engine"
-import { normalizeKey, parseWhereClause } from "@maple/query-engine/where-clause"
 import {
+  buildAlertQueryFilterSet,
   AlertComparator as AlertComparatorSchema,
   AlertDeliveryError,
   AlertDeliveryEventDocument,
@@ -14,6 +14,7 @@ import {
   AlertDeliveryStatus,
   AlertDestinationDeleteResponse,
   AlertDestinationDocument,
+  AlertDestinationInUseError,
   AlertDestinationTestResponse,
   AlertDestinationsListResponse,
   AlertEvaluationResult,
@@ -546,65 +547,48 @@ const compileRulePlan = (rule: {
         makeValidationError("query alerts require queryDataSource and queryAggregation"),
       )
     }
-    const { clauses } = parseWhereClause(rule.queryWhereClause ?? "")
+    const filterSet = buildAlertQueryFilterSet({
+      queryDataSource: rule.queryDataSource as AlertQueryDataSource,
+      serviceName: rule.serviceName,
+      metricName: rule.metricName,
+      metricType: rule.metricType,
+      queryWhereClause: rule.queryWhereClause,
+    })
 
-    if (rule.queryDataSource === "traces") {
-      const filters: Record<string, unknown> = {}
-      if (rule.serviceName) filters.serviceName = rule.serviceName
-      for (const c of clauses) {
-        const key = normalizeKey(c.key)
-        if (key === "service.name") filters.serviceName = c.value
-        else if (key === "span.name") filters.spanName = c.value
-        else if (key === "root_only" && (c.value === "true" || c.value === "1")) filters.rootSpansOnly = true
-        else if (key === "has_error" && (c.value === "true" || c.value === "1")) filters.errorsOnly = true
-      }
+    if (filterSet == null) {
+      return Effect.fail(
+        makeValidationError("metrics query alerts require metricName and metricType"),
+      )
+    }
+
+    if (filterSet.source === "traces") {
       query = decodeQuerySpecSync({
         kind: "timeseries",
         source: "traces",
         metric: rule.queryAggregation,
         groupBy: ["none"],
         bucketSeconds,
-        filters: Object.keys(filters).length ? filters : undefined,
+        filters: filterSet.filters,
       })
       sampleCountStrategy = "trace_count"
-    } else if (rule.queryDataSource === "logs") {
-      const filters: Record<string, unknown> = {}
-      for (const c of clauses) {
-        const key = normalizeKey(c.key)
-        if (key === "service.name") filters.serviceName = c.value
-        else if (key === "severity") filters.severity = c.value
-      }
+    } else if (filterSet.source === "logs") {
       query = decodeQuerySpecSync({
         kind: "timeseries",
         source: "logs",
         metric: "count",
         groupBy: ["none"],
         bucketSeconds,
-        filters: Object.keys(filters).length ? filters : undefined,
+        filters: filterSet.filters,
       })
       sampleCountStrategy = "log_count"
     } else {
-      if (rule.metricName == null || rule.metricType == null) {
-        return Effect.fail(
-          makeValidationError("metrics query alerts require metricName and metricType"),
-        )
-      }
-      const metricsFilters: Record<string, unknown> = {
-        metricName: rule.metricName,
-        metricType: rule.metricType,
-      }
-      if (rule.serviceName) metricsFilters.serviceName = rule.serviceName
-      for (const c of clauses) {
-        const key = normalizeKey(c.key)
-        if (key === "service.name") metricsFilters.serviceName = c.value
-      }
       query = decodeQuerySpecSync({
         kind: "timeseries",
         source: "metrics",
         metric: rule.queryAggregation,
         groupBy: ["none"],
         bucketSeconds,
-        filters: metricsFilters,
+        filters: filterSet.filters,
       })
       sampleCountStrategy = "metric_data_points"
     }
@@ -759,7 +743,10 @@ export interface AlertsServiceShape {
     destinationId: AlertDestinationDocument["id"],
   ) => Effect.Effect<
     AlertDestinationDeleteResponse,
-    AlertForbiddenError | AlertPersistenceError | AlertNotFoundError
+    | AlertForbiddenError
+    | AlertPersistenceError
+    | AlertNotFoundError
+    | AlertDestinationInUseError
   >
   readonly testDestination: (
     orgId: OrgId,
@@ -1647,6 +1634,36 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       ) {
         yield* requireAdmin(roles)
         yield* requireDestinationRow(orgId, destinationId)
+        const dependentRules = yield* dbExecute((db) =>
+          db
+            .select({
+              id: alertRules.id,
+              name: alertRules.name,
+              destinationIdsJson: alertRules.destinationIdsJson,
+            })
+            .from(alertRules)
+            .where(eq(alertRules.orgId, orgId)),
+        ).pipe(
+          Effect.map((rows) =>
+            rows.filter((row) =>
+              safeParseStringArray(row.destinationIdsJson).includes(destinationId),
+            ),
+          ),
+        )
+
+        if (dependentRules.length > 0) {
+          const ruleIds = dependentRules.map((row) => decodeAlertRuleIdSync(row.id))
+          const ruleNames = dependentRules.map((row) => row.name)
+          return yield* Effect.fail(
+            new AlertDestinationInUseError({
+              message: `Destination is still used by alert rules: ${ruleNames.join(", ")}`,
+              destinationId,
+              ruleIds,
+              ruleNames,
+            }),
+          )
+        }
+
         yield* dbExecute((db) =>
           db
             .delete(alertDestinations)
