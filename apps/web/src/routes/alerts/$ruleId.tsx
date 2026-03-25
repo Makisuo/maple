@@ -233,6 +233,9 @@ function RuleDetailPage() {
             for (const svc of serviceNames) {
               if (svc in point.series) base[svc] = point.series[svc]
             }
+          } else if (serviceNames.length === 1) {
+            const values = Object.values(point.series)
+            base[serviceNames[0]!] = values[0] ?? 0
           } else {
             Object.assign(base, point.series)
           }

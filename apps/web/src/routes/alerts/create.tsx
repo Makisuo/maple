@@ -179,6 +179,9 @@ function AlertCreatePage() {
             for (const svc of ruleForm.serviceNames) {
               if (svc in point.series) base[svc] = point.series[svc]
             }
+          } else if (ruleForm.serviceNames.length === 1) {
+            const values = Object.values(point.series)
+            base[ruleForm.serviceNames[0]!] = values[0] ?? 0
           } else {
             Object.assign(base, point.series)
           }
