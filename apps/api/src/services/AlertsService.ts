@@ -69,6 +69,7 @@ import {
 } from "@maple/db"
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm"
 import {
+  Duration,
   Effect,
   Layer,
   Option,
@@ -1453,40 +1454,24 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const runTimedFetch = <A>(
         destinationType: AlertDestinationType,
         label: string,
-        request: (signal: AbortSignal) => Promise<A>,
+        request: () => Promise<A>,
       ) =>
-        Effect.gen(function* (): Effect.fn.Return<A, AlertDeliveryError> {
-          const controller = new AbortController()
-          const timeoutMs = deliveryTimeoutMs()
-          const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-          const response = yield* Effect.tryPromise({
-            try: () => request(controller.signal),
-            catch: (error) => {
-              const isAbortError =
-                controller.signal.aborted ||
-                (error instanceof DOMException && error.name === "AbortError") ||
-                (error instanceof Error && error.name === "AbortError")
-
-              return makeDeliveryError(
-                isAbortError
-                  ? `${label} delivery timed out after ${timeoutMs}ms`
-                  : error instanceof Error
-                    ? error.message
-                    : `${label} delivery failed`,
-                destinationType,
-              )
-            },
-          }).pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                clearTimeout(timeoutId)
-              }),
+        Effect.tryPromise({
+          try: () => request(),
+          catch: (error) =>
+            makeDeliveryError(
+              error instanceof Error ? error.message : `${label} delivery failed`,
+              destinationType,
             ),
-          )
-
-          return response
-        })
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: Duration.millis(deliveryTimeoutMs()),
+            onTimeout: () =>
+              Effect.fail(
+                makeDeliveryError(`${label} delivery timed out after ${deliveryTimeoutMs()}ms`, destinationType),
+              ),
+          }),
+        )
 
       const dispatchDelivery = Effect.fn("AlertsService.dispatchDelivery")(function* (
         context: DispatchContext,
@@ -1495,10 +1480,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         switch (context.secretConfig.type) {
           case "slack": {
             const webhookUrl = context.secretConfig.webhookUrl
-            const response = yield* runTimedFetch("slack", "Slack", (signal) =>
+            const response = yield* runTimedFetch("slack", "Slack", () =>
               runtime.fetch(webhookUrl, {
                   method: "POST",
-                  signal,
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify({
                     text: `${context.ruleName}: ${formatEventTypeLabel(context.eventType)}`,
@@ -1616,10 +1600,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 },
               ],
             }
-            const response = yield* runTimedFetch("pagerduty", "PagerDuty", (signal) =>
+            const response = yield* runTimedFetch("pagerduty", "PagerDuty", () =>
               runtime.fetch("https://events.pagerduty.com/v2/enqueue", {
                   method: "POST",
-                  signal,
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify(body),
                 }),
@@ -1652,10 +1635,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 .digest("hex")
               headers["x-maple-signature"] = signature
             }
-            const response = yield* runTimedFetch("webhook", "Webhook", (signal) =>
+            const response = yield* runTimedFetch("webhook", "Webhook", () =>
               runtime.fetch(targetUrl, {
                   method: "POST",
-                  signal,
                   headers,
                   body: payloadJson,
                 }),

@@ -188,10 +188,6 @@ const makeUuidSequence = (...values: string[]): Pick<AlertRuntimeShape, "makeUui
   }
 }
 
-const makeTestFetch = (impl: typeof fetch): Pick<AlertRuntimeShape, "fetch"> => ({
-  fetch: impl,
-})
-
 const okFetch: typeof fetch = (async () => new Response("ok", { status: 200 })) as unknown as typeof fetch
 
 const insertDeliveryEventRow = (
@@ -805,11 +801,7 @@ describe("AlertsService", () => {
   it("times out stuck deliveries and enqueues a retry attempt", async () => {
     const fixedTime = 1_710_000_300_000
     const { url, dbPath } = createTempDbUrl()
-    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
-      new Promise((_resolve, reject) => {
-        const signal = init?.signal as AbortSignal | undefined
-        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
-      })) as typeof fetch
+    const hangingFetch = (() => new Promise(() => {})) as unknown as typeof fetch
 
     const setup = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1046,7 +1038,6 @@ describe("AlertsService", () => {
   })
 
   it("opens per-service incidents for groupBy=service rules", async () => {
-    useAdvancingClock()
     const { url } = createTempDbUrl()
 
     const breachingRow = {
@@ -1080,8 +1071,6 @@ describe("AlertsService", () => {
         Effect.succeed([breachingRow, healthyRow]) as never,
     }
 
-    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
-
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const alerts = yield* AlertsService
@@ -1114,7 +1103,7 @@ describe("AlertsService", () => {
         yield* alerts.runSchedulerTick()
 
         return yield* alerts.listIncidents(orgId)
-      }).pipe(Effect.provide(makeLayer(url, stub))),
+      }).pipe(Effect.provide(makeLayer(url, stub, { ...makeAdvancingClock(), fetch: okFetch }))),
     )
 
     expect(result.incidents).toHaveLength(1)
