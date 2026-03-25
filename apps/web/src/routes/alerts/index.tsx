@@ -554,8 +554,15 @@ function AlertsPage() {
     <>
       <DashboardLayout
         breadcrumbs={[{ label: "Alerts" }]}
-        title="Alerts"
-        description="Monitor your services and get notified when things go wrong."
+        titleContent={
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight truncate">Alerts</h1>
+              <Badge variant="secondary" className="text-xs font-medium">Beta</Badge>
+            </div>
+            <p className="text-muted-foreground">Monitor your services and get notified when things go wrong.</p>
+          </div>
+        }
         headerActions={
           <Button size="sm" render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}>
             <PlusIcon size={14} />

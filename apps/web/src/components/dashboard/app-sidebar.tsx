@@ -108,6 +108,7 @@ const investigateNavItems = [
     title: "Alerts",
     href: "/alerts",
     icon: BellIcon,
+    badge: "Beta",
   },
 ]
 
@@ -384,6 +385,13 @@ export function AppSidebar() {
                           <item.icon size={18} />
                           <span>{item.title}</span>
                         </SidebarMenuButton>
+                        {"badge" in item && (item.badge as string) ? (
+                          <SidebarMenuBadge>
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-medium">
+                              {item.badge as string}
+                            </Badge>
+                          </SidebarMenuBadge>
+                        ) : null}
                       </SidebarMenuItem>
                     )
                   })}

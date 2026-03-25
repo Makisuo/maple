@@ -291,7 +291,12 @@ function AlertCreatePage() {
         { label: "Alert Rules", href: "/alerts?tab=rules" },
         { label: editingRule ? "Edit Rule" : "New Rule" },
       ]}
-      title={pageTitle}
+      titleContent={
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight truncate">{pageTitle}</h1>
+          <Badge variant="secondary" className="text-xs font-medium">Beta</Badge>
+        </div>
+      }
       headerActions={
         <div className="flex items-center gap-2">
           <Button variant="outline" render={<Link to="/alerts" search={{ tab: "rules" }} />}>
