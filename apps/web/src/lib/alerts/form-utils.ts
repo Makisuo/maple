@@ -5,8 +5,10 @@ import {
   AlertRuleTestRequest,
   AlertRuleUpsertRequest,
   type AlertComparator,
+  type AlertDestinationCreateRequest,
   type AlertDestinationId,
   type AlertDestinationType,
+  type AlertDestinationUpdateRequest,
   type AlertMetricAggregation,
   type AlertMetricType,
   type AlertQueryAggregation,
@@ -248,13 +250,13 @@ export function signalToQueryParams(form: RuleFormState): {
 
   switch (form.signalType) {
     case "error_rate":
-      return { source: "traces", metric: "error_rate", filters: baseFilters }
+      return { source: "traces", metric: "error_rate", filters: { ...baseFilters, rootSpansOnly: true } }
     case "p95_latency":
-      return { source: "traces", metric: "p95_duration", filters: baseFilters }
+      return { source: "traces", metric: "p95_duration", filters: { ...baseFilters, rootSpansOnly: true } }
     case "p99_latency":
-      return { source: "traces", metric: "p99_duration", filters: baseFilters }
+      return { source: "traces", metric: "p99_duration", filters: { ...baseFilters, rootSpansOnly: true } }
     case "throughput":
-      return { source: "traces", metric: "count", filters: baseFilters }
+      return { source: "traces", metric: "count", filters: { ...baseFilters, rootSpansOnly: true } }
     case "apdex":
       return {
         source: "traces",
@@ -357,25 +359,25 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
   }
 }
 
-export function buildDestinationCreatePayload(form: DestinationFormState) {
+export function buildDestinationCreatePayload(form: DestinationFormState): AlertDestinationCreateRequest {
   switch (form.type) {
     case "slack":
-      return { type: "slack" as const, name: form.name.trim(), enabled: form.enabled, webhookUrl: form.webhookUrl.trim(), channelLabel: form.channelLabel.trim() || undefined }
+      return { type: "slack", name: form.name.trim(), enabled: form.enabled, webhookUrl: form.webhookUrl.trim(), channelLabel: form.channelLabel.trim() || undefined }
     case "pagerduty":
-      return { type: "pagerduty" as const, name: form.name.trim(), enabled: form.enabled, integrationKey: form.integrationKey.trim() }
+      return { type: "pagerduty", name: form.name.trim(), enabled: form.enabled, integrationKey: form.integrationKey.trim() }
     case "webhook":
-      return { type: "webhook" as const, name: form.name.trim(), enabled: form.enabled, url: form.url.trim(), signingSecret: form.signingSecret.trim() || undefined }
+      return { type: "webhook", name: form.name.trim(), enabled: form.enabled, url: form.url.trim(), signingSecret: form.signingSecret.trim() || undefined }
   }
 }
 
-export function buildDestinationUpdatePayload(form: DestinationFormState) {
+export function buildDestinationUpdatePayload(form: DestinationFormState): AlertDestinationUpdateRequest {
   switch (form.type) {
     case "slack":
-      return { type: "slack" as const, name: form.name.trim() || undefined, enabled: form.enabled, channelLabel: form.channelLabel.trim() || undefined, webhookUrl: form.webhookUrl.trim() || undefined }
+      return { type: "slack", name: form.name.trim() || undefined, enabled: form.enabled, channelLabel: form.channelLabel.trim() || undefined, webhookUrl: form.webhookUrl.trim() || undefined }
     case "pagerduty":
-      return { type: "pagerduty" as const, name: form.name.trim() || undefined, enabled: form.enabled, integrationKey: form.integrationKey.trim() || undefined }
+      return { type: "pagerduty", name: form.name.trim() || undefined, enabled: form.enabled, integrationKey: form.integrationKey.trim() || undefined }
     case "webhook":
-      return { type: "webhook" as const, name: form.name.trim() || undefined, enabled: form.enabled, url: form.url.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined }
+      return { type: "webhook", name: form.name.trim() || undefined, enabled: form.enabled, url: form.url.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined }
   }
 }
 
