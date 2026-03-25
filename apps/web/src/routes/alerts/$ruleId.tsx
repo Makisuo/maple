@@ -197,7 +197,7 @@ function RuleDetailPage() {
   const formState = useMemo(() => rule ? ruleToFormState(rule) : defaultRuleForm(), [rule])
   const queryParams = useMemo(() => signalToQueryParams(formState), [formState])
 
-  const chartGroupBy = rule?.groupBy === "service" && (!rule?.serviceNames || rule.serviceNames.length === 0)
+  const chartGroupBy = (rule?.serviceNames?.length ?? 0) > 1
     ? "service" as const
     : "none" as const
 
@@ -224,12 +224,23 @@ function RuleDetailPage() {
 
   const chartData = useMemo(() => {
     if (!chartQueryInput) return []
+    const serviceNames = rule?.serviceNames ?? []
     return Result.builder(chartResult)
       .onSuccess((response) =>
-        response.data.map((point) => ({ bucket: point.bucket, ...point.series })),
+        response.data.map((point) => {
+          const base: Record<string, unknown> = { bucket: point.bucket }
+          if (serviceNames.length > 1) {
+            for (const svc of serviceNames) {
+              if (svc in point.series) base[svc] = point.series[svc]
+            }
+          } else {
+            Object.assign(base, point.series)
+          }
+          return base
+        }),
       )
       .orElse(() => [])
-  }, [chartResult, chartQueryInput])
+  }, [chartResult, chartQueryInput, rule?.serviceNames])
 
   const chartLoading = !chartQueryInput || Result.isInitial(chartResult)
 

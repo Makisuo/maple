@@ -144,7 +144,7 @@ function AlertCreatePage() {
 
   const queryParams = useMemo(() => signalToQueryParams(ruleForm), [ruleForm])
 
-  const chartGroupBy = ruleForm.groupBy === "service" && ruleForm.serviceNames.length === 0
+  const chartGroupBy = ruleForm.serviceNames.length > 1
     ? "service" as const
     : "none" as const
 
@@ -173,13 +173,20 @@ function AlertCreatePage() {
     if (!chartQueryInput) return []
     return Result.builder(chartResult)
       .onSuccess((response) =>
-        response.data.map((point) => ({
-          bucket: point.bucket,
-          ...point.series,
-        })),
+        response.data.map((point) => {
+          const base: Record<string, unknown> = { bucket: point.bucket }
+          if (ruleForm.serviceNames.length > 1) {
+            for (const svc of ruleForm.serviceNames) {
+              if (svc in point.series) base[svc] = point.series[svc]
+            }
+          } else {
+            Object.assign(base, point.series)
+          }
+          return base
+        }),
       )
       .orElse(() => [])
-  }, [chartResult, chartQueryInput])
+  }, [chartResult, chartQueryInput, ruleForm.serviceNames])
 
   const chartLoading = !chartQueryInput || Result.isInitial(chartResult)
   const threshold = Number(ruleForm.threshold)
