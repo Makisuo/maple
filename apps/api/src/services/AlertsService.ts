@@ -57,7 +57,7 @@ import {
   type AlertRuleRow,
   alertRuleStates,
 } from "@maple/db"
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm"
 import {
   Cause,
   Effect,
@@ -75,7 +75,7 @@ import {
   parseBase64Aes256GcmKey,
   type EncryptedValue,
 } from "./Crypto"
-import { Database } from "./DatabaseLive"
+import { Database, type DatabaseClient } from "./DatabaseLive"
 import { Env } from "./Env"
 import { QueryEngineService, type GroupedAlertObservation } from "./QueryEngineService"
 
@@ -135,6 +135,7 @@ interface EvaluatedRule {
 }
 
 interface DispatchContext {
+  readonly deliveryKey: string
   readonly destination: AlertDestinationRow
   readonly destinationDoc: AlertDestinationDocument
   readonly publicConfig: DestinationPublicConfig
@@ -161,7 +162,35 @@ interface DispatchResult {
   readonly responseCode: number | null
 }
 
+interface DeliveryPayloadContext {
+  readonly eventType: AlertEventTypeValue
+  readonly incidentId: string | null
+  readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
+  readonly dedupeKey: string
+  readonly ruleId: string
+  readonly ruleName: string
+  readonly serviceName: string | null
+  readonly signalType: AlertSignalType
+  readonly severity: AlertSeverity
+  readonly comparator: AlertComparator
+  readonly threshold: number
+  readonly windowMinutes: number
+  readonly value: number | null
+  readonly sampleCount: number | null
+}
+
+interface DeliveryAttemptFailure {
+  readonly message: string
+  readonly kind: "transport" | "timeout" | "payload" | "destination" | "unknown"
+  readonly retryable: boolean
+}
+
 const MAX_DELIVERY_ATTEMPTS = 5
+const DELIVERY_TIMEOUT_MS_DEFAULT = 15_000
+const DELIVERY_LEASE_TTL_MS = 30_000
+
+type DatabaseTransaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
+type DatabaseExecutor = DatabaseClient | DatabaseTransaction
 
 const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(
   AlertDestinationDocument.fields.id,
@@ -190,6 +219,10 @@ const adminRoles = [decodeRoleNameSync("root"), decodeRoleNameSync("org:admin")]
 
 let nowImpl = () => Date.now()
 const now = () => nowImpl()
+let randomUuidImpl = () => randomUUID()
+const makeUuid = () => randomUuidImpl()
+let deliveryTimeoutMsImpl = () => DELIVERY_TIMEOUT_MS_DEFAULT
+const deliveryTimeoutMs = () => deliveryTimeoutMsImpl()
 
 const toIso = (value: number | null | undefined): IsoDateTimeValue | null =>
   value == null ? null : decodeIsoDateTimeStringSync(new Date(value).toISOString())
@@ -766,9 +799,17 @@ export const __testables = {
   setNow: (impl: () => number) => {
     nowImpl = impl
   },
+  setRandomUuid: (impl: () => string) => {
+    randomUuidImpl = impl
+  },
+  setDeliveryTimeoutMs: (impl: () => number) => {
+    deliveryTimeoutMsImpl = impl
+  },
   reset: () => {
     alertFetchImpl = fetch
     nowImpl = () => Date.now()
+    randomUuidImpl = () => randomUUID()
+    deliveryTimeoutMsImpl = () => DELIVERY_TIMEOUT_MS_DEFAULT
   },
 }
 
@@ -1284,6 +1325,49 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         }))
       })
 
+      const buildDeliveryKey = (
+        incidentId: string,
+        destinationId: string,
+        eventType: AlertEventTypeValue,
+        scheduledAt: number,
+      ) => [incidentId, destinationId, eventType, scheduledAt].join(":")
+
+      const insertDeliveryEventRecord = (
+        db: DatabaseExecutor,
+        orgId: OrgId,
+        incidentId: string | null,
+        ruleId: string,
+        destinationId: string,
+        eventType: AlertEventTypeValue,
+        payload: Record<string, unknown>,
+        scheduledAt: number,
+        deliveryKey: string,
+        attemptNumber: number,
+      ) =>
+        db.insert(alertDeliveryEvents).values({
+          id: makeUuid(),
+          orgId,
+          incidentId,
+          ruleId,
+          destinationId,
+          deliveryKey,
+          eventType,
+          attemptNumber,
+          status: "queued",
+          scheduledAt,
+          claimedAt: null,
+          claimExpiresAt: null,
+          claimedBy: null,
+          attemptedAt: null,
+          providerMessage: null,
+          providerReference: null,
+          responseCode: null,
+          errorMessage: null,
+          payloadJson: JSON.stringify(payload),
+          createdAt: scheduledAt,
+          updatedAt: scheduledAt,
+        })
+
       const insertDeliveryEvent = Effect.fn("AlertsService.insertDeliveryEvent")(function* (
         orgId: OrgId,
         incidentId: string | null,
@@ -1295,28 +1379,19 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         deliveryKey: string,
         attemptNumber: number,
       ) {
-        const id = randomUUID()
         yield* database.execute((db) =>
-          db.insert(alertDeliveryEvents).values({
-            id,
+          insertDeliveryEventRecord(
+            db,
             orgId,
             incidentId,
             ruleId,
             destinationId,
-            deliveryKey,
             eventType,
-            attemptNumber,
-            status: "queued",
+            payload,
             scheduledAt,
-            attemptedAt: null,
-            providerMessage: null,
-            providerReference: null,
-            responseCode: null,
-            errorMessage: null,
-            payloadJson: JSON.stringify(payload),
-            createdAt: scheduledAt,
-            updatedAt: scheduledAt,
-          }),
+            deliveryKey,
+            attemptNumber,
+          ),
         ).pipe(Effect.mapError(makePersistenceError))
       })
 
@@ -1348,6 +1423,44 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           ? `${env.MAPLE_APP_BASE_URL}/services/${encodeURIComponent(serviceName)}`
           : `${env.MAPLE_APP_BASE_URL}/alerts`
 
+      const runTimedFetch = <A>(
+        destinationType: AlertDestinationType,
+        label: string,
+        request: (signal: AbortSignal) => Promise<A>,
+      ) =>
+        Effect.gen(function* (): Effect.fn.Return<A, AlertDeliveryError> {
+          const controller = new AbortController()
+          const timeoutMs = deliveryTimeoutMs()
+          const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+          const response = yield* Effect.tryPromise({
+            try: () => request(controller.signal),
+            catch: (error) => {
+              const isAbortError =
+                controller.signal.aborted ||
+                (error instanceof DOMException && error.name === "AbortError") ||
+                (error instanceof Error && error.name === "AbortError")
+
+              return makeDeliveryError(
+                isAbortError
+                  ? `${label} delivery timed out after ${timeoutMs}ms`
+                  : error instanceof Error
+                    ? error.message
+                    : `${label} delivery failed`,
+                destinationType,
+              )
+            },
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                clearTimeout(timeoutId)
+              }),
+            ),
+          )
+
+          return response
+        })
+
       const dispatchDelivery = Effect.fn("AlertsService.dispatchDelivery")(function* (
         context: DispatchContext,
         payloadJson: string,
@@ -1355,10 +1468,10 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         switch (context.secretConfig.type) {
           case "slack": {
             const webhookUrl = context.secretConfig.webhookUrl
-            const response = yield* Effect.tryPromise({
-              try: () =>
-                alertFetchImpl(webhookUrl, {
+            const response = yield* runTimedFetch("slack", "Slack", (signal) =>
+              alertFetchImpl(webhookUrl, {
                   method: "POST",
+                  signal,
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify({
                     text: `${context.ruleName}: ${formatEventTypeLabel(context.eventType)}`,
@@ -1434,12 +1547,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                     ],
                   }),
                 }),
-              catch: (error) =>
-                makeDeliveryError(
-                  error instanceof Error ? error.message : "Slack delivery failed",
-                  "slack",
-                ),
-            })
+            )
             if (!response.ok) {
               return yield* Effect.fail(
                 makeDeliveryError(
@@ -1481,19 +1589,14 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 },
               ],
             }
-            const response = yield* Effect.tryPromise({
-              try: () =>
-                alertFetchImpl("https://events.pagerduty.com/v2/enqueue", {
+            const response = yield* runTimedFetch("pagerduty", "PagerDuty", (signal) =>
+              alertFetchImpl("https://events.pagerduty.com/v2/enqueue", {
                   method: "POST",
+                  signal,
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify(body),
                 }),
-              catch: (error) =>
-                makeDeliveryError(
-                  error instanceof Error ? error.message : "PagerDuty delivery failed",
-                  "pagerduty",
-                ),
-            })
+            )
             if (!response.ok) {
               return yield* Effect.fail(
                 makeDeliveryError(
@@ -1514,7 +1617,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             const headers: Record<string, string> = {
               "content-type": "application/json",
               "x-maple-event-type": context.eventType,
-              "x-maple-delivery-key": context.dedupeKey,
+              "x-maple-delivery-key": context.deliveryKey,
             }
             if (signingSecret) {
               const signature = createHmac("sha256", signingSecret)
@@ -1522,19 +1625,14 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 .digest("hex")
               headers["x-maple-signature"] = signature
             }
-            const response = yield* Effect.tryPromise({
-              try: () =>
-                alertFetchImpl(targetUrl, {
+            const response = yield* runTimedFetch("webhook", "Webhook", (signal) =>
+              alertFetchImpl(targetUrl, {
                   method: "POST",
+                  signal,
                   headers,
                   body: payloadJson,
                 }),
-              catch: (error) =>
-                makeDeliveryError(
-                  error instanceof Error ? error.message : "Webhook delivery failed",
-                  "webhook",
-                ),
-            })
+            )
             if (!response.ok) {
               return yield* Effect.fail(
                 makeDeliveryError(
@@ -1552,7 +1650,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         }
       })
 
-      const buildPayload = (context: DispatchContext) => ({
+      const buildPayload = (context: DeliveryPayloadContext) => ({
         eventType: context.eventType,
         incidentId: context.incidentId,
         incidentStatus: context.incidentStatus,
@@ -1572,8 +1670,40 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           sampleCount: context.sampleCount,
         },
         linkUrl: composeLinkUrl(context.serviceName),
-        sentAt: new Date().toISOString(),
+        sentAt: new Date(now()).toISOString(),
       })
+
+      const toDeliveryAttemptFailure = (error: unknown): DeliveryAttemptFailure => {
+        if (error instanceof AlertValidationError) {
+          return {
+            message: error.message,
+            kind: "payload",
+            retryable: false,
+          }
+        }
+
+        if (error instanceof AlertDeliveryError) {
+          return {
+            message: error.message,
+            kind: error.message.includes("timed out") ? "timeout" : "transport",
+            retryable: true,
+          }
+        }
+
+        if (error instanceof AlertNotFoundError) {
+          return {
+            message: error.message,
+            kind: "destination",
+            retryable: false,
+          }
+        }
+
+        return {
+          message: error instanceof Error ? error.message : "Delivery failed",
+          kind: "unknown",
+          retryable: false,
+        }
+      }
 
       const sendImmediateNotification = Effect.fn(
         "AlertsService.sendImmediateNotification",
@@ -1594,6 +1724,70 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         return yield* dispatchDelivery(fullContext, payloadJson)
       })
 
+      const queueIncidentNotificationsOnDb = (
+        db: DatabaseExecutor,
+        orgId: OrgId,
+        rule: NormalizedRule,
+        incident: AlertIncidentRow,
+        evaluation: EvaluatedRule,
+        eventType: AlertEventTypeValue,
+        scheduledAt: number,
+      ) => {
+        if (rule.destinationIds.length === 0) return Promise.resolve()
+
+        return db
+          .select({
+            id: alertDestinations.id,
+            enabled: alertDestinations.enabled,
+          })
+          .from(alertDestinations)
+          .where(
+            and(
+              eq(alertDestinations.orgId, orgId),
+              inArray(alertDestinations.id, [...rule.destinationIds]),
+            ),
+          )
+          .then(async (rows) => {
+            const destinations = new Map(rows.map((row) => [row.id, row]))
+            const payload = buildPayload({
+              eventType,
+              incidentId: incident.id,
+              incidentStatus: incident.status as Schema.Schema.Type<
+                typeof AlertIncidentStatus
+              >,
+              dedupeKey: incident.dedupeKey,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              serviceName: incident.serviceName ?? rule.serviceName,
+              signalType: rule.signalType,
+              severity: rule.severity,
+              comparator: rule.comparator,
+              threshold: rule.threshold,
+              windowMinutes: rule.windowMinutes,
+              value: evaluation.value,
+              sampleCount: evaluation.sampleCount,
+            })
+
+            for (const destinationId of rule.destinationIds) {
+              const destination = destinations.get(destinationId)
+              if (!destination || destination.enabled !== 1) continue
+
+              await insertDeliveryEventRecord(
+                db,
+                orgId,
+                incident.id,
+                rule.id,
+                destinationId,
+                eventType,
+                payload,
+                scheduledAt,
+                buildDeliveryKey(incident.id, destinationId, eventType, scheduledAt),
+                1,
+              )
+            }
+          })
+      }
+
       const queueIncidentNotifications = Effect.fn(
         "AlertsService.queueIncidentNotifications",
       )(function* (
@@ -1602,70 +1796,19 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         incident: AlertIncidentRow,
         evaluation: EvaluatedRule,
         eventType: AlertEventTypeValue,
+        scheduledAt: number,
       ) {
-        if (rule.destinationIds.length === 0) return
-        const rows = yield* database.execute((db) =>
-          db
-            .select()
-            .from(alertDestinations)
-            .where(
-              and(
-                eq(alertDestinations.orgId, orgId),
-                inArray(alertDestinations.id, [...rule.destinationIds]),
-              ),
-            ),
-        ).pipe(Effect.mapError(makePersistenceError))
-
-        const destinations = new Map(rows.map((row) => [row.id, row]))
-        const scheduledAt = now()
-
-        for (const destinationId of rule.destinationIds) {
-          const destination = destinations.get(destinationId)
-          if (!destination || destination.enabled !== 1) continue
-          const publicConfig = yield* parsePublicConfig(destination)
-          const secretConfig = yield* parseJson<DestinationSecretConfig>(
-            yield* decryptSecret(destination, encryptionKey),
-            "Stored destination secret is invalid",
-          )
-          const deliveryKey = [
-            incident.id,
-            destinationId,
-            eventType,
-            scheduledAt,
-          ].join(":")
-          yield* insertDeliveryEvent(
+        yield* database.execute((db) =>
+          queueIncidentNotificationsOnDb(
+            db,
             orgId,
-            incident.id,
-            rule.id,
-            destinationId,
+            rule,
+            incident,
+            evaluation,
             eventType,
-            buildPayload({
-              destination,
-              destinationDoc: rowToDestinationDocument(destination, publicConfig),
-              publicConfig,
-              secretConfig,
-              ruleId: rule.id,
-              ruleName: rule.name,
-              serviceName: rule.serviceName,
-              signalType: rule.signalType,
-              severity: rule.severity,
-              comparator: rule.comparator,
-              threshold: rule.threshold,
-              windowMinutes: rule.windowMinutes,
-              eventType,
-              incidentId: incident.id,
-              incidentStatus: incident.status as Schema.Schema.Type<
-                typeof AlertIncidentStatus
-              >,
-              dedupeKey: incident.dedupeKey,
-              value: evaluation.value,
-              sampleCount: evaluation.sampleCount,
-            }),
             scheduledAt,
-            deliveryKey,
-            1,
-          )
-        }
+          ),
+        ).pipe(Effect.mapError(makePersistenceError))
       })
 
       const computeRetryDelayMs = (attemptNumber: number) => {

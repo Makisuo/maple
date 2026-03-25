@@ -167,6 +167,9 @@ export const alertDeliveryEvents = sqliteTable(
     attemptNumber: integer("attempt_number", { mode: "number" }).notNull(),
     status: text("status").notNull(),
     scheduledAt: integer("scheduled_at", { mode: "number" }).notNull(),
+    claimedAt: integer("claimed_at", { mode: "number" }),
+    claimExpiresAt: integer("claim_expires_at", { mode: "number" }),
+    claimedBy: text("claimed_by"),
     attemptedAt: integer("attempted_at", { mode: "number" }),
     providerMessage: text("provider_message"),
     providerReference: text("provider_reference"),
@@ -183,6 +186,11 @@ export const alertDeliveryEvents = sqliteTable(
       table.incidentId,
     ),
     index("alert_delivery_events_due_idx").on(table.status, table.scheduledAt),
+    index("alert_delivery_events_claim_idx").on(
+      table.status,
+      table.claimExpiresAt,
+      table.scheduledAt,
+    ),
     uniqueIndex("alert_delivery_events_delivery_attempt_idx").on(
       table.deliveryKey,
       table.attemptNumber,

@@ -119,6 +119,7 @@ export type AlertEventType = Schema.Schema.Type<typeof AlertEventType>
 
 export const AlertDeliveryStatus = Schema.Literals([
   "queued",
+  "processing",
   "success",
   "failed",
 ]).annotate({

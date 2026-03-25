@@ -107,6 +107,10 @@ function AlertCreatePage() {
   const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), { mode: "promiseExit" })
   const testRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "testRule"), { mode: "promiseExit" })
 
+  const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "24h")
+  const [activeAttributeKey, setActiveAttributeKey] = useState<string | null>(null)
+  const [activeResourceAttributeKey, setActiveResourceAttributeKey] = useState<string | null>(null)
+
   const facetsResult = useAtomValue(getTracesFacetsResultAtom({ data: {} }))
   const serviceNameOptions = useMemo(() =>
     Result.builder(facetsResult)
@@ -114,6 +118,104 @@ function AlertCreatePage() {
       .orElse(() => [] as string[]),
     [facetsResult],
   )
+
+  const logsFacetsResult = useAtomValue(getLogsFacetsResultAtom({ data: {} }))
+
+  const spanAttributeKeysResult = useAtomValue(
+    getSpanAttributeKeysResultAtom({ data: { startTime, endTime } }),
+  )
+  const spanAttributeValuesResult = useAtomValue(
+    getSpanAttributeValuesResultAtom({
+      data: { startTime, endTime, attributeKey: activeAttributeKey ?? "" },
+    }),
+  )
+  const resourceAttributeKeysResult = useAtomValue(
+    getResourceAttributeKeysResultAtom({ data: { startTime, endTime } }),
+  )
+  const resourceAttributeValuesResult = useAtomValue(
+    getResourceAttributeValuesResultAtom({
+      data: { startTime, endTime, attributeKey: activeResourceAttributeKey ?? "" },
+    }),
+  )
+
+  const attributeKeys = useMemo(
+    () =>
+      Result.builder(spanAttributeKeysResult)
+        .onSuccess((response) => response.data.map((row) => row.attributeKey))
+        .orElse(() => [] as string[]),
+    [spanAttributeKeysResult],
+  )
+  const attributeValues = useMemo(
+    () =>
+      activeAttributeKey
+        ? Result.builder(spanAttributeValuesResult)
+            .onSuccess((response) => response.data.map((row) => row.attributeValue))
+            .orElse(() => [] as string[])
+        : [],
+    [activeAttributeKey, spanAttributeValuesResult],
+  )
+  const resourceAttributeKeys = useMemo(
+    () =>
+      Result.builder(resourceAttributeKeysResult)
+        .onSuccess((response) => response.data.map((row) => row.attributeKey))
+        .orElse(() => [] as string[]),
+    [resourceAttributeKeysResult],
+  )
+  const resourceAttributeValues = useMemo(
+    () =>
+      activeResourceAttributeKey
+        ? Result.builder(resourceAttributeValuesResult)
+            .onSuccess((response) => response.data.map((row) => row.attributeValue))
+            .orElse(() => [] as string[])
+        : [],
+    [activeResourceAttributeKey, resourceAttributeValuesResult],
+  )
+
+  const autocompleteValues = useMemo(() => {
+    const tracesFacets = Result.builder(facetsResult)
+      .onSuccess((response) => response.data)
+      .orElse(() => ({ services: [] as { name: string }[], spanNames: [] as { name: string }[], deploymentEnvs: [] as { name: string }[] }))
+
+    const logsFacets = Result.builder(logsFacetsResult)
+      .onSuccess((response) => response.data)
+      .orElse(() => ({ services: [] as { name: string }[], severities: [] as { name: string }[] }))
+
+    const toNames = (items: Array<{ name: string }>): string[] => {
+      const seen = new Set<string>()
+      const values: string[] = []
+      for (const item of items) {
+        const next = item.name.trim()
+        if (!next || seen.has(next)) continue
+        seen.add(next)
+        values.push(next)
+      }
+      return values
+    }
+
+    return {
+      traces: {
+        services: toNames(tracesFacets.services),
+        spanNames: toNames(tracesFacets.spanNames),
+        environments: toNames(tracesFacets.deploymentEnvs),
+        attributeKeys,
+        attributeValues,
+        resourceAttributeKeys,
+        resourceAttributeValues,
+      } satisfies WhereClauseAutocompleteValues,
+      logs: {
+        services: toNames(logsFacets.services),
+        severities: toNames(logsFacets.severities),
+        attributeKeys,
+        attributeValues,
+        resourceAttributeKeys,
+        resourceAttributeValues,
+      } satisfies WhereClauseAutocompleteValues,
+      metrics: {
+        services: toNames(tracesFacets.services),
+        metricTypes: [...QUERY_BUILDER_METRIC_TYPES],
+      } satisfies WhereClauseAutocompleteValues,
+    }
+  }, [facetsResult, logsFacetsResult, attributeKeys, attributeValues, resourceAttributeKeys, resourceAttributeValues])
 
   const destinations = Result.builder(destinationsResult)
     .onSuccess((response) => [...response.destinations] as AlertDestinationDocument[])
@@ -146,7 +248,6 @@ function AlertCreatePage() {
     }
   }, [editingRule, initialized])
 
-  const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "24h")
   const bucketSeconds = useMemo(
     () => computeBucketSeconds(startTime, endTime, CHART_BUCKET_TARGET),
     [startTime, endTime],
@@ -458,6 +559,9 @@ function AlertCreatePage() {
                     dataSource={ruleForm.queryDataSource}
                     value={ruleForm.queryWhereClause}
                     onChange={(value) => setRuleForm((c) => ({ ...c, queryWhereClause: value }))}
+                    values={autocompleteValues[ruleForm.queryDataSource]}
+                    onActiveAttributeKey={setActiveAttributeKey}
+                    onActiveResourceAttributeKey={setActiveResourceAttributeKey}
                     rows={2}
                     placeholder='service.name = "payments" AND has_error = true'
                   />
