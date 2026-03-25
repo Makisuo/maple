@@ -144,6 +144,10 @@ const ChannelLabel = Schema.String.pipe(
   Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
 )
 
+const NonEmptyString = Schema.String.pipe(
+  Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
+)
+
 const OptionalNonEmptyString = Schema.optional(
   Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed())),
 )
@@ -165,7 +169,7 @@ export class SlackAlertDestinationConfig extends Schema.Class<SlackAlertDestinat
 )({
   type: Schema.Literal("slack"),
   name: ChannelLabel,
-  webhookUrl: Schema.String,
+  webhookUrl: NonEmptyString,
   channelLabel: OptionalNonEmptyString,
   enabled: Schema.optional(Schema.Boolean),
 }) {}
@@ -175,7 +179,7 @@ export class PagerDutyAlertDestinationConfig extends Schema.Class<PagerDutyAlert
 )({
   type: Schema.Literal("pagerduty"),
   name: ChannelLabel,
-  integrationKey: Schema.String,
+  integrationKey: NonEmptyString,
   enabled: Schema.optional(Schema.Boolean),
 }) {}
 
@@ -184,7 +188,7 @@ export class WebhookAlertDestinationConfig extends Schema.Class<WebhookAlertDest
 )({
   type: Schema.Literal("webhook"),
   name: ChannelLabel,
-  url: Schema.String,
+  url: NonEmptyString,
   signingSecret: Schema.optional(Schema.String),
   enabled: Schema.optional(Schema.Boolean),
 }) {}
@@ -193,20 +197,20 @@ export const AlertDestinationCreateRequest = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("slack"),
     name: ChannelLabel,
-    webhookUrl: Schema.String,
+    webhookUrl: NonEmptyString,
     channelLabel: OptionalNonEmptyString,
     enabled: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("pagerduty"),
     name: ChannelLabel,
-    integrationKey: Schema.String,
+    integrationKey: NonEmptyString,
     enabled: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("webhook"),
     name: ChannelLabel,
-    url: Schema.String,
+    url: NonEmptyString,
     signingSecret: Schema.optional(Schema.String),
     enabled: Schema.optional(Schema.Boolean),
   }),

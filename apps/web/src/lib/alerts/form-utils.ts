@@ -306,7 +306,7 @@ export function flattenAlertChartData(
         if (svc in point.series) base[svc] = point.series[svc]
       }
     } else if (serviceNames.length === 1) {
-      base[serviceNames[0]!] = point.series[serviceNames[0]!] ?? 0
+      base[serviceNames[0]!] = point.series[serviceNames[0]!] ?? point.series["all"] ?? 0
     } else {
       Object.assign(base, point.series)
     }

@@ -63,7 +63,6 @@ import {
   Effect,
   Exit,
   Layer,
-  Option,
   Redacted,
   Schema,
   ServiceMap,
@@ -121,8 +120,6 @@ interface NormalizedRule {
   readonly compiledPlan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>
   readonly createdAt: number
   readonly updatedAt: number
-  readonly createdBy: string
-  readonly updatedBy: string
 }
 
 interface EvaluatedRule {
@@ -177,6 +174,27 @@ interface DeliveryPayloadContext {
   readonly windowMinutes: number
   readonly value: number | null
   readonly sampleCount: number | null
+}
+
+interface StoredDeliveryPayload {
+  readonly eventType?: AlertEventTypeValue
+  readonly incidentId?: string | null
+  readonly incidentStatus?: string
+  readonly dedupeKey?: string
+  readonly rule?: {
+    readonly id?: string
+    readonly name?: string
+    readonly signalType?: string
+    readonly severity?: string
+    readonly serviceName?: string | null
+    readonly comparator?: string
+    readonly threshold?: number
+    readonly windowMinutes?: number
+  }
+  readonly observed?: {
+    readonly value?: number | null
+    readonly sampleCount?: number | null
+  }
 }
 
 interface DeliveryAttemptFailure {
@@ -937,6 +955,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       )
       const workerId = makeUuid()
 
+      const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
+        database.execute(fn).pipe(Effect.mapError(makePersistenceError))
+
       const requireAdmin = Effect.fn("AlertsService.requireAdmin")(function* (
         roles: ReadonlyArray<RoleName>,
       ) {
@@ -949,11 +970,11 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         )
       })
 
-      const selectDestinationRow = Effect.fn("AlertsService.selectDestinationRow")(function* (
+      const requireDestinationRow = Effect.fn("AlertsService.requireDestinationRow")(function* (
         orgId: OrgId,
         destinationId: AlertDestinationDocument["id"],
       ) {
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select()
             .from(alertDestinations)
@@ -964,17 +985,8 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               ),
             )
             .limit(1),
-        ).pipe(Effect.mapError(makePersistenceError))
-
-        return Option.fromNullishOr(rows[0])
-      })
-
-      const requireDestinationRow = Effect.fn("AlertsService.requireDestinationRow")(function* (
-        orgId: OrgId,
-        destinationId: AlertDestinationDocument["id"],
-      ) {
-        const row = yield* selectDestinationRow(orgId, destinationId)
-        if (Option.isSome(row)) return row.value
+        )
+        if (rows[0]) return rows[0]
         return yield* Effect.fail(
           new AlertNotFoundError({
             message: "Alert destination not found",
@@ -1001,27 +1013,18 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         } as const
       })
 
-      const selectRuleRow = Effect.fn("AlertsService.selectRuleRow")(function* (
+      const requireRuleRow = Effect.fn("AlertsService.requireRuleRow")(function* (
         orgId: OrgId,
         ruleId: AlertRuleDocument["id"],
       ) {
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select()
             .from(alertRules)
             .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
             .limit(1),
-        ).pipe(Effect.mapError(makePersistenceError))
-
-        return Option.fromNullishOr(rows[0])
-      })
-
-      const requireRuleRow = Effect.fn("AlertsService.requireRuleRow")(function* (
-        orgId: OrgId,
-        ruleId: AlertRuleDocument["id"],
-      ) {
-        const row = yield* selectRuleRow(orgId, ruleId)
-        if (Option.isSome(row)) return row.value
+        )
+        if (rows[0]) return rows[0]
         return yield* Effect.fail(
           new AlertNotFoundError({
             message: "Alert rule not found",
@@ -1066,8 +1069,6 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           compiledPlan: yield* parseCompiledPlan(row),
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
-          createdBy: row.createdBy,
-          updatedBy: row.updatedBy,
         }
       })
 
@@ -1153,8 +1154,6 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           destinationIds,
           createdAt: now(),
           updatedAt: now(),
-          createdBy: "system",
-          updatedBy: "system",
         }
         const compiledPlan = yield* compileRulePlan(normalizedBase)
 
@@ -1170,7 +1169,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       ) {
         if (destinationIds.length === 0) return
 
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select({ id: alertDestinations.id })
             .from(alertDestinations)
@@ -1180,7 +1179,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 inArray(alertDestinations.id, [...destinationIds]),
               ),
             ),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
         const existingIds = new Set(rows.map((row) => row.id))
         const missing = destinationIds.filter((id) => !existingIds.has(id))
@@ -1191,35 +1190,32 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         }
       })
 
+      const systemTenant = (orgId: OrgId): TenantContext => ({
+        orgId,
+        userId: decodeUserIdSync("system-alerting"),
+        roles: [decodeRoleNameSync("root")],
+        authMode: "self_hosted",
+      })
+
+      const mapQueryEngineError = (error: unknown) => {
+        if (error instanceof QueryEngineValidationError) return makeValidationError(error.message, error.details)
+        if (error instanceof QueryEngineExecutionError) return makeDeliveryError(error.message)
+        return makeDeliveryError("Alert evaluation failed")
+      }
+
       const evaluateRule = Effect.fn("AlertsService.evaluateRule")(function* (
         orgId: OrgId,
         rule: NormalizedRule,
       ): Effect.fn.Return<EvaluatedRule, AlertValidationError | AlertDeliveryError> {
-        const tenant: TenantContext = {
-          orgId,
-          userId: decodeUserIdSync("system-alerting"),
-          roles: [decodeRoleNameSync("root")],
-          authMode: "self_hosted",
-        }
         const endMs = now()
         const startMs = endMs - rule.windowMinutes * 60_000
-        const evaluated = yield* queryEngine.evaluate(tenant, {
+        const evaluated = yield* queryEngine.evaluate(systemTenant(orgId), {
           startTime: toTinybirdDateTime(startMs),
           endTime: toTinybirdDateTime(endMs),
           query: rule.compiledPlan.query,
           reducer: rule.compiledPlan.reducer,
           sampleCountStrategy: rule.compiledPlan.sampleCountStrategy,
-        }).pipe(
-          Effect.mapError((error) => {
-            if (error instanceof QueryEngineValidationError) {
-              return makeValidationError(error.message, error.details)
-            }
-            if (error instanceof QueryEngineExecutionError) {
-              return makeDeliveryError(error.message)
-            }
-            return makeDeliveryError("Alert evaluation failed")
-          }),
-        )
+        }).pipe(Effect.mapError(mapQueryEngineError))
 
         return applyEvaluationLogic(rule, evaluated, evaluated.reason ?? undefined)
       })
@@ -1297,31 +1293,15 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         if (rule.groupBy !== "service") {
           return yield* Effect.fail(makeValidationError(`Unsupported groupBy dimension: ${rule.groupBy}`))
         }
-        const tenant: TenantContext = {
-          orgId,
-          userId: decodeUserIdSync("system-alerting"),
-          roles: [decodeRoleNameSync("root")],
-          authMode: "self_hosted",
-        }
         const endMs = now()
         const startMs = endMs - rule.windowMinutes * 60_000
-        const groupedResults = yield* queryEngine.evaluateGrouped(tenant, {
+        const groupedResults = yield* queryEngine.evaluateGrouped(systemTenant(orgId), {
           startTime: toTinybirdDateTime(startMs),
           endTime: toTinybirdDateTime(endMs),
           query: rule.compiledPlan.query,
           reducer: rule.compiledPlan.reducer,
           sampleCountStrategy: rule.compiledPlan.sampleCountStrategy,
-        }, rule.groupBy).pipe(
-          Effect.mapError((error) => {
-            if (error instanceof QueryEngineValidationError) {
-              return makeValidationError(error.message, error.details)
-            }
-            if (error instanceof QueryEngineExecutionError) {
-              return makeDeliveryError(error.message)
-            }
-            return makeDeliveryError("Grouped alert evaluation failed")
-          }),
-        )
+        }, rule.groupBy).pipe(Effect.mapError(mapQueryEngineError))
 
         return groupedResults.map((obs) => ({
           evaluation: applyEvaluationLogic(rule, obs),
@@ -1383,7 +1363,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         deliveryKey: string,
         attemptNumber: number,
       ) {
-        yield* database.execute((db) =>
+        yield* dbExecute((db) =>
           insertDeliveryEventRecord(
             db,
             orgId,
@@ -1396,7 +1376,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             deliveryKey,
             attemptNumber,
           ),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
       })
 
       const markDestinationTest = Effect.fn("AlertsService.markDestinationTest")(function* (
@@ -1405,7 +1385,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         errorMessage: string | null,
       ) {
         const timestamp = now()
-        yield* database.execute((db) =>
+        yield* dbExecute((db) =>
           db
             .update(alertDestinations)
             .set({
@@ -1419,7 +1399,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 eq(alertDestinations.id, destinationId),
               ),
             ),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
       })
 
       const composeLinkUrl = (serviceName: string | null) =>
@@ -1801,13 +1781,13 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const listDestinations = Effect.fn("AlertsService.listDestinations")(function* (
         orgId: OrgId,
       ) {
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select()
             .from(alertDestinations)
             .where(eq(alertDestinations.orgId, orgId))
             .orderBy(desc(alertDestinations.updatedAt)),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
         const destinations = rows.map((row) =>
           rowToDestinationDocument(row, safeParsePublicConfig(row)),
@@ -1850,9 +1830,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           updatedBy: userId,
         }
 
-        yield* database.execute((db) =>
+        yield* dbExecute((db) =>
           db.insert(alertDestinations).values(row),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
         return rowToDestinationDocument(row, publicConfig)
       })
@@ -1940,7 +1920,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         const nextEnabled =
           request.enabled === undefined ? existing.enabled : request.enabled ? 1 : 0
 
-        yield* database.execute((db) =>
+        yield* dbExecute((db) =>
           db
             .update(alertDestinations)
             .set({
@@ -1959,7 +1939,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 eq(alertDestinations.id, destinationId),
               ),
             ),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
         return rowToDestinationDocument(
           {
@@ -1984,7 +1964,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       ) {
         yield* requireAdmin(roles)
         yield* requireDestinationRow(orgId, destinationId)
-        yield* database.execute((db) =>
+        yield* dbExecute((db) =>
           db
             .delete(alertDestinations)
             .where(
@@ -1993,7 +1973,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 eq(alertDestinations.id, destinationId),
               ),
             ),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
         return new AlertDestinationDeleteResponse({ id: destinationId })
       })
 
@@ -2021,23 +2001,25 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           dedupeKey: `${orgId}:${destinationId}:test`,
           value: 0,
           sampleCount: 0,
-        }).pipe(Effect.exit)
-
-        if (Exit.isFailure(result)) {
-          const error = Cause.squash(result.cause)
-          const message =
-            error instanceof AlertDeliveryError
-              ? error.message
-              : error instanceof Error
+        }).pipe(
+          Effect.tapError((error) => {
+            const message =
+              error instanceof AlertDeliveryError
                 ? error.message
-                : "Destination test failed"
-          yield* markDestinationTest(orgId, destinationId, message)
-          return yield* Effect.fail(
+                : error instanceof Error
+                  ? error.message
+                  : "Destination test failed"
+            return markDestinationTest(orgId, destinationId, message)
+          }),
+          Effect.mapError((error) =>
             error instanceof AlertDeliveryError
               ? error
-              : makeDeliveryError(message, row.type as AlertDestinationType),
-          )
-        }
+              : makeDeliveryError(
+                  error instanceof Error ? error.message : "Destination test failed",
+                  row.type as AlertDestinationType,
+                ),
+          ),
+        )
 
         yield* markDestinationTest(orgId, destinationId, null)
         return new AlertDestinationTestResponse({
@@ -2058,7 +2040,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         const timestamp = now()
 
         if (existingId == null) {
-          yield* database.execute((db) =>
+          yield* dbExecute((db) =>
             db.insert(alertRules).values({
               id: ruleId,
               orgId,
@@ -2093,9 +2075,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               createdBy: userId,
               updatedBy: userId,
             }),
-          ).pipe(Effect.mapError(makePersistenceError))
+          )
         } else {
-          yield* database.execute((db) =>
+          yield* dbExecute((db) =>
             db
               .update(alertRules)
               .set({
@@ -2129,7 +2111,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 updatedBy: userId,
               })
               .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId))),
-          ).pipe(Effect.mapError(makePersistenceError))
+          )
         }
 
         const row = yield* requireRuleRow(orgId, decodeAlertRuleIdSync(ruleId))
@@ -2140,13 +2122,13 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const listRules = Effect.fn("AlertsService.listRules")(function* (
         orgId: OrgId,
       ) {
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select()
             .from(alertRules)
             .where(eq(alertRules.orgId, orgId))
             .orderBy(desc(alertRules.updatedAt)),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
         const rules = rows.map((row) =>
           rowToRuleDocument(row, safeParseStringArray(row.destinationIdsJson)),
@@ -2184,18 +2166,14 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       ) {
         yield* requireAdmin(roles)
         yield* requireRuleRow(orgId, ruleId)
-        yield* database.execute((db) =>
-          db.delete(alertDeliveryEvents).where(and(eq(alertDeliveryEvents.orgId, orgId), eq(alertDeliveryEvents.ruleId, ruleId))),
-        ).pipe(Effect.mapError(makePersistenceError))
-        yield* database.execute((db) =>
-          db.delete(alertIncidents).where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.ruleId, ruleId))),
-        ).pipe(Effect.mapError(makePersistenceError))
-        yield* database.execute((db) =>
-          db.delete(alertRuleStates).where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId))),
-        ).pipe(Effect.mapError(makePersistenceError))
-        yield* database.execute((db) =>
-          db.delete(alertRules).where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId))),
-        ).pipe(Effect.mapError(makePersistenceError))
+        yield* dbExecute((db) =>
+          db.transaction(async (tx) => {
+            await tx.delete(alertDeliveryEvents).where(and(eq(alertDeliveryEvents.orgId, orgId), eq(alertDeliveryEvents.ruleId, ruleId)))
+            await tx.delete(alertIncidents).where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.ruleId, ruleId)))
+            await tx.delete(alertRuleStates).where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId)))
+            await tx.delete(alertRules).where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
+          }),
+        )
         return new AlertRuleDeleteResponse({ id: ruleId })
       })
 
@@ -2242,12 +2220,17 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         }
 
         if (sendNotification) {
-          const rows = yield* database.execute((db) =>
+          const rows = yield* dbExecute((db) =>
             db
               .select()
               .from(alertDestinations)
-              .where(eq(alertDestinations.orgId, orgId)),
-          ).pipe(Effect.mapError(makePersistenceError))
+              .where(
+                and(
+                  eq(alertDestinations.orgId, orgId),
+                  inArray(alertDestinations.id, [...normalized.destinationIds]),
+                ),
+              ),
+          )
           const byId = new Map(rows.map((row) => [row.id, row]))
           for (const destinationId of normalized.destinationIds) {
             const destination = byId.get(destinationId)
@@ -2278,14 +2261,14 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const listIncidents = Effect.fn("AlertsService.listIncidents")(function* (
         orgId: OrgId,
       ) {
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select()
             .from(alertIncidents)
             .where(eq(alertIncidents.orgId, orgId))
             .orderBy(desc(alertIncidents.status), desc(alertIncidents.lastTriggeredAt))
             .limit(100),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
         return new AlertIncidentsListResponse({
           incidents: rows.map(rowToIncidentDocument),
         })
@@ -2294,16 +2277,16 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const listDeliveryEvents = Effect.fn("AlertsService.listDeliveryEvents")(function* (
         orgId: OrgId,
       ) {
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select()
             .from(alertDeliveryEvents)
             .where(eq(alertDeliveryEvents.orgId, orgId))
             .orderBy(desc(alertDeliveryEvents.createdAt))
             .limit(100),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
-        const destinationRows = yield* database.execute((db) =>
+        const destinationRows = yield* dbExecute((db) =>
           db
             .select({
               id: alertDestinations.id,
@@ -2312,7 +2295,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             })
             .from(alertDestinations)
             .where(eq(alertDestinations.orgId, orgId)),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
         const destinationMap = new Map(
           destinationRows.map((row) => [row.id, row]),
         )
@@ -2359,7 +2342,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         )
 
       const claimDeliveryEvent = (deliveryEventId: string, currentTime: number) =>
-        database.execute((db) =>
+        dbExecute((db) =>
           db
             .update(alertDeliveryEvents)
             .set({
@@ -2375,7 +2358,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 claimableDeliveryWhere(currentTime),
               ),
             ),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
       const finalizeClaimedDelivery = (
         deliveryEventId: string,
@@ -2384,7 +2367,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           readonly status: "success" | "failed"
         },
       ) =>
-        database.execute((db) =>
+        dbExecute((db) =>
           db
             .update(alertDeliveryEvents)
             .set({
@@ -2401,19 +2384,42 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 eq(alertDeliveryEvents.claimedBy, workerId),
               ),
             ),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
+
+      const recordDeliveryFailure = (
+        row: AlertDeliveryEventRow,
+        currentTime: number,
+        failure: DeliveryAttemptFailure,
+      ) =>
+        Effect.gen(function* () {
+          yield* finalizeClaimedDelivery(row.id, currentTime, {
+            status: "failed",
+            attemptedAt: currentTime,
+            errorMessage: failure.message,
+          })
+          yield* Effect.logWarning("Alert delivery attempt failed").pipe(
+            Effect.annotateLogs({
+              workerId,
+              deliveryKey: row.deliveryKey,
+              attemptNumber: row.attemptNumber,
+              destinationId: row.destinationId,
+              failureKind: failure.kind,
+              errorMessage: failure.message,
+            }),
+          )
+        })
 
       const processQueuedDeliveries = Effect.fn(
         "AlertsService.processQueuedDeliveries",
       )(function* () {
         const currentTime = now()
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select()
             .from(alertDeliveryEvents)
             .where(claimableDeliveryWhere(currentTime))
             .orderBy(asc(alertDeliveryEvents.scheduledAt)),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
         if (rows.length === 0) {
           return {
@@ -2427,18 +2433,18 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         const uniqueIncidentIds = [...new Set(rows.filter((r) => r.incidentId != null).map((r) => r.incidentId!))]
 
         const [allDestinations, allRules, allIncidents] = yield* Effect.all([
-          database.execute((db) =>
+          dbExecute((db) =>
             db.select().from(alertDestinations).where(inArray(alertDestinations.id, uniqueDestinationIds)),
           ),
-          database.execute((db) =>
+          dbExecute((db) =>
             db.select().from(alertRules).where(inArray(alertRules.id, uniqueRuleIds)),
           ),
           uniqueIncidentIds.length > 0
-            ? database.execute((db) =>
+            ? dbExecute((db) =>
                 db.select().from(alertIncidents).where(inArray(alertIncidents.id, uniqueIncidentIds)),
               )
             : Effect.succeed([] as AlertIncidentRow[]),
-        ], { concurrency: "unbounded" }).pipe(Effect.mapError(makePersistenceError))
+        ], { concurrency: "unbounded" })
 
         const destinationMap = new Map(allDestinations.map((r) => [r.id, r]))
         const ruleMap = new Map(allRules.map((r) => [r.id, r]))
@@ -2456,45 +2462,17 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           const destinationRow = destinationMap.get(row.destinationId)
           if (!destinationRow) {
             failureCount += 1
-            yield* finalizeClaimedDelivery(row.id, currentTime, {
-              status: "failed",
-              attemptedAt: currentTime,
-              errorMessage: "Destination not found",
-            })
-            yield* Effect.logWarning("Alert delivery attempt failed").pipe(
-              Effect.annotateLogs({
-                workerId,
-                deliveryKey: row.deliveryKey,
-                attemptNumber: row.attemptNumber,
-                destinationId: row.destinationId,
-                failureKind: "destination",
-                errorMessage: "Destination not found",
-              }),
-            )
+            yield* recordDeliveryFailure(row, currentTime, { message: "Destination not found", kind: "destination", retryable: false })
             continue
           }
 
           if (destinationRow.enabled !== 1) {
             failureCount += 1
-            yield* finalizeClaimedDelivery(row.id, currentTime, {
-              status: "failed",
-              attemptedAt: currentTime,
-              errorMessage: "Destination disabled",
-            })
-            yield* Effect.logWarning("Alert delivery attempt failed").pipe(
-              Effect.annotateLogs({
-                workerId,
-                deliveryKey: row.deliveryKey,
-                attemptNumber: row.attemptNumber,
-                destinationId: row.destinationId,
-                failureKind: "destination",
-                errorMessage: "Destination disabled",
-              }),
-            )
+            yield* recordDeliveryFailure(row, currentTime, { message: "Destination disabled", kind: "destination", retryable: false })
             continue
           }
 
-          const payloadExit = yield* parseJson<Record<string, unknown>>(
+          const payloadExit = yield* parseJson<StoredDeliveryPayload>(
             row.payloadJson,
             "Stored delivery payload is invalid",
           ).pipe(Effect.exit)
@@ -2502,21 +2480,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           if (Exit.isFailure(payloadExit)) {
             const failure = toDeliveryAttemptFailure(Cause.squash(payloadExit.cause))
             failureCount += 1
-            yield* finalizeClaimedDelivery(row.id, currentTime, {
-              status: "failed",
-              attemptedAt: currentTime,
-              errorMessage: failure.message,
-            })
-            yield* Effect.logWarning("Alert delivery attempt failed").pipe(
-              Effect.annotateLogs({
-                workerId,
-                deliveryKey: row.deliveryKey,
-                attemptNumber: row.attemptNumber,
-                destinationId: row.destinationId,
-                failureKind: failure.kind,
-                errorMessage: failure.message,
-              }),
-            )
+            yield* recordDeliveryFailure(row, currentTime, failure)
             continue
           }
 
@@ -2526,21 +2490,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           if (Exit.isFailure(hydratedExit)) {
             const failure = toDeliveryAttemptFailure(Cause.squash(hydratedExit.cause))
             failureCount += 1
-            yield* finalizeClaimedDelivery(row.id, currentTime, {
-              status: "failed",
-              attemptedAt: currentTime,
-              errorMessage: failure.message,
-            })
-            yield* Effect.logWarning("Alert delivery attempt failed").pipe(
-              Effect.annotateLogs({
-                workerId,
-                deliveryKey: row.deliveryKey,
-                attemptNumber: row.attemptNumber,
-                destinationId: row.destinationId,
-                failureKind: failure.kind,
-                errorMessage: failure.message,
-              }),
-            )
+            yield* recordDeliveryFailure(row, currentTime, failure)
             continue
           }
 
@@ -2549,6 +2499,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             ? incidentMap.get(row.incidentId) ?? null
             : null
           const ruleRow = ruleMap.get(row.ruleId) ?? null
+          const payloadRule = payload.rule
 
           const deliveryResult = yield* dispatchDelivery(
             {
@@ -2558,54 +2509,19 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               publicConfig: hydrated.publicConfig,
               secretConfig: hydrated.secretConfig,
               ruleId: row.ruleId,
-              ruleName:
-                ruleRow?.name ??
-                String((payload.rule as Record<string, unknown> | undefined)?.name ?? "Alert"),
-              serviceName:
-                incidentRow?.serviceName ??
-                ((payload.rule as Record<string, unknown> | undefined)
-                  ?.serviceName as string | null | undefined) ??
-                null,
-              signalType:
-                (incidentRow?.signalType as AlertSignalType | undefined) ??
-                ((payload.rule as Record<string, unknown> | undefined)
-                  ?.signalType as AlertSignalType | undefined) ??
-                "throughput",
-              severity:
-                (incidentRow?.severity as AlertSeverity | undefined) ??
-                ((payload.rule as Record<string, unknown> | undefined)
-                  ?.severity as AlertSeverity | undefined) ??
-                "warning",
-              comparator:
-                (incidentRow?.comparator as AlertComparator | undefined) ??
-                ((payload.rule as Record<string, unknown> | undefined)
-                  ?.comparator as AlertComparator | undefined) ??
-                "gt",
-              threshold:
-                incidentRow?.threshold ??
-                Number(
-                  (payload.rule as Record<string, unknown> | undefined)?.threshold ?? 0,
-                ),
-              windowMinutes:
-                ruleRow?.windowMinutes ??
-                Number(
-                  (payload.rule as Record<string, unknown> | undefined)?.windowMinutes ?? 5,
-                ),
+              ruleName: ruleRow?.name ?? String(payloadRule?.name ?? "Alert"),
+              serviceName: incidentRow?.serviceName ?? payloadRule?.serviceName ?? null,
+              signalType: (incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput") as AlertSignalType,
+              severity: (incidentRow?.severity ?? payloadRule?.severity ?? "warning") as AlertSeverity,
+              comparator: (incidentRow?.comparator ?? payloadRule?.comparator ?? "gt") as AlertComparator,
+              threshold: incidentRow?.threshold ?? payloadRule?.threshold ?? 0,
+              windowMinutes: ruleRow?.windowMinutes ?? payloadRule?.windowMinutes ?? 5,
               eventType: row.eventType as AlertEventTypeValue,
               incidentId: row.incidentId,
-              incidentStatus:
-                (incidentRow?.status as Schema.Schema.Type<
-                  typeof AlertIncidentStatus
-                > | null) ?? "resolved",
-              dedupeKey:
-                incidentRow?.dedupeKey ??
-                String(payload.dedupeKey ?? row.deliveryKey),
-              value:
-                ((payload.observed as Record<string, unknown> | undefined)
-                  ?.value as number | null | undefined) ?? null,
-              sampleCount:
-                ((payload.observed as Record<string, unknown> | undefined)
-                  ?.sampleCount as number | null | undefined) ?? null,
+              incidentStatus: (incidentRow?.status ?? "resolved") as Schema.Schema.Type<typeof AlertIncidentStatus>,
+              dedupeKey: incidentRow?.dedupeKey ?? String(payload.dedupeKey ?? row.deliveryKey),
+              value: payload.observed?.value ?? null,
+              sampleCount: payload.observed?.sampleCount ?? null,
             },
             row.payloadJson,
           ).pipe(Effect.exit)
@@ -2622,7 +2538,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             })
 
             if (row.incidentId) {
-              yield* database.execute((db) =>
+              yield* dbExecute((db) =>
                 db
                   .update(alertIncidents)
                   .set({
@@ -2631,7 +2547,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                     updatedAt: currentTime,
                   })
                   .where(eq(alertIncidents.id, row.incidentId!)),
-              ).pipe(Effect.mapError(makePersistenceError))
+              )
             }
 
             yield* Effect.logInfo("Alert delivery attempt succeeded").pipe(
@@ -2661,7 +2577,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               row.ruleId,
               row.destinationId,
               row.eventType as AlertEventTypeValue,
-              payload,
+              payload as Record<string, unknown>,
               currentTime + computeRetryDelayMs(row.attemptNumber),
               row.deliveryKey,
               row.attemptNumber + 1,
@@ -2698,7 +2614,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       ) {
         const stateConflictTarget: [typeof alertRuleStates.orgId, typeof alertRuleStates.ruleId, typeof alertRuleStates.groupKey] = [alertRuleStates.orgId, alertRuleStates.ruleId, alertRuleStates.groupKey]
 
-        yield* database.execute((db) =>
+        yield* dbExecute((db) =>
           db.transaction(async (tx) => {
             const state =
               (
@@ -2735,18 +2651,20 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                   .limit(1)
               )[0] ?? null
 
-            if (evaluation.status === "skipped") {
-              await tx
+            const upsertState = (fields: {
+              consecutiveBreaches: number
+              consecutiveHealthy: number
+              lastStatus: string
+              lastValue: number | null
+              lastSampleCount: number
+            }) =>
+              tx
                 .insert(alertRuleStates)
                 .values({
                   orgId: row.orgId,
                   ruleId: row.id,
                   groupKey,
-                  consecutiveBreaches: state?.consecutiveBreaches ?? 0,
-                  consecutiveHealthy: state?.consecutiveHealthy ?? 0,
-                  lastStatus: evaluation.status,
-                  lastValue: evaluation.value,
-                  lastSampleCount: evaluation.sampleCount,
+                  ...fields,
                   lastEvaluatedAt: timestamp,
                   lastError: null,
                   updatedAt: timestamp,
@@ -2754,14 +2672,21 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 .onConflictDoUpdate({
                   target: stateConflictTarget,
                   set: {
-                    lastStatus: evaluation.status,
-                    lastValue: evaluation.value,
-                    lastSampleCount: evaluation.sampleCount,
+                    ...fields,
                     lastEvaluatedAt: timestamp,
                     lastError: null,
                     updatedAt: timestamp,
                   },
                 })
+
+            if (evaluation.status === "skipped") {
+              await upsertState({
+                consecutiveBreaches: state?.consecutiveBreaches ?? 0,
+                consecutiveHealthy: state?.consecutiveHealthy ?? 0,
+                lastStatus: evaluation.status,
+                lastValue: evaluation.value,
+                lastSampleCount: evaluation.sampleCount,
+              })
               return
             }
 
@@ -2774,34 +2699,13 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 ? (state?.consecutiveHealthy ?? 0) + 1
                 : 0
 
-            await tx
-              .insert(alertRuleStates)
-              .values({
-                orgId: row.orgId,
-                ruleId: row.id,
-                groupKey,
-                consecutiveBreaches,
-                consecutiveHealthy,
-                lastStatus: evaluation.status,
-                lastValue: evaluation.value,
-                lastSampleCount: evaluation.sampleCount,
-                lastEvaluatedAt: timestamp,
-                lastError: null,
-                updatedAt: timestamp,
-              })
-              .onConflictDoUpdate({
-                target: stateConflictTarget,
-                set: {
-                  consecutiveBreaches,
-                  consecutiveHealthy,
-                  lastStatus: evaluation.status,
-                  lastValue: evaluation.value,
-                  lastSampleCount: evaluation.sampleCount,
-                  lastEvaluatedAt: timestamp,
-                  lastError: null,
-                  updatedAt: timestamp,
-                },
-              })
+            await upsertState({
+              consecutiveBreaches,
+              consecutiveHealthy,
+              lastStatus: evaluation.status,
+              lastValue: evaluation.value,
+              lastSampleCount: evaluation.sampleCount,
+            })
 
             if (
               evaluation.status === "breached" &&
@@ -2924,13 +2828,13 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               )
             }
           }),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
       })
 
       const SCHEDULER_LOCK_TTL_MS = 30_000
 
       const claimRule = (ruleId: string, timestamp: number) =>
-        database.execute((db) =>
+        dbExecute((db) =>
           db
             .update(alertRules)
             .set({ lastScheduledAt: timestamp })
@@ -2940,16 +2844,16 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 sql`(${alertRules.lastScheduledAt} IS NULL OR ${alertRules.lastScheduledAt} < ${timestamp - SCHEDULER_LOCK_TTL_MS})`,
               ),
             ),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
       const runSchedulerTick = Effect.fn("AlertsService.runSchedulerTick")(function* () {
-        const rows = yield* database.execute((db) =>
+        const rows = yield* dbExecute((db) =>
           db
             .select()
             .from(alertRules)
             .where(eq(alertRules.enabled, 1))
             .orderBy(asc(alertRules.updatedAt)),
-        ).pipe(Effect.mapError(makePersistenceError))
+        )
 
         let evaluationFailureCount = 0
 
