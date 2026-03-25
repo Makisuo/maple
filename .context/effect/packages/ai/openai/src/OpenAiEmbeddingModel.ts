@@ -1,0 +1,178 @@
+/**
+ * OpenAI Embedding Model implementation.
+ *
+ * Provides an EmbeddingModel implementation for OpenAI's embeddings API.
+ *
+ * @since 1.0.0
+ */
+import * as Effect from "effect/Effect"
+import { dual } from "effect/Function"
+import * as Layer from "effect/Layer"
+import * as ServiceMap from "effect/ServiceMap"
+import type { Simplify } from "effect/Types"
+import * as AiError from "effect/unstable/ai/AiError"
+import * as EmbeddingModel from "effect/unstable/ai/EmbeddingModel"
+import * as AiModel from "effect/unstable/ai/Model"
+import type * as Generated from "./Generated.ts"
+import { OpenAiClient } from "./OpenAiClient.ts"
+
+/**
+ * @since 1.0.0
+ * @category models
+ */
+export type Model = "text-embedding-ada-002" | "text-embedding-3-small" | "text-embedding-3-large"
+
+/**
+ * Service definition for OpenAI embedding model configuration.
+ *
+ * @since 1.0.0
+ * @category services
+ */
+export class Config extends ServiceMap.Service<
+  Config,
+  Simplify<
+    & Partial<
+      Omit<
+        typeof Generated.CreateEmbeddingRequest.Encoded,
+        "input"
+      >
+    >
+    & {
+      readonly [x: string]: unknown
+    }
+  >
+>()("@effect/ai-openai/OpenAiEmbeddingModel/Config") {}
+
+/**
+ * @since 1.0.0
+ * @category constructors
+ */
+export const model = (
+  model: (string & {}) | Model,
+  options: {
+    readonly dimensions: number
+    readonly config?: Omit<typeof Config.Service, "model" | "dimensions">
+  }
+): AiModel.Model<"openai", EmbeddingModel.EmbeddingModel | EmbeddingModel.Dimensions, OpenAiClient> =>
+  AiModel.make(
+    "openai",
+    model,
+    Layer.merge(
+      layer({
+        model,
+        config: {
+          ...options.config,
+          dimensions: options.dimensions
+        }
+      }),
+      Layer.succeed(EmbeddingModel.Dimensions, options.dimensions)
+    )
+  )
+
+/**
+ * Creates an OpenAI embedding model service.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
+export const make = Effect.fnUntraced(function*({ model, config: providerConfig }: {
+  readonly model: (string & {}) | Model
+  readonly config?: Omit<typeof Config.Service, "model"> | undefined
+}): Effect.fn.Return<EmbeddingModel.Service, never, OpenAiClient> {
+  const client = yield* OpenAiClient
+
+  const makeConfig = Effect.gen(function*() {
+    const services = yield* Effect.services<never>()
+    return { model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
+  })
+
+  return yield* EmbeddingModel.make({
+    embedMany: Effect.fnUntraced(function*({ inputs }) {
+      const config = yield* makeConfig
+      const response = yield* client.createEmbedding({ ...config, input: inputs })
+      return yield* mapProviderResponse(inputs.length, response)
+    })
+  })
+})
+
+/**
+ * Creates a layer for the OpenAI embedding model.
+ *
+ * @since 1.0.0
+ * @category layers
+ */
+export const layer = (options: {
+  readonly model: (string & {}) | Model
+  readonly config?: Omit<typeof Config.Service, "model"> | undefined
+}): Layer.Layer<EmbeddingModel.EmbeddingModel, never, OpenAiClient> =>
+  Layer.effect(EmbeddingModel.EmbeddingModel, make(options))
+
+/**
+ * Provides config overrides for OpenAI embedding model operations.
+ *
+ * @since 1.0.0
+ * @category configuration
+ */
+export const withConfigOverride: {
+  (overrides: typeof Config.Service): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, Exclude<R, Config>>
+  <A, E, R>(self: Effect.Effect<A, E, R>, overrides: typeof Config.Service): Effect.Effect<A, E, Exclude<R, Config>>
+} = dual<
+  (
+    overrides: typeof Config.Service
+  ) => <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, Exclude<R, Config>>,
+  <A, E, R>(self: Effect.Effect<A, E, R>, overrides: typeof Config.Service) => Effect.Effect<A, E, Exclude<R, Config>>
+>(2, (self, overrides) =>
+  Effect.flatMap(
+    Effect.serviceOption(Config),
+    (config) =>
+      Effect.provideService(self, Config, {
+        ...(config._tag === "Some" ? config.value : {}),
+        ...overrides
+      })
+  ))
+
+const mapProviderResponse = (
+  inputLength: number,
+  response: typeof Generated.CreateEmbeddingResponse.Type
+): Effect.Effect<EmbeddingModel.ProviderResponse, AiError.AiError> => {
+  if (response.data.length !== inputLength) {
+    return Effect.fail(
+      invalidOutput("Provider returned " + response.data.length + " embeddings but expected " + inputLength)
+    )
+  }
+
+  const results = new Array<Array<number>>(inputLength)
+  const seen = new Set<number>()
+
+  for (const entry of response.data) {
+    if (!Number.isInteger(entry.index) || entry.index < 0 || entry.index >= inputLength) {
+      return Effect.fail(invalidOutput("Provider returned invalid embedding index: " + entry.index))
+    }
+    if (seen.has(entry.index)) {
+      return Effect.fail(invalidOutput("Provider returned duplicate embedding index: " + entry.index))
+    }
+
+    seen.add(entry.index)
+    results[entry.index] = [...entry.embedding]
+  }
+
+  if (seen.size !== inputLength) {
+    return Effect.fail(
+      invalidOutput("Provider returned embeddings for " + seen.size + " inputs but expected " + inputLength)
+    )
+  }
+
+  return Effect.succeed({
+    results,
+    usage: {
+      inputTokens: response.usage?.prompt_tokens
+    }
+  })
+}
+
+const invalidOutput = (description: string): AiError.AiError =>
+  AiError.make({
+    module: "OpenAiEmbeddingModel",
+    method: "embedMany",
+    reason: new AiError.InvalidOutputError({ description })
+  })
