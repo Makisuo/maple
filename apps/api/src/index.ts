@@ -7,7 +7,7 @@ import { HttpApiRoutes } from "./http";
 import { McpLive } from "./mcp/app";
 import { AutumnRouter } from "./routes/autumn.http";
 import { ApiKeysService } from "./services/ApiKeysService";
-import { AlertsService } from "./services/AlertsService";
+import { AlertRuntime, AlertsService } from "./services/AlertsService";
 import { AuthorizationLive } from "./services/AuthorizationLive";
 import { CloudflareLogpushService } from "./services/CloudflareLogpushService";
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService";
@@ -59,7 +59,7 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 )
 
 const AlertsServiceLive = AlertsService.Live.pipe(
-  Layer.provideMerge(Layer.mergeAll(CoreServicesLive, QueryEngineServiceLive)),
+  Layer.provideMerge(Layer.mergeAll(CoreServicesLive, QueryEngineServiceLive, AlertRuntime.Default)),
 )
 
 const MainLive = Layer.mergeAll(

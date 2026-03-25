@@ -1,6 +1,6 @@
 import { BunRuntime } from "@effect/platform-bun"
 import { Cause, Duration, Effect, Layer, Schedule } from "effect"
-import { AlertsService } from "../../api/src/services/AlertsService"
+import { AlertRuntime, AlertsService } from "../../api/src/services/AlertsService"
 import { Database } from "../../api/src/services/DatabaseLive"
 import { Env } from "../../api/src/services/Env"
 import { OrgTinybirdSettingsService } from "../../api/src/services/OrgTinybirdSettingsService"
@@ -36,6 +36,7 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 const AlertsDependenciesLive = Layer.mergeAll(
   BaseLive,
   QueryEngineServiceLive,
+  AlertRuntime.Default,
 )
 
 const AlertsServiceLive = AlertsService.Live.pipe(

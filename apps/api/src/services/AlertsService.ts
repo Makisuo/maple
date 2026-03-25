@@ -990,9 +990,13 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const database = yield* Database
       const env = yield* Env
       const queryEngine = yield* QueryEngineService
+      const runtime = yield* AlertRuntime
       const encryptionKey = yield* parseEncryptionKey(
         Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
       )
+      const now = () => runtime.now()
+      const makeUuid = () => runtime.makeUuid()
+      const deliveryTimeoutMs = () => runtime.deliveryTimeoutMs()
       const workerId = makeUuid()
 
       const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
@@ -1492,7 +1496,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           case "slack": {
             const webhookUrl = context.secretConfig.webhookUrl
             const response = yield* runTimedFetch("slack", "Slack", (signal) =>
-              alertFetchImpl(webhookUrl, {
+              runtime.fetch(webhookUrl, {
                   method: "POST",
                   signal,
                   headers: { "content-type": "application/json" },
@@ -1613,7 +1617,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               ],
             }
             const response = yield* runTimedFetch("pagerduty", "PagerDuty", (signal) =>
-              alertFetchImpl("https://events.pagerduty.com/v2/enqueue", {
+              runtime.fetch("https://events.pagerduty.com/v2/enqueue", {
                   method: "POST",
                   signal,
                   headers: { "content-type": "application/json" },
@@ -1649,7 +1653,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               headers["x-maple-signature"] = signature
             }
             const response = yield* runTimedFetch("webhook", "Webhook", (signal) =>
-              alertFetchImpl(targetUrl, {
+              runtime.fetch(targetUrl, {
                   method: "POST",
                   signal,
                   headers,

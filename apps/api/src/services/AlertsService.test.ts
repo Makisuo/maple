@@ -14,7 +14,7 @@ import {
 } from "@maple/domain/http"
 import type { TinybirdServiceShape } from "./TinybirdService"
 import { TinybirdService } from "./TinybirdService"
-import { AlertsService, type AlertsServiceShape, __testables } from "./AlertsService"
+import { AlertRuntime, type AlertRuntimeShape, AlertsService, type AlertsServiceShape } from "./AlertsService"
 import { Database as DatabaseService } from "./DatabaseLive"
 import { Env } from "./Env"
 import { QueryEngineService } from "./QueryEngineService"
@@ -22,7 +22,6 @@ import { QueryEngineService } from "./QueryEngineService"
 const createdTempDirs: string[] = []
 
 afterEach(() => {
-  __testables.reset()
   for (const dir of createdTempDirs.splice(0, createdTempDirs.length)) {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -99,15 +98,23 @@ function makeTinybirdStub(state: {
   }
 }
 
-const makeLayer = (url: string, tinybirdStub: TinybirdServiceShape) => {
+const defaultTestRuntime: AlertRuntimeShape = {
+  now: () => Date.now(),
+  makeUuid: () => crypto.randomUUID(),
+  fetch: globalThis.fetch,
+  deliveryTimeoutMs: () => 15_000,
+}
+
+const makeLayer = (url: string, tinybirdStub: TinybirdServiceShape, runtimeOverrides?: Partial<AlertRuntimeShape>) => {
   const configProvider = makeConfigProvider(url)
   const envLive = Env.Default.pipe(Layer.provide(configProvider))
   const databaseLive = DatabaseService.Default.pipe(Layer.provide(envLive))
   const tinybirdLive = Layer.succeed(TinybirdService, tinybirdStub)
   const queryEngineLive = QueryEngineService.layer.pipe(Layer.provide(tinybirdLive))
+  const runtimeLive = Layer.succeed(AlertRuntime, { ...defaultTestRuntime, ...runtimeOverrides })
 
   return AlertsService.Live.pipe(
-    Layer.provide(Layer.mergeAll(envLive, databaseLive, queryEngineLive)),
+    Layer.provide(Layer.mergeAll(envLive, databaseLive, queryEngineLive, runtimeLive)),
   ) as Layer.Layer<AlertsService, never, never>
 }
 
@@ -131,13 +138,15 @@ const createWebhookDestination = (
     signingSecret: "webhook-secret",
   })
 
-const useAdvancingClock = () => {
+const makeAdvancingClock = (): Pick<AlertRuntimeShape, "now"> => {
   let tick = Date.now()
-  __testables.setNow(() => {
-    const t = tick
-    tick += 60_000
-    return t
-  })
+  return {
+    now: () => {
+      const t = tick
+      tick += 60_000
+      return t
+    },
+  }
 }
 
 const createErrorRateRule = (
@@ -167,16 +176,23 @@ const createErrorRateRule = (
     }),
   )
 
-const useFixedClock = (timestamp: number) => {
-  __testables.setNow(() => timestamp)
+const makeFixedClock = (timestamp: number): Pick<AlertRuntimeShape, "now"> => ({
+  now: () => timestamp,
+})
+
+const makeUuidSequence = (...values: string[]): Pick<AlertRuntimeShape, "makeUuid"> => {
+  let index = 0
+  return {
+    makeUuid: () =>
+      values[index++] ?? `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+  }
 }
 
-const useUuidSequence = (...values: string[]) => {
-  let index = 0
-  __testables.setRandomUuid(() =>
-    (values[index++] ?? `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`) as ReturnType<typeof crypto.randomUUID>,
-  )
-}
+const makeTestFetch = (impl: typeof fetch): Pick<AlertRuntimeShape, "fetch"> => ({
+  fetch: impl,
+})
+
+const okFetch: typeof fetch = (async () => new Response("ok", { status: 200 })) as unknown as typeof fetch
 
 const insertDeliveryEventRow = (
   dbPath: string,
@@ -243,7 +259,6 @@ const insertDeliveryEventRow = (
 
 describe("AlertsService", () => {
   it("opens an incident after consecutive breaches and delivers the webhook notification", async () => {
-    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: [
@@ -261,7 +276,7 @@ describe("AlertsService", () => {
       ],
     }
     const requests: Array<{ url: string; headers: Headers }> = []
-    __testables.setFetchImpl((async (input, init) => {
+    const fetchImpl = ((async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({
         url: String(input),
         headers: new Headers(init?.headers),
@@ -285,7 +300,7 @@ describe("AlertsService", () => {
         const events = yield* alerts.listDeliveryEvents(orgId)
 
         return { incidentsAfterFirstTick, incidentsAfterSecondTick, events }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state)))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock(), fetch: fetchImpl }))),
     )
 
     expect(result.incidentsAfterFirstTick.incidents).toHaveLength(0)
@@ -307,7 +322,6 @@ describe("AlertsService", () => {
   })
 
   it("skips no-data error-rate rules instead of opening incidents", async () => {
-    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: emptyTinybirdRows,
@@ -327,7 +341,7 @@ describe("AlertsService", () => {
         const incidents = yield* alerts.listIncidents(orgId)
         const events = yield* alerts.listDeliveryEvents(orgId)
         return { incidents, events }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state)))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock() }))),
     )
 
     expect(result.incidents.incidents).toHaveLength(0)
@@ -335,12 +349,10 @@ describe("AlertsService", () => {
   })
 
   it("treats no data as a breach for throughput-below-threshold rules", async () => {
-    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: emptyTinybirdRows,
     }
-    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -374,7 +386,7 @@ describe("AlertsService", () => {
         yield* alerts.runSchedulerTick()
 
         return yield* alerts.listIncidents(orgId)
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state)))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock(), fetch: okFetch }))),
     )
 
     expect(result.incidents).toHaveLength(1)
@@ -428,7 +440,6 @@ describe("AlertsService", () => {
   })
 
   it("resolves an open incident after consecutive healthy evaluations", async () => {
-    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: [
@@ -445,7 +456,6 @@ describe("AlertsService", () => {
         },
       ] as ReadonlyArray<Record<string, unknown>>,
     }
-    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -478,7 +488,7 @@ describe("AlertsService", () => {
         const incidents = yield* alerts.listIncidents(orgId)
         const events = yield* alerts.listDeliveryEvents(orgId)
         return { incidents, events }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state)))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock(), fetch: okFetch }))),
     )
 
     expect(result.incidents.incidents).toHaveLength(1)
@@ -492,7 +502,7 @@ describe("AlertsService", () => {
   it("sends signed webhook test notifications", async () => {
     const { url } = createTempDbUrl()
     const requests: Array<{ headers: Headers; body: string }> = []
-    __testables.setFetchImpl((async (_input, init) => {
+    const fetchImpl = ((async (_input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({
         headers: new Headers(init?.headers),
         body: String(init?.body ?? ""),
@@ -507,7 +517,7 @@ describe("AlertsService", () => {
         const userId = asUserId("user_test_destination")
         const destination = yield* createWebhookDestination(alerts, orgId, userId)
         return yield* alerts.testDestination(orgId, userId, adminRoles, destination.id)
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), { fetch: fetchImpl }))),
     )
 
     expect(response.success).toBe(true)
@@ -519,13 +529,13 @@ describe("AlertsService", () => {
 
   it("keeps processing queued deliveries when a rule evaluation fails", async () => {
     const fixedTime = 1_710_000_000_000
-    useFixedClock(fixedTime)
     const { url, dbPath } = createTempDbUrl()
     const requests: Array<{ headers: Headers }> = []
-    __testables.setFetchImpl((async (_input, init) => {
+    const fetchImpl = ((async (_input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({ headers: new Headers(init?.headers) })
       return new Response("ok", { status: 200 })
     }) as typeof fetch)
+    const overrides = { ...makeFixedClock(fixedTime), fetch: fetchImpl }
 
     const setup = await Effect.runPromise(
       Effect.gen(function* () {
@@ -535,7 +545,7 @@ describe("AlertsService", () => {
         const destination = yield* createWebhookDestination(alerts, orgId, userId)
         const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
         return { orgId, destination, rule }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides))),
     )
 
     const db = new Database(dbPath)
@@ -583,7 +593,7 @@ describe("AlertsService", () => {
         const tick = yield* alerts.runSchedulerTick()
         const events = yield* alerts.listDeliveryEvents(setup.orgId)
         return { tick, events }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides))),
     )
 
     expect(result.tick.evaluationFailureCount).toBe(1)
@@ -595,13 +605,13 @@ describe("AlertsService", () => {
 
   it("suppresses duplicate delivery sends across concurrent service instances", async () => {
     const fixedTime = 1_710_000_100_000
-    useFixedClock(fixedTime)
     const { url, dbPath } = createTempDbUrl()
     let requestCount = 0
-    __testables.setFetchImpl((async () => {
+    const fetchImpl = ((async () => {
       requestCount += 1
       return new Response("ok", { status: 200 })
     }) as unknown as typeof fetch)
+    const overrides = { ...makeFixedClock(fixedTime), fetch: fetchImpl }
 
     const setup = await Effect.runPromise(
       Effect.gen(function* () {
@@ -611,7 +621,7 @@ describe("AlertsService", () => {
         const destination = yield* createWebhookDestination(alerts, orgId, userId)
         const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
         return { orgId, destination, rule }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides))),
     )
 
     const db = new Database(dbPath)
@@ -654,8 +664,8 @@ describe("AlertsService", () => {
     })
 
     const stub = makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })
-    const layerA = makeLayer(url, stub)
-    const layerB = makeLayer(url, stub)
+    const layerA = makeLayer(url, stub, overrides)
+    const layerB = makeLayer(url, stub, overrides)
 
     const [tickA, tickB] = await Promise.all([
       Effect.runPromise(
@@ -686,16 +696,7 @@ describe("AlertsService", () => {
 
   it("rolls back incident creation when notification enqueue fails", async () => {
     const fixedTime = 1_710_000_200_000
-    useFixedClock(fixedTime)
-    useUuidSequence(
-      "00000000-0000-4000-8000-000000000001",
-      "00000000-0000-4000-8000-000000000002",
-      "00000000-0000-4000-8000-000000000003",
-      "00000000-0000-4000-8000-000000000004",
-      "00000000-0000-4000-8000-000000000005",
-    )
     const { url, dbPath } = createTempDbUrl()
-    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
 
     const state = {
       tracesAggregateRows: [
@@ -712,7 +713,18 @@ describe("AlertsService", () => {
         },
       ],
     }
-    const layer = makeLayer(url, makeTinybirdStub(state))
+    const overrides = {
+      ...makeFixedClock(fixedTime),
+      ...makeUuidSequence(
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+        "00000000-0000-4000-8000-000000000003",
+        "00000000-0000-4000-8000-000000000004",
+        "00000000-0000-4000-8000-000000000005",
+      ),
+      fetch: okFetch,
+    }
+    const layer = makeLayer(url, makeTinybirdStub(state), overrides)
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -792,14 +804,12 @@ describe("AlertsService", () => {
 
   it("times out stuck deliveries and enqueues a retry attempt", async () => {
     const fixedTime = 1_710_000_300_000
-    useFixedClock(fixedTime)
-    __testables.setDeliveryTimeoutMs(() => 10)
     const { url, dbPath } = createTempDbUrl()
-    __testables.setFetchImpl(((input, init) =>
+    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
       new Promise((_resolve, reject) => {
         const signal = init?.signal as AbortSignal | undefined
         signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
-      })) as typeof fetch)
+      })) as typeof fetch
 
     const setup = await Effect.runPromise(
       Effect.gen(function* () {
@@ -809,7 +819,7 @@ describe("AlertsService", () => {
         const destination = yield* createWebhookDestination(alerts, orgId, userId)
         const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
         return { orgId, destination, rule }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), { ...makeFixedClock(fixedTime) }))),
     )
 
     insertDeliveryEventRow(dbPath, {
@@ -853,7 +863,7 @@ describe("AlertsService", () => {
         const tick = yield* alerts.runSchedulerTick()
         const events = yield* alerts.listDeliveryEvents(setup.orgId)
         return { tick, events }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), { ...makeFixedClock(fixedTime), fetch: hangingFetch, deliveryTimeoutMs: () => 10 }))),
     )
 
     expect(result.tick.processedCount).toBe(1)
@@ -867,13 +877,13 @@ describe("AlertsService", () => {
 
   it("marks corrupted queued payloads as failed without blocking later deliveries", async () => {
     const fixedTime = 1_710_000_400_000
-    useFixedClock(fixedTime)
     const { url, dbPath } = createTempDbUrl()
     let requestCount = 0
-    __testables.setFetchImpl((async () => {
+    const fetchImpl = ((async () => {
       requestCount += 1
       return new Response("ok", { status: 200 })
     }) as unknown as typeof fetch)
+    const overrides = { ...makeFixedClock(fixedTime), fetch: fetchImpl }
 
     const setup = await Effect.runPromise(
       Effect.gen(function* () {
@@ -883,7 +893,7 @@ describe("AlertsService", () => {
         const destination = yield* createWebhookDestination(alerts, orgId, userId)
         const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
         return { orgId, destination, rule }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides))),
     )
 
     insertDeliveryEventRow(dbPath, {
@@ -940,7 +950,7 @@ describe("AlertsService", () => {
         const tick = yield* alerts.runSchedulerTick()
         const events = yield* alerts.listDeliveryEvents(setup.orgId)
         return { tick, events }
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides))),
     )
 
     expect(result.tick.processedCount).toBe(2)
@@ -977,7 +987,6 @@ describe("AlertsService", () => {
   })
 
   it("opens per-service incidents for multi-service rules", async () => {
-    useAdvancingClock()
     const { url } = createTempDbUrl()
     const state = {
       tracesAggregateRows: [
@@ -994,7 +1003,6 @@ describe("AlertsService", () => {
         },
       ],
     }
-    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1028,7 +1036,7 @@ describe("AlertsService", () => {
         yield* alerts.runSchedulerTick()
 
         return yield* alerts.listIncidents(orgId)
-      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state)))),
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock(), fetch: okFetch }))),
     )
 
     expect(result.incidents).toHaveLength(2)
