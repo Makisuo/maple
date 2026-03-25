@@ -63,7 +63,11 @@ const program = Effect.gen(function* () {
         Effect.annotateLogs({ error: Cause.pretty(cause) }),
       ),
     ),
-    Effect.repeat(Schedule.spaced(Duration.seconds(60))),
+    Effect.repeat(
+      Schedule.spaced(Duration.seconds(60)).pipe(
+        Schedule.jittered({ min: 0.8, max: 1.2 }),
+      ),
+    ),
   )
 }).pipe(
   Effect.provide(AlertsServiceLive),

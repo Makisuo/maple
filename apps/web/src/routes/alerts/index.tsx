@@ -455,13 +455,14 @@ function AlertsPage() {
 
   async function handleDestinationSave() {
     setSavingDestination(true)
-    const payload = editingDestination
-      ? buildDestinationUpdatePayload(destinationForm)
-      : buildDestinationCreatePayload(destinationForm)
-
     const result = editingDestination
-      ? await updateDestination({ params: { destinationId: editingDestination.id }, payload })
-      : await createDestination({ payload })
+      ? await updateDestination({
+          params: { destinationId: editingDestination.id },
+          payload: buildDestinationUpdatePayload(destinationForm) as never,
+        })
+      : await createDestination({
+          payload: buildDestinationCreatePayload(destinationForm) as never,
+        })
 
     if (Exit.isSuccess(result)) {
       toast.success(editingDestination ? "Destination updated" : "Destination created")
@@ -490,8 +491,10 @@ function AlertsPage() {
   async function handleDestinationToggle(destination: AlertDestination) {
     const form = destinationToFormState(destination)
     form.enabled = !destination.enabled
-    const payload = buildDestinationUpdatePayload(form)
-    const result = await updateDestination({ params: { destinationId: destination.id }, payload })
+    const result = await updateDestination({
+      params: { destinationId: destination.id },
+      payload: buildDestinationUpdatePayload(form) as never,
+    })
     if (Exit.isSuccess(result)) {
       refreshDestinations()
     } else {

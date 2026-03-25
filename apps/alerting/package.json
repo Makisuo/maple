@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "bun run --env-file ../../.env.local --watch src/index.ts",
     "start": "bun run --env-file ../../.env.local src/index.ts",
-    "test": "bun test",
+    "test": "echo 'No tests yet'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

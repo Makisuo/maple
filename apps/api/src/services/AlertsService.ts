@@ -7,6 +7,7 @@ import {
 } from "@maple/query-engine"
 import { normalizeKey, parseWhereClause } from "@maple/query-engine/where-clause"
 import {
+  AlertComparator as AlertComparatorSchema,
   AlertDeliveryError,
   AlertDeliveryEventDocument,
   AlertDeliveryEventsListResponse,
@@ -16,17 +17,26 @@ import {
   AlertDestinationTestResponse,
   AlertDestinationsListResponse,
   AlertEvaluationResult,
+  AlertEventType as AlertEventTypeSchema,
   AlertForbiddenError,
+  AlertGroupBy as AlertGroupBySchema,
   AlertIncidentDocument,
   AlertIncidentsListResponse,
   AlertIncidentStatus,
+  AlertMetricAggregation as AlertMetricAggregationSchema,
+  AlertMetricType as AlertMetricTypeSchema,
   AlertNotFoundError,
   AlertPersistenceError,
+  AlertQueryAggregation as AlertQueryAggregationSchema,
+  AlertQueryDataSource as AlertQueryDataSourceSchema,
   AlertRuleDeleteResponse,
   AlertRuleDocument,
   AlertRulesListResponse,
+  AlertSeverity as AlertSeveritySchema,
+  AlertSignalType as AlertSignalTypeSchema,
   AlertValidationError,
   type AlertComparator,
+  AlertDestinationType as AlertDestinationTypeSchema,
   type AlertDestinationCreateRequest,
   type AlertDestinationType,
   type AlertDestinationUpdateRequest,
@@ -59,10 +69,9 @@ import {
 } from "@maple/db"
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm"
 import {
-  Cause,
   Effect,
-  Exit,
   Layer,
+  Option,
   Redacted,
   Schema,
   ServiceMap,
@@ -176,26 +185,6 @@ interface DeliveryPayloadContext {
   readonly sampleCount: number | null
 }
 
-interface StoredDeliveryPayload {
-  readonly eventType?: AlertEventTypeValue
-  readonly incidentId?: string | null
-  readonly incidentStatus?: string
-  readonly dedupeKey?: string
-  readonly rule?: {
-    readonly id?: string
-    readonly name?: string
-    readonly signalType?: string
-    readonly severity?: string
-    readonly serviceName?: string | null
-    readonly comparator?: string
-    readonly threshold?: number
-    readonly windowMinutes?: number
-  }
-  readonly observed?: {
-    readonly value?: number | null
-    readonly sampleCount?: number | null
-  }
-}
 
 interface DeliveryAttemptFailure {
   readonly message: string
@@ -209,6 +198,59 @@ const DELIVERY_LEASE_TTL_MS = 30_000
 
 type DatabaseTransaction = Parameters<Parameters<DatabaseClient["transaction"]>[0]>[0]
 type DatabaseExecutor = DatabaseClient | DatabaseTransaction
+
+/* -------------------------------------------------------------------------- */
+/*  Schemas for stored JSON formats                                           */
+/* -------------------------------------------------------------------------- */
+
+const DestinationPublicConfigSchema = Schema.Struct({
+  summary: Schema.String,
+  channelLabel: Schema.NullOr(Schema.String),
+})
+
+const DestinationSecretConfigSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("slack"),
+    webhookUrl: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("pagerduty"),
+    integrationKey: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("webhook"),
+    url: Schema.String,
+    signingSecret: Schema.NullOr(Schema.String),
+  }),
+])
+
+const StoredDeliveryPayloadSchema = Schema.Struct({
+  eventType: Schema.optional(Schema.String),
+  incidentId: Schema.optional(Schema.NullOr(Schema.String)),
+  incidentStatus: Schema.optional(Schema.String),
+  dedupeKey: Schema.optional(Schema.String),
+  rule: Schema.optional(Schema.Struct({
+    id: Schema.optional(Schema.String),
+    name: Schema.optional(Schema.String),
+    signalType: Schema.optional(Schema.String),
+    severity: Schema.optional(Schema.String),
+    serviceName: Schema.optional(Schema.NullOr(Schema.String)),
+    comparator: Schema.optional(Schema.String),
+    threshold: Schema.optional(Schema.Number),
+    windowMinutes: Schema.optional(Schema.Number),
+  })),
+  observed: Schema.optional(Schema.Struct({
+    value: Schema.optional(Schema.NullOr(Schema.Number)),
+    sampleCount: Schema.optional(Schema.NullOr(Schema.Number)),
+  })),
+})
+
+const StringArraySchema = Schema.Array(Schema.String)
+
+const PublicConfigFromJson = Schema.parseJson(DestinationPublicConfigSchema)
+const SecretConfigFromJson = Schema.parseJson(DestinationSecretConfigSchema)
+const DeliveryPayloadFromJson = Schema.parseJson(StoredDeliveryPayloadSchema)
+const StringArrayFromJson = Schema.parseJson(StringArraySchema)
 
 const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(
   AlertDestinationDocument.fields.id,
@@ -229,6 +271,18 @@ const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(
 )
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
+const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestinationTypeSchema)
+const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
+const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
+const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
+const decodeAlertMetricTypeSync = Schema.decodeUnknownSync(AlertMetricTypeSchema)
+const decodeAlertMetricAggregationSync = Schema.decodeUnknownSync(AlertMetricAggregationSchema)
+const decodeAlertIncidentStatusSync = Schema.decodeUnknownSync(AlertIncidentStatus)
+const decodeAlertEventTypeSync = Schema.decodeUnknownSync(AlertEventTypeSchema)
+const decodeAlertDeliveryStatusSync = Schema.decodeUnknownSync(AlertDeliveryStatus)
+const decodeAlertGroupBySync = Schema.decodeUnknownSync(AlertGroupBySchema)
+const decodeAlertQueryDataSourceSync = Schema.decodeUnknownSync(AlertQueryDataSourceSchema)
+const decodeAlertQueryAggregationSync = Schema.decodeUnknownSync(AlertQueryAggregationSchema)
 type IsoDateTimeValue = Schema.Schema.Type<
   typeof AlertDestinationDocument.fields.createdAt
 >
@@ -329,20 +383,28 @@ const decryptSecret = (
     () => makeValidationError("Failed to decrypt destination secret"),
   )
 
-const parseJson = <T>(value: string, onError: string): Effect.Effect<T, AlertValidationError> =>
-  Effect.try({
-    try: () => JSON.parse(value) as T,
-    catch: () => makeValidationError(onError),
-  })
+const parsePublicConfig = (row: AlertDestinationRow): Effect.Effect<DestinationPublicConfig, AlertValidationError> =>
+  Schema.decodeUnknown(PublicConfigFromJson)(row.configJson).pipe(
+    Effect.mapError(() => makeValidationError("Stored destination config is invalid")),
+  )
 
-const summarizeWebhookUrl = (url: string) => {
-  try {
-    const parsed = new URL(url)
-    return `POST ${parsed.host}`
-  } catch {
-    return "Webhook endpoint"
-  }
-}
+const parseSecretConfig = (json: string): Effect.Effect<DestinationSecretConfig, AlertValidationError> =>
+  Schema.decodeUnknown(SecretConfigFromJson)(json).pipe(
+    Effect.mapError(() => makeValidationError("Stored destination secret is invalid")),
+  )
+
+type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
+
+const parseDeliveryPayload = (json: string): Effect.Effect<StoredDeliveryPayloadType, AlertValidationError> =>
+  Schema.decodeUnknown(DeliveryPayloadFromJson)(json).pipe(
+    Effect.mapError(() => makeValidationError("Stored delivery payload is invalid")),
+  )
+
+const summarizeWebhookUrl = (url: string) =>
+  Option.match(Option.liftThrowable(() => new URL(url))(), {
+    onNone: () => "Webhook endpoint",
+    onSome: (parsed) => `POST ${parsed.host}`,
+  })
 
 const buildPublicConfig = (
   request: AlertDestinationCreateRequest,
@@ -389,31 +451,17 @@ const buildSecretConfig = (
   }
 }
 
-const parsePublicConfig = (row: AlertDestinationRow) =>
-  parseJson<DestinationPublicConfig>(
-    row.configJson,
-    "Stored destination config is invalid",
+const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfig =>
+  Option.getOrElse(
+    Schema.decodeUnknownOption(PublicConfigFromJson)(row.configJson),
+    () => ({ summary: "Invalid destination config", channelLabel: null }),
   )
 
-const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfig => {
-  try {
-    return JSON.parse(row.configJson) as DestinationPublicConfig
-  } catch {
-    return {
-      summary: "Invalid destination config",
-      channelLabel: null,
-    }
-  }
-}
-
-const safeParseStringArray = (value: string): ReadonlyArray<string> => {
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : []
-  } catch {
-    return []
-  }
-}
+const safeParseStringArray = (value: string): ReadonlyArray<string> =>
+  Option.getOrElse(
+    Schema.decodeUnknownOption(StringArrayFromJson)(value),
+    () => [] as ReadonlyArray<string>,
+  )
 
 const compileRulePlan = (rule: {
   readonly signalType: AlertSignalType
@@ -608,17 +656,17 @@ const compileRulePlan = (rule: {
     }
   }
 
-  return Effect.try({
-    try: () =>
-      decodeCompiledAlertQueryPlanSync({
-        query,
-        reducer: "identity",
-        sampleCountStrategy,
-        noDataBehavior,
-      }),
-    catch: () => makeValidationError("Failed to compile alert rule plan"),
-  })
+  return Schema.decodeUnknown(CompiledAlertQueryPlan)({
+    query,
+    reducer: "identity",
+    sampleCountStrategy,
+    noDataBehavior,
+  }).pipe(
+    Effect.mapError(() => makeValidationError("Failed to compile alert rule plan")),
+  )
 }
+
+const QuerySpecFromJson = Schema.parseJson(QuerySpec)
 
 const parseCompiledPlan = (
   row: Pick<
@@ -626,16 +674,17 @@ const parseCompiledPlan = (
     "querySpecJson" | "reducer" | "sampleCountStrategy" | "noDataBehavior"
   >,
 ): Effect.Effect<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> =>
-  Effect.try({
-    try: () =>
-      decodeCompiledAlertQueryPlanSync({
-        query: JSON.parse(row.querySpecJson),
+  Schema.decodeUnknown(QuerySpecFromJson)(row.querySpecJson).pipe(
+    Effect.flatMap((query) =>
+      Schema.decodeUnknown(CompiledAlertQueryPlan)({
+        query,
         reducer: row.reducer,
         sampleCountStrategy: row.sampleCountStrategy,
         noDataBehavior: row.noDataBehavior,
       }),
-    catch: () => makeValidationError("Stored compiled alert plan is invalid"),
-  })
+    ),
+    Effect.mapError(() => makeValidationError("Stored compiled alert plan is invalid")),
+  )
 
 const rowToDestinationDocument = (
   row: AlertDestinationRow,
@@ -644,7 +693,7 @@ const rowToDestinationDocument = (
   new AlertDestinationDocument({
     id: decodeAlertDestinationIdSync(row.id),
     name: row.name,
-    type: row.type as AlertDestinationType,
+    type: decodeAlertDestinationTypeSync(row.type),
     enabled: row.enabled === 1,
     summary: publicConfig.summary,
     channelLabel: publicConfig.channelLabel,
@@ -667,12 +716,12 @@ const rowToRuleDocument = (row: AlertRuleRow, destinationIds: ReadonlyArray<stri
     id: decodeAlertRuleIdSync(row.id),
     name: row.name,
     enabled: row.enabled === 1,
-    severity: row.severity as AlertSeverity,
+    severity: decodeAlertSeveritySync(row.severity),
     serviceName: serviceNames.length === 1 ? serviceNames[0] : row.serviceName,
     serviceNames: [...serviceNames],
-    groupBy: (row.groupBy as AlertGroupBy | null) ?? null,
-    signalType: row.signalType as AlertSignalType,
-    comparator: row.comparator as AlertComparator,
+    groupBy: row.groupBy != null ? decodeAlertGroupBySync(row.groupBy) : null,
+    signalType: decodeAlertSignalTypeSync(row.signalType),
+    comparator: decodeAlertComparatorSync(row.comparator),
     threshold: row.threshold,
     windowMinutes: row.windowMinutes,
     minimumSampleCount: row.minimumSampleCount,
@@ -680,12 +729,12 @@ const rowToRuleDocument = (row: AlertRuleRow, destinationIds: ReadonlyArray<stri
     consecutiveHealthyRequired: row.consecutiveHealthyRequired,
     renotifyIntervalMinutes: row.renotifyIntervalMinutes,
     metricName: row.metricName,
-    metricType: (row.metricType as AlertMetricType | null) ?? null,
+    metricType: row.metricType != null ? decodeAlertMetricTypeSync(row.metricType) : null,
     metricAggregation:
-      (row.metricAggregation as AlertMetricAggregationValue | null) ?? null,
+      row.metricAggregation != null ? decodeAlertMetricAggregationSync(row.metricAggregation) : null,
     apdexThresholdMs: row.apdexThresholdMs,
-    queryDataSource: (row.queryDataSource as AlertQueryDataSource | null) ?? null,
-    queryAggregation: (row.queryAggregation as AlertQueryAggregation | null) ?? null,
+    queryDataSource: row.queryDataSource != null ? decodeAlertQueryDataSourceSync(row.queryDataSource) : null,
+    queryAggregation: row.queryAggregation != null ? decodeAlertQueryAggregationSync(row.queryAggregation) : null,
     queryWhereClause: row.queryWhereClause ?? null,
     destinationIds: destinationIds.map((id) => decodeAlertDestinationIdSync(id)),
     createdAt: decodeIsoDateTimeStringSync(new Date(row.createdAt).toISOString()),
@@ -701,10 +750,10 @@ const rowToIncidentDocument = (row: AlertIncidentRow) =>
     ruleId: decodeAlertRuleIdSync(row.ruleId),
     ruleName: row.ruleName,
     serviceName: row.serviceName,
-    signalType: row.signalType as AlertSignalType,
-    severity: row.severity as AlertSeverity,
-    status: row.status as Schema.Schema.Type<typeof AlertIncidentStatus>,
-    comparator: row.comparator as AlertComparator,
+    signalType: decodeAlertSignalTypeSync(row.signalType),
+    severity: decodeAlertSeveritySync(row.severity),
+    status: decodeAlertIncidentStatusSync(row.status),
+    comparator: decodeAlertComparatorSync(row.comparator),
     threshold: row.threshold,
     firstTriggeredAt: decodeIsoDateTimeStringSync(
       new Date(row.firstTriggeredAt).toISOString(),
@@ -716,7 +765,7 @@ const rowToIncidentDocument = (row: AlertIncidentRow) =>
     lastObservedValue: row.lastObservedValue,
     lastSampleCount: row.lastSampleCount,
     dedupeKey: row.dedupeKey,
-    lastDeliveredEventType: (row.lastDeliveredEventType as AlertEventTypeValue | null) ?? null,
+    lastDeliveredEventType: row.lastDeliveredEventType != null ? decodeAlertEventTypeSync(row.lastDeliveredEventType) : null,
     lastNotifiedAt: toIso(row.lastNotifiedAt),
   })
 
@@ -1001,10 +1050,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       ) {
         const publicConfig = yield* parsePublicConfig(row)
         const secretJson = yield* decryptSecret(row, encryptionKey)
-        const secretConfig = yield* parseJson<DestinationSecretConfig>(
-          secretJson,
-          "Stored destination secret is invalid",
-        )
+        const secretConfig = yield* parseSecretConfig(secretJson)
         return {
           row,
           publicConfig,
@@ -1034,8 +1080,10 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         )
       })
 
-      const parseDestinationIds = (value: string) =>
-        parseJson<ReadonlyArray<string>>(value, "Stored rule destinations are invalid")
+      const parseDestinationIds = (value: string): Effect.Effect<ReadonlyArray<string>, AlertValidationError> =>
+        Schema.decodeUnknown(StringArrayFromJson)(value).pipe(
+          Effect.mapError(() => makeValidationError("Stored rule destinations are invalid")),
+        )
 
       const normalizeRuleRow = Effect.fn("AlertsService.normalizeRuleRow")(function* (
         row: AlertRuleRow,
@@ -1045,12 +1093,12 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           id: row.id,
           name: row.name,
           enabled: row.enabled === 1,
-          severity: row.severity as AlertSeverity,
+          severity: decodeAlertSeveritySync(row.severity),
           serviceName: serviceNames.length === 1 ? serviceNames[0] : row.serviceName,
           serviceNames,
-          groupBy: (row.groupBy as AlertGroupBy | null) ?? null,
-          signalType: row.signalType as AlertSignalType,
-          comparator: row.comparator as AlertComparator,
+          groupBy: row.groupBy != null ? decodeAlertGroupBySync(row.groupBy) : null,
+          signalType: decodeAlertSignalTypeSync(row.signalType),
+          comparator: decodeAlertComparatorSync(row.comparator),
           threshold: row.threshold,
           windowMinutes: row.windowMinutes,
           minimumSampleCount: row.minimumSampleCount,
@@ -1058,12 +1106,12 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           consecutiveHealthyRequired: row.consecutiveHealthyRequired,
           renotifyIntervalMinutes: row.renotifyIntervalMinutes,
           metricName: row.metricName,
-          metricType: (row.metricType as AlertMetricType | null) ?? null,
+          metricType: row.metricType != null ? decodeAlertMetricTypeSync(row.metricType) : null,
           metricAggregation:
-            (row.metricAggregation as AlertMetricAggregationValue | null) ?? null,
+            row.metricAggregation != null ? decodeAlertMetricAggregationSync(row.metricAggregation) : null,
           apdexThresholdMs: row.apdexThresholdMs,
           queryDataSource: row.queryDataSource ?? null,
-          queryAggregation: (row.queryAggregation as AlertQueryAggregation | null) ?? null,
+          queryAggregation: row.queryAggregation != null ? decodeAlertQueryAggregationSync(row.queryAggregation) : null,
           queryWhereClause: row.queryWhereClause ?? null,
           destinationIds: yield* parseDestinationIds(row.destinationIdsJson),
           compiledPlan: yield* parseCompiledPlan(row),
@@ -1736,9 +1784,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             const payload = buildPayload({
               eventType,
               incidentId: incident.id,
-              incidentStatus: incident.status as Schema.Schema.Type<
-                typeof AlertIncidentStatus
-              >,
+              incidentStatus: decodeAlertIncidentStatusSync(incident.status),
               dedupeKey: incident.dedupeKey,
               ruleId: rule.id,
               ruleName: rule.name,
@@ -2016,7 +2062,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               ? error
               : makeDeliveryError(
                   error instanceof Error ? error.message : "Destination test failed",
-                  row.type as AlertDestinationType,
+                  decodeAlertDestinationTypeSync(row.type),
                 ),
           ),
         )
@@ -2201,12 +2247,15 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             reason: "No services found",
           }
         } else if (normalized.serviceNames.length > 1) {
-          const results: EvaluatedRule[] = []
-          for (const svcName of normalized.serviceNames) {
-            const perServicePlan = yield* compileRulePlan({ ...normalized, serviceName: svcName })
-            const perService = { ...normalized, serviceName: svcName, compiledPlan: perServicePlan }
-            results.push(yield* evaluateRule(orgId, perService))
-          }
+          const results = yield* Effect.forEach(
+            normalized.serviceNames,
+            (svcName) =>
+              Effect.gen(function* () {
+                const perServicePlan = yield* compileRulePlan({ ...normalized, serviceName: svcName })
+                return yield* evaluateRule(orgId, { ...normalized, serviceName: svcName, compiledPlan: perServicePlan })
+              }),
+            { concurrency: 5 },
+          )
           evaluation = results.find((r) => r.status === "breached") ?? results[0] ?? {
             status: "skipped" as const,
             value: null,
@@ -2232,27 +2281,32 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               ),
           )
           const byId = new Map(rows.map((row) => [row.id, row]))
-          for (const destinationId of normalized.destinationIds) {
-            const destination = byId.get(destinationId)
-            if (!destination || destination.enabled !== 1) continue
-            yield* sendImmediateNotification(destination, {
-              deliveryKey: `${orgId}:${destinationId}:rule-test`,
-              ruleId: makeUuid(),
-              ruleName: normalized.name,
-              serviceName: normalized.serviceName,
-              signalType: normalized.signalType,
-              severity: normalized.severity,
-              comparator: normalized.comparator,
-              threshold: normalized.threshold,
-              windowMinutes: normalized.windowMinutes,
-              eventType: "test",
-              incidentId: null,
-              incidentStatus: "resolved",
-              dedupeKey: `${orgId}:${destinationId}:rule-test`,
-              value: evaluation.value,
-              sampleCount: evaluation.sampleCount,
-            })
-          }
+          const enabledDestinations = normalized.destinationIds
+            .map((id) => ({ id, row: byId.get(id) }))
+            .filter((d): d is { id: string; row: AlertDestinationRow } => d.row != null && d.row.enabled === 1)
+
+          yield* Effect.forEach(
+            enabledDestinations,
+            ({ id: destinationId, row: destination }) =>
+              sendImmediateNotification(destination, {
+                deliveryKey: `${orgId}:${destinationId}:rule-test`,
+                ruleId: makeUuid(),
+                ruleName: normalized.name,
+                serviceName: normalized.serviceName,
+                signalType: normalized.signalType,
+                severity: normalized.severity,
+                comparator: normalized.comparator,
+                threshold: normalized.threshold,
+                windowMinutes: normalized.windowMinutes,
+                eventType: "test",
+                incidentId: null,
+                incidentStatus: "resolved",
+                dedupeKey: `${orgId}:${destinationId}:rule-test`,
+                value: evaluation.value,
+                sampleCount: evaluation.sampleCount,
+              }),
+            { concurrency: "unbounded" },
+          )
         }
 
         return new AlertEvaluationResult(evaluation)
@@ -2309,11 +2363,11 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             destinationId: decodeAlertDestinationIdSync(row.destinationId),
             destinationName: destination?.name ?? "Deleted destination",
             destinationType:
-              (destination?.type as AlertDestinationType | undefined) ?? "webhook",
+              destination?.type != null ? decodeAlertDestinationTypeSync(destination.type) : decodeAlertDestinationTypeSync("webhook"),
             deliveryKey: row.deliveryKey,
-            eventType: row.eventType as AlertEventTypeValue,
+            eventType: decodeAlertEventTypeSync(row.eventType),
             attemptNumber: row.attemptNumber,
-            status: row.status as Schema.Schema.Type<typeof AlertDeliveryStatus>,
+            status: decodeAlertDeliveryStatusSync(row.status),
             scheduledAt: decodeIsoDateTimeStringSync(
               new Date(row.scheduledAt).toISOString(),
             ),
@@ -2453,9 +2507,11 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         let processedCount = 0
         let failureCount = 0
 
-        for (const row of rows) {
+        const processOneDelivery = Effect.fn("AlertsService.processOneDelivery")(function* (
+          row: AlertDeliveryEventRow,
+        ) {
           const claimed = yield* claimDeliveryEvent(row.id, currentTime)
-          if (claimed.rowsAffected === 0) continue
+          if (claimed.rowsAffected === 0) return
 
           processedCount += 1
 
@@ -2463,45 +2519,24 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           if (!destinationRow) {
             failureCount += 1
             yield* recordDeliveryFailure(row, currentTime, { message: "Destination not found", kind: "destination", retryable: false })
-            continue
+            return
           }
 
           if (destinationRow.enabled !== 1) {
             failureCount += 1
             yield* recordDeliveryFailure(row, currentTime, { message: "Destination disabled", kind: "destination", retryable: false })
-            continue
+            return
           }
 
-          const payloadExit = yield* parseJson<StoredDeliveryPayload>(
-            row.payloadJson,
-            "Stored delivery payload is invalid",
-          ).pipe(Effect.exit)
-
-          if (Exit.isFailure(payloadExit)) {
-            const failure = toDeliveryAttemptFailure(Cause.squash(payloadExit.cause))
-            failureCount += 1
-            yield* recordDeliveryFailure(row, currentTime, failure)
-            continue
-          }
-
-          const payload = payloadExit.value
-
-          const hydratedExit = yield* hydrateDestination(destinationRow).pipe(Effect.exit)
-          if (Exit.isFailure(hydratedExit)) {
-            const failure = toDeliveryAttemptFailure(Cause.squash(hydratedExit.cause))
-            failureCount += 1
-            yield* recordDeliveryFailure(row, currentTime, failure)
-            continue
-          }
-
-          const hydrated = hydratedExit.value
+          const payload = yield* parseDeliveryPayload(row.payloadJson)
+          const hydrated = yield* hydrateDestination(destinationRow)
           const incidentRow: AlertIncidentRow | null = row.incidentId != null
             ? incidentMap.get(row.incidentId) ?? null
             : null
           const ruleRow = ruleMap.get(row.ruleId) ?? null
           const payloadRule = payload.rule
 
-          const deliveryResult = yield* dispatchDelivery(
+          const result = yield* dispatchDelivery(
             {
               deliveryKey: row.deliveryKey,
               destination: hydrated.row,
@@ -2511,89 +2546,93 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               ruleId: row.ruleId,
               ruleName: ruleRow?.name ?? String(payloadRule?.name ?? "Alert"),
               serviceName: incidentRow?.serviceName ?? payloadRule?.serviceName ?? null,
-              signalType: (incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput") as AlertSignalType,
-              severity: (incidentRow?.severity ?? payloadRule?.severity ?? "warning") as AlertSeverity,
-              comparator: (incidentRow?.comparator ?? payloadRule?.comparator ?? "gt") as AlertComparator,
+              signalType: decodeAlertSignalTypeSync(incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput"),
+              severity: decodeAlertSeveritySync(incidentRow?.severity ?? payloadRule?.severity ?? "warning"),
+              comparator: decodeAlertComparatorSync(incidentRow?.comparator ?? payloadRule?.comparator ?? "gt"),
               threshold: incidentRow?.threshold ?? payloadRule?.threshold ?? 0,
               windowMinutes: ruleRow?.windowMinutes ?? payloadRule?.windowMinutes ?? 5,
-              eventType: row.eventType as AlertEventTypeValue,
+              eventType: decodeAlertEventTypeSync(row.eventType),
               incidentId: row.incidentId,
-              incidentStatus: (incidentRow?.status ?? "resolved") as Schema.Schema.Type<typeof AlertIncidentStatus>,
+              incidentStatus: decodeAlertIncidentStatusSync(incidentRow?.status ?? "resolved"),
               dedupeKey: incidentRow?.dedupeKey ?? String(payload.dedupeKey ?? row.deliveryKey),
               value: payload.observed?.value ?? null,
               sampleCount: payload.observed?.sampleCount ?? null,
             },
             row.payloadJson,
-          ).pipe(Effect.exit)
+          )
 
-          if (Exit.isSuccess(deliveryResult)) {
-            const result = deliveryResult.value
-            yield* finalizeClaimedDelivery(row.id, currentTime, {
-              status: "success",
-              attemptedAt: currentTime,
-              providerMessage: result.providerMessage,
-              providerReference: result.providerReference,
-              responseCode: result.responseCode,
-              errorMessage: null,
-            })
-
-            if (row.incidentId) {
-              yield* dbExecute((db) =>
-                db
-                  .update(alertIncidents)
-                  .set({
-                    lastDeliveredEventType: row.eventType,
-                    lastNotifiedAt: currentTime,
-                    updatedAt: currentTime,
-                  })
-                  .where(eq(alertIncidents.id, row.incidentId!)),
-              )
-            }
-
-            yield* Effect.logInfo("Alert delivery attempt succeeded").pipe(
-              Effect.annotateLogs({
-                workerId,
-                deliveryKey: row.deliveryKey,
-                attemptNumber: row.attemptNumber,
-                destinationId: row.destinationId,
-                responseCode: result.responseCode,
-              }),
-            )
-            continue
-          }
-
-          const failure = toDeliveryAttemptFailure(Cause.squash(deliveryResult.cause))
-          failureCount += 1
           yield* finalizeClaimedDelivery(row.id, currentTime, {
-            status: "failed",
+            status: "success",
             attemptedAt: currentTime,
-            errorMessage: failure.message,
+            providerMessage: result.providerMessage,
+            providerReference: result.providerReference,
+            responseCode: result.responseCode,
+            errorMessage: null,
           })
 
-          if (failure.retryable && row.attemptNumber < MAX_DELIVERY_ATTEMPTS) {
-            yield* insertDeliveryEvent(
-              row.orgId as OrgId,
-              row.incidentId,
-              row.ruleId,
-              row.destinationId,
-              row.eventType as AlertEventTypeValue,
-              payload as Record<string, unknown>,
-              currentTime + computeRetryDelayMs(row.attemptNumber),
-              row.deliveryKey,
-              row.attemptNumber + 1,
+          if (row.incidentId) {
+            yield* dbExecute((db) =>
+              db
+                .update(alertIncidents)
+                .set({
+                  lastDeliveredEventType: row.eventType,
+                  lastNotifiedAt: currentTime,
+                  updatedAt: currentTime,
+                })
+                .where(eq(alertIncidents.id, row.incidentId!)),
             )
           }
 
-          yield* Effect.logWarning("Alert delivery attempt failed").pipe(
+          yield* Effect.logInfo("Alert delivery attempt succeeded").pipe(
             Effect.annotateLogs({
               workerId,
               deliveryKey: row.deliveryKey,
               attemptNumber: row.attemptNumber,
               destinationId: row.destinationId,
-              failureKind: failure.kind,
-              errorMessage: failure.message,
-              willRetry:
-                failure.retryable && row.attemptNumber < MAX_DELIVERY_ATTEMPTS,
+              responseCode: result.responseCode,
+            }),
+          )
+        })
+
+        for (const row of rows) {
+          yield* processOneDelivery(row).pipe(
+            Effect.catchAll((error) => {
+              const failure = toDeliveryAttemptFailure(error)
+              failureCount += 1
+              return Effect.gen(function* () {
+                yield* finalizeClaimedDelivery(row.id, currentTime, {
+                  status: "failed",
+                  attemptedAt: currentTime,
+                  errorMessage: failure.message,
+                })
+
+                if (failure.retryable && row.attemptNumber < MAX_DELIVERY_ATTEMPTS) {
+                  yield* insertDeliveryEvent(
+                    row.orgId as OrgId,
+                    row.incidentId,
+                    row.ruleId,
+                    row.destinationId,
+                    decodeAlertEventTypeSync(row.eventType),
+                    {} as Record<string, unknown>,
+                    currentTime + computeRetryDelayMs(row.attemptNumber),
+                    row.deliveryKey,
+                    row.attemptNumber + 1,
+                  )
+                }
+
+                yield* Effect.logWarning("Alert delivery attempt failed").pipe(
+                  Effect.annotateLogs({
+                    workerId,
+                    deliveryKey: row.deliveryKey,
+                    attemptNumber: row.attemptNumber,
+                    destinationId: row.destinationId,
+                    failureKind: failure.kind,
+                    errorMessage: failure.message,
+                    willRetry:
+                      failure.retryable && row.attemptNumber < MAX_DELIVERY_ATTEMPTS,
+                  }),
+                )
+              })
             }),
           )
         }
@@ -2865,7 +2904,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               const claimed = yield* claimRule(row.id, timestamp)
               if (claimed.rowsAffected === 0) return
 
-              const ruleExit = yield* Effect.gen(function* () {
+              yield* Effect.gen(function* () {
                 const normalized = yield* normalizeRuleRow(row)
 
                 if (normalized.groupBy != null && normalized.serviceNames.length === 0) {
@@ -2916,27 +2955,26 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                   normalized.serviceName,
                   timestamp,
                 )
-              }).pipe(Effect.exit)
-
-              if (Exit.isFailure(ruleExit)) {
-                evaluationFailureCount += 1
-                const error = Cause.squash(ruleExit.cause)
-                yield* Effect.logError("Alert rule evaluation failed").pipe(
-                  Effect.annotateLogs({
-                    workerId,
-                    ruleId: row.id,
-                    orgId: row.orgId,
-                    failureCategory:
-                      error instanceof AlertValidationError
-                        ? "validation"
-                        : error instanceof AlertDeliveryError
-                          ? "evaluation"
-                          : "unknown",
-                    errorMessage:
-                      error instanceof Error ? error.message : "Alert rule evaluation failed",
-                  }),
-                )
-              }
+              }).pipe(
+                Effect.catchAll((error) => {
+                  evaluationFailureCount += 1
+                  return Effect.logError("Alert rule evaluation failed").pipe(
+                    Effect.annotateLogs({
+                      workerId,
+                      ruleId: row.id,
+                      orgId: row.orgId,
+                      failureCategory:
+                        error instanceof AlertValidationError
+                          ? "validation"
+                          : error instanceof AlertDeliveryError
+                            ? "evaluation"
+                            : "unknown",
+                      errorMessage:
+                        error instanceof Error ? error.message : "Alert rule evaluation failed",
+                    }),
+                  )
+                }),
+              )
             }),
           { concurrency: 5 },
         )
