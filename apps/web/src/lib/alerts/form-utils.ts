@@ -1,4 +1,6 @@
 import {
+  AlertDestinationDocument,
+  AlertIncidentDocument,
   AlertRuleDocument,
   AlertRuleTestRequest,
   AlertRuleUpsertRequest,
@@ -312,4 +314,159 @@ export function flattenAlertChartData(
     }
     return base
   })
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Destination Form Helpers                                                  */
+/* -------------------------------------------------------------------------- */
+
+export type DestinationFormState = {
+  type: AlertDestinationType
+  name: string
+  enabled: boolean
+  channelLabel: string
+  webhookUrl: string
+  integrationKey: string
+  url: string
+  signingSecret: string
+}
+
+export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
+  return {
+    type,
+    name: "",
+    enabled: true,
+    channelLabel: "",
+    webhookUrl: "",
+    integrationKey: "",
+    url: "",
+    signingSecret: "",
+  }
+}
+
+export function destinationToFormState(destination: AlertDestinationDocument): DestinationFormState {
+  return {
+    type: destination.type,
+    name: destination.name,
+    enabled: destination.enabled,
+    channelLabel: destination.channelLabel ?? "",
+    webhookUrl: "",
+    integrationKey: "",
+    url: "",
+    signingSecret: "",
+  }
+}
+
+export function buildDestinationCreatePayload(form: DestinationFormState) {
+  switch (form.type) {
+    case "slack":
+      return { type: "slack" as const, name: form.name.trim(), enabled: form.enabled, webhookUrl: form.webhookUrl.trim(), channelLabel: form.channelLabel.trim() || undefined }
+    case "pagerduty":
+      return { type: "pagerduty" as const, name: form.name.trim(), enabled: form.enabled, integrationKey: form.integrationKey.trim() }
+    case "webhook":
+      return { type: "webhook" as const, name: form.name.trim(), enabled: form.enabled, url: form.url.trim(), signingSecret: form.signingSecret.trim() || undefined }
+  }
+}
+
+export function buildDestinationUpdatePayload(form: DestinationFormState) {
+  switch (form.type) {
+    case "slack":
+      return { type: "slack" as const, name: form.name.trim() || undefined, enabled: form.enabled, channelLabel: form.channelLabel.trim() || undefined, webhookUrl: form.webhookUrl.trim() || undefined }
+    case "pagerduty":
+      return { type: "pagerduty" as const, name: form.name.trim() || undefined, enabled: form.enabled, integrationKey: form.integrationKey.trim() || undefined }
+    case "webhook":
+      return { type: "webhook" as const, name: form.name.trim() || undefined, enabled: form.enabled, url: form.url.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Rule Toggle Helper                                                        */
+/* -------------------------------------------------------------------------- */
+
+export function buildRuleToggleRequest(rule: AlertRuleDocument): AlertRuleUpsertRequest {
+  return new AlertRuleUpsertRequest({
+    ...rule,
+    enabled: !rule.enabled,
+    serviceName: rule.serviceName ?? null,
+    serviceNames: rule.serviceNames?.length > 0 ? [...rule.serviceNames] : undefined,
+    metricName: rule.metricName ?? null,
+    metricType: rule.metricType ?? null,
+    metricAggregation: rule.metricAggregation ?? null,
+    apdexThresholdMs: rule.apdexThresholdMs ?? null,
+    destinationIds: [...rule.destinationIds],
+  })
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Incident Stats                                                            */
+/* -------------------------------------------------------------------------- */
+
+export function computeIncidentStats(incidents: AlertIncidentDocument[]) {
+  const totalTriggered = incidents.length
+  const resolvedIncidents = incidents.filter((i) => i.resolvedAt && i.firstTriggeredAt)
+  const avgResolutionMs = resolvedIncidents.length > 0
+    ? resolvedIncidents.reduce((sum, i) => {
+        const start = new Date(i.firstTriggeredAt).getTime()
+        const end = new Date(i.resolvedAt!).getTime()
+        return sum + (end - start)
+      }, 0) / resolvedIncidents.length
+    : 0
+
+  const avgResolution = avgResolutionMs > 0
+    ? avgResolutionMs < 60_000 ? `${Math.round(avgResolutionMs / 1000)}s`
+      : avgResolutionMs < 3_600_000 ? `${(avgResolutionMs / 60_000).toFixed(1)}m`
+      : `${(avgResolutionMs / 3_600_000).toFixed(1)}h`
+    : "—"
+
+  const serviceCounts: Record<string, number> = {}
+  for (const i of incidents) {
+    const svc = i.serviceName ?? "unknown"
+    serviceCounts[svc] = (serviceCounts[svc] ?? 0) + 1
+  }
+  const topContributors = Object.entries(serviceCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+
+  return { totalTriggered, avgResolution, topContributors }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Shared Formatters                                                         */
+/* -------------------------------------------------------------------------- */
+
+export function formatAlertDateTime(value: string | null): string {
+  if (!value) return "Never"
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+export function formatAlertDateTimeFull(value: string | null): string {
+  if (!value) return "—"
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+}
+
+export function formatAlertDuration(startStr: string | null, endStr: string | null): string {
+  if (!startStr) return "—"
+  const start = new Date(startStr).getTime()
+  const end = endStr ? new Date(endStr).getTime() : Date.now()
+  const diffMs = end - start
+  if (diffMs < 0) return "—"
+  const mins = Math.floor(diffMs / 60_000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  const remainMins = mins % 60
+  if (hours < 24) return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
+  const days = Math.floor(hours / 24)
+  return `${days}d ${hours % 24}h`
 }

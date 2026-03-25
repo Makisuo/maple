@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Atom, Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -21,8 +21,6 @@ import {
   destinationTypeLabels,
   signalLabels,
   formatSignalValue,
-  signalToQueryParams,
-  flattenAlertChartData,
 } from "@/lib/alerts/form-utils"
 import {
   AlertDestinationDocument,
@@ -62,7 +60,6 @@ import {
   ComboboxList,
 } from "@maple/ui/components/ui/combobox"
 import {
-  getCustomChartTimeSeriesResultAtom,
   getLogsFacetsResultAtom,
   getTracesFacetsResultAtom,
   getSpanAttributeKeysResultAtom,
@@ -70,8 +67,8 @@ import {
   getResourceAttributeKeysResultAtom,
   getResourceAttributeValuesResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
-import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useAlertRuleChart } from "@/hooks/use-alert-rule-chart"
 import { AGGREGATIONS_BY_SOURCE, QUERY_BUILDER_METRIC_TYPES } from "@/lib/query-builder/model"
 import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
@@ -85,9 +82,6 @@ export const Route = createFileRoute("/alerts/create")({
   component: AlertCreatePage,
   validateSearch: Schema.toStandardSchemaV1(AlertCreateSearch),
 })
-
-const CHART_BUCKET_TARGET = 96
-const emptyChartAtom = Atom.make(Result.initial())
 
 const signalTypes = Object.entries(signalLabels).map(([value, label]) => ({
   value: value as AlertSignalType,
@@ -248,48 +242,7 @@ function AlertCreatePage() {
     }
   }, [editingRule, initialized])
 
-  const bucketSeconds = useMemo(
-    () => computeBucketSeconds(startTime, endTime, CHART_BUCKET_TARGET),
-    [startTime, endTime],
-  )
-
-  const queryParams = useMemo(() => signalToQueryParams(ruleForm), [ruleForm])
-
-  const chartGroupBy = useMemo(
-    () => ruleForm.serviceNames.length > 1 || (ruleForm.serviceNames.length === 0 && ruleForm.groupBy === "service")
-      ? "service" as const : "none" as const,
-    [ruleForm.serviceNames.length, ruleForm.groupBy],
-  )
-
-  const chartQueryInput = useMemo(() => {
-    if (!queryParams) return null
-    return {
-      data: {
-        source: queryParams.source as "traces" | "logs" | "metrics",
-        metric: queryParams.metric,
-        groupBy: chartGroupBy,
-        startTime,
-        endTime,
-        bucketSeconds,
-        filters: queryParams.filters as Record<string, string | boolean | string[] | undefined>,
-      },
-    }
-  }, [queryParams, startTime, endTime, bucketSeconds, chartGroupBy])
-
-  const chartResult = useAtomValue(
-    chartQueryInput
-      ? getCustomChartTimeSeriesResultAtom(chartQueryInput)
-      : emptyChartAtom,
-  )
-
-  const chartData = useMemo(() => {
-    if (!chartQueryInput) return []
-    return Result.builder(chartResult)
-      .onSuccess((response) => flattenAlertChartData(response.data, ruleForm.serviceNames))
-      .orElse(() => [])
-  }, [chartResult, chartQueryInput, ruleForm.serviceNames])
-
-  const chartLoading = !chartQueryInput || Result.isInitial(chartResult)
+  const { chartData, chartLoading } = useAlertRuleChart(ruleForm)
   const threshold = Number(ruleForm.threshold)
 
   async function handleSave() {
