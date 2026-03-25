@@ -212,4 +212,6 @@ export class ApiKeysService extends ServiceMap.Service<ApiKeysService>()(
   },
 ) {
   static readonly layer = Layer.effect(this, this.make)
+  static readonly Live = this.layer
+  static readonly Default = this.layer
 }

@@ -126,5 +126,6 @@ export class Env extends ServiceMap.Service<Env, EnvShape>()("Env", {
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make)
+  static readonly Live = this.layer
   static readonly Default = this.layer
 }

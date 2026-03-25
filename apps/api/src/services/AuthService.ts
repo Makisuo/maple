@@ -484,4 +484,6 @@ export class AuthService extends ServiceMap.Service<AuthService, AuthServiceShap
   }),
 }) {
   static readonly layer = Layer.effect(this, this.make)
+  static readonly Live = this.layer
+  static readonly Default = this.layer
 }

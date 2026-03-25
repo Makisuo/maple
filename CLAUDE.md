@@ -100,7 +100,7 @@ TINYBIRD_TOKEN=<token>                # Tinybird API token
 - **Path Alias:** Use `@/` for imports (e.g., `@/components/ui/button`)
 - **TypeScript:** Strict mode enabled with no unused variables
 - **Server Functions:** Always validate inputs with Zod schemas
-- **Effect Schema:** Use Effect Schema instead of Zod for all new schemas (route search params, server function validation). Use `Schema.standardSchemaV1()` to wrap Effect Schemas for TanStack Router's `validateSearch`.
+- **Effect Schema:** Use Effect Schema instead of Zod for all new schemas (route search params, server function validation). Use `Schema.toStandardSchemaV1()` to wrap Effect Schemas for TanStack Router's `validateSearch`. Use `Schema.optionalKey()` for optional fields in JSON-decoded HTTP schemas (domain models), and `Schema.optional()` only for JS-side schemas (route search params, MCP tool params) where `undefined` is a valid value.
 - **Components:** Add UI components via `npx shadcn@latest add <component>`
 
 ### Nucleo Icons

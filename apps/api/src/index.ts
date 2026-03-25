@@ -58,7 +58,7 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
   Layer.provideMerge(TinybirdServiceLive),
 )
 
-const AlertsServiceLive = AlertsService.Live.pipe(
+const AlertsServiceLive = AlertsService.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(CoreServicesLive, QueryEngineServiceLive, AlertRuntime.Default)),
 )
 

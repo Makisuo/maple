@@ -11,7 +11,7 @@ const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
 
 export class TinybirdQueryRequest extends Schema.Class<TinybirdQueryRequest>("TinybirdQueryRequest")({
   pipe: TinybirdPipeSchema,
-  params: Schema.optional(UnknownRecord),
+  params: Schema.optionalKey(UnknownRecord),
 }) {}
 
 export class TinybirdQueryResponse extends Schema.Class<TinybirdQueryResponse>("TinybirdQueryResponse")({

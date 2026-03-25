@@ -303,7 +303,9 @@ export class AlertRuntime extends ServiceMap.Service<AlertRuntime, AlertRuntimeS
     }),
   },
 ) {
-  static readonly Default = Layer.effect(this, this.make)
+  static readonly layer = Layer.effect(this, this.make)
+  static readonly Live = this.layer
+  static readonly Default = this.layer
 }
 
 const toIso = (value: number | null | undefined): IsoDateTimeValue | null =>
@@ -2634,6 +2636,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
     }),
   },
 ) {
-  static readonly Live = Layer.effect(this, this.make)
-  static readonly Default = this.Live
+  static readonly layer = Layer.effect(this, this.make)
+  static readonly Live = this.layer
+  static readonly Default = this.layer
 }

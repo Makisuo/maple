@@ -155,7 +155,7 @@ const NonEmptyString = Schema.String.pipe(
   Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
 )
 
-const OptionalNonEmptyString = Schema.optional(
+const OptionalNonEmptyString = Schema.optionalKey(
   Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed())),
 )
 
@@ -178,7 +178,7 @@ export class SlackAlertDestinationConfig extends Schema.Class<SlackAlertDestinat
   name: ChannelLabel,
   webhookUrl: NonEmptyString,
   channelLabel: OptionalNonEmptyString,
-  enabled: Schema.optional(Schema.Boolean),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class PagerDutyAlertDestinationConfig extends Schema.Class<PagerDutyAlertDestinationConfig>(
@@ -187,7 +187,7 @@ export class PagerDutyAlertDestinationConfig extends Schema.Class<PagerDutyAlert
   type: Schema.Literal("pagerduty"),
   name: ChannelLabel,
   integrationKey: NonEmptyString,
-  enabled: Schema.optional(Schema.Boolean),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class WebhookAlertDestinationConfig extends Schema.Class<WebhookAlertDestinationConfig>(
@@ -196,8 +196,8 @@ export class WebhookAlertDestinationConfig extends Schema.Class<WebhookAlertDest
   type: Schema.Literal("webhook"),
   name: ChannelLabel,
   url: NonEmptyString,
-  signingSecret: Schema.optional(Schema.String),
-  enabled: Schema.optional(Schema.Boolean),
+  signingSecret: Schema.optionalKey(Schema.String),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export const AlertDestinationCreateRequest = Schema.Union([
@@ -206,20 +206,20 @@ export const AlertDestinationCreateRequest = Schema.Union([
     name: ChannelLabel,
     webhookUrl: NonEmptyString,
     channelLabel: OptionalNonEmptyString,
-    enabled: Schema.optional(Schema.Boolean),
+    enabled: Schema.optionalKey(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("pagerduty"),
     name: ChannelLabel,
     integrationKey: NonEmptyString,
-    enabled: Schema.optional(Schema.Boolean),
+    enabled: Schema.optionalKey(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("webhook"),
     name: ChannelLabel,
     url: NonEmptyString,
-    signingSecret: Schema.optional(Schema.String),
-    enabled: Schema.optional(Schema.Boolean),
+    signingSecret: Schema.optionalKey(Schema.String),
+    enabled: Schema.optionalKey(Schema.Boolean),
   }),
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<
@@ -230,26 +230,26 @@ export class UpdateSlackAlertDestinationConfig extends Schema.Class<UpdateSlackA
   "UpdateSlackAlertDestinationConfig",
 )({
   name: OptionalNonEmptyString,
-  webhookUrl: Schema.optional(Schema.String),
+  webhookUrl: Schema.optionalKey(Schema.String),
   channelLabel: OptionalNonEmptyString,
-  enabled: Schema.optional(Schema.Boolean),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class UpdatePagerDutyAlertDestinationConfig extends Schema.Class<UpdatePagerDutyAlertDestinationConfig>(
   "UpdatePagerDutyAlertDestinationConfig",
 )({
   name: OptionalNonEmptyString,
-  integrationKey: Schema.optional(Schema.String),
-  enabled: Schema.optional(Schema.Boolean),
+  integrationKey: Schema.optionalKey(Schema.String),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class UpdateWebhookAlertDestinationConfig extends Schema.Class<UpdateWebhookAlertDestinationConfig>(
   "UpdateWebhookAlertDestinationConfig",
 )({
   name: OptionalNonEmptyString,
-  url: Schema.optional(Schema.String),
-  signingSecret: Schema.optional(Schema.String),
-  enabled: Schema.optional(Schema.Boolean),
+  url: Schema.optionalKey(Schema.String),
+  signingSecret: Schema.optionalKey(Schema.String),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export const AlertDestinationUpdateRequest = Schema.Union([
@@ -331,26 +331,26 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
   "AlertRuleUpsertRequest",
 )({
   name: ChannelLabel,
-  enabled: Schema.optional(Schema.Boolean),
+  enabled: Schema.optionalKey(Schema.Boolean),
   severity: AlertSeverity,
-  serviceName: Schema.optional(Schema.NullOr(Schema.String)),
-  serviceNames: Schema.optional(Schema.Array(Schema.String)),
-  groupBy: Schema.optional(Schema.NullOr(AlertGroupBy)),
+  serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  serviceNames: Schema.optionalKey(Schema.Array(Schema.String)),
+  groupBy: Schema.optionalKey(Schema.NullOr(AlertGroupBy)),
   signalType: AlertSignalType,
   comparator: AlertComparator,
   threshold: Schema.Number,
   windowMinutes: PositiveInt,
-  minimumSampleCount: Schema.optional(NonNegativeInt),
-  consecutiveBreachesRequired: Schema.optional(PositiveInt),
-  consecutiveHealthyRequired: Schema.optional(PositiveInt),
-  renotifyIntervalMinutes: Schema.optional(PositiveInt),
-  metricName: Schema.optional(Schema.NullOr(Schema.String)),
-  metricType: Schema.optional(Schema.NullOr(AlertMetricType)),
-  metricAggregation: Schema.optional(Schema.NullOr(AlertMetricAggregation)),
-  apdexThresholdMs: Schema.optional(Schema.NullOr(PositiveFloat)),
-  queryDataSource: Schema.optional(Schema.NullOr(AlertQueryDataSource)),
-  queryAggregation: Schema.optional(Schema.NullOr(AlertQueryAggregation)),
-  queryWhereClause: Schema.optional(Schema.NullOr(Schema.String)),
+  minimumSampleCount: Schema.optionalKey(NonNegativeInt),
+  consecutiveBreachesRequired: Schema.optionalKey(PositiveInt),
+  consecutiveHealthyRequired: Schema.optionalKey(PositiveInt),
+  renotifyIntervalMinutes: Schema.optionalKey(PositiveInt),
+  metricName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  metricType: Schema.optionalKey(Schema.NullOr(AlertMetricType)),
+  metricAggregation: Schema.optionalKey(Schema.NullOr(AlertMetricAggregation)),
+  apdexThresholdMs: Schema.optionalKey(Schema.NullOr(PositiveFloat)),
+  queryDataSource: Schema.optionalKey(Schema.NullOr(AlertQueryDataSource)),
+  queryAggregation: Schema.optionalKey(Schema.NullOr(AlertQueryAggregation)),
+  queryWhereClause: Schema.optionalKey(Schema.NullOr(Schema.String)),
   destinationIds: Schema.Array(AlertDestinationId),
 }) {}
 
@@ -370,7 +370,7 @@ export class AlertRuleTestRequest extends Schema.Class<AlertRuleTestRequest>(
   "AlertRuleTestRequest",
 )({
   rule: AlertRuleUpsertRequest,
-  sendNotification: Schema.optional(Schema.Boolean),
+  sendNotification: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class AlertEvaluationResult extends Schema.Class<AlertEvaluationResult>(
@@ -450,7 +450,7 @@ export class AlertForbiddenError extends Schema.TaggedErrorClass<AlertForbiddenE
   "AlertForbiddenError",
   {
     message: Schema.String,
-    roles: Schema.optional(Schema.Array(RoleName)),
+    roles: Schema.optionalKey(Schema.Array(RoleName)),
   },
   { httpApiStatus: 403 },
 ) {}
@@ -486,7 +486,7 @@ export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryErr
   "AlertDeliveryError",
   {
     message: Schema.String,
-    destinationType: Schema.optional(AlertDestinationType),
+    destinationType: Schema.optionalKey(AlertDestinationType),
   },
   { httpApiStatus: 502 },
 ) {}

@@ -35,25 +35,25 @@ export class CreateScrapeTargetRequest extends Schema.Class<CreateScrapeTargetRe
 )({
   name: Schema.String,
   url: Schema.String,
-  scrapeIntervalSeconds: Schema.optional(ScrapeIntervalSeconds),
-  labelsJson: Schema.optional(Schema.NullOr(Schema.String)),
-  authType: Schema.optional(ScrapeAuthType),
-  serviceName: Schema.optional(Schema.NullOr(Schema.String)),
-  authCredentials: Schema.optional(Schema.NullOr(Schema.String)),
-  enabled: Schema.optional(Schema.Boolean),
+  scrapeIntervalSeconds: Schema.optionalKey(ScrapeIntervalSeconds),
+  labelsJson: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  authType: Schema.optionalKey(ScrapeAuthType),
+  serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  authCredentials: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class UpdateScrapeTargetRequest extends Schema.Class<UpdateScrapeTargetRequest>(
   "UpdateScrapeTargetRequest",
 )({
-  name: Schema.optional(Schema.String),
-  url: Schema.optional(Schema.String),
-  scrapeIntervalSeconds: Schema.optional(ScrapeIntervalSeconds),
-  labelsJson: Schema.optional(Schema.NullOr(Schema.String)),
-  authType: Schema.optional(ScrapeAuthType),
-  serviceName: Schema.optional(Schema.NullOr(Schema.String)),
-  authCredentials: Schema.optional(Schema.NullOr(Schema.String)),
-  enabled: Schema.optional(Schema.Boolean),
+  name: Schema.optionalKey(Schema.String),
+  url: Schema.optionalKey(Schema.String),
+  scrapeIntervalSeconds: Schema.optionalKey(ScrapeIntervalSeconds),
+  labelsJson: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  authType: Schema.optionalKey(ScrapeAuthType),
+  serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  authCredentials: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class ScrapeTargetDeleteResponse extends Schema.Class<ScrapeTargetDeleteResponse>(

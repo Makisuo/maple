@@ -332,7 +332,11 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
             org_id: tenant.orgId,
           }),
         catch: (error) => toTinybirdQueryError(pipe, error),
-      })
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.logError("TinybirdService.runPipe failed", { pipe, error: String(error) })
+        )
+      )
       return result.data as ReadonlyArray<TRow>
     })
 
@@ -367,7 +371,11 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
             org_id: tenant.orgId,
           }),
         catch: (error) => toTinybirdQueryError(payload.pipe, error),
-      })
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.logError("TinybirdService.query failed", { pipe: payload.pipe, error: String(error) })
+        )
+      )
 
       return new TinybirdQueryResponse({
         data: Array.from(result.data ?? []),

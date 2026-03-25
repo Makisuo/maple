@@ -59,17 +59,17 @@ export class CreateCloudflareLogpushConnectorRequest extends Schema.Class<Create
 )({
   name: Schema.String,
   zoneName: Schema.String,
-  serviceName: Schema.optional(Schema.NullOr(Schema.String)),
-  enabled: Schema.optional(Schema.Boolean),
+  serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class UpdateCloudflareLogpushConnectorRequest extends Schema.Class<UpdateCloudflareLogpushConnectorRequest>(
   "UpdateCloudflareLogpushConnectorRequest",
 )({
-  name: Schema.optional(Schema.String),
-  zoneName: Schema.optional(Schema.String),
-  serviceName: Schema.optional(Schema.NullOr(Schema.String)),
-  enabled: Schema.optional(Schema.Boolean),
+  name: Schema.optionalKey(Schema.String),
+  zoneName: Schema.optionalKey(Schema.String),
+  serviceName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class CloudflareLogpushPersistenceError extends Schema.TaggedErrorClass<CloudflareLogpushPersistenceError>()(
