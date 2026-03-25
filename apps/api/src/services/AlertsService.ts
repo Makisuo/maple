@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import {
   CompiledAlertQueryPlan,
   type QueryEngineNoDataBehavior,
@@ -69,7 +69,6 @@ import {
 } from "@maple/db"
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm"
 import {
-  Duration,
   Effect,
   Layer,
   Option,
@@ -85,6 +84,13 @@ import {
   type EncryptedValue,
 } from "./Crypto"
 import { Database, type DatabaseClient } from "./DatabaseLive"
+import {
+  dispatchDelivery as dispatchDeliveryImpl,
+  formatComparator,
+  formatSignalLabel,
+  formatEventTypeLabel,
+  formatSignalMetric,
+} from "./AlertDeliveryDispatch"
 import { Env } from "./Env"
 import { QueryEngineService, type GroupedAlertObservation } from "./QueryEngineService"
 
@@ -144,7 +150,6 @@ interface EvaluatedRule {
 interface DispatchContext {
   readonly deliveryKey: string
   readonly destination: AlertDestinationRow
-  readonly destinationDoc: AlertDestinationDocument
   readonly publicConfig: DestinationPublicConfig
   readonly secretConfig: DestinationSecretConfig
   readonly ruleId: string
@@ -253,23 +258,12 @@ const SecretConfigFromJson = Schema.fromJsonString(DestinationSecretConfigSchema
 const DeliveryPayloadFromJson = Schema.fromJsonString(StoredDeliveryPayloadSchema)
 const StringArrayFromJson = Schema.fromJsonString(StringArraySchema)
 
-const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(
-  AlertDestinationDocument.fields.id,
-)
+const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.id)
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
-const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(
-  AlertIncidentDocument.fields.id,
-)
-const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(
-  AlertDeliveryEventDocument.fields.id,
-)
+const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.id)
+const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(AlertDeliveryEventDocument.fields.id)
 const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
-const decodeCompiledAlertQueryPlanSync = Schema.decodeUnknownSync(
-  CompiledAlertQueryPlan,
-)
-const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(
-  AlertDestinationDocument.fields.createdAt,
-)
+const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.createdAt)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestinationTypeSchema)
@@ -504,171 +498,118 @@ const compileRulePlan = (rule: {
       ? "zero"
       : "skip"
 
+  const traceSignalMetrics: Record<string, string> = {
+    error_rate: "error_rate",
+    p95_latency: "p95_duration",
+    p99_latency: "p99_duration",
+    throughput: "count",
+    apdex: "apdex",
+  }
+
   let query: QuerySpec
   let sampleCountStrategy: QueryEngineSampleCountStrategy
 
-  switch (rule.signalType) {
-    case "error_rate":
+  const traceMetric = traceSignalMetrics[rule.signalType]
+  if (traceMetric) {
+    query = decodeQuerySpecSync({
+      kind: "timeseries",
+      source: "traces",
+      metric: traceMetric,
+      groupBy: ["none"],
+      bucketSeconds,
+      ...(rule.signalType === "apdex" ? { apdexThresholdMs: rule.apdexThresholdMs ?? 500 } : {}),
+      filters: { ...(baseTraceFilters ?? {}), rootSpansOnly: true },
+    })
+    sampleCountStrategy = "trace_count"
+  } else if (rule.signalType === "metric") {
+    if (rule.metricName == null || rule.metricType == null || rule.metricAggregation == null) {
+      return Effect.fail(
+        makeValidationError("metric alerts require metricName, metricType, and metricAggregation"),
+      )
+    }
+    query = decodeQuerySpecSync({
+      kind: "timeseries",
+      source: "metrics",
+      metric: rule.metricAggregation,
+      groupBy: ["none"],
+      bucketSeconds,
+      filters: {
+        metricName: rule.metricName,
+        metricType: rule.metricType,
+        ...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
+      },
+    })
+    sampleCountStrategy = "metric_data_points"
+  } else if (rule.signalType === "query") {
+    if (rule.queryDataSource == null || rule.queryAggregation == null) {
+      return Effect.fail(
+        makeValidationError("query alerts require queryDataSource and queryAggregation"),
+      )
+    }
+    const { clauses } = parseWhereClause(rule.queryWhereClause ?? "")
+
+    if (rule.queryDataSource === "traces") {
+      const filters: Record<string, unknown> = {}
+      if (rule.serviceName) filters.serviceName = rule.serviceName
+      for (const c of clauses) {
+        const key = normalizeKey(c.key)
+        if (key === "service.name") filters.serviceName = c.value
+        else if (key === "span.name") filters.spanName = c.value
+        else if (key === "root_only" && (c.value === "true" || c.value === "1")) filters.rootSpansOnly = true
+        else if (key === "has_error" && (c.value === "true" || c.value === "1")) filters.errorsOnly = true
+      }
       query = decodeQuerySpecSync({
         kind: "timeseries",
         source: "traces",
-        metric: "error_rate",
+        metric: rule.queryAggregation,
         groupBy: ["none"],
         bucketSeconds,
-        filters: {
-          ...(baseTraceFilters ?? {}),
-          rootSpansOnly: true,
-        },
+        filters: Object.keys(filters).length ? filters : undefined,
       })
       sampleCountStrategy = "trace_count"
-      break
-    case "p95_latency":
+    } else if (rule.queryDataSource === "logs") {
+      const filters: Record<string, unknown> = {}
+      for (const c of clauses) {
+        const key = normalizeKey(c.key)
+        if (key === "service.name") filters.serviceName = c.value
+        else if (key === "severity") filters.severity = c.value
+      }
       query = decodeQuerySpecSync({
         kind: "timeseries",
-        source: "traces",
-        metric: "p95_duration",
-        groupBy: ["none"],
-        bucketSeconds,
-        filters: {
-          ...(baseTraceFilters ?? {}),
-          rootSpansOnly: true,
-        },
-      })
-      sampleCountStrategy = "trace_count"
-      break
-    case "p99_latency":
-      query = decodeQuerySpecSync({
-        kind: "timeseries",
-        source: "traces",
-        metric: "p99_duration",
-        groupBy: ["none"],
-        bucketSeconds,
-        filters: {
-          ...(baseTraceFilters ?? {}),
-          rootSpansOnly: true,
-        },
-      })
-      sampleCountStrategy = "trace_count"
-      break
-    case "throughput":
-      query = decodeQuerySpecSync({
-        kind: "timeseries",
-        source: "traces",
+        source: "logs",
         metric: "count",
         groupBy: ["none"],
         bucketSeconds,
-        filters: {
-          ...(baseTraceFilters ?? {}),
-          rootSpansOnly: true,
-        },
+        filters: Object.keys(filters).length ? filters : undefined,
       })
-      sampleCountStrategy = "trace_count"
-      break
-    case "apdex":
-      query = decodeQuerySpecSync({
-        kind: "timeseries",
-        source: "traces",
-        metric: "apdex",
-        groupBy: ["none"],
-        bucketSeconds,
-        apdexThresholdMs: rule.apdexThresholdMs ?? 500,
-        filters: {
-          ...(baseTraceFilters ?? {}),
-          rootSpansOnly: true,
-        },
-      })
-      sampleCountStrategy = "trace_count"
-      break
-    case "metric":
-      if (rule.metricName == null || rule.metricType == null || rule.metricAggregation == null) {
+      sampleCountStrategy = "log_count"
+    } else {
+      if (rule.metricName == null || rule.metricType == null) {
         return Effect.fail(
-          makeValidationError("metric alerts require metricName, metricType, and metricAggregation"),
+          makeValidationError("metrics query alerts require metricName and metricType"),
         )
+      }
+      const metricsFilters: Record<string, unknown> = {
+        metricName: rule.metricName,
+        metricType: rule.metricType,
+      }
+      if (rule.serviceName) metricsFilters.serviceName = rule.serviceName
+      for (const c of clauses) {
+        const key = normalizeKey(c.key)
+        if (key === "service.name") metricsFilters.serviceName = c.value
       }
       query = decodeQuerySpecSync({
         kind: "timeseries",
         source: "metrics",
-        metric: rule.metricAggregation,
+        metric: rule.queryAggregation,
         groupBy: ["none"],
         bucketSeconds,
-        filters: {
-          metricName: rule.metricName,
-          metricType: rule.metricType,
-          ...(rule.serviceName == null ? {} : { serviceName: rule.serviceName }),
-        },
+        filters: metricsFilters,
       })
       sampleCountStrategy = "metric_data_points"
-      break
-    case "query": {
-      if (rule.queryDataSource == null || rule.queryAggregation == null) {
-        return Effect.fail(
-          makeValidationError("query alerts require queryDataSource and queryAggregation"),
-        )
-      }
-      const { clauses } = parseWhereClause(rule.queryWhereClause ?? "")
-
-      if (rule.queryDataSource === "traces") {
-        const filters: Record<string, unknown> = {}
-        if (rule.serviceName) filters.serviceName = rule.serviceName
-        for (const c of clauses) {
-          const key = normalizeKey(c.key)
-          if (key === "service.name") filters.serviceName = c.value
-          else if (key === "span.name") filters.spanName = c.value
-          else if (key === "root_only" && (c.value === "true" || c.value === "1")) filters.rootSpansOnly = true
-          else if (key === "has_error" && (c.value === "true" || c.value === "1")) filters.errorsOnly = true
-        }
-        query = decodeQuerySpecSync({
-          kind: "timeseries",
-          source: "traces",
-          metric: rule.queryAggregation,
-          groupBy: ["none"],
-          bucketSeconds,
-          filters: Object.keys(filters).length ? filters : undefined,
-        })
-        sampleCountStrategy = "trace_count"
-      } else if (rule.queryDataSource === "logs") {
-        const filters: Record<string, unknown> = {}
-        for (const c of clauses) {
-          const key = normalizeKey(c.key)
-          if (key === "service.name") filters.serviceName = c.value
-          else if (key === "severity") filters.severity = c.value
-        }
-        query = decodeQuerySpecSync({
-          kind: "timeseries",
-          source: "logs",
-          metric: "count",
-          groupBy: ["none"],
-          bucketSeconds,
-          filters: Object.keys(filters).length ? filters : undefined,
-        })
-        sampleCountStrategy = "log_count"
-      } else {
-        if (rule.metricName == null || rule.metricType == null) {
-          return Effect.fail(
-            makeValidationError("metrics query alerts require metricName and metricType"),
-          )
-        }
-        const metricsFilters: Record<string, unknown> = {
-          metricName: rule.metricName,
-          metricType: rule.metricType,
-        }
-        if (rule.serviceName) metricsFilters.serviceName = rule.serviceName
-        for (const c of clauses) {
-          const key = normalizeKey(c.key)
-          if (key === "service.name") metricsFilters.serviceName = c.value
-        }
-        query = decodeQuerySpecSync({
-          kind: "timeseries",
-          source: "metrics",
-          metric: rule.queryAggregation,
-          groupBy: ["none"],
-          bucketSeconds,
-          filters: metricsFilters,
-        })
-        sampleCountStrategy = "metric_data_points"
-      }
-      break
     }
+  } else {
+    return Effect.fail(makeValidationError(`Unsupported signal type: ${rule.signalType}`))
   }
 
   return Schema.decodeUnknownEffect(CompiledAlertQueryPlan)({
@@ -784,91 +725,7 @@ const rowToIncidentDocument = (row: AlertIncidentRow) =>
     lastNotifiedAt: toIso(row.lastNotifiedAt),
   })
 
-const formatComparator = (value: AlertComparator) => {
-  switch (value) {
-    case "gt":
-      return ">"
-    case "gte":
-      return ">="
-    case "lt":
-      return "<"
-    case "lte":
-      return "<="
-  }
-}
-
-const formatSignalLabel = (signal: string) => {
-  const labels: Record<string, string> = {
-    error_rate: "Error Rate",
-    p95_latency: "P95 Latency",
-    p99_latency: "P99 Latency",
-    apdex: "Apdex",
-    throughput: "Throughput",
-    metric: "Metric",
-  }
-  return labels[signal] ?? signal
-}
-
-const eventTypeEmoji = (type: string) => {
-  const map: Record<string, string> = {
-    trigger: "\u{1F6A8}",
-    resolve: "\u2705",
-    renotify: "\u{1F514}",
-    test: "\u{1F9EA}",
-  }
-  return map[type] ?? "\u{1F4E2}"
-}
-
-const formatEventTypeLabel = (type: string) => {
-  const map: Record<string, string> = {
-    trigger: "Triggered",
-    resolve: "Resolved",
-    renotify: "Re-notification",
-    test: "Test",
-  }
-  return map[type] ?? type
-}
-
-const formatSignalMetric = (
-  value: number | null,
-  signalType: string,
-): string => {
-  if (value == null) return "n/a"
-  switch (signalType) {
-    case "error_rate":
-      return `${round(value)}%`
-    case "p95_latency":
-    case "p99_latency":
-      return `${round(value)}ms`
-    case "apdex":
-      return `${round(value, 3)}`
-    case "throughput":
-      return `${round(value)} rpm`
-    default:
-      return `${round(value)}`
-  }
-}
-
-const round = (value: number, decimals = 2): string => {
-  const factor = 10 ** decimals
-  return (Math.round(value * factor) / factor).toString()
-}
-
-const formatWindow = (minutes: number): string => {
-  if (minutes < 60) return `${minutes}m`
-  const hours = minutes / 60
-  return hours % 1 === 0 ? `${hours}h` : `${minutes}m`
-}
-
-const slackAttachmentColor = (
-  eventType: string,
-  severity: string,
-): string => {
-  if (eventType === "resolve") return "#2eb67d"
-  if (eventType === "test") return "#36c5f0"
-  if (severity === "critical") return "#e01e5a"
-  return "#ecb22e" // warning
-}
+// Formatting helpers imported from AlertDeliveryDispatch
 
 export interface AlertsServiceShape {
   readonly listDestinations: (
@@ -1451,213 +1308,17 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           ? `${env.MAPLE_APP_BASE_URL}/services/${encodeURIComponent(serviceName)}`
           : `${env.MAPLE_APP_BASE_URL}/alerts`
 
-      const runTimedFetch = <A>(
-        destinationType: AlertDestinationType,
-        label: string,
-        request: () => Promise<A>,
-      ) =>
-        Effect.tryPromise({
-          try: () => request(),
-          catch: (error) =>
-            makeDeliveryError(
-              error instanceof Error ? error.message : `${label} delivery failed`,
-              destinationType,
-            ),
-        }).pipe(
-          Effect.timeoutOrElse({
-            duration: Duration.millis(deliveryTimeoutMs()),
-            onTimeout: () =>
-              Effect.fail(
-                makeDeliveryError(`${label} delivery timed out after ${deliveryTimeoutMs()}ms`, destinationType),
-              ),
-          }),
-        )
-
-      const dispatchDelivery = Effect.fn("AlertsService.dispatchDelivery")(function* (
+      const dispatchDelivery = (
         context: DispatchContext,
         payloadJson: string,
-      ): Effect.fn.Return<DispatchResult, AlertDeliveryError> {
-        switch (context.secretConfig.type) {
-          case "slack": {
-            const webhookUrl = context.secretConfig.webhookUrl
-            const response = yield* runTimedFetch("slack", "Slack", () =>
-              runtime.fetch(webhookUrl, {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    text: `${context.ruleName}: ${formatEventTypeLabel(context.eventType)}`,
-                    attachments: [
-                      {
-                        color: slackAttachmentColor(
-                          context.eventType,
-                          context.severity,
-                        ),
-                        blocks: [
-                          {
-                            type: "header",
-                            text: {
-                              type: "plain_text",
-                              text: `${eventTypeEmoji(context.eventType)} ${context.ruleName} — ${formatEventTypeLabel(context.eventType)}`,
-                              emoji: true,
-                            },
-                          },
-                          {
-                            type: "section",
-                            fields: [
-                              {
-                                type: "mrkdwn",
-                                text: `*Severity*\n${context.severity}`,
-                              },
-                              {
-                                type: "mrkdwn",
-                                text: `*Signal*\n${formatSignalLabel(context.signalType)}`,
-                              },
-                              {
-                                type: "mrkdwn",
-                                text: `*Service*\n${context.serviceName ?? "All services"}`,
-                              },
-                              {
-                                type: "mrkdwn",
-                                text: `*Observed*\n${formatSignalMetric(context.value, context.signalType)} ${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`,
-                              },
-                              {
-                                type: "mrkdwn",
-                                text: `*Window*\n${formatWindow(context.windowMinutes)}`,
-                              },
-                            ],
-                          },
-                          { type: "divider" },
-                          {
-                            type: "actions",
-                            elements: [
-                              {
-                                type: "button",
-                                text: {
-                                  type: "plain_text",
-                                  text: "Open in Maple",
-                                  emoji: true,
-                                },
-                                url: composeLinkUrl(context.serviceName),
-                                ...(context.eventType !== "resolve" && {
-                                  style: "danger",
-                                }),
-                              },
-                            ],
-                          },
-                          {
-                            type: "context",
-                            elements: [
-                              {
-                                type: "mrkdwn",
-                                text: "\u{1F341} Maple Alerts",
-                              },
-                            ],
-                          },
-                        ],
-                      },
-                    ],
-                  }),
-                }),
-            )
-            if (!response.ok) {
-              return yield* Effect.fail(
-                makeDeliveryError(
-                  `Slack delivery failed with ${response.status}`,
-                  "slack",
-                ),
-              )
-            }
-            return {
-              providerMessage: "Delivered to Slack",
-              providerReference: null,
-              responseCode: response.status,
-            }
-          }
-          case "pagerduty": {
-            const integrationKey = context.secretConfig.integrationKey
-            const body = {
-              routing_key: integrationKey,
-              event_action: context.eventType === "resolve" ? "resolve" : "trigger",
-              dedup_key: context.dedupeKey,
-              payload: {
-                summary: `${context.ruleName} ${context.eventType}`,
-                source: context.serviceName ?? "maple",
-                severity: context.severity === "critical" ? "critical" : "warning",
-                custom_details: {
-                  ruleName: context.ruleName,
-                  signalType: context.signalType,
-                  value: context.value,
-                  threshold: context.threshold,
-                  comparator: context.comparator,
-                  serviceName: context.serviceName,
-                  linkUrl: composeLinkUrl(context.serviceName),
-                },
-              },
-              links: [
-                {
-                  href: composeLinkUrl(context.serviceName),
-                  text: "Open in Maple",
-                },
-              ],
-            }
-            const response = yield* runTimedFetch("pagerduty", "PagerDuty", () =>
-              runtime.fetch("https://events.pagerduty.com/v2/enqueue", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify(body),
-                }),
-            )
-            if (!response.ok) {
-              return yield* Effect.fail(
-                makeDeliveryError(
-                  `PagerDuty delivery failed with ${response.status}`,
-                  "pagerduty",
-                ),
-              )
-            }
-            return {
-              providerMessage: "Delivered to PagerDuty",
-              providerReference: context.dedupeKey,
-              responseCode: response.status,
-            }
-          }
-          case "webhook": {
-            const targetUrl = context.secretConfig.url
-            const signingSecret = context.secretConfig.signingSecret
-            const headers: Record<string, string> = {
-              "content-type": "application/json",
-              "x-maple-event-type": context.eventType,
-              "x-maple-delivery-key": context.deliveryKey,
-            }
-            if (signingSecret) {
-              const signature = createHmac("sha256", signingSecret)
-                .update(payloadJson)
-                .digest("hex")
-              headers["x-maple-signature"] = signature
-            }
-            const response = yield* runTimedFetch("webhook", "Webhook", () =>
-              runtime.fetch(targetUrl, {
-                  method: "POST",
-                  headers,
-                  body: payloadJson,
-                }),
-            )
-            if (!response.ok) {
-              return yield* Effect.fail(
-                makeDeliveryError(
-                  `Webhook delivery failed with ${response.status}`,
-                  "webhook",
-                ),
-              )
-            }
-            return {
-              providerMessage: "Delivered to webhook",
-              providerReference: context.dedupeKey,
-              responseCode: response.status,
-            }
-          }
-        }
-      })
+      ): Effect.Effect<DispatchResult, AlertDeliveryError> =>
+        dispatchDeliveryImpl(
+          context,
+          payloadJson,
+          runtime.fetch,
+          deliveryTimeoutMs(),
+          composeLinkUrl(context.serviceName),
+        )
 
       const buildPayload = (context: DeliveryPayloadContext) => ({
         eventType: context.eventType,
@@ -1718,12 +1379,11 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         "AlertsService.sendImmediateNotification",
       )(function* (
         destinationRow: AlertDestinationRow,
-        context: Omit<DispatchContext, "destination" | "destinationDoc" | "publicConfig" | "secretConfig">,
+        context: Omit<DispatchContext, "destination" | "publicConfig" | "secretConfig">,
       ) {
         const hydrated = yield* hydrateDestination(destinationRow)
         const fullContext: DispatchContext = {
           destination: hydrated.row,
-          destinationDoc: hydrated.document,
           publicConfig: hydrated.publicConfig,
           secretConfig: hydrated.secretConfig,
           ...context,
@@ -2062,77 +1722,52 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         const ruleId = existingId ?? normalized.id
         const timestamp = now()
 
+        const ruleFields = {
+          name: normalized.name,
+          enabled: normalized.enabled ? 1 : 0,
+          severity: normalized.severity,
+          serviceName: normalized.serviceName,
+          serviceNamesJson: normalized.serviceNames.length > 0 ? JSON.stringify(normalized.serviceNames) : null,
+          groupBy: normalized.groupBy,
+          signalType: normalized.signalType,
+          comparator: normalized.comparator,
+          threshold: normalized.threshold,
+          windowMinutes: normalized.windowMinutes,
+          minimumSampleCount: normalized.minimumSampleCount,
+          consecutiveBreachesRequired: normalized.consecutiveBreachesRequired,
+          consecutiveHealthyRequired: normalized.consecutiveHealthyRequired,
+          renotifyIntervalMinutes: normalized.renotifyIntervalMinutes,
+          metricName: normalized.metricName,
+          metricType: normalized.metricType,
+          metricAggregation: normalized.metricAggregation,
+          apdexThresholdMs: normalized.apdexThresholdMs,
+          queryDataSource: normalized.queryDataSource,
+          queryAggregation: normalized.queryAggregation,
+          queryWhereClause: normalized.queryWhereClause,
+          destinationIdsJson: JSON.stringify(normalized.destinationIds),
+          querySpecJson: JSON.stringify(normalized.compiledPlan.query),
+          reducer: normalized.compiledPlan.reducer,
+          sampleCountStrategy: normalized.compiledPlan.sampleCountStrategy,
+          noDataBehavior: normalized.compiledPlan.noDataBehavior,
+          updatedAt: timestamp,
+          updatedBy: userId,
+        } as const
+
         if (existingId == null) {
           yield* dbExecute((db) =>
             db.insert(alertRules).values({
               id: ruleId,
               orgId,
-              name: normalized.name,
-              enabled: normalized.enabled ? 1 : 0,
-              severity: normalized.severity,
-              serviceName: normalized.serviceName,
-              serviceNamesJson: normalized.serviceNames.length > 0 ? JSON.stringify(normalized.serviceNames) : null,
-              groupBy: normalized.groupBy,
-              signalType: normalized.signalType,
-              comparator: normalized.comparator,
-              threshold: normalized.threshold,
-              windowMinutes: normalized.windowMinutes,
-              minimumSampleCount: normalized.minimumSampleCount,
-              consecutiveBreachesRequired: normalized.consecutiveBreachesRequired,
-              consecutiveHealthyRequired: normalized.consecutiveHealthyRequired,
-              renotifyIntervalMinutes: normalized.renotifyIntervalMinutes,
-              metricName: normalized.metricName,
-              metricType: normalized.metricType,
-              metricAggregation: normalized.metricAggregation,
-              apdexThresholdMs: normalized.apdexThresholdMs,
-              queryDataSource: normalized.queryDataSource,
-              queryAggregation: normalized.queryAggregation,
-              queryWhereClause: normalized.queryWhereClause,
-              destinationIdsJson: JSON.stringify(normalized.destinationIds),
-              querySpecJson: JSON.stringify(normalized.compiledPlan.query),
-              reducer: normalized.compiledPlan.reducer,
-              sampleCountStrategy: normalized.compiledPlan.sampleCountStrategy,
-              noDataBehavior: normalized.compiledPlan.noDataBehavior,
+              ...ruleFields,
               createdAt: timestamp,
-              updatedAt: timestamp,
               createdBy: userId,
-              updatedBy: userId,
             }),
           )
         } else {
           yield* dbExecute((db) =>
             db
               .update(alertRules)
-              .set({
-                name: normalized.name,
-                enabled: normalized.enabled ? 1 : 0,
-                severity: normalized.severity,
-                serviceName: normalized.serviceName,
-                serviceNamesJson: normalized.serviceNames.length > 0 ? JSON.stringify(normalized.serviceNames) : null,
-                groupBy: normalized.groupBy,
-                signalType: normalized.signalType,
-                comparator: normalized.comparator,
-                threshold: normalized.threshold,
-                windowMinutes: normalized.windowMinutes,
-                minimumSampleCount: normalized.minimumSampleCount,
-                consecutiveBreachesRequired: normalized.consecutiveBreachesRequired,
-                consecutiveHealthyRequired: normalized.consecutiveHealthyRequired,
-                renotifyIntervalMinutes: normalized.renotifyIntervalMinutes,
-                metricName: normalized.metricName,
-                metricType: normalized.metricType,
-                metricAggregation: normalized.metricAggregation,
-                apdexThresholdMs: normalized.apdexThresholdMs,
-                queryDataSource: normalized.queryDataSource,
-                queryAggregation: normalized.queryAggregation,
-                queryWhereClause: normalized.queryWhereClause,
-                destinationIdsJson: JSON.stringify(normalized.destinationIds),
-                querySpecJson: JSON.stringify(normalized.compiledPlan.query),
-                reducer: normalized.compiledPlan.reducer,
-                sampleCountStrategy: normalized.compiledPlan.sampleCountStrategy,
-                noDataBehavior: normalized.compiledPlan.noDataBehavior,
-                updatedAt: timestamp,
-                updatedBy: userId,
-              })
+              .set(ruleFields)
               .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId))),
           )
         }
@@ -2517,7 +2152,6 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             {
               deliveryKey: row.deliveryKey,
               destination: hydrated.row,
-              destinationDoc: hydrated.document,
               publicConfig: hydrated.publicConfig,
               secretConfig: hydrated.secretConfig,
               ruleId: row.ruleId,
