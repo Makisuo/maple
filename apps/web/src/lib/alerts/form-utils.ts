@@ -293,3 +293,23 @@ export function signalToQueryParams(form: RuleFormState): {
     }
   }
 }
+
+/** Flatten timeseries points into chart-ready rows, scoped to selected services. */
+export function flattenAlertChartData(
+  points: { bucket: string; series: Record<string, number> }[],
+  serviceNames: readonly string[],
+): Record<string, unknown>[] {
+  return points.map((point) => {
+    const base: Record<string, unknown> = { bucket: point.bucket }
+    if (serviceNames.length > 1) {
+      for (const svc of serviceNames) {
+        if (svc in point.series) base[svc] = point.series[svc]
+      }
+    } else if (serviceNames.length === 1) {
+      base[serviceNames[0]!] = point.series[serviceNames[0]!] ?? 0
+    } else {
+      Object.assign(base, point.series)
+    }
+    return base
+  })
+}

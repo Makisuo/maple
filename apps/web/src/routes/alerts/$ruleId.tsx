@@ -14,6 +14,7 @@ import {
   signalToQueryParams,
   defaultRuleForm,
   ruleToFormState,
+  flattenAlertChartData,
 } from "@/lib/alerts/form-utils"
 import type { AlertRuleDocument } from "@maple/domain/http"
 import {
@@ -197,9 +198,12 @@ function RuleDetailPage() {
   const formState = useMemo(() => rule ? ruleToFormState(rule) : defaultRuleForm(), [rule])
   const queryParams = useMemo(() => signalToQueryParams(formState), [formState])
 
-  const chartGroupBy = (rule?.serviceNames?.length ?? 0) > 1
-    ? "service" as const
-    : "none" as const
+  const serviceNames = rule?.serviceNames ?? []
+
+  const chartGroupBy = useMemo(
+    () => serviceNames.length > 1 ? "service" as const : "none" as const,
+    [serviceNames.length],
+  )
 
   const chartQueryInput = useMemo(() => {
     if (!queryParams) return null
@@ -224,24 +228,8 @@ function RuleDetailPage() {
 
   const chartData = useMemo(() => {
     if (!chartQueryInput) return []
-    const serviceNames = rule?.serviceNames ?? []
     return Result.builder(chartResult)
-      .onSuccess((response) =>
-        response.data.map((point) => {
-          const base: Record<string, unknown> = { bucket: point.bucket }
-          if (serviceNames.length > 1) {
-            for (const svc of serviceNames) {
-              if (svc in point.series) base[svc] = point.series[svc]
-            }
-          } else if (serviceNames.length === 1) {
-            const values = Object.values(point.series)
-            base[serviceNames[0]!] = values[0] ?? 0
-          } else {
-            Object.assign(base, point.series)
-          }
-          return base
-        }),
-      )
+      .onSuccess((response) => flattenAlertChartData(response.data, serviceNames))
       .orElse(() => [])
   }, [chartResult, chartQueryInput, rule?.serviceNames])
 

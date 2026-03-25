@@ -22,6 +22,7 @@ import {
   signalLabels,
   formatSignalValue,
   signalToQueryParams,
+  flattenAlertChartData,
 } from "@/lib/alerts/form-utils"
 import {
   AlertDestinationDocument,
@@ -144,9 +145,10 @@ function AlertCreatePage() {
 
   const queryParams = useMemo(() => signalToQueryParams(ruleForm), [ruleForm])
 
-  const chartGroupBy = ruleForm.serviceNames.length > 1
-    ? "service" as const
-    : "none" as const
+  const chartGroupBy = useMemo(
+    () => ruleForm.serviceNames.length > 1 ? "service" as const : "none" as const,
+    [ruleForm.serviceNames.length],
+  )
 
   const chartQueryInput = useMemo(() => {
     if (!queryParams) return null
@@ -172,22 +174,7 @@ function AlertCreatePage() {
   const chartData = useMemo(() => {
     if (!chartQueryInput) return []
     return Result.builder(chartResult)
-      .onSuccess((response) =>
-        response.data.map((point) => {
-          const base: Record<string, unknown> = { bucket: point.bucket }
-          if (ruleForm.serviceNames.length > 1) {
-            for (const svc of ruleForm.serviceNames) {
-              if (svc in point.series) base[svc] = point.series[svc]
-            }
-          } else if (ruleForm.serviceNames.length === 1) {
-            const values = Object.values(point.series)
-            base[ruleForm.serviceNames[0]!] = values[0] ?? 0
-          } else {
-            Object.assign(base, point.series)
-          }
-          return base
-        }),
-      )
+      .onSuccess((response) => flattenAlertChartData(response.data, ruleForm.serviceNames))
       .orElse(() => [])
   }, [chartResult, chartQueryInput, ruleForm.serviceNames])
 
