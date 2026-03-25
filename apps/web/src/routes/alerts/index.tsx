@@ -10,17 +10,24 @@ import { formatRelativeTime } from "@/lib/format"
 import {
   AlertDeliveryEventDocument,
   AlertDestinationDocument,
+  AlertIncidentDocument,
   AlertRuleDocument,
-  AlertRuleUpsertRequest,
   type AlertDestinationType,
 } from "@maple/domain/http"
 import {
+  type DestinationFormState,
   severityTone,
   signalLabels,
   comparatorLabels,
   destinationTypeLabels,
   formatSignalValue,
+  formatAlertDateTime,
   getExitErrorMessage,
+  defaultDestinationForm,
+  destinationToFormState,
+  buildDestinationCreatePayload,
+  buildDestinationUpdatePayload,
+  buildRuleToggleRequest,
 } from "@/lib/alerts/form-utils"
 import {
   AlertWarningIcon,
@@ -112,54 +119,6 @@ type AlertDestination = AlertDestinationDocument
 type AlertRule = AlertRuleDocument
 type AlertDeliveryEvent = AlertDeliveryEventDocument
 
-type DestinationFormState = {
-  type: AlertDestinationType
-  name: string
-  enabled: boolean
-  channelLabel: string
-  webhookUrl: string
-  integrationKey: string
-  url: string
-  signingSecret: string
-}
-
-function formatDateTime(value: string | null): string {
-  if (!value) return "Never"
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
-  return {
-    type,
-    name: "",
-    enabled: true,
-    channelLabel: "",
-    webhookUrl: "",
-    integrationKey: "",
-    url: "",
-    signingSecret: "",
-  }
-}
-
-function destinationToFormState(destination: AlertDestination): DestinationFormState {
-  return {
-    type: destination.type,
-    name: destination.name,
-    enabled: destination.enabled,
-    channelLabel: destination.channelLabel ?? "",
-    webhookUrl: "",
-    integrationKey: "",
-    url: "",
-    signingSecret: "",
-  }
-}
-
 /* -------------------------------------------------------------------------- */
 /*  Signal badge colors                                                       */
 /* -------------------------------------------------------------------------- */
@@ -182,16 +141,14 @@ function OverviewTab({
   incidents,
   destinations,
   deliveryEvents,
-  rulesResult,
-  incidentsResult,
+  loading,
   onTabSelect,
 }: {
   rules: AlertRule[]
-  incidents: { status: string; severity: string; ruleName: string; serviceName?: string | null; signalType: string; lastObservedValue: number | null; comparator: string; threshold: number; lastTriggeredAt: string | null; lastNotifiedAt: string | null; ruleId: string }[]
+  incidents: AlertIncidentDocument[]
   destinations: AlertDestination[]
   deliveryEvents: AlertDeliveryEvent[]
-  rulesResult: unknown
-  incidentsResult: unknown
+  loading: boolean
   onTabSelect: (tab: AlertsTab) => void
 }) {
   const openIncidents = useMemo(() => incidents.filter((i) => i.status === "open"), [incidents])
@@ -214,7 +171,6 @@ function OverviewTab({
     [rules],
   )
 
-  const loading = Result.isInitial(rulesResult as never) || Result.isInitial(incidentsResult as never)
 
   if (loading) {
     return (
@@ -331,7 +287,7 @@ function OverviewTab({
                 return (
                   <TableRow key={idx}>
                     <TableCell>
-                      <Badge variant="outline" className={severityTone[incident.severity as "warning" | "critical"]}>
+                      <Badge variant="outline" className={severityTone[incident.severity]}>
                         {incident.severity === "critical" ? "Critical" : "Warning"}
                       </Badge>
                     </TableCell>
@@ -343,10 +299,10 @@ function OverviewTab({
                     </TableCell>
                     <TableCell>
                       <span className="font-mono text-orange-500">
-                        {formatSignalValue(incident.signalType as never, incident.lastObservedValue)}
+                        {formatSignalValue(incident.signalType, incident.lastObservedValue)}
                       </span>
                       <span className="text-muted-foreground text-xs ml-1">
-                        / {formatSignalValue(incident.signalType as never, incident.threshold)}
+                        / {formatSignalValue(incident.signalType, incident.threshold)}
                       </span>
                     </TableCell>
                     <TableCell>{duration}</TableCell>
@@ -458,8 +414,8 @@ function AlertsPage() {
     .onSuccess((response) => [...response.rules] as AlertRule[])
     .orElse(() => [])
   const incidents = Result.builder(incidentsResult)
-    .onSuccess((response) => [...response.incidents])
-    .orElse(() => [])
+    .onSuccess((response) => [...response.incidents] as AlertIncidentDocument[])
+    .orElse(() => [] as AlertIncidentDocument[])
   const deliveryEvents = Result.builder(deliveryEventsResult)
     .onSuccess((response) => [...response.events] as AlertDeliveryEvent[])
     .orElse(() => [])
@@ -499,43 +455,13 @@ function AlertsPage() {
 
   async function handleDestinationSave() {
     setSavingDestination(true)
-    const form = destinationForm
-    let result: Exit.Exit<unknown, unknown>
+    const payload = editingDestination
+      ? buildDestinationUpdatePayload(destinationForm)
+      : buildDestinationCreatePayload(destinationForm)
 
-    if (editingDestination) {
-      switch (form.type) {
-        case "slack":
-          result = await updateDestination({
-            params: { destinationId: editingDestination.id },
-            payload: { type: "slack", name: form.name.trim() || undefined, enabled: form.enabled, channelLabel: form.channelLabel.trim() || undefined, webhookUrl: form.webhookUrl.trim() || undefined },
-          })
-          break
-        case "pagerduty":
-          result = await updateDestination({
-            params: { destinationId: editingDestination.id },
-            payload: { type: "pagerduty", name: form.name.trim() || undefined, enabled: form.enabled, integrationKey: form.integrationKey.trim() || undefined },
-          })
-          break
-        case "webhook":
-          result = await updateDestination({
-            params: { destinationId: editingDestination.id },
-            payload: { type: "webhook", name: form.name.trim() || undefined, enabled: form.enabled, url: form.url.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined },
-          })
-          break
-      }
-    } else {
-      switch (form.type) {
-        case "slack":
-          result = await createDestination({ payload: { type: "slack", name: form.name.trim(), enabled: form.enabled, webhookUrl: form.webhookUrl.trim(), channelLabel: form.channelLabel.trim() || undefined } })
-          break
-        case "pagerduty":
-          result = await createDestination({ payload: { type: "pagerduty", name: form.name.trim(), enabled: form.enabled, integrationKey: form.integrationKey.trim() } })
-          break
-        case "webhook":
-          result = await createDestination({ payload: { type: "webhook", name: form.name.trim(), enabled: form.enabled, url: form.url.trim(), signingSecret: form.signingSecret.trim() || undefined } })
-          break
-      }
-    }
+    const result = editingDestination
+      ? await updateDestination({ params: { destinationId: editingDestination.id }, payload })
+      : await createDestination({ payload })
 
     if (Exit.isSuccess(result)) {
       toast.success(editingDestination ? "Destination updated" : "Destination created")
@@ -562,7 +488,9 @@ function AlertsPage() {
   }
 
   async function handleDestinationToggle(destination: AlertDestination) {
-    const payload = { type: destination.type, enabled: !destination.enabled } as never
+    const form = destinationToFormState(destination)
+    form.enabled = !destination.enabled
+    const payload = buildDestinationUpdatePayload(form)
     const result = await updateDestination({ params: { destinationId: destination.id }, payload })
     if (Exit.isSuccess(result)) {
       refreshDestinations()
@@ -587,17 +515,7 @@ function AlertsPage() {
   async function handleRuleToggle(rule: AlertRule) {
     const result = await updateRule({
       params: { ruleId: rule.id },
-      payload: new AlertRuleUpsertRequest({
-        ...rule,
-        enabled: !rule.enabled,
-        serviceName: rule.serviceName ?? null,
-        serviceNames: rule.serviceNames?.length > 0 ? [...rule.serviceNames] : undefined,
-        metricName: rule.metricName ?? null,
-        metricType: rule.metricType ?? null,
-        metricAggregation: rule.metricAggregation ?? null,
-        apdexThresholdMs: rule.apdexThresholdMs ?? null,
-        destinationIds: [...rule.destinationIds],
-      }),
+      payload: buildRuleToggleRequest(rule),
     })
     if (Exit.isSuccess(result)) {
       refreshRules()
@@ -649,8 +567,7 @@ function AlertsPage() {
               incidents={incidents}
               destinations={destinations}
               deliveryEvents={deliveryEvents}
-              rulesResult={rulesResult}
-              incidentsResult={incidentsResult}
+              loading={Result.isInitial(rulesResult) || Result.isInitial(incidentsResult)}
               onTabSelect={handleTabSelect}
             />
           )}
@@ -833,7 +750,7 @@ function AlertsPage() {
                                 Threshold: {comparatorLabels[incident.comparator]} {formatSignalValue(incident.signalType, incident.threshold)}
                               </span>
                               <span>Triggered {formatRelativeTime(incident.lastTriggeredAt)}</span>
-                              <span>Last notified {formatDateTime(incident.lastNotifiedAt)}</span>
+                              <span>Last notified {formatAlertDateTime(incident.lastNotifiedAt)}</span>
                             </div>
                           </div>
                           {incident.serviceName ? (
@@ -849,8 +766,8 @@ function AlertsPage() {
                           )}
                         </div>
                         <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                          <span>First triggered {formatDateTime(incident.firstTriggeredAt)}</span>
-                          <span>Resolved {formatDateTime(incident.resolvedAt)}</span>
+                          <span>First triggered {formatAlertDateTime(incident.firstTriggeredAt)}</span>
+                          <span>Resolved {formatAlertDateTime(incident.resolvedAt)}</span>
                           <span>Dedupe key {incident.dedupeKey}</span>
                         </div>
                       </CardContent>
@@ -909,7 +826,7 @@ function AlertsPage() {
                             <TableCell>{event.attemptNumber}</TableCell>
                             <TableCell>
                               <div className="flex flex-col">
-                                <span>{formatDateTime(event.scheduledAt)}</span>
+                                <span>{formatAlertDateTime(event.scheduledAt)}</span>
                                 <span className="text-muted-foreground text-xs">
                                   {formatRelativeTime(event.scheduledAt)}
                                 </span>

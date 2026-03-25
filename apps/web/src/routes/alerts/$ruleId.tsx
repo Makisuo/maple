@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
 import { useMemo, useState } from "react"
 
@@ -11,12 +11,13 @@ import {
   signalLabels,
   comparatorLabels,
   formatSignalValue,
-  signalToQueryParams,
   defaultRuleForm,
   ruleToFormState,
-  flattenAlertChartData,
+  formatAlertDateTimeFull,
+  formatAlertDuration,
+  computeIncidentStats,
 } from "@/lib/alerts/form-utils"
-import type { AlertRuleDocument } from "@maple/domain/http"
+import { AlertIncidentDocument, type AlertRuleDocument } from "@maple/domain/http"
 import {
   CheckIcon,
   PencilIcon,
@@ -53,9 +54,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@maple/ui/components/ui/dropdown-menu"
-import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
-import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
-import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useAlertRuleChart } from "@/hooks/use-alert-rule-chart"
 
 const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
@@ -69,34 +68,6 @@ export const Route = createFileRoute("/alerts/$ruleId")({
   validateSearch: Schema.toStandardSchemaV1(RuleDetailSearch),
 })
 
-function formatDuration(startStr: string | null, endStr: string | null): string {
-  if (!startStr) return "—"
-  const start = new Date(startStr).getTime()
-  const end = endStr ? new Date(endStr).getTime() : Date.now()
-  const diffMs = end - start
-  if (diffMs < 0) return "—"
-  const mins = Math.floor(diffMs / 60_000)
-  if (mins < 60) return `${mins}m`
-  const hours = Math.floor(mins / 60)
-  const remainMins = mins % 60
-  if (hours < 24) return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
-  const days = Math.floor(hours / 24)
-  return `${days}d ${hours % 24}h`
-}
-
-function formatDateTimeFull(value: string | null): string {
-  if (!value) return "—"
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
-}
-
-const CHART_BUCKET_TARGET = 96
-const emptyChartAtom = Atom.make(Result.initial())
 
 function RuleDetailPage() {
   const { ruleId } = Route.useParams()
@@ -110,8 +81,8 @@ function RuleDetailPage() {
     .onSuccess((response) => [...response.rules] as AlertRuleDocument[])
     .orElse(() => [])
   const allIncidents = Result.builder(incidentsResult)
-    .onSuccess((response) => [...response.incidents])
-    .orElse(() => [])
+    .onSuccess((response) => [...response.incidents] as AlertIncidentDocument[])
+    .orElse(() => [] as AlertIncidentDocument[])
 
   const rule = useMemo(() => rules.find((r) => r.id === ruleId) ?? null, [rules, ruleId])
 
@@ -135,36 +106,8 @@ function RuleDetailPage() {
     return ruleIncidents.filter((i) => i.status === stateFilter)
   }, [ruleIncidents, stateFilter])
 
-  // Stats
-  const totalTriggered = ruleIncidents.length
-  const resolvedIncidents = ruleIncidents.filter((i) => i.resolvedAt && i.firstTriggeredAt)
-  const avgResolutionMs = resolvedIncidents.length > 0
-    ? resolvedIncidents.reduce((sum, i) => {
-        const start = new Date(i.firstTriggeredAt!).getTime()
-        const end = new Date(i.resolvedAt!).getTime()
-        return sum + (end - start)
-      }, 0) / resolvedIncidents.length
-    : 0
-
-  const avgResolution = avgResolutionMs > 0
-    ? avgResolutionMs < 60_000 ? `${Math.round(avgResolutionMs / 1000)}s`
-      : avgResolutionMs < 3_600_000 ? `${(avgResolutionMs / 60_000).toFixed(1)}m`
-      : `${(avgResolutionMs / 3_600_000).toFixed(1)}h`
-    : "—"
-
-  // Top contributors by service
-  const topContributors = useMemo(() => {
-    const counts: Record<string, number> = {}
-    for (const i of ruleIncidents) {
-      const svc = i.serviceName ?? "unknown"
-      counts[svc] = (counts[svc] ?? 0) + 1
-    }
-    return Object.entries(counts)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5)
-  }, [ruleIncidents])
-
-  const maxContributorCount = topContributors.length > 0 ? topContributors[0][1] : 1
+  const stats = useMemo(() => computeIncidentStats(ruleIncidents), [ruleIncidents])
+  const maxContributorCount = stats.topContributors.length > 0 ? stats.topContributors[0][1] : 1
 
   // Timeline bar segments
   const timelineSegments = useMemo(() => {
@@ -188,53 +131,8 @@ function RuleDetailPage() {
     return { min: Math.min(...starts), max: Math.max(...ends, Date.now()) }
   }, [timelineSegments])
 
-  // Overview tab chart
-  const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "24h")
-  const bucketSeconds = useMemo(
-    () => computeBucketSeconds(startTime, endTime, CHART_BUCKET_TARGET),
-    [startTime, endTime],
-  )
-
   const formState = useMemo(() => rule ? ruleToFormState(rule) : defaultRuleForm(), [rule])
-  const queryParams = useMemo(() => signalToQueryParams(formState), [formState])
-
-  const serviceNames = rule?.serviceNames ?? []
-
-  const chartGroupBy = useMemo(
-    () => serviceNames.length > 1 || (serviceNames.length === 0 && rule?.groupBy === "service")
-      ? "service" as const : "none" as const,
-    [serviceNames.length, rule?.groupBy],
-  )
-
-  const chartQueryInput = useMemo(() => {
-    if (!queryParams) return null
-    return {
-      data: {
-        source: queryParams.source as "traces" | "logs" | "metrics",
-        metric: queryParams.metric,
-        groupBy: chartGroupBy,
-        startTime,
-        endTime,
-        bucketSeconds,
-        filters: queryParams.filters as Record<string, string | boolean | string[] | undefined>,
-      },
-    }
-  }, [queryParams, startTime, endTime, bucketSeconds, chartGroupBy])
-
-  const chartResult = useAtomValue(
-    chartQueryInput
-      ? getCustomChartTimeSeriesResultAtom(chartQueryInput)
-      : emptyChartAtom,
-  )
-
-  const chartData = useMemo(() => {
-    if (!chartQueryInput) return []
-    return Result.builder(chartResult)
-      .onSuccess((response) => flattenAlertChartData(response.data, serviceNames))
-      .orElse(() => [])
-  }, [chartResult, chartQueryInput, rule?.serviceNames])
-
-  const chartLoading = !chartQueryInput || Result.isInitial(chartResult)
+  const { chartData, chartLoading } = useAlertRuleChart(formState)
 
   if (Result.isInitial(rulesResult)) {
     return (
@@ -406,7 +304,7 @@ function RuleDetailPage() {
                   <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Total Triggered</span>
                 </div>
                 <div className="mt-3">
-                  <span className="text-3xl font-bold tabular-nums">{totalTriggered}</span>
+                  <span className="text-3xl font-bold tabular-nums">{stats.totalTriggered}</span>
                 </div>
               </CardContent>
             </Card>
@@ -417,7 +315,7 @@ function RuleDetailPage() {
                   <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Avg. Resolution Time</span>
                 </div>
                 <div className="mt-3">
-                  <span className="text-3xl font-bold font-mono tabular-nums">{avgResolution}</span>
+                  <span className="text-3xl font-bold font-mono tabular-nums">{stats.avgResolution}</span>
                 </div>
               </CardContent>
             </Card>
@@ -426,10 +324,10 @@ function RuleDetailPage() {
               <CardContent className="p-5">
                 <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">Top Contributors</span>
                 <div className="mt-3 space-y-2">
-                  {topContributors.length === 0 ? (
+                  {stats.topContributors.length === 0 ? (
                     <span className="text-3xl font-bold">—</span>
                   ) : (
-                    topContributors.map(([service, count]) => (
+                    stats.topContributors.map(([service, count]) => (
                       <div key={service} className="flex items-center gap-2">
                         <Badge variant="outline" className="text-xs shrink-0">{service}</Badge>
                         <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
@@ -442,7 +340,7 @@ function RuleDetailPage() {
                           />
                         </div>
                         <span className="text-xs text-muted-foreground tabular-nums shrink-0">
-                          {count}/{totalTriggered}
+                          {count}/{stats.totalTriggered}
                         </span>
                       </div>
                     ))
@@ -457,7 +355,7 @@ function RuleDetailPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold">Timeline</h2>
-                <span className="text-muted-foreground text-sm">{totalTriggered} triggers</span>
+                <span className="text-muted-foreground text-sm">{stats.totalTriggered} triggers</span>
               </div>
               <div className="flex gap-1">
                 {(["all", "open", "resolved"] as const).map((f) => (
@@ -559,11 +457,11 @@ function RuleDetailPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-sm">
-                        {formatDateTimeFull(incident.firstTriggeredAt)}
+                        {formatAlertDateTimeFull(incident.firstTriggeredAt)}
                       </TableCell>
                       <TableCell>
                         <span className={cn("text-sm tabular-nums", isOpen && "text-red-500 font-medium")}>
-                          {formatDuration(incident.firstTriggeredAt, incident.resolvedAt)}
+                          {formatAlertDuration(incident.firstTriggeredAt, incident.resolvedAt)}
                         </span>
                       </TableCell>
                       <TableCell>
