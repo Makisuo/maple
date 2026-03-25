@@ -462,4 +462,140 @@ describe("AlertsService", () => {
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toBeInstanceOf(AlertForbiddenError)
   })
+
+  it("opens per-service incidents for multi-service rules", async () => {
+    useAdvancingClock()
+    const { url } = createTempDbUrl()
+    const state = {
+      tracesAggregateRows: [
+        {
+          count: 200,
+          avgDuration: 40,
+          p50Duration: 20,
+          p95Duration: 120,
+          p99Duration: 240,
+          errorRate: 10,
+          satisfiedCount: 180,
+          toleratingCount: 10,
+          apdexScore: 0.925,
+        },
+      ],
+    }
+    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_multi_svc")
+        const userId = asUserId("user_multi_svc")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+        yield* alerts.createRule(
+          orgId,
+          userId,
+          adminRoles,
+          new AlertRuleUpsertRequest({
+            name: "Multi-service error rate",
+            severity: "critical",
+            enabled: true,
+            serviceNames: ["svc-a", "svc-b"],
+            signalType: "error_rate",
+            comparator: "gt",
+            threshold: 5,
+            windowMinutes: 5,
+            minimumSampleCount: 10,
+            consecutiveBreachesRequired: 2,
+            consecutiveHealthyRequired: 2,
+            renotifyIntervalMinutes: 30,
+            destinationIds: [destination.id],
+          }),
+        )
+
+        yield* alerts.runSchedulerTick()
+        yield* alerts.runSchedulerTick()
+
+        return yield* alerts.listIncidents(orgId)
+      }).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state)))),
+    )
+
+    expect(result.incidents).toHaveLength(2)
+    const serviceNames = result.incidents.map((i: { serviceName: string | null }) => i.serviceName).sort()
+    expect(serviceNames).toEqual(["svc-a", "svc-b"])
+    expect(result.incidents.every((i: { status: string }) => i.status === "open")).toBe(true)
+  })
+
+  it("opens per-service incidents for groupBy=service rules", async () => {
+    useAdvancingClock()
+    const { url } = createTempDbUrl()
+
+    const breachingRow = {
+      serviceName: "svc-breach",
+      count: 200,
+      avgDuration: 40,
+      p50Duration: 20,
+      p95Duration: 120,
+      p99Duration: 240,
+      errorRate: 10,
+      satisfiedCount: 180,
+      toleratingCount: 10,
+      apdexScore: 0.925,
+    }
+    const healthyRow = {
+      serviceName: "svc-healthy",
+      count: 200,
+      avgDuration: 20,
+      p50Duration: 10,
+      p95Duration: 80,
+      p99Duration: 160,
+      errorRate: 0.5,
+      satisfiedCount: 195,
+      toleratingCount: 3,
+      apdexScore: 0.9825,
+    }
+
+    const stub = makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })
+    stub.alertTracesAggregateByServiceQuery = () =>
+      Effect.succeed([breachingRow, healthyRow]) as never
+
+    __testables.setFetchImpl((async () => new Response("ok", { status: 200 })) as unknown as typeof fetch)
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const alerts = yield* AlertsService
+        const orgId = asOrgId("org_grouped")
+        const userId = asUserId("user_grouped")
+        const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+        yield* alerts.createRule(
+          orgId,
+          userId,
+          adminRoles,
+          new AlertRuleUpsertRequest({
+            name: "All services error rate",
+            severity: "critical",
+            enabled: true,
+            groupBy: "service",
+            signalType: "error_rate",
+            comparator: "gt",
+            threshold: 5,
+            windowMinutes: 5,
+            minimumSampleCount: 10,
+            consecutiveBreachesRequired: 2,
+            consecutiveHealthyRequired: 2,
+            renotifyIntervalMinutes: 30,
+            destinationIds: [destination.id],
+          }),
+        )
+
+        yield* alerts.runSchedulerTick()
+        yield* alerts.runSchedulerTick()
+
+        return yield* alerts.listIncidents(orgId)
+      }).pipe(Effect.provide(makeLayer(url, stub))),
+    )
+
+    expect(result.incidents).toHaveLength(1)
+    expect(result.incidents[0]?.serviceName).toBe("svc-breach")
+    expect(result.incidents[0]?.status).toBe("open")
+  })
 })

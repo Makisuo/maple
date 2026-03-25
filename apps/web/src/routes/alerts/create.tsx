@@ -61,10 +61,19 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@maple/ui/components/ui/combobox"
-import { getCustomChartTimeSeriesResultAtom, getTracesFacetsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import {
+  getCustomChartTimeSeriesResultAtom,
+  getLogsFacetsResultAtom,
+  getTracesFacetsResultAtom,
+  getSpanAttributeKeysResultAtom,
+  getSpanAttributeValuesResultAtom,
+  getResourceAttributeKeysResultAtom,
+  getResourceAttributeValuesResultAtom,
+} from "@/lib/services/atoms/tinybird-query-atoms"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { AGGREGATIONS_BY_SOURCE } from "@/lib/query-builder/model"
+import { AGGREGATIONS_BY_SOURCE, QUERY_BUILDER_METRIC_TYPES } from "@/lib/query-builder/model"
+import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 
 const AlertCreateSearch = Schema.Struct({
@@ -146,8 +155,9 @@ function AlertCreatePage() {
   const queryParams = useMemo(() => signalToQueryParams(ruleForm), [ruleForm])
 
   const chartGroupBy = useMemo(
-    () => ruleForm.serviceNames.length > 1 ? "service" as const : "none" as const,
-    [ruleForm.serviceNames.length],
+    () => ruleForm.serviceNames.length > 1 || (ruleForm.serviceNames.length === 0 && ruleForm.groupBy === "service")
+      ? "service" as const : "none" as const,
+    [ruleForm.serviceNames.length, ruleForm.groupBy],
   )
 
   const chartQueryInput = useMemo(() => {

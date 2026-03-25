@@ -201,8 +201,9 @@ function RuleDetailPage() {
   const serviceNames = rule?.serviceNames ?? []
 
   const chartGroupBy = useMemo(
-    () => serviceNames.length > 1 ? "service" as const : "none" as const,
-    [serviceNames.length],
+    () => serviceNames.length > 1 || (serviceNames.length === 0 && rule?.groupBy === "service")
+      ? "service" as const : "none" as const,
+    [serviceNames.length, rule?.groupBy],
   )
 
   const chartQueryInput = useMemo(() => {
