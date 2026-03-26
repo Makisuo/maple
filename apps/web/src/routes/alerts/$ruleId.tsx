@@ -202,6 +202,32 @@ function RuleDetailPage() {
       }
       stickyContent={tabBar}
     >
+      {/* ─── Incident Timeline (always visible) ─── */}
+      <div className="space-y-1">
+        <div className="relative h-5 rounded overflow-hidden bg-green-500/20">
+          {timelineSegments.map((seg, idx) => {
+            const totalRange = timelineRange.max - timelineRange.min
+            if (totalRange <= 0) return null
+            const leftPct = ((seg.start - timelineRange.min) / totalRange) * 100
+            const widthPct = Math.max(((seg.end - seg.start) / totalRange) * 100, 0.5)
+            return (
+              <div
+                key={idx}
+                className={cn(
+                  "absolute h-5",
+                  seg.status === "open" ? "bg-red-500" : "bg-red-500/60",
+                )}
+                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+              />
+            )
+          })}
+        </div>
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>{new Date(timelineRange.min).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+          <span>{new Date(timelineRange.max).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
+      </div>
+
       {/* ─── Overview Sub-Tab ─── */}
       {activeTab === "overview" && (
         <div className="space-y-6">
@@ -351,7 +377,7 @@ function RuleDetailPage() {
             </Card>
           </div>
 
-          {/* Timeline */}
+          {/* Timeline header + filters */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -376,34 +402,6 @@ function RuleDetailPage() {
                 ))}
               </div>
             </div>
-
-            {/* Timeline bar */}
-            {timelineSegments.length > 0 && (
-              <div className="space-y-1">
-                <div className="relative h-5 rounded overflow-hidden bg-green-500/20">
-                  {timelineSegments.map((seg, idx) => {
-                    const totalRange = timelineRange.max - timelineRange.min
-                    if (totalRange <= 0) return null
-                    const leftPct = ((seg.start - timelineRange.min) / totalRange) * 100
-                    const widthPct = Math.max(((seg.end - seg.start) / totalRange) * 100, 0.5)
-                    return (
-                      <div
-                        key={idx}
-                        className={cn(
-                          "absolute h-5",
-                          seg.status === "open" ? "bg-red-500" : "bg-red-500/60",
-                        )}
-                        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                      />
-                    )
-                  })}
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{new Date(timelineRange.min).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                  <span>{new Date(timelineRange.max).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Event table */}
