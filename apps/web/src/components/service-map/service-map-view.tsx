@@ -485,7 +485,7 @@ function ServiceMapCanvas({
                 onNodesChange={onNodesChange}
                 onNodeClick={handleNodeClick}
                 onPaneClick={handlePaneClick}
-                onInit={(instance) => { rfInstance.current = instance }}
+                onInit={(instance) => { rfInstance.current = instance as unknown as ReactFlowInstance }}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 nodesDraggable
