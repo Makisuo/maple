@@ -4,20 +4,8 @@ import { Effect, Schedule, Schema } from "effect"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { serverFunctionMap } from "@/components/dashboard-builder/data-source-registry"
 import type { DashboardWidget, WidgetDataSource } from "@/components/dashboard-builder/types"
-import { relativeToAbsolute } from "@/lib/time-utils"
-import type { TimeRange } from "@/components/dashboard-builder/types"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
-
-function resolveTimeRange(timeRange: TimeRange): {
-  startTime: string
-  endTime: string
-} | null {
-  if (timeRange.type === "absolute") {
-    return { startTime: timeRange.startTime, endTime: timeRange.endTime }
-  }
-  return relativeToAbsolute(timeRange.value)
-}
 
 function interpolateParams(
   params: Record<string, unknown>,
@@ -220,18 +208,17 @@ function encodeKey(value: unknown): string {
   return JSON.stringify(normalized === undefined ? null : normalized)
 }
 
-const widgetDataResultFamily = Atom.family((key: string) =>
+const widgetFetchFamily = Atom.family((key: string) =>
   Atom.make(
     Effect.try({
       try: () =>
         JSON.parse(key) as {
           endpoint: DashboardWidget["dataSource"]["endpoint"]
           params: Record<string, unknown>
-          transform: WidgetDataSource["transform"]
         },
       catch: toWidgetDataAtomError,
     }).pipe(
-      Effect.flatMap(({ endpoint, params, transform }) => {
+      Effect.flatMap(({ endpoint, params }) => {
         const serverFn = serverFunctionMap[endpoint]
         if (!serverFn) {
           return Effect.fail(
@@ -243,8 +230,7 @@ const widgetDataResultFamily = Atom.family((key: string) =>
 
         return (serverFn({ data: params }) as Effect.Effect<unknown, unknown, never>).pipe(
           Effect.map((response) => {
-            const rawData = (response as { data?: unknown })?.data ?? response
-            return applyTransform(rawData, transform)
+            return (response as { data?: unknown })?.data ?? response
           }),
         )
       }),
@@ -254,48 +240,46 @@ const widgetDataResultFamily = Atom.family((key: string) =>
   ).pipe(Atom.setIdleTTL(30_000)),
 )
 
-const widgetDataResultAtom = (input: {
+const widgetFetchAtom = (input: {
   endpoint: DashboardWidget["dataSource"]["endpoint"]
   params: Record<string, unknown>
-  transform: WidgetDataSource["transform"]
-}) => widgetDataResultFamily(encodeKey(input))
+}) => widgetFetchFamily(encodeKey(input))
 
 export function useWidgetData(widget: DashboardWidget) {
-  const dashboardTimeRange = useDashboardTimeRange()
-
-  const resolvedTime = resolveTimeRange(dashboardTimeRange.state.timeRange)
+  const { state: { resolvedTimeRange } } = useDashboardTimeRange()
 
   const hasServerFn = !!serverFunctionMap[widget.dataSource.endpoint]
 
-  const resolvedParams = resolvedTime
+  const resolvedParams = resolvedTimeRange
     ? interpolateParams(
         {
-          startTime: resolvedTime.startTime,
-          endTime: resolvedTime.endTime,
+          startTime: resolvedTimeRange.startTime,
+          endTime: resolvedTimeRange.endTime,
           ...widget.dataSource.params,
         },
-        resolvedTime
+        resolvedTimeRange
       )
     : {}
 
   const result = useAtomValue(
-    resolvedTime && hasServerFn
-      ? widgetDataResultAtom({
+    resolvedTimeRange && hasServerFn
+      ? widgetFetchAtom({
           endpoint: widget.dataSource.endpoint,
           params: resolvedParams,
-          transform: widget.dataSource.transform,
         })
       : disabledResultAtom<unknown, WidgetDataAtomError>(),
   )
+
+  const transform = widget.dataSource.transform
 
   const dataState: WidgetDataState = useMemo(
     () =>
       Result.builder(result)
         .onInitial(() => ({ status: "loading" } as const))
         .onError(() => ({ status: "error" } as const))
-        .onSuccess((data) => ({ status: "ready", data } as const))
+        .onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) } as const))
         .orElse(() => ({ status: "error" } as const)),
-    [result]
+    [result, transform]
   )
 
   return {

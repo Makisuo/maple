@@ -17,7 +17,6 @@ import type {
   WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
-import { relativeToAbsolute } from "@/lib/time-utils"
 import { useWidgetData } from "@/hooks/use-widget-data"
 import {
   buildTimeseriesQuerySpec,
@@ -376,13 +375,7 @@ export function WidgetQueryBuilderPage({
   const [activeAttributeKey, setActiveAttributeKey] = React.useState<string | null>(null)
   const [activeResourceAttributeKey, setActiveResourceAttributeKey] = React.useState<string | null>(null)
 
-  const { state: { timeRange } } = useDashboardTimeRange()
-  const resolvedTime = React.useMemo(() => {
-    if (timeRange.type === "absolute") {
-      return { startTime: timeRange.startTime, endTime: timeRange.endTime }
-    }
-    return relativeToAbsolute(timeRange.value)
-  }, [timeRange])
+  const { state: { resolvedTimeRange: resolvedTime } } = useDashboardTimeRange()
 
   const metricsResult = useAtomValue(
     listMetricsResultAtom({ data: { limit: 300 } }),

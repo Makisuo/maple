@@ -29,6 +29,7 @@ const ERROR_FINGERPRINT_SQL = `if(StatusMessage = '', 'Unknown Error',
  */
 export const listTraces = defineEndpoint("list_traces", {
   description: "List traces with pagination. Queries pre-materialized root span data for fast loading.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     limit: p.int32().optional(100).describe("Number of results"),
@@ -140,6 +141,7 @@ export type ListTracesOutput = InferOutputRow<typeof listTraces>;
  */
 export const spanHierarchy = defineEndpoint("span_hierarchy", {
   description: "Get all spans for a trace to build span hierarchy.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     trace_id: p.string().describe("Trace ID (required)"),
@@ -208,6 +210,7 @@ export type SpanHierarchyOutput = InferOutputRow<typeof spanHierarchy>;
  */
 export const listLogs = defineEndpoint("list_logs", {
   description: "Paginate through logs with optional filtering.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     limit: p.int32().optional(50).describe("Number of results"),
@@ -291,6 +294,7 @@ export type ListLogsOutput = InferOutputRow<typeof listLogs>;
  */
 export const logsCount = defineEndpoint("logs_count", {
   description: "Returns total count of logs with optional filtering.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     service: p.string().optional().describe("Filter by service name"),
@@ -342,6 +346,7 @@ export type LogsCountOutput = InferOutputRow<typeof logsCount>;
  */
 export const logsFacets = defineEndpoint("logs_facets", {
   description: "Returns facet counts for SeverityText and ServiceName.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     service: p.string().optional().describe("Filter by service name"),
@@ -423,6 +428,7 @@ export type LogsFacetsOutput = InferOutputRow<typeof logsFacets>;
  */
 export const errorRateByService = defineEndpoint("error_rate_by_service", {
   description: "Calculates the error rate grouped by service name.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -467,6 +473,7 @@ export type ErrorRateByServiceOutput = InferOutputRow<typeof errorRateByService>
  */
 export const getServiceUsage = defineEndpoint("get_service_usage", {
   description: "Query aggregated service usage statistics.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     service: p.string().optional().describe("Filter by service name"),
@@ -535,6 +542,7 @@ export type GetServiceUsageOutput = InferOutputRow<typeof getServiceUsage>;
  */
 export const listMetrics = defineEndpoint("list_metrics", {
   description: "List available metrics with counts across all metric types.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     limit: p.int32().optional(100).describe("Number of results"),
@@ -724,6 +732,7 @@ export type ListMetricsOutput = InferOutputRow<typeof listMetrics>;
  */
 export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
   description: "Get time-bucketed sum metric values for charting.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
@@ -785,6 +794,7 @@ export type MetricTimeSeriesSumOutput = InferOutputRow<typeof metricTimeSeriesSu
  */
 export const metricTimeSeriesGauge = defineEndpoint("metric_time_series_gauge", {
   description: "Get time-bucketed gauge metric values for charting.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
@@ -841,6 +851,7 @@ export type MetricTimeSeriesGaugeOutput = InferOutputRow<typeof metricTimeSeries
  */
 export const metricTimeSeriesHistogram = defineEndpoint("metric_time_series_histogram", {
   description: "Get time-bucketed histogram metric values for charting.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
@@ -897,6 +908,7 @@ export type MetricTimeSeriesHistogramOutput = InferOutputRow<typeof metricTimeSe
  */
 export const metricTimeSeriesExpHistogram = defineEndpoint("metric_time_series_exp_histogram", {
   description: "Get time-bucketed exponential histogram metric values for charting.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
@@ -953,6 +965,7 @@ export type MetricTimeSeriesExpHistogramOutput = InferOutputRow<typeof metricTim
  */
 export const metricsSummary = defineEndpoint("metrics_summary", {
   description: "Get summary counts by metric type.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     service: p.string().optional().describe("Filter by service name"),
@@ -1073,6 +1086,7 @@ export type MetricsSummaryOutput = InferOutputRow<typeof metricsSummary>;
  */
 export const tracesFacets = defineEndpoint("traces_facets", {
   description: "Returns facet counts for trace filtering from pre-materialized root span data.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -1460,6 +1474,7 @@ export type TracesFacetsOutput = InferOutputRow<typeof tracesFacets>;
  */
 export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
   description: "Returns duration statistics (min, max, p50, p95) for traces from pre-materialized data.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -1546,6 +1561,7 @@ export type TracesDurationStatsOutput = InferOutputRow<typeof tracesDurationStat
  */
 export const serviceOverview = defineEndpoint("service_overview", {
   description: "Get aggregated service metrics including P99 latency, error rate, and throughput.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -1617,6 +1633,7 @@ export type ServiceOverviewOutput = InferOutputRow<typeof serviceOverview>;
  */
 export const servicesFacets = defineEndpoint("services_facets", {
   description: "Get facet counts for environment and commit SHA filters.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -1689,6 +1706,7 @@ export type ServicesFacetsOutput = InferOutputRow<typeof servicesFacets>;
  */
 export const errorsByType = defineEndpoint("errors_by_type", {
   description: "Get errors grouped by StatusMessage/error type.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -1761,6 +1779,7 @@ export type ErrorsByTypeOutput = InferOutputRow<typeof errorsByType>;
  */
 export const errorDetailTraces = defineEndpoint("error_detail_traces", {
   description: "Get sample traces for a specific error type with trace metadata.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     error_type: p.string().describe("The error type/StatusMessage to filter by"),
@@ -1857,6 +1876,7 @@ export type ErrorDetailTracesOutput = InferOutputRow<typeof errorDetailTraces>;
  */
 export const errorsFacets = defineEndpoint("errors_facets", {
   description: "Returns facet counts for error filtering (services, environments, error types).",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -1980,6 +2000,7 @@ export type ErrorsFacetsOutput = InferOutputRow<typeof errorsFacets>;
  */
 export const errorsSummary = defineEndpoint("errors_summary", {
   description: "Get summary error statistics including total count, rate, and affected services.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -2077,6 +2098,7 @@ export type ErrorsSummaryOutput = InferOutputRow<typeof errorsSummary>;
  */
 export const serviceApdexTimeSeries = defineEndpoint("service_apdex_time_series", {
   description: "Get time-bucketed Apdex score for a single service.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     service_name: p.string().describe("Service name (required)"),
@@ -2130,6 +2152,7 @@ export type ServiceApdexTimeSeriesOutput = InferOutputRow<typeof serviceApdexTim
 
 export const alertTracesAggregate = defineEndpoint("alert_traces_aggregate", {
   description: "Aggregate trace metrics for alert evaluation across a full window.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2217,6 +2240,7 @@ export type AlertTracesAggregateOutput = InferOutputRow<typeof alertTracesAggreg
 
 export const alertMetricsAggregate = defineEndpoint("alert_metrics_aggregate", {
   description: "Aggregate metric values for alert evaluation across a full window.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
@@ -2307,6 +2331,7 @@ export type AlertMetricsAggregateOutput = InferOutputRow<typeof alertMetricsAggr
 
 export const alertLogsAggregate = defineEndpoint("alert_logs_aggregate", {
   description: "Aggregate log counts for alert evaluation across a full window.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2339,6 +2364,7 @@ export type AlertLogsAggregateOutput = InferOutputRow<typeof alertLogsAggregate>
 
 export const alertTracesAggregateByService = defineEndpoint("alert_traces_aggregate_by_service", {
   description: "Aggregate trace metrics for alert evaluation, grouped by service.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2427,6 +2453,7 @@ export type AlertTracesAggregateByServiceOutput = InferOutputRow<typeof alertTra
 
 export const alertMetricsAggregateByService = defineEndpoint("alert_metrics_aggregate_by_service", {
   description: "Aggregate metric values for alert evaluation, grouped by service.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
@@ -2513,6 +2540,7 @@ export type AlertMetricsAggregateByServiceOutput = InferOutputRow<typeof alertMe
 
 export const alertLogsAggregateByService = defineEndpoint("alert_logs_aggregate_by_service", {
   description: "Aggregate log counts for alert evaluation, grouped by service.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2549,6 +2577,7 @@ export type AlertLogsAggregateByServiceOutput = InferOutputRow<typeof alertLogsA
  */
 export const customTracesTimeseries = defineEndpoint("custom_traces_timeseries", {
   description: "Flexible time-bucketed trace metrics for custom charts.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2668,6 +2697,7 @@ export type CustomTracesTimeseriesOutput = InferOutputRow<typeof customTracesTim
  */
 export const customTracesBreakdown = defineEndpoint("custom_traces_breakdown", {
   description: "Flexible aggregated trace metrics grouped by a chosen dimension.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2781,6 +2811,7 @@ export type CustomTracesBreakdownOutput = InferOutputRow<typeof customTracesBrea
  */
 export const customLogsTimeseries = defineEndpoint("custom_logs_timeseries", {
   description: "Flexible time-bucketed log counts for custom charts.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2828,6 +2859,7 @@ export type CustomLogsTimeseriesOutput = InferOutputRow<typeof customLogsTimeser
  */
 export const customLogsBreakdown = defineEndpoint("custom_logs_breakdown", {
   description: "Flexible aggregated log counts grouped by a chosen dimension.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2877,6 +2909,7 @@ export type CustomLogsBreakdownOutput = InferOutputRow<typeof customLogsBreakdow
  */
 export const customMetricsBreakdown = defineEndpoint("custom_metrics_breakdown", {
   description: "Aggregated metric values grouped by ServiceName across all metric types.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
@@ -3000,6 +3033,7 @@ export type CustomMetricsBreakdownOutput = InferOutputRow<typeof customMetricsBr
  */
 export const serviceDependencies = defineEndpoint("service_dependencies", {
   description: "Get service-to-service dependency edges derived from span parent-child relationships.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -3129,6 +3163,7 @@ export type ServiceDependenciesOutput = InferOutputRow<typeof serviceDependencie
  */
 export const spanAttributeKeys = defineEndpoint("span_attribute_keys", {
   description: "List distinct span attribute keys with usage counts.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -3167,6 +3202,7 @@ export type SpanAttributeKeysOutput = InferOutputRow<typeof spanAttributeKeys>;
  */
 export const spanAttributeValues = defineEndpoint("span_attribute_values", {
   description: "List distinct values for a specific span attribute key.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -3206,6 +3242,7 @@ export type SpanAttributeValuesOutput = InferOutputRow<typeof spanAttributeValue
  */
 export const resourceAttributeKeys = defineEndpoint("resource_attribute_keys", {
   description: "List distinct resource attribute keys with usage counts.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -3244,6 +3281,7 @@ export type ResourceAttributeKeysOutput = InferOutputRow<typeof resourceAttribut
  */
 export const resourceAttributeValues = defineEndpoint("resource_attribute_values", {
   description: "List distinct values for a specific resource attribute key.",
+  cache: { enabled: true, ttl: 60 },
   params: {
     org_id: p.string().optional().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),

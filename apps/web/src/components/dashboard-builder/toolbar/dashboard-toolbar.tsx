@@ -10,8 +10,7 @@ import {
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { downloadPortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
-import { relativeToAbsolute } from "@/lib/time-utils"
-import type { Dashboard, TimeRange, WidgetMode } from "@/components/dashboard-builder/types"
+import type { Dashboard, WidgetMode } from "@/components/dashboard-builder/types"
 
 interface DashboardToolbarProps {
   mode: WidgetMode
@@ -21,19 +20,6 @@ interface DashboardToolbarProps {
   onAddWidget: () => void
   onAutoLayout: () => void
   onOpenAi?: () => void
-}
-
-function resolveForPicker(timeRange: TimeRange): {
-  startTime?: string
-  endTime?: string
-} {
-  if (timeRange.type === "absolute") {
-    return { startTime: timeRange.startTime, endTime: timeRange.endTime }
-  }
-  const resolved = relativeToAbsolute(timeRange.value)
-  return resolved
-    ? { startTime: resolved.startTime, endTime: resolved.endTime }
-    : {}
 }
 
 export function DashboardToolbar({
@@ -46,17 +32,15 @@ export function DashboardToolbar({
   onOpenAi,
 }: DashboardToolbarProps) {
   const {
-    state: { timeRange },
+    state: { timeRange, resolvedTimeRange },
     actions: { setTimeRange },
   } = useDashboardTimeRange()
-
-   const pickerRange = resolveForPicker(timeRange)
 
   return (
     <div className="flex items-center gap-1">
       <TimeRangePicker
-        startTime={pickerRange.startTime}
-        endTime={pickerRange.endTime}
+        startTime={resolvedTimeRange?.startTime}
+        endTime={resolvedTimeRange?.endTime}
         presetValue={timeRange.type === "relative" ? timeRange.value : undefined}
         onChange={(range) => {
           if (range.startTime && range.endTime) {
