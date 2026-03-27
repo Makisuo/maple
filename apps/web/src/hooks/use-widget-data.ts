@@ -235,9 +235,9 @@ const widgetFetchFamily = Atom.family((key: string) =>
         )
       }),
       Effect.mapError(toWidgetDataAtomError),
-      Effect.retry(Schedule.recurs(1)),
+      Effect.retry(Schedule.exponential("500 millis").pipe(Schedule.compose(Schedule.recurs(2)))),
     ),
-  ).pipe(Atom.setIdleTTL(30_000)),
+  ).pipe(Atom.setIdleTTL(120_000)),
 )
 
 const widgetFetchAtom = (input: {
