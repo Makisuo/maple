@@ -30,7 +30,7 @@
     --chart-2: oklch(0.62 0.14 185);
     --chart-3: oklch(0.65 0.16 85);
     --chart-4: oklch(0.58 0.16 310);
-    --chart-5: oklch(0.62 0.16 20);
+    --chart-5: oklch(0.58 0.13 210);
     --chart-p99:        oklch(0.55 0.20 30);
     --chart-p95:        oklch(0.62 0.17 65);
     --chart-p50:        oklch(0.62 0.14 250);
@@ -99,7 +99,7 @@
     --chart-1: oklch(0.714 0.154 59);
     --chart-2: oklch(0.693 0.165 254);
     --chart-3: oklch(0.658 0.134 151);
-    --chart-4: oklch(0.654 0.176 30);
+    --chart-4: oklch(0.65 0.14 185);
     --chart-5: oklch(0.70 0.12 310);
     --chart-p99:        oklch(0.654 0.176 30);
     --chart-p95:        oklch(0.714 0.154 59);
