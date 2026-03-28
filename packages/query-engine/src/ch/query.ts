@@ -83,6 +83,10 @@ export interface CHQuery<
   limit(n: number): CHQuery<Cols, Output, Params>
 
   format(fmt: "JSON" | "JSONEachRow"): CHQuery<Cols, Output, Params>
+
+  /** Declare the required compile-time params type. No-op at runtime —
+   *  Params is phantom and only constrains what `compile()` accepts. */
+  withParams<P extends Record<string, any>>(): CHQuery<Cols, Output, P>
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +145,11 @@ function makeQuery<
 
     format(fmt) {
       return makeQuery({ ...state, formatValue: fmt })
+    },
+
+    withParams() {
+      // Params is phantom — same runtime state, refined compile-time type
+      return makeQuery(state) as any
     },
   }
 }

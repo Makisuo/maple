@@ -1,19 +1,5 @@
 // ---------------------------------------------------------------------------
 // ClickHouse Query DSL — Public API
-//
-// Usage:
-//   import * as CH from "@maple/query-engine/ch"
-//
-//   const q = CH.from(CH.tables.Traces)
-//     .select($ => ({
-//       bucket: CH.toStartOfInterval($.Timestamp, 60),
-//       count: CH.count(),
-//     }))
-//     .where($ => [ $.OrgId.eq(CH.param.string("orgId")) ])
-//     .groupBy("bucket")
-//     .format("JSON")
-//
-//   const sql = CH.compile(q, { orgId: "org_123", ... })
 // ---------------------------------------------------------------------------
 
 // Types
@@ -21,14 +7,10 @@ export {
   type CHType,
   type CHString,
   type CHUInt8,
-  type CHUInt16,
-  type CHUInt32,
   type CHUInt64,
-  type CHInt32,
   type CHFloat64,
   type CHDateTime,
   type CHDateTime64,
-  type CHBool,
   type CHMap,
   type CHArray,
   type CHNullable,
@@ -36,14 +18,10 @@ export {
   type ColumnDefs,
   string,
   uint8,
-  uint16,
-  uint32,
   uint64,
-  int32,
   float64,
   dateTime,
   dateTime64,
-  bool,
   map,
   array,
   nullable,
@@ -52,14 +30,12 @@ export {
 // Table
 export { type Table, table } from "./table"
 
-// Expressions
+// Expressions (only re-export what is actually used by queries or consumers)
 export {
   type Expr,
   type ColumnRef,
   type Condition,
-  // Literals
   lit,
-  // Aggregates
   count,
   countIf,
   avg,
@@ -67,26 +43,11 @@ export {
   min_ as min,
   max_ as max,
   quantile,
-  any_,
-  anyIf,
-  // ClickHouse functions
   toStartOfInterval,
   if_,
-  coalesce,
-  nullIf,
-  toString_ as toString,
-  toFloat64OrZero,
-  toUInt16OrZero,
-  positionCaseInsensitive,
-  mapContains,
-  arrayStringConcat,
-  arrayFilter,
-  extract_ as extract,
   inList,
-  // Raw escape hatches
   rawExpr,
   rawCond,
-  // Conditional helpers
   when,
   whenTrue,
 } from "./expr"

@@ -11,6 +11,12 @@ import {
 } from "./sql/sql-fragment"
 import { compileQuery } from "./sql/sql-query"
 import { attrFilter, eq, gte, lte, inList, toStartOfInterval } from "./sql/clickhouse"
+import {
+  METRIC_NEEDS,
+  TRACE_LIST_MV_ATTR_MAP,
+  TRACE_LIST_MV_RESOURCE_MAP,
+  canUseTraceListMv,
+} from "./traces-shared"
 
 export { escapeClickHouseString }
 
@@ -49,20 +55,8 @@ export interface TracesBreakdownRow {
 }
 
 // ---------------------------------------------------------------------------
-// Metric → SELECT columns mapping
+// Metric → SELECT columns mapping (imported from traces-shared.ts)
 // ---------------------------------------------------------------------------
-
-type MetricNeed = "count" | "avg_duration" | "quantiles" | "error_rate" | "apdex"
-
-const METRIC_NEEDS: Record<TracesMetric, MetricNeed[]> = {
-  count: ["count"],
-  avg_duration: ["count", "avg_duration"],
-  p50_duration: ["count", "quantiles"],
-  p95_duration: ["count", "quantiles"],
-  p99_duration: ["count", "quantiles"],
-  error_rate: ["count", "error_rate"],
-  apdex: ["count", "apdex"],
-}
 
 // ---------------------------------------------------------------------------
 // Metric SELECT fragments
@@ -241,63 +235,7 @@ function breakdownGroupFragment(groupBy: string, groupByAttributeKey?: string): 
   }
 }
 
-// ---------------------------------------------------------------------------
-// trace_list_mv column mapping (pre-extracted HTTP attributes)
-// ---------------------------------------------------------------------------
-
-const TRACE_LIST_MV_ATTR_MAP: Record<string, string> = {
-  "http.method": "HttpMethod",
-  "http.request.method": "HttpMethod",
-  "http.route": "HttpRoute",
-  "url.path": "HttpRoute",
-  "http.target": "HttpRoute",
-  "http.status_code": "HttpStatusCode",
-  "http.response.status_code": "HttpStatusCode",
-}
-
-const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
-  "deployment.environment": "DeploymentEnv",
-}
-
-function canUseTraceListMv(params: {
-  rootOnly?: boolean
-  attributeFilters?: readonly AttributeFilter[]
-  resourceAttributeFilters?: readonly AttributeFilter[]
-  commitShas?: readonly string[]
-  groupBy?: readonly string[] | string
-  groupByAttributeKeys?: readonly string[]
-  groupByAttributeKey?: string
-}): boolean {
-  if (!params.rootOnly) return false
-
-  // trace_list_mv doesn't have CommitSha
-  if (params.commitShas?.length) return false
-
-  // Check all attribute filters map to pre-extracted columns
-  if (params.attributeFilters) {
-    for (const af of params.attributeFilters) {
-      if (!TRACE_LIST_MV_ATTR_MAP[af.key]) return false
-    }
-  }
-
-  // Check all resource filters map to pre-extracted columns
-  if (params.resourceAttributeFilters) {
-    for (const rf of params.resourceAttributeFilters) {
-      if (!TRACE_LIST_MV_RESOURCE_MAP[rf.key]) return false
-    }
-  }
-
-  // Check groupBy doesn't use unmapped custom attributes
-  const groupByArray = Array.isArray(params.groupBy) ? params.groupBy : params.groupBy ? [params.groupBy] : []
-  if (groupByArray.includes("attribute")) {
-    const attrKeys = params.groupByAttributeKeys ?? (params.groupByAttributeKey ? [params.groupByAttributeKey] : [])
-    for (const key of attrKeys) {
-      if (!TRACE_LIST_MV_ATTR_MAP[key]) return false
-    }
-  }
-
-  return true
-}
+// trace_list_mv column mapping + canUseTraceListMv imported from traces-shared.ts
 
 // ---------------------------------------------------------------------------
 // WHERE clause builder

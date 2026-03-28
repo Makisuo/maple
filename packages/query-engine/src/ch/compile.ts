@@ -12,7 +12,7 @@ import type { ColumnDefs } from "./types"
 import type { CHQuery } from "./query"
 import { createColumnAccessor } from "./query"
 import { aliased } from "./expr"
-import { raw, ident } from "../sql/sql-fragment"
+import { raw, ident, escapeClickHouseString } from "../sql/sql-fragment"
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
 
 // ---------------------------------------------------------------------------
@@ -81,11 +81,7 @@ export function compileCH<
 }
 
 function resolveParam(value: unknown): string {
-  if (typeof value === "string") {
-    // Escape for ClickHouse string literal
-    const escaped = value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
-    return `'${escaped}'`
-  }
+  if (typeof value === "string") return `'${escapeClickHouseString(value)}'`
   if (typeof value === "number") return String(Math.round(value))
   if (typeof value === "boolean") return value ? "1" : "0"
   return String(value)

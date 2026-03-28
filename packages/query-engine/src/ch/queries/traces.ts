@@ -1,8 +1,7 @@
 // ---------------------------------------------------------------------------
 // Typed Traces Queries
 //
-// Replaces traces-sql-builder.ts with DSL-based query definitions.
-// The output row types are fully inferred from the SELECT clause.
+// DSL-based query definitions for traces timeseries, breakdown, and list.
 // ---------------------------------------------------------------------------
 
 import type { TracesMetric, AttributeFilter } from "../../query-engine"
@@ -11,22 +10,13 @@ import { param } from "../param"
 import { from, type CHQuery } from "../query"
 import { Traces, TraceListMv } from "../tables"
 import { compile, str } from "../../sql/sql-fragment"
-
-// ---------------------------------------------------------------------------
-// Metric needs — which metric columns to compute
-// ---------------------------------------------------------------------------
-
-type MetricNeed = "count" | "avg_duration" | "quantiles" | "error_rate" | "apdex"
-
-const METRIC_NEEDS: Record<TracesMetric, MetricNeed[]> = {
-  count: ["count"],
-  avg_duration: ["count", "avg_duration"],
-  p50_duration: ["count", "quantiles"],
-  p95_duration: ["count", "quantiles"],
-  p99_duration: ["count", "quantiles"],
-  error_rate: ["count", "error_rate"],
-  apdex: ["count", "apdex"],
-}
+import {
+  METRIC_NEEDS,
+  TRACE_LIST_MV_ATTR_MAP,
+  TRACE_LIST_MV_RESOURCE_MAP,
+  canUseTraceListMv,
+  buildAttrFilterSQL,
+} from "../../traces-shared"
 
 // ---------------------------------------------------------------------------
 // Metric SELECT expressions
@@ -79,101 +69,13 @@ function metricSelectExprs(
   }
 }
 
-function breakdownMetricSelectExprs(
-  $: any,
-  metric: TracesMetric,
-  apdexThresholdMs: number,
-) {
-  const needs = new Set(METRIC_NEEDS[metric])
-  const t = String(apdexThresholdMs)
-
-  return {
-    count: CH.count(),
-    avgDuration: needs.has("avg_duration")
-      ? CH.avg($.Duration).div(1000000)
-      : CH.lit(0),
-    p50Duration: needs.has("quantiles")
-      ? CH.quantile(0.5)($.Duration).div(1000000)
-      : CH.lit(0),
-    p95Duration: needs.has("quantiles")
-      ? CH.quantile(0.95)($.Duration).div(1000000)
-      : CH.lit(0),
-    p99Duration: needs.has("quantiles")
-      ? CH.quantile(0.99)($.Duration).div(1000000)
-      : CH.lit(0),
-    errorRate: needs.has("error_rate")
-      ? CH.rawExpr<number>(`if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0)`)
-      : CH.lit(0),
-    satisfiedCount: needs.has("apdex")
-      ? CH.rawExpr<number>(`countIf(Duration / 1000000 < ${t})`)
-      : CH.lit(0),
-    toleratingCount: needs.has("apdex")
-      ? CH.rawExpr<number>(`countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4)`)
-      : CH.lit(0),
-    apdexScore: needs.has("apdex")
-      ? CH.rawExpr<number>(`if(count() > 0, round((countIf(Duration / 1000000 < ${t}) + countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4) * 0.5) / count(), 4), 0)`)
-      : CH.lit(0),
-  }
-}
-
-// ---------------------------------------------------------------------------
-// trace_list_mv optimization
-// ---------------------------------------------------------------------------
-
-const TRACE_LIST_MV_ATTR_MAP: Record<string, string> = {
-  "http.method": "HttpMethod",
-  "http.request.method": "HttpMethod",
-  "http.route": "HttpRoute",
-  "url.path": "HttpRoute",
-  "http.target": "HttpRoute",
-  "http.status_code": "HttpStatusCode",
-  "http.response.status_code": "HttpStatusCode",
-}
-
-const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
-  "deployment.environment": "DeploymentEnv",
-}
-
-const NUMERIC_MV_COLUMNS = new Set(["HttpStatusCode"])
-
-function canUseTraceListMv(opts: {
-  rootOnly?: boolean
-  attributeFilters?: readonly AttributeFilter[]
-  resourceAttributeFilters?: readonly AttributeFilter[]
-  commitShas?: readonly string[]
-  groupBy?: readonly string[]
-  groupByAttributeKeys?: readonly string[]
-  groupByAttributeKey?: string
-}): boolean {
-  if (!opts.rootOnly) return false
-  if (opts.commitShas?.length) return false
-  if (opts.attributeFilters) {
-    for (const af of opts.attributeFilters) {
-      if (!TRACE_LIST_MV_ATTR_MAP[af.key]) return false
-    }
-  }
-  if (opts.resourceAttributeFilters) {
-    for (const rf of opts.resourceAttributeFilters) {
-      if (!TRACE_LIST_MV_RESOURCE_MAP[rf.key]) return false
-    }
-  }
-  const groupByArray = opts.groupBy ?? []
-  if (groupByArray.includes("attribute")) {
-    const attrKeys = opts.groupByAttributeKeys ??
-      (opts.groupByAttributeKey ? [opts.groupByAttributeKey] : [])
-    for (const key of attrKeys) {
-      if (!TRACE_LIST_MV_ATTR_MAP[key]) return false
-    }
-  }
-  return true
-}
+// trace_list_mv constants + canUseTraceListMv imported from traces-shared.ts
 
 // ---------------------------------------------------------------------------
 // GROUP BY expression builder
 // ---------------------------------------------------------------------------
 
 function buildGroupNameExpr(
-  _$: any,
   groupBy: readonly string[] | undefined,
   groupByAttributeKeys: readonly string[] | undefined,
   useTraceListMv: boolean,
@@ -260,37 +162,7 @@ function buildAttrFilterCondition(
   mapName: "SpanAttributes" | "ResourceAttributes",
   mvMap: Record<string, string>,
 ): CH.Condition {
-  const mvColumn = useMv ? mvMap[af.key] : undefined
-  const escapedKey = compile(str(af.key))
-  const escapedValue = compile(str(af.value ?? ""))
-
-  if (af.mode === "exists") {
-    return mvColumn
-      ? CH.rawCond(`${mvColumn} != ''`)
-      : CH.rawCond(`mapContains(${mapName}, ${escapedKey})`)
-  }
-
-  if (af.mode === "contains") {
-    const col = mvColumn ?? `${mapName}[${escapedKey}]`
-    return CH.rawCond(`positionCaseInsensitive(${col}, ${escapedValue}) > 0`)
-  }
-
-  const MODE_TO_OP: Record<string, string> = { gt: ">", gte: ">=", lt: "<", lte: "<=" }
-  const op = MODE_TO_OP[af.mode]
-  if (op) {
-    if (mvColumn) {
-      const cast = NUMERIC_MV_COLUMNS.has(mvColumn) ? `toUInt16OrZero(${mvColumn})` : mvColumn
-      return CH.rawCond(`${cast} ${op} ${escapedValue}`)
-    }
-    const rawEscaped = af.value?.replace(/\\/g, "\\\\").replace(/'/g, "\\'") ?? ""
-    return CH.rawCond(`toFloat64OrZero(${mapName}[${escapedKey}]) ${op} ${rawEscaped}`)
-  }
-
-  // equals (default)
-  if (mvColumn) {
-    return CH.rawCond(`${mvColumn} = ${escapedValue}`)
-  }
-  return CH.rawCond(`${mapName}[${escapedKey}] = ${escapedValue}`)
+  return CH.rawCond(buildAttrFilterSQL(af, useMv, mapName, mvMap))
 }
 
 function buildWhereConditions(
@@ -369,7 +241,6 @@ export interface TracesTimeseriesOpts extends TracesQueryOpts {
   apdexThresholdMs?: number
 }
 
-/** Output row type — inferred from the SELECT clause */
 export interface TracesTimeseriesOutput {
   readonly bucket: string
   readonly groupName: string
@@ -392,20 +263,19 @@ export function tracesTimeseriesQuery(
 ): CHQuery<any, TracesTimeseriesOutput, { orgId: string; startTime: string; endTime: string; bucketSeconds: number }> {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
   const useTraceListMv = canUseTraceListMv(opts)
-  // TraceListMv and Traces have different column sets but we access only shared
-  // columns via the proxy — the Cols type param is erased via `as any` return.
   const tbl = useTraceListMv ? TraceListMv : Traces
 
   return from(tbl as typeof Traces)
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
-      groupName: buildGroupNameExpr($, opts.groupBy, opts.groupByAttributeKeys, useTraceListMv),
+      groupName: buildGroupNameExpr(opts.groupBy, opts.groupByAttributeKeys, useTraceListMv),
       ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling),
     }))
     .where(($) => buildWhereConditions($, opts, useTraceListMv))
     .groupBy("bucket", "groupName")
     .orderBy(["bucket", "asc"], ["groupName", "asc"])
-    .format("JSON") as any
+    .format("JSON")
+    .withParams<{ orgId: string; startTime: string; endTime: string; bucketSeconds: number }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -446,15 +316,20 @@ export function tracesBreakdownQuery(
   const tbl = useTraceListMv ? TraceListMv : Traces
 
   return from(tbl as typeof Traces)
-    .select(($) => ({
-      name: buildBreakdownGroupExpr(opts.groupBy, opts.groupByAttributeKey),
-      ...breakdownMetricSelectExprs($, opts.metric, apdexThresholdMs),
-    }))
+    .select(($) => {
+      const { sampledSpanCount, unsampledSpanCount, dominantThreshold, ...metrics } =
+        metricSelectExprs($, opts.metric, apdexThresholdMs, false)
+      return {
+        name: buildBreakdownGroupExpr(opts.groupBy, opts.groupByAttributeKey),
+        ...metrics,
+      }
+    })
     .where(($) => buildWhereConditions($, opts, useTraceListMv))
     .groupBy("name")
     .orderBy(["count", "desc"])
     .limit(limit)
-    .format("JSON") as any
+    .format("JSON")
+    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -502,8 +377,7 @@ export function tracesListQuery(
     .where(($) => buildWhereConditions($, opts, false))
     .orderBy(["timestamp", "desc"])
     .limit(limit)
-    .format("JSON") as any
+    .format("JSON")
+    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
-// Re-export canUseTraceListMv for QueryEngineService
-export { canUseTraceListMv }
