@@ -3704,7 +3704,7 @@ export const serviceDependencies = defineEndpoint("service_dependencies", {
         FROM service_map_edges_hourly
         WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
-          AND Hour >= toStartOfHour({{DateTime(start_time, "2023-01-01 00:00:00")}})
+          AND Hour >= toStartOfHour(toDateTime({{DateTime(start_time, "2023-01-01 00:00:00")}}))
         {% end %}
         {% if defined(end_time) %}
           AND Hour <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
