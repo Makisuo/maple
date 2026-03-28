@@ -11,6 +11,12 @@ import { registerFindSlowTracesTool } from "./tools/find-slow-traces"
 import { registerErrorDetailTool } from "./tools/error-detail"
 import { registerListMetricsTool } from "./tools/list-metrics"
 import { registerQueryDataTool } from "./tools/query-data"
+import { registerListAlertRulesTool } from "./tools/list-alert-rules"
+import { registerListAlertIncidentsTool } from "./tools/list-alert-incidents"
+import { registerCreateAlertRuleTool } from "./tools/create-alert-rule"
+import { registerListDashboardsTool } from "./tools/list-dashboards"
+import { registerGetDashboardTool } from "./tools/get-dashboard"
+import { registerCreateDashboardTool } from "./tools/create-dashboard"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "./tools/types"
 
 interface ToolDefinition {
@@ -89,6 +95,16 @@ const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
   registerErrorDetailTool(registrar)
   registerListMetricsTool(registrar)
   registerQueryDataTool(registrar)
+
+  // Alert management
+  registerListAlertRulesTool(registrar)
+  registerListAlertIncidentsTool(registrar)
+  registerCreateAlertRuleTool(registrar)
+
+  // Dashboard management
+  registerListDashboardsTool(registrar)
+  registerGetDashboardTool(registrar)
+  registerCreateDashboardTool(registrar)
 
   return definitions
 }

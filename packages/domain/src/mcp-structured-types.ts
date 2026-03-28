@@ -199,6 +199,87 @@ export interface QueryDataData {
       }
 }
 
+// ---------------------------------------------------------------------------
+// Alert rule types
+// ---------------------------------------------------------------------------
+
+export interface AlertRuleRow {
+  id: string
+  name: string
+  enabled: boolean
+  severity: string
+  serviceName: string | null
+  signalType: string
+  comparator: string
+  threshold: number
+  windowMinutes: number
+  destinationIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ListAlertRulesData {
+  rules: AlertRuleRow[]
+  total: number
+}
+
+export interface CreateAlertRuleData {
+  rule: AlertRuleRow
+}
+
+// ---------------------------------------------------------------------------
+// Alert incident types
+// ---------------------------------------------------------------------------
+
+export interface AlertIncidentRow {
+  id: string
+  ruleId: string
+  ruleName: string
+  serviceName: string | null
+  signalType: string
+  severity: string
+  status: string
+  threshold: number
+  comparator: string
+  firstTriggeredAt: string
+  resolvedAt: string | null
+  lastObservedValue: number | null
+}
+
+export interface ListAlertIncidentsData {
+  incidents: AlertIncidentRow[]
+  total: number
+  openCount: number
+  resolvedCount: number
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard types
+// ---------------------------------------------------------------------------
+
+export interface DashboardRow {
+  id: string
+  name: string
+  description?: string
+  tags?: string[]
+  widgetCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ListDashboardsData {
+  dashboards: DashboardRow[]
+  total: number
+}
+
+export interface GetDashboardData {
+  dashboard: Record<string, unknown>
+}
+
+export interface CreateDashboardData {
+  dashboard: DashboardRow
+}
+
 export type StructuredToolOutput =
   | { tool: "system_health"; data: SystemHealthData }
   | { tool: "service_overview"; data: ServiceOverviewData }
@@ -211,3 +292,9 @@ export type StructuredToolOutput =
   | { tool: "diagnose_service"; data: DiagnoseServiceData }
   | { tool: "list_metrics"; data: ListMetricsData }
   | { tool: "query_data"; data: QueryDataData }
+  | { tool: "list_alert_rules"; data: ListAlertRulesData }
+  | { tool: "list_alert_incidents"; data: ListAlertIncidentsData }
+  | { tool: "create_alert_rule"; data: CreateAlertRuleData }
+  | { tool: "list_dashboards"; data: ListDashboardsData }
+  | { tool: "get_dashboard"; data: GetDashboardData }
+  | { tool: "create_dashboard"; data: CreateDashboardData }

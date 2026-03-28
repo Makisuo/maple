@@ -241,5 +241,100 @@ export function buildSpec(output: StructuredToolOutput): Spec {
       })
       return { root, elements }
     }
+
+    case "list_alert_rules": {
+      const d = output.data
+      const headers = ["Name", "Severity", "Signal", "Threshold", "Enabled"]
+      const rows = d.rules.map((r) => [
+        r.name,
+        r.severity,
+        r.signalType,
+        `${r.comparator} ${r.threshold}`,
+        r.enabled ? "Yes" : "No",
+      ])
+      const root = addElement(elements, "DataTable", {
+        headers,
+        rows,
+        title: `Alert Rules (${d.total})`,
+      })
+      return { root, elements }
+    }
+
+    case "list_alert_incidents": {
+      const d = output.data
+      const headers = ["Rule", "Severity", "Status", "Signal", "Value", "Triggered"]
+      const rows = d.incidents.map((i) => [
+        i.ruleName,
+        i.severity,
+        i.status,
+        i.signalType,
+        i.lastObservedValue != null ? String(i.lastObservedValue) : "—",
+        i.firstTriggeredAt.slice(0, 19),
+      ])
+      const root = addElement(elements, "DataTable", {
+        headers,
+        rows,
+        title: `Alert Incidents (${d.openCount} open, ${d.resolvedCount} resolved)`,
+      })
+      return { root, elements }
+    }
+
+    case "create_alert_rule": {
+      const d = output.data
+      const r = d.rule
+      const root = addElement(elements, "StatCards", {
+        cards: [
+          { label: "Rule", value: r.name, format: "text" },
+          { label: "Severity", value: r.severity, format: "text" },
+          { label: "Signal", value: r.signalType, format: "text" },
+          { label: "Threshold", value: `${r.comparator} ${r.threshold}`, format: "text" },
+          { label: "Window", value: `${r.windowMinutes}m`, format: "text" },
+        ],
+      })
+      return { root, elements }
+    }
+
+    case "list_dashboards": {
+      const d = output.data
+      const headers = ["ID", "Name", "Widgets", "Updated"]
+      const rows = d.dashboards.map((db) => [
+        db.id,
+        db.name,
+        String(db.widgetCount),
+        db.updatedAt.slice(0, 19),
+      ])
+      const root = addElement(elements, "DataTable", {
+        headers,
+        rows,
+        title: `Dashboards (${d.total})`,
+      })
+      return { root, elements }
+    }
+
+    case "get_dashboard": {
+      const d = output.data
+      const db = d.dashboard
+      const root = addElement(elements, "StatCards", {
+        cards: [
+          { label: "Name", value: db.name ?? "—", format: "text" },
+          { label: "ID", value: db.id ?? "—", format: "text" },
+          { label: "Widgets", value: Array.isArray(db.widgets) ? db.widgets.length : 0, format: "number" },
+        ],
+      })
+      return { root, elements }
+    }
+
+    case "create_dashboard": {
+      const d = output.data
+      const db = d.dashboard
+      const root = addElement(elements, "StatCards", {
+        cards: [
+          { label: "Dashboard", value: db.name, format: "text" },
+          { label: "ID", value: db.id, format: "text" },
+          { label: "Widgets", value: db.widgetCount, format: "number" },
+        ],
+      })
+      return { root, elements }
+    }
   }
 }
