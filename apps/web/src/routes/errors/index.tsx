@@ -23,7 +23,7 @@ const errorsSearchSchema = Schema.Struct({
 
 export type ErrorsSearchParams = Schema.Schema.Type<typeof errorsSearchSchema>
 
-export const Route = createFileRoute("/errors")({
+export const Route = createFileRoute("/errors/")({
   component: ErrorsPage,
   validateSearch: Schema.toStandardSchemaV1(errorsSearchSchema),
 })

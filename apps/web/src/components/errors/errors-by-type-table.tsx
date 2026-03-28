@@ -2,7 +2,7 @@ import { Result } from "@/lib/effect-atom"
 import { Fragment, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { formatDistanceToNow, format } from "date-fns"
-import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
+import { ArrowRightIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
 
 import {
   Table,
@@ -161,6 +161,17 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
             )
           })
           .render()}
+      </div>
+
+      <div className="pt-1">
+        <Link
+          to="/errors/$errorType"
+          params={{ errorType: encodeURIComponent(errorRow.errorType) }}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+        >
+          View full details
+          <ArrowRightIcon size={12} />
+        </Link>
       </div>
     </div>
   )

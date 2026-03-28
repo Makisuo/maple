@@ -20,7 +20,6 @@ import { Route as OrgRequiredRouteImport } from './routes/org-required'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LogsRouteImport } from './routes/logs'
-import { Route as ErrorsRouteImport } from './routes/errors'
 import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as DashboardsRouteImport } from './routes/dashboards'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
@@ -28,9 +27,11 @@ import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as ServicesIndexRouteImport } from './routes/services/index'
+import { Route as ErrorsIndexRouteImport } from './routes/errors/index'
 import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 import { Route as ServicesServiceNameRouteImport } from './routes/services/$serviceName'
+import { Route as ErrorsErrorTypeRouteImport } from './routes/errors/$errorType'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
 
@@ -89,11 +90,6 @@ const LogsRoute = LogsRouteImport.update({
   path: '/logs',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ErrorsRoute = ErrorsRouteImport.update({
-  id: '/errors',
-  path: '/errors',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const DeveloperRoute = DeveloperRouteImport.update({
   id: '/developer',
   path: '/developer',
@@ -129,6 +125,11 @@ const ServicesIndexRoute = ServicesIndexRouteImport.update({
   path: '/services/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ErrorsIndexRoute = ErrorsIndexRouteImport.update({
+  id: '/errors/',
+  path: '/errors/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AlertsIndexRoute = AlertsIndexRouteImport.update({
   id: '/alerts/',
   path: '/alerts/',
@@ -142,6 +143,11 @@ const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
 const ServicesServiceNameRoute = ServicesServiceNameRouteImport.update({
   id: '/services/$serviceName',
   path: '/services/$serviceName',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ErrorsErrorTypeRoute = ErrorsErrorTypeRouteImport.update({
+  id: '/errors/$errorType',
+  path: '/errors/$errorType',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsCreateRoute = AlertsCreateRouteImport.update({
@@ -161,7 +167,6 @@ export interface FileRoutesByFullPath {
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
-  '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
   '/metrics': typeof MetricsRoute
@@ -175,9 +180,11 @@ export interface FileRoutesByFullPath {
   '/sign-up': typeof SignUpRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
+  '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts/': typeof AlertsIndexRoute
+  '/errors/': typeof ErrorsIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
 }
@@ -187,7 +194,6 @@ export interface FileRoutesByTo {
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
-  '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
   '/metrics': typeof MetricsRoute
@@ -201,9 +207,11 @@ export interface FileRoutesByTo {
   '/sign-up': typeof SignUpRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
+  '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts': typeof AlertsIndexRoute
+  '/errors': typeof ErrorsIndexRoute
   '/services': typeof ServicesIndexRoute
   '/traces': typeof TracesIndexRoute
 }
@@ -214,7 +222,6 @@ export interface FileRoutesById {
   '/connectors': typeof ConnectorsRoute
   '/dashboards': typeof DashboardsRoute
   '/developer': typeof DeveloperRoute
-  '/errors': typeof ErrorsRoute
   '/logs': typeof LogsRoute
   '/mcp': typeof McpRoute
   '/metrics': typeof MetricsRoute
@@ -228,9 +235,11 @@ export interface FileRoutesById {
   '/sign-up': typeof SignUpRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
+  '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
   '/alerts/': typeof AlertsIndexRoute
+  '/errors/': typeof ErrorsIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
 }
@@ -242,7 +251,6 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
-    | '/errors'
     | '/logs'
     | '/mcp'
     | '/metrics'
@@ -256,9 +264,11 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/alerts/$ruleId'
     | '/alerts/create'
+    | '/errors/$errorType'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts/'
+    | '/errors/'
     | '/services/'
     | '/traces/'
   fileRoutesByTo: FileRoutesByTo
@@ -268,7 +278,6 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
-    | '/errors'
     | '/logs'
     | '/mcp'
     | '/metrics'
@@ -282,9 +291,11 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/alerts/$ruleId'
     | '/alerts/create'
+    | '/errors/$errorType'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts'
+    | '/errors'
     | '/services'
     | '/traces'
   id:
@@ -294,7 +305,6 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/dashboards'
     | '/developer'
-    | '/errors'
     | '/logs'
     | '/mcp'
     | '/metrics'
@@ -308,9 +318,11 @@ export interface FileRouteTypes {
     | '/sign-up'
     | '/alerts/$ruleId'
     | '/alerts/create'
+    | '/errors/$errorType'
     | '/services/$serviceName'
     | '/traces/$traceId'
     | '/alerts/'
+    | '/errors/'
     | '/services/'
     | '/traces/'
   fileRoutesById: FileRoutesById
@@ -321,7 +333,6 @@ export interface RootRouteChildren {
   ConnectorsRoute: typeof ConnectorsRoute
   DashboardsRoute: typeof DashboardsRoute
   DeveloperRoute: typeof DeveloperRoute
-  ErrorsRoute: typeof ErrorsRoute
   LogsRoute: typeof LogsRoute
   McpRoute: typeof McpRoute
   MetricsRoute: typeof MetricsRoute
@@ -335,9 +346,11 @@ export interface RootRouteChildren {
   SignUpRoute: typeof SignUpRoute
   AlertsRuleIdRoute: typeof AlertsRuleIdRoute
   AlertsCreateRoute: typeof AlertsCreateRoute
+  ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
   AlertsIndexRoute: typeof AlertsIndexRoute
+  ErrorsIndexRoute: typeof ErrorsIndexRoute
   ServicesIndexRoute: typeof ServicesIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
 }
@@ -421,13 +434,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LogsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/errors': {
-      id: '/errors'
-      path: '/errors'
-      fullPath: '/errors'
-      preLoaderRoute: typeof ErrorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/developer': {
       id: '/developer'
       path: '/developer'
@@ -477,6 +483,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ServicesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/errors/': {
+      id: '/errors/'
+      path: '/errors'
+      fullPath: '/errors/'
+      preLoaderRoute: typeof ErrorsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/alerts/': {
       id: '/alerts/'
       path: '/alerts'
@@ -496,6 +509,13 @@ declare module '@tanstack/react-router' {
       path: '/services/$serviceName'
       fullPath: '/services/$serviceName'
       preLoaderRoute: typeof ServicesServiceNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/errors/$errorType': {
+      id: '/errors/$errorType'
+      path: '/errors/$errorType'
+      fullPath: '/errors/$errorType'
+      preLoaderRoute: typeof ErrorsErrorTypeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/alerts/create': {
@@ -521,7 +541,6 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectorsRoute: ConnectorsRoute,
   DashboardsRoute: DashboardsRoute,
   DeveloperRoute: DeveloperRoute,
-  ErrorsRoute: ErrorsRoute,
   LogsRoute: LogsRoute,
   McpRoute: McpRoute,
   MetricsRoute: MetricsRoute,
@@ -535,9 +554,11 @@ const rootRouteChildren: RootRouteChildren = {
   SignUpRoute: SignUpRoute,
   AlertsRuleIdRoute: AlertsRuleIdRoute,
   AlertsCreateRoute: AlertsCreateRoute,
+  ErrorsErrorTypeRoute: ErrorsErrorTypeRoute,
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
   AlertsIndexRoute: AlertsIndexRoute,
+  ErrorsIndexRoute: ErrorsIndexRoute,
   ServicesIndexRoute: ServicesIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
 }

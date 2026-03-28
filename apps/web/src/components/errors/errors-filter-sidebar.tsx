@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { FilterSection, SingleCheckboxFilter } from "@/components/traces/filter-section"
-import { Route } from "@/routes/errors"
+import { Route } from "@/routes/errors/index"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { getErrorsFacetsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import {

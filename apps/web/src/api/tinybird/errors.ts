@@ -5,6 +5,7 @@ import {
   type ErrorsByTypeOutput,
   type ErrorsFacetsOutput,
   type ErrorsSummaryOutput,
+  type ErrorsTimeseriesOutput,
 } from "@/lib/tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import {
@@ -309,5 +310,60 @@ const getErrorDetailTracesEffect = Effect.fn("Tinybird.getErrorDetailTraces")(fu
 
     return {
       data: result.data.map(transformErrorDetailTrace),
+    }
+})
+
+export interface ErrorsTimeseriesItem {
+  bucket: string
+  count: number
+}
+
+const GetErrorsTimeseriesInputSchema = Schema.Struct({
+  errorType: Schema.String,
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  services: OptionalStringArray,
+  bucketSeconds: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+  showSpam: Schema.optional(Schema.Boolean),
+})
+
+export type GetErrorsTimeseriesInput = Schema.Schema.Type<typeof GetErrorsTimeseriesInputSchema>
+
+function transformErrorsTimeseries(raw: ErrorsTimeseriesOutput): ErrorsTimeseriesItem {
+  return {
+    bucket: String(raw.bucket),
+    count: Number(raw.count),
+  }
+}
+
+export function getErrorsTimeseries({
+  data,
+}: {
+  data: GetErrorsTimeseriesInput
+}) {
+  return getErrorsTimeseriesEffect({ data })
+}
+
+const getErrorsTimeseriesEffect = Effect.fn("Tinybird.getErrorsTimeseries")(function* ({
+  data,
+}: {
+  data: GetErrorsTimeseriesInput
+}) {
+    const input = yield* decodeInput(GetErrorsTimeseriesInputSchema, data ?? {}, "getErrorsTimeseries")
+    const tinybird = getTinybird()
+
+    const result = yield* runTinybirdQuery("errors_timeseries", () =>
+      tinybird.query.errors_timeseries({
+        error_type: input.errorType,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        services: input.services?.join(","),
+        bucket_seconds: input.bucketSeconds,
+        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+      }),
+    )
+
+    return {
+      data: result.data.map(transformErrorsTimeseries),
     }
 })

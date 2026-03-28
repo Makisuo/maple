@@ -20,6 +20,7 @@ export const tinybirdPipes = [
   "error_detail_traces",
   "errors_facets",
   "errors_summary",
+  "errors_timeseries",
   "service_apdex_time_series",
   "alert_traces_aggregate",
   "alert_metrics_aggregate",

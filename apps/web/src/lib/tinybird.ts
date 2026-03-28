@@ -14,6 +14,7 @@ import type {
   ErrorsByTypeOutput,
   ErrorsFacetsOutput,
   ErrorsSummaryOutput,
+  ErrorsTimeseriesOutput,
   GetServiceUsageOutput,
   ListLogsOutput,
   ListMetricsOutput,
@@ -59,6 +60,8 @@ export type {
   ErrorsFacetsOutput,
   ErrorsSummaryParams,
   ErrorsSummaryOutput,
+  ErrorsTimeseriesParams,
+  ErrorsTimeseriesOutput,
   GetServiceUsageParams,
   GetServiceUsageOutput,
   ListLogsParams,
@@ -171,6 +174,8 @@ const query = {
     queryTinybird<ErrorsFacetsOutput>("errors_facets", params),
   errors_summary: (params?: Record<string, unknown>) =>
     queryTinybird<ErrorsSummaryOutput>("errors_summary", params),
+  errors_timeseries: (params?: Record<string, unknown>) =>
+    queryTinybird<ErrorsTimeseriesOutput>("errors_timeseries", params),
   service_apdex_time_series: (params?: Record<string, unknown>) =>
     queryTinybird<ServiceApdexTimeSeriesOutput>("service_apdex_time_series", params),
   custom_traces_timeseries: (params?: Record<string, unknown>) =>

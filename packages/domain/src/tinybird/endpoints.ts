@@ -2063,6 +2063,61 @@ export type ErrorsByTypeParams = InferParams<typeof errorsByType>;
 export type ErrorsByTypeOutput = InferOutputRow<typeof errorsByType>;
 
 /**
+ * Errors timeseries endpoint - get error counts over time for a specific error type
+ */
+export const errorsTimeseries = defineEndpoint("errors_timeseries", {
+  description: "Get time-bucketed error counts for a specific error type.",
+  params: {
+    org_id: p.string().optional().describe("Organization ID"),
+    error_type: p.string().describe("The error type/fingerprint to filter by"),
+    start_time: p.dateTime().optional().describe("Start of time range"),
+    end_time: p.dateTime().optional().describe("End of time range"),
+    bucket_seconds: p.int32().optional(3600).describe("Bucket size in seconds"),
+    services: p.string().optional().describe("Comma-separated list of services to filter"),
+    exclude_spam_patterns: p.string().optional().describe("Comma-separated spam patterns to exclude"),
+  },
+  nodes: [
+    node({
+      name: "errors_timeseries_node",
+      sql: `
+        SELECT
+          toStartOfInterval(Timestamp, INTERVAL {{Int32(bucket_seconds, 3600)}} SECOND) AS bucket,
+          count() AS count
+        FROM error_spans
+        WHERE OrgId = {{String(org_id, "")}}
+          AND ${ERROR_FINGERPRINT_SQL} = {{String(error_type)}}
+        {% if defined(start_time) %}
+          AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+        {% end %}
+        {% if defined(end_time) %}
+          AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+        {% end %}
+        {% if defined(services) %}
+          AND ServiceName IN splitByChar(',', {{String(services, "")}})
+        {% end %}
+        {% if defined(exclude_spam_patterns) %}
+          AND NOT arrayExists(
+            x -> positionCaseInsensitive(
+              if(StatusMessage = '', 'Unknown Error', StatusMessage), x
+            ) > 0,
+            splitByChar(',', {{String(exclude_spam_patterns, "")}})
+          )
+        {% end %}
+        GROUP BY bucket
+        ORDER BY bucket ASC
+      `,
+    }),
+  ],
+  output: {
+    bucket: t.dateTime(),
+    count: t.uint64(),
+  },
+});
+
+export type ErrorsTimeseriesParams = InferParams<typeof errorsTimeseries>;
+export type ErrorsTimeseriesOutput = InferOutputRow<typeof errorsTimeseries>;
+
+/**
  * Error detail traces endpoint - get sample traces for a specific error type
  */
 export const errorDetailTraces = defineEndpoint("error_detail_traces", {

@@ -11,6 +11,7 @@ import {
   getErrorsByType,
   getErrorsFacets,
   getErrorsSummary,
+  getErrorsTimeseries,
 } from "@/api/tinybird/errors"
 import { getLogsFacets, listLogs } from "@/api/tinybird/logs"
 import { getMetricTimeSeries, getMetricsSummary, listMetrics } from "@/api/tinybird/metrics"
@@ -152,6 +153,10 @@ export const getErrorsFacetsResultAtom = makeQueryAtomFamily(getErrorsFacets, {
 
 export const getErrorsSummaryResultAtom = makeQueryAtomFamily(getErrorsSummary, {
   staleTime: 60_000,
+})
+
+export const getErrorsTimeseriesResultAtom = makeQueryAtomFamily(getErrorsTimeseries, {
+  staleTime: 30_000,
 })
 
 export const listMetricsResultAtom = makeQueryAtomFamily(listMetrics, {
