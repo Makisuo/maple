@@ -20,10 +20,45 @@
     "deploy:pr": "bun scripts/deploy-stack.ts deploy pr",
     "destroy:pr": "bun scripts/deploy-stack.ts destroy pr"
   },
+  "catalogs": {
+    "effect": {
+      "effect": "4.0.0-beta.42",
+      "@effect/atom-react": "4.0.0-beta.42",
+      "@effect/opentelemetry": "4.0.0-beta.42",
+      "@effect/platform-bun": "4.0.0-beta.42",
+      "@effect/language-service": "^0.84.1"
+    },
+    "react": {
+      "react": "^19.2.4",
+      "react-dom": "^19.2.4",
+      "@types/react": "^19.2.14",
+      "@types/react-dom": "^19.2.3"
+    },
+    "tailwind": {
+      "tailwindcss": "^4.2.2",
+      "@tailwindcss/vite": "^4.2.2",
+      "tailwind-merge": "^3.5.0",
+      "tw-animate-css": "^1.4.0"
+    },
+    "ui": {
+      "@base-ui/react": "^1.3.0",
+      "@xyflow/react": "^12.10.2",
+      "class-variance-authority": "^0.7.1",
+      "clsx": "^2.1.1",
+      "recharts": "2.15.4"
+    },
+    "tooling": {
+      "typescript": "^6.0.2",
+      "@types/node": "^22.10.2"
+    },
+    "tinybird": {
+      "@tinybirdco/sdk": "0.0.64"
+    }
+  },
   "devDependencies": {
-    "@tinybirdco/sdk": "0.0.60",
-    "turbo": "^2.8.17",
-    "typescript": "^5.9.3"
+    "@tinybirdco/sdk": "catalog:tinybird",
+    "turbo": "^2.8.21",
+    "typescript": "catalog:tooling"
   },
   "packageManager": "bun@1.3.8"
 }

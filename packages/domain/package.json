@@ -17,13 +17,13 @@
   },
   "dependencies": {
     "@maple/query-engine": "workspace:*",
-    "@tinybirdco/sdk": "0.0.60",
-    "effect": "4.0.0-beta.33"
+    "@tinybirdco/sdk": "catalog:tinybird",
+    "effect": "catalog:effect"
   },
   "devDependencies": {
-    "@effect/language-service": "^0.75.1",
+    "@effect/language-service": "catalog:effect",
     "@types/bun": "^1.3.8",
-    "@types/node": "^22.10.2",
-    "typescript": "^5.9.3"
+    "@types/node": "catalog:tooling",
+    "typescript": "catalog:tooling"
   }
 }

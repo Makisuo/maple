@@ -14,7 +14,7 @@
     "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
-    "typescript": "^5.9.3"
+    "@types/node": "catalog:tooling",
+    "typescript": "catalog:tooling"
   }
 }

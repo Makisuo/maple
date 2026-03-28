@@ -19,7 +19,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250214.0",
     "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848",
-    "typescript": "^5.9.3",
+    "typescript": "catalog:tooling",
     "wrangler": "^4.14.4"
   }
 }

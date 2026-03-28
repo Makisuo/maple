@@ -17,12 +17,12 @@
   "dependencies": {
     "@libsql/client": "0.15.15",
     "drizzle-orm": "^0.45.1",
-    "effect": "4.0.0-beta.33"
+    "effect": "catalog:effect"
   },
   "devDependencies": {
-    "@effect/language-service": "^0.75.1",
-    "@types/node": "^22.10.2",
+    "@effect/language-service": "catalog:effect",
+    "@types/node": "catalog:tooling",
     "drizzle-kit": "^0.31.9",
-    "typescript": "^5.9.3"
+    "typescript": "catalog:tooling"
   }
 }
