@@ -159,13 +159,41 @@ export const McpToolsLive = Layer.effectDiscard(
                   ),
                 McpTenantError: (error) =>
                   Effect.logError(`Tool error: ${error.message}`).pipe(
-                    Effect.annotateLogs({
-                      errorTag: error._tag,
-                    }),
+                    Effect.annotateLogs({ errorTag: error._tag }),
                     Effect.as(
                       toCallToolResult({
                         isError: true,
                         content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
+                      }),
+                    ),
+                  ),
+                McpAuthMissingError: (error) =>
+                  Effect.logError(`Auth error: ${error.message}`).pipe(
+                    Effect.annotateLogs({ errorTag: error._tag }),
+                    Effect.as(
+                      toCallToolResult({
+                        isError: true,
+                        content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
+                      }),
+                    ),
+                  ),
+                McpAuthInvalidError: (error) =>
+                  Effect.logError(`Auth error: ${error.message}`).pipe(
+                    Effect.annotateLogs({ errorTag: error._tag }),
+                    Effect.as(
+                      toCallToolResult({
+                        isError: true,
+                        content: [{ type: "text", text: `${error._tag}: ${error.message}` }],
+                      }),
+                    ),
+                  ),
+                McpInvalidTenantError: (error) =>
+                  Effect.logError(`Tenant validation error [${error.field}]: ${error.message}`).pipe(
+                    Effect.annotateLogs({ errorTag: error._tag, field: error.field }),
+                    Effect.as(
+                      toCallToolResult({
+                        isError: true,
+                        content: [{ type: "text", text: `${error._tag} (${error.field}): ${error.message}` }],
                       }),
                     ),
                   ),

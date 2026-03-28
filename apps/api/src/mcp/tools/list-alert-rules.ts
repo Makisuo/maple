@@ -1,33 +1,14 @@
 import {
   McpQueryError,
-  McpTenantError,
   optionalBooleanParam,
   optionalStringParam,
   type McpToolRegistrar,
 } from "./types"
 import { formatTable } from "../lib/format"
-import { HttpServerRequest } from "effect/unstable/http"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
-import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
+import { resolveTenant } from "@/mcp/lib/query-tinybird"
 import { AlertsService } from "@/services/AlertsService"
-
-const resolveTenant = Effect.gen(function* () {
-  const req = yield* HttpServerRequest.HttpServerRequest
-  const nativeReq = yield* HttpServerRequest.toWeb(req)
-  return yield* resolveMcpTenantContext(nativeReq)
-}).pipe(
-  Effect.mapError((error: unknown) =>
-    new McpTenantError({
-      message:
-        error instanceof Error
-          ? error.message
-          : typeof error === "object" && error !== null && "message" in error
-            ? String(error.message)
-            : String(error),
-    }),
-  ),
-)
 
 const comparatorLabel: Record<string, string> = {
   gt: ">",

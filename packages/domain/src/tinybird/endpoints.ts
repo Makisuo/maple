@@ -30,7 +30,7 @@ const ERROR_FINGERPRINT_SQL = `if(StatusMessage = '', 'Unknown Error',
 export const listTraces = defineEndpoint("list_traces", {
   description: "List traces with pagination. Queries pre-materialized root span data for fast loading.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     limit: p.int32().optional(100).describe("Number of results"),
     offset: p.int32().optional(0).describe("Offset for pagination"),
     service: p.string().optional().describe("Filter by service name"),
@@ -72,7 +72,7 @@ export const listTraces = defineEndpoint("list_traces", {
           HttpStatusCode AS rootHttpStatusCode,
           HasError AS hasError
         FROM trace_list_mv
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -119,7 +119,7 @@ export const listTraces = defineEndpoint("list_traces", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_attr
             WHERE t_attr.TraceId = TraceId
-              AND t_attr.OrgId = {{String(org_id, "")}}
+              AND t_attr.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_attr.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -137,7 +137,7 @@ export const listTraces = defineEndpoint("list_traces", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_res
             WHERE t_res.TraceId = TraceId
-              AND t_res.OrgId = {{String(org_id, "")}}
+              AND t_res.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_res.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -183,7 +183,7 @@ export type ListTracesOutput = InferOutputRow<typeof listTraces>;
 export const spanHierarchy = defineEndpoint("span_hierarchy", {
   description: "Get all spans for a trace to build span hierarchy.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     trace_id: p.string().describe("Trace ID (required)"),
     span_id: p.string().optional().describe("Optional span ID to highlight"),
   },
@@ -220,7 +220,7 @@ export const spanHierarchy = defineEndpoint("span_hierarchy", {
           {% end %}
         FROM traces
         WHERE TraceId = {{String(trace_id)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
         ORDER BY Timestamp ASC
       `,
     }),
@@ -251,7 +251,7 @@ export type SpanHierarchyOutput = InferOutputRow<typeof spanHierarchy>;
 export const listLogs = defineEndpoint("list_logs", {
   description: "Paginate through logs with optional filtering.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     limit: p.int32().optional(50).describe("Number of results"),
     service: p.string().optional().describe("Filter by service name"),
     severity: p.string().optional().describe("Filter by severity"),
@@ -279,7 +279,7 @@ export const listLogs = defineEndpoint("list_logs", {
           toJSONString(ResourceAttributes) AS resourceAttributes
         FROM logs
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -334,7 +334,7 @@ export type ListLogsOutput = InferOutputRow<typeof listLogs>;
 export const logsCount = defineEndpoint("logs_count", {
   description: "Returns total count of logs with optional filtering.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     service: p.string().optional().describe("Filter by service name"),
     severity: p.string().optional().describe("Filter by severity"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -349,7 +349,7 @@ export const logsCount = defineEndpoint("logs_count", {
         SELECT count() as total
         FROM logs
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -385,7 +385,7 @@ export type LogsCountOutput = InferOutputRow<typeof logsCount>;
 export const logsFacets = defineEndpoint("logs_facets", {
   description: "Returns facet counts for SeverityText and ServiceName.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     service: p.string().optional().describe("Filter by service name"),
     severity: p.string().optional().describe("Filter by severity"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -402,7 +402,7 @@ export const logsFacets = defineEndpoint("logs_facets", {
           'severity' AS facetType
         FROM logs
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -426,7 +426,7 @@ export const logsFacets = defineEndpoint("logs_facets", {
           'service' AS facetType
         FROM logs
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(severity) %}
           AND SeverityText = {{String(severity, "")}}
         {% end %}
@@ -466,7 +466,7 @@ export type LogsFacetsOutput = InferOutputRow<typeof logsFacets>;
 export const errorRateByService = defineEndpoint("error_rate_by_service", {
   description: "Calculates the error rate grouped by service name.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
   },
@@ -481,7 +481,7 @@ export const errorRateByService = defineEndpoint("error_rate_by_service", {
           round(errorLogs / totalLogs * 100, 2) AS errorRatePercent
         FROM logs
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -510,7 +510,7 @@ export type ErrorRateByServiceOutput = InferOutputRow<typeof errorRateByService>
 export const getServiceUsage = defineEndpoint("get_service_usage", {
   description: "Query aggregated service usage statistics.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     service: p.string().optional().describe("Filter by service name"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
@@ -536,7 +536,7 @@ export const getServiceUsage = defineEndpoint("get_service_usage", {
           sum(LogSizeBytes) + sum(TraceSizeBytes) + sum(SumMetricSizeBytes) + sum(GaugeMetricSizeBytes) + sum(HistogramMetricSizeBytes) + sum(ExpHistogramMetricSizeBytes) AS totalSizeBytes
         FROM service_usage
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -578,7 +578,7 @@ export type GetServiceUsageOutput = InferOutputRow<typeof getServiceUsage>;
 export const listMetrics = defineEndpoint("list_metrics", {
   description: "List available metrics with counts across all metric types.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     limit: p.int32().optional(100).describe("Number of results"),
     offset: p.int32().optional(0).describe("Offset for pagination"),
     service: p.string().optional().describe("Filter by service name"),
@@ -604,7 +604,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
           max(TimeUnix) AS lastSeen
         FROM metrics_sum
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -637,7 +637,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
           max(TimeUnix) AS lastSeen
         FROM metrics_gauge
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -670,7 +670,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
           max(TimeUnix) AS lastSeen
         FROM metrics_histogram
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -703,7 +703,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
           max(TimeUnix) AS lastSeen
         FROM metrics_exponential_histogram
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -736,7 +736,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
           lastSeen
         FROM all_metrics
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(metric_type) %}
           AND metricType = {{String(metric_type, "")}}
         {% end %}
@@ -767,7 +767,7 @@ export type ListMetricsOutput = InferOutputRow<typeof listMetrics>;
 export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
   description: "Get time-bucketed sum metric values for charting.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
     service: p.string().optional().describe("Filter by service name"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -790,7 +790,7 @@ export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
           count() AS dataPointCount
         FROM metrics_sum
         WHERE MetricName = {{String(metric_name)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -828,7 +828,7 @@ export type MetricTimeSeriesSumOutput = InferOutputRow<typeof metricTimeSeriesSu
 export const metricTimeSeriesGauge = defineEndpoint("metric_time_series_gauge", {
   description: "Get time-bucketed gauge metric values for charting.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
     service: p.string().optional().describe("Filter by service name"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -849,7 +849,7 @@ export const metricTimeSeriesGauge = defineEndpoint("metric_time_series_gauge", 
           count() AS dataPointCount
         FROM metrics_gauge
         WHERE MetricName = {{String(metric_name)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -884,7 +884,7 @@ export type MetricTimeSeriesGaugeOutput = InferOutputRow<typeof metricTimeSeries
 export const metricTimeSeriesHistogram = defineEndpoint("metric_time_series_histogram", {
   description: "Get time-bucketed histogram metric values for charting.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
     service: p.string().optional().describe("Filter by service name"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -905,7 +905,7 @@ export const metricTimeSeriesHistogram = defineEndpoint("metric_time_series_hist
           sum(Count) AS dataPointCount
         FROM metrics_histogram
         WHERE MetricName = {{String(metric_name)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -940,7 +940,7 @@ export type MetricTimeSeriesHistogramOutput = InferOutputRow<typeof metricTimeSe
 export const metricTimeSeriesExpHistogram = defineEndpoint("metric_time_series_exp_histogram", {
   description: "Get time-bucketed exponential histogram metric values for charting.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
     service: p.string().optional().describe("Filter by service name"),
     start_time: p.dateTime().optional().describe("Start of time range"),
@@ -961,7 +961,7 @@ export const metricTimeSeriesExpHistogram = defineEndpoint("metric_time_series_e
           sum(Count) AS dataPointCount
         FROM metrics_exponential_histogram
         WHERE MetricName = {{String(metric_name)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -996,7 +996,7 @@ export type MetricTimeSeriesExpHistogramOutput = InferOutputRow<typeof metricTim
 export const metricsSummary = defineEndpoint("metrics_summary", {
   description: "Get summary counts by metric type.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     service: p.string().optional().describe("Filter by service name"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
@@ -1011,7 +1011,7 @@ export const metricsSummary = defineEndpoint("metrics_summary", {
           count() AS dataPointCount
         FROM metrics_sum
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -1032,7 +1032,7 @@ export const metricsSummary = defineEndpoint("metrics_summary", {
           count() AS dataPointCount
         FROM metrics_gauge
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -1053,7 +1053,7 @@ export const metricsSummary = defineEndpoint("metrics_summary", {
           count() AS dataPointCount
         FROM metrics_histogram
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -1074,7 +1074,7 @@ export const metricsSummary = defineEndpoint("metrics_summary", {
           count() AS dataPointCount
         FROM metrics_exponential_histogram
         WHERE 1=1
-        AND OrgId = {{String(org_id, "")}}
+        AND OrgId = {{String(org_id)}}
         {% if defined(service) %}
           AND ServiceName = {{String(service, "")}}
         {% end %}
@@ -1116,7 +1116,7 @@ export type MetricsSummaryOutput = InferOutputRow<typeof metricsSummary>;
 export const tracesFacets = defineEndpoint("traces_facets", {
   description: "Returns facet counts for trace filtering from pre-materialized root span data.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     service: p.string().optional().describe("Filter by service name"),
@@ -1146,7 +1146,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           count() AS count,
           'service' AS facetType
         FROM trace_list_mv
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1193,7 +1193,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_attr
             WHERE t_attr.TraceId = TraceId
-              AND t_attr.OrgId = {{String(org_id, "")}}
+              AND t_attr.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_attr.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1211,7 +1211,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_res
             WHERE t_res.TraceId = TraceId
-              AND t_res.OrgId = {{String(org_id, "")}}
+              AND t_res.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_res.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1238,7 +1238,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           count() AS count,
           'spanName' AS facetType
         FROM trace_list_mv
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1285,7 +1285,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_attr
             WHERE t_attr.TraceId = TraceId
-              AND t_attr.OrgId = {{String(org_id, "")}}
+              AND t_attr.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_attr.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1303,7 +1303,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_res
             WHERE t_res.TraceId = TraceId
-              AND t_res.OrgId = {{String(org_id, "")}}
+              AND t_res.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_res.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1331,7 +1331,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           count() AS count,
           'httpMethod' AS facetType
         FROM trace_list_mv
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1378,7 +1378,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_attr
             WHERE t_attr.TraceId = TraceId
-              AND t_attr.OrgId = {{String(org_id, "")}}
+              AND t_attr.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_attr.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1396,7 +1396,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_res
             WHERE t_res.TraceId = TraceId
-              AND t_res.OrgId = {{String(org_id, "")}}
+              AND t_res.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_res.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1424,7 +1424,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           count() AS count,
           'httpStatus' AS facetType
         FROM trace_list_mv
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1471,7 +1471,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_attr
             WHERE t_attr.TraceId = TraceId
-              AND t_attr.OrgId = {{String(org_id, "")}}
+              AND t_attr.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_attr.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1489,7 +1489,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_res
             WHERE t_res.TraceId = TraceId
-              AND t_res.OrgId = {{String(org_id, "")}}
+              AND t_res.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_res.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1517,7 +1517,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           count() AS count,
           'deploymentEnv' AS facetType
         FROM trace_list_mv
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1564,7 +1564,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_attr
             WHERE t_attr.TraceId = TraceId
-              AND t_attr.OrgId = {{String(org_id, "")}}
+              AND t_attr.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_attr.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1582,7 +1582,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_res
             WHERE t_res.TraceId = TraceId
-              AND t_res.OrgId = {{String(org_id, "")}}
+              AND t_res.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_res.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1610,7 +1610,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           count() AS count,
           'errorCount' AS facetType
         FROM trace_list_mv
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1657,7 +1657,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_attr
             WHERE t_attr.TraceId = TraceId
-              AND t_attr.OrgId = {{String(org_id, "")}}
+              AND t_attr.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_attr.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1675,7 +1675,7 @@ export const tracesFacets = defineEndpoint("traces_facets", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_res
             WHERE t_res.TraceId = TraceId
-              AND t_res.OrgId = {{String(org_id, "")}}
+              AND t_res.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_res.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1725,7 +1725,7 @@ export type TracesFacetsOutput = InferOutputRow<typeof tracesFacets>;
 export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
   description: "Returns duration statistics (min, max, p50, p95) for traces from pre-materialized data.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     service: p.string().optional().describe("Filter by service name"),
@@ -1754,7 +1754,7 @@ export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
           quantile(0.5)(Duration) / 1000000.0 AS p50DurationMs,
           quantile(0.95)(Duration) / 1000000.0 AS p95DurationMs
         FROM trace_list_mv
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1801,7 +1801,7 @@ export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_attr
             WHERE t_attr.TraceId = TraceId
-              AND t_attr.OrgId = {{String(org_id, "")}}
+              AND t_attr.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_attr.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1819,7 +1819,7 @@ export const tracesDurationStats = defineEndpoint("traces_duration_stats", {
           AND EXISTS (
             SELECT 1 FROM traces AS t_res
             WHERE t_res.TraceId = TraceId
-              AND t_res.OrgId = {{String(org_id, "")}}
+              AND t_res.OrgId = {{String(org_id)}}
             {% if defined(start_time) %}
               AND t_res.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
             {% end %}
@@ -1853,7 +1853,7 @@ export type TracesDurationStatsOutput = InferOutputRow<typeof tracesDurationStat
 export const serviceOverview = defineEndpoint("service_overview", {
   description: "Get aggregated service metrics including P99 latency, error rate, and throughput.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     environments: p.string().optional().describe("Comma-separated list of environments to filter"),
@@ -1877,7 +1877,7 @@ export const serviceOverview = defineEndpoint("service_overview", {
           countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS unsampledSpanCount,
           anyIf(extract(TraceState, 'th:([0-9a-f]+)'), TraceState LIKE '%th:%') AS dominantThreshold
         FROM service_overview_spans
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -1924,7 +1924,7 @@ export type ServiceOverviewOutput = InferOutputRow<typeof serviceOverview>;
 export const servicesFacets = defineEndpoint("services_facets", {
   description: "Get facet counts for environment and commit SHA filters.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
   },
@@ -1937,7 +1937,7 @@ export const servicesFacets = defineEndpoint("services_facets", {
           count() AS count,
           'environment' AS facetType
         FROM service_overview_spans
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           AND DeploymentEnv != ''
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
@@ -1958,7 +1958,7 @@ export const servicesFacets = defineEndpoint("services_facets", {
           count() AS count,
           'commitSha' AS facetType
         FROM service_overview_spans
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           AND CommitSha != ''
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
@@ -1996,7 +1996,7 @@ export type ServicesFacetsOutput = InferOutputRow<typeof servicesFacets>;
 export const errorsByType = defineEndpoint("errors_by_type", {
   description: "Get errors grouped by StatusMessage/error type.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     services: p.string().optional().describe("Comma-separated list of services to filter"),
@@ -2018,7 +2018,7 @@ export const errorsByType = defineEndpoint("errors_by_type", {
           min(Timestamp) AS firstSeen,
           max(Timestamp) AS lastSeen
         FROM error_spans
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
@@ -2068,7 +2068,7 @@ export type ErrorsByTypeOutput = InferOutputRow<typeof errorsByType>;
 export const errorsTimeseries = defineEndpoint("errors_timeseries", {
   description: "Get time-bucketed error counts for a specific error type.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     error_type: p.string().describe("The error type/fingerprint to filter by"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
@@ -2084,7 +2084,7 @@ export const errorsTimeseries = defineEndpoint("errors_timeseries", {
           toStartOfInterval(Timestamp, INTERVAL {{Int32(bucket_seconds, 3600)}} SECOND) AS bucket,
           count() AS count
         FROM error_spans
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           AND ${ERROR_FINGERPRINT_SQL} = {{String(error_type)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
@@ -2123,7 +2123,7 @@ export type ErrorsTimeseriesOutput = InferOutputRow<typeof errorsTimeseries>;
 export const errorDetailTraces = defineEndpoint("error_detail_traces", {
   description: "Get sample traces for a specific error type with trace metadata.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     error_type: p.string().describe("The error type/StatusMessage to filter by"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
@@ -2138,7 +2138,7 @@ export const errorDetailTraces = defineEndpoint("error_detail_traces", {
       sql: `
         SELECT DISTINCT TraceId
         FROM error_spans
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         AND ${ERROR_FINGERPRINT_SQL} = {{String(error_type)}}
         {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
         {% if defined(start_time) %}
@@ -2186,7 +2186,7 @@ export const errorDetailTraces = defineEndpoint("error_detail_traces", {
           ) AS rootSpanName,
           anyIf(t.StatusMessage, t.StatusCode = 'Error' AND t.StatusMessage != '') AS errorMessage
         FROM traces AS t
-        INNER JOIN error_trace_ids AS e ON t.TraceId = e.TraceId AND t.OrgId = {{String(org_id, "")}}
+        INNER JOIN error_trace_ids AS e ON t.TraceId = e.TraceId AND t.OrgId = {{String(org_id)}}
         WHERE 1=1
         {% if defined(start_time) %}
           AND t.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
@@ -2219,7 +2219,7 @@ export type ErrorDetailTracesOutput = InferOutputRow<typeof errorDetailTraces>;
 export const errorsFacets = defineEndpoint("errors_facets", {
   description: "Returns facet counts for error filtering (services, environments, error types).",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     services: p.string().optional().describe("Comma-separated list of services to filter"),
@@ -2237,7 +2237,7 @@ export const errorsFacets = defineEndpoint("errors_facets", {
           DeploymentEnv AS deploymentEnv,
           ${ERROR_FINGERPRINT_SQL} AS errorType
         FROM error_spans
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
@@ -2342,7 +2342,7 @@ export type ErrorsFacetsOutput = InferOutputRow<typeof errorsFacets>;
 export const errorsSummary = defineEndpoint("errors_summary", {
   description: "Get summary error statistics including total count, rate, and affected services.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     services: p.string().optional().describe("Comma-separated list of services to filter"),
@@ -2360,7 +2360,7 @@ export const errorsSummary = defineEndpoint("errors_summary", {
           uniq(ServiceName) AS affectedServicesCount,
           uniq(TraceId) AS affectedTracesCount
         FROM error_spans
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
@@ -2392,7 +2392,7 @@ export const errorsSummary = defineEndpoint("errors_summary", {
       sql: `
         SELECT sum(TraceCount) AS totalSpans
         FROM service_usage
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
           AND Hour >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
         {% end %}
@@ -2439,7 +2439,7 @@ export type ErrorsSummaryOutput = InferOutputRow<typeof errorsSummary>;
 export const serviceApdexTimeSeries = defineEndpoint("service_apdex_time_series", {
   description: "Get time-bucketed Apdex score for a single service.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     service_name: p.string().describe("Service name (required)"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
@@ -2464,7 +2464,7 @@ export const serviceApdexTimeSeries = defineEndpoint("service_apdex_time_series"
           ) AS apdexScore
         FROM traces
         WHERE ParentSpanId = ''
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND ServiceName = {{String(service_name)}}
         {% if defined(start_time) %}
           AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
@@ -2492,7 +2492,7 @@ export type ServiceApdexTimeSeriesOutput = InferOutputRow<typeof serviceApdexTim
 export const alertTracesAggregate = defineEndpoint("alert_traces_aggregate", {
   description: "Aggregate trace metrics for alert evaluation across a full window.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     service_name: p.string().optional().describe("Filter by service name"),
@@ -2555,7 +2555,7 @@ export const alertTracesAggregate = defineEndpoint("alert_traces_aggregate", {
           ) AS apdexScore
         FROM traces
         WHERE Timestamp >= {{DateTime(start_time)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND Timestamp <= {{DateTime(end_time)}}
           {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
           {% if defined(span_name) %}AND SpanName = {{String(span_name)}}{% end %}
@@ -2659,7 +2659,7 @@ export type AlertTracesAggregateOutput = InferOutputRow<typeof alertTracesAggreg
 export const alertMetricsAggregate = defineEndpoint("alert_metrics_aggregate", {
   description: "Aggregate metric values for alert evaluation across a full window.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
     metric_type: p.string().describe("Metric type"),
     service: p.string().optional().describe("Filter by service name"),
@@ -2679,7 +2679,7 @@ export const alertMetricsAggregate = defineEndpoint("alert_metrics_aggregate", {
             count() AS dataPointCount
           FROM metrics_sum
           WHERE MetricName = {{String(metric_name)}}
-            AND OrgId = {{String(org_id, "")}}
+            AND OrgId = {{String(org_id)}}
           {% if defined(service) %}
             AND ServiceName = {{String(service, "")}}
           {% end %}
@@ -2694,7 +2694,7 @@ export const alertMetricsAggregate = defineEndpoint("alert_metrics_aggregate", {
             count() AS dataPointCount
           FROM metrics_gauge
           WHERE MetricName = {{String(metric_name)}}
-            AND OrgId = {{String(org_id, "")}}
+            AND OrgId = {{String(org_id)}}
           {% if defined(service) %}
             AND ServiceName = {{String(service, "")}}
           {% end %}
@@ -2709,7 +2709,7 @@ export const alertMetricsAggregate = defineEndpoint("alert_metrics_aggregate", {
             sum(Count) AS dataPointCount
           FROM metrics_histogram
           WHERE MetricName = {{String(metric_name)}}
-            AND OrgId = {{String(org_id, "")}}
+            AND OrgId = {{String(org_id)}}
           {% if defined(service) %}
             AND ServiceName = {{String(service, "")}}
           {% end %}
@@ -2724,7 +2724,7 @@ export const alertMetricsAggregate = defineEndpoint("alert_metrics_aggregate", {
             sum(Count) AS dataPointCount
           FROM metrics_exponential_histogram
           WHERE MetricName = {{String(metric_name)}}
-            AND OrgId = {{String(org_id, "")}}
+            AND OrgId = {{String(org_id)}}
           {% if defined(service) %}
             AND ServiceName = {{String(service, "")}}
           {% end %}
@@ -2749,7 +2749,7 @@ export type AlertMetricsAggregateOutput = InferOutputRow<typeof alertMetricsAggr
 export const alertLogsAggregate = defineEndpoint("alert_logs_aggregate", {
   description: "Aggregate log counts for alert evaluation across a full window.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     service_name: p.string().optional().describe("Filter by service name"),
@@ -2763,7 +2763,7 @@ export const alertLogsAggregate = defineEndpoint("alert_logs_aggregate", {
           count() AS count
         FROM logs
         WHERE Timestamp >= {{DateTime(start_time)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND Timestamp <= {{DateTime(end_time)}}
           {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
           {% if defined(severity) %}AND SeverityText = {{String(severity)}}{% end %}
@@ -2781,7 +2781,7 @@ export type AlertLogsAggregateOutput = InferOutputRow<typeof alertLogsAggregate>
 export const alertTracesAggregateByService = defineEndpoint("alert_traces_aggregate_by_service", {
   description: "Aggregate trace metrics for alert evaluation, grouped by service.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     span_name: p.string().optional().describe("Filter by span name"),
@@ -2844,7 +2844,7 @@ export const alertTracesAggregateByService = defineEndpoint("alert_traces_aggreg
           ) AS apdexScore
         FROM traces
         WHERE Timestamp >= {{DateTime(start_time)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND Timestamp <= {{DateTime(end_time)}}
           {% if defined(span_name) %}AND SpanName = {{String(span_name)}}{% end %}
           {% if defined(root_only) %}AND ParentSpanId = ''{% end %}
@@ -2949,7 +2949,7 @@ export type AlertTracesAggregateByServiceOutput = InferOutputRow<typeof alertTra
 export const alertMetricsAggregateByService = defineEndpoint("alert_metrics_aggregate_by_service", {
   description: "Aggregate metric values for alert evaluation, grouped by service.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
     metric_type: p.string().describe("Metric type"),
     start_time: p.dateTime().describe("Start of time range"),
@@ -2969,7 +2969,7 @@ export const alertMetricsAggregateByService = defineEndpoint("alert_metrics_aggr
             count() AS dataPointCount
           FROM metrics_sum
           WHERE MetricName = {{String(metric_name)}}
-            AND OrgId = {{String(org_id, "")}}
+            AND OrgId = {{String(org_id)}}
           AND TimeUnix >= {{DateTime(start_time)}}
           AND TimeUnix <= {{DateTime(end_time)}}
           GROUP BY ServiceName
@@ -2983,7 +2983,7 @@ export const alertMetricsAggregateByService = defineEndpoint("alert_metrics_aggr
             count() AS dataPointCount
           FROM metrics_gauge
           WHERE MetricName = {{String(metric_name)}}
-            AND OrgId = {{String(org_id, "")}}
+            AND OrgId = {{String(org_id)}}
           AND TimeUnix >= {{DateTime(start_time)}}
           AND TimeUnix <= {{DateTime(end_time)}}
           GROUP BY ServiceName
@@ -2997,7 +2997,7 @@ export const alertMetricsAggregateByService = defineEndpoint("alert_metrics_aggr
             sum(Count) AS dataPointCount
           FROM metrics_histogram
           WHERE MetricName = {{String(metric_name)}}
-            AND OrgId = {{String(org_id, "")}}
+            AND OrgId = {{String(org_id)}}
           AND TimeUnix >= {{DateTime(start_time)}}
           AND TimeUnix <= {{DateTime(end_time)}}
           GROUP BY ServiceName
@@ -3011,7 +3011,7 @@ export const alertMetricsAggregateByService = defineEndpoint("alert_metrics_aggr
             sum(Count) AS dataPointCount
           FROM metrics_exponential_histogram
           WHERE MetricName = {{String(metric_name)}}
-            AND OrgId = {{String(org_id, "")}}
+            AND OrgId = {{String(org_id)}}
           AND TimeUnix >= {{DateTime(start_time)}}
           AND TimeUnix <= {{DateTime(end_time)}}
           GROUP BY ServiceName
@@ -3035,7 +3035,7 @@ export type AlertMetricsAggregateByServiceOutput = InferOutputRow<typeof alertMe
 export const alertLogsAggregateByService = defineEndpoint("alert_logs_aggregate_by_service", {
   description: "Aggregate log counts for alert evaluation, grouped by service.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     severity: p.string().optional().describe("Filter by severity"),
@@ -3049,7 +3049,7 @@ export const alertLogsAggregateByService = defineEndpoint("alert_logs_aggregate_
           count() AS count
         FROM logs
         WHERE Timestamp >= {{DateTime(start_time)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND Timestamp <= {{DateTime(end_time)}}
           {% if defined(severity) %}AND SeverityText = {{String(severity)}}{% end %}
         GROUP BY ServiceName
@@ -3071,7 +3071,7 @@ export type AlertLogsAggregateByServiceOutput = InferOutputRow<typeof alertLogsA
 export const customTracesTimeseries = defineEndpoint("custom_traces_timeseries", {
   description: "Flexible time-bucketed trace metrics for custom charts.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
@@ -3155,7 +3155,7 @@ export const customTracesTimeseries = defineEndpoint("custom_traces_timeseries",
           countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS unsampledSpanCount,
           anyIf(extract(TraceState, 'th:([0-9a-f]+)'), TraceState LIKE '%th:%') AS dominantThreshold
         FROM traces
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
           {% if defined(span_name) %}AND SpanName = {{String(span_name)}}{% end %}
           AND Timestamp >= {{DateTime(start_time)}}
@@ -3270,7 +3270,7 @@ export type CustomTracesTimeseriesOutput = InferOutputRow<typeof customTracesTim
 export const customTracesBreakdown = defineEndpoint("custom_traces_breakdown", {
   description: "Flexible aggregated trace metrics grouped by a chosen dimension.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     service_name: p.string().optional().describe("Filter by service name"),
@@ -3351,7 +3351,7 @@ export const customTracesBreakdown = defineEndpoint("custom_traces_breakdown", {
             ) / count(), 4), 0
           ) AS apdexScore
         FROM traces
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
           {% if defined(span_name) %}AND SpanName = {{String(span_name)}}{% end %}
           AND Timestamp >= {{DateTime(start_time)}}
@@ -3463,7 +3463,7 @@ export type CustomTracesBreakdownOutput = InferOutputRow<typeof customTracesBrea
 export const customLogsTimeseries = defineEndpoint("custom_logs_timeseries", {
   description: "Flexible time-bucketed log counts for custom charts.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
@@ -3484,7 +3484,7 @@ export const customLogsTimeseries = defineEndpoint("custom_logs_timeseries", {
           ]), ' · '), ''), 'all') AS groupName,
           count() AS count
         FROM logs
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
           AND Timestamp >= {{DateTime(start_time)}}
           AND Timestamp <= {{DateTime(end_time)}}
@@ -3510,7 +3510,7 @@ export type CustomLogsTimeseriesOutput = InferOutputRow<typeof customLogsTimeser
 export const customLogsBreakdown = defineEndpoint("custom_logs_breakdown", {
   description: "Flexible aggregated log counts grouped by a chosen dimension.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     service_name: p.string().optional().describe("Filter by service name"),
@@ -3533,7 +3533,7 @@ export const customLogsBreakdown = defineEndpoint("custom_logs_breakdown", {
           {% end %} AS name,
           count() AS count
         FROM logs
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           {% if defined(service_name) %}AND ServiceName = {{String(service_name)}}{% end %}
           AND Timestamp >= {{DateTime(start_time)}}
           AND Timestamp <= {{DateTime(end_time)}}
@@ -3559,7 +3559,7 @@ export type CustomLogsBreakdownOutput = InferOutputRow<typeof customLogsBreakdow
 export const customMetricsBreakdown = defineEndpoint("custom_metrics_breakdown", {
   description: "Aggregated metric values grouped by ServiceName across all metric types.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     metric_name: p.string().describe("Metric name (required)"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
@@ -3577,7 +3577,7 @@ export const customMetricsBreakdown = defineEndpoint("custom_metrics_breakdown",
           count() AS count
         FROM metrics_sum
         WHERE MetricName = {{String(metric_name)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND TimeUnix >= {{DateTime(start_time)}}
           AND TimeUnix <= {{DateTime(end_time)}}
         GROUP BY ServiceName
@@ -3593,7 +3593,7 @@ export const customMetricsBreakdown = defineEndpoint("custom_metrics_breakdown",
           count() AS count
         FROM metrics_gauge
         WHERE MetricName = {{String(metric_name)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND TimeUnix >= {{DateTime(start_time)}}
           AND TimeUnix <= {{DateTime(end_time)}}
         GROUP BY ServiceName
@@ -3609,7 +3609,7 @@ export const customMetricsBreakdown = defineEndpoint("custom_metrics_breakdown",
           sum(Count) AS count
         FROM metrics_histogram
         WHERE MetricName = {{String(metric_name)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND TimeUnix >= {{DateTime(start_time)}}
           AND TimeUnix <= {{DateTime(end_time)}}
         GROUP BY ServiceName
@@ -3625,7 +3625,7 @@ export const customMetricsBreakdown = defineEndpoint("custom_metrics_breakdown",
           sum(Count) AS count
         FROM metrics_exponential_histogram
         WHERE MetricName = {{String(metric_name)}}
-          AND OrgId = {{String(org_id, "")}}
+          AND OrgId = {{String(org_id)}}
           AND TimeUnix >= {{DateTime(start_time)}}
           AND TimeUnix <= {{DateTime(end_time)}}
         GROUP BY ServiceName
@@ -3682,7 +3682,7 @@ export type CustomMetricsBreakdownOutput = InferOutputRow<typeof customMetricsBr
 export const serviceDependencies = defineEndpoint("service_dependencies", {
   description: "Get service-to-service dependency edges derived from span parent-child relationships.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     deployment_env: p.string().optional().describe("Filter by deployment environment"),
@@ -3692,24 +3692,22 @@ export const serviceDependencies = defineEndpoint("service_dependencies", {
       name: "peer_service_edges",
       sql: `
         SELECT
-          ServiceName AS sourceService,
-          PeerService AS targetService,
-          count() AS callCount,
-          countIf(StatusCode = 'Error') AS errorCount,
-          avg(Duration / 1000000) AS avgDurationMs,
-          quantile(0.95)(Duration / 1000000) AS p95DurationMs,
-          countIf(TraceState LIKE '%th:%') AS sampledSpanCount,
-          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS unsampledSpanCount,
-          anyIf(extract(TraceState, 'th:([0-9a-f]+)'), TraceState LIKE '%th:%') AS dominantThreshold
-        FROM service_map_spans
-        WHERE OrgId = {{String(org_id, "")}}
-          AND SpanKind = 'Client'
-          AND PeerService != ''
+          SourceService AS sourceService,
+          TargetService AS targetService,
+          sum(CallCount) AS callCount,
+          sum(ErrorCount) AS errorCount,
+          sum(DurationSumMs) / sum(CallCount) AS avgDurationMs,
+          max(MaxDurationMs) AS p95DurationMs,
+          sum(SampledSpanCount) AS sampledSpanCount,
+          sum(UnsampledSpanCount) AS unsampledSpanCount,
+          '' AS dominantThreshold
+        FROM service_map_edges_hourly
+        WHERE OrgId = {{String(org_id)}}
         {% if defined(start_time) %}
-          AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+          AND Hour >= toStartOfHour({{DateTime(start_time, "2023-01-01 00:00:00")}})
         {% end %}
         {% if defined(end_time) %}
-          AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+          AND Hour <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
         {% if defined(deployment_env) %}
           AND DeploymentEnv = {{String(deployment_env)}}
@@ -3733,14 +3731,14 @@ export const serviceDependencies = defineEndpoint("service_dependencies", {
         FROM (
           SELECT TraceId, SpanId, ServiceName
           FROM service_map_spans
-          WHERE OrgId = {{String(org_id, "")}}
+          WHERE OrgId = {{String(org_id)}}
             AND SpanKind IN ('Client', 'Producer')
             AND PeerService = ''
-          {% if defined(start_time) %}
-            AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-          {% end %}
           {% if defined(end_time) %}
+            AND Timestamp >= addHours({{DateTime(end_time, "2099-12-31 23:59:59")}}, -1)
             AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+          {% else %}
+            AND Timestamp >= addHours(now(), -1)
           {% end %}
           {% if defined(deployment_env) %}
             AND DeploymentEnv = {{String(deployment_env)}}
@@ -3749,12 +3747,12 @@ export const serviceDependencies = defineEndpoint("service_dependencies", {
         INNER JOIN (
           SELECT TraceId, ParentSpanId, ServiceName, Duration, StatusCode, TraceState
           FROM service_map_children
-          WHERE OrgId = {{String(org_id, "")}}
-          {% if defined(start_time) %}
-            AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
-          {% end %}
+          WHERE OrgId = {{String(org_id)}}
           {% if defined(end_time) %}
+            AND Timestamp >= addHours({{DateTime(end_time, "2099-12-31 23:59:59")}}, -1)
             AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+          {% else %}
+            AND Timestamp >= addHours(now(), -1)
           {% end %}
           {% if defined(deployment_env) %}
             AND DeploymentEnv = {{String(deployment_env)}}
@@ -3811,7 +3809,7 @@ export type ServiceDependenciesOutput = InferOutputRow<typeof serviceDependencie
 export const spanAttributeKeys = defineEndpoint("span_attribute_keys", {
   description: "List distinct span attribute keys with usage counts.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     limit: p.int32().optional(200).describe("Maximum number of keys to return"),
@@ -3824,7 +3822,7 @@ export const spanAttributeKeys = defineEndpoint("span_attribute_keys", {
           arrayJoin(mapKeys(SpanAttributes)) AS attributeKey,
           count() AS usageCount
         FROM traces
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           AND Timestamp >= {{DateTime(start_time)}}
           AND Timestamp <= {{DateTime(end_time)}}
           AND SpanAttributes != map()
@@ -3849,7 +3847,7 @@ export type SpanAttributeKeysOutput = InferOutputRow<typeof spanAttributeKeys>;
 export const spanAttributeValues = defineEndpoint("span_attribute_values", {
   description: "List distinct values for a specific span attribute key.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     attribute_key: p.string().describe("The attribute key to get values for"),
@@ -3863,7 +3861,7 @@ export const spanAttributeValues = defineEndpoint("span_attribute_values", {
           SpanAttributes[{{String(attribute_key)}}] AS attributeValue,
           count() AS usageCount
         FROM traces
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           AND Timestamp >= {{DateTime(start_time)}}
           AND Timestamp <= {{DateTime(end_time)}}
           AND SpanAttributes[{{String(attribute_key)}}] != ''
@@ -3888,7 +3886,7 @@ export type SpanAttributeValuesOutput = InferOutputRow<typeof spanAttributeValue
 export const resourceAttributeKeys = defineEndpoint("resource_attribute_keys", {
   description: "List distinct resource attribute keys with usage counts.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     limit: p.int32().optional(200).describe("Maximum number of keys to return"),
@@ -3901,7 +3899,7 @@ export const resourceAttributeKeys = defineEndpoint("resource_attribute_keys", {
           arrayJoin(mapKeys(ResourceAttributes)) AS attributeKey,
           count() AS usageCount
         FROM traces
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           AND Timestamp >= {{DateTime(start_time)}}
           AND Timestamp <= {{DateTime(end_time)}}
           AND ResourceAttributes != map()
@@ -3926,7 +3924,7 @@ export type ResourceAttributeKeysOutput = InferOutputRow<typeof resourceAttribut
 export const resourceAttributeValues = defineEndpoint("resource_attribute_values", {
   description: "List distinct values for a specific resource attribute key.",
   params: {
-    org_id: p.string().optional().describe("Organization ID"),
+    org_id: p.string().describe("Organization ID"),
     start_time: p.dateTime().describe("Start of time range"),
     end_time: p.dateTime().describe("End of time range"),
     attribute_key: p.string().describe("The attribute key to get values for"),
@@ -3940,7 +3938,7 @@ export const resourceAttributeValues = defineEndpoint("resource_attribute_values
           ResourceAttributes[{{String(attribute_key)}}] AS attributeValue,
           count() AS usageCount
         FROM traces
-        WHERE OrgId = {{String(org_id, "")}}
+        WHERE OrgId = {{String(org_id)}}
           AND Timestamp >= {{DateTime(start_time)}}
           AND Timestamp <= {{DateTime(end_time)}}
           AND ResourceAttributes[{{String(attribute_key)}}] != ''

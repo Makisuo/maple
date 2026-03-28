@@ -2,26 +2,17 @@ import { HttpServerRequest } from "effect/unstable/http"
 import type { TinybirdPipe } from "@maple/domain"
 import { Effect } from "effect"
 import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
-import { McpTenantError, McpQueryError } from "@/mcp/tools/types"
+import { McpAuthMissingError, McpQueryError } from "@/mcp/tools/types"
 import { TinybirdService } from "@/services/TinybirdService"
 import type { TenantContext } from "@/services/AuthService"
 
-const resolveTenant = Effect.gen(function* () {
+export const resolveTenant = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest
-  const nativeReq = yield* HttpServerRequest.toWeb(req)
+  const nativeReq = yield* HttpServerRequest.toWeb(req).pipe(
+    Effect.mapError((e) => new McpAuthMissingError({ message: `Failed to read request: ${e.message}` })),
+  )
   return yield* resolveMcpTenantContext(nativeReq)
-}).pipe(
-  Effect.mapError((error: unknown) =>
-    new McpTenantError({
-      message:
-        error instanceof Error
-          ? error.message
-          : typeof error === "object" && error !== null && "message" in error
-            ? String(error.message)
-            : String(error),
-    }),
-  ),
-)
+})
 
 export const queryTinybird = <T = any>(
   pipe: TinybirdPipe,

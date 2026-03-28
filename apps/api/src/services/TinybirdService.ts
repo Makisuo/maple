@@ -321,6 +321,9 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
         params: TParams & { org_id: OrgId },
       ) => PromiseLike<{ data: ReadonlyArray<TRow> }>,
     ) {
+      if (!tenant.orgId || tenant.orgId.trim() === "") {
+        return yield* new TinybirdQueryError({ pipe, message: "org_id must not be empty" })
+      }
       const result = yield* Effect.tryPromise({
         try: async (_signal) =>
           execute({
@@ -340,6 +343,9 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       tenant: TenantContext,
       payload: TinybirdQueryRequest,
     ) {
+      if (!tenant.orgId || tenant.orgId.trim() === "") {
+        return yield* new TinybirdQueryError({ pipe: payload.pipe, message: "org_id must not be empty" })
+      }
       const client = yield* resolveClient(tenant, payload.pipe)
       const pipeAccessor = (
         client as unknown as Record<
@@ -547,6 +553,12 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       tenant: TenantContext,
       sql: string,
     ) {
+      if (!tenant.orgId || tenant.orgId.trim() === "") {
+        return yield* new TinybirdQueryError({ pipe: "custom_traces_timeseries", message: "org_id must not be empty" })
+      }
+      if (!sql.includes("OrgId")) {
+        return yield* new TinybirdQueryError({ pipe: "custom_traces_timeseries", message: "SQL query must contain OrgId filter" })
+      }
       // Use "custom_traces_timeseries" as the pipe identifier for client resolution / error context
       const client = yield* resolveClient(tenant, "custom_traces_timeseries")
       const result = yield* Effect.tryPromise({

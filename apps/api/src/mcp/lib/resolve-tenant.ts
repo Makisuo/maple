@@ -6,11 +6,11 @@ import { ApiKeysService } from "@/services/ApiKeysService"
 import { Env } from "@/services/Env"
 import { OrgId, UserId } from "@maple/domain/http"
 import { API_KEY_PREFIX } from "@maple/db"
-import { McpTenantError } from "../tools/types"
+import { McpAuthMissingError, McpAuthInvalidError, McpInvalidTenantError, McpTenantError } from "../tools/types"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
-const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
+const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
+const decodeUserId = Schema.decodeUnknownEffect(UserId)
 
 const toHeaderRecord = (headers: Headers): Record<string, string> => {
   const record: Record<string, string> = {}
@@ -32,7 +32,11 @@ const getBearerToken = (headers: Headers): string | undefined => {
 
 export const resolveMcpTenantContext = (
   request: Request,
-): Effect.Effect<McpTenantContext, McpTenantError, Env | ApiKeysService | AuthService> =>
+): Effect.Effect<
+  McpTenantContext,
+  McpTenantError | McpAuthMissingError | McpAuthInvalidError | McpInvalidTenantError,
+  Env | ApiKeysService | AuthService
+> =>
   Effect.gen(function* () {
   const token = getBearerToken(request.headers)
 
@@ -46,11 +50,9 @@ export const resolveMcpTenantContext = (
     })
 
     if (!expected) {
-      return yield* Effect.fail(
-        new McpTenantError({
-          message: "INTERNAL_SERVICE_TOKEN is not configured on the server",
-        }),
-      )
+      return yield* new McpAuthMissingError({
+        message: "INTERNAL_SERVICE_TOKEN is not configured on the server",
+      })
     }
 
     if (
@@ -62,44 +64,36 @@ export const resolveMcpTenantContext = (
         onSome: (value) => value,
       })
       if (!orgId) {
-        return yield* Effect.fail(
-          new McpTenantError({
-            message: "X-Org-Id header is required for internal service auth",
-          }),
-        )
+        return yield* new McpAuthMissingError({
+          message: "x-org-id header is required for internal service auth",
+        })
       }
 
-      try {
-        return {
-          orgId: decodeOrgIdSync(orgId),
-          userId: decodeUserIdSync("internal-service"),
-          roles: [],
-          authMode: "self_hosted",
-        }
-      } catch (error) {
-        return yield* Effect.fail(
-          new McpTenantError({
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        )
-      }
+      const validOrgId = yield* decodeOrgId(orgId).pipe(
+        Effect.mapError((e) => new McpInvalidTenantError({
+          message: e.message,
+          field: "orgId",
+        })),
+      )
+      const validUserId = yield* decodeUserId("internal-service").pipe(
+        Effect.mapError((e) => new McpInvalidTenantError({
+          message: e.message,
+          field: "userId",
+        })),
+      )
+      return { orgId: validOrgId, userId: validUserId, roles: [], authMode: "self_hosted" } as McpTenantContext
     }
 
-    return yield* Effect.fail(
-      new McpTenantError({
-        message: `Internal service token mismatch (provided length: ${provided.length}, expected length: ${expected.length})`,
-      }),
-    )
+    return yield* new McpAuthInvalidError({
+      message: "Internal service token mismatch",
+    })
   }
 
   if (token && token.startsWith(API_KEY_PREFIX)) {
     const apiKeys = yield* ApiKeysService
     const resolved = yield* apiKeys.resolveByKey(token).pipe(
       Effect.mapError(
-        (error) =>
-          new McpTenantError({
-            message: error.message,
-          }),
+        (error) => new McpAuthInvalidError({ message: error.message }),
       ),
     )
 
@@ -110,12 +104,19 @@ export const resolveMcpTenantContext = (
         Effect.forkDetach,
       )
 
-      return {
-        orgId: resolved.value.orgId,
-        userId: resolved.value.userId,
-        roles: [],
-        authMode: "self_hosted",
-      }
+      const validOrgId = yield* decodeOrgId(resolved.value.orgId).pipe(
+        Effect.mapError((e) => new McpInvalidTenantError({
+          message: e.message,
+          field: "orgId",
+        })),
+      )
+      const validUserId = yield* decodeUserId(resolved.value.userId).pipe(
+        Effect.mapError((e) => new McpInvalidTenantError({
+          message: e.message,
+          field: "userId",
+        })),
+      )
+      return { orgId: validOrgId, userId: validUserId, roles: [], authMode: "self_hosted" } as McpTenantContext
     }
   }
 
@@ -123,10 +124,7 @@ export const resolveMcpTenantContext = (
   const auth = yield* AuthService
   const tenant = yield* auth.resolveMcpTenant(toHeaderRecord(request.headers)).pipe(
     Effect.mapError(
-      (error) =>
-        new McpTenantError({
-          message: error.message,
-        }),
+      (error) => new McpAuthInvalidError({ message: error.message }),
     ),
   )
 

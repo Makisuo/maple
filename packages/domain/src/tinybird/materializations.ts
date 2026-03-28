@@ -3,6 +3,7 @@ import {
   serviceUsage,
   serviceMapSpans,
   serviceMapChildren,
+  serviceMapEdgesHourly,
   serviceOverviewSpans,
   errorSpans,
   traceListMv,
@@ -332,6 +333,43 @@ export const serviceMapChildrenMv = defineMaterializedView(
         FROM traces
         WHERE SpanKind IN ('Server', 'Consumer')
           AND ParentSpanId != ''
+      `,
+      }),
+    ],
+  }
+);
+
+/**
+ * Materialized view pre-aggregating service-to-service edges per hour.
+ * Aggregates Client spans with peer.service into hourly buckets at write time
+ * so the service map query scans pre-aggregated rows instead of individual spans.
+ */
+export const serviceMapEdgesHourlyMv = defineMaterializedView(
+  "service_map_edges_hourly_mv",
+  {
+    description:
+      "Pre-aggregates Client spans with peer.service into hourly service-to-service edge buckets for fast service map queries.",
+    datasource: serviceMapEdgesHourly,
+    nodes: [
+      node({
+        name: "service_map_edges_hourly_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          ServiceName AS SourceService,
+          SpanAttributes['peer.service'] AS TargetService,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          count() AS CallCount,
+          countIf(StatusCode = 'Error') AS ErrorCount,
+          sum(Duration / 1000000) AS DurationSumMs,
+          max(Duration / 1000000) AS MaxDurationMs,
+          countIf(TraceState LIKE '%th:%') AS SampledSpanCount,
+          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount
+        FROM traces
+        WHERE SpanKind = 'Client'
+          AND SpanAttributes['peer.service'] != ''
+        GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
       `,
       }),
     ],

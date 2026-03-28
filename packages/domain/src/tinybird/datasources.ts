@@ -224,6 +224,49 @@ export const serviceMapChildren = defineDatasource("service_map_children", {
 export type ServiceMapChildrenRow = InferRow<typeof serviceMapChildren>;
 
 /**
+ * Pre-aggregated hourly service-to-service edges for the service map.
+ * Aggregates Client spans with peer.service at write time so the service map
+ * query reads ~hundreds of hourly rows instead of millions of individual spans.
+ * Uses AggregatingMergeTree with SimpleAggregateFunction columns for correct
+ * incremental merging of sum/max aggregates.
+ * Populated by materialized view, not direct ingestion.
+ */
+export const serviceMapEdgesHourly = defineDatasource(
+  "service_map_edges_hourly",
+  {
+    description:
+      "Pre-aggregated hourly service-to-service edges for the service map. Uses AggregatingMergeTree for incremental aggregation. Populated by materialized view.",
+    jsonPaths: false,
+    schema: {
+      OrgId: t.string().lowCardinality(),
+      Hour: t.dateTime(),
+      SourceService: t.string().lowCardinality(),
+      TargetService: t.string(),
+      DeploymentEnv: t.string().lowCardinality(),
+      CallCount: t.simpleAggregateFunction("sum", t.uint64()),
+      ErrorCount: t.simpleAggregateFunction("sum", t.uint64()),
+      DurationSumMs: t.simpleAggregateFunction("sum", t.float64()),
+      MaxDurationMs: t.simpleAggregateFunction("max", t.float64()),
+      SampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+      UnsampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+    },
+    engine: engine.aggregatingMergeTree({
+      partitionKey: "toDate(Hour)",
+      sortingKey: [
+        "OrgId",
+        "DeploymentEnv",
+        "Hour",
+        "SourceService",
+        "TargetService",
+      ],
+      ttl: "toDate(Hour) + INTERVAL 90 DAY",
+    }),
+  }
+);
+
+export type ServiceMapEdgesHourlyRow = InferRow<typeof serviceMapEdgesHourly>;
+
+/**
  * Lightweight projection of root spans for service overview queries.
  * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes.
  * Only stores root spans (ParentSpanId = ''), sorted by (OrgId, ServiceName, Timestamp).
