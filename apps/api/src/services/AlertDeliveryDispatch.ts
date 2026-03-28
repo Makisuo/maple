@@ -172,7 +172,7 @@ const runTimedFetch = <A>(
   }).pipe(
     Effect.timeoutOrElse({
       duration: Duration.millis(timeoutMs),
-      onTimeout: () =>
+      orElse: () =>
         Effect.fail(
           makeDeliveryError(`${label} delivery timed out after ${timeoutMs}ms`, destinationType),
         ),
