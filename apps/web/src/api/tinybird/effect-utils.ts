@@ -18,7 +18,7 @@ function toMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error ? cause.message : fallback
 }
 
-export function decodeInput<S extends Schema.Decoder<unknown>>(
+export function decodeInput<S extends Schema.Top & { readonly DecodingServices: never }>(
   schema: S,
   input: unknown,
   operation: string,

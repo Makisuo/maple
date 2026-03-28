@@ -84,7 +84,7 @@ const withTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.timeoutOrElse({
       duration: QUERY_ENGINE_TIMEOUT,
-      orElse: () =>
+      onTimeout: () =>
         Effect.fail(
           new QueryEngineTimeoutError({
             message: "Query execution timed out after 30 seconds",
