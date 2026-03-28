@@ -17,6 +17,7 @@ import { useWidgetData } from "@/hooks/use-widget-data"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
+import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
 
 interface DashboardCanvasProps {
   widgets: DashboardWidget[]
@@ -47,6 +48,7 @@ const visualizationRegistry: Record<
   chart: ChartWidget,
   stat: StatWidget,
   table: TableWidget,
+  list: ListWidget,
 }
 
 const WidgetRenderer = memo(function WidgetRenderer({

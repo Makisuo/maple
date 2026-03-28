@@ -1,0 +1,516 @@
+import { describe, expect, it } from "bun:test"
+import * as CH from "./index"
+import { compileCH } from "./compile"
+import { tracesTimeseriesQuery, tracesBreakdownQuery, tracesListQuery } from "./queries/traces"
+
+// ---------------------------------------------------------------------------
+// Core DSL tests
+// ---------------------------------------------------------------------------
+
+describe("CH.from / select / where / compile", () => {
+  const TestTable = CH.table("test_table", {
+    Id: CH.string,
+    Name: CH.string,
+    Value: CH.uint64,
+    Attrs: CH.map(CH.string, CH.string),
+  })
+
+  it("compiles a basic select", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({
+        id: $.Id,
+        name: $.Name,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("SELECT")
+    expect(sql).toContain("Id AS id")
+    expect(sql).toContain("Name AS name")
+    expect(sql).toContain("FROM test_table")
+    expect(sql).toContain("FORMAT JSON")
+  })
+
+  it("compiles with WHERE conditions", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({
+        id: $.Id,
+        count: CH.count(),
+      }))
+      .where(($) => [
+        $.Id.eq(CH.param.string("orgId")),
+        $.Name.eq("test"),
+      ])
+      .groupBy("id")
+
+    const { sql } = compileCH(q, { orgId: "org_123" })
+    expect(sql).toContain("Id AS id")
+    expect(sql).toContain("count() AS count")
+    expect(sql).toContain("Id = 'org_123'")
+    expect(sql).toContain("Name = 'test'")
+    expect(sql).toContain("GROUP BY id")
+  })
+
+  it("compiles with orderBy and limit", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({
+        name: $.Name,
+        count: CH.count(),
+      }))
+      .groupBy("name")
+      .orderBy(["count", "desc"])
+      .limit(10)
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("ORDER BY count DESC")
+    expect(sql).toContain("LIMIT 10")
+  })
+
+  it("compiles map access", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({
+        method: $.Attrs.get("http.method"),
+      }))
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("Attrs['http.method'] AS method")
+  })
+
+  it("compiles arithmetic expressions", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({
+        avgMs: CH.avg($.Value).div(1000000),
+      }))
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("avg(Value) / 1000000 AS avgMs")
+  })
+
+  it("compiles aggregate functions", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({
+        cnt: CH.count(),
+        total: CH.sum($.Value),
+        p95: CH.quantile(0.95)($.Value),
+      }))
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("count() AS cnt")
+    expect(sql).toContain("sum(Value) AS total")
+    expect(sql).toContain("quantile(0.95)(Value) AS p95")
+  })
+
+  it("skips undefined WHERE conditions", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ id: $.Id }))
+      .where(($) => [
+        $.Id.eq("test"),
+        CH.when(undefined, () => $.Name.eq("nope")),
+        CH.when("hello", (v) => $.Name.eq(v)),
+      ])
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("Id = 'test'")
+    expect(sql).toContain("Name = 'hello'")
+    expect(sql).not.toContain("nope")
+  })
+
+  it("resolves params with special characters", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ id: $.Id }))
+      .where(($) => [$.Id.eq(CH.param.string("name"))])
+
+    const { sql } = compileCH(q, { name: "it's-a-test" })
+    expect(sql).toContain("Id = 'it\\'s-a-test'")
+  })
+
+  it("compiles toStartOfInterval", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({
+        bucket: CH.toStartOfInterval(CH.rawExpr<string>("Timestamp"), 3600),
+      }))
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("toStartOfInterval(Timestamp, INTERVAL 3600 SECOND) AS bucket")
+  })
+
+  it("compiles if_ expressions", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({
+        errorRate: CH.if_(CH.count().gt(0), CH.countIf($.Name.eq("Error")), CH.lit(0)),
+      }))
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("if(count() > 0, countIf(Name = 'Error'), 0) AS errorRate")
+  })
+
+  it("compiles inList conditions", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ id: $.Id }))
+      .where(($) => [CH.inList($.Name, ["a", "b", "c"])])
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("Name IN ('a', 'b', 'c')")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Traces timeseries query — parity with buildTracesTimeseriesSQL
+// ---------------------------------------------------------------------------
+
+describe("tracesTimeseriesQuery", () => {
+  const baseParams = {
+    orgId: "org_123",
+    startTime: "2024-01-01 00:00:00",
+    endTime: "2024-01-02 00:00:00",
+    bucketSeconds: 3600,
+  }
+
+  it("builds basic count timeseries", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SELECT")
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("OrgId = 'org_123'")
+    expect(sql).toContain("count() AS count")
+    expect(sql).toContain("INTERVAL 3600 SECOND")
+    expect(sql).toContain("GROUP BY bucket, groupName")
+    expect(sql).toContain("ORDER BY bucket ASC, groupName ASC")
+    expect(sql).toContain("FORMAT JSON")
+    expect(sql).toContain("'all'")
+    // count metric should not include quantiles
+    expect(sql).toContain("0 AS p50Duration")
+  })
+
+  it("builds apdex timeseries with threshold", () => {
+    const q = tracesTimeseriesQuery({ metric: "apdex", needsSampling: false, apdexThresholdMs: 250 })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("countIf(Duration / 1000000 < 250) AS satisfiedCount")
+    expect(sql).toContain("toleratingCount")
+    expect(sql).toContain("apdexScore")
+  })
+
+  it("builds p95 duration timeseries", () => {
+    const q = tracesTimeseriesQuery({ metric: "p95_duration", needsSampling: false })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("quantile(0.5)(Duration) / 1000000 AS p50Duration")
+    expect(sql).toContain("quantile(0.95)(Duration) / 1000000 AS p95Duration")
+    expect(sql).toContain("quantile(0.99)(Duration) / 1000000 AS p99Duration")
+  })
+
+  it("builds error_rate timeseries", () => {
+    const q = tracesTimeseriesQuery({ metric: "error_rate", needsSampling: false })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate")
+  })
+
+  it("includes sampling columns when needsSampling is true", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: true })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("sampledSpanCount")
+    expect(sql).toContain("unsampledSpanCount")
+    expect(sql).toContain("dominantThreshold")
+    expect(sql).toContain("TraceState LIKE '%th:%'")
+  })
+
+  it("excludes sampling columns when needsSampling is false", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("0 AS sampledSpanCount")
+    expect(sql).toContain("0 AS unsampledSpanCount")
+  })
+
+  it("groups by service", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, groupBy: ["service"] })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("toString(ServiceName)")
+    expect(sql).toContain("AS groupName")
+  })
+
+  it("groups by span_name", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, groupBy: ["span_name"] })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("toString(SpanName)")
+  })
+
+  it("groups by multiple dimensions", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, groupBy: ["service", "status_code"] })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("arrayStringConcat")
+    expect(sql).toContain("arrayFilter")
+  })
+
+  it("groups by attribute with keys", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      groupBy: ["attribute"],
+      groupByAttributeKeys: ["http.route"],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SpanAttributes['http.route']")
+  })
+
+  it("uses trace_list_mv when rootOnly with mapped filters", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, rootOnly: true })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("FROM trace_list_mv")
+    expect(sql).not.toContain("ParentSpanId")
+  })
+
+  it("uses traces table when not rootOnly", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("FROM traces")
+  })
+
+  it("falls back to traces table when commitShas present", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      rootOnly: true, commitShas: ["abc123"],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("ParentSpanId = ''")
+    expect(sql).toContain("deployment.commit_sha")
+  })
+
+  it("filters by serviceName", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, serviceName: "api-service" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ServiceName = 'api-service'")
+  })
+
+  it("filters by spanName", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, spanName: "GET /users" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SpanName = 'GET /users'")
+  })
+
+  it("filters errorsOnly", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, errorsOnly: true })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("StatusCode = 'Error'")
+  })
+
+  it("filters errorsOnly on MV uses HasError", () => {
+    const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, rootOnly: true, errorsOnly: true })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("HasError = 1")
+  })
+
+  it("filters by environments", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      environments: ["production", "staging"],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
+  })
+
+  it("filters by environments on MV uses DeploymentEnv", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      rootOnly: true, environments: ["production"],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("DeploymentEnv IN ('production')")
+  })
+
+  it("filters by attribute filters (equals)", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      attributeFilters: [{ key: "http.status_code", value: "200", mode: "equals" }],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SpanAttributes['http.status_code'] = '200'")
+  })
+
+  it("filters by attribute filters (exists)", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      attributeFilters: [{ key: "http.route", mode: "exists" }],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("mapContains(SpanAttributes, 'http.route')")
+  })
+
+  it("filters by attribute filters (contains)", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      attributeFilters: [{ key: "http.route", value: "/api", mode: "contains" }],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("positionCaseInsensitive(SpanAttributes['http.route'], '/api') > 0")
+  })
+
+  it("filters by attribute filters (gt)", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      attributeFilters: [{ key: "http.status_code", value: "400", mode: "gt" }],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("toFloat64OrZero(SpanAttributes['http.status_code']) > 400")
+  })
+
+  it("filters by resource attribute filters", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      resourceAttributeFilters: [{ key: "host.name", value: "server-1", mode: "equals" }],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ResourceAttributes['host.name'] = 'server-1'")
+  })
+
+  it("uses MV column for mapped attribute filters on MV", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      rootOnly: true,
+      attributeFilters: [{ key: "http.method", value: "GET", mode: "equals" }],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("FROM trace_list_mv")
+    expect(sql).toContain("HttpMethod = 'GET'")
+  })
+
+  it("escapes special characters in filter values", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      serviceName: "it's-a-service",
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ServiceName = 'it\\'s-a-service'")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Traces breakdown query — parity with buildTracesBreakdownSQL
+// ---------------------------------------------------------------------------
+
+describe("tracesBreakdownQuery", () => {
+  const baseParams = {
+    orgId: "org_123",
+    startTime: "2024-01-01 00:00:00",
+    endTime: "2024-01-02 00:00:00",
+  }
+
+  it("builds basic breakdown by service", () => {
+    const q = tracesBreakdownQuery({ metric: "count", groupBy: "service" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SELECT")
+    expect(sql).toContain("ServiceName AS name")
+    expect(sql).toContain("count() AS count")
+    expect(sql).toContain("GROUP BY name")
+    expect(sql).toContain("ORDER BY count DESC")
+    expect(sql).toContain("LIMIT 10")
+    expect(sql).toContain("FORMAT JSON")
+  })
+
+  it("groups by span_name", () => {
+    const q = tracesBreakdownQuery({ metric: "count", groupBy: "span_name" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SpanName AS name")
+  })
+
+  it("groups by status_code", () => {
+    const q = tracesBreakdownQuery({ metric: "count", groupBy: "status_code" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("StatusCode AS name")
+  })
+
+  it("groups by http_method", () => {
+    const q = tracesBreakdownQuery({ metric: "count", groupBy: "http_method" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SpanAttributes['http.method'] AS name")
+  })
+
+  it("groups by custom attribute", () => {
+    const q = tracesBreakdownQuery({
+      metric: "count", groupBy: "attribute",
+      groupByAttributeKey: "rpc.service",
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SpanAttributes['rpc.service'] AS name")
+  })
+
+  it("applies custom limit", () => {
+    const q = tracesBreakdownQuery({ metric: "count", groupBy: "service", limit: 25 })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("LIMIT 25")
+  })
+
+  it("uses default limit of 10", () => {
+    const q = tracesBreakdownQuery({ metric: "count", groupBy: "service" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("LIMIT 10")
+  })
+
+  it("includes apdex columns for apdex metric", () => {
+    const q = tracesBreakdownQuery({ metric: "apdex", groupBy: "service", apdexThresholdMs: 300 })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("countIf(Duration / 1000000 < 300) AS satisfiedCount")
+    expect(sql).toContain("apdexScore")
+  })
+
+  it("includes quantile columns for p99 metric", () => {
+    const q = tracesBreakdownQuery({ metric: "p99_duration", groupBy: "service" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("quantile(0.99)(Duration) / 1000000 AS p99Duration")
+  })
+
+  it("applies WHERE filters", () => {
+    const q = tracesBreakdownQuery({
+      metric: "count", groupBy: "service",
+      serviceName: "api", errorsOnly: true,
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ServiceName = 'api'")
+    expect(sql).toContain("StatusCode = 'Error'")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Traces list query
+// ---------------------------------------------------------------------------
+
+describe("tracesListQuery", () => {
+  const baseParams = {
+    orgId: "org_123",
+    startTime: "2024-01-01 00:00:00",
+    endTime: "2024-01-02 00:00:00",
+  }
+
+  it("builds basic list query", () => {
+    const q = tracesListQuery({})
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SELECT")
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("TraceId AS traceId")
+    expect(sql).toContain("Duration / 1000000 AS durationMs")
+    expect(sql).toContain("SpanAttributes AS spanAttributes")
+    expect(sql).toContain("ResourceAttributes AS resourceAttributes")
+    expect(sql).toContain("ORDER BY timestamp DESC")
+    expect(sql).toContain("LIMIT 100")
+    expect(sql).toContain("FORMAT JSON")
+  })
+
+  it("applies custom limit", () => {
+    const q = tracesListQuery({ limit: 50 })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("LIMIT 50")
+  })
+
+  it("filters by service", () => {
+    const q = tracesListQuery({ serviceName: "api" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ServiceName = 'api'")
+  })
+
+  it("always uses traces table (not MV)", () => {
+    const q = tracesListQuery({ rootOnly: true })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("FROM traces")
+    // rootOnly should add ParentSpanId filter since we're not using MV
+    expect(sql).toContain("ParentSpanId = ''")
+  })
+})

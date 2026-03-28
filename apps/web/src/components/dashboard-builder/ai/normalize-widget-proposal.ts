@@ -341,6 +341,13 @@ function normalizeFormulaEntry(
 export function normalizeAiWidgetProposal(
   input: AiWidgetProposal,
 ): NormalizeAiWidgetProposalResult {
+  if (
+    input.visualization === "list" &&
+    (input.dataSource.endpoint === "list_traces" || input.dataSource.endpoint === "list_logs")
+  ) {
+    return { kind: "valid", proposal: input }
+  }
+
   if (input.dataSource.endpoint !== "custom_query_builder_timeseries") {
     return { kind: "valid", proposal: input }
   }

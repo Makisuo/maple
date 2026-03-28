@@ -3,6 +3,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import {
   ChartBarIcon,
   CheckIcon,
+  FileIcon,
   GridIcon,
   PulseIcon,
 } from "@/components/icons"
@@ -28,12 +29,14 @@ const vizIcons: Record<string, typeof PulseIcon> = {
   stat: PulseIcon,
   chart: ChartBarIcon,
   table: GridIcon,
+  list: FileIcon,
 }
 
 const vizLabels: Record<string, string> = {
   stat: "Stat",
   chart: "Chart",
   table: "Table",
+  list: "List",
 }
 
 export function WidgetProposalCard({ input, onAccept, disabledReason }: WidgetProposalCardProps) {

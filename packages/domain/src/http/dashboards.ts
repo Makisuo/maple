@@ -109,6 +109,11 @@ const WidgetDisplayConfigSchema = Schema.Struct({
     }),
   ),
   columns: Schema.optional(Schema.Array(WidgetDisplayColumnSchema)),
+
+  // List-specific
+  listDataSource: Schema.optional(Schema.String),
+  listWhereClause: Schema.optional(Schema.String),
+  listLimit: Schema.optional(Schema.Number),
 })
 
 const WidgetLayoutSchema = Schema.Struct({

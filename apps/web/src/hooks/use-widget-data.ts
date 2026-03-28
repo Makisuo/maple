@@ -276,9 +276,12 @@ export function useWidgetData(widget: DashboardWidget) {
     () =>
       Result.builder(result)
         .onInitial(() => ({ status: "loading" } as const))
-        .onError(() => ({ status: "error" } as const))
+        .onError((error) => {
+          const msg = error instanceof Error ? error.message : error && typeof error === "object" && "message" in error ? String((error as { message: unknown }).message) : String(error)
+          return { status: "error", message: msg } as const
+        })
         .onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) } as const))
-        .orElse(() => ({ status: "error" } as const)),
+        .orElse(() => ({ status: "error", message: "Unknown error" } as const)),
     [result, transform]
   )
 

@@ -66,10 +66,10 @@ function findNextWidgetPosition(widgets: DashboardWidget[], width: number) {
 function normalizeWidgetLayouts(widgets: DashboardWidget[]): DashboardWidget[] {
   return widgets.reduce<DashboardWidget[]>((normalized, widget) => {
     const defaultLayout = {
-      w: widget.visualization === "stat" ? 3 : widget.visualization === "table" ? 6 : 4,
+      w: widget.visualization === "stat" ? 3 : widget.visualization === "table" || widget.visualization === "list" ? 6 : 4,
       h: 4,
       minW: widget.visualization === "stat" ? 2 : 3,
-      minH: widget.visualization === "table" ? 3 : 2,
+      minH: widget.visualization === "table" || widget.visualization === "list" ? 3 : 2,
     }
 
     const layout = isWidgetLayout(widget.layout)

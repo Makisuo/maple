@@ -28,6 +28,7 @@ const VISUALIZATION_OPTIONS: Array<{ value: VisualizationType; label: string }> 
   { value: "chart", label: "Chart" },
   { value: "stat", label: "Stat" },
   { value: "table", label: "Table" },
+  { value: "list", label: "List" },
 ]
 
 interface WidgetSettingsBarProps {
@@ -66,6 +67,7 @@ export function WidgetSettingsBar({
   const isChart = visualization === "chart"
   const isStat = visualization === "stat"
   const isTable = visualization === "table"
+  const isList = visualization === "list"
 
   const chartStyleOptions = isChart
     ? chartRegistry
@@ -196,28 +198,30 @@ export function WidgetSettingsBar({
         </div>
       )}
 
-      <div className="space-y-1 w-48">
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          Comparison
-        </p>
-        <Select
-          value={comparisonMode}
-          onValueChange={(value) =>
-            onChange({
-              comparisonMode:
-                value === "previous_period" ? "previous_period" : "none",
-            })
-          }
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">None</SelectItem>
-            <SelectItem value="previous_period">Previous period</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {!isList && (
+        <div className="space-y-1 w-48">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Comparison
+          </p>
+          <Select
+            value={comparisonMode}
+            onValueChange={(value) =>
+              onChange({
+                comparisonMode:
+                  value === "previous_period" ? "previous_period" : "none",
+              })
+            }
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None</SelectItem>
+              <SelectItem value="previous_period">Previous period</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {isStat && (
         <>
@@ -306,39 +310,41 @@ export function WidgetSettingsBar({
         </div>
       )}
 
-      <div className="flex items-center gap-4 ml-auto">
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="qb-percent-change"
-            checked={includePercentChange}
-            disabled={comparisonMode === "none"}
-            onCheckedChange={(checked) =>
-              onChange({ includePercentChange: checked === true })
-            }
-          />
-          <label
-            htmlFor="qb-percent-change"
-            className="text-[11px] text-muted-foreground"
-          >
-            % change
-          </label>
+      {!isList && (
+        <div className="flex items-center gap-4 ml-auto">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="qb-percent-change"
+              checked={includePercentChange}
+              disabled={comparisonMode === "none"}
+              onCheckedChange={(checked) =>
+                onChange({ includePercentChange: checked === true })
+              }
+            />
+            <label
+              htmlFor="qb-percent-change"
+              className="text-[11px] text-muted-foreground"
+            >
+              % change
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="qb-debug"
+              checked={debug}
+              onCheckedChange={(checked) =>
+                onChange({ debug: checked === true })
+              }
+            />
+            <label
+              htmlFor="qb-debug"
+              className="text-[11px] text-muted-foreground"
+            >
+              Debug
+            </label>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="qb-debug"
-            checked={debug}
-            onCheckedChange={(checked) =>
-              onChange({ debug: checked === true })
-            }
-          />
-          <label
-            htmlFor="qb-debug"
-            className="text-[11px] text-muted-foreground"
-          >
-            Debug
-          </label>
-        </div>
-      </div>
+      )}
     </div>
   )
 }

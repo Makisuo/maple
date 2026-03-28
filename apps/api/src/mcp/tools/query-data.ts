@@ -249,33 +249,6 @@ function formatQueryResult(
 ): McpToolResult {
   const result = response.result
   const metricLabel = metric ?? (source === "metrics" ? "avg" : "count")
-  const structuredResult = result.kind === "timeseries"
-    ? {
-        kind: "timeseries" as const,
-        data: result.data.map((point) => ({
-          bucket: point.bucket,
-          series: { ...point.series },
-        })),
-      }
-    : {
-        kind: "breakdown" as const,
-        data: result.data.map((item) => ({
-          name: item.name,
-          value: item.value,
-        })),
-      }
-
-  const structuredData = {
-    tool: "query_data" as const,
-    data: {
-      timeRange: { start: startTime, end: endTime },
-      source,
-      kind,
-      metric: metricLabel,
-      groupBy,
-      result: structuredResult,
-    },
-  }
 
   const lines: string[] = [
     `=== ${capitalize(source)} ${capitalize(kind)}: ${metricLabel} ===`,
@@ -283,6 +256,24 @@ function formatQueryResult(
   ]
 
   if (result.kind === "timeseries") {
+    const structuredData = {
+      tool: "query_data" as const,
+      data: {
+        timeRange: { start: startTime, end: endTime },
+        source,
+        kind,
+        metric: metricLabel,
+        groupBy,
+        result: {
+          kind: "timeseries" as const,
+          data: result.data.map((point) => ({
+            bucket: point.bucket,
+            series: { ...point.series },
+          })),
+        },
+      },
+    }
+
     if (result.data.length === 0) {
       lines.push("", "No data points found.")
       return { content: createDualContent(lines.join("\n"), structuredData) }
@@ -305,22 +296,46 @@ function formatQueryResult(
     return { content: createDualContent(lines.join("\n"), structuredData) }
   }
 
-  if (result.data.length === 0) {
-    lines.push("", "No data found.")
+  if (result.kind === "breakdown") {
+    const structuredData = {
+      tool: "query_data" as const,
+      data: {
+        timeRange: { start: startTime, end: endTime },
+        source,
+        kind,
+        metric: metricLabel,
+        groupBy,
+        result: {
+          kind: "breakdown" as const,
+          data: result.data.map((item) => ({
+            name: item.name,
+            value: item.value,
+          })),
+        },
+      },
+    }
+
+    if (result.data.length === 0) {
+      lines.push("", "No data found.")
+      return { content: createDualContent(lines.join("\n"), structuredData) }
+    }
+
+    if (groupBy) lines.push(`Grouped by: ${groupBy}`)
+    lines.push("")
+
+    const headers = ["Name", metricLabel]
+    const rows = result.data.map((item) => [
+      item.name,
+      formatMetricValue(metricLabel, item.value),
+    ])
+
+    lines.push(formatTable(headers, rows))
     return { content: createDualContent(lines.join("\n"), structuredData) }
   }
 
-  if (groupBy) lines.push(`Grouped by: ${groupBy}`)
-  lines.push("")
-
-  const headers = ["Name", metricLabel]
-  const rows = result.data.map((item) => [
-    item.name,
-    formatMetricValue(metricLabel, item.value),
-  ])
-
-  lines.push(formatTable(headers, rows))
-  return { content: createDualContent(lines.join("\n"), structuredData) }
+  // list results
+  lines.push(`Results: ${result.data.length}`)
+  return { content: [{ type: "text", text: lines.join("\n") }] }
 }
 
 function toInvalidQuerySpecMessage(error: unknown): string {

@@ -37,6 +37,7 @@ export type DataSourceEndpoint =
   | "custom_breakdown"
   | "custom_query_builder_timeseries"
   | "custom_query_builder_breakdown"
+  | "custom_query_builder_list"
 
 // --- Widget Data Source ---
 
@@ -112,6 +113,11 @@ export interface WidgetDisplayConfig {
     width?: number
     align?: "left" | "center" | "right"
   }>
+
+  // List-specific
+  listDataSource?: "traces" | "logs"
+  listWhereClause?: string
+  listLimit?: number
 }
 
 // --- Widget Layout ---
@@ -129,11 +135,11 @@ export interface WidgetLayout {
 
 // --- Visualization ---
 
-export type VisualizationType = "chart" | "stat" | "table" | (string & {})
+export type VisualizationType = "chart" | "stat" | "table" | "list" | (string & {})
 export type WidgetMode = "view" | "edit"
 export type WidgetDataState =
   | { status: "loading" }
-  | { status: "error" }
+  | { status: "error"; message?: string }
   | { status: "ready"; data: unknown }
 
 // --- Dashboard Widget ---

@@ -13,7 +13,6 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "baseUrl": ".",
     "plugins": [
       {
         "name": "@effect/language-service",

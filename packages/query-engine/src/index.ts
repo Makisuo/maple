@@ -1,4 +1,6 @@
 export * from "./query-engine"
 export * from "./where-clause"
+export * from "./traces-shared"
 export * from "./traces-sql-builder"
 export * from "./sql"
+export * as CH from "./ch"

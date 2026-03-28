@@ -330,7 +330,7 @@ export function useDashboardStore() {
       const layoutDefaults =
         visualization === "stat"
           ? { w: 3, h: 4, minW: 2, minH: 2 }
-          : visualization === "table"
+          : visualization === "table" || visualization === "list"
             ? { w: 6, h: 4, minW: 3, minH: 3 }
             : { w: 4, h: 4, minW: 2, minH: 2 }
 

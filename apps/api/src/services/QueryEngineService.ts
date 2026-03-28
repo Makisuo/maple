@@ -8,10 +8,7 @@ import {
   type QueryEngineSampleCountStrategy,
   type QuerySpec,
   type TimeseriesPoint,
-  buildTracesTimeseriesSQL,
-  buildTracesBreakdownSQL,
-  type TracesTimeseriesRow,
-  type TracesBreakdownRow,
+  CH,
 } from "@maple/query-engine"
 import {
   QueryEngineExecutionError,
@@ -199,6 +196,7 @@ const validateTraceAttributeFilters = Effect.fn("QueryEngineService.validateTrac
   query: QuerySpec,
 ): Effect.fn.Return<void, QueryEngineValidationError> {
   if (query.source !== "traces") return
+  if (query.kind === "list") return
 
   const details: string[] = []
   if (query.groupBy?.includes("attribute") && !query.filters?.groupByAttributeKeys?.length) {
@@ -313,7 +311,7 @@ function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: strin
 
 function collapseMetricTimeseriesRows(
   rows: ReadonlyArray<MetricTimeseriesRow>,
-  metric: QuerySpec["metric"],
+  metric: Extract<QuerySpec, { metric: string }>["metric"],
 ): Array<{ bucket: string; groupName: "all"; value: number }> {
   const bucketMap = new Map<
     string,
@@ -396,6 +394,20 @@ const mapTinybirdError = <A, R>(
     ),
   )
 
+/** Compile a CHQuery, execute it via Tinybird SQL, and return typed rows. */
+const executeCHQuery = <Output extends Record<string, any>, Params extends Record<string, any>>(
+  tinybird: Pick<TinybirdServiceShape, "sqlQuery">,
+  tenant: TenantContext,
+  query: CH.CHQuery<any, Output, Params>,
+  params: Params,
+  context: string,
+): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {
+  const compiled = CH.compile(query, params)
+  return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql), context).pipe(
+    Effect.map((rows) => compiled.castRows(rows)),
+  )
+}
+
 type QueryEngineTinybird = Pick<
   TinybirdServiceShape,
   | "sqlQuery"
@@ -425,7 +437,7 @@ const tracesMetricFieldMap = {
 } as const
 
 const tracesAggregateValueForMetric = (
-  metric: Extract<QuerySpec, { source: "traces" }>["metric"],
+  metric: Extract<QuerySpec, { source: "traces"; metric: string }>["metric"],
   row: {
     readonly count: number
     readonly avgDuration: number
@@ -530,34 +542,29 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
       : undefined
 
     if (request.query.source === "traces" && request.query.kind === "timeseries") {
-      const sql = buildTracesTimeseriesSQL({
-        orgId: tenant.orgId,
-        startTime: request.startTime,
-        endTime: request.endTime,
-        bucketSeconds: bucketSeconds!,
-        metric: request.query.metric,
-        needsSampling: false,
-        serviceName: request.query.filters?.serviceName,
-        spanName: request.query.filters?.spanName,
-        rootOnly: request.query.filters?.rootSpansOnly,
-        errorsOnly: request.query.filters?.errorsOnly,
-        groupBy: request.query.groupBy as string[] | undefined,
-        groupByAttributeKeys: request.query.filters?.groupByAttributeKeys as string[] | undefined,
-        environments: request.query.filters?.environments as string[] | undefined,
-        commitShas: request.query.filters?.commitShas as string[] | undefined,
-        attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
-        resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
-        apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
-      })
-
-      const result = yield* mapTinybirdError(
-        tinybird.sqlQuery(tenant, sql),
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.tracesTimeseriesQuery({
+          metric: request.query.metric,
+          needsSampling: false,
+          serviceName: request.query.filters?.serviceName,
+          spanName: request.query.filters?.spanName,
+          rootOnly: request.query.filters?.rootSpansOnly,
+          errorsOnly: request.query.filters?.errorsOnly,
+          groupBy: request.query.groupBy as string[] | undefined,
+          groupByAttributeKeys: request.query.filters?.groupByAttributeKeys as string[] | undefined,
+          environments: request.query.filters?.environments as string[] | undefined,
+          commitShas: request.query.filters?.commitShas as string[] | undefined,
+          attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
+          resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
+          apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
+        }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime, bucketSeconds: bucketSeconds! },
         "Failed to execute traces timeseries query",
       )
 
       const field = tracesMetricFieldMap[request.query.metric]
-      const rows = result as unknown as ReadonlyArray<TracesTimeseriesRow>
-
       return new QueryEngineExecuteResponse({
         result: {
           kind: "timeseries",
@@ -644,36 +651,32 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "traces" && request.query.kind === "breakdown") {
-      const sql = buildTracesBreakdownSQL({
-        orgId: tenant.orgId,
-        startTime: request.startTime,
-        endTime: request.endTime,
-        metric: request.query.metric,
-        groupBy: request.query.groupBy,
-        groupByAttributeKey:
-          request.query.groupBy === "attribute"
-            ? (request.query.filters?.groupByAttributeKeys as string[] | undefined)?.[0]
-            : undefined,
-        limit: request.query.limit,
-        serviceName: request.query.filters?.serviceName,
-        spanName: request.query.filters?.spanName,
-        rootOnly: request.query.filters?.rootSpansOnly,
-        errorsOnly: request.query.filters?.errorsOnly,
-        environments: request.query.filters?.environments as string[] | undefined,
-        commitShas: request.query.filters?.commitShas as string[] | undefined,
-        attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
-        resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
-        apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
-      })
-
-      const result = yield* mapTinybirdError(
-        tinybird.sqlQuery(tenant, sql),
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.tracesBreakdownQuery({
+          metric: request.query.metric,
+          groupBy: request.query.groupBy,
+          groupByAttributeKey:
+            request.query.groupBy === "attribute"
+              ? (request.query.filters?.groupByAttributeKeys as string[] | undefined)?.[0]
+              : undefined,
+          limit: request.query.limit,
+          serviceName: request.query.filters?.serviceName,
+          spanName: request.query.filters?.spanName,
+          rootOnly: request.query.filters?.rootSpansOnly,
+          errorsOnly: request.query.filters?.errorsOnly,
+          environments: request.query.filters?.environments as string[] | undefined,
+          commitShas: request.query.filters?.commitShas as string[] | undefined,
+          attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
+          resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
+          apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
+        }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         "Failed to execute traces breakdown query",
       )
 
       const field = tracesMetricFieldMap[request.query.metric]
-      const rows = result as unknown as ReadonlyArray<TracesBreakdownRow>
-
       return new QueryEngineExecuteResponse({
         result: {
           kind: "breakdown",
@@ -738,6 +741,46 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           data: result.map((row) => ({
             name: row.name,
             value: Number(row[valueField]),
+          })),
+        },
+      })
+    }
+
+    if (request.query.source === "traces" && request.query.kind === "list") {
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.tracesListQuery({
+          limit: request.query.limit,
+          serviceName: request.query.filters?.serviceName,
+          spanName: request.query.filters?.spanName,
+          rootOnly: request.query.filters?.rootSpansOnly,
+          errorsOnly: request.query.filters?.errorsOnly,
+          environments: request.query.filters?.environments as string[] | undefined,
+          commitShas: request.query.filters?.commitShas as string[] | undefined,
+          attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" }> | undefined,
+          resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" }> | undefined,
+        }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
+        "Failed to execute traces list query",
+      )
+
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "list",
+          source: "traces",
+          data: rows.map((row) => ({
+            traceId: row.traceId,
+            timestamp: String(row.timestamp),
+            spanId: row.spanId,
+            serviceName: row.serviceName,
+            spanName: row.spanName,
+            durationMs: Number(row.durationMs),
+            statusCode: row.statusCode,
+            spanKind: row.spanKind,
+            hasError: Number(row.hasError) === 1,
+            spanAttributes: row.spanAttributes ?? {},
+            resourceAttributes: row.resourceAttributes ?? {},
           })),
         },
       })
@@ -886,7 +929,7 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
             commit_shas: request.query.filters?.commitShas?.join(","),
             ...buildAttributeFilterParams(request.query.filters),
             apdex_threshold_ms:
-              request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
+              (request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).metric === "apdex" ? (request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).apdexThresholdMs : undefined,
           }),
           "Failed to evaluate grouped traces alert query",
         )
@@ -895,7 +938,7 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
           const sampleCount = Number(row.count ?? 0)
           return {
             groupKey: row.serviceName,
-            value: sampleCount > 0 ? tracesAggregateValueForMetric(request.query.metric as Extract<QuerySpec, { source: "traces" }>["metric"], row) : null,
+            value: sampleCount > 0 ? tracesAggregateValueForMetric((request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).metric, row) : null,
             sampleCount,
             hasData: sampleCount > 0,
           }
@@ -934,7 +977,7 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
           const sampleCount = Number(row.dataPointCount ?? 0)
           return {
             groupKey: row.serviceName,
-            value: sampleCount > 0 ? metricsAggregateValueForMetric(request.query.metric as Extract<QuerySpec, { source: "metrics" }>["metric"], row) : null,
+            value: sampleCount > 0 ? metricsAggregateValueForMetric((request.query as Extract<QuerySpec, { source: "metrics" }>).metric, row) : null,
             sampleCount,
             hasData: sampleCount > 0,
           }

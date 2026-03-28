@@ -133,30 +133,35 @@ const listTracesEffect = Effect.fn("Tinybird.listTraces")(function* ({
     const offset = input.offset ?? DEFAULT_OFFSET
 
     const tinybird = getTinybird()
+    const queryParams: Record<string, unknown> = {
+      limit,
+      offset,
+      service: input.service,
+      start_time: input.startTime,
+      end_time: input.endTime,
+      span_name: input.spanName,
+      has_error: input.hasError,
+      min_duration_ms: input.minDurationMs,
+      max_duration_ms: input.maxDurationMs,
+      http_method: input.httpMethod,
+      http_status_code: input.httpStatusCode,
+      deployment_env: input.deploymentEnv,
+      service_match_mode: input.serviceMatchMode,
+      span_name_match_mode: input.spanNameMatchMode,
+      deployment_env_match_mode: input.deploymentEnvMatchMode,
+      attribute_filter_key: input.attributeKey,
+      attribute_filter_value: input.attributeValue,
+      attribute_filter_value_match_mode: input.attributeValueMatchMode,
+      resource_filter_key: input.resourceAttributeKey,
+      resource_filter_value: input.resourceAttributeValue,
+      resource_filter_value_match_mode: input.resourceAttributeValueMatchMode,
+    }
+    // Strip undefined values — Effect Schema rejects them in Record<String, Unknown>
+    const cleanParams = Object.fromEntries(
+      Object.entries(queryParams).filter(([, v]) => v !== undefined),
+    )
     const result = yield* runTinybirdQuery("list_traces", () =>
-      tinybird.query.list_traces({
-        limit,
-        offset,
-        service: input.service,
-        start_time: input.startTime,
-        end_time: input.endTime,
-        span_name: input.spanName,
-        has_error: input.hasError,
-        min_duration_ms: input.minDurationMs,
-        max_duration_ms: input.maxDurationMs,
-        http_method: input.httpMethod,
-        http_status_code: input.httpStatusCode,
-        deployment_env: input.deploymentEnv,
-        service_match_mode: input.serviceMatchMode,
-        span_name_match_mode: input.spanNameMatchMode,
-        deployment_env_match_mode: input.deploymentEnvMatchMode,
-        attribute_filter_key: input.attributeKey,
-        attribute_filter_value: input.attributeValue,
-        attribute_filter_value_match_mode: input.attributeValueMatchMode,
-        resource_filter_key: input.resourceAttributeKey,
-        resource_filter_value: input.resourceAttributeValue,
-        resource_filter_value_match_mode: input.resourceAttributeValueMatchMode,
-      }),
+      tinybird.query.list_traces(cleanParams),
     )
 
     return {
