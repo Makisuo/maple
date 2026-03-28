@@ -24,6 +24,7 @@ import {
 } from "@/api/tinybird/custom-charts"
 import { getQueryBuilderTimeseries } from "@/api/tinybird/query-builder-timeseries"
 import { getQueryBuilderBreakdown } from "@/api/tinybird/query-builder-breakdown"
+import { getQueryBuilderList } from "@/api/tinybird/query-builder-list"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ServerFunction = (opts: { data: any }) => Effect.Effect<any, unknown, unknown>
@@ -55,4 +56,5 @@ export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
   custom_breakdown: getCustomChartBreakdown,
   custom_query_builder_timeseries: getQueryBuilderTimeseries,
   custom_query_builder_breakdown: getQueryBuilderBreakdown,
+  custom_query_builder_list: getQueryBuilderList,
 }

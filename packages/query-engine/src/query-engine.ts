@@ -170,6 +170,34 @@ export const MetricsBreakdownQuery = Schema.Struct({
 })
 export type MetricsBreakdownQuery = Schema.Schema.Type<typeof MetricsBreakdownQuery>
 
+export const TracesListQuery = Schema.Struct({
+  kind: Schema.Literal("list"),
+  source: Schema.Literal("traces"),
+  filters: Schema.optional(TracesFilters),
+  limit: Schema.optional(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isGreaterThan(0),
+      Schema.isLessThanOrEqualTo(1000),
+    ),
+  ),
+})
+export type TracesListQuery = Schema.Schema.Type<typeof TracesListQuery>
+
+export const LogsListQuery = Schema.Struct({
+  kind: Schema.Literal("list"),
+  source: Schema.Literal("logs"),
+  filters: Schema.optional(LogsFilters),
+  limit: Schema.optional(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isGreaterThan(0),
+      Schema.isLessThanOrEqualTo(1000),
+    ),
+  ),
+})
+export type LogsListQuery = Schema.Schema.Type<typeof LogsListQuery>
+
 export const QuerySpec = Schema.Union([
   TracesTimeseriesQuery,
   LogsTimeseriesQuery,
@@ -177,6 +205,8 @@ export const QuerySpec = Schema.Union([
   TracesBreakdownQuery,
   LogsBreakdownQuery,
   MetricsBreakdownQuery,
+  TracesListQuery,
+  LogsListQuery,
 ])
 export type QuerySpec = Schema.Schema.Type<typeof QuerySpec>
 
@@ -200,6 +230,9 @@ export const BreakdownItem = Schema.Struct({
 })
 export type BreakdownItem = Schema.Schema.Type<typeof BreakdownItem>
 
+export const ListRow = Schema.Record(Schema.String, Schema.Unknown)
+export type ListRow = Schema.Schema.Type<typeof ListRow>
+
 export const QueryEngineResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("timeseries"),
@@ -210,6 +243,11 @@ export const QueryEngineResult = Schema.Union([
     kind: Schema.Literal("breakdown"),
     source: Schema.Literals(["traces", "logs", "metrics"]),
     data: Schema.Array(BreakdownItem),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("list"),
+    source: Schema.Literals(["traces", "logs"]),
+    data: Schema.Array(ListRow),
   }),
 ])
 export type QueryEngineResult = Schema.Schema.Type<typeof QueryEngineResult>

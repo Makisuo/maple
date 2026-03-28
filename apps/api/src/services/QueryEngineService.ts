@@ -10,8 +10,10 @@ import {
   type TimeseriesPoint,
   buildTracesTimeseriesSQL,
   buildTracesBreakdownSQL,
+  buildTracesListSQL,
   type TracesTimeseriesRow,
   type TracesBreakdownRow,
+  type TracesListRow,
 } from "@maple/query-engine"
 import {
   QueryEngineExecutionError,
@@ -738,6 +740,50 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           data: result.map((row) => ({
             name: row.name,
             value: Number(row[valueField]),
+          })),
+        },
+      })
+    }
+
+    if (request.query.source === "traces" && request.query.kind === "list") {
+      const sql = buildTracesListSQL({
+        orgId: tenant.orgId,
+        startTime: request.startTime,
+        endTime: request.endTime,
+        limit: request.query.limit,
+        serviceName: request.query.filters?.serviceName,
+        spanName: request.query.filters?.spanName,
+        rootOnly: request.query.filters?.rootSpansOnly,
+        errorsOnly: request.query.filters?.errorsOnly,
+        environments: request.query.filters?.environments as string[] | undefined,
+        commitShas: request.query.filters?.commitShas as string[] | undefined,
+        attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" }> | undefined,
+        resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" }> | undefined,
+      })
+
+      const result = yield* mapTinybirdError(
+        tinybird.sqlQuery(tenant, sql),
+        "Failed to execute traces list query",
+      )
+
+      const rows = result as unknown as ReadonlyArray<TracesListRow>
+
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "list",
+          source: "traces",
+          data: rows.map((row) => ({
+            traceId: row.traceId,
+            timestamp: String(row.timestamp),
+            spanId: row.spanId,
+            serviceName: row.serviceName,
+            spanName: row.spanName,
+            durationMs: Number(row.durationMs),
+            statusCode: row.statusCode,
+            spanKind: row.spanKind,
+            hasError: Number(row.hasError) === 1,
+            spanAttributes: row.spanAttributes ?? {},
+            resourceAttributes: row.resourceAttributes ?? {},
           })),
         },
       })

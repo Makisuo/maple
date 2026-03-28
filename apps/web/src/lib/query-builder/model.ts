@@ -668,6 +668,29 @@ export function buildBreakdownQuerySpec(
   }
 }
 
+export function buildListQuerySpec(
+  query: QueryBuilderQueryDraft,
+  limit?: number,
+): BuildSpecResult {
+  // Reuse the timeseries spec builder to parse the where clause into filters
+  const timeseriesResult = buildTimeseriesQuerySpec(query)
+  if (!timeseriesResult.query) return timeseriesResult
+
+  const spec = timeseriesResult.query
+  if (spec.kind !== "timeseries") return timeseriesResult
+
+  return {
+    query: {
+      kind: "list" as const,
+      source: spec.source,
+      filters: (spec as { filters?: unknown }).filters,
+      limit,
+    } as QuerySpec,
+    warnings: timeseriesResult.warnings,
+    error: null,
+  }
+}
+
 const FILTER_MODE_TO_DISPLAY: Record<string, string> = {
   equals: "=",
   gt: ">",

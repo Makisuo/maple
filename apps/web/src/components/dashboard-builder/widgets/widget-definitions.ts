@@ -146,6 +146,117 @@ export const statPresets: WidgetPresetDefinition[] = [
   },
 ]
 
+export const listPresets: WidgetPresetDefinition[] = [
+  {
+    id: "list-traces",
+    name: "Recent Spans",
+    description: "Latest spans with service, duration, and status",
+    visualization: "list",
+    dataSource: {
+      endpoint: "custom_query_builder_list",
+      params: {
+        queries: [{
+          id: "preset-list-traces",
+          name: "A",
+          enabled: true,
+          dataSource: "traces",
+          signalSource: "default",
+          metricName: "",
+          metricType: "sum",
+          whereClause: "",
+          aggregation: "count",
+          stepInterval: "",
+          orderByDirection: "desc",
+          addOns: { groupBy: false, having: false, orderBy: false, limit: false, legend: false },
+          groupBy: [],
+          having: "",
+          orderBy: "",
+          limit: "",
+          legend: "",
+        }],
+        limit: 25,
+      },
+    },
+    display: {
+      title: "Recent Spans",
+      listDataSource: "traces",
+      listWhereClause: "",
+      listLimit: 25,
+      columns: [
+        { field: "serviceName", header: "Service" },
+        { field: "spanName", header: "Span" },
+        { field: "durationMs", header: "Duration", unit: "duration_ms", align: "right" },
+        { field: "statusCode", header: "Status" },
+      ],
+    },
+  },
+  {
+    id: "list-error-traces",
+    name: "Error Spans",
+    description: "Spans with errors",
+    visualization: "list",
+    dataSource: {
+      endpoint: "custom_query_builder_list",
+      params: {
+        queries: [{
+          id: "preset-list-errors",
+          name: "A",
+          enabled: true,
+          dataSource: "traces",
+          signalSource: "default",
+          metricName: "",
+          metricType: "sum",
+          whereClause: "has_error = true",
+          aggregation: "count",
+          stepInterval: "",
+          orderByDirection: "desc",
+          addOns: { groupBy: false, having: false, orderBy: false, limit: false, legend: false },
+          groupBy: [],
+          having: "",
+          orderBy: "",
+          limit: "",
+          legend: "",
+        }],
+        limit: 25,
+      },
+    },
+    display: {
+      title: "Error Spans",
+      listDataSource: "traces",
+      listWhereClause: "has_error = true",
+      listLimit: 25,
+      columns: [
+        { field: "serviceName", header: "Service" },
+        { field: "spanName", header: "Span" },
+        { field: "durationMs", header: "Duration", unit: "duration_ms", align: "right" },
+        { field: "statusCode", header: "Status" },
+      ],
+    },
+  },
+  {
+    id: "list-logs",
+    name: "Recent Logs",
+    description: "Latest log entries",
+    visualization: "list",
+    dataSource: {
+      endpoint: "list_logs",
+      params: { limit: 25 },
+    },
+    display: {
+      title: "Recent Logs",
+      listDataSource: "logs",
+      listWhereClause: "",
+      listLimit: 25,
+      columns: [
+        { field: "timestamp", header: "Time" },
+        { field: "severityText", header: "Severity" },
+        { field: "serviceName", header: "Service" },
+        { field: "body", header: "Message" },
+      ],
+    },
+  },
+]
+
 export const tablePresets: WidgetPresetDefinition[] = [
   {
     id: "table-traces",

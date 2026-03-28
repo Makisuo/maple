@@ -437,6 +437,71 @@ export interface BuildTracesBreakdownSQLParams {
   apdexThresholdMs?: number
 }
 
+// ---------------------------------------------------------------------------
+// List SQL builder
+// ---------------------------------------------------------------------------
+
+export interface TracesListRow {
+  readonly traceId: string
+  readonly timestamp: string | Date
+  readonly spanId: string
+  readonly serviceName: string
+  readonly spanName: string
+  readonly durationMs: number
+  readonly statusCode: string
+  readonly spanKind: string
+  readonly hasError: number
+  readonly spanAttributes: Record<string, string>
+  readonly resourceAttributes: Record<string, string>
+}
+
+export interface BuildTracesListSQLParams {
+  orgId: string
+  startTime: string
+  endTime: string
+  limit?: number
+  serviceName?: string
+  spanName?: string
+  rootOnly?: boolean
+  errorsOnly?: boolean
+  environments?: readonly string[]
+  commitShas?: readonly string[]
+  attributeFilters?: readonly AttributeFilter[]
+  resourceAttributeFilters?: readonly AttributeFilter[]
+}
+
+export function buildTracesListSQL(params: BuildTracesListSQLParams): string {
+  const limit = params.limit ?? 100
+  // List queries always use the raw traces table (not MV) to get full attributes
+  const useTraceListMv = false
+
+  return compileQuery({
+    select: [
+      as_(ident("TraceId"), "traceId"),
+      as_(ident("Timestamp"), "timestamp"),
+      as_(ident("SpanId"), "spanId"),
+      as_(ident("ServiceName"), "serviceName"),
+      as_(ident("SpanName"), "spanName"),
+      as_(raw("Duration / 1000000"), "durationMs"),
+      as_(ident("StatusCode"), "statusCode"),
+      as_(ident("SpanKind"), "spanKind"),
+      as_(raw("if(StatusCode = 'Error', 1, 0)"), "hasError"),
+      as_(ident("SpanAttributes"), "spanAttributes"),
+      as_(ident("ResourceAttributes"), "resourceAttributes"),
+    ],
+    from: ident("traces"),
+    where: buildWhereFragments(params, useTraceListMv),
+    groupBy: [],
+    orderBy: [raw("Timestamp DESC")],
+    limit: raw(String(Math.round(limit))),
+    format: "JSON",
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Breakdown SQL builder
+// ---------------------------------------------------------------------------
+
 export function buildTracesBreakdownSQL(params: BuildTracesBreakdownSQLParams): string {
   const apdexThresholdMs = params.apdexThresholdMs ?? 500
   const limit = params.limit ?? 10

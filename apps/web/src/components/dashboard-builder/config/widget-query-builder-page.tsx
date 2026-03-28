@@ -6,9 +6,17 @@ import { Input } from "@maple/ui/components/ui/input"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
+import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
 import { QueryPanel } from "@/components/dashboard-builder/config/query-panel"
 import { FormulaPanel } from "@/components/dashboard-builder/config/formula-panel"
 import { WidgetSettingsBar } from "@/components/dashboard-builder/config/widget-settings-bar"
+import {
+  ListConfigPanel,
+  TRACE_DEFAULT_COLUMNS,
+  LOG_DEFAULT_COLUMNS,
+  type ListColumnDraft,
+  type ListDataSource,
+} from "@/components/dashboard-builder/config/list-config-panel"
 import type {
   DashboardWidget,
   ValueUnit,
@@ -41,6 +49,11 @@ import {
   getTracesFacetsResultAtom,
   listMetricsResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
+import {
+  normalizeKey,
+  parseBoolean,
+  parseWhereClause as parseWhereClauses,
+} from "@maple/query-engine/where-clause"
 
 type StatAggregate = "sum" | "first" | "count" | "avg" | "max" | "min"
 
@@ -69,6 +82,11 @@ interface QueryBuilderWidgetState {
   statValueField: string
   unit: ValueUnit
   tableLimit: string
+  // List-specific
+  listDataSource: ListDataSource
+  listWhereClause: string
+  listLimit: string
+  listColumns: ListColumnDraft[]
 }
 
 function parsePositiveNumber(raw: string): number | undefined {
@@ -120,6 +138,7 @@ function cloneWidgetState(state: QueryBuilderWidgetState): QueryBuilderWidgetSta
     ...state,
     queries: state.queries.map((query) => ({ ...query, addOns: { ...query.addOns } })),
     formulas: state.formulas.map((formula) => ({ ...formula })),
+    listColumns: state.listColumns.map((col) => ({ ...col })),
   }
 }
 
@@ -150,6 +169,8 @@ function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
       ? (params.comparison as Record<string, unknown>)
       : {}
 
+  const listDs =
+    widget.display.listDataSource === "logs" ? "logs" as const : "traces" as const
   const baseFromWidget = {
     visualization: widget.visualization,
     title: widget.display.title ?? "",
@@ -169,7 +190,19 @@ function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
       typeof widget.dataSource.transform?.limit === "number"
         ? String(widget.dataSource.transform.limit)
         : "",
+    listDataSource: listDs,
+    listWhereClause: widget.display.listWhereClause ?? "",
+    listLimit:
+      typeof widget.display.listLimit === "number"
+        ? String(widget.display.listLimit)
+        : "",
+    listColumns: (widget.display.columns ?? (listDs === "logs" ? LOG_DEFAULT_COLUMNS : TRACE_DEFAULT_COLUMNS)) as ListColumnDraft[],
   } satisfies Omit<QueryBuilderWidgetState, "queries" | "formulas">
+
+  // List widgets don't use the query builder — return early with a dummy query
+  if (widget.visualization === "list") {
+    return { ...baseFromWidget, queries: [createQueryDraft(0)], formulas: [] }
+  }
 
   if (
     widget.dataSource.endpoint === "custom_query_builder_timeseries" &&
@@ -235,11 +268,79 @@ function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
   return { ...baseFromWidget, queries: [fallback], formulas: [] }
 }
 
+function buildListEndpointParams(
+  dataSource: ListDataSource,
+  whereClause: string,
+  limit: number,
+): Record<string, unknown> {
+  const { clauses } = parseWhereClauses(whereClause)
+  // NOTE: startTime/endTime are injected by useWidgetData from the dashboard
+  // time range — do NOT include them here or they'll clash with interpolation.
+  const params: Record<string, unknown> = { limit }
+
+  if (dataSource === "traces") {
+    for (const clause of clauses) {
+      const key = normalizeKey(clause.key)
+      if (key === "service.name") params.service = clause.value
+      else if (key === "span.name") params.spanName = clause.value
+      else if (key === "has_error") {
+        const b = parseBoolean(clause.value)
+        if (b != null) params.hasError = b
+      } else if (key === "root_only") {
+        const b = parseBoolean(clause.value)
+        if (b != null) params.rootOnly = b
+      } else if (key === "deployment.environment") params.deploymentEnv = clause.value
+      else if (key.startsWith("attr.")) {
+        params.attributeKey = key.slice(5)
+        if (clause.operator !== "exists") params.attributeValue = clause.value
+      } else if (key.startsWith("resource.")) {
+        params.resourceAttributeKey = key.slice(9)
+        if (clause.operator !== "exists") params.resourceAttributeValue = clause.value
+      }
+    }
+  } else {
+    for (const clause of clauses) {
+      const key = normalizeKey(clause.key)
+      if (key === "service.name") params.service = clause.value
+      else if (key === "severity") params.severity = clause.value
+      else if (key === "search" || key === "body") params.search = clause.value
+    }
+  }
+
+  return params
+}
+
 function buildWidgetDataSource(
   _widget: DashboardWidget,
   state: QueryBuilderWidgetState,
   seriesFieldOptions: string[],
 ): WidgetDataSource {
+  if (state.visualization === "list") {
+    const limit = parsePositiveNumber(state.listLimit) ?? 50
+    // For logs without rich filtering, fall back to the simple list_logs endpoint
+    if (state.listDataSource === "logs") {
+      return {
+        endpoint: "list_logs" as const,
+        params: buildListEndpointParams(state.listDataSource, state.listWhereClause, limit),
+      }
+    }
+    // For traces, use the query engine which supports full attr.* filtering
+    const listQuery = createQueryDraft(0)
+    const queryForEngine: QueryBuilderQueryDraft = {
+      ...listQuery,
+      dataSource: state.listDataSource,
+      whereClause: state.listWhereClause,
+      aggregation: "count", // required by the spec builder but unused for list
+    }
+    return {
+      endpoint: "custom_query_builder_list" as const,
+      params: {
+        queries: [queryForEngine],
+        limit,
+      },
+    }
+  }
+
   const base: WidgetDataSource = {
     endpoint: "custom_query_builder_timeseries",
     params: {
@@ -295,6 +396,16 @@ function buildWidgetDisplay(
   widget: DashboardWidget,
   state: QueryBuilderWidgetState,
 ): WidgetDisplayConfig {
+  if (state.visualization === "list") {
+    return {
+      title: state.title.trim() || undefined,
+      listDataSource: state.listDataSource,
+      listWhereClause: state.listWhereClause,
+      listLimit: parsePositiveNumber(state.listLimit) ?? 50,
+      columns: state.listColumns.length > 0 ? state.listColumns : undefined,
+    }
+  }
+
   const display: WidgetDisplayConfig = {
     ...widget.display,
     title: state.title.trim() ? state.title.trim() : undefined,
@@ -340,6 +451,7 @@ function buildWidgetDisplay(
 }
 
 function validateQueries(state: QueryBuilderWidgetState): string | null {
+  if (state.visualization === "list") return null
   const enabledQueries = state.queries.filter((query) => query.enabled)
   if (enabledQueries.length === 0) return "Enable at least one query"
   for (const query of enabledQueries) {
@@ -357,6 +469,9 @@ const WidgetPreview = React.memo(function WidgetPreview({ widget }: { widget: Da
   }
   if (widget.visualization === "table") {
     return <TableWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
+  }
+  if (widget.visualization === "list") {
+    return <ListWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
   }
   return <ChartWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
 })
@@ -579,7 +694,9 @@ export function WidgetQueryBuilderPage({
       : state.statValueField
 
   const previewWidget = React.useMemo(() => {
-    const previewState = stagedState ?? state
+    // List widgets use live state (no query builder compilation needed).
+    // Chart/Stat/Table use stagedState to avoid re-querying on every keystroke.
+    const previewState = state.visualization === "list" ? state : (stagedState ?? state)
     const previewSeriesOptions = toSeriesFieldOptions(previewState)
     return {
       ...widget,
@@ -587,7 +704,7 @@ export function WidgetQueryBuilderPage({
       dataSource: buildWidgetDataSource(widget, previewState, previewSeriesOptions),
       display: buildWidgetDisplay(widget, previewState),
     }
-  }, [stagedState, widget])
+  }, [state, stagedState, widget])
 
   const runPreview = () => {
     const error = validateQueries(state)
@@ -764,62 +881,86 @@ export function WidgetQueryBuilderPage({
             <p className="text-xs text-destructive font-medium">{validationError}</p>
           )}
 
-          {/* Query panels */}
-          <div className="space-y-3">
-            {state.queries.map((query, index) => (
-              <QueryPanel
-                key={query.id}
-                query={query}
-                index={index}
-                collapsed={collapsedQueries.has(query.id)}
-                canRemove={state.queries.length > 1}
-                metricSelectionOptions={metricSelectionOptions}
+          {state.visualization === "list" ? (
+            <>
+              <ListConfigPanel
+                listDataSource={state.listDataSource}
+                whereClause={state.listWhereClause}
+                limit={state.listLimit}
+                columns={state.listColumns}
                 autocompleteValues={autocompleteValuesBySource}
                 onActiveAttributeKey={setActiveAttributeKey}
                 onActiveResourceAttributeKey={setActiveResourceAttributeKey}
-                onUpdate={(updater) => updateQuery(query.id, updater)}
-                onClone={() => cloneQuery(query.id)}
-                onRemove={() => removeQuery(query.id)}
-                onToggleCollapse={() => toggleCollapse(query.id)}
-                onDataSourceChange={(ds) =>
-                  updateQuery(query.id, (current) =>
-                    resetQueryForDataSource(current, ds)
-                  )
+                onChange={(updates) =>
+                  setState((current) => ({ ...current, ...updates }))
                 }
               />
-            ))}
-          </div>
+              <div className="flex items-center gap-3 border-t pt-4">
+                <Button size="sm" onClick={runPreview}>
+                  Run Preview
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Query panels */}
+              <div className="space-y-3">
+                {state.queries.map((query, index) => (
+                  <QueryPanel
+                    key={query.id}
+                    query={query}
+                    index={index}
+                    collapsed={collapsedQueries.has(query.id)}
+                    canRemove={state.queries.length > 1}
+                    metricSelectionOptions={metricSelectionOptions}
+                    autocompleteValues={autocompleteValuesBySource}
+                    onActiveAttributeKey={setActiveAttributeKey}
+                    onActiveResourceAttributeKey={setActiveResourceAttributeKey}
+                    onUpdate={(updater) => updateQuery(query.id, updater)}
+                    onClone={() => cloneQuery(query.id)}
+                    onRemove={() => removeQuery(query.id)}
+                    onToggleCollapse={() => toggleCollapse(query.id)}
+                    onDataSourceChange={(ds) =>
+                      updateQuery(query.id, (current) =>
+                        resetQueryForDataSource(current, ds)
+                      )
+                    }
+                  />
+                ))}
+              </div>
 
-          {/* Formula panels */}
-          {state.formulas.length > 0 && (
-            <div className="space-y-3">
-              {state.formulas.map((formula) => (
-                <FormulaPanel
-                  key={formula.id}
-                  formula={formula}
-                  onUpdate={(updater) => updateFormula(formula.id, updater)}
-                  onRemove={() => removeFormula(formula.id)}
-                />
-              ))}
-            </div>
+              {/* Formula panels */}
+              {state.formulas.length > 0 && (
+                <div className="space-y-3">
+                  {state.formulas.map((formula) => (
+                    <FormulaPanel
+                      key={formula.id}
+                      formula={formula}
+                      onUpdate={(updater) => updateFormula(formula.id, updater)}
+                      onRemove={() => removeFormula(formula.id)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Toolbar */}
+              <div className="flex items-center gap-3 border-t pt-4">
+                <Button variant="outline" size="sm" onClick={addQuery}>
+                  + Query
+                </Button>
+                <Button variant="outline" size="sm" onClick={addFormula}>
+                  + Formula
+                </Button>
+                <Button size="sm" onClick={runPreview}>
+                  Run Preview
+                </Button>
+                <span className="text-[11px] text-muted-foreground ml-auto">
+                  {state.queries.map((q) => q.name).join(", ")}
+                  {state.formulas.length > 0 && `, ${state.formulas.map((f) => f.name).join(", ")}`}
+                </span>
+              </div>
+            </>
           )}
-
-          {/* Toolbar */}
-          <div className="flex items-center gap-3 border-t pt-4">
-            <Button variant="outline" size="sm" onClick={addQuery}>
-              + Query
-            </Button>
-            <Button variant="outline" size="sm" onClick={addFormula}>
-              + Formula
-            </Button>
-            <Button size="sm" onClick={runPreview}>
-              Run Preview
-            </Button>
-            <span className="text-[11px] text-muted-foreground ml-auto">
-              {state.queries.map((q) => q.name).join(", ")}
-              {state.formulas.length > 0 && `, ${state.formulas.map((f) => f.name).join(", ")}`}
-            </span>
-          </div>
         </div>
       </div>
     </div>
