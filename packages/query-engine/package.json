@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./query-engine": "./src/query-engine.ts",
     "./where-clause": "./src/where-clause.ts",
-    "./sql": "./src/sql/index.ts"
+    "./sql": "./src/sql/index.ts",
+    "./ch": "./src/ch/index.ts"
   },
   "scripts": {
     "test": "bun test",

@@ -8,12 +8,7 @@ import {
   type QueryEngineSampleCountStrategy,
   type QuerySpec,
   type TimeseriesPoint,
-  buildTracesTimeseriesSQL,
-  buildTracesBreakdownSQL,
-  buildTracesListSQL,
-  type TracesTimeseriesRow,
-  type TracesBreakdownRow,
-  type TracesListRow,
+  CH,
 } from "@maple/query-engine"
 import {
   QueryEngineExecutionError,
@@ -532,11 +527,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
       : undefined
 
     if (request.query.source === "traces" && request.query.kind === "timeseries") {
-      const sql = buildTracesTimeseriesSQL({
-        orgId: tenant.orgId,
-        startTime: request.startTime,
-        endTime: request.endTime,
-        bucketSeconds: bucketSeconds!,
+      const query = CH.tracesTimeseriesQuery({
         metric: request.query.metric,
         needsSampling: false,
         serviceName: request.query.filters?.serviceName,
@@ -551,14 +542,20 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
         apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
       })
+      const compiled = CH.compile(query, {
+        orgId: tenant.orgId,
+        startTime: request.startTime,
+        endTime: request.endTime,
+        bucketSeconds: bucketSeconds!,
+      })
 
       const result = yield* mapTinybirdError(
-        tinybird.sqlQuery(tenant, sql),
+        tinybird.sqlQuery(tenant, compiled.sql),
         "Failed to execute traces timeseries query",
       )
 
       const field = tracesMetricFieldMap[request.query.metric]
-      const rows = result as unknown as ReadonlyArray<TracesTimeseriesRow>
+      const rows = compiled.castRows(result as ReadonlyArray<Record<string, unknown>>)
 
       return new QueryEngineExecuteResponse({
         result: {
@@ -646,10 +643,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "traces" && request.query.kind === "breakdown") {
-      const sql = buildTracesBreakdownSQL({
-        orgId: tenant.orgId,
-        startTime: request.startTime,
-        endTime: request.endTime,
+      const query = CH.tracesBreakdownQuery({
         metric: request.query.metric,
         groupBy: request.query.groupBy,
         groupByAttributeKey:
@@ -667,14 +661,19 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
         apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
       })
+      const compiled = CH.compile(query, {
+        orgId: tenant.orgId,
+        startTime: request.startTime,
+        endTime: request.endTime,
+      })
 
       const result = yield* mapTinybirdError(
-        tinybird.sqlQuery(tenant, sql),
+        tinybird.sqlQuery(tenant, compiled.sql),
         "Failed to execute traces breakdown query",
       )
 
       const field = tracesMetricFieldMap[request.query.metric]
-      const rows = result as unknown as ReadonlyArray<TracesBreakdownRow>
+      const rows = compiled.castRows(result as ReadonlyArray<Record<string, unknown>>)
 
       return new QueryEngineExecuteResponse({
         result: {
@@ -746,10 +745,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "traces" && request.query.kind === "list") {
-      const sql = buildTracesListSQL({
-        orgId: tenant.orgId,
-        startTime: request.startTime,
-        endTime: request.endTime,
+      const query = CH.tracesListQuery({
         limit: request.query.limit,
         serviceName: request.query.filters?.serviceName,
         spanName: request.query.filters?.spanName,
@@ -760,13 +756,18 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" }> | undefined,
         resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" }> | undefined,
       })
+      const compiled = CH.compile(query, {
+        orgId: tenant.orgId,
+        startTime: request.startTime,
+        endTime: request.endTime,
+      })
 
       const result = yield* mapTinybirdError(
-        tinybird.sqlQuery(tenant, sql),
+        tinybird.sqlQuery(tenant, compiled.sql),
         "Failed to execute traces list query",
       )
 
-      const rows = result as unknown as ReadonlyArray<TracesListRow>
+      const rows = compiled.castRows(result as ReadonlyArray<Record<string, unknown>>)
 
       return new QueryEngineExecuteResponse({
         result: {
