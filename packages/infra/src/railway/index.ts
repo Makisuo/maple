@@ -286,6 +286,9 @@ export async function provisionRailwayStack(
       CLERK_PUBLISHABLE_KEY: env.CLERK_PUBLISHABLE_KEY?.trim() || "",
       CLERK_JWT_KEY: env.CLERK_JWT_KEY?.trim() || "",
       MAPLE_APP_BASE_URL: appBaseUrl,
+      OTEL_ENVIRONMENT: "production",
+      OTEL_BASE_URL: toIngestPrivateEndpoint(serviceNames.ingest),
+      MAPLE_OTEL_INGEST_KEY: env.MAPLE_OTEL_INGEST_KEY?.trim() || "",
     },
   });
 
