@@ -19,11 +19,11 @@ export interface McpToolResult {
 }
 
 export interface McpToolRegistrar {
-  tool<TSchema extends Schema.Top & { readonly DecodingServices: never }>(
+  tool<TSchema extends Schema.Decoder<unknown, never>>(
     name: string,
     description: string,
     schema: TSchema,
-    handler: (params: Schema.Schema.Type<TSchema>) => Effect.Effect<McpToolResult, McpToolError, any>,
+    handler: (params: TSchema["Type"]) => Effect.Effect<McpToolResult, McpToolError, any>,
   ): void
 }
 

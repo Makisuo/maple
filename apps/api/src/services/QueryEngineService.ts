@@ -196,6 +196,7 @@ const validateTraceAttributeFilters = Effect.fn("QueryEngineService.validateTrac
   query: QuerySpec,
 ): Effect.fn.Return<void, QueryEngineValidationError> {
   if (query.source !== "traces") return
+  if (query.kind === "list") return
 
   const details: string[] = []
   if (query.groupBy?.includes("attribute") && !query.filters?.groupByAttributeKeys?.length) {
@@ -310,7 +311,7 @@ function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: strin
 
 function collapseMetricTimeseriesRows(
   rows: ReadonlyArray<MetricTimeseriesRow>,
-  metric: QuerySpec["metric"],
+  metric: Extract<QuerySpec, { metric: string }>["metric"],
 ): Array<{ bucket: string; groupName: "all"; value: number }> {
   const bucketMap = new Map<
     string,
@@ -436,7 +437,7 @@ const tracesMetricFieldMap = {
 } as const
 
 const tracesAggregateValueForMetric = (
-  metric: Extract<QuerySpec, { source: "traces" }>["metric"],
+  metric: Extract<QuerySpec, { source: "traces"; metric: string }>["metric"],
   row: {
     readonly count: number
     readonly avgDuration: number
@@ -928,7 +929,7 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
             commit_shas: request.query.filters?.commitShas?.join(","),
             ...buildAttributeFilterParams(request.query.filters),
             apdex_threshold_ms:
-              request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
+              (request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).metric === "apdex" ? (request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).apdexThresholdMs : undefined,
           }),
           "Failed to evaluate grouped traces alert query",
         )
@@ -937,7 +938,7 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
           const sampleCount = Number(row.count ?? 0)
           return {
             groupKey: row.serviceName,
-            value: sampleCount > 0 ? tracesAggregateValueForMetric(request.query.metric as Extract<QuerySpec, { source: "traces" }>["metric"], row) : null,
+            value: sampleCount > 0 ? tracesAggregateValueForMetric((request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).metric, row) : null,
             sampleCount,
             hasData: sampleCount > 0,
           }
@@ -976,7 +977,7 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
           const sampleCount = Number(row.dataPointCount ?? 0)
           return {
             groupKey: row.serviceName,
-            value: sampleCount > 0 ? metricsAggregateValueForMetric(request.query.metric as Extract<QuerySpec, { source: "metrics" }>["metric"], row) : null,
+            value: sampleCount > 0 ? metricsAggregateValueForMetric((request.query as Extract<QuerySpec, { source: "metrics" }>).metric, row) : null,
             sampleCount,
             hasData: sampleCount > 0,
           }

@@ -16,7 +16,7 @@ import type { McpToolError, McpToolRegistrar, McpToolResult } from "./tools/type
 interface ToolDefinition {
   readonly name: string
   readonly description: string
-  readonly schema: Schema.Top & { readonly DecodingServices: never }
+  readonly schema: Schema.Schema<any, any, never>
   readonly handler: (params: unknown) => Effect.Effect<McpToolResult, McpToolError, any>
 }
 
