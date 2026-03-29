@@ -8,7 +8,7 @@ import { DashboardList } from "@/components/dashboard-builder/list/dashboard-lis
 import { DashboardCanvas } from "@/components/dashboard-builder/canvas/dashboard-canvas"
 import { DashboardToolbar } from "@/components/dashboard-builder/toolbar/dashboard-toolbar"
 import { WidgetPicker } from "@/components/dashboard-builder/config/chart-picker"
-import { WidgetQueryBuilderPage } from "@/components/dashboard-builder/config/widget-query-builder-page"
+import { WidgetQueryBuilderPage, type WidgetQueryBuilderPageHandle } from "@/components/dashboard-builder/config/widget-query-builder-page"
 import { InlineEditableTitle } from "@/components/dashboard-builder/inline-editable-title"
 import {
   DashboardTimeRangeProvider,
@@ -17,6 +17,9 @@ import {
   parsePortableDashboardJson,
 } from "@/components/dashboard-builder/portable-dashboard"
 import type {
+  Dashboard,
+  DashboardWidget,
+  TimeRange,
   VisualizationType,
   WidgetDataSource,
   WidgetDisplayConfig,
@@ -35,6 +38,59 @@ export const Route = createFileRoute("/dashboards")({
   component: DashboardsPage,
   validateSearch: Schema.toStandardSchemaV1(dashboardsSearchSchema),
 })
+
+function ConfigureWidgetView({
+  activeDashboard,
+  configureWidget,
+  onApply,
+  onCancel,
+  onTimeRangeChange,
+}: {
+  activeDashboard: Dashboard
+  configureWidget: DashboardWidget
+  onApply: (updates: { visualization: VisualizationType; dataSource: WidgetDataSource; display: WidgetDisplayConfig }) => void
+  onCancel: () => void
+  onTimeRangeChange: (timeRange: TimeRange) => void
+}) {
+  const builderRef = useRef<WidgetQueryBuilderPageHandle>(null)
+
+  return (
+    <DashboardTimeRangeProvider
+      initialTimeRange={activeDashboard.timeRange}
+      onTimeRangeChange={onTimeRangeChange}
+    >
+      <DashboardLayout
+        breadcrumbs={[
+          { label: "Dashboards", href: "/dashboards" },
+          {
+            label: activeDashboard.name,
+            href: `/dashboards?dashboardId=${activeDashboard.id}`,
+          },
+          { label: "Configure Widget" },
+        ]}
+        breadcrumbActions={
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onCancel}>
+              &larr; Back
+            </Button>
+            <Button variant="outline" size="sm" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => builderRef.current?.apply()}>
+              Apply
+            </Button>
+          </div>
+        }
+      >
+        <WidgetQueryBuilderPage
+          ref={builderRef}
+          widget={configureWidget}
+          onApply={onApply}
+        />
+      </DashboardLayout>
+    </DashboardTimeRangeProvider>
+  )
+}
 
 function DashboardsPage() {
   const search = Route.useSearch()
@@ -196,32 +252,18 @@ function DashboardsPage() {
 
     if (!readOnly && configureOpen && configureWidget) {
       return (
-        <DashboardTimeRangeProvider
-          initialTimeRange={activeDashboard.timeRange}
+        <ConfigureWidgetView
+          activeDashboard={activeDashboard}
+          configureWidget={configureWidget}
+          onApply={(updates) => {
+            handleApplyWidgetConfig(configureWidget.id, updates)
+            handleCloseBuilder()
+          }}
+          onCancel={handleCloseBuilder}
           onTimeRangeChange={(timeRange) =>
             updateDashboardTimeRange(activeDashboard.id, timeRange)
           }
-        >
-          <DashboardLayout
-            breadcrumbs={[
-              { label: "Dashboards", href: "/dashboards" },
-              {
-                label: activeDashboard.name,
-                href: `/dashboards?dashboardId=${activeDashboard.id}`,
-              },
-              { label: "Configure Widget" },
-            ]}
-          >
-            <WidgetQueryBuilderPage
-              widget={configureWidget}
-              onApply={(updates) => {
-                handleApplyWidgetConfig(configureWidget.id, updates)
-                handleCloseBuilder()
-              }}
-              onCancel={handleCloseBuilder}
-            />
-          </DashboardLayout>
-        </DashboardTimeRangeProvider>
+        />
       )
     }
 

@@ -1,6 +1,6 @@
 import type React from "react"
 
-export type ChartLegendMode = "visible" | "hidden"
+export type ChartLegendMode = "visible" | "hidden" | "right"
 export type ChartTooltipMode = "visible" | "hidden"
 
 export interface BaseChartProps {

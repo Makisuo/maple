@@ -29,6 +29,8 @@ interface DashboardLayoutProps {
   filterSidebar?: React.ReactNode
   /** Content pinned above the scrollable children (e.g. volume charts). */
   stickyContent?: React.ReactNode
+  /** Render actions in the breadcrumb header bar, right-aligned. */
+  breadcrumbActions?: React.ReactNode
   /** Render a panel on the right side of the content area (e.g. AI chat). */
   rightSidebar?: React.ReactNode
 }
@@ -50,6 +52,7 @@ export function DashboardLayout({
   headerActions,
   filterSidebar,
   stickyContent,
+  breadcrumbActions,
   rightSidebar,
 }: DashboardLayoutProps) {
   const [isScrolled, setIsScrolled] = React.useState(false)
@@ -98,6 +101,7 @@ export function DashboardLayout({
               ))}
             </BreadcrumbList>
           </Breadcrumb>
+          {breadcrumbActions && <div className="ml-auto shrink-0">{breadcrumbActions}</div>}
         </header>
         <div className="flex min-h-0 flex-1 overflow-hidden">
           {filterSidebar && (

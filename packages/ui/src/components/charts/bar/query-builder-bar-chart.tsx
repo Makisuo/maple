@@ -132,6 +132,7 @@ export function QueryBuilderBarChart({ data, className, legend, tooltip, stacked
         )}
 
         {legend === "visible" && <ChartLegend content={<ChartLegendContent />} />}
+        {legend === "right" && <ChartLegend layout="vertical" verticalAlign="middle" align="right" content={<ChartLegendContent />} />}
 
         {seriesDefinitions.map((definition, index) => (
           <Bar

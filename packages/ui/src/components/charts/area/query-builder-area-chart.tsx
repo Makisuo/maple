@@ -160,6 +160,7 @@ export function QueryBuilderAreaChart({ data, className, legend, tooltip, stacke
         )}
 
         {legend === "visible" && <ChartLegend content={<ChartLegendContent />} />}
+        {legend === "right" && <ChartLegend layout="vertical" verticalAlign="middle" align="right" content={<ChartLegendContent />} />}
 
         {seriesDefinitions.map((definition) => (
           <Area

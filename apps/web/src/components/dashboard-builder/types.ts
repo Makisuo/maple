@@ -78,7 +78,7 @@ export interface WidgetDisplayConfig {
   // Chart-specific
   chartId?: string
   chartPresentation?: {
-    legend?: "visible" | "hidden"
+    legend?: "visible" | "hidden" | "right"
     tooltip?: "visible" | "hidden"
   }
   xAxis?: { label?: string; unit?: ValueUnit; visible?: boolean }

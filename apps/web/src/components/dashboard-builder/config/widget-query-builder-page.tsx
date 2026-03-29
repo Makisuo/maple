@@ -2,14 +2,13 @@ import * as React from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
 import { Button } from "@maple/ui/components/ui/button"
-import { Input } from "@maple/ui/components/ui/input"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
 import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
 import { QueryPanel } from "@/components/dashboard-builder/config/query-panel"
 import { FormulaPanel } from "@/components/dashboard-builder/config/formula-panel"
-import { WidgetSettingsBar } from "@/components/dashboard-builder/config/widget-settings-bar"
+import { WidgetSettingsBar, type LegendPosition } from "@/components/dashboard-builder/config/widget-settings-bar"
 import {
   ListConfigPanel,
   TRACE_DEFAULT_COLUMNS,
@@ -59,6 +58,10 @@ import {
 
 type StatAggregate = "sum" | "first" | "count" | "avg" | "max" | "min"
 
+export interface WidgetQueryBuilderPageHandle {
+  apply: () => void
+}
+
 interface WidgetQueryBuilderPageProps {
   widget: DashboardWidget
   onApply: (updates: {
@@ -66,12 +69,12 @@ interface WidgetQueryBuilderPageProps {
     dataSource: WidgetDataSource
     display: WidgetDisplayConfig
   }) => void
-  onCancel: () => void
 }
 
 interface QueryBuilderWidgetState {
   visualization: VisualizationType
   title: string
+  description: string
   chartId: string
   stacked: boolean
   curveType: "linear" | "monotone"
@@ -83,6 +86,7 @@ interface QueryBuilderWidgetState {
   statAggregate: StatAggregate
   statValueField: string
   unit: ValueUnit
+  legendPosition: LegendPosition
   tableLimit: string
   // List-specific
   listDataSource: ListDataSource
@@ -174,9 +178,14 @@ function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
 
   const listDs =
     widget.display.listDataSource === "logs" ? "logs" as const : "traces" as const
+  const legendRaw = widget.display.chartPresentation?.legend
+  const legendPosition: LegendPosition =
+    legendRaw === "hidden" ? "hidden" : legendRaw === "right" ? "right" : "bottom"
+
   const baseFromWidget = {
     visualization: widget.visualization,
     title: widget.display.title ?? "",
+    description: widget.display.description ?? "",
     chartId: widget.display.chartId ?? "query-builder-line",
     stacked: widget.display.stacked ?? false,
     curveType: widget.display.curveType ?? "linear",
@@ -189,6 +198,7 @@ function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
     statAggregate: widget.dataSource.transform?.reduceToValue?.aggregate ?? "first",
     statValueField: widget.dataSource.transform?.reduceToValue?.field ?? "",
     unit: widget.display.unit ?? "number",
+    legendPosition,
     tableLimit:
       typeof widget.dataSource.transform?.limit === "number"
         ? String(widget.dataSource.transform.limit)
@@ -402,6 +412,7 @@ function buildWidgetDisplay(
   if (state.visualization === "list") {
     return {
       title: state.title.trim() || undefined,
+      description: state.description.trim() || undefined,
       listDataSource: state.listDataSource,
       listWhereClause: state.listWhereClause,
       listLimit: parsePositiveNumber(state.listLimit) ?? 50,
@@ -409,18 +420,24 @@ function buildWidgetDisplay(
     }
   }
 
+  const legendValue = state.legendPosition === "hidden" ? "hidden" as const
+    : state.legendPosition === "right" ? "right" as const
+    : "visible" as const
+
   const display: WidgetDisplayConfig = {
     ...widget.display,
     title: state.title.trim() ? state.title.trim() : undefined,
+    description: state.description.trim() || undefined,
     chartPresentation: {
       ...widget.display.chartPresentation,
-      legend: "visible",
+      legend: legendValue,
     },
   }
   if (state.visualization === "chart") {
     display.chartId = state.chartId
     display.stacked = state.stacked
     display.curveType = state.curveType
+    display.unit = state.unit
   }
   if (state.visualization === "stat") display.unit = state.unit
   if (state.visualization === "table") {
@@ -482,8 +499,8 @@ const WidgetPreview = React.memo(function WidgetPreview({ widget }: { widget: Da
 export function WidgetQueryBuilderPage({
   widget,
   onApply,
-  onCancel,
-}: WidgetQueryBuilderPageProps) {
+  ref,
+}: WidgetQueryBuilderPageProps & { ref?: React.Ref<WidgetQueryBuilderPageHandle> }) {
   const [state, setState] = React.useState<QueryBuilderWidgetState>(() => toInitialState(widget))
   const [stagedState, setStagedState] = React.useState<QueryBuilderWidgetState>(() =>
     cloneWidgetState(toInitialState(widget))
@@ -759,6 +776,8 @@ export function WidgetQueryBuilderPage({
     })
   }
 
+  React.useImperativeHandle(ref, () => ({ apply: applyChanges }))
+
   const updateQuery = (
     id: string,
     updater: (query: QueryBuilderQueryDraft) => QueryBuilderQueryDraft,
@@ -847,40 +866,9 @@ export function WidgetQueryBuilderPage({
   }
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-2 duration-200 flex flex-col -m-4 -mt-4 min-h-0 flex-1">
-      {/* Sticky header bar */}
-      <div className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur-sm px-6 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors text-sm"
-          >
-            &larr; Back
-          </button>
-          <div className="h-4 w-px bg-border shrink-0" />
-          <Input
-            value={state.title}
-            onChange={(event) =>
-              setState((current) => ({ ...current, title: event.target.value }))
-            }
-            placeholder="Untitled widget"
-            className="border-none bg-transparent text-base font-bold shadow-none px-0 focus-visible:ring-0 max-w-md"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="sm" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={applyChanges}>
-            Apply
-          </Button>
-        </div>
-      </div>
-
-      {/* Scrollable content */}
-      <div className="flex-1 min-h-0 overflow-auto">
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-200 flex flex-1 min-h-0 -m-4">
+      {/* Main content (scrollable) */}
+      <div className="flex-1 min-w-0 overflow-y-auto">
         {/* Preview hero section */}
         <div className="border-b bg-muted/30 px-6 py-6">
           <div className="h-[400px]">
@@ -888,30 +876,8 @@ export function WidgetQueryBuilderPage({
           </div>
         </div>
 
-        {/* Configuration */}
+        {/* Query configuration */}
         <div className="px-6 py-6 space-y-6">
-          {/* Widget settings */}
-          <WidgetSettingsBar
-            visualization={state.visualization}
-            onVisualizationChange={(visualization) =>
-              setState((current) => ({ ...current, visualization }))
-            }
-            chartId={state.chartId}
-            stacked={state.stacked}
-            curveType={state.curveType}
-            comparisonMode={state.comparisonMode}
-            includePercentChange={state.includePercentChange}
-            debug={state.debug}
-            statAggregate={state.statAggregate}
-            statValueField={effectiveStatValueField}
-            unit={state.unit}
-            tableLimit={state.tableLimit}
-            seriesFieldOptions={seriesFieldOptions}
-            onChange={(updates) =>
-              setState((current) => ({ ...current, ...updates }))
-            }
-          />
-
           {validationError && (
             <p className="text-xs text-destructive font-medium">{validationError}</p>
           )}
@@ -999,6 +965,39 @@ export function WidgetQueryBuilderPage({
           )}
         </div>
       </div>
+
+      {/* Right sidebar */}
+      <aside className="w-[272px] shrink-0 border-l overflow-y-auto p-5 bg-muted/20">
+        <WidgetSettingsBar
+          title={state.title}
+          onTitleChange={(title) =>
+            setState((current) => ({ ...current, title }))
+          }
+          description={state.description}
+          onDescriptionChange={(description) =>
+            setState((current) => ({ ...current, description }))
+          }
+          visualization={state.visualization}
+          onVisualizationChange={(visualization) =>
+            setState((current) => ({ ...current, visualization }))
+          }
+          chartId={state.chartId}
+          stacked={state.stacked}
+          curveType={state.curveType}
+          comparisonMode={state.comparisonMode}
+          includePercentChange={state.includePercentChange}
+          debug={state.debug}
+          statAggregate={state.statAggregate}
+          statValueField={effectiveStatValueField}
+          unit={state.unit}
+          legendPosition={state.legendPosition}
+          tableLimit={state.tableLimit}
+          seriesFieldOptions={seriesFieldOptions}
+          onChange={(updates) =>
+            setState((current) => ({ ...current, ...updates }))
+          }
+        />
+      </aside>
     </div>
   )
 }

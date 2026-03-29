@@ -161,6 +161,7 @@ export function QueryBuilderLineChart({ data, className, legend, tooltip, curveT
         )}
 
         {legend === "visible" && <ChartLegend content={<ChartLegendContent />} />}
+        {legend === "right" && <ChartLegend layout="vertical" verticalAlign="middle" align="right" content={<ChartLegendContent />} />}
 
         {seriesDefinitions.map((definition) => (
           <Line

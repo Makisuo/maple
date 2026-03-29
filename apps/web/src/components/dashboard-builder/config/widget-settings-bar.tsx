@@ -13,6 +13,8 @@ import type { ValueUnit, VisualizationType } from "@/components/dashboard-builde
 
 type StatAggregate = "sum" | "first" | "count" | "avg" | "max" | "min"
 
+export type LegendPosition = "bottom" | "right" | "hidden"
+
 const UNIT_OPTIONS: Array<{ value: ValueUnit; label: string }> = [
   { value: "none", label: "None" },
   { value: "number", label: "Number" },
@@ -32,6 +34,10 @@ const VISUALIZATION_OPTIONS: Array<{ value: VisualizationType; label: string }> 
 ]
 
 interface WidgetSettingsBarProps {
+  title: string
+  onTitleChange: (title: string) => void
+  description: string
+  onDescriptionChange: (description: string) => void
   visualization: VisualizationType
   onVisualizationChange: (visualization: VisualizationType) => void
   chartId: string
@@ -45,10 +51,15 @@ interface WidgetSettingsBarProps {
   unit: ValueUnit
   tableLimit: string
   seriesFieldOptions: string[]
+  legendPosition: LegendPosition
   onChange: (updates: Record<string, unknown>) => void
 }
 
 export function WidgetSettingsBar({
+  title,
+  onTitleChange,
+  description,
+  onDescriptionChange,
   visualization,
   onVisualizationChange,
   chartId,
@@ -62,6 +73,7 @@ export function WidgetSettingsBar({
   unit,
   tableLimit,
   seriesFieldOptions,
+  legendPosition,
   onChange,
 }: WidgetSettingsBarProps) {
   const isChart = visualization === "chart"
@@ -83,8 +95,41 @@ export function WidgetSettingsBar({
   const showCurveToggle = isChart && (chartCategory === "line" || chartCategory === "area")
 
   return (
-    <div className="flex flex-wrap items-end gap-4">
-      <div className="space-y-1">
+    <div className="flex flex-col gap-5">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+        Panel Options
+      </p>
+
+      {/* Name */}
+      <div className="space-y-1.5">
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          Name
+        </p>
+        <Input
+          value={title}
+          onChange={(event) => onTitleChange(event.target.value)}
+          placeholder="Untitled widget"
+        />
+      </div>
+
+      {/* Description */}
+      <div className="space-y-1.5">
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          Description
+        </p>
+        <textarea
+          value={description}
+          onChange={(event) => onDescriptionChange(event.target.value)}
+          placeholder="Add a description..."
+          rows={2}
+          className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+        />
+      </div>
+
+      <div className="h-px bg-border" />
+
+      {/* Type */}
+      <div className="space-y-1.5">
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
           Type
         </p>
@@ -95,7 +140,7 @@ export function WidgetSettingsBar({
               type="button"
               onClick={() => onVisualizationChange(opt.value)}
               className={cn(
-                "px-3 text-xs rounded-sm transition-colors",
+                "flex-1 text-xs rounded-sm transition-colors",
                 visualization === opt.value
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -108,7 +153,7 @@ export function WidgetSettingsBar({
       </div>
 
       {isChart && (
-        <div className="space-y-1 w-48">
+        <div className="space-y-1.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
             Chart Style
           </p>
@@ -132,7 +177,7 @@ export function WidgetSettingsBar({
       )}
 
       {showStackedToggle && (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
             Layout
           </p>
@@ -141,7 +186,7 @@ export function WidgetSettingsBar({
               type="button"
               onClick={() => onChange({ stacked: false })}
               className={cn(
-                "px-3 text-xs rounded-sm transition-colors",
+                "flex-1 text-xs rounded-sm transition-colors",
                 !stacked
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -153,7 +198,7 @@ export function WidgetSettingsBar({
               type="button"
               onClick={() => onChange({ stacked: true })}
               className={cn(
-                "px-3 text-xs rounded-sm transition-colors",
+                "flex-1 text-xs rounded-sm transition-colors",
                 stacked
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -166,7 +211,7 @@ export function WidgetSettingsBar({
       )}
 
       {showCurveToggle && (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
             Curve
           </p>
@@ -175,7 +220,7 @@ export function WidgetSettingsBar({
               type="button"
               onClick={() => onChange({ curveType: "linear" })}
               className={cn(
-                "px-3 text-xs rounded-sm transition-colors",
+                "flex-1 text-xs rounded-sm transition-colors",
                 curveType === "linear"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -187,7 +232,7 @@ export function WidgetSettingsBar({
               type="button"
               onClick={() => onChange({ curveType: "monotone" })}
               className={cn(
-                "px-3 text-xs rounded-sm transition-colors",
+                "flex-1 text-xs rounded-sm transition-colors",
                 curveType === "monotone"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -199,35 +244,64 @@ export function WidgetSettingsBar({
         </div>
       )}
 
-      {!isList && (
-        <div className="space-y-1 w-48">
+      {(isChart || isStat) && <div className="h-px bg-border" />}
+
+      {/* Y-Axis Unit (for chart) / Unit (for stat) */}
+      {(isChart || isStat) && (
+        <div className="space-y-1.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Comparison
+            {isChart ? "Y-Axis Unit" : "Unit"}
           </p>
           <Select
-            items={{ none: "None", previous_period: "Previous period" }}
-            value={comparisonMode}
+            items={UNIT_OPTIONS}
+            value={unit}
             onValueChange={(value) =>
-              onChange({
-                comparisonMode:
-                  value === "previous_period" ? "previous_period" : "none",
-              })
+              onChange({ unit: value as ValueUnit })
             }
           >
             <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="none">None</SelectItem>
-              <SelectItem value="previous_period">Previous period</SelectItem>
+              {UNIT_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
       )}
 
+      {/* Legend position (chart only) */}
+      {isChart && (
+        <div className="space-y-1.5">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Legend
+          </p>
+          <div className="flex h-9 rounded-md border bg-muted/40 p-0.5">
+            {(["bottom", "right", "hidden"] as const).map((pos) => (
+              <button
+                key={pos}
+                type="button"
+                onClick={() => onChange({ legendPosition: pos })}
+                className={cn(
+                  "flex-1 text-xs rounded-sm transition-colors capitalize",
+                  legendPosition === pos
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {pos === "hidden" ? "Hidden" : pos === "right" ? "Right" : "Bottom"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {isStat && (
         <>
-          <div className="space-y-1 w-36">
+          <div className="space-y-1.5">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
               Aggregate
             </p>
@@ -252,7 +326,7 @@ export function WidgetSettingsBar({
             </Select>
           </div>
 
-          <div className="space-y-1 w-48">
+          <div className="space-y-1.5">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
               Value Field
             </p>
@@ -272,35 +346,11 @@ export function WidgetSettingsBar({
               </SelectContent>
             </Select>
           </div>
-
-          <div className="space-y-1 w-40">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              Unit
-            </p>
-            <Select
-              items={UNIT_OPTIONS}
-              value={unit}
-              onValueChange={(value) =>
-                onChange({ unit: value as ValueUnit })
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {UNIT_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
         </>
       )}
 
       {isTable && (
-        <div className="space-y-1 w-36">
+        <div className="space-y-1.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
             Row Limit
           </p>
@@ -315,39 +365,71 @@ export function WidgetSettingsBar({
       )}
 
       {!isList && (
-        <div className="flex items-center gap-4 ml-auto">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="qb-percent-change"
-              checked={includePercentChange}
-              disabled={comparisonMode === "none"}
-              onCheckedChange={(checked) =>
-                onChange({ includePercentChange: checked === true })
+        <>
+          <div className="h-px bg-border" />
+
+          {/* Comparison */}
+          <div className="space-y-1.5">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Comparison
+            </p>
+            <Select
+              items={{ none: "None", previous_period: "Previous period" }}
+              value={comparisonMode}
+              onValueChange={(value) =>
+                onChange({
+                  comparisonMode:
+                    value === "previous_period" ? "previous_period" : "none",
+                })
               }
-            />
-            <label
-              htmlFor="qb-percent-change"
-              className="text-[11px] text-muted-foreground"
             >
-              % change
-            </label>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="previous_period">Previous period</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="qb-debug"
-              checked={debug}
-              onCheckedChange={(checked) =>
-                onChange({ debug: checked === true })
-              }
-            />
-            <label
-              htmlFor="qb-debug"
-              className="text-[11px] text-muted-foreground"
-            >
-              Debug
-            </label>
+
+          <div className="h-px bg-border" />
+
+          {/* Checkboxes */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="qb-percent-change"
+                checked={includePercentChange}
+                disabled={comparisonMode === "none"}
+                onCheckedChange={(checked) =>
+                  onChange({ includePercentChange: checked === true })
+                }
+              />
+              <label
+                htmlFor="qb-percent-change"
+                className="text-xs text-muted-foreground"
+              >
+                % change
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="qb-debug"
+                checked={debug}
+                onCheckedChange={(checked) =>
+                  onChange({ debug: checked === true })
+                }
+              />
+              <label
+                htmlFor="qb-debug"
+                className="text-xs text-muted-foreground"
+              >
+                Debug
+              </label>
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   )
