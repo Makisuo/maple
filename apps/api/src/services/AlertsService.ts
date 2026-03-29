@@ -70,7 +70,9 @@ import {
 } from "@maple/db"
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm"
 import {
+  Array as Arr,
   Effect,
+  HashSet,
   Layer,
   Metric,
   Option,
@@ -1850,8 +1852,28 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         request: AlertRuleUpsertRequest,
       ) {
         yield* requireAdmin(roles)
-        yield* requireRuleRow(orgId, ruleId)
-        return yield* upsertRuleRow(orgId, userId, ruleId, request)
+        const oldRow = yield* requireRuleRow(orgId, ruleId)
+        const result = yield* upsertRuleRow(orgId, userId, ruleId, request)
+
+        // Resolve stale incidents caused by the configuration change
+        const oldNormalized = yield* normalizeRuleRow(oldRow)
+        const newNormalized = yield* normalizeRule(request)
+
+        if (oldNormalized.enabled && !newNormalized.enabled) {
+          // Rule was disabled — resolve all open incidents
+          yield* resolveStaleIncidents(orgId, ruleId, newNormalized, { resolveAll: true })
+        } else if (ruleStructureChanged(oldNormalized, newNormalized)) {
+          // Evaluation mode changed — resolve all and let scheduler re-evaluate fresh
+          yield* resolveStaleIncidents(orgId, ruleId, newNormalized, { resolveAll: true })
+        } else {
+          // Check for services that fell out of scope
+          const staleServiceNames = computeStaleServices(oldNormalized, newNormalized)
+          if (HashSet.size(staleServiceNames) > 0) {
+            yield* resolveStaleIncidents(orgId, ruleId, newNormalized, { staleServiceNames })
+          }
+        }
+
+        return result
       })
 
       const deleteRule = Effect.fn("AlertsService.deleteRule")(function* (
@@ -2532,6 +2554,218 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         if (incidentAction === "resolved") yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, 1)
       })
 
+      /* -------------------------------------------------------------------------- */
+      /*  Stale incident resolution                                               */
+      /* -------------------------------------------------------------------------- */
+
+      const computeStaleServices = (
+        oldRule: NormalizedRule,
+        newRule: NormalizedRule,
+      ): HashSet.HashSet<string> => {
+        // Services removed from the explicit list
+        const removedServices = HashSet.difference(
+          HashSet.fromIterable(oldRule.serviceNames),
+          HashSet.fromIterable(newRule.serviceNames),
+        )
+        // Services newly added to the exclude list
+        const newlyExcluded = HashSet.difference(
+          HashSet.fromIterable(newRule.excludeServiceNames),
+          HashSet.fromIterable(oldRule.excludeServiceNames),
+        )
+        return HashSet.union(removedServices, newlyExcluded)
+      }
+
+      const ruleStructureChanged = (
+        oldRule: NormalizedRule,
+        newRule: NormalizedRule,
+      ): boolean => {
+        if (oldRule.groupBy !== newRule.groupBy) return true
+        if (oldRule.signalType !== newRule.signalType) return true
+        const mode = (r: NormalizedRule) =>
+          r.groupBy != null ? "grouped"
+            : r.serviceNames.length > 1 ? "multi"
+            : "single"
+        return mode(oldRule) !== mode(newRule)
+      }
+
+      const makeSyntheticResolveEvaluation = (normalized: NormalizedRule, reason: string): EvaluatedRule => ({
+        status: "healthy",
+        value: null,
+        sampleCount: 0,
+        threshold: normalized.threshold,
+        comparator: normalized.comparator,
+        reason,
+      })
+
+      const resolveStaleIncidents = Effect.fn("AlertsService.resolveStaleIncidents")(function* (
+        orgId: OrgId,
+        ruleId: string,
+        normalized: NormalizedRule,
+        opts: {
+          readonly staleServiceNames?: HashSet.HashSet<string>
+          readonly resolveAll?: boolean
+        },
+      ) {
+        const openIncidents = yield* dbExecute((db) =>
+          db
+            .select()
+            .from(alertIncidents)
+            .where(
+              and(
+                eq(alertIncidents.orgId, orgId),
+                eq(alertIncidents.ruleId, ruleId),
+                eq(alertIncidents.status, "open"),
+              ),
+            ),
+        )
+
+        const toResolve = opts.resolveAll
+          ? openIncidents
+          : Arr.filter(openIncidents, (i) =>
+            i.serviceName != null && (opts.staleServiceNames
+              ? HashSet.has(opts.staleServiceNames, i.serviceName)
+              : false),
+          )
+
+        if (toResolve.length === 0) return
+
+        const timestamp = now()
+        const syntheticEvaluation = makeSyntheticResolveEvaluation(
+          normalized,
+          "Auto-resolved: rule configuration changed",
+        )
+        const staleGroupKeys = Arr.map(toResolve, (i) => i.serviceName ?? "__total__")
+
+        yield* dbExecute((db) =>
+          db.transaction(async (tx) => {
+            for (const incident of toResolve) {
+              const resolvedIncident = {
+                ...incident,
+                status: "resolved" as const,
+                resolvedAt: timestamp,
+                updatedAt: timestamp,
+              }
+
+              await tx
+                .update(alertIncidents)
+                .set({
+                  status: "resolved",
+                  resolvedAt: timestamp,
+                  updatedAt: timestamp,
+                })
+                .where(eq(alertIncidents.id, incident.id))
+
+              await queueIncidentNotificationsOnDb(
+                tx,
+                orgId,
+                normalized,
+                resolvedIncident,
+                syntheticEvaluation,
+                "resolve",
+                timestamp,
+              )
+            }
+
+            if (opts.resolveAll) {
+              await tx
+                .delete(alertRuleStates)
+                .where(
+                  and(
+                    eq(alertRuleStates.orgId, orgId),
+                    eq(alertRuleStates.ruleId, ruleId),
+                  ),
+                )
+            } else if (staleGroupKeys.length > 0) {
+              await tx
+                .delete(alertRuleStates)
+                .where(
+                  and(
+                    eq(alertRuleStates.orgId, orgId),
+                    eq(alertRuleStates.ruleId, ruleId),
+                    inArray(alertRuleStates.groupKey, staleGroupKeys),
+                  ),
+                )
+            }
+          }),
+        )
+
+        yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, toResolve.length)
+        yield* Metric.update(AlertingMetrics.staleIncidentsResolvedTotal, toResolve.length)
+      })
+
+      const resolveOrphanedGroupIncidents = Effect.fn(
+        "AlertsService.resolveOrphanedGroupIncidents",
+      )(function* (
+        orgId: OrgId,
+        ruleId: string,
+        normalized: NormalizedRule,
+        evaluatedGroups: HashSet.HashSet<string>,
+        timestamp: number,
+      ) {
+        const openIncidents = yield* dbExecute((db) =>
+          db
+            .select()
+            .from(alertIncidents)
+            .where(
+              and(
+                eq(alertIncidents.orgId, orgId),
+                eq(alertIncidents.ruleId, ruleId),
+                eq(alertIncidents.status, "open"),
+              ),
+            ),
+        )
+
+        const orphaned = Arr.filter(openIncidents, (i) =>
+          !HashSet.has(evaluatedGroups, i.serviceName ?? "__total__"),
+        )
+
+        if (orphaned.length === 0) return
+
+        const syntheticEvaluation = makeSyntheticResolveEvaluation(
+          normalized,
+          "Auto-resolved: service no longer appears in evaluation results",
+        )
+
+        yield* Effect.forEach(orphaned, (incident) => {
+          const groupKey = incident.serviceName ?? "__total__"
+          return dbExecute((db) =>
+            db.transaction(async (tx) => {
+              await tx
+                .update(alertIncidents)
+                .set({
+                  status: "resolved",
+                  resolvedAt: timestamp,
+                  updatedAt: timestamp,
+                })
+                .where(eq(alertIncidents.id, incident.id))
+
+              await queueIncidentNotificationsOnDb(
+                tx,
+                orgId,
+                normalized,
+                { ...incident, status: "resolved", resolvedAt: timestamp, updatedAt: timestamp },
+                syntheticEvaluation,
+                "resolve",
+                timestamp,
+              )
+
+              await tx
+                .delete(alertRuleStates)
+                .where(
+                  and(
+                    eq(alertRuleStates.orgId, orgId),
+                    eq(alertRuleStates.ruleId, ruleId),
+                    eq(alertRuleStates.groupKey, groupKey),
+                  ),
+                )
+            }),
+          )
+        })
+
+        yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, orphaned.length)
+        yield* Metric.update(AlertingMetrics.staleIncidentsResolvedTotal, orphaned.length)
+      })
+
       const SCHEDULER_LOCK_TTL_MS = 30_000
 
       const claimRule = (ruleId: string, timestamp: number) =>
@@ -2582,45 +2816,51 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
                 if (normalized.groupBy != null && normalized.serviceNames.length === 0) {
                   const results = yield* evaluateGroupedRule(row.orgId as OrgId, normalized)
-                  const excludeSet = new Set(normalized.excludeServiceNames)
-                  for (const { evaluation, groupKey } of results) {
-                    if (excludeSet.has(groupKey)) continue
-                    yield* recordEvaluationStatus(evaluation)
-                    yield* processEvaluation(
-                      row,
-                      normalized,
-                      evaluation,
-                      groupKey,
-                      groupKey,
-                      timestamp,
-                    )
-                  }
+                  const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
+                  const eligible = Arr.filter(results, (r) => !HashSet.has(excludeSet, r.groupKey))
+
+                  yield* Effect.forEach(eligible, ({ evaluation, groupKey }) =>
+                    Effect.gen(function* () {
+                      yield* recordEvaluationStatus(evaluation)
+                      yield* processEvaluation(row, normalized, evaluation, groupKey, groupKey, timestamp)
+                    }))
+
+                  const evaluatedGroups = HashSet.fromIterable(Arr.map(eligible, (r) => r.groupKey))
+                  yield* resolveOrphanedGroupIncidents(
+                    row.orgId as OrgId,
+                    row.id,
+                    normalized,
+                    evaluatedGroups,
+                    timestamp,
+                  )
                   yield* Metric.update(AlertingMetrics.ruleEvaluationDurationMs, now() - ruleStart)
                   return
                 }
 
                 if (normalized.serviceNames.length > 1) {
-                  for (const svcName of normalized.serviceNames) {
-                    const perServicePlan = yield* compileRulePlan({
-                      ...normalized,
-                      serviceName: svcName,
-                    })
-                    const perService = {
-                      ...normalized,
-                      serviceName: svcName,
-                      compiledPlan: perServicePlan,
-                    }
-                    const evaluation = yield* evaluateRule(row.orgId as OrgId, perService)
-                    yield* recordEvaluationStatus(evaluation)
-                    yield* processEvaluation(
-                      row,
-                      normalized,
-                      evaluation,
-                      svcName,
-                      svcName,
-                      timestamp,
-                    )
-                  }
+                  yield* Effect.forEach(normalized.serviceNames, (svcName) =>
+                    Effect.gen(function* () {
+                      const perServicePlan = yield* compileRulePlan({
+                        ...normalized,
+                        serviceName: svcName,
+                      })
+                      const perService = {
+                        ...normalized,
+                        serviceName: svcName,
+                        compiledPlan: perServicePlan,
+                      }
+                      const evaluation = yield* evaluateRule(row.orgId as OrgId, perService)
+                      yield* recordEvaluationStatus(evaluation)
+                      yield* processEvaluation(row, normalized, evaluation, svcName, svcName, timestamp)
+                    }))
+
+                  yield* resolveOrphanedGroupIncidents(
+                    row.orgId as OrgId,
+                    row.id,
+                    normalized,
+                    HashSet.fromIterable(normalized.serviceNames),
+                    timestamp,
+                  )
                   yield* Metric.update(AlertingMetrics.ruleEvaluationDurationMs, now() - ruleStart)
                   return
                 }
@@ -2662,6 +2902,29 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             }),
           { concurrency: 5 },
         )
+
+        // Resolve stale incidents for disabled rules
+        const disabledRulesWithOpenIncidents = yield* dbExecute((db) =>
+          db
+            .selectDistinct({ ruleId: alertIncidents.ruleId, orgId: alertIncidents.orgId })
+            .from(alertIncidents)
+            .innerJoin(alertRules, eq(alertIncidents.ruleId, alertRules.id))
+            .where(
+              and(
+                eq(alertIncidents.status, "open"),
+                eq(alertRules.enabled, 0),
+              ),
+            ),
+        )
+        yield* Effect.forEach(disabledRulesWithOpenIncidents, ({ ruleId, orgId }) =>
+          Effect.gen(function* () {
+            const ruleRow = (yield* dbExecute((db) =>
+              db.select().from(alertRules).where(eq(alertRules.id, ruleId)).limit(1),
+            ))[0]
+            if (!ruleRow) return
+            const normalized = yield* normalizeRuleRow(ruleRow)
+            yield* resolveStaleIncidents(orgId as OrgId, ruleId, normalized, { resolveAll: true })
+          }))
 
         const deliveryResult = yield* processQueuedDeliveries()
         yield* Metric.update(AlertingMetrics.rulesEvaluatedTotal, rows.length)

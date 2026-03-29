@@ -37,6 +37,11 @@ export const incidentsResolvedTotal = Metric.counter("alerting.incidents_resolve
   incremental: true,
 })
 
+export const staleIncidentsResolvedTotal = Metric.counter("alerting.stale_incidents_resolved_total", {
+  description: "Incidents auto-resolved due to rule config changes or disappeared services",
+  incremental: true,
+})
+
 export const deliveriesAttemptedTotal = Metric.counter("alerting.deliveries_attempted_total", {
   description: "Total number of delivery attempts",
   incremental: true,
