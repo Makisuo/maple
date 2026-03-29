@@ -69,7 +69,7 @@ export { compileCH as compile, type CompiledQuery } from "./compile"
 // Tables
 export * as tables from "./tables"
 
-// Queries
+// Queries — Traces
 export {
   tracesTimeseriesQuery,
   tracesBreakdownQuery,
@@ -81,3 +81,16 @@ export {
   type TracesBreakdownOutput,
   type TracesListOutput,
 } from "./queries/traces"
+
+// Queries — Metrics
+export {
+  metricsTimeseriesQuery,
+  metricsTimeseriesRateSQL,
+  metricsBreakdownQuery,
+  type MetricsTimeseriesOpts,
+  type MetricsTimeseriesOutput,
+  type MetricsRateTimeseriesOpts,
+  type MetricsRateTimeseriesOutput,
+  type MetricsBreakdownOpts,
+  type MetricsBreakdownOutput,
+} from "./queries/metrics"

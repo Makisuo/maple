@@ -725,7 +725,7 @@ function MetricsBody({
 
         <span className="text-xs text-muted-foreground">by</span>
 
-        <Select
+        <Combobox
           value={
             !query.addOns.groupBy ||
             query.groupBy.length === 0 ||
@@ -742,17 +742,20 @@ function MetricsBody({
             }))
           }}
         >
-          <SelectTrigger className="h-8 w-[220px] text-xs">
-            <span className="truncate">{groupByDisplay}</span>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">Everything (no breakdown)</SelectItem>
-            <SelectItem value="service.name">ServiceName</SelectItem>
-            {(autocompleteValues.metrics?.attributeKeys ?? []).map((key) => (
-              <SelectItem key={key} value={`attr.${key}`}>attr.{key}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <ComboboxInput
+            placeholder="Search fields..."
+            className="h-8 w-[220px] text-xs"
+          />
+          <ComboboxContent>
+            <ComboboxList>
+              <ComboboxItem value="__none__">Everything (no breakdown)</ComboboxItem>
+              <ComboboxItem value="service.name">service.name</ComboboxItem>
+              {(autocompleteValues.metrics?.attributeKeys ?? []).map((key) => (
+                <ComboboxItem key={key} value={`attr.${key}`}>attr.{key}</ComboboxItem>
+              ))}
+            </ComboboxList>
+          </ComboboxContent>
+        </Combobox>
       </div>
     </>
   )

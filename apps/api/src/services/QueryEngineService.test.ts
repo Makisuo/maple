@@ -67,13 +67,7 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
   return {
     sqlQuery: unexpected("sqlQuery"),
     customLogsTimeseriesQuery: unexpected("customLogsTimeseriesQuery"),
-    metricTimeSeriesSumQuery: unexpected("metricTimeSeriesSumQuery"),
-    metricTimeSeriesGaugeQuery: unexpected("metricTimeSeriesGaugeQuery"),
-    metricTimeSeriesHistogramQuery: unexpected("metricTimeSeriesHistogramQuery"),
-    metricTimeSeriesExpHistogramQuery: unexpected("metricTimeSeriesExpHistogramQuery"),
-    metricTimeSeriesSumRateQuery: unexpected("metricTimeSeriesSumRateQuery"),
     customLogsBreakdownQuery: unexpected("customLogsBreakdownQuery"),
-    customMetricsBreakdownQuery: unexpected("customMetricsBreakdownQuery"),
     alertTracesAggregateQuery: unexpected("alertTracesAggregateQuery"),
     alertMetricsAggregateQuery: unexpected("alertMetricsAggregateQuery"),
     alertLogsAggregateQuery: unexpected("alertLogsAggregateQuery"),
@@ -333,7 +327,7 @@ describe("makeQueryEngineExecute", () => {
   it("aggregates metrics timeseries into an all series when groupBy=none", async () => {
     const execute = makeQueryEngineExecute(
       makeTinybirdStub({
-        metricTimeSeriesHistogramQuery: () =>
+        sqlQuery: () =>
           Effect.succeed([
             {
               bucket: "2026-01-01 00:00:00",
@@ -396,7 +390,7 @@ describe("makeQueryEngineExecute", () => {
   it("preserves per-service metrics timeseries when groupBy=service", async () => {
     const execute = makeQueryEngineExecute(
       makeTinybirdStub({
-        metricTimeSeriesGaugeQuery: () =>
+        sqlQuery: () =>
           Effect.succeed([
             {
               bucket: "2026-01-01 00:00:00",

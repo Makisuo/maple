@@ -413,13 +413,7 @@ type QueryEngineTinybird = Pick<
   TinybirdServiceShape,
   | "sqlQuery"
   | "customLogsTimeseriesQuery"
-  | "metricTimeSeriesSumQuery"
-  | "metricTimeSeriesGaugeQuery"
-  | "metricTimeSeriesHistogramQuery"
-  | "metricTimeSeriesExpHistogramQuery"
-  | "metricTimeSeriesSumRateQuery"
   | "customLogsBreakdownQuery"
-  | "customMetricsBreakdownQuery"
   | "alertTracesAggregateQuery"
   | "alertMetricsAggregateQuery"
   | "alertLogsAggregateQuery"
@@ -612,24 +606,29 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         : undefined
       const attributeFilter = request.query.filters.attributeFilters?.[0]
 
-      const params = {
-        metric_name: request.query.filters.metricName,
-        service: request.query.filters.serviceName,
-        start_time: request.startTime,
-        end_time: request.endTime,
-        bucket_seconds: bucketSeconds,
-        group_by_attribute_key: groupByAttributeKey,
-        attribute_key: attributeFilter?.key,
-        attribute_value: attributeFilter?.value,
-      }
-
       const isRateOrIncrease = request.query.metric === "rate" || request.query.metric === "increase"
 
       if (isRateOrIncrease) {
-        const rateResult = yield* mapTinybirdError(
-          tinybird.metricTimeSeriesSumRateQuery(tenant, params),
+        const compiled = CH.metricsTimeseriesRateSQL(
+          {
+            serviceName: request.query.filters.serviceName,
+            groupByAttributeKey,
+            attributeKey: attributeFilter?.key,
+            attributeValue: attributeFilter?.value,
+          },
+          {
+            orgId: tenant.orgId,
+            metricName: request.query.filters.metricName,
+            startTime: request.startTime,
+            endTime: request.endTime,
+            bucketSeconds: bucketSeconds!,
+          },
+        )
+        const rawRows = yield* mapTinybirdError(
+          tinybird.sqlQuery(tenant, compiled.sql),
           "Failed to execute metrics rate/increase query",
         )
+        const rateResult = compiled.castRows(rawRows)
 
         const rateValueField = request.query.metric === "rate" ? "rateValue" : "increaseValue"
 
@@ -672,14 +671,23 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         })
       }
 
-      const result = yield* mapTinybirdError(
-        request.query.filters.metricType === "sum"
-          ? tinybird.metricTimeSeriesSumQuery(tenant, params)
-          : request.query.filters.metricType === "gauge"
-            ? tinybird.metricTimeSeriesGaugeQuery(tenant, params)
-            : request.query.filters.metricType === "histogram"
-              ? tinybird.metricTimeSeriesHistogramQuery(tenant, params)
-              : tinybird.metricTimeSeriesExpHistogramQuery(tenant, params),
+      const result = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.metricsTimeseriesQuery({
+          metricType: request.query.filters.metricType,
+          serviceName: request.query.filters.serviceName,
+          groupByAttributeKey,
+          attributeKey: attributeFilter?.key,
+          attributeValue: attributeFilter?.value,
+        }),
+        {
+          orgId: tenant.orgId,
+          metricName: request.query.filters.metricName,
+          startTime: request.startTime,
+          endTime: request.endTime,
+          bucketSeconds: bucketSeconds!,
+        },
         "Failed to execute metrics timeseries query",
       )
 
@@ -793,14 +801,19 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "metrics" && request.query.kind === "breakdown") {
-      const result = yield* mapTinybirdError(
-        tinybird.customMetricsBreakdownQuery(tenant, {
-          metric_name: request.query.filters.metricName,
-          start_time: request.startTime,
-          end_time: request.endTime,
-          metric_type: request.query.filters.metricType,
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.metricsBreakdownQuery({
+          metricType: request.query.filters.metricType,
           limit: request.query.limit,
         }),
+        {
+          orgId: tenant.orgId,
+          metricName: request.query.filters.metricName,
+          startTime: request.startTime,
+          endTime: request.endTime,
+        },
         "Failed to execute metrics breakdown query",
       )
 
@@ -815,7 +828,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         result: {
           kind: "breakdown",
           source: "metrics",
-          data: result.map((row) => ({
+          data: rows.map((row) => ({
             name: row.name,
             value: Number(row[valueField]),
           })),
