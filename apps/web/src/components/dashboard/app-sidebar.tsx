@@ -1,5 +1,5 @@
-import { Link, useRouterState } from "@tanstack/react-router"
-import { useUser, useClerk } from "@clerk/clerk-react"
+import { Link, useRouterState } from "@tanstack/react-router";
+import { useUser, useClerk } from "@clerk/clerk-react";
 import {
   HouseIcon,
   FileIcon,
@@ -15,8 +15,8 @@ import {
   NetworkNodesIcon,
   ChatBubbleSparkleIcon,
   GridIcon,
-} from "@/components/icons"
-import { OrgSwitcher } from "@/components/dashboard/org-switcher"
+} from "@/components/icons";
+import { OrgSwitcher } from "@/components/dashboard/org-switcher";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,7 +25,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@maple/ui/components/ui/dropdown-menu"
+} from "@maple/ui/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -41,16 +41,16 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from "@maple/ui/components/ui/sidebar"
+} from "@maple/ui/components/ui/sidebar";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@maple/ui/components/ui/collapsible"
-import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
-import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
-import { useDashboardStore } from "@/hooks/use-dashboard-store"
-import { Badge } from "@maple/ui/components/ui/badge"
+} from "@maple/ui/components/ui/collapsible";
+import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode";
+import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth";
+import { useDashboardStore } from "@/hooks/use-dashboard-store";
+import { Badge } from "@maple/ui/components/ui/badge";
 
 const mainNavItems = [
   {
@@ -63,7 +63,7 @@ const mainNavItems = [
     href: "/chat",
     icon: ChatBubbleSparkleIcon,
   },
-]
+];
 
 const topologyNavItems = [
   {
@@ -76,7 +76,7 @@ const topologyNavItems = [
     href: "/service-map",
     icon: NetworkNodesIcon,
   },
-]
+];
 
 const signalsNavItems = [
   {
@@ -94,7 +94,7 @@ const signalsNavItems = [
     href: "/metrics",
     icon: ChartLineIcon,
   },
-]
+];
 
 const investigateNavItems = [
   {
@@ -108,43 +108,39 @@ const investigateNavItems = [
     icon: BellIcon,
     badge: "Beta",
   },
-]
+];
 
 function UserAvatar({
   imageUrl,
   initials,
   name,
 }: {
-  imageUrl?: string
-  initials: string
-  name: string
+  imageUrl?: string;
+  initials: string;
+  name: string;
 }) {
   return imageUrl ? (
-    <img
-      src={imageUrl}
-      alt={name}
-      className="size-8 shrink-0 rounded-md object-cover"
-    />
+    <img src={imageUrl} alt={name} className="size-8 shrink-0 rounded-md object-cover" />
   ) : (
     <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground text-xs font-medium">
       {initials}
     </div>
-  )
+  );
 }
 
 function UserMenu() {
-  const { user } = useUser()
-  const { signOut } = useClerk()
+  const { user } = useUser();
+  const { signOut } = useClerk();
 
-  const name = user?.fullName ?? "User"
-  const email = user?.primaryEmailAddress?.emailAddress ?? ""
-  const imageUrl = user?.imageUrl
+  const name = user?.fullName ?? "User";
+  const email = user?.primaryEmailAddress?.emailAddress ?? "";
+  const imageUrl = user?.imageUrl;
   const initials = name
     .split(" ")
     .map((n) => n[0])
     .join("")
     .slice(0, 2)
-    .toUpperCase()
+    .toUpperCase();
 
   return (
     <DropdownMenu>
@@ -159,31 +155,18 @@ function UserMenu() {
         <UserAvatar imageUrl={imageUrl} initials={initials} name={name} />
         <div className="grid flex-1 text-left text-sm leading-tight">
           <span className="truncate font-medium">{name}</span>
-          {email && (
-            <span className="truncate text-xs text-muted-foreground">
-              {email}
-            </span>
-          )}
+          {email && <span className="truncate text-xs text-muted-foreground">{email}</span>}
         </div>
         <ChevronUpIcon size={16} className="ml-auto" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        side="top"
-        align="start"
-        sideOffset={4}
-        className="min-w-56"
-      >
+      <DropdownMenuContent side="top" align="start" sideOffset={4} className="min-w-56">
         <DropdownMenuGroup>
           <DropdownMenuLabel>
             <div className="flex items-center gap-2 py-1 text-left text-sm">
               <UserAvatar imageUrl={imageUrl} initials={initials} name={name} />
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{name}</span>
-                {email && (
-                  <span className="truncate text-xs text-muted-foreground">
-                    {email}
-                  </span>
-                )}
+                {email && <span className="truncate text-xs text-muted-foreground">{email}</span>}
               </div>
             </div>
           </DropdownMenuLabel>
@@ -204,14 +187,14 @@ function UserMenu() {
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  )
+  );
 }
 
 function GuestMenu() {
   const handleLogout = () => {
-    clearSelfHostedSessionToken()
-    window.location.assign("/sign-in")
-  }
+    clearSelfHostedSessionToken();
+    window.location.assign("/sign-in");
+  };
 
   return (
     <DropdownMenu>
@@ -229,12 +212,7 @@ function GuestMenu() {
         </div>
         <ChevronUpIcon size={16} className="ml-auto" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        side="top"
-        align="start"
-        sideOffset={4}
-        className="min-w-56"
-      >
+      <DropdownMenuContent side="top" align="start" sideOffset={4} className="min-w-56">
         <DropdownMenuGroup>
           <DropdownMenuItem render={<Link to="/settings" />}>
             <GearIcon size={16} />
@@ -250,18 +228,16 @@ function GuestMenu() {
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  )
+  );
 }
 
-
 export function AppSidebar() {
-  const routerState = useRouterState()
-  const currentPath = routerState.location.pathname
-  const { dashboards, isLoading } = useDashboardStore()
+  const routerState = useRouterState();
+  const currentPath = routerState.location.pathname;
+  const { dashboards, isLoading } = useDashboardStore();
 
-  const activeDashboardId = (routerState.location.search as Record<string, unknown>)?.dashboardId as string | undefined
-
-  const isDashboardsRoute = currentPath === "/dashboards"
+  const dashboardMatch = currentPath.match(/^\/dashboards\/([^/]+)/);
+  const activeDashboardId = dashboardMatch?.[1];
 
   return (
     <Sidebar collapsible="icon">
@@ -273,7 +249,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {mainNavItems.map((item) => {
-                const isActive = currentPath === item.href
+                const isActive = currentPath === item.href;
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
@@ -285,7 +261,7 @@ export function AppSidebar() {
                       <span>{item.title}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                )
+                );
               })}
             </SidebarMenu>
           </SidebarGroupContent>
@@ -299,7 +275,10 @@ export function AppSidebar() {
               <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-medium">
                 Beta
               </Badge>
-              <ChevronRightIcon size={14} className="ml-auto !size-3.5 transition-transform group-data-[open]/dashboards:rotate-90" />
+              <ChevronRightIcon
+                size={14}
+                className="ml-auto !size-3.5 transition-transform group-data-[open]/dashboards:rotate-90"
+              />
             </SidebarGroupLabel>
             <CollapsibleContent>
               <SidebarGroupContent>
@@ -308,7 +287,7 @@ export function AppSidebar() {
                     <SidebarMenuButton
                       render={<Link to="/dashboards" />}
                       tooltip="All Dashboards"
-                      isActive={isDashboardsRoute && !activeDashboardId}
+                      isActive={currentPath === "/dashboards" || currentPath === "/dashboards/"}
                     >
                       <GridIcon size={18} />
                       <span>All Dashboards</span>
@@ -321,14 +300,11 @@ export function AppSidebar() {
                           <SidebarMenuSubButton
                             render={
                               <Link
-                                to="/dashboards"
-                                search={{ dashboardId: dashboard.id }}
+                                to="/dashboards/$dashboardId"
+                                params={{ dashboardId: dashboard.id }}
                               />
                             }
-                            isActive={
-                              isDashboardsRoute &&
-                              activeDashboardId === dashboard.id
-                            }
+                            isActive={activeDashboardId === dashboard.id}
                           >
                             <span>{dashboard.name}</span>
                           </SidebarMenuSubButton>
@@ -342,38 +318,39 @@ export function AppSidebar() {
           </SidebarGroup>
         </Collapsible>
 
-        {[topologyNavItems, signalsNavItems, investigateNavItems].map(
-          (group) => (
-            <SidebarGroup key={group[0].title}>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {group.map((item) => {
-                    const isActive = currentPath.startsWith(item.href)
-                    return (
-                      <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton
-                          render={<Link to={item.href} />}
-                          tooltip={item.title}
-                          isActive={isActive}
-                        >
-                          <item.icon size={18} />
-                          <span>{item.title}</span>
-                        </SidebarMenuButton>
-                        {"badge" in item && (item.badge as string) ? (
-                          <SidebarMenuBadge>
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-medium">
-                              {item.badge as string}
-                            </Badge>
-                          </SidebarMenuBadge>
-                        ) : null}
-                      </SidebarMenuItem>
-                    )
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ),
-        )}
+        {[topologyNavItems, signalsNavItems, investigateNavItems].map((group) => (
+          <SidebarGroup key={group[0].title}>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.map((item) => {
+                  const isActive = currentPath.startsWith(item.href);
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        render={<Link to={item.href} />}
+                        tooltip={item.title}
+                        isActive={isActive}
+                      >
+                        <item.icon size={18} />
+                        <span>{item.title}</span>
+                      </SidebarMenuButton>
+                      {"badge" in item && (item.badge as string) ? (
+                        <SidebarMenuBadge>
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] px-1.5 py-0 h-4 font-medium"
+                          >
+                            {item.badge as string}
+                          </Badge>
+                        </SidebarMenuBadge>
+                      ) : null}
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
 
         <div className="flex-1" />
 
@@ -396,11 +373,9 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
-          <SidebarMenuItem>
-            {isClerkAuthEnabled ? <UserMenu /> : <GuestMenu />}
-          </SidebarMenuItem>
+          <SidebarMenuItem>{isClerkAuthEnabled ? <UserMenu /> : <GuestMenu />}</SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
-  )
+  );
 }

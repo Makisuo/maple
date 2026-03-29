@@ -8,530 +8,571 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as SignUpRouteImport } from './routes/sign-up'
-import { Route as SignInRouteImport } from './routes/sign-in'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as ServiceMapRouteImport } from './routes/service-map'
-import { Route as SelectPlanRouteImport } from './routes/select-plan'
-import { Route as QuickStartRouteImport } from './routes/quick-start'
-import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
-import { Route as OrgRequiredRouteImport } from './routes/org-required'
-import { Route as MetricsRouteImport } from './routes/metrics'
-import { Route as McpRouteImport } from './routes/mcp'
-import { Route as LogsRouteImport } from './routes/logs'
-import { Route as DeveloperRouteImport } from './routes/developer'
-import { Route as DashboardsRouteImport } from './routes/dashboards'
-import { Route as ConnectorsRouteImport } from './routes/connectors'
-import { Route as ChatRouteImport } from './routes/chat'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as TracesIndexRouteImport } from './routes/traces/index'
-import { Route as ServicesIndexRouteImport } from './routes/services/index'
-import { Route as ErrorsIndexRouteImport } from './routes/errors/index'
-import { Route as AlertsIndexRouteImport } from './routes/alerts/index'
-import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
-import { Route as ServicesServiceNameRouteImport } from './routes/services/$serviceName'
-import { Route as ErrorsErrorTypeRouteImport } from './routes/errors/$errorType'
-import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
-import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
+import { Route as rootRouteImport } from "./routes/__root";
+import { Route as SignUpRouteImport } from "./routes/sign-up";
+import { Route as SignInRouteImport } from "./routes/sign-in";
+import { Route as SettingsRouteImport } from "./routes/settings";
+import { Route as ServiceMapRouteImport } from "./routes/service-map";
+import { Route as SelectPlanRouteImport } from "./routes/select-plan";
+import { Route as QuickStartRouteImport } from "./routes/quick-start";
+import { Route as QueryBuilderLabRouteImport } from "./routes/query-builder-lab";
+import { Route as OrgRequiredRouteImport } from "./routes/org-required";
+import { Route as MetricsRouteImport } from "./routes/metrics";
+import { Route as McpRouteImport } from "./routes/mcp";
+import { Route as LogsRouteImport } from "./routes/logs";
+import { Route as DeveloperRouteImport } from "./routes/developer";
+import { Route as ConnectorsRouteImport } from "./routes/connectors";
+import { Route as ChatRouteImport } from "./routes/chat";
+import { Route as IndexRouteImport } from "./routes/index";
+import { Route as TracesIndexRouteImport } from "./routes/traces/index";
+import { Route as ServicesIndexRouteImport } from "./routes/services/index";
+import { Route as ErrorsIndexRouteImport } from "./routes/errors/index";
+import { Route as DashboardsIndexRouteImport } from "./routes/dashboards/index";
+import { Route as AlertsIndexRouteImport } from "./routes/alerts/index";
+import { Route as TracesTraceIdRouteImport } from "./routes/traces/$traceId";
+import { Route as ServicesServiceNameRouteImport } from "./routes/services/$serviceName";
+import { Route as ErrorsErrorTypeRouteImport } from "./routes/errors/$errorType";
+import { Route as DashboardsDashboardIdRouteImport } from "./routes/dashboards/$dashboardId";
+import { Route as AlertsCreateRouteImport } from "./routes/alerts/create";
+import { Route as AlertsRuleIdRouteImport } from "./routes/alerts/$ruleId";
+import { Route as DashboardsDashboardIdWidgetsWidgetIdRouteImport } from "./routes/dashboards/$dashboardId_.widgets.$widgetId";
 
 const SignUpRoute = SignUpRouteImport.update({
-  id: '/sign-up',
-  path: '/sign-up',
+  id: "/sign-up",
+  path: "/sign-up",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const SignInRoute = SignInRouteImport.update({
-  id: '/sign-in',
-  path: '/sign-in',
+  id: "/sign-in",
+  path: "/sign-in",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
+  id: "/settings",
+  path: "/settings",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ServiceMapRoute = ServiceMapRouteImport.update({
-  id: '/service-map',
-  path: '/service-map',
+  id: "/service-map",
+  path: "/service-map",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const SelectPlanRoute = SelectPlanRouteImport.update({
-  id: '/select-plan',
-  path: '/select-plan',
+  id: "/select-plan",
+  path: "/select-plan",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const QuickStartRoute = QuickStartRouteImport.update({
-  id: '/quick-start',
-  path: '/quick-start',
+  id: "/quick-start",
+  path: "/quick-start",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const QueryBuilderLabRoute = QueryBuilderLabRouteImport.update({
-  id: '/query-builder-lab',
-  path: '/query-builder-lab',
+  id: "/query-builder-lab",
+  path: "/query-builder-lab",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const OrgRequiredRoute = OrgRequiredRouteImport.update({
-  id: '/org-required',
-  path: '/org-required',
+  id: "/org-required",
+  path: "/org-required",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const MetricsRoute = MetricsRouteImport.update({
-  id: '/metrics',
-  path: '/metrics',
+  id: "/metrics",
+  path: "/metrics",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const McpRoute = McpRouteImport.update({
-  id: '/mcp',
-  path: '/mcp',
+  id: "/mcp",
+  path: "/mcp",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const LogsRoute = LogsRouteImport.update({
-  id: '/logs',
-  path: '/logs',
+  id: "/logs",
+  path: "/logs",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const DeveloperRoute = DeveloperRouteImport.update({
-  id: '/developer',
-  path: '/developer',
+  id: "/developer",
+  path: "/developer",
   getParentRoute: () => rootRouteImport,
-} as any)
-const DashboardsRoute = DashboardsRouteImport.update({
-  id: '/dashboards',
-  path: '/dashboards',
-  getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ConnectorsRoute = ConnectorsRouteImport.update({
-  id: '/connectors',
-  path: '/connectors',
+  id: "/connectors",
+  path: "/connectors",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ChatRoute = ChatRouteImport.update({
-  id: '/chat',
-  path: '/chat',
+  id: "/chat",
+  path: "/chat",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+  id: "/",
+  path: "/",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const TracesIndexRoute = TracesIndexRouteImport.update({
-  id: '/traces/',
-  path: '/traces/',
+  id: "/traces/",
+  path: "/traces/",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ServicesIndexRoute = ServicesIndexRouteImport.update({
-  id: '/services/',
-  path: '/services/',
+  id: "/services/",
+  path: "/services/",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ErrorsIndexRoute = ErrorsIndexRouteImport.update({
-  id: '/errors/',
-  path: '/errors/',
+  id: "/errors/",
+  path: "/errors/",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
+const DashboardsIndexRoute = DashboardsIndexRouteImport.update({
+  id: "/dashboards/",
+  path: "/dashboards/",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const AlertsIndexRoute = AlertsIndexRouteImport.update({
-  id: '/alerts/',
-  path: '/alerts/',
+  id: "/alerts/",
+  path: "/alerts/",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const TracesTraceIdRoute = TracesTraceIdRouteImport.update({
-  id: '/traces/$traceId',
-  path: '/traces/$traceId',
+  id: "/traces/$traceId",
+  path: "/traces/$traceId",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ServicesServiceNameRoute = ServicesServiceNameRouteImport.update({
-  id: '/services/$serviceName',
-  path: '/services/$serviceName',
+  id: "/services/$serviceName",
+  path: "/services/$serviceName",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ErrorsErrorTypeRoute = ErrorsErrorTypeRouteImport.update({
-  id: '/errors/$errorType',
-  path: '/errors/$errorType',
+  id: "/errors/$errorType",
+  path: "/errors/$errorType",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
+const DashboardsDashboardIdRoute = DashboardsDashboardIdRouteImport.update({
+  id: "/dashboards/$dashboardId",
+  path: "/dashboards/$dashboardId",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const AlertsCreateRoute = AlertsCreateRouteImport.update({
-  id: '/alerts/create',
-  path: '/alerts/create',
+  id: "/alerts/create",
+  path: "/alerts/create",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const AlertsRuleIdRoute = AlertsRuleIdRouteImport.update({
-  id: '/alerts/$ruleId',
-  path: '/alerts/$ruleId',
+  id: "/alerts/$ruleId",
+  path: "/alerts/$ruleId",
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
+const DashboardsDashboardIdWidgetsWidgetIdRoute =
+  DashboardsDashboardIdWidgetsWidgetIdRouteImport.update({
+    id: "/dashboards/$dashboardId_/widgets/$widgetId",
+    path: "/dashboards/$dashboardId/widgets/$widgetId",
+    getParentRoute: () => rootRouteImport,
+  } as any);
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/chat': typeof ChatRoute
-  '/connectors': typeof ConnectorsRoute
-  '/dashboards': typeof DashboardsRoute
-  '/developer': typeof DeveloperRoute
-  '/logs': typeof LogsRoute
-  '/mcp': typeof McpRoute
-  '/metrics': typeof MetricsRoute
-  '/org-required': typeof OrgRequiredRoute
-  '/query-builder-lab': typeof QueryBuilderLabRoute
-  '/quick-start': typeof QuickStartRoute
-  '/select-plan': typeof SelectPlanRoute
-  '/service-map': typeof ServiceMapRoute
-  '/settings': typeof SettingsRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/alerts/$ruleId': typeof AlertsRuleIdRoute
-  '/alerts/create': typeof AlertsCreateRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
-  '/services/$serviceName': typeof ServicesServiceNameRoute
-  '/traces/$traceId': typeof TracesTraceIdRoute
-  '/alerts/': typeof AlertsIndexRoute
-  '/errors/': typeof ErrorsIndexRoute
-  '/services/': typeof ServicesIndexRoute
-  '/traces/': typeof TracesIndexRoute
+  "/": typeof IndexRoute;
+  "/chat": typeof ChatRoute;
+  "/connectors": typeof ConnectorsRoute;
+  "/developer": typeof DeveloperRoute;
+  "/logs": typeof LogsRoute;
+  "/mcp": typeof McpRoute;
+  "/metrics": typeof MetricsRoute;
+  "/org-required": typeof OrgRequiredRoute;
+  "/query-builder-lab": typeof QueryBuilderLabRoute;
+  "/quick-start": typeof QuickStartRoute;
+  "/select-plan": typeof SelectPlanRoute;
+  "/service-map": typeof ServiceMapRoute;
+  "/settings": typeof SettingsRoute;
+  "/sign-in": typeof SignInRoute;
+  "/sign-up": typeof SignUpRoute;
+  "/alerts/$ruleId": typeof AlertsRuleIdRoute;
+  "/alerts/create": typeof AlertsCreateRoute;
+  "/dashboards/$dashboardId": typeof DashboardsDashboardIdRoute;
+  "/errors/$errorType": typeof ErrorsErrorTypeRoute;
+  "/services/$serviceName": typeof ServicesServiceNameRoute;
+  "/traces/$traceId": typeof TracesTraceIdRoute;
+  "/alerts/": typeof AlertsIndexRoute;
+  "/dashboards/": typeof DashboardsIndexRoute;
+  "/errors/": typeof ErrorsIndexRoute;
+  "/services/": typeof ServicesIndexRoute;
+  "/traces/": typeof TracesIndexRoute;
+  "/dashboards/$dashboardId/widgets/$widgetId": typeof DashboardsDashboardIdWidgetsWidgetIdRoute;
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/chat': typeof ChatRoute
-  '/connectors': typeof ConnectorsRoute
-  '/dashboards': typeof DashboardsRoute
-  '/developer': typeof DeveloperRoute
-  '/logs': typeof LogsRoute
-  '/mcp': typeof McpRoute
-  '/metrics': typeof MetricsRoute
-  '/org-required': typeof OrgRequiredRoute
-  '/query-builder-lab': typeof QueryBuilderLabRoute
-  '/quick-start': typeof QuickStartRoute
-  '/select-plan': typeof SelectPlanRoute
-  '/service-map': typeof ServiceMapRoute
-  '/settings': typeof SettingsRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/alerts/$ruleId': typeof AlertsRuleIdRoute
-  '/alerts/create': typeof AlertsCreateRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
-  '/services/$serviceName': typeof ServicesServiceNameRoute
-  '/traces/$traceId': typeof TracesTraceIdRoute
-  '/alerts': typeof AlertsIndexRoute
-  '/errors': typeof ErrorsIndexRoute
-  '/services': typeof ServicesIndexRoute
-  '/traces': typeof TracesIndexRoute
+  "/": typeof IndexRoute;
+  "/chat": typeof ChatRoute;
+  "/connectors": typeof ConnectorsRoute;
+  "/developer": typeof DeveloperRoute;
+  "/logs": typeof LogsRoute;
+  "/mcp": typeof McpRoute;
+  "/metrics": typeof MetricsRoute;
+  "/org-required": typeof OrgRequiredRoute;
+  "/query-builder-lab": typeof QueryBuilderLabRoute;
+  "/quick-start": typeof QuickStartRoute;
+  "/select-plan": typeof SelectPlanRoute;
+  "/service-map": typeof ServiceMapRoute;
+  "/settings": typeof SettingsRoute;
+  "/sign-in": typeof SignInRoute;
+  "/sign-up": typeof SignUpRoute;
+  "/alerts/$ruleId": typeof AlertsRuleIdRoute;
+  "/alerts/create": typeof AlertsCreateRoute;
+  "/dashboards/$dashboardId": typeof DashboardsDashboardIdRoute;
+  "/errors/$errorType": typeof ErrorsErrorTypeRoute;
+  "/services/$serviceName": typeof ServicesServiceNameRoute;
+  "/traces/$traceId": typeof TracesTraceIdRoute;
+  "/alerts": typeof AlertsIndexRoute;
+  "/dashboards": typeof DashboardsIndexRoute;
+  "/errors": typeof ErrorsIndexRoute;
+  "/services": typeof ServicesIndexRoute;
+  "/traces": typeof TracesIndexRoute;
+  "/dashboards/$dashboardId/widgets/$widgetId": typeof DashboardsDashboardIdWidgetsWidgetIdRoute;
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/chat': typeof ChatRoute
-  '/connectors': typeof ConnectorsRoute
-  '/dashboards': typeof DashboardsRoute
-  '/developer': typeof DeveloperRoute
-  '/logs': typeof LogsRoute
-  '/mcp': typeof McpRoute
-  '/metrics': typeof MetricsRoute
-  '/org-required': typeof OrgRequiredRoute
-  '/query-builder-lab': typeof QueryBuilderLabRoute
-  '/quick-start': typeof QuickStartRoute
-  '/select-plan': typeof SelectPlanRoute
-  '/service-map': typeof ServiceMapRoute
-  '/settings': typeof SettingsRoute
-  '/sign-in': typeof SignInRoute
-  '/sign-up': typeof SignUpRoute
-  '/alerts/$ruleId': typeof AlertsRuleIdRoute
-  '/alerts/create': typeof AlertsCreateRoute
-  '/errors/$errorType': typeof ErrorsErrorTypeRoute
-  '/services/$serviceName': typeof ServicesServiceNameRoute
-  '/traces/$traceId': typeof TracesTraceIdRoute
-  '/alerts/': typeof AlertsIndexRoute
-  '/errors/': typeof ErrorsIndexRoute
-  '/services/': typeof ServicesIndexRoute
-  '/traces/': typeof TracesIndexRoute
+  __root__: typeof rootRouteImport;
+  "/": typeof IndexRoute;
+  "/chat": typeof ChatRoute;
+  "/connectors": typeof ConnectorsRoute;
+  "/developer": typeof DeveloperRoute;
+  "/logs": typeof LogsRoute;
+  "/mcp": typeof McpRoute;
+  "/metrics": typeof MetricsRoute;
+  "/org-required": typeof OrgRequiredRoute;
+  "/query-builder-lab": typeof QueryBuilderLabRoute;
+  "/quick-start": typeof QuickStartRoute;
+  "/select-plan": typeof SelectPlanRoute;
+  "/service-map": typeof ServiceMapRoute;
+  "/settings": typeof SettingsRoute;
+  "/sign-in": typeof SignInRoute;
+  "/sign-up": typeof SignUpRoute;
+  "/alerts/$ruleId": typeof AlertsRuleIdRoute;
+  "/alerts/create": typeof AlertsCreateRoute;
+  "/dashboards/$dashboardId": typeof DashboardsDashboardIdRoute;
+  "/errors/$errorType": typeof ErrorsErrorTypeRoute;
+  "/services/$serviceName": typeof ServicesServiceNameRoute;
+  "/traces/$traceId": typeof TracesTraceIdRoute;
+  "/alerts/": typeof AlertsIndexRoute;
+  "/dashboards/": typeof DashboardsIndexRoute;
+  "/errors/": typeof ErrorsIndexRoute;
+  "/services/": typeof ServicesIndexRoute;
+  "/traces/": typeof TracesIndexRoute;
+  "/dashboards/$dashboardId_/widgets/$widgetId": typeof DashboardsDashboardIdWidgetsWidgetIdRoute;
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
+  fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
-    | '/'
-    | '/chat'
-    | '/connectors'
-    | '/dashboards'
-    | '/developer'
-    | '/logs'
-    | '/mcp'
-    | '/metrics'
-    | '/org-required'
-    | '/query-builder-lab'
-    | '/quick-start'
-    | '/select-plan'
-    | '/service-map'
-    | '/settings'
-    | '/sign-in'
-    | '/sign-up'
-    | '/alerts/$ruleId'
-    | '/alerts/create'
-    | '/errors/$errorType'
-    | '/services/$serviceName'
-    | '/traces/$traceId'
-    | '/alerts/'
-    | '/errors/'
-    | '/services/'
-    | '/traces/'
-  fileRoutesByTo: FileRoutesByTo
+    | "/"
+    | "/chat"
+    | "/connectors"
+    | "/developer"
+    | "/logs"
+    | "/mcp"
+    | "/metrics"
+    | "/org-required"
+    | "/query-builder-lab"
+    | "/quick-start"
+    | "/select-plan"
+    | "/service-map"
+    | "/settings"
+    | "/sign-in"
+    | "/sign-up"
+    | "/alerts/$ruleId"
+    | "/alerts/create"
+    | "/dashboards/$dashboardId"
+    | "/errors/$errorType"
+    | "/services/$serviceName"
+    | "/traces/$traceId"
+    | "/alerts/"
+    | "/dashboards/"
+    | "/errors/"
+    | "/services/"
+    | "/traces/"
+    | "/dashboards/$dashboardId/widgets/$widgetId";
+  fileRoutesByTo: FileRoutesByTo;
   to:
-    | '/'
-    | '/chat'
-    | '/connectors'
-    | '/dashboards'
-    | '/developer'
-    | '/logs'
-    | '/mcp'
-    | '/metrics'
-    | '/org-required'
-    | '/query-builder-lab'
-    | '/quick-start'
-    | '/select-plan'
-    | '/service-map'
-    | '/settings'
-    | '/sign-in'
-    | '/sign-up'
-    | '/alerts/$ruleId'
-    | '/alerts/create'
-    | '/errors/$errorType'
-    | '/services/$serviceName'
-    | '/traces/$traceId'
-    | '/alerts'
-    | '/errors'
-    | '/services'
-    | '/traces'
+    | "/"
+    | "/chat"
+    | "/connectors"
+    | "/developer"
+    | "/logs"
+    | "/mcp"
+    | "/metrics"
+    | "/org-required"
+    | "/query-builder-lab"
+    | "/quick-start"
+    | "/select-plan"
+    | "/service-map"
+    | "/settings"
+    | "/sign-in"
+    | "/sign-up"
+    | "/alerts/$ruleId"
+    | "/alerts/create"
+    | "/dashboards/$dashboardId"
+    | "/errors/$errorType"
+    | "/services/$serviceName"
+    | "/traces/$traceId"
+    | "/alerts"
+    | "/dashboards"
+    | "/errors"
+    | "/services"
+    | "/traces"
+    | "/dashboards/$dashboardId/widgets/$widgetId";
   id:
-    | '__root__'
-    | '/'
-    | '/chat'
-    | '/connectors'
-    | '/dashboards'
-    | '/developer'
-    | '/logs'
-    | '/mcp'
-    | '/metrics'
-    | '/org-required'
-    | '/query-builder-lab'
-    | '/quick-start'
-    | '/select-plan'
-    | '/service-map'
-    | '/settings'
-    | '/sign-in'
-    | '/sign-up'
-    | '/alerts/$ruleId'
-    | '/alerts/create'
-    | '/errors/$errorType'
-    | '/services/$serviceName'
-    | '/traces/$traceId'
-    | '/alerts/'
-    | '/errors/'
-    | '/services/'
-    | '/traces/'
-  fileRoutesById: FileRoutesById
+    | "__root__"
+    | "/"
+    | "/chat"
+    | "/connectors"
+    | "/developer"
+    | "/logs"
+    | "/mcp"
+    | "/metrics"
+    | "/org-required"
+    | "/query-builder-lab"
+    | "/quick-start"
+    | "/select-plan"
+    | "/service-map"
+    | "/settings"
+    | "/sign-in"
+    | "/sign-up"
+    | "/alerts/$ruleId"
+    | "/alerts/create"
+    | "/dashboards/$dashboardId"
+    | "/errors/$errorType"
+    | "/services/$serviceName"
+    | "/traces/$traceId"
+    | "/alerts/"
+    | "/dashboards/"
+    | "/errors/"
+    | "/services/"
+    | "/traces/"
+    | "/dashboards/$dashboardId_/widgets/$widgetId";
+  fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  ChatRoute: typeof ChatRoute
-  ConnectorsRoute: typeof ConnectorsRoute
-  DashboardsRoute: typeof DashboardsRoute
-  DeveloperRoute: typeof DeveloperRoute
-  LogsRoute: typeof LogsRoute
-  McpRoute: typeof McpRoute
-  MetricsRoute: typeof MetricsRoute
-  OrgRequiredRoute: typeof OrgRequiredRoute
-  QueryBuilderLabRoute: typeof QueryBuilderLabRoute
-  QuickStartRoute: typeof QuickStartRoute
-  SelectPlanRoute: typeof SelectPlanRoute
-  ServiceMapRoute: typeof ServiceMapRoute
-  SettingsRoute: typeof SettingsRoute
-  SignInRoute: typeof SignInRoute
-  SignUpRoute: typeof SignUpRoute
-  AlertsRuleIdRoute: typeof AlertsRuleIdRoute
-  AlertsCreateRoute: typeof AlertsCreateRoute
-  ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute
-  ServicesServiceNameRoute: typeof ServicesServiceNameRoute
-  TracesTraceIdRoute: typeof TracesTraceIdRoute
-  AlertsIndexRoute: typeof AlertsIndexRoute
-  ErrorsIndexRoute: typeof ErrorsIndexRoute
-  ServicesIndexRoute: typeof ServicesIndexRoute
-  TracesIndexRoute: typeof TracesIndexRoute
+  IndexRoute: typeof IndexRoute;
+  ChatRoute: typeof ChatRoute;
+  ConnectorsRoute: typeof ConnectorsRoute;
+  DeveloperRoute: typeof DeveloperRoute;
+  LogsRoute: typeof LogsRoute;
+  McpRoute: typeof McpRoute;
+  MetricsRoute: typeof MetricsRoute;
+  OrgRequiredRoute: typeof OrgRequiredRoute;
+  QueryBuilderLabRoute: typeof QueryBuilderLabRoute;
+  QuickStartRoute: typeof QuickStartRoute;
+  SelectPlanRoute: typeof SelectPlanRoute;
+  ServiceMapRoute: typeof ServiceMapRoute;
+  SettingsRoute: typeof SettingsRoute;
+  SignInRoute: typeof SignInRoute;
+  SignUpRoute: typeof SignUpRoute;
+  AlertsRuleIdRoute: typeof AlertsRuleIdRoute;
+  AlertsCreateRoute: typeof AlertsCreateRoute;
+  DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute;
+  ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute;
+  ServicesServiceNameRoute: typeof ServicesServiceNameRoute;
+  TracesTraceIdRoute: typeof TracesTraceIdRoute;
+  AlertsIndexRoute: typeof AlertsIndexRoute;
+  DashboardsIndexRoute: typeof DashboardsIndexRoute;
+  ErrorsIndexRoute: typeof ErrorsIndexRoute;
+  ServicesIndexRoute: typeof ServicesIndexRoute;
+  TracesIndexRoute: typeof TracesIndexRoute;
+  DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute;
 }
 
-declare module '@tanstack/react-router' {
+declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
-    '/sign-up': {
-      id: '/sign-up'
-      path: '/sign-up'
-      fullPath: '/sign-up'
-      preLoaderRoute: typeof SignUpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sign-in': {
-      id: '/sign-in'
-      path: '/sign-in'
-      fullPath: '/sign-in'
-      preLoaderRoute: typeof SignInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/service-map': {
-      id: '/service-map'
-      path: '/service-map'
-      fullPath: '/service-map'
-      preLoaderRoute: typeof ServiceMapRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/select-plan': {
-      id: '/select-plan'
-      path: '/select-plan'
-      fullPath: '/select-plan'
-      preLoaderRoute: typeof SelectPlanRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/quick-start': {
-      id: '/quick-start'
-      path: '/quick-start'
-      fullPath: '/quick-start'
-      preLoaderRoute: typeof QuickStartRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/query-builder-lab': {
-      id: '/query-builder-lab'
-      path: '/query-builder-lab'
-      fullPath: '/query-builder-lab'
-      preLoaderRoute: typeof QueryBuilderLabRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/org-required': {
-      id: '/org-required'
-      path: '/org-required'
-      fullPath: '/org-required'
-      preLoaderRoute: typeof OrgRequiredRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/metrics': {
-      id: '/metrics'
-      path: '/metrics'
-      fullPath: '/metrics'
-      preLoaderRoute: typeof MetricsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mcp': {
-      id: '/mcp'
-      path: '/mcp'
-      fullPath: '/mcp'
-      preLoaderRoute: typeof McpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/logs': {
-      id: '/logs'
-      path: '/logs'
-      fullPath: '/logs'
-      preLoaderRoute: typeof LogsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/developer': {
-      id: '/developer'
-      path: '/developer'
-      fullPath: '/developer'
-      preLoaderRoute: typeof DeveloperRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboards': {
-      id: '/dashboards'
-      path: '/dashboards'
-      fullPath: '/dashboards'
-      preLoaderRoute: typeof DashboardsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/connectors': {
-      id: '/connectors'
-      path: '/connectors'
-      fullPath: '/connectors'
-      preLoaderRoute: typeof ConnectorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/chat': {
-      id: '/chat'
-      path: '/chat'
-      fullPath: '/chat'
-      preLoaderRoute: typeof ChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/traces/': {
-      id: '/traces/'
-      path: '/traces'
-      fullPath: '/traces/'
-      preLoaderRoute: typeof TracesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/services/': {
-      id: '/services/'
-      path: '/services'
-      fullPath: '/services/'
-      preLoaderRoute: typeof ServicesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/errors/': {
-      id: '/errors/'
-      path: '/errors'
-      fullPath: '/errors/'
-      preLoaderRoute: typeof ErrorsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/alerts/': {
-      id: '/alerts/'
-      path: '/alerts'
-      fullPath: '/alerts/'
-      preLoaderRoute: typeof AlertsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/traces/$traceId': {
-      id: '/traces/$traceId'
-      path: '/traces/$traceId'
-      fullPath: '/traces/$traceId'
-      preLoaderRoute: typeof TracesTraceIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/services/$serviceName': {
-      id: '/services/$serviceName'
-      path: '/services/$serviceName'
-      fullPath: '/services/$serviceName'
-      preLoaderRoute: typeof ServicesServiceNameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/errors/$errorType': {
-      id: '/errors/$errorType'
-      path: '/errors/$errorType'
-      fullPath: '/errors/$errorType'
-      preLoaderRoute: typeof ErrorsErrorTypeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/alerts/create': {
-      id: '/alerts/create'
-      path: '/alerts/create'
-      fullPath: '/alerts/create'
-      preLoaderRoute: typeof AlertsCreateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/alerts/$ruleId': {
-      id: '/alerts/$ruleId'
-      path: '/alerts/$ruleId'
-      fullPath: '/alerts/$ruleId'
-      preLoaderRoute: typeof AlertsRuleIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+    "/sign-up": {
+      id: "/sign-up";
+      path: "/sign-up";
+      fullPath: "/sign-up";
+      preLoaderRoute: typeof SignUpRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/sign-in": {
+      id: "/sign-in";
+      path: "/sign-in";
+      fullPath: "/sign-in";
+      preLoaderRoute: typeof SignInRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/settings": {
+      id: "/settings";
+      path: "/settings";
+      fullPath: "/settings";
+      preLoaderRoute: typeof SettingsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/service-map": {
+      id: "/service-map";
+      path: "/service-map";
+      fullPath: "/service-map";
+      preLoaderRoute: typeof ServiceMapRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/select-plan": {
+      id: "/select-plan";
+      path: "/select-plan";
+      fullPath: "/select-plan";
+      preLoaderRoute: typeof SelectPlanRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/quick-start": {
+      id: "/quick-start";
+      path: "/quick-start";
+      fullPath: "/quick-start";
+      preLoaderRoute: typeof QuickStartRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/query-builder-lab": {
+      id: "/query-builder-lab";
+      path: "/query-builder-lab";
+      fullPath: "/query-builder-lab";
+      preLoaderRoute: typeof QueryBuilderLabRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/org-required": {
+      id: "/org-required";
+      path: "/org-required";
+      fullPath: "/org-required";
+      preLoaderRoute: typeof OrgRequiredRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/metrics": {
+      id: "/metrics";
+      path: "/metrics";
+      fullPath: "/metrics";
+      preLoaderRoute: typeof MetricsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/mcp": {
+      id: "/mcp";
+      path: "/mcp";
+      fullPath: "/mcp";
+      preLoaderRoute: typeof McpRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/logs": {
+      id: "/logs";
+      path: "/logs";
+      fullPath: "/logs";
+      preLoaderRoute: typeof LogsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/developer": {
+      id: "/developer";
+      path: "/developer";
+      fullPath: "/developer";
+      preLoaderRoute: typeof DeveloperRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/connectors": {
+      id: "/connectors";
+      path: "/connectors";
+      fullPath: "/connectors";
+      preLoaderRoute: typeof ConnectorsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/chat": {
+      id: "/chat";
+      path: "/chat";
+      fullPath: "/chat";
+      preLoaderRoute: typeof ChatRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/": {
+      id: "/";
+      path: "/";
+      fullPath: "/";
+      preLoaderRoute: typeof IndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/traces/": {
+      id: "/traces/";
+      path: "/traces";
+      fullPath: "/traces/";
+      preLoaderRoute: typeof TracesIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/services/": {
+      id: "/services/";
+      path: "/services";
+      fullPath: "/services/";
+      preLoaderRoute: typeof ServicesIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/errors/": {
+      id: "/errors/";
+      path: "/errors";
+      fullPath: "/errors/";
+      preLoaderRoute: typeof ErrorsIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/dashboards/": {
+      id: "/dashboards/";
+      path: "/dashboards";
+      fullPath: "/dashboards/";
+      preLoaderRoute: typeof DashboardsIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/alerts/": {
+      id: "/alerts/";
+      path: "/alerts";
+      fullPath: "/alerts/";
+      preLoaderRoute: typeof AlertsIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/traces/$traceId": {
+      id: "/traces/$traceId";
+      path: "/traces/$traceId";
+      fullPath: "/traces/$traceId";
+      preLoaderRoute: typeof TracesTraceIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/services/$serviceName": {
+      id: "/services/$serviceName";
+      path: "/services/$serviceName";
+      fullPath: "/services/$serviceName";
+      preLoaderRoute: typeof ServicesServiceNameRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/errors/$errorType": {
+      id: "/errors/$errorType";
+      path: "/errors/$errorType";
+      fullPath: "/errors/$errorType";
+      preLoaderRoute: typeof ErrorsErrorTypeRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/dashboards/$dashboardId": {
+      id: "/dashboards/$dashboardId";
+      path: "/dashboards/$dashboardId";
+      fullPath: "/dashboards/$dashboardId";
+      preLoaderRoute: typeof DashboardsDashboardIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/alerts/create": {
+      id: "/alerts/create";
+      path: "/alerts/create";
+      fullPath: "/alerts/create";
+      preLoaderRoute: typeof AlertsCreateRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/alerts/$ruleId": {
+      id: "/alerts/$ruleId";
+      path: "/alerts/$ruleId";
+      fullPath: "/alerts/$ruleId";
+      preLoaderRoute: typeof AlertsRuleIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/dashboards/$dashboardId_/widgets/$widgetId": {
+      id: "/dashboards/$dashboardId_/widgets/$widgetId";
+      path: "/dashboards/$dashboardId/widgets/$widgetId";
+      fullPath: "/dashboards/$dashboardId/widgets/$widgetId";
+      preLoaderRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
   }
 }
 
@@ -539,7 +580,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatRoute: ChatRoute,
   ConnectorsRoute: ConnectorsRoute,
-  DashboardsRoute: DashboardsRoute,
   DeveloperRoute: DeveloperRoute,
   LogsRoute: LogsRoute,
   McpRoute: McpRoute,
@@ -554,14 +594,17 @@ const rootRouteChildren: RootRouteChildren = {
   SignUpRoute: SignUpRoute,
   AlertsRuleIdRoute: AlertsRuleIdRoute,
   AlertsCreateRoute: AlertsCreateRoute,
+  DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
   ErrorsErrorTypeRoute: ErrorsErrorTypeRoute,
   ServicesServiceNameRoute: ServicesServiceNameRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
   AlertsIndexRoute: AlertsIndexRoute,
+  DashboardsIndexRoute: DashboardsIndexRoute,
   ErrorsIndexRoute: ErrorsIndexRoute,
   ServicesIndexRoute: ServicesIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
-}
+  DashboardsDashboardIdWidgetsWidgetIdRoute: DashboardsDashboardIdWidgetsWidgetIdRoute,
+};
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+  ._addFileTypes<FileRouteTypes>();
