@@ -62,6 +62,8 @@ export const MetricsFilters = Schema.Struct({
   metricName: Schema.String,
   metricType: MetricType,
   serviceName: Schema.optional(Schema.String),
+  groupByAttributeKey: Schema.optional(Schema.String),
+  attributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
 })
 export type MetricsFilters = Schema.Schema.Type<typeof MetricsFilters>
 
@@ -105,7 +107,7 @@ export const MetricsTimeseriesQuery = Schema.Struct({
   kind: Schema.Literal("timeseries"),
   source: Schema.Literal("metrics"),
   metric: MetricsMetric,
-  groupBy: Schema.optional(Schema.Array(Schema.Literals(["service", "none"]))),
+  groupBy: Schema.optional(Schema.Array(Schema.Literals(["service", "attribute", "none"]))),
   filters: MetricsFilters,
   bucketSeconds: Schema.optional(
     Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),

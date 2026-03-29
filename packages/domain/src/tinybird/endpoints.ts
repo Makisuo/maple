@@ -775,6 +775,7 @@ export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
     bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
     attribute_key: p.string().optional().describe("Filter by Attributes[key]"),
     attribute_value: p.string().optional().describe("Value for attribute filter"),
+    group_by_attribute_key: p.string().optional().describe("Group by Attributes[key] value"),
   },
   nodes: [
     node({
@@ -783,6 +784,9 @@ export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
         SELECT
           toStartOfInterval(TimeUnix, INTERVAL {{Int32(bucket_seconds, 60)}} SECOND) AS bucket,
           ServiceName AS serviceName,
+          {% if defined(group_by_attribute_key) %}
+            Attributes[{{String(group_by_attribute_key)}}] AS attributeValue,
+          {% end %}
           avg(Value) AS avgValue,
           min(Value) AS minValue,
           max(Value) AS maxValue,
@@ -804,6 +808,9 @@ export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
           AND Attributes[{{String(attribute_key)}}] = {{String(attribute_value, '')}}
         {% end %}
         GROUP BY bucket, ServiceName
+        {% if defined(group_by_attribute_key) %}
+          , Attributes[{{String(group_by_attribute_key)}}]
+        {% end %}
         ORDER BY bucket ASC
       `,
     }),
@@ -811,6 +818,7 @@ export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
   output: {
     bucket: t.dateTime(),
     serviceName: t.string(),
+    attributeValue: t.string().optional(),
     avgValue: t.float64(),
     minValue: t.float64(),
     maxValue: t.float64(),
@@ -834,6 +842,9 @@ export const metricTimeSeriesGauge = defineEndpoint("metric_time_series_gauge", 
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
+    attribute_key: p.string().optional().describe("Filter by Attributes[key]"),
+    attribute_value: p.string().optional().describe("Value for attribute filter"),
+    group_by_attribute_key: p.string().optional().describe("Group by Attributes[key] value"),
   },
   nodes: [
     node({
@@ -842,6 +853,9 @@ export const metricTimeSeriesGauge = defineEndpoint("metric_time_series_gauge", 
         SELECT
           toStartOfInterval(TimeUnix, INTERVAL {{Int32(bucket_seconds, 60)}} SECOND) AS bucket,
           ServiceName AS serviceName,
+          {% if defined(group_by_attribute_key) %}
+            Attributes[{{String(group_by_attribute_key)}}] AS attributeValue,
+          {% end %}
           avg(Value) AS avgValue,
           min(Value) AS minValue,
           max(Value) AS maxValue,
@@ -859,7 +873,13 @@ export const metricTimeSeriesGauge = defineEndpoint("metric_time_series_gauge", 
         {% if defined(end_time) %}
           AND TimeUnix <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
+        {% if defined(attribute_key) %}
+          AND Attributes[{{String(attribute_key)}}] = {{String(attribute_value, '')}}
+        {% end %}
         GROUP BY bucket, ServiceName
+        {% if defined(group_by_attribute_key) %}
+          , Attributes[{{String(group_by_attribute_key)}}]
+        {% end %}
         ORDER BY bucket ASC
       `,
     }),
@@ -867,6 +887,7 @@ export const metricTimeSeriesGauge = defineEndpoint("metric_time_series_gauge", 
   output: {
     bucket: t.dateTime(),
     serviceName: t.string(),
+    attributeValue: t.string().optional(),
     avgValue: t.float64(),
     minValue: t.float64(),
     maxValue: t.float64(),
@@ -890,6 +911,9 @@ export const metricTimeSeriesHistogram = defineEndpoint("metric_time_series_hist
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
+    attribute_key: p.string().optional().describe("Filter by Attributes[key]"),
+    attribute_value: p.string().optional().describe("Value for attribute filter"),
+    group_by_attribute_key: p.string().optional().describe("Group by Attributes[key] value"),
   },
   nodes: [
     node({
@@ -898,6 +922,9 @@ export const metricTimeSeriesHistogram = defineEndpoint("metric_time_series_hist
         SELECT
           toStartOfInterval(TimeUnix, INTERVAL {{Int32(bucket_seconds, 60)}} SECOND) AS bucket,
           ServiceName AS serviceName,
+          {% if defined(group_by_attribute_key) %}
+            Attributes[{{String(group_by_attribute_key)}}] AS attributeValue,
+          {% end %}
           if(sum(Count) > 0, sum(Sum) / sum(Count), 0) AS avgValue,
           min(Min) AS minValue,
           max(Max) AS maxValue,
@@ -915,7 +942,13 @@ export const metricTimeSeriesHistogram = defineEndpoint("metric_time_series_hist
         {% if defined(end_time) %}
           AND TimeUnix <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
+        {% if defined(attribute_key) %}
+          AND Attributes[{{String(attribute_key)}}] = {{String(attribute_value, '')}}
+        {% end %}
         GROUP BY bucket, ServiceName
+        {% if defined(group_by_attribute_key) %}
+          , Attributes[{{String(group_by_attribute_key)}}]
+        {% end %}
         ORDER BY bucket ASC
       `,
     }),
@@ -923,6 +956,7 @@ export const metricTimeSeriesHistogram = defineEndpoint("metric_time_series_hist
   output: {
     bucket: t.dateTime(),
     serviceName: t.string(),
+    attributeValue: t.string().optional(),
     avgValue: t.float64(),
     minValue: t.float64(),
     maxValue: t.float64(),
@@ -946,6 +980,9 @@ export const metricTimeSeriesExpHistogram = defineEndpoint("metric_time_series_e
     start_time: p.dateTime().optional().describe("Start of time range"),
     end_time: p.dateTime().optional().describe("End of time range"),
     bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
+    attribute_key: p.string().optional().describe("Filter by Attributes[key]"),
+    attribute_value: p.string().optional().describe("Value for attribute filter"),
+    group_by_attribute_key: p.string().optional().describe("Group by Attributes[key] value"),
   },
   nodes: [
     node({
@@ -954,6 +991,9 @@ export const metricTimeSeriesExpHistogram = defineEndpoint("metric_time_series_e
         SELECT
           toStartOfInterval(TimeUnix, INTERVAL {{Int32(bucket_seconds, 60)}} SECOND) AS bucket,
           ServiceName AS serviceName,
+          {% if defined(group_by_attribute_key) %}
+            Attributes[{{String(group_by_attribute_key)}}] AS attributeValue,
+          {% end %}
           if(sum(Count) > 0, sum(Sum) / sum(Count), 0) AS avgValue,
           min(Min) AS minValue,
           max(Max) AS maxValue,
@@ -971,7 +1011,13 @@ export const metricTimeSeriesExpHistogram = defineEndpoint("metric_time_series_e
         {% if defined(end_time) %}
           AND TimeUnix <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
         {% end %}
+        {% if defined(attribute_key) %}
+          AND Attributes[{{String(attribute_key)}}] = {{String(attribute_value, '')}}
+        {% end %}
         GROUP BY bucket, ServiceName
+        {% if defined(group_by_attribute_key) %}
+          , Attributes[{{String(group_by_attribute_key)}}]
+        {% end %}
         ORDER BY bucket ASC
       `,
     }),
@@ -979,6 +1025,7 @@ export const metricTimeSeriesExpHistogram = defineEndpoint("metric_time_series_e
   output: {
     bucket: t.dateTime(),
     serviceName: t.string(),
+    attributeValue: t.string().optional(),
     avgValue: t.float64(),
     minValue: t.float64(),
     maxValue: t.float64(),

@@ -598,12 +598,21 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "metrics" && request.query.kind === "timeseries") {
+      const groupByAttribute = request.query.groupBy?.includes("attribute")
+      const groupByAttributeKey = groupByAttribute
+        ? request.query.filters.groupByAttributeKey
+        : undefined
+      const attributeFilter = request.query.filters.attributeFilters?.[0]
+
       const params = {
         metric_name: request.query.filters.metricName,
         service: request.query.filters.serviceName,
         start_time: request.startTime,
         end_time: request.endTime,
         bucket_seconds: bucketSeconds,
+        group_by_attribute_key: groupByAttributeKey,
+        attribute_key: attributeFilter?.key,
+        attribute_value: attributeFilter?.value,
       }
 
       const result = yield* mapTinybirdError(
@@ -625,21 +634,32 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         count: "dataPointCount",
       } as const
       const valueField = metricValueField[request.query.metric]
+
       const data = (request.query.groupBy?.includes("none") || !request.query.groupBy?.length)
         ? groupTimeSeriesRows(
             collapseMetricTimeseriesRows(result as Array<MetricTimeseriesRow>, request.query.metric),
             (row) => row.value,
             fillOptions,
           )
-        : groupTimeSeriesRows(
-            result.map((row) => ({
-              bucket: row.bucket,
-              groupName: row.serviceName,
-              value: Number(row[valueField]),
-            })),
-            (row) => row.value,
-            fillOptions,
-          )
+        : groupByAttributeKey
+          ? groupTimeSeriesRows(
+              result.map((row) => ({
+                bucket: row.bucket,
+                groupName: (row as any).attributeValue || "(empty)",
+                value: Number(row[valueField]),
+              })),
+              (row) => row.value,
+              fillOptions,
+            )
+          : groupTimeSeriesRows(
+              result.map((row) => ({
+                bucket: row.bucket,
+                groupName: row.serviceName,
+                value: Number(row[valueField]),
+              })),
+              (row) => row.value,
+              fillOptions,
+            )
 
       return new QueryEngineExecuteResponse({
         result: {

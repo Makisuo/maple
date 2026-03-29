@@ -84,6 +84,7 @@ export const GROUP_BY_OPTIONS: Record<
   ],
   metrics: [
     { label: "service.name", value: "service.name" },
+    { label: "attr.*", value: "attr." },
     { label: "none", value: "none" },
   ],
 }
@@ -418,17 +419,27 @@ function resolveLogsGroupByToken(
   )
 }
 
-type MetricsGroupByKey = "service" | "none"
+type MetricsGroupByKey = "service" | "attribute" | "none"
 
 function resolveMetricsGroupByToken(
   token: string,
+  metricsFilters: { metricName: string; metricType: string; serviceName?: string; groupByAttributeKey?: string },
   warnings: string[],
   raw: string,
 ): MetricsGroupByKey | null {
   return Match.value(token).pipe(
     Match.whenOr("service", "service.name", () => "service" as const),
     Match.whenOr("none", "all", () => "none" as const),
-    Match.orElse(() => {
+    Match.orElse((t) => {
+      if (t.startsWith("attr.")) {
+        const attributeKey = t.slice(5)
+        if (!attributeKey) {
+          warnings.push("Invalid attr.* group by ignored")
+          return null
+        }
+        metricsFilters.groupByAttributeKey = attributeKey
+        return "attribute" as const
+      }
       warnings.push(`Unsupported metrics group by ignored: ${raw}`)
       return null
     }),
@@ -598,7 +609,7 @@ export function buildTimeseriesQuerySpec(
     {
       metricName: query.metricName,
       metricType: query.metricType,
-    } as { metricName: string; metricType: QueryBuilderMetricType; serviceName?: string },
+    } as { metricName: string; metricType: QueryBuilderMetricType; serviceName?: string; groupByAttributeKey?: string },
   )
 
   const metricsGroupByKeys: MetricsGroupByKey[] = []
@@ -606,7 +617,7 @@ export function buildTimeseriesQuerySpec(
     for (const raw of query.groupBy) {
       const token = raw.trim().toLowerCase()
       if (!token) continue
-      const resolved = resolveMetricsGroupByToken(token, warnings, raw)
+      const resolved = resolveMetricsGroupByToken(token, metricsFilters, warnings, raw)
       if (resolved) metricsGroupByKeys.push(resolved)
     }
   }
