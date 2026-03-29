@@ -1,17 +1,20 @@
+import { QueryEngineExecuteRequest, type MetricType } from "@maple/query-engine"
 import { Effect, Schema } from "effect"
 import {
   getTinybird,
   type ListMetricsOutput,
   type MetricAttributeKeysOutput,
-  type MetricTimeSeriesSumOutput,
   type MetricsSummaryOutput,
 } from "@/lib/tinybird"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
   TinybirdDateTimeString,
+  TinybirdApiError,
   decodeInput,
   invalidTinybirdInput,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
+import { computeBucketSeconds, toIsoBucket } from "@/api/tinybird/timeseries-utils"
 
 const MetricTypeSchema = Schema.Literals([
   "sum",
