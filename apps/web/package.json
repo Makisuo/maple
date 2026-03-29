@@ -3,12 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vp dev --port 3471",
-    "build": "vp build",
+    "dev": "vite dev --port 3471",
+    "build": "vite build",
     "deploy:stack": "alchemy deploy",
     "destroy:stack": "alchemy destroy",
-    "preview": "vp preview",
-    "test": "vp test run --passWithNoTests",
+    "preview": "vite preview",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "smoke:query-builder-live": "bun run ./scripts/query-builder-live-smoke.ts"
   },
@@ -87,7 +87,6 @@
     "jsdom": "^27.0.0",
     "typescript": "catalog:tooling",
     "vite": "catalog:",
-    "vite-plus": "catalog:",
     "vite-tsconfig-paths": "^6.0.5",
     "vitest": "catalog:"
   }

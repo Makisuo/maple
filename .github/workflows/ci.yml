@@ -23,10 +23,7 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - run: |
-          bunx vp run --filter '@maple/*' --filter '!@maple/ingest' typecheck
-          bunx vp run --filter '@maple/*' --filter '!@maple/ingest' test
-          bunx vp run --filter '@maple/*' --filter '!@maple/ingest' build
+      - run: bun turbo typecheck test build --filter='!@maple/ingest'
 
   rust:
     name: Rust (ingest)

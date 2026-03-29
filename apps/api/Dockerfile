@@ -14,7 +14,7 @@ RUN apt-get update && \
   rm -rf /var/lib/apt/lists/*
 RUN bun install
 COPY --from=pruner /app/out/full/ ./
-RUN bunx tsc --noEmit
+RUN bunx turbo typecheck
 
 FROM oven/bun:1.3.8-slim AS runner
 WORKDIR /app
