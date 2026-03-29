@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { createQueryDraft, resetQueryForDataSource } from "@/lib/query-builder/model";
 import { normalizeAiWidgetProposal } from "@/components/dashboard-builder/ai/normalize-widget-proposal";
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { formatTimeInTimezone, formatTimestampInTimezone } from "./timezone-format";
 
 describe("timezone-format", () => {

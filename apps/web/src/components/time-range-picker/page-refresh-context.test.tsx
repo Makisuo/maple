@@ -4,7 +4,7 @@ import { Atom, Registry, RegistryContext, Result } from "@/lib/effect-atom";
 import { Effect } from "effect";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value";
 

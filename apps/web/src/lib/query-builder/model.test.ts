@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model";
 
 describe("query-builder model bucket parsing", () => {

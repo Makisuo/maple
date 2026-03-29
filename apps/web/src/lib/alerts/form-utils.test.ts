@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { defaultRuleForm, flattenAlertChartData, signalToQueryParams } from "./form-utils";
 
 const makePoint = (bucket: string, series: Record<string, number>) => ({ bucket, series });

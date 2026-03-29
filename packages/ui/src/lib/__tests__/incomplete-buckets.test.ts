@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import { markIncompleteSegments } from "../incomplete-buckets";
 
 function makeRow(bucket: string, values: Record<string, number>): Record<string, unknown> {

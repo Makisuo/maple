@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Registry, RegistryContext } from "@/lib/effect-atom";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getBrowserTimeZone, TIMEZONE_STORAGE_KEY } from "@/atoms/timezone-preference-atoms";
 import { localStorageRuntime } from "@/lib/services/common/storage-runtime";
 import { useTimezonePreference } from "./use-timezone-preference";

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor";
 import type { QueryBuilderDataSource } from "@/lib/query-builder/model";

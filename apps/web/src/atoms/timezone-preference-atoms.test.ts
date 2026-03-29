@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi, afterEach } from "vite-plus/test";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   SYSTEM_VALUE,
   getBrowserTimeZone,

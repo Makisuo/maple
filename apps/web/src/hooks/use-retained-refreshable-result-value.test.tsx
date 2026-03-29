@@ -3,7 +3,7 @@
 import { Atom, Registry, RegistryContext, Result } from "@/lib/effect-atom";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { useRetainedRefreshableResultValue } from "./use-retained-refreshable-result-value";
 
