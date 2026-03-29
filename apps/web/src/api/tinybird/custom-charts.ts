@@ -190,7 +190,7 @@ const tracesMetrics = new Set<TracesMetric>([
   "error_rate",
   "apdex",
 ])
-const metricsMetrics = new Set<MetricsMetric>(["avg", "sum", "min", "max", "count"])
+const metricsMetrics = new Set<MetricsMetric>(["avg", "sum", "min", "max", "count", "rate", "increase"])
 const metricsBreakdownMetrics = new Set<"avg" | "sum" | "count">(["avg", "sum", "count"])
 
 function executeQueryEngine(payload: QueryEngineExecuteRequest) {

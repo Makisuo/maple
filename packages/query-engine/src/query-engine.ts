@@ -21,7 +21,7 @@ export const TracesMetric = Schema.Literals([
 ])
 export type TracesMetric = Schema.Schema.Type<typeof TracesMetric>
 
-export const MetricsMetric = Schema.Literals(["avg", "sum", "min", "max", "count"])
+export const MetricsMetric = Schema.Literals(["avg", "sum", "min", "max", "count", "rate", "increase"])
 export type MetricsMetric = Schema.Schema.Type<typeof MetricsMetric>
 
 export const MetricType = Schema.Literals([

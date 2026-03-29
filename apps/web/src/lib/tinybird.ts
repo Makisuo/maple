@@ -30,6 +30,7 @@ import type {
   ServiceDependenciesOutput,
   ServiceOverviewOutput,
   ServicesFacetsOutput,
+  MetricAttributeKeysOutput,
   ResourceAttributeKeysOutput,
   ResourceAttributeValuesOutput,
   SpanAttributeKeysOutput,
@@ -96,6 +97,8 @@ export type {
   ResourceAttributeKeysOutput,
   ResourceAttributeValuesParams,
   ResourceAttributeValuesOutput,
+  MetricAttributeKeysParams,
+  MetricAttributeKeysOutput,
   SpanAttributeKeysParams,
   SpanAttributeKeysOutput,
   SpanAttributeValuesParams,
@@ -190,6 +193,8 @@ const query = {
     queryTinybird<CustomMetricsBreakdownOutput>("custom_metrics_breakdown", params),
   service_dependencies: (params?: Record<string, unknown>) =>
     queryTinybird<ServiceDependenciesOutput>("service_dependencies", params),
+  metric_attribute_keys: (params?: Record<string, unknown>) =>
+    queryTinybird<MetricAttributeKeysOutput>("metric_attribute_keys", params),
   span_attribute_keys: (params?: Record<string, unknown>) =>
     queryTinybird<SpanAttributeKeysOutput>("span_attribute_keys", params),
   span_attribute_values: (params?: Record<string, unknown>) =>

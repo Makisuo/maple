@@ -91,6 +91,7 @@ function makeTinybirdStub(state: {
     metricTimeSeriesGaugeQuery: () => succeedRows(emptyTinybirdRows),
     metricTimeSeriesHistogramQuery: () => succeedRows(emptyTinybirdRows),
     metricTimeSeriesExpHistogramQuery: () => succeedRows(emptyTinybirdRows),
+    metricTimeSeriesSumRateQuery: () => succeedRows(emptyTinybirdRows),
     alertTracesAggregateQuery: () =>
       succeedRows(state.tracesAggregateRows ?? emptyTinybirdRows),
     alertMetricsAggregateQuery: () =>

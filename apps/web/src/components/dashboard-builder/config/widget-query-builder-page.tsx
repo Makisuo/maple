@@ -34,6 +34,7 @@ import {
   formulaLabel,
   QUERY_BUILDER_METRIC_TYPES,
   queryLabel,
+  resetAggregationForMetricType,
   resetQueryForDataSource,
   type QueryBuilderDataSource,
   type QueryBuilderFormulaDraft,
@@ -42,6 +43,7 @@ import {
 } from "@/lib/query-builder/model"
 import {
   getLogsFacetsResultAtom,
+  getMetricAttributeKeysResultAtom,
   getResourceAttributeKeysResultAtom,
   getResourceAttributeValuesResultAtom,
   getSpanAttributeKeysResultAtom,
@@ -122,6 +124,7 @@ function normalizeLoadedQuery(raw: QueryBuilderQueryDraft, index: number): Query
         ? raw.signalSource
         : base.signalSource,
     metricType: toMetricType(raw.metricType, base.metricType),
+    isMonotonic: raw.isMonotonic ?? (raw.metricType === "sum"),
     groupBy: toQueryGroupByArray(raw.groupBy),
     addOns: {
       groupBy: raw.addOns?.groupBy ?? base.addOns.groupBy,
@@ -530,6 +533,15 @@ export function WidgetQueryBuilderPage({
     }),
   )
 
+  const metricAttributeKeysResult = useAtomValue(
+    getMetricAttributeKeysResultAtom({
+      data: {
+        startTime: resolvedTime?.startTime,
+        endTime: resolvedTime?.endTime,
+      },
+    }),
+  )
+
   const resourceAttributeKeysResult = useAtomValue(
     getResourceAttributeKeysResultAtom({
       data: {
@@ -585,6 +597,14 @@ export function WidgetQueryBuilderPage({
     [activeResourceAttributeKey, resourceAttributeValuesResult],
   )
 
+  const metricAttributeKeys = React.useMemo(
+    () =>
+      Result.builder(metricAttributeKeysResult)
+        .onSuccess((response) => response.data.map((row) => row.attributeKey))
+        .orElse(() => []),
+    [metricAttributeKeysResult],
+  )
+
   const metricRows = React.useMemo(
     () =>
       Result.builder(metricsResult)
@@ -595,7 +615,7 @@ export function WidgetQueryBuilderPage({
 
   const metricSelectionOptions = React.useMemo(() => {
     const seen = new Set<string>()
-    const options: Array<{ value: string; label: string }> = []
+    const options: Array<{ value: string; label: string; isMonotonic: boolean }> = []
     for (const row of metricRows) {
       if (
         row.metricType !== "sum" &&
@@ -606,7 +626,7 @@ export function WidgetQueryBuilderPage({
       const value = `${row.metricName}::${row.metricType}`
       if (seen.has(value)) continue
       seen.add(value)
-      options.push({ value, label: `${row.metricName} (${row.metricType})` })
+      options.push({ value, label: `${row.metricName} (${row.metricType})`, isMonotonic: row.isMonotonic })
     }
     return options
   }, [metricRows])
@@ -666,9 +686,10 @@ export function WidgetQueryBuilderPage({
       metrics: {
         services: metricServices,
         metricTypes: [...QUERY_BUILDER_METRIC_TYPES],
+        attributeKeys: metricAttributeKeys,
       },
     }
-  }, [logsFacetsResult, metricRows, tracesFacetsResult, attributeKeys, attributeValues, resourceAttributeKeys, resourceAttributeValues])
+  }, [logsFacetsResult, metricRows, tracesFacetsResult, attributeKeys, attributeValues, resourceAttributeKeys, resourceAttributeValues, metricAttributeKeys])
 
   const appliedMetricDefaultRef = React.useRef(false)
   if (metricSelectionOptions.length > 0 && !appliedMetricDefaultRef.current) {
@@ -684,7 +705,14 @@ export function WidgetQueryBuilderPage({
         const queries = current.queries.map((query) => {
           if (query.dataSource !== "metrics" || query.metricName || !defaultMetricName || !defaultMetricType) return query
           changed = true
-          return { ...query, metricName: defaultMetricName, metricType: defaultMetricType }
+          const defaultIsMonotonic = metricSelectionOptions[0]?.isMonotonic ?? (defaultMetricType === "sum")
+          return {
+            ...query,
+            metricName: defaultMetricName,
+            metricType: defaultMetricType,
+            isMonotonic: defaultIsMonotonic,
+            aggregation: resetAggregationForMetricType(query.aggregation, defaultMetricType, defaultIsMonotonic),
+          }
         })
         return changed ? { ...current, queries } : current
       })

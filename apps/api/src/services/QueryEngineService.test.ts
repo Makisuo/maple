@@ -71,6 +71,7 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
     metricTimeSeriesGaugeQuery: unexpected("metricTimeSeriesGaugeQuery"),
     metricTimeSeriesHistogramQuery: unexpected("metricTimeSeriesHistogramQuery"),
     metricTimeSeriesExpHistogramQuery: unexpected("metricTimeSeriesExpHistogramQuery"),
+    metricTimeSeriesSumRateQuery: unexpected("metricTimeSeriesSumRateQuery"),
     customLogsBreakdownQuery: unexpected("customLogsBreakdownQuery"),
     customMetricsBreakdownQuery: unexpected("customMetricsBreakdownQuery"),
     alertTracesAggregateQuery: unexpected("alertTracesAggregateQuery"),

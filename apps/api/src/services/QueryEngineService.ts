@@ -417,6 +417,7 @@ type QueryEngineTinybird = Pick<
   | "metricTimeSeriesGaugeQuery"
   | "metricTimeSeriesHistogramQuery"
   | "metricTimeSeriesExpHistogramQuery"
+  | "metricTimeSeriesSumRateQuery"
   | "customLogsBreakdownQuery"
   | "customMetricsBreakdownQuery"
   | "alertTracesAggregateQuery"
@@ -453,11 +454,13 @@ const tracesAggregateValueForMetric = (
 const metricsAggregateValueForMetric = (
   metric: Extract<QuerySpec, { source: "metrics" }>["metric"],
   row: {
-    readonly avgValue: number
-    readonly minValue: number
-    readonly maxValue: number
-    readonly sumValue: number
-    readonly dataPointCount: number
+    readonly avgValue?: number
+    readonly minValue?: number
+    readonly maxValue?: number
+    readonly sumValue?: number
+    readonly dataPointCount?: number
+    readonly rateValue?: number
+    readonly increaseValue?: number
   },
 ): number => {
   switch (metric) {
@@ -471,6 +474,10 @@ const metricsAggregateValueForMetric = (
       return Number(row.sumValue)
     case "count":
       return Number(row.dataPointCount)
+    case "rate":
+      return Number(row.rateValue)
+    case "increase":
+      return Number(row.increaseValue)
   }
 }
 
@@ -616,6 +623,55 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         attribute_value: attributeFilter?.value,
       }
 
+      const isRateOrIncrease = request.query.metric === "rate" || request.query.metric === "increase"
+
+      if (isRateOrIncrease) {
+        const rateResult = yield* mapTinybirdError(
+          tinybird.metricTimeSeriesSumRateQuery(tenant, params),
+          "Failed to execute metrics rate/increase query",
+        )
+
+        const rateValueField = request.query.metric === "rate" ? "rateValue" : "increaseValue"
+
+        const data = (request.query.groupBy?.includes("none") || !request.query.groupBy?.length)
+          ? groupTimeSeriesRows(
+              rateResult.map((row) => ({
+                bucket: row.bucket,
+                groupName: "all" as const,
+                value: Number(row[rateValueField]),
+              })),
+              (row) => row.value,
+              fillOptions,
+            )
+          : groupByAttributeKey
+            ? groupTimeSeriesRows(
+                rateResult.map((row) => ({
+                  bucket: row.bucket,
+                  groupName: row.attributeValue || "(empty)",
+                  value: Number(row[rateValueField]),
+                })),
+                (row) => row.value,
+                fillOptions,
+              )
+            : groupTimeSeriesRows(
+                rateResult.map((row) => ({
+                  bucket: row.bucket,
+                  groupName: row.serviceName,
+                  value: Number(row[rateValueField]),
+                })),
+                (row) => row.value,
+                fillOptions,
+              )
+
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "timeseries",
+            source: "metrics",
+            data,
+          },
+        })
+      }
+
       const result = yield* mapTinybirdError(
         request.query.filters.metricType === "sum"
           ? tinybird.metricTimeSeriesSumQuery(tenant, params)
@@ -634,7 +690,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         max: "maxValue",
         count: "dataPointCount",
       } as const
-      const valueField = metricValueField[request.query.metric]
+      const valueField = metricValueField[request.query.metric as keyof typeof metricValueField]
 
       const data = (request.query.groupBy?.includes("none") || !request.query.groupBy?.length)
         ? groupTimeSeriesRows(

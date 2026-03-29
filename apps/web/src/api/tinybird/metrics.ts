@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 import {
   getTinybird,
   type ListMetricsOutput,
+  type MetricAttributeKeysOutput,
   type MetricTimeSeriesSumOutput,
   type MetricsSummaryOutput,
 } from "@/lib/tinybird"
@@ -42,6 +43,7 @@ export interface Metric {
   dataPointCount: number
   firstSeen: string
   lastSeen: string
+  isMonotonic: boolean
 }
 
 export interface MetricsResponse {
@@ -58,6 +60,7 @@ function transformMetric(raw: ListMetricsOutput): Metric {
     dataPointCount: Number(raw.dataPointCount),
     firstSeen: String(raw.firstSeen),
     lastSeen: String(raw.lastSeen),
+    isMonotonic: Boolean(raw.isMonotonic),
   }
 }
 
@@ -282,5 +285,50 @@ const getMetricsSummaryEffect = Effect.fn("Tinybird.getMetricsSummary")(function
 
     return {
       data: result.data.map(transformSummary),
+    }
+})
+
+const GetMetricAttributeKeysInputSchema = Schema.Struct({
+  startTime: Schema.optional(TinybirdDateTimeString),
+  endTime: Schema.optional(TinybirdDateTimeString),
+  metricName: Schema.optional(Schema.String),
+  metricType: Schema.optional(Schema.String),
+})
+
+export type GetMetricAttributeKeysInput = Schema.Schema.Type<typeof GetMetricAttributeKeysInputSchema>
+
+export function getMetricAttributeKeys({
+  data,
+}: {
+  data: GetMetricAttributeKeysInput
+}) {
+  return getMetricAttributeKeysEffect({ data })
+}
+
+const getMetricAttributeKeysEffect = Effect.fn("Tinybird.getMetricAttributeKeys")(function* ({
+  data,
+}: {
+  data: GetMetricAttributeKeysInput
+}) {
+    const input = yield* decodeInput(
+      GetMetricAttributeKeysInputSchema,
+      data ?? {},
+      "getMetricAttributeKeys",
+    )
+    const tinybird = getTinybird()
+    const result = yield* runTinybirdQuery("metric_attribute_keys", () =>
+      tinybird.query.metric_attribute_keys({
+        start_time: input.startTime,
+        end_time: input.endTime,
+        metric_name: input.metricName,
+        metric_type: input.metricType,
+      }),
+    )
+
+    return {
+      data: result.data.map((row: MetricAttributeKeysOutput) => ({
+        attributeKey: row.attributeKey,
+        usageCount: Number(row.usageCount),
+      })),
     }
 })

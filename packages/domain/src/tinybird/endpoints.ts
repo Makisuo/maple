@@ -601,7 +601,8 @@ export const listMetrics = defineEndpoint("list_metrics", {
           MetricUnit AS metricUnit,
           count() AS dataPointCount,
           min(TimeUnix) AS firstSeen,
-          max(TimeUnix) AS lastSeen
+          max(TimeUnix) AS lastSeen,
+          any(IsMonotonic) AS isMonotonic
         FROM metrics_sum
         WHERE 1=1
         AND OrgId = {{String(org_id)}}
@@ -619,7 +620,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
         {% end %}
         GROUP BY OrgId, MetricName, ServiceName, MetricDescription, MetricUnit
         {% else %}
-        SELECT '' AS metricName, '' AS metricType, '' AS serviceName, '' AS metricDescription, '' AS metricUnit, 0 AS dataPointCount, now() AS firstSeen, now() AS lastSeen, '' AS OrgId WHERE 1=0
+        SELECT '' AS metricName, '' AS metricType, '' AS serviceName, '' AS metricDescription, '' AS metricUnit, 0 AS dataPointCount, now() AS firstSeen, now() AS lastSeen, '' AS OrgId, false AS isMonotonic WHERE 1=0
         {% end %}
 
         UNION ALL
@@ -634,7 +635,8 @@ export const listMetrics = defineEndpoint("list_metrics", {
           MetricUnit AS metricUnit,
           count() AS dataPointCount,
           min(TimeUnix) AS firstSeen,
-          max(TimeUnix) AS lastSeen
+          max(TimeUnix) AS lastSeen,
+          false AS isMonotonic
         FROM metrics_gauge
         WHERE 1=1
         AND OrgId = {{String(org_id)}}
@@ -652,7 +654,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
         {% end %}
         GROUP BY OrgId, MetricName, ServiceName, MetricDescription, MetricUnit
         {% else %}
-        SELECT '' AS metricName, '' AS metricType, '' AS serviceName, '' AS metricDescription, '' AS metricUnit, 0 AS dataPointCount, now() AS firstSeen, now() AS lastSeen, '' AS OrgId WHERE 1=0
+        SELECT '' AS metricName, '' AS metricType, '' AS serviceName, '' AS metricDescription, '' AS metricUnit, 0 AS dataPointCount, now() AS firstSeen, now() AS lastSeen, '' AS OrgId, false AS isMonotonic WHERE 1=0
         {% end %}
 
         UNION ALL
@@ -667,7 +669,8 @@ export const listMetrics = defineEndpoint("list_metrics", {
           MetricUnit AS metricUnit,
           count() AS dataPointCount,
           min(TimeUnix) AS firstSeen,
-          max(TimeUnix) AS lastSeen
+          max(TimeUnix) AS lastSeen,
+          false AS isMonotonic
         FROM metrics_histogram
         WHERE 1=1
         AND OrgId = {{String(org_id)}}
@@ -685,7 +688,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
         {% end %}
         GROUP BY OrgId, MetricName, ServiceName, MetricDescription, MetricUnit
         {% else %}
-        SELECT '' AS metricName, '' AS metricType, '' AS serviceName, '' AS metricDescription, '' AS metricUnit, 0 AS dataPointCount, now() AS firstSeen, now() AS lastSeen, '' AS OrgId WHERE 1=0
+        SELECT '' AS metricName, '' AS metricType, '' AS serviceName, '' AS metricDescription, '' AS metricUnit, 0 AS dataPointCount, now() AS firstSeen, now() AS lastSeen, '' AS OrgId, false AS isMonotonic WHERE 1=0
         {% end %}
 
         UNION ALL
@@ -700,7 +703,8 @@ export const listMetrics = defineEndpoint("list_metrics", {
           MetricUnit AS metricUnit,
           count() AS dataPointCount,
           min(TimeUnix) AS firstSeen,
-          max(TimeUnix) AS lastSeen
+          max(TimeUnix) AS lastSeen,
+          false AS isMonotonic
         FROM metrics_exponential_histogram
         WHERE 1=1
         AND OrgId = {{String(org_id)}}
@@ -718,7 +722,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
         {% end %}
         GROUP BY OrgId, MetricName, ServiceName, MetricDescription, MetricUnit
         {% else %}
-        SELECT '' AS metricName, '' AS metricType, '' AS serviceName, '' AS metricDescription, '' AS metricUnit, 0 AS dataPointCount, now() AS firstSeen, now() AS lastSeen, '' AS OrgId WHERE 1=0
+        SELECT '' AS metricName, '' AS metricType, '' AS serviceName, '' AS metricDescription, '' AS metricUnit, 0 AS dataPointCount, now() AS firstSeen, now() AS lastSeen, '' AS OrgId, false AS isMonotonic WHERE 1=0
         {% end %}
       `,
     }),
@@ -733,7 +737,8 @@ export const listMetrics = defineEndpoint("list_metrics", {
           metricUnit,
           dataPointCount,
           firstSeen,
-          lastSeen
+          lastSeen,
+          isMonotonic
         FROM all_metrics
         WHERE 1=1
         AND OrgId = {{String(org_id)}}
@@ -755,6 +760,7 @@ export const listMetrics = defineEndpoint("list_metrics", {
     dataPointCount: t.uint64(),
     firstSeen: t.dateTime64(9),
     lastSeen: t.dateTime64(9),
+    isMonotonic: t.bool(),
   },
 });
 
@@ -831,6 +837,101 @@ export const metricTimeSeriesSum = defineEndpoint("metric_time_series_sum", {
 
 export type MetricTimeSeriesSumParams = InferParams<typeof metricTimeSeriesSum>;
 export type MetricTimeSeriesSumOutput = InferOutputRow<typeof metricTimeSeriesSum>;
+
+/**
+ * Metric time series endpoint for monotonic sum (counter) metrics — computes rate and increase
+ * using window functions to calculate per-series deltas, handling counter resets.
+ */
+export const metricTimeSeriesSumRate = defineEndpoint("metric_time_series_sum_rate", {
+  description: "Get time-bucketed rate and increase for monotonic sum (counter) metrics.",
+  params: {
+    org_id: p.string().describe("Organization ID"),
+    metric_name: p.string().describe("Metric name (required)"),
+    service: p.string().optional().describe("Filter by service name"),
+    start_time: p.dateTime().optional().describe("Start of time range"),
+    end_time: p.dateTime().optional().describe("End of time range"),
+    bucket_seconds: p.int32().optional(60).describe("Bucket size in seconds"),
+    attribute_key: p.string().optional().describe("Filter by Attributes[key]"),
+    attribute_value: p.string().optional().describe("Value for attribute filter"),
+    group_by_attribute_key: p.string().optional().describe("Group by Attributes[key] value"),
+  },
+  nodes: [
+    node({
+      name: "with_deltas",
+      sql: `
+        SELECT
+          TimeUnix,
+          ServiceName,
+          Attributes,
+          Value,
+          Value - lagInFrame(Value, 1, Value) OVER (
+            PARTITION BY ServiceName, MetricName, Attributes
+            ORDER BY TimeUnix ASC
+          ) AS delta,
+          toFloat64(
+            toUnixTimestamp64Nano(TimeUnix) - toUnixTimestamp64Nano(
+              lagInFrame(TimeUnix, 1, TimeUnix) OVER (
+                PARTITION BY ServiceName, MetricName, Attributes
+                ORDER BY TimeUnix ASC
+              )
+            )
+          ) / 1000000000.0 AS time_delta
+        FROM metrics_sum
+        WHERE MetricName = {{String(metric_name)}}
+          AND OrgId = {{String(org_id)}}
+          AND IsMonotonic = 1
+        {% if defined(service) %}
+          AND ServiceName = {{String(service, "")}}
+        {% end %}
+        {% if defined(start_time) %}
+          AND TimeUnix >= {{DateTime(start_time, "2023-01-01 00:00:00")}} - INTERVAL {{Int32(bucket_seconds, 60)}} SECOND
+        {% end %}
+        {% if defined(end_time) %}
+          AND TimeUnix <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+        {% end %}
+        {% if defined(attribute_key) %}
+          AND Attributes[{{String(attribute_key)}}] = {{String(attribute_value, '')}}
+        {% end %}
+      `,
+    }),
+    node({
+      name: "time_series",
+      sql: `
+        SELECT
+          toStartOfInterval(TimeUnix, INTERVAL {{Int32(bucket_seconds, 60)}} SECOND) AS bucket,
+          ServiceName AS serviceName,
+          {% if defined(group_by_attribute_key) %}
+            Attributes[{{String(group_by_attribute_key)}}] AS attributeValue,
+          {% else %}
+            '' AS attributeValue,
+          {% end %}
+          sumIf(delta / time_delta, delta >= 0 AND time_delta > 0) AS rateValue,
+          sumIf(delta, delta >= 0) AS increaseValue,
+          count() AS dataPointCount
+        FROM with_deltas
+        {% if defined(start_time) %}
+        WHERE TimeUnix >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+        {% end %}
+        GROUP BY bucket, ServiceName
+        {% if defined(group_by_attribute_key) %}
+          , Attributes[{{String(group_by_attribute_key)}}]
+        {% end %}
+        ORDER BY bucket ASC
+      `,
+    }),
+  ],
+  output: {
+    bucket: t.dateTime(),
+    serviceName: t.string(),
+    attributeValue: t.string(),
+    rateValue: t.float64(),
+    increaseValue: t.float64(),
+    dataPointCount: t.uint64(),
+  },
+});
+
+export type MetricTimeSeriesSumRateParams = InferParams<typeof metricTimeSeriesSumRate>;
+export type MetricTimeSeriesSumRateOutput = InferOutputRow<typeof metricTimeSeriesSumRate>;
 
 /**
  * Metric time series endpoint for gauge metrics
@@ -3895,6 +3996,62 @@ export const spanAttributeKeys = defineEndpoint("span_attribute_keys", {
 
 export type SpanAttributeKeysParams = InferParams<typeof spanAttributeKeys>;
 export type SpanAttributeKeysOutput = InferOutputRow<typeof spanAttributeKeys>;
+
+/**
+ * Metric attribute keys endpoint - returns distinct attribute keys from metric data
+ */
+export const metricAttributeKeys = defineEndpoint("metric_attribute_keys", {
+  description: "List distinct metric attribute keys with usage counts.",
+  params: {
+    org_id: p.string().describe("Organization ID"),
+    start_time: p.dateTime().describe("Start of time range"),
+    end_time: p.dateTime().describe("End of time range"),
+    metric_name: p.string().optional().describe("Filter by metric name"),
+    metric_type: p.string().optional().describe("Filter by metric type: sum, gauge, histogram, exponential_histogram"),
+    limit: p.int32().optional(200).describe("Maximum number of keys to return"),
+  },
+  nodes: [
+    node({
+      name: "metric_attribute_keys_node",
+      sql: `
+        SELECT attributeKey, sum(cnt) AS usageCount
+        FROM (
+          SELECT arrayJoin(mapKeys(Attributes)) AS attributeKey, count() AS cnt
+          FROM metrics_gauge
+          WHERE OrgId = {{String(org_id)}}
+            AND TimeUnix >= {{DateTime(start_time)}}
+            AND TimeUnix <= {{DateTime(end_time)}}
+            AND Attributes != map()
+            {% if defined(metric_name) %}
+              AND MetricName = {{String(metric_name)}}
+            {% end %}
+          GROUP BY attributeKey
+          UNION ALL
+          SELECT arrayJoin(mapKeys(Attributes)) AS attributeKey, count() AS cnt
+          FROM metrics_sum
+          WHERE OrgId = {{String(org_id)}}
+            AND TimeUnix >= {{DateTime(start_time)}}
+            AND TimeUnix <= {{DateTime(end_time)}}
+            AND Attributes != map()
+            {% if defined(metric_name) %}
+              AND MetricName = {{String(metric_name)}}
+            {% end %}
+          GROUP BY attributeKey
+        )
+        GROUP BY attributeKey
+        ORDER BY usageCount DESC
+        LIMIT {{Int32(limit, 200)}}
+      `,
+    }),
+  ],
+  output: {
+    attributeKey: t.string(),
+    usageCount: t.uint64(),
+  },
+});
+
+export type MetricAttributeKeysParams = InferParams<typeof metricAttributeKeys>;
+export type MetricAttributeKeysOutput = InferOutputRow<typeof metricAttributeKeys>;
 
 /**
  * Span attribute values endpoint - returns distinct values for a specific attribute key

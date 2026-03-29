@@ -29,6 +29,7 @@ const QueryDraftSchema = Schema.Struct({
   signalSource: Schema.Literals(["default", "meter"]),
   metricName: Schema.String,
   metricType: Schema.Literals(METRIC_TYPES_TUPLE),
+  isMonotonic: Schema.optionalKey(Schema.Boolean),
   whereClause: Schema.String,
   aggregation: Schema.String,
   stepInterval: Schema.String,
@@ -86,6 +87,7 @@ async function executeBreakdownQuery(
   const built = buildBreakdownQuerySpec({
     ...query,
     metricType: query.metricType as QueryBuilderMetricType,
+    isMonotonic: query.isMonotonic ?? (query.metricType === "sum"),
   })
 
   if (!built.query) {

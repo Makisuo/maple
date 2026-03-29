@@ -19,6 +19,7 @@ export interface QueryBuilderQueryDraft {
   signalSource: "default" | "meter"
   metricName: string
   metricType: QueryBuilderMetricType
+  isMonotonic: boolean
   whereClause: string
   aggregation: string
   stepInterval: string
@@ -56,7 +57,46 @@ export const AGGREGATIONS_BY_SOURCE: Record<
     { label: "min", value: "min" },
     { label: "max", value: "max" },
     { label: "count", value: "count" },
+    { label: "rate", value: "rate" },
+    { label: "increase", value: "increase" },
   ],
+}
+
+const METRICS_AGGREGATIONS_MONOTONIC_SUM = [
+  { label: "rate", value: "rate" },
+  { label: "increase", value: "increase" },
+]
+
+const METRICS_AGGREGATIONS_GAUGE_LIKE = [
+  { label: "avg", value: "avg" },
+  { label: "sum", value: "sum" },
+  { label: "min", value: "min" },
+  { label: "max", value: "max" },
+  { label: "count", value: "count" },
+]
+
+export function getMetricsAggregations(
+  metricType: QueryBuilderMetricType,
+  _isMonotonic?: boolean,
+): Array<{ label: string; value: string }> {
+  // Sum metrics are almost always monotonic counters in OpenTelemetry.
+  // Show rate/increase for all Sum metrics by default.
+  if (metricType === "sum") {
+    return METRICS_AGGREGATIONS_MONOTONIC_SUM
+  }
+  return METRICS_AGGREGATIONS_GAUGE_LIKE
+}
+
+export function resetAggregationForMetricType(
+  currentAggregation: string,
+  metricType: QueryBuilderMetricType,
+  isMonotonic: boolean,
+): string {
+  const validOptions = getMetricsAggregations(metricType, isMonotonic)
+  if (validOptions.some((opt) => opt.value === currentAggregation)) {
+    return currentAggregation
+  }
+  return validOptions[0]?.value ?? "avg"
 }
 
 export const QUERY_BUILDER_METRIC_TYPES: readonly QueryBuilderMetricType[] = [
@@ -124,6 +164,7 @@ export function createQueryDraft(index: number): QueryBuilderQueryDraft {
     signalSource: "default",
     metricName: "",
     metricType: "gauge",
+    isMonotonic: false,
     whereClause: defaultWhereClause(),
     aggregation: isDefaultErrorRateQuery ? "error_rate" : "count",
     stepInterval: "",
@@ -587,7 +628,7 @@ export function buildTimeseriesQuerySpec(
     }
   }
 
-  const allowedMetrics = new Set(["avg", "sum", "min", "max", "count"])
+  const allowedMetrics = new Set(["avg", "sum", "min", "max", "count", "rate", "increase"])
   if (!allowedMetrics.has(query.aggregation)) {
     return {
       query: null,
@@ -627,7 +668,7 @@ export function buildTimeseriesQuerySpec(
     query: {
       kind: "timeseries",
       source: "metrics",
-      metric: query.aggregation as "avg" | "sum" | "min" | "max" | "count",
+      metric: query.aggregation as "avg" | "sum" | "min" | "max" | "count" | "rate" | "increase",
       groupBy,
       filters: metricsFilters,
       bucketSeconds,

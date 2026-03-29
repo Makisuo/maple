@@ -29,6 +29,7 @@ const QueryDraftSchema = Schema.Struct({
   signalSource: Schema.Literals(["default", "meter"]),
   metricName: Schema.String,
   metricType: Schema.Literals(METRIC_TYPES_TUPLE),
+  isMonotonic: Schema.optionalKey(Schema.Boolean),
   whereClause: Schema.String,
   aggregation: Schema.String,
   stepInterval: Schema.String,
@@ -82,7 +83,7 @@ async function executeListQueryInternal(
   // Use the first enabled query for the list
   const query = enabledQueries[0]
   const built = buildListQuerySpec(
-    { ...query, metricType: query.metricType as QueryBuilderMetricType },
+    { ...query, metricType: query.metricType as QueryBuilderMetricType, isMonotonic: query.isMonotonic ?? (query.metricType === "sum") },
     input.limit,
   )
 

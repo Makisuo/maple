@@ -259,6 +259,7 @@ function normalizeQueryEntry(
       metricTypeInput,
       queryBase.metricType,
     ),
+    isMonotonic: typeof queryRecord.isMonotonic === "boolean" ? queryRecord.isMonotonic : queryBase.isMonotonic,
     whereClause:
       typeof queryRecord.whereClause === "string"
         ? queryRecord.whereClause
