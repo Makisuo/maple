@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { createQueryDraft, resetQueryForDataSource } from "@/lib/query-builder/model"
-import { normalizeAiWidgetProposal } from "@/components/dashboard-builder/ai/normalize-widget-proposal"
+import { describe, expect, it } from "vite-plus/test";
+import { createQueryDraft, resetQueryForDataSource } from "@/lib/query-builder/model";
+import { normalizeAiWidgetProposal } from "@/components/dashboard-builder/ai/normalize-widget-proposal";
 
 describe("normalizeAiWidgetProposal", () => {
   it("converts legacy flat timeseries params to queries[]", () => {
@@ -24,24 +24,24 @@ describe("normalizeAiWidgetProposal", () => {
         title: "Metric Chart",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("valid")
-    if (result.kind !== "valid") return
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
 
-    const params = result.proposal.dataSource.params as Record<string, unknown>
-    const queries = params.queries as Array<Record<string, unknown>>
-    expect(Array.isArray(queries)).toBe(true)
-    expect(queries).toHaveLength(1)
-    expect(queries[0]?.dataSource).toBe("metrics")
-    expect(queries[0]?.aggregation).toBe("sum")
-    expect(queries[0]?.metricName).toBe("http.server.duration")
-    expect(queries[0]?.metricType).toBe("histogram")
-    expect(queries[0]?.stepInterval).toBe("300")
-  })
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(Array.isArray(queries)).toBe(true);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]?.dataSource).toBe("metrics");
+    expect(queries[0]?.aggregation).toBe("sum");
+    expect(queries[0]?.metricName).toBe("http.server.duration");
+    expect(queries[0]?.metricType).toBe("histogram");
+    expect(queries[0]?.stepInterval).toBe("300");
+  });
 
   it("blocks metrics query without metric name/type", () => {
-    const metricsQuery = resetQueryForDataSource(createQueryDraft(0), "metrics")
+    const metricsQuery = resetQueryForDataSource(createQueryDraft(0), "metrics");
     const result = normalizeAiWidgetProposal({
       visualization: "chart",
       dataSource: {
@@ -59,12 +59,12 @@ describe("normalizeAiWidgetProposal", () => {
         title: "Broken Metric Chart",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("blocked")
-    if (result.kind !== "blocked") return
-    expect(result.reason).toContain("metric name and metric type")
-  })
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reason).toContain("metric name and metric type");
+  });
 
   it("blocks metrics query with invalid metric type", () => {
     const result = normalizeAiWidgetProposal({
@@ -86,12 +86,12 @@ describe("normalizeAiWidgetProposal", () => {
         title: "Invalid Metric Type",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("blocked")
-    if (result.kind !== "blocked") return
-    expect(result.reason).toContain("metric name and metric type")
-  })
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reason).toContain("metric name and metric type");
+  });
 
   it("accepts valid metrics query and preserves metric values", () => {
     const metricsQuery = {
@@ -99,7 +99,7 @@ describe("normalizeAiWidgetProposal", () => {
       metricName: "process.runtime.jvm.cpu.utilization",
       metricType: "gauge",
       aggregation: "avg",
-    }
+    };
 
     const result = normalizeAiWidgetProposal({
       visualization: "chart",
@@ -116,20 +116,20 @@ describe("normalizeAiWidgetProposal", () => {
         title: "CPU",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("valid")
-    if (result.kind !== "valid") return
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
 
-    const params = result.proposal.dataSource.params as Record<string, unknown>
-    const queries = params.queries as Array<Record<string, unknown>>
-    expect(queries[0]?.metricName).toBe("process.runtime.jvm.cpu.utilization")
-    expect(queries[0]?.metricType).toBe("gauge")
-    expect(queries[0]?.aggregation).toBe("avg")
-    expect(typeof queries[0]?.id).toBe("string")
-    expect(typeof queries[0]?.whereClause).toBe("string")
-    expect(typeof queries[0]?.addOns).toBe("object")
-  })
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.metricName).toBe("process.runtime.jvm.cpu.utilization");
+    expect(queries[0]?.metricType).toBe("gauge");
+    expect(queries[0]?.aggregation).toBe("avg");
+    expect(typeof queries[0]?.id).toBe("string");
+    expect(typeof queries[0]?.whereClause).toBe("string");
+    expect(typeof queries[0]?.addOns).toBe("object");
+  });
 
   it("hydrates minimal metrics query entries into full query drafts", () => {
     const result = normalizeAiWidgetProposal({
@@ -151,21 +151,21 @@ describe("normalizeAiWidgetProposal", () => {
         title: "Hydrated Metrics Query",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("valid")
-    if (result.kind !== "valid") return
-    const params = result.proposal.dataSource.params as Record<string, unknown>
-    const queries = params.queries as Array<Record<string, unknown>>
-    expect(queries).toHaveLength(1)
-    expect(typeof queries[0]?.id).toBe("string")
-    expect(queries[0]?.name).toBe("A")
-    expect(queries[0]?.enabled).toBe(true)
-    expect(queries[0]?.dataSource).toBe("metrics")
-    expect(typeof queries[0]?.whereClause).toBe("string")
-    expect(queries[0]?.stepInterval).toBe("")
-    expect(typeof queries[0]?.addOns).toBe("object")
-  })
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries).toHaveLength(1);
+    expect(typeof queries[0]?.id).toBe("string");
+    expect(queries[0]?.name).toBe("A");
+    expect(queries[0]?.enabled).toBe(true);
+    expect(queries[0]?.dataSource).toBe("metrics");
+    expect(typeof queries[0]?.whereClause).toBe("string");
+    expect(queries[0]?.stepInterval).toBe("");
+    expect(typeof queries[0]?.addOns).toBe("object");
+  });
 
   it("converts spec-like query entries inside queries[]", () => {
     const result = normalizeAiWidgetProposal({
@@ -192,18 +192,18 @@ describe("normalizeAiWidgetProposal", () => {
         title: "Spec-like query",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("valid")
-    if (result.kind !== "valid") return
-    const params = result.proposal.dataSource.params as Record<string, unknown>
-    const queries = params.queries as Array<Record<string, unknown>>
-    expect(queries[0]?.dataSource).toBe("metrics")
-    expect(queries[0]?.aggregation).toBe("count")
-    expect(queries[0]?.metricName).toBe("queue.depth")
-    expect(queries[0]?.metricType).toBe("gauge")
-    expect(queries[0]?.stepInterval).toBe("120")
-  })
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.dataSource).toBe("metrics");
+    expect(queries[0]?.aggregation).toBe("count");
+    expect(queries[0]?.metricName).toBe("queue.depth");
+    expect(queries[0]?.metricType).toBe("gauge");
+    expect(queries[0]?.stepInterval).toBe("120");
+  });
 
   it("keeps step interval empty when AI does not specify one", () => {
     const result = normalizeAiWidgetProposal({
@@ -224,14 +224,14 @@ describe("normalizeAiWidgetProposal", () => {
         title: "Requests",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("valid")
-    if (result.kind !== "valid") return
-    const params = result.proposal.dataSource.params as Record<string, unknown>
-    const queries = params.queries as Array<Record<string, unknown>>
-    expect(queries[0]?.stepInterval).toBe("")
-  })
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.stepInterval).toBe("");
+  });
 
   it("normalizes friendly trace percentile aliases and rewrites visible labels", () => {
     const result = normalizeAiWidgetProposal({
@@ -258,19 +258,19 @@ describe("normalizeAiWidgetProposal", () => {
         title: "p95_duration and avg_duration",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("valid")
-    if (result.kind !== "valid") return
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
 
-    const params = result.proposal.dataSource.params as Record<string, unknown>
-    const queries = params.queries as Array<Record<string, unknown>>
-    expect(queries[0]?.aggregation).toBe("p95_duration")
-    expect(queries[0]?.legend).toBe("p95 by service")
-    expect(queries[1]?.aggregation).toBe("avg_duration")
-    expect(queries[1]?.legend).toBe("avg duration")
-    expect(result.proposal.display.title).toBe("p95 and avg duration")
-  })
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.aggregation).toBe("p95_duration");
+    expect(queries[0]?.legend).toBe("p95 by service");
+    expect(queries[1]?.aggregation).toBe("avg_duration");
+    expect(queries[1]?.legend).toBe("avg duration");
+    expect(result.proposal.display.title).toBe("p95 and avg duration");
+  });
 
   it("drops malformed query entries and blocks when none remain", () => {
     const result = normalizeAiWidgetProposal({
@@ -278,22 +278,17 @@ describe("normalizeAiWidgetProposal", () => {
       dataSource: {
         endpoint: "custom_query_builder_timeseries",
         params: {
-          queries: [
-            null,
-            123,
-            "bad",
-            {},
-          ],
+          queries: [null, 123, "bad", {}],
         },
       },
       display: {
         title: "Malformed Queries",
         chartId: "query-builder-line",
       },
-    })
+    });
 
-    expect(result.kind).toBe("blocked")
-    if (result.kind !== "blocked") return
-    expect(result.reason).toContain("missing queries[]")
-  })
-})
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reason).toContain("missing queries[]");
+  });
+});

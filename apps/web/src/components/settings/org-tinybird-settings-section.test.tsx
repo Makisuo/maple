@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { Exit } from "effect"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { OrgTinybirdSettingsSection } from "./org-tinybird-settings-section"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Exit } from "effect";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { OrgTinybirdSettingsSection } from "./org-tinybird-settings-section";
 
 type MockResult =
   | { readonly _tag: "initial" }
   | { readonly _tag: "success"; readonly value: unknown }
-  | { readonly _tag: "failure" }
+  | { readonly _tag: "failure" };
 
 const mocks = vi.hoisted(() => ({
   refreshSpy: vi.fn(),
@@ -18,21 +18,22 @@ const mocks = vi.hoisted(() => ({
   toastSuccessSpy: vi.fn(),
   toastErrorSpy: vi.fn(),
   settingsResult: { _tag: "initial" } as MockResult,
-}))
+}));
 
 vi.mock("@/lib/services/common/atom-client", () => ({
   MapleApiAtomClient: {
     query: (_group: string, name: string) => ({ kind: "query", name }),
     mutation: (_group: string, name: string) => ({ kind: "mutation", name }),
   },
-}))
+}));
 
 vi.mock("@/lib/effect-atom", async () => ({
   Atom: (await vi.importActual<typeof import("@/lib/effect-atom")>("@/lib/effect-atom")).Atom,
   Result: {
     builder: (result: MockResult) => ({
       onSuccess: (onSuccess: (value: unknown) => unknown) => ({
-        orElse: (onElse: () => unknown) => (result._tag === "success" ? onSuccess(result.value) : onElse()),
+        orElse: (onElse: () => unknown) =>
+          result._tag === "success" ? onSuccess(result.value) : onElse(),
       }),
     }),
     isInitial: (result: MockResult) => result._tag === "initial",
@@ -40,28 +41,30 @@ vi.mock("@/lib/effect-atom", async () => ({
   },
   useAtomRefresh: () => mocks.refreshSpy,
   useAtomSet: (descriptor: { readonly name: string }) => {
-    if (descriptor.name === "upsert") return mocks.upsertSpy
-    if (descriptor.name === "resync") return mocks.resyncSpy
-    if (descriptor.name === "delete") return mocks.deleteSpy
-    throw new Error(`Unexpected mutation ${descriptor.name}`)
+    if (descriptor.name === "upsert") return mocks.upsertSpy;
+    if (descriptor.name === "resync") return mocks.resyncSpy;
+    if (descriptor.name === "delete") return mocks.deleteSpy;
+    throw new Error(`Unexpected mutation ${descriptor.name}`);
   },
   useAtomValue: (atom: { name?: string }) => {
-    if (atom?.name === "deploymentStatus") return { _tag: "success", value: { status: "synced", resources: [] } }
-    if (atom?.name === "instanceHealth") return { _tag: "success", value: { totalBytes: 0, totalRows: 0, datasources: [] } }
-    return mocks.settingsResult
+    if (atom?.name === "deploymentStatus")
+      return { _tag: "success", value: { status: "synced", resources: [] } };
+    if (atom?.name === "instanceHealth")
+      return { _tag: "success", value: { totalBytes: 0, totalRows: 0, datasources: [] } };
+    return mocks.settingsResult;
   },
-}))
+}));
 
 vi.mock("sonner", () => ({
   toast: {
     success: mocks.toastSuccessSpy,
     error: mocks.toastErrorSpy,
   },
-}))
+}));
 
 describe("OrgTinybirdSettingsSection", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.clearAllMocks();
     mocks.settingsResult = {
       _tag: "success",
       value: {
@@ -72,15 +75,15 @@ describe("OrgTinybirdSettingsSection", () => {
         lastSyncError: null,
         projectRevision: "rev-1",
       },
-    }
-    mocks.upsertSpy.mockResolvedValue(Exit.succeed({}))
-    mocks.resyncSpy.mockResolvedValue(Exit.succeed({}))
-    mocks.deleteSpy.mockResolvedValue(Exit.succeed({}))
-  })
+    };
+    mocks.upsertSpy.mockResolvedValue(Exit.succeed({}));
+    mocks.resyncSpy.mockResolvedValue(Exit.succeed({}));
+    mocks.deleteSpy.mockResolvedValue(Exit.succeed({}));
+  });
 
   afterEach(() => {
-    cleanup()
-  })
+    cleanup();
+  });
 
   it("renders the out_of_sync badge and guidance", () => {
     mocks.settingsResult = {
@@ -93,30 +96,30 @@ describe("OrgTinybirdSettingsSection", () => {
         lastSyncError: null,
         projectRevision: "rev-1",
       },
-    }
+    };
 
-    render(<OrgTinybirdSettingsSection isAdmin hasEntitlement />)
+    render(<OrgTinybirdSettingsSection isAdmin hasEntitlement />);
 
-    expect(screen.getByText("Out of sync")).toBeTruthy()
-    expect(screen.getByText(/project definition changed since this org last synced/i)).toBeTruthy()
-  })
+    expect(screen.getByText("Out of sync")).toBeTruthy();
+    expect(screen.getByText(/project definition changed since this org last synced/i)).toBeTruthy();
+  });
 
   it("resyncs explicitly from the settings screen", async () => {
-    render(<OrgTinybirdSettingsSection isAdmin hasEntitlement />)
+    render(<OrgTinybirdSettingsSection isAdmin hasEntitlement />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Resync project" }))
+    fireEvent.click(screen.getByRole("button", { name: "Resync project" }));
 
     await waitFor(() => {
-      expect(mocks.resyncSpy).toHaveBeenCalledWith({})
-    })
-    expect(mocks.refreshSpy).toHaveBeenCalled()
-    expect(mocks.toastSuccessSpy).toHaveBeenCalledWith("Tinybird project synced")
-    expect(mocks.toastErrorSpy).not.toHaveBeenCalled()
-  })
+      expect(mocks.resyncSpy).toHaveBeenCalledWith({});
+    });
+    expect(mocks.refreshSpy).toHaveBeenCalled();
+    expect(mocks.toastSuccessSpy).toHaveBeenCalledWith("Tinybird project synced");
+    expect(mocks.toastErrorSpy).not.toHaveBeenCalled();
+  });
 
   it("renders nothing when the org lacks the BYO entitlement", () => {
-    const { container } = render(<OrgTinybirdSettingsSection isAdmin hasEntitlement={false} />)
+    const { container } = render(<OrgTinybirdSettingsSection isAdmin hasEntitlement={false} />);
 
-    expect(container.firstChild).toBeNull()
-  })
-})
+    expect(container.firstChild).toBeNull();
+  });
+});

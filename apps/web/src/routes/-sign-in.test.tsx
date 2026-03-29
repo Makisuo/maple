@@ -1,18 +1,18 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import * as SignInRoute from "./sign-in"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import * as SignInRoute from "./sign-in";
 
 describe("SelfHostedSignInPage", () => {
   beforeEach(() => {
-    vi.restoreAllMocks()
-    window.sessionStorage.clear()
-  })
+    vi.restoreAllMocks();
+    window.sessionStorage.clear();
+  });
 
   afterEach(() => {
-    cleanup()
-  })
+    cleanup();
+  });
 
   it("stores session token on successful root-password login", async () => {
     vi.spyOn(window, "fetch").mockResolvedValue(
@@ -27,20 +27,20 @@ describe("SelfHostedSignInPage", () => {
           headers: { "content-type": "application/json" },
         },
       ),
-    )
-    vi.spyOn(SignInRoute, "redirectToDashboard").mockImplementation(() => {})
+    );
+    vi.spyOn(SignInRoute, "redirectToDashboard").mockImplementation(() => {});
 
-    render(<SignInRoute.SelfHostedSignInPage />)
+    render(<SignInRoute.SelfHostedSignInPage />);
 
     fireEvent.change(screen.getByPlaceholderText("Root password"), {
       target: { value: "root-password" },
-    })
-    fireEvent.submit(screen.getByRole("button", { name: "Sign in" }).closest("form")!)
+    });
+    fireEvent.submit(screen.getByRole("button", { name: "Sign in" }).closest("form")!);
 
     await waitFor(() => {
-      expect(window.sessionStorage.getItem("maple.self_hosted.token")).toBe("session-token")
-    })
-  })
+      expect(window.sessionStorage.getItem("maple.self_hosted.token")).toBe("session-token");
+    });
+  });
 
   it("shows an error and does not store token on failed login", async () => {
     vi.spyOn(window, "fetch").mockResolvedValue(
@@ -53,18 +53,18 @@ describe("SelfHostedSignInPage", () => {
           headers: { "content-type": "application/json" },
         },
       ),
-    )
+    );
 
-    render(<SignInRoute.SelfHostedSignInPage />)
+    render(<SignInRoute.SelfHostedSignInPage />);
 
     fireEvent.change(screen.getByPlaceholderText("Root password"), {
       target: { value: "wrong-password" },
-    })
-    fireEvent.submit(screen.getByRole("button", { name: "Sign in" }).closest("form")!)
+    });
+    fireEvent.submit(screen.getByRole("button", { name: "Sign in" }).closest("form")!);
 
     await waitFor(() => {
-      expect(screen.getByText("Invalid root password")).toBeTruthy()
-    })
-    expect(window.sessionStorage.getItem("maple.self_hosted.token")).toBeNull()
-  })
-})
+      expect(screen.getByText("Invalid root password")).toBeTruthy();
+    });
+    expect(window.sessionStorage.getItem("maple.self_hosted.token")).toBeNull();
+  });
+});

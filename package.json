@@ -18,7 +18,24 @@
     "deploy:stg": "bun scripts/deploy-stack.ts deploy stg",
     "destroy:stg": "bun scripts/deploy-stack.ts destroy stg",
     "deploy:pr": "bun scripts/deploy-stack.ts deploy pr",
-    "destroy:pr": "bun scripts/deploy-stack.ts destroy pr"
+    "destroy:pr": "bun scripts/deploy-stack.ts destroy pr",
+    "prepare": "vp config"
+  },
+  "devDependencies": {
+    "@tinybirdco/sdk": "catalog:tinybird",
+    "turbo": "^2.8.21",
+    "typescript": "catalog:tooling",
+    "vite-plus": "catalog:"
+  },
+  "overrides": {
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "packageManager": "bun@1.3.8",
+  "catalog": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest",
+    "vite-plus": "latest"
   },
   "catalogs": {
     "effect": {
@@ -54,11 +71,5 @@
     "tinybird": {
       "@tinybirdco/sdk": "0.0.64"
     }
-  },
-  "devDependencies": {
-    "@tinybirdco/sdk": "catalog:tinybird",
-    "turbo": "^2.8.21",
-    "typescript": "catalog:tooling"
-  },
-  "packageManager": "bun@1.3.8"
+  }
 }

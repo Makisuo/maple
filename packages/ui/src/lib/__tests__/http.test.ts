@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test";
 
-import { getHttpInfo } from "../http"
+import { getHttpInfo } from "../http";
 
 describe("getHttpInfo", () => {
   it("detects HTTP from standard attrs", () => {
@@ -15,8 +15,8 @@ describe("getHttpInfo", () => {
       route: "/checkout",
       statusCode: 201,
       isError: false,
-    })
-  })
+    });
+  });
 
   it("detects HTTP from semantic convention attrs", () => {
     expect(
@@ -30,8 +30,8 @@ describe("getHttpInfo", () => {
       route: "/users/123",
       statusCode: 503,
       isError: true,
-    })
-  })
+    });
+  });
 
   it("detects HTTP from name-only overview values", () => {
     expect(getHttpInfo("GET /checkout", {})).toEqual({
@@ -39,8 +39,8 @@ describe("getHttpInfo", () => {
       route: "/checkout",
       statusCode: null,
       isError: false,
-    })
-  })
+    });
+  });
 
   it("detects HTTP from http.server span names", () => {
     expect(getHttpInfo("http.server GET /checkout", {})).toEqual({
@@ -48,12 +48,12 @@ describe("getHttpInfo", () => {
       route: "/checkout",
       statusCode: null,
       isError: false,
-    })
-  })
+    });
+  });
 
   it("returns null for non-http spans", () => {
-    expect(getHttpInfo("CheckoutService.createOrder", {})).toBeNull()
-  })
+    expect(getHttpInfo("CheckoutService.createOrder", {})).toBeNull();
+  });
 
   it("prefers attrs when name and attrs disagree", () => {
     expect(
@@ -67,6 +67,6 @@ describe("getHttpInfo", () => {
       route: "/orders/:id",
       statusCode: 404,
       isError: false,
-    })
-  })
-})
+    });
+  });
+});

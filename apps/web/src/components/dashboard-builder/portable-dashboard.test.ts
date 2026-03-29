@@ -1,9 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test";
 
-import {
-  parsePortableDashboardJson,
-  toPortableDashboard,
-} from "./portable-dashboard"
+import { parsePortableDashboardJson, toPortableDashboard } from "./portable-dashboard";
 
 describe("portable-dashboard", () => {
   it("exports the canonical portable dashboard payload", () => {
@@ -16,7 +13,7 @@ describe("portable-dashboard", () => {
       widgets: [],
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T01:00:00.000Z",
-    })
+    });
 
     expect(portableDashboard).toEqual({
       name: "Errors Overview",
@@ -24,8 +21,8 @@ describe("portable-dashboard", () => {
       tags: ["errors", "backend"],
       timeRange: { type: "relative", value: "12h" },
       widgets: [],
-    })
-  })
+    });
+  });
 
   it("imports canonical dashboards and strips instance metadata", () => {
     const portableDashboard = parsePortableDashboardJson(
@@ -39,7 +36,7 @@ describe("portable-dashboard", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T01:00:00.000Z",
       }),
-    )
+    );
 
     expect(portableDashboard).toEqual({
       name: "Errors Overview",
@@ -47,8 +44,8 @@ describe("portable-dashboard", () => {
       tags: ["errors", "backend"],
       timeRange: { type: "relative", value: "12h" },
       widgets: [],
-    })
-  })
+    });
+  });
 
   it("rejects non-canonical dashboard files", () => {
     expect(() =>
@@ -58,6 +55,6 @@ describe("portable-dashboard", () => {
           timeRange: { type: "relative", value: "12h" },
         }),
       ),
-    ).toThrow()
-  })
-})
+    ).toThrow();
+  });
+});

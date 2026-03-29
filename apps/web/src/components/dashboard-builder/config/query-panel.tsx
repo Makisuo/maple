@@ -1,26 +1,26 @@
-import * as React from "react"
+import * as React from "react";
 
-import { Badge } from "@maple/ui/components/ui/badge"
-import { Button } from "@maple/ui/components/ui/button"
-import { Checkbox } from "@maple/ui/components/ui/checkbox"
-import { Input } from "@maple/ui/components/ui/input"
+import { Badge } from "@maple/ui/components/ui/badge";
+import { Button } from "@maple/ui/components/ui/button";
+import { Checkbox } from "@maple/ui/components/ui/checkbox";
+import { Input } from "@maple/ui/components/ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@maple/ui/components/ui/select"
+} from "@maple/ui/components/ui/select";
 import {
   Combobox,
   ComboboxContent,
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-} from "@maple/ui/components/ui/combobox"
-import { cn } from "@maple/ui/utils"
-import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
-import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
+} from "@maple/ui/components/ui/combobox";
+import { cn } from "@maple/ui/utils";
+import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor";
+import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete";
 import {
   AGGREGATIONS_BY_SOURCE,
   GROUP_BY_OPTIONS,
@@ -32,39 +32,39 @@ import {
   type QueryBuilderDataSource,
   type QueryBuilderMetricType,
   type QueryBuilderQueryDraft,
-} from "@/lib/query-builder/model"
+} from "@/lib/query-builder/model";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface MetricSelectionOption {
-  value: string
-  label: string
-  isMonotonic: boolean
+  value: string;
+  label: string;
+  isMonotonic: boolean;
 }
 
 interface AutocompleteValues {
-  traces: WhereClauseAutocompleteValues
-  logs: WhereClauseAutocompleteValues
-  metrics: WhereClauseAutocompleteValues
+  traces: WhereClauseAutocompleteValues;
+  logs: WhereClauseAutocompleteValues;
+  metrics: WhereClauseAutocompleteValues;
 }
 
 interface QueryPanelProps {
-  query: QueryBuilderQueryDraft
-  index: number
-  collapsed: boolean
-  canRemove: boolean
-  metricSelectionOptions: MetricSelectionOption[]
-  onMetricSearch?: (search: string) => void
-  autocompleteValues: AutocompleteValues
-  onActiveAttributeKey?: (key: string | null) => void
-  onActiveResourceAttributeKey?: (key: string | null) => void
-  onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void
-  onClone: () => void
-  onRemove: () => void
-  onToggleCollapse: () => void
-  onDataSourceChange: (ds: QueryBuilderDataSource) => void
+  query: QueryBuilderQueryDraft;
+  index: number;
+  collapsed: boolean;
+  canRemove: boolean;
+  metricSelectionOptions: MetricSelectionOption[];
+  onMetricSearch?: (search: string) => void;
+  autocompleteValues: AutocompleteValues;
+  onActiveAttributeKey?: (key: string | null) => void;
+  onActiveResourceAttributeKey?: (key: string | null) => void;
+  onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void;
+  onClone: () => void;
+  onRemove: () => void;
+  onToggleCollapse: () => void;
+  onDataSourceChange: (ds: QueryBuilderDataSource) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,16 +72,13 @@ interface QueryPanelProps {
 // ---------------------------------------------------------------------------
 
 function parseMetricSelection(raw: string): {
-  metricName: string
-  metricType: QueryBuilderMetricType
+  metricName: string;
+  metricType: QueryBuilderMetricType;
 } | null {
-  const [metricName, metricType] = raw.split("::")
-  if (!metricName || !metricType) return null
-  if (
-    !QUERY_BUILDER_METRIC_TYPES.includes(metricType as QueryBuilderMetricType)
-  )
-    return null
-  return { metricName, metricType: metricType as QueryBuilderMetricType }
+  const [metricName, metricType] = raw.split("::");
+  if (!metricName || !metricType) return null;
+  if (!QUERY_BUILDER_METRIC_TYPES.includes(metricType as QueryBuilderMetricType)) return null;
+  return { metricName, metricType: metricType as QueryBuilderMetricType };
 }
 
 const ADD_ON_KEYS: { key: QueryBuilderAddOnKey; label: string }[] = [
@@ -90,7 +87,7 @@ const ADD_ON_KEYS: { key: QueryBuilderAddOnKey; label: string }[] = [
   { key: "orderBy", label: "Order By" },
   { key: "limit", label: "Limit" },
   { key: "legend", label: "Legend" },
-]
+];
 
 // ---------------------------------------------------------------------------
 // GroupByMultiSelect (inline)
@@ -102,73 +99,69 @@ function GroupByMultiSelect({
   dataSource,
   attributeKeys,
 }: {
-  value: string[]
-  onChange: (value: string[]) => void
-  dataSource: QueryBuilderDataSource
-  attributeKeys?: string[]
+  value: string[];
+  onChange: (value: string[]) => void;
+  dataSource: QueryBuilderDataSource;
+  attributeKeys?: string[];
 }) {
-  const inputRef = React.useRef<HTMLInputElement | null>(null)
-  const [isFocused, setIsFocused] = React.useState(false)
-  const [isDismissed, setIsDismissed] = React.useState(false)
-  const [inputValue, setInputValue] = React.useState("")
-  const [activeIndex, setActiveIndex] = React.useState(0)
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const [isFocused, setIsFocused] = React.useState(false);
+  const [isDismissed, setIsDismissed] = React.useState(false);
+  const [inputValue, setInputValue] = React.useState("");
+  const [activeIndex, setActiveIndex] = React.useState(0);
 
-  const selectedSet = React.useMemo(() => new Set(value), [value])
+  const selectedSet = React.useMemo(() => new Set(value), [value]);
 
   const suggestions = React.useMemo(() => {
-    const query = inputValue.toLowerCase()
+    const query = inputValue.toLowerCase();
     const staticOptions = GROUP_BY_OPTIONS[dataSource]
       .filter((opt) => opt.value !== "none")
-      .map((opt) => ({ label: opt.label, value: opt.value }))
+      .map((opt) => ({ label: opt.label, value: opt.value }));
     const attrOptions = (attributeKeys ?? []).map((key) => ({
       label: `attr.${key}`,
       value: `attr.${key}`,
-    }))
-    const options = [...staticOptions, ...attrOptions].filter(
-      (opt) => !selectedSet.has(opt.value),
-    )
-    if (!query) return options
+    }));
+    const options = [...staticOptions, ...attrOptions].filter((opt) => !selectedSet.has(opt.value));
+    if (!query) return options;
     return options.filter(
-      (opt) =>
-        opt.label.toLowerCase().includes(query) ||
-        opt.value.toLowerCase().includes(query),
-    )
-  }, [inputValue, dataSource, attributeKeys, selectedSet])
+      (opt) => opt.label.toLowerCase().includes(query) || opt.value.toLowerCase().includes(query),
+    );
+  }, [inputValue, dataSource, attributeKeys, selectedSet]);
 
-  const isOpen = isFocused && !isDismissed && suggestions.length > 0
+  const isOpen = isFocused && !isDismissed && suggestions.length > 0;
 
   const handleInputChange = React.useCallback((nextValue: string) => {
-    setInputValue(nextValue)
-    setActiveIndex(0)
-    setIsDismissed(false)
-  }, [])
+    setInputValue(nextValue);
+    setActiveIndex(0);
+    setIsDismissed(false);
+  }, []);
 
   const addKey = React.useCallback(
     (key: string) => {
       if (!selectedSet.has(key)) {
-        onChange([...value, key])
+        onChange([...value, key]);
       }
-      setInputValue("")
-      setIsDismissed(false)
+      setInputValue("");
+      setIsDismissed(false);
     },
     [value, onChange, selectedSet],
-  )
+  );
 
   const removeKey = React.useCallback(
     (key: string) => {
-      onChange(value.filter((k) => k !== key))
+      onChange(value.filter((k) => k !== key));
     },
     [value, onChange],
-  )
+  );
 
   const applySuggestion = React.useCallback(
     (index: number) => {
-      const suggestion = suggestions[index]
-      if (!suggestion) return
-      addKey(suggestion.value)
+      const suggestion = suggestions[index];
+      if (!suggestion) return;
+      addKey(suggestion.value);
     },
     [suggestions, addKey],
-  )
+  );
 
   return (
     <div className="relative flex-1 min-w-[140px]">
@@ -189,8 +182,8 @@ function GroupByMultiSelect({
               type="button"
               className="ml-0.5 text-muted-foreground hover:text-foreground"
               onClick={(event) => {
-                event.stopPropagation()
-                removeKey(key)
+                event.stopPropagation();
+                removeKey(key);
               }}
             >
               ×
@@ -203,37 +196,35 @@ function GroupByMultiSelect({
           placeholder={value.length === 0 ? "service.name" : ""}
           className="flex-1 min-w-[80px] bg-transparent outline-none text-xs placeholder:text-muted-foreground"
           onFocus={() => {
-            setIsFocused(true)
-            setIsDismissed(false)
+            setIsFocused(true);
+            setIsDismissed(false);
           }}
           onBlur={() => setIsFocused(false)}
           onChange={(event) => handleInputChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Backspace" && !inputValue && value.length > 0) {
-              removeKey(value[value.length - 1])
-              return
+              removeKey(value[value.length - 1]);
+              return;
             }
-            if (!isOpen || suggestions.length === 0) return
+            if (!isOpen || suggestions.length === 0) return;
             if (event.key === "ArrowDown") {
-              event.preventDefault()
-              setActiveIndex((c) => (c + 1) % suggestions.length)
-              return
+              event.preventDefault();
+              setActiveIndex((c) => (c + 1) % suggestions.length);
+              return;
             }
             if (event.key === "ArrowUp") {
-              event.preventDefault()
-              setActiveIndex(
-                (c) => (c - 1 + suggestions.length) % suggestions.length,
-              )
-              return
+              event.preventDefault();
+              setActiveIndex((c) => (c - 1 + suggestions.length) % suggestions.length);
+              return;
             }
             if (event.key === "Enter" || event.key === "Tab") {
-              event.preventDefault()
-              applySuggestion(activeIndex)
-              return
+              event.preventDefault();
+              applySuggestion(activeIndex);
+              return;
             }
             if (event.key === "Escape") {
-              event.preventDefault()
-              setIsDismissed(true)
+              event.preventDefault();
+              setIsDismissed(true);
             }
           }}
         />
@@ -252,9 +243,7 @@ function GroupByMultiSelect({
               aria-selected={index === activeIndex}
               className={cn(
                 "flex w-full items-center px-2 py-1.5 text-left text-xs font-mono",
-                index === activeIndex
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent/60",
+                index === activeIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
               )}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => applySuggestion(index)}
@@ -265,7 +254,7 @@ function GroupByMultiSelect({
         </div>
       )}
     </div>
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -288,17 +277,16 @@ export function QueryPanel({
   onToggleCollapse,
   onDataSourceChange,
 }: QueryPanelProps) {
-  const badgeColor = queryBadgeColor(index)
-  const aggregateOptions = query.dataSource === "metrics"
-    ? getMetricsAggregations(query.metricType || "gauge", query.isMonotonic)
-    : AGGREGATIONS_BY_SOURCE[query.dataSource]
+  const badgeColor = queryBadgeColor(index);
+  const aggregateOptions =
+    query.dataSource === "metrics"
+      ? getMetricsAggregations(query.metricType || "gauge", query.isMonotonic)
+      : AGGREGATIONS_BY_SOURCE[query.dataSource];
 
   const metricValue =
-    query.metricName && query.metricType
-      ? `${query.metricName}::${query.metricType}`
-      : undefined
+    query.metricName && query.metricType ? `${query.metricName}::${query.metricType}` : undefined;
 
-  const isMetrics = query.dataSource === "metrics"
+  const isMetrics = query.dataSource === "metrics";
 
   return (
     <div className="border rounded-md">
@@ -327,10 +315,7 @@ export function QueryPanel({
 
         <Badge
           variant="outline"
-          className={cn(
-            "font-mono text-[11px] text-white border-0 shrink-0",
-            badgeColor,
-          )}
+          className={cn("font-mono text-[11px] text-white border-0 shrink-0", badgeColor)}
         >
           {query.name}
         </Badge>
@@ -338,9 +323,7 @@ export function QueryPanel({
         <Select
           items={{ traces: "Traces", logs: "Logs", metrics: "Metrics" }}
           value={query.dataSource}
-          onValueChange={(value) =>
-            onDataSourceChange(value as QueryBuilderDataSource)
-          }
+          onValueChange={(value) => onDataSourceChange(value as QueryBuilderDataSource)}
         >
           <SelectTrigger className="h-7 w-24 text-xs border-none bg-transparent shadow-none px-1">
             <SelectValue />
@@ -357,12 +340,7 @@ export function QueryPanel({
         <Button variant="ghost" size="xs" onClick={onClone}>
           Clone
         </Button>
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={onRemove}
-          disabled={!canRemove}
-        >
+        <Button variant="ghost" size="xs" onClick={onRemove} disabled={!canRemove}>
           Remove
         </Button>
       </div>
@@ -421,11 +399,15 @@ export function QueryPanel({
           </div>
 
           {/* Expanded add-on sections */}
-          <AddOnSections query={query} autocompleteValues={autocompleteValues} onUpdate={onUpdate} />
+          <AddOnSections
+            query={query}
+            autocompleteValues={autocompleteValues}
+            onUpdate={onUpdate}
+          />
         </div>
       )}
     </div>
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -440,14 +422,12 @@ function TracesLogsBody({
   onActiveResourceAttributeKey,
   onUpdate,
 }: {
-  query: QueryBuilderQueryDraft
-  aggregateOptions: Array<{ label: string; value: string }>
-  autocompleteValues: AutocompleteValues
-  onActiveAttributeKey?: (key: string | null) => void
-  onActiveResourceAttributeKey?: (key: string | null) => void
-  onUpdate: (
-    updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft,
-  ) => void
+  query: QueryBuilderQueryDraft;
+  aggregateOptions: Array<{ label: string; value: string }>;
+  autocompleteValues: AutocompleteValues;
+  onActiveAttributeKey?: (key: string | null) => void;
+  onActiveResourceAttributeKey?: (key: string | null) => void;
+  onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void;
 }) {
   return (
     <>
@@ -474,25 +454,21 @@ function TracesLogsBody({
         {query.dataSource === "traces" && (
           <Select
             items={{ all: "All Spans", root: "Root Spans" }}
-            value={
-              query.whereClause.includes("root_only = true")
-                ? "root"
-                : "all"
-            }
+            value={query.whereClause.includes("root_only = true") ? "root" : "all"}
             onValueChange={(value) =>
               onUpdate((current) => {
                 const stripped = current.whereClause
                   .replace(/\s*AND\s*root_only\s*=\s*\w+/gi, "")
                   .replace(/root_only\s*=\s*\w+\s*AND\s*/gi, "")
                   .replace(/root_only\s*=\s*\w+/gi, "")
-                  .trim()
+                  .trim();
                 const clause =
                   value === "root"
                     ? stripped
                       ? `${stripped} AND root_only = true`
                       : "root_only = true"
-                    : stripped
-                return { ...current, whereClause: clause }
+                    : stripped;
+                return { ...current, whereClause: clause };
               })
             }
           >
@@ -548,7 +524,7 @@ function TracesLogsBody({
         <span className="text-xs text-muted-foreground">seconds</span>
       </div>
     </>
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -566,24 +542,16 @@ function MetricsBody({
   onActiveResourceAttributeKey,
   onUpdate,
 }: {
-  query: QueryBuilderQueryDraft
-  aggregateOptions: Array<{ label: string; value: string }>
-  metricValue: string | undefined
-  metricSelectionOptions: MetricSelectionOption[]
-  onMetricSearch?: (search: string) => void
-  autocompleteValues: AutocompleteValues
-  onActiveAttributeKey?: (key: string | null) => void
-  onActiveResourceAttributeKey?: (key: string | null) => void
-  onUpdate: (
-    updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft,
-  ) => void
+  query: QueryBuilderQueryDraft;
+  aggregateOptions: Array<{ label: string; value: string }>;
+  metricValue: string | undefined;
+  metricSelectionOptions: MetricSelectionOption[];
+  onMetricSearch?: (search: string) => void;
+  autocompleteValues: AutocompleteValues;
+  onActiveAttributeKey?: (key: string | null) => void;
+  onActiveResourceAttributeKey?: (key: string | null) => void;
+  onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void;
 }) {
-  const groupByDisplay =
-    !query.addOns.groupBy || query.groupBy.length === 0 || (query.groupBy.length === 1 && query.groupBy[0] === "none")
-      ? "Everything (no breakdown)"
-      : query.groupBy.join(", ")
-
-
   return (
     <>
       {/* Row 1: Metric type + name */}
@@ -592,10 +560,10 @@ function MetricsBody({
         <Combobox
           value={metricValue ?? null}
           onValueChange={(value) => {
-            const parsed = value ? parseMetricSelection(value) : null
-            if (!parsed) return
-            const selectedOption = metricSelectionOptions.find((o) => o.value === value)
-            const isMonotonic = selectedOption?.isMonotonic ?? (parsed.metricType === "sum")
+            const parsed = value ? parseMetricSelection(value) : null;
+            if (!parsed) return;
+            const selectedOption = metricSelectionOptions.find((o) => o.value === value);
+            const isMonotonic = selectedOption?.isMonotonic ?? parsed.metricType === "sum";
             onUpdate((current) => ({
               ...current,
               metricName: parsed.metricName,
@@ -606,7 +574,7 @@ function MetricsBody({
                 parsed.metricType,
                 isMonotonic,
               ),
-            }))
+            }));
           }}
         >
           <ComboboxInput
@@ -731,34 +699,33 @@ function MetricsBody({
             query.groupBy.length === 0 ||
             (query.groupBy.length === 1 && query.groupBy[0] === "none")
               ? "__none__"
-              : query.groupBy[0] ?? "__none__"
+              : (query.groupBy[0] ?? "__none__")
           }
           onValueChange={(value) => {
-            if (!value) return
+            if (!value) return;
             onUpdate((current) => ({
               ...current,
               groupBy: value === "__none__" ? [] : [value],
               addOns: { ...current.addOns, groupBy: value !== "__none__" },
-            }))
+            }));
           }}
         >
-          <ComboboxInput
-            placeholder="Search fields..."
-            className="h-8 w-[220px] text-xs"
-          />
+          <ComboboxInput placeholder="Search fields..." className="h-8 w-[220px] text-xs" />
           <ComboboxContent>
             <ComboboxList>
               <ComboboxItem value="__none__">Everything (no breakdown)</ComboboxItem>
               <ComboboxItem value="service.name">service.name</ComboboxItem>
               {(autocompleteValues.metrics?.attributeKeys ?? []).map((key) => (
-                <ComboboxItem key={key} value={`attr.${key}`}>attr.{key}</ComboboxItem>
+                <ComboboxItem key={key} value={`attr.${key}`}>
+                  attr.{key}
+                </ComboboxItem>
               ))}
             </ComboboxList>
           </ComboboxContent>
         </Combobox>
       </div>
     </>
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -770,27 +737,21 @@ function AddOnSections({
   autocompleteValues,
   onUpdate,
 }: {
-  query: QueryBuilderQueryDraft
-  autocompleteValues: AutocompleteValues
-  onUpdate: (
-    updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft,
-  ) => void
+  query: QueryBuilderQueryDraft;
+  autocompleteValues: AutocompleteValues;
+  onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void;
 }) {
-  const hasAny = Object.values(query.addOns).some(Boolean)
-  if (!hasAny) return null
+  const hasAny = Object.values(query.addOns).some(Boolean);
+  if (!hasAny) return null;
 
   return (
     <div className="space-y-2 pt-1">
       {query.addOns.groupBy && query.dataSource !== "metrics" && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground w-16 shrink-0">
-            Group By
-          </span>
+          <span className="text-[11px] text-muted-foreground w-16 shrink-0">Group By</span>
           <GroupByMultiSelect
             value={query.groupBy}
-            onChange={(value) =>
-              onUpdate((current) => ({ ...current, groupBy: value }))
-            }
+            onChange={(value) => onUpdate((current) => ({ ...current, groupBy: value }))}
             dataSource={query.dataSource}
             attributeKeys={autocompleteValues[query.dataSource]?.attributeKeys}
           />
@@ -799,9 +760,7 @@ function AddOnSections({
 
       {query.addOns.having && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground w-16 shrink-0">
-            Having
-          </span>
+          <span className="text-[11px] text-muted-foreground w-16 shrink-0">Having</span>
           <Input
             value={query.having}
             onChange={(event) =>
@@ -818,9 +777,7 @@ function AddOnSections({
 
       {query.addOns.orderBy && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground w-16 shrink-0">
-            Order By
-          </span>
+          <span className="text-[11px] text-muted-foreground w-16 shrink-0">Order By</span>
           <Input
             value={query.orderBy}
             onChange={(event) =>
@@ -838,9 +795,7 @@ function AddOnSections({
               onUpdate((current) => ({
                 ...current,
                 orderByDirection:
-                  value === "asc" || value === "desc"
-                    ? value
-                    : current.orderByDirection,
+                  value === "asc" || value === "desc" ? value : current.orderByDirection,
               }))
             }
           >
@@ -857,9 +812,7 @@ function AddOnSections({
 
       {query.addOns.limit && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground w-16 shrink-0">
-            Limit
-          </span>
+          <span className="text-[11px] text-muted-foreground w-16 shrink-0">Limit</span>
           <Input
             value={query.limit}
             onChange={(event) =>
@@ -878,9 +831,7 @@ function AddOnSections({
 
       {query.addOns.legend && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground w-16 shrink-0">
-            Legend
-          </span>
+          <span className="text-[11px] text-muted-foreground w-16 shrink-0">Legend</span>
           <Input
             value={query.legend}
             onChange={(event) =>
@@ -895,5 +846,5 @@ function AddOnSections({
         </div>
       )}
     </div>
-  )
+  );
 }
