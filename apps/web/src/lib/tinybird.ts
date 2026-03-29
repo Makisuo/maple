@@ -6,7 +6,6 @@ import { setMapleAuthHeaders } from "./services/common/auth-headers"
 import type {
   CustomLogsBreakdownOutput,
   CustomLogsTimeseriesOutput,
-  CustomMetricsBreakdownOutput,
   CustomTracesBreakdownOutput,
   CustomTracesTimeseriesOutput,
   ErrorDetailTracesOutput,
@@ -21,10 +20,6 @@ import type {
   ListTracesOutput,
   LogsCountOutput,
   LogsFacetsOutput,
-  MetricTimeSeriesExpHistogramOutput,
-  MetricTimeSeriesGaugeOutput,
-  MetricTimeSeriesHistogramOutput,
-  MetricTimeSeriesSumOutput,
   MetricsSummaryOutput,
   ServiceApdexTimeSeriesOutput,
   ServiceDependenciesOutput,
@@ -45,8 +40,6 @@ export type {
   CustomLogsBreakdownOutput,
   CustomLogsTimeseriesParams,
   CustomLogsTimeseriesOutput,
-  CustomMetricsBreakdownParams,
-  CustomMetricsBreakdownOutput,
   CustomTracesBreakdownParams,
   CustomTracesBreakdownOutput,
   CustomTracesTimeseriesParams,
@@ -75,14 +68,6 @@ export type {
   LogsCountOutput,
   LogsFacetsParams,
   LogsFacetsOutput,
-  MetricTimeSeriesExpHistogramParams,
-  MetricTimeSeriesExpHistogramOutput,
-  MetricTimeSeriesGaugeParams,
-  MetricTimeSeriesGaugeOutput,
-  MetricTimeSeriesHistogramParams,
-  MetricTimeSeriesHistogramOutput,
-  MetricTimeSeriesSumParams,
-  MetricTimeSeriesSumOutput,
   MetricsSummaryParams,
   MetricsSummaryOutput,
   ServiceApdexTimeSeriesParams,
@@ -151,14 +136,6 @@ const query = {
     queryTinybird<GetServiceUsageOutput>("get_service_usage", params),
   list_metrics: (params?: Record<string, unknown>) =>
     queryTinybird<ListMetricsOutput>("list_metrics", params),
-  metric_time_series_sum: (params?: Record<string, unknown>) =>
-    queryTinybird<MetricTimeSeriesSumOutput>("metric_time_series_sum", params),
-  metric_time_series_gauge: (params?: Record<string, unknown>) =>
-    queryTinybird<MetricTimeSeriesGaugeOutput>("metric_time_series_gauge", params),
-  metric_time_series_histogram: (params?: Record<string, unknown>) =>
-    queryTinybird<MetricTimeSeriesHistogramOutput>("metric_time_series_histogram", params),
-  metric_time_series_exp_histogram: (params?: Record<string, unknown>) =>
-    queryTinybird<MetricTimeSeriesExpHistogramOutput>("metric_time_series_exp_histogram", params),
   metrics_summary: (params?: Record<string, unknown>) =>
     queryTinybird<MetricsSummaryOutput>("metrics_summary", params),
   traces_facets: (params?: Record<string, unknown>) =>
@@ -189,8 +166,6 @@ const query = {
     queryTinybird<CustomLogsTimeseriesOutput>("custom_logs_timeseries", params),
   custom_logs_breakdown: (params?: Record<string, unknown>) =>
     queryTinybird<CustomLogsBreakdownOutput>("custom_logs_breakdown", params),
-  custom_metrics_breakdown: (params?: Record<string, unknown>) =>
-    queryTinybird<CustomMetricsBreakdownOutput>("custom_metrics_breakdown", params),
   service_dependencies: (params?: Record<string, unknown>) =>
     queryTinybird<ServiceDependenciesOutput>("service_dependencies", params),
   metric_attribute_keys: (params?: Record<string, unknown>) =>

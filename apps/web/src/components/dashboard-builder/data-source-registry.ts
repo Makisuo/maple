@@ -16,7 +16,7 @@ import {
   getErrorDetailTraces,
 } from "@/api/tinybird/errors"
 import { getErrorRateByService } from "@/api/tinybird/error-rates"
-import { listMetrics, getMetricTimeSeries, getMetricsSummary } from "@/api/tinybird/metrics"
+import { listMetrics, getMetricsSummary } from "@/api/tinybird/metrics"
 import {
   getCustomChartTimeSeries,
   getCustomChartBreakdown,
@@ -48,10 +48,6 @@ export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
   error_rate_by_service: getErrorRateByService,
   list_metrics: listMetrics,
   metrics_summary: getMetricsSummary,
-  metric_time_series_sum: getMetricTimeSeries,
-  metric_time_series_gauge: getMetricTimeSeries,
-  metric_time_series_histogram: getMetricTimeSeries,
-  metric_time_series_exp_histogram: getMetricTimeSeries,
   custom_timeseries: getCustomChartTimeSeries,
   custom_breakdown: getCustomChartBreakdown,
   custom_query_builder_timeseries: getQueryBuilderTimeseries,

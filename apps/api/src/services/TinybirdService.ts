@@ -35,30 +35,6 @@ export interface TinybirdServiceShape {
     tenant: TenantContext,
     params: Omit<CustomLogsBreakdownParams, "org_id">,
   ) => Effect.Effect<ReadonlyArray<CustomLogsBreakdownOutput>, TinybirdQueryError>
-  readonly customMetricsBreakdownQuery: (
-    tenant: TenantContext,
-    params: Omit<CustomMetricsBreakdownParams, "org_id">,
-  ) => Effect.Effect<ReadonlyArray<CustomMetricsBreakdownOutput>, TinybirdQueryError>
-  readonly metricTimeSeriesSumQuery: (
-    tenant: TenantContext,
-    params: Omit<MetricTimeSeriesSumParams, "org_id">,
-  ) => Effect.Effect<ReadonlyArray<MetricTimeSeriesSumOutput>, TinybirdQueryError>
-  readonly metricTimeSeriesGaugeQuery: (
-    tenant: TenantContext,
-    params: Omit<MetricTimeSeriesGaugeParams, "org_id">,
-  ) => Effect.Effect<ReadonlyArray<MetricTimeSeriesGaugeOutput>, TinybirdQueryError>
-  readonly metricTimeSeriesHistogramQuery: (
-    tenant: TenantContext,
-    params: Omit<MetricTimeSeriesHistogramParams, "org_id">,
-  ) => Effect.Effect<ReadonlyArray<MetricTimeSeriesHistogramOutput>, TinybirdQueryError>
-  readonly metricTimeSeriesExpHistogramQuery: (
-    tenant: TenantContext,
-    params: Omit<MetricTimeSeriesExpHistogramParams, "org_id">,
-  ) => Effect.Effect<ReadonlyArray<MetricTimeSeriesExpHistogramOutput>, TinybirdQueryError>
-  readonly metricTimeSeriesSumRateQuery: (
-    tenant: TenantContext,
-    params: Omit<MetricTimeSeriesSumRateParams, "org_id">,
-  ) => Effect.Effect<ReadonlyArray<MetricTimeSeriesSumRateOutput>, TinybirdQueryError>
   readonly alertTracesAggregateQuery: (
     tenant: TenantContext,
     params: Omit<AlertTracesAggregateParams, "org_id">,
@@ -108,15 +84,12 @@ import {
   type CustomLogsBreakdownParams,
   type CustomLogsTimeseriesOutput,
   type CustomLogsTimeseriesParams,
-  type CustomMetricsBreakdownOutput,
-  type CustomMetricsBreakdownParams,
   type CustomTracesBreakdownOutput,
   type CustomTracesBreakdownParams,
   type CustomTracesTimeseriesOutput,
   type CustomTracesTimeseriesParams,
   customLogsBreakdown,
   customLogsTimeseries,
-  customMetricsBreakdown,
   customTracesBreakdown,
   customTracesTimeseries,
   errorDetailTraces,
@@ -130,21 +103,6 @@ import {
   listTraces,
   logsCount,
   logsFacets,
-  type MetricTimeSeriesExpHistogramOutput,
-  type MetricTimeSeriesExpHistogramParams,
-  metricTimeSeriesExpHistogram,
-  type MetricTimeSeriesGaugeOutput,
-  type MetricTimeSeriesGaugeParams,
-  metricTimeSeriesGauge,
-  type MetricTimeSeriesHistogramOutput,
-  type MetricTimeSeriesHistogramParams,
-  metricTimeSeriesHistogram,
-  type MetricTimeSeriesSumOutput,
-  type MetricTimeSeriesSumParams,
-  metricTimeSeriesSum,
-  type MetricTimeSeriesSumRateOutput,
-  type MetricTimeSeriesSumRateParams,
-  metricTimeSeriesSumRate,
   metricAttributeKeys,
   metricsSummary,
   serviceApdexTimeSeries,
@@ -169,11 +127,6 @@ const pipes = {
   error_rate_by_service: errorRateByService,
   get_service_usage: getServiceUsage,
   list_metrics: listMetrics,
-  metric_time_series_sum: metricTimeSeriesSum,
-  metric_time_series_sum_rate: metricTimeSeriesSumRate,
-  metric_time_series_gauge: metricTimeSeriesGauge,
-  metric_time_series_histogram: metricTimeSeriesHistogram,
-  metric_time_series_exp_histogram: metricTimeSeriesExpHistogram,
   metrics_summary: metricsSummary,
   traces_facets: tracesFacets,
   traces_duration_stats: tracesDurationStats,
@@ -194,7 +147,6 @@ const pipes = {
   custom_traces_breakdown: customTracesBreakdown,
   custom_logs_timeseries: customLogsTimeseries,
   custom_logs_breakdown: customLogsBreakdown,
-  custom_metrics_breakdown: customMetricsBreakdown,
   service_dependencies: serviceDependencies,
   metric_attribute_keys: metricAttributeKeys,
   span_attribute_keys: spanAttributeKeys,
@@ -225,30 +177,6 @@ interface TinybirdClient {
   readonly custom_logs_breakdown: TinybirdPipeQuery<
     Omit<CustomLogsBreakdownParams, "org_id">,
     CustomLogsBreakdownOutput
-  >
-  readonly custom_metrics_breakdown: TinybirdPipeQuery<
-    Omit<CustomMetricsBreakdownParams, "org_id">,
-    CustomMetricsBreakdownOutput
-  >
-  readonly metric_time_series_sum: TinybirdPipeQuery<
-    Omit<MetricTimeSeriesSumParams, "org_id">,
-    MetricTimeSeriesSumOutput
-  >
-  readonly metric_time_series_gauge: TinybirdPipeQuery<
-    Omit<MetricTimeSeriesGaugeParams, "org_id">,
-    MetricTimeSeriesGaugeOutput
-  >
-  readonly metric_time_series_histogram: TinybirdPipeQuery<
-    Omit<MetricTimeSeriesHistogramParams, "org_id">,
-    MetricTimeSeriesHistogramOutput
-  >
-  readonly metric_time_series_exp_histogram: TinybirdPipeQuery<
-    Omit<MetricTimeSeriesExpHistogramParams, "org_id">,
-    MetricTimeSeriesExpHistogramOutput
-  >
-  readonly metric_time_series_sum_rate: TinybirdPipeQuery<
-    Omit<MetricTimeSeriesSumRateParams, "org_id">,
-    MetricTimeSeriesSumRateOutput
   >
   readonly alert_traces_aggregate: TinybirdPipeQuery<
     Omit<AlertTracesAggregateParams, "org_id">,
@@ -422,87 +350,6 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       >("custom_logs_breakdown", tenant, params, client.custom_logs_breakdown.query)
     })
 
-    const customMetricsBreakdownQuery = Effect.fn("TinybirdService.customMetricsBreakdownQuery")(function* (
-      tenant: TenantContext,
-      params: Omit<CustomMetricsBreakdownParams, "org_id">,
-    ) {
-      const client = yield* resolveClient(tenant, "custom_metrics_breakdown")
-      return yield* runPipe<
-        "custom_metrics_breakdown",
-        Omit<CustomMetricsBreakdownParams, "org_id">,
-        CustomMetricsBreakdownOutput
-      >("custom_metrics_breakdown", tenant, params, client.custom_metrics_breakdown.query)
-    })
-
-    const metricTimeSeriesSumQuery = Effect.fn("TinybirdService.metricTimeSeriesSumQuery")(function* (
-      tenant: TenantContext,
-      params: Omit<MetricTimeSeriesSumParams, "org_id">,
-    ) {
-      const client = yield* resolveClient(tenant, "metric_time_series_sum")
-      return yield* runPipe<
-        "metric_time_series_sum",
-        Omit<MetricTimeSeriesSumParams, "org_id">,
-        MetricTimeSeriesSumOutput
-      >("metric_time_series_sum", tenant, params, client.metric_time_series_sum.query)
-    })
-
-    const metricTimeSeriesGaugeQuery = Effect.fn("TinybirdService.metricTimeSeriesGaugeQuery")(function* (
-      tenant: TenantContext,
-      params: Omit<MetricTimeSeriesGaugeParams, "org_id">,
-    ) {
-      const client = yield* resolveClient(tenant, "metric_time_series_gauge")
-      return yield* runPipe<
-        "metric_time_series_gauge",
-        Omit<MetricTimeSeriesGaugeParams, "org_id">,
-        MetricTimeSeriesGaugeOutput
-      >("metric_time_series_gauge", tenant, params, client.metric_time_series_gauge.query)
-    })
-
-    const metricTimeSeriesHistogramQuery = Effect.fn(
-      "TinybirdService.metricTimeSeriesHistogramQuery",
-    )(function* (
-      tenant: TenantContext,
-      params: Omit<MetricTimeSeriesHistogramParams, "org_id">,
-    ) {
-      const client = yield* resolveClient(tenant, "metric_time_series_histogram")
-      return yield* runPipe<
-        "metric_time_series_histogram",
-        Omit<MetricTimeSeriesHistogramParams, "org_id">,
-        MetricTimeSeriesHistogramOutput
-      >("metric_time_series_histogram", tenant, params, client.metric_time_series_histogram.query)
-    })
-
-    const metricTimeSeriesExpHistogramQuery = Effect.fn(
-      "TinybirdService.metricTimeSeriesExpHistogramQuery",
-    )(function* (
-      tenant: TenantContext,
-      params: Omit<MetricTimeSeriesExpHistogramParams, "org_id">,
-    ) {
-      const client = yield* resolveClient(tenant, "metric_time_series_exp_histogram")
-      return yield* runPipe<
-        "metric_time_series_exp_histogram",
-        Omit<MetricTimeSeriesExpHistogramParams, "org_id">,
-        MetricTimeSeriesExpHistogramOutput
-      >(
-        "metric_time_series_exp_histogram",
-        tenant,
-        params,
-        client.metric_time_series_exp_histogram.query,
-      )
-    })
-
-    const metricTimeSeriesSumRateQuery = Effect.fn("TinybirdService.metricTimeSeriesSumRateQuery")(function* (
-      tenant: TenantContext,
-      params: Omit<MetricTimeSeriesSumRateParams, "org_id">,
-    ) {
-      const client = yield* resolveClient(tenant, "metric_time_series_sum_rate")
-      return yield* runPipe<
-        "metric_time_series_sum_rate",
-        Omit<MetricTimeSeriesSumRateParams, "org_id">,
-        MetricTimeSeriesSumRateOutput
-      >("metric_time_series_sum_rate", tenant, params, client.metric_time_series_sum_rate.query)
-    })
-
     const alertTracesAggregateQuery = Effect.fn("TinybirdService.alertTracesAggregateQuery")(function* (
       tenant: TenantContext,
       params: Omit<AlertTracesAggregateParams, "org_id">,
@@ -603,12 +450,6 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       sqlQuery,
       customLogsTimeseriesQuery,
       customLogsBreakdownQuery,
-      customMetricsBreakdownQuery,
-      metricTimeSeriesSumQuery,
-      metricTimeSeriesGaugeQuery,
-      metricTimeSeriesHistogramQuery,
-      metricTimeSeriesExpHistogramQuery,
-      metricTimeSeriesSumRateQuery,
       alertTracesAggregateQuery,
       alertMetricsAggregateQuery,
       alertLogsAggregateQuery,

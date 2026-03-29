@@ -86,12 +86,6 @@ function makeTinybirdStub(state: {
     sqlQuery: () => succeedRows(emptyTinybirdRows),
     customLogsTimeseriesQuery: () => succeedRows(emptyTinybirdRows),
     customLogsBreakdownQuery: () => succeedRows(emptyTinybirdRows),
-    customMetricsBreakdownQuery: () => succeedRows(emptyTinybirdRows),
-    metricTimeSeriesSumQuery: () => succeedRows(emptyTinybirdRows),
-    metricTimeSeriesGaugeQuery: () => succeedRows(emptyTinybirdRows),
-    metricTimeSeriesHistogramQuery: () => succeedRows(emptyTinybirdRows),
-    metricTimeSeriesExpHistogramQuery: () => succeedRows(emptyTinybirdRows),
-    metricTimeSeriesSumRateQuery: () => succeedRows(emptyTinybirdRows),
     alertTracesAggregateQuery: () =>
       succeedRows(state.tracesAggregateRows ?? emptyTinybirdRows),
     alertMetricsAggregateQuery: () =>

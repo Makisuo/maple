@@ -11,10 +11,9 @@ import {
   TinybirdDateTimeString,
   TinybirdApiError,
   decodeInput,
-  invalidTinybirdInput,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
-import { computeBucketSeconds, toIsoBucket } from "@/api/tinybird/timeseries-utils"
+import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 
 const MetricTypeSchema = Schema.Literals([
   "sum",
@@ -128,17 +127,28 @@ export interface MetricTimeSeriesResponse {
   data: MetricTimeSeriesPoint[]
 }
 
-function transformTimeSeriesPoint(raw: MetricTimeSeriesSumOutput): MetricTimeSeriesPoint {
-  return {
-    bucket: String(raw.bucket),
-    serviceName: raw.serviceName,
-    attributeValue: raw.attributeValue,
-    avgValue: raw.avgValue,
-    minValue: raw.minValue,
-    maxValue: raw.maxValue,
-    sumValue: raw.sumValue,
-    dataPointCount: Number(raw.dataPointCount),
-  }
+function toMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error ? cause.message : fallback
+}
+
+function executeMetricsQueryEngine(payload: QueryEngineExecuteRequest) {
+  return Effect.gen(function* () {
+    const client = yield* MapleApiAtomClient
+    return yield* client.queryEngine.execute({
+      payload: new QueryEngineExecuteRequest(payload),
+    })
+  }).pipe(
+    Effect.provide(MapleApiAtomClient.layer),
+    Effect.mapError(
+      (cause) =>
+        new TinybirdApiError({
+          operation: "queryEngine.execute",
+          stage: "query",
+          message: toMessage(cause, "Metrics query engine request failed"),
+          cause,
+        }),
+    ),
+  )
 }
 
 export function getMetricTimeSeries({
@@ -160,76 +170,65 @@ const getMetricTimeSeriesEffect = Effect.fn("Tinybird.getMetricTimeSeries")(func
       "getMetricTimeSeries",
     )
 
-    const tinybird = getTinybird()
-    const params = {
-      metric_name: input.metricName,
-      service: input.service,
-      start_time: input.startTime,
-      end_time: input.endTime,
-      bucket_seconds: input.bucketSeconds,
+    const bucketSeconds = input.bucketSeconds ?? computeBucketSeconds(input.startTime, input.endTime)
+
+    const makeRequest = (metric: string) =>
+      new QueryEngineExecuteRequest({
+        startTime: input.startTime ?? "2020-01-01 00:00:00",
+        endTime: input.endTime ?? "2099-12-31 23:59:59",
+        query: {
+          kind: "timeseries" as const,
+          source: "metrics" as const,
+          metric: metric as any,
+          groupBy: ["service"],
+          filters: {
+            metricName: input.metricName,
+            metricType: input.metricType as MetricType,
+            serviceName: input.service,
+          },
+          bucketSeconds,
+        },
+      })
+
+    const [avgRes, sumRes, minRes, maxRes, countRes] = yield* Effect.all([
+      executeMetricsQueryEngine(makeRequest("avg")),
+      executeMetricsQueryEngine(makeRequest("sum")),
+      executeMetricsQueryEngine(makeRequest("min")),
+      executeMetricsQueryEngine(makeRequest("max")),
+      executeMetricsQueryEngine(makeRequest("count")),
+    ], { concurrency: 5 })
+
+    // Build a map of bucket::service -> { avg, sum, min, max, count }
+    const valueMap = new Map<string, MetricTimeSeriesPoint>()
+
+    const processResult = (
+      res: typeof avgRes,
+      field: keyof Pick<MetricTimeSeriesPoint, "avgValue" | "sumValue" | "minValue" | "maxValue" | "dataPointCount">,
+    ) => {
+      if (res.result.kind !== "timeseries") return
+      for (const point of res.result.data) {
+        const bucket = point.bucket
+        for (const [serviceName, value] of Object.entries(point.series)) {
+          const key = `${bucket}::${serviceName}`
+          let row = valueMap.get(key)
+          if (!row) {
+            row = { bucket, serviceName, attributeValue: "", avgValue: 0, minValue: 0, maxValue: 0, sumValue: 0, dataPointCount: 0 }
+            valueMap.set(key, row)
+          }
+          ;(row as any)[field] = Number(value)
+        }
+      }
     }
 
-    let operation = ""
-    let execute:
-      | (() => Effect.Effect<{ data: MetricTimeSeriesSumOutput[] }, unknown, any>)
-      | null = null
+    processResult(avgRes, "avgValue")
+    processResult(sumRes, "sumValue")
+    processResult(minRes, "minValue")
+    processResult(maxRes, "maxValue")
+    processResult(countRes, "dataPointCount")
 
-    switch (input.metricType) {
-      case "sum":
-        operation = "metric_time_series_sum"
-        execute = () =>
-          tinybird.query.metric_time_series_sum(params) as Effect.Effect<
-            { data: MetricTimeSeriesSumOutput[] },
-            unknown,
-            any
-          >
-        break
-      case "gauge":
-        operation = "metric_time_series_gauge"
-        execute = () =>
-          tinybird.query.metric_time_series_gauge(params) as Effect.Effect<
-            { data: MetricTimeSeriesSumOutput[] },
-            unknown,
-            any
-          >
-        break
-      case "histogram":
-        operation = "metric_time_series_histogram"
-        execute = () =>
-          tinybird.query.metric_time_series_histogram(params) as Effect.Effect<
-            { data: MetricTimeSeriesSumOutput[] },
-            unknown,
-            any
-          >
-        break
-      case "exponential_histogram":
-        operation = "metric_time_series_exp_histogram"
-        execute = () =>
-          tinybird.query.metric_time_series_exp_histogram(params) as Effect.Effect<
-            { data: MetricTimeSeriesSumOutput[] },
-            unknown,
-            any
-          >
-        break
-      default:
-        return yield* invalidTinybirdInput(
-          "getMetricTimeSeries",
-          `Unknown metric type: ${String(input.metricType)}`,
-        )
-    }
+    const rows = [...valueMap.values()].sort((a, b) => a.bucket.localeCompare(b.bucket))
 
-    if (!execute) {
-      return yield* invalidTinybirdInput(
-        "getMetricTimeSeries",
-        `Unknown metric type: ${String(input.metricType)}`,
-      )
-    }
-
-    const result = yield* runTinybirdQuery(operation, execute)
-
-    return {
-      data: result.data.map(transformTimeSeriesPoint),
-    }
+    return { data: rows }
 })
 
 const GetMetricsSummaryInputSchema = Schema.Struct({

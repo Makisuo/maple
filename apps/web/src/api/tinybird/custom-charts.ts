@@ -27,7 +27,7 @@ const dateTimeString = TinybirdDateTimeString
 const SPANMETRICS_CALLS_CANDIDATES = ["span.metrics.calls", "calls"]
 
 function querySpanMetricsCalls(
-  tinybird: ReturnType<typeof getTinybird>,
+  _tinybird: ReturnType<typeof getTinybird>,
   params: {
     service?: string
     start_time?: string
@@ -37,20 +37,41 @@ function querySpanMetricsCalls(
 ) {
   return Effect.gen(function* () {
     for (const metricName of SPANMETRICS_CALLS_CANDIDATES) {
-      const result = yield* runTinybirdQuery("metric_time_series_sum", () =>
-        tinybird.query.metric_time_series_sum({
-          metric_name: metricName,
-          service: params.service,
-          start_time: params.start_time,
-          end_time: params.end_time,
-          bucket_seconds: params.bucket_seconds,
-          attribute_key: "span.kind",
-          attribute_value: "SPAN_KIND_SERVER",
+      const response = yield* executeQueryEngine(
+        new QueryEngineExecuteRequest({
+          startTime: params.start_time ?? "2020-01-01 00:00:00",
+          endTime: params.end_time ?? "2099-12-31 23:59:59",
+          query: {
+            kind: "timeseries",
+            source: "metrics",
+            metric: "sum",
+            groupBy: ["service"],
+            filters: {
+              metricName,
+              metricType: "sum",
+              serviceName: params.service,
+              attributeFilters: [
+                { key: "span.kind", value: "SPAN_KIND_SERVER", mode: "equals" },
+              ],
+            },
+            bucketSeconds: params.bucket_seconds,
+          },
         }),
-      ).pipe(Effect.orElseSucceed(() => ({ data: [] as Array<Record<string, unknown>> })))
+      ).pipe(Effect.orElseSucceed(() => null))
 
-      if (result.data.length > 0) {
-        return result
+      if (response && response.result.kind === "timeseries" && response.result.data.length > 0) {
+        // Transform grouped timeseries back to flat rows for compatibility
+        const data: Array<Record<string, unknown>> = []
+        for (const point of response.result.data) {
+          for (const [serviceName, value] of Object.entries(point.series)) {
+            data.push({
+              bucket: point.bucket,
+              serviceName,
+              sumValue: value,
+            })
+          }
+        }
+        return { data }
       }
     }
     return { data: [] as never[] }
