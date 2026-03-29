@@ -19,7 +19,7 @@
     "destroy:stg": "bun scripts/deploy-stack.ts destroy stg",
     "deploy:pr": "bun scripts/deploy-stack.ts deploy pr",
     "destroy:pr": "bun scripts/deploy-stack.ts destroy pr",
-    "prepare": "vp config"
+    "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && vp config || true"
   },
   "devDependencies": {
     "@tinybirdco/sdk": "catalog:tinybird",
