@@ -5,7 +5,6 @@ import { registerFindErrorsTool } from "./tools/find-errors"
 import { registerInspectTraceTool } from "./tools/inspect-trace"
 import { registerSearchLogsTool } from "./tools/search-logs"
 import { registerSearchTracesTool } from "./tools/search-traces"
-import { registerServiceOverviewTool } from "./tools/service-overview"
 import { registerDiagnoseServiceTool } from "./tools/diagnose-service"
 import { registerFindSlowTracesTool } from "./tools/find-slow-traces"
 import { registerErrorDetailTool } from "./tools/error-detail"
@@ -75,7 +74,6 @@ const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
   registerInspectTraceTool(registrar)
   registerSearchLogsTool(registrar)
   registerSearchTracesTool(registrar)
-  registerServiceOverviewTool(registrar)
   registerDiagnoseServiceTool(registrar)
   registerFindSlowTracesTool(registrar)
   registerErrorDetailTool(registrar)

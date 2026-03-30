@@ -17,10 +17,6 @@ export interface SystemHealthData {
     count: number
     affectedServicesCount: number
   }>
-}
-
-export interface ServiceOverviewData {
-  timeRange: { start: string; end: string }
   services: Array<{
     name: string
     throughput: number
@@ -295,7 +291,6 @@ export interface CreateDashboardData {
 
 export type StructuredToolOutput =
   | { tool: "system_health"; data: SystemHealthData }
-  | { tool: "service_overview"; data: ServiceOverviewData }
   | { tool: "search_traces"; data: SearchTracesData }
   | { tool: "find_slow_traces"; data: FindSlowTracesData }
   | { tool: "find_errors"; data: FindErrorsData }
