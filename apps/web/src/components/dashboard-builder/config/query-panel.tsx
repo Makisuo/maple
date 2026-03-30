@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Atom, useAtom } from "@/lib/effect-atom";
 
 import { Badge } from "@maple/ui/components/ui/badge";
 import { Button } from "@maple/ui/components/ui/button";
@@ -105,10 +106,14 @@ function GroupByMultiSelect({
   attributeKeys?: string[];
 }) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const [isFocused, setIsFocused] = React.useState(false);
-  const [isDismissed, setIsDismissed] = React.useState(false);
-  const [inputValue, setInputValue] = React.useState("");
-  const [activeIndex, setActiveIndex] = React.useState(0);
+  const isFocusedAtom = React.useMemo(() => Atom.make(false), []);
+  const [isFocused, setIsFocused] = useAtom(isFocusedAtom);
+  const isDismissedAtom = React.useMemo(() => Atom.make(false), []);
+  const [isDismissed, setIsDismissed] = useAtom(isDismissedAtom);
+  const inputValueAtom = React.useMemo(() => Atom.make(""), []);
+  const [inputValue, setInputValue] = useAtom(inputValueAtom);
+  const activeIndexAtom = React.useMemo(() => Atom.make(0), []);
+  const [activeIndex, setActiveIndex] = useAtom(activeIndexAtom);
 
   const selectedSet = React.useMemo(() => new Set(value), [value]);
 

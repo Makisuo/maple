@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useMemo } from "react"
+import { Atom, useAtom } from "@/lib/effect-atom"
 import { Button } from "@maple/ui/components/ui/button"
 import { CheckIcon, TrashIcon } from "@/components/icons"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
@@ -30,7 +31,8 @@ export function WidgetRemovalCard({
   widgets,
   onConfirm,
 }: WidgetRemovalCardProps) {
-  const [removed, setRemoved] = useState(false)
+  const removedAtom = useMemo(() => Atom.make(false), [])
+  const [removed, setRemoved] = useAtom(removedAtom)
 
   const matched = findWidgetByTitle(widgets, input.widgetTitle)
 

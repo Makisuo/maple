@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Atom, Result, useAtom, useAtomValue } from "@/lib/effect-atom"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
@@ -72,7 +72,7 @@ interface WidgetQueryBuilderPageProps {
   onDirtyChange?: (dirty: boolean) => void
 }
 
-interface QueryBuilderWidgetState {
+export interface QueryBuilderWidgetState {
   visualization: VisualizationType
   title: string
   description: string
@@ -138,15 +138,6 @@ function normalizeLoadedQuery(raw: QueryBuilderQueryDraft, index: number): Query
       limit: raw.addOns?.limit ?? base.addOns.limit,
       legend: raw.addOns?.legend ?? base.addOns.legend,
     },
-  }
-}
-
-function cloneWidgetState(state: QueryBuilderWidgetState): QueryBuilderWidgetState {
-  return {
-    ...state,
-    queries: state.queries.map((query) => ({ ...query, addOns: { ...query.addOns } })),
-    formulas: state.formulas.map((formula) => ({ ...formula })),
-    listColumns: state.listColumns.map((col) => ({ ...col })),
   }
 }
 
@@ -503,27 +494,35 @@ export function WidgetQueryBuilderPage({
   onDirtyChange,
   ref,
 }: WidgetQueryBuilderPageProps & { ref?: React.Ref<WidgetQueryBuilderPageHandle> }) {
-  const [state, setStateRaw] = React.useState<QueryBuilderWidgetState>(() => toInitialState(widget))
-  const hasMounted = React.useRef(false)
-  const setState: typeof setStateRaw = (action) => {
-    setStateRaw(action)
-    if (hasMounted.current) onDirtyChange?.(true)
-  }
-  React.useEffect(() => { hasMounted.current = true }, [])
-  const [stagedState, setStagedState] = React.useState<QueryBuilderWidgetState>(() =>
-    cloneWidgetState(toInitialState(widget))
-  )
-  const [validationError, setValidationError] = React.useState<string | null>(null)
-  const [collapsedQueries, setCollapsedQueries] = React.useState<Set<string>>(new Set())
-  const [activeAttributeKey, setActiveAttributeKey] = React.useState<string | null>(null)
-  const [activeResourceAttributeKey, setActiveResourceAttributeKey] = React.useState<string | null>(null)
-  const [metricSearch, setMetricSearch] = React.useState("")
-  const [debouncedMetricSearch, setDebouncedMetricSearch] = React.useState("")
+  // Core form state — single atom, no staged/cloned copy
+  const stateAtom = React.useMemo(() => Atom.make<QueryBuilderWidgetState>(toInitialState(widget)), [widget])
+  const [state, setState] = useAtom(stateAtom)
+  const initialRef = React.useRef(toInitialState(widget))
 
+  // Dirty = structurally different from initial
+  const isDirty = JSON.stringify(state) !== JSON.stringify(initialRef.current)
   React.useEffect(() => {
-    const timer = setTimeout(() => setDebouncedMetricSearch(metricSearch), 250)
-    return () => clearTimeout(timer)
-  }, [metricSearch])
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
+
+  const validationErrorAtom = React.useMemo(() => Atom.make<string | null>(null), [])
+  const [validationError, setValidationError] = useAtom(validationErrorAtom)
+
+  // Collapsed queries tracked as Record (avoids Set type issues with atoms)
+  const collapsedAtom = React.useMemo(() => Atom.make<Record<string, true>>({}), [])
+  const [collapsed, setCollapsed] = useAtom(collapsedAtom)
+
+  const activeAttributeKeyAtom = React.useMemo(() => Atom.make<string | null>(null), [])
+  const [activeAttributeKey, setActiveAttributeKey] = useAtom(activeAttributeKeyAtom)
+
+  const activeResourceAttributeKeyAtom = React.useMemo(() => Atom.make<string | null>(null), [])
+  const [activeResourceAttributeKey, setActiveResourceAttributeKey] = useAtom(activeResourceAttributeKeyAtom)
+
+  // Metric search with built-in debounce — no manual setTimeout
+  const metricSearchAtom = React.useMemo(() => Atom.make(""), [])
+  const setMetricSearch = useAtom(metricSearchAtom)[1]
+  const debouncedMetricSearchAtom = React.useMemo(() => Atom.debounce(metricSearchAtom, 250), [metricSearchAtom])
+  const debouncedMetricSearch = useAtomValue(debouncedMetricSearchAtom)
 
   const { state: { resolvedTimeRange: resolvedTime } } = useDashboardTimeRange()
 
@@ -753,24 +752,21 @@ export function WidgetQueryBuilderPage({
       ? seriesFieldOptions[0]
       : state.statValueField
 
+  // Preview reads live state — no separate stagedState needed
   const previewWidget = React.useMemo(() => {
-    // List widgets use live state (no query builder compilation needed).
-    // Chart/Stat/Table use stagedState to avoid re-querying on every keystroke.
-    const previewState = state.visualization === "list" ? state : (stagedState ?? state)
-    const previewSeriesOptions = toSeriesFieldOptions(previewState)
+    const previewSeriesOptions = toSeriesFieldOptions(state)
     return {
       ...widget,
-      visualization: previewState.visualization,
-      dataSource: buildWidgetDataSource(widget, previewState, previewSeriesOptions),
-      display: buildWidgetDisplay(widget, previewState),
+      visualization: state.visualization,
+      dataSource: buildWidgetDataSource(widget, state, previewSeriesOptions),
+      display: buildWidgetDisplay(widget, state),
     }
-  }, [state, stagedState, widget])
+  }, [state, widget])
 
   const runPreview = () => {
     const error = validateQueries(state)
     if (error) { setValidationError(error); return }
     setValidationError(null)
-    setStagedState(cloneWidgetState(state))
   }
 
   const applyChanges = () => {
@@ -828,10 +824,9 @@ export function WidgetQueryBuilderPage({
           .map((query, index) => ({ ...query, name: queryLabel(index) })),
       }
     })
-    setCollapsedQueries((prev) => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
+    setCollapsed((prev) => {
+      const { [id]: _, ...rest } = prev
+      return rest
     })
   }
 
@@ -865,12 +860,9 @@ export function WidgetQueryBuilderPage({
   }
 
   const toggleCollapse = (id: string) => {
-    setCollapsedQueries((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    setCollapsed((prev) =>
+      prev[id] ? (({ [id]: _, ...rest }) => rest)(prev) : { ...prev, [id]: true as const },
+    )
   }
 
   return (
@@ -919,7 +911,7 @@ export function WidgetQueryBuilderPage({
                     key={query.id}
                     query={query}
                     index={index}
-                    collapsed={collapsedQueries.has(query.id)}
+                    collapsed={!!collapsed[query.id]}
                     canRemove={state.queries.length > 1}
                     metricSelectionOptions={metricSelectionOptions}
                     onMetricSearch={setMetricSearch}

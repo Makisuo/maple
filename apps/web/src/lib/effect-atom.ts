@@ -20,6 +20,7 @@ export { RegistryContext, scheduleTask, useAtom, useAtomInitialValues, useAtomMo
 export * as Atom from "effect/unstable/reactivity/Atom"
 export * as AtomHttpApi from "effect/unstable/reactivity/AtomHttpApi"
 export * as Registry from "effect/unstable/reactivity/AtomRegistry"
+export * as ScopedAtom from "@effect/atom-react/ScopedAtom"
 
 type ResultValue<T> = T extends AsyncResult.AsyncResult<infer A, any> ? A : never
 type ResultError<T> = T extends AsyncResult.AsyncResult<any, infer E> ? E : never

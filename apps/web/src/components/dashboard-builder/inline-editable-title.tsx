@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback } from "react"
+import { useMemo, useRef, useCallback } from "react"
+import { Atom, useAtom } from "@/lib/effect-atom"
 
 export function InlineEditableTitle({
   value,
@@ -9,8 +10,10 @@ export function InlineEditableTitle({
   onChange: (name: string) => void
   readOnly?: boolean
 }) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [draft, setDraft] = useState(value)
+  const isEditingAtom = useMemo(() => Atom.make(false), [])
+  const [isEditing, setIsEditing] = useAtom(isEditingAtom)
+  const draftAtom = useMemo(() => Atom.make(value), [])
+  const [draft, setDraft] = useAtom(draftAtom)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const startEditing = useCallback(() => {

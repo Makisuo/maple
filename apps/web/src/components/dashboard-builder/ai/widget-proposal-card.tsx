@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useMemo } from "react"
+import { Atom, useAtom } from "@/lib/effect-atom"
 import { Button } from "@maple/ui/components/ui/button"
 import {
   ChartBarIcon,
@@ -40,7 +41,8 @@ const vizLabels: Record<string, string> = {
 }
 
 export function WidgetProposalCard({ input, onAccept, disabledReason }: WidgetProposalCardProps) {
-  const [added, setAdded] = useState(false)
+  const addedAtom = useMemo(() => Atom.make(false), [])
+  const [added, setAdded] = useAtom(addedAtom)
 
   const Icon = vizIcons[input.visualization] ?? GridIcon
   const vizLabel = vizLabels[input.visualization] ?? input.visualization

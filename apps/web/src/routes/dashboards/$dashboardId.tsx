@@ -1,13 +1,13 @@
-import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
+import { Atom, useAtom } from "@/lib/effect-atom";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { DashboardCanvas } from "@/components/dashboard-builder/canvas/dashboard-canvas";
 import { DashboardToolbar } from "@/components/dashboard-builder/toolbar/dashboard-toolbar";
 import { WidgetPicker } from "@/components/dashboard-builder/config/chart-picker";
 import { InlineEditableTitle } from "@/components/dashboard-builder/inline-editable-title";
-import { DashboardTimeRangeProvider } from "@/components/dashboard-builder/dashboard-providers";
+import { DashboardTimeRangeWrapper } from "@/components/dashboard-builder/dashboard-providers";
 import type {
   VisualizationType,
   WidgetDataSource,
@@ -16,6 +16,10 @@ import type {
 } from "@/components/dashboard-builder/types";
 import { useDashboardStore } from "@/hooks/use-dashboard-store";
 import { DashboardAiPanel } from "@/components/dashboard-builder/ai";
+
+// Module-level atoms — singleton (only one dashboard page visible at a time)
+const chartPickerOpenAtom = Atom.make(false)
+const aiPanelOpenAtom = Atom.make(false)
 
 const dashboardViewSearchSchema = Schema.Struct({
   mode: Schema.optional(Schema.Literal("edit")),
@@ -45,8 +49,8 @@ function DashboardViewPage() {
     autoLayoutWidgets,
   } = useDashboardStore();
 
-  const [chartPickerOpen, setChartPickerOpen] = useState(false);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [chartPickerOpen, setChartPickerOpen] = useAtom(chartPickerOpenAtom);
+  const [aiPanelOpen, setAiPanelOpen] = useAtom(aiPanelOpenAtom);
 
   const activeDashboard = dashboards.find((d) => d.id === dashboardId);
 
@@ -122,7 +126,7 @@ function DashboardViewPage() {
   }
 
   return (
-    <DashboardTimeRangeProvider
+    <DashboardTimeRangeWrapper
       initialTimeRange={activeDashboard.timeRange}
       onTimeRangeChange={(timeRange) => updateDashboardTimeRange(activeDashboard.id, timeRange)}
     >
@@ -215,6 +219,6 @@ function DashboardViewPage() {
           onSelect={handleAddWidget}
         />
       </DashboardLayout>
-    </DashboardTimeRangeProvider>
+    </DashboardTimeRangeWrapper>
   );
 }

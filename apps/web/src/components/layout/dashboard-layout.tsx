@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Atom, useAtom } from "@/lib/effect-atom"
 
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@maple/ui/components/ui/sidebar"
@@ -55,7 +56,8 @@ export function DashboardLayout({
   breadcrumbActions,
   rightSidebar,
 }: DashboardLayoutProps) {
-  const [isScrolled, setIsScrolled] = React.useState(false)
+  const isScrolledAtom = React.useMemo(() => Atom.make(false), [])
+  const [isScrolled, setIsScrolled] = useAtom(isScrolledAtom)
   const hasHeader = title || titleContent || description || headerActions
 
   return (

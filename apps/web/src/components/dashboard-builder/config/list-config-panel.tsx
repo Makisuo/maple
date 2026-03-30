@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Atom, useAtom } from "@/lib/effect-atom"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import {
@@ -99,7 +100,8 @@ export function ListConfigPanel({
   onActiveResourceAttributeKey,
   onChange,
 }: ListConfigPanelProps) {
-  const [showFieldSuggestions, setShowFieldSuggestions] = React.useState<number | null>(null)
+  const showFieldSuggestionsAtom = React.useMemo(() => Atom.make<number | null>(null), [])
+  const [showFieldSuggestions, setShowFieldSuggestions] = useAtom(showFieldSuggestionsAtom)
 
   const knownFields = listDataSource === "traces" ? TRACE_FIELDS : LOG_FIELDS
   // Query engine list returns full SpanAttributes/ResourceAttributes maps,

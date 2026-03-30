@@ -1,95 +1,48 @@
+import { type ReactNode, useRef, useCallback } from "react"
 import {
-  createContext,
-  use,
-  useState,
-  useCallback,
-  useMemo,
-  useRef,
-  type ReactNode,
-} from "react"
+  DashboardTimeRange,
+  DashboardTimeRangeProvider,
+  useDashboardTimeRange,
+} from "@/atoms/dashboard-time-range-atoms"
+import { useAtomSubscribe } from "@/lib/effect-atom"
 import type { TimeRange } from "@/components/dashboard-builder/types"
-import { relativeToAbsolute } from "@/lib/time-utils"
 
-// ---------------------------------------------------------------------------
-// Time Range Context
-// ---------------------------------------------------------------------------
+export { DashboardTimeRangeProvider, useDashboardTimeRange }
+export type { ResolvedTimeRange } from "@/atoms/dashboard-time-range-atoms"
 
-type ResolvedTimeRange = { startTime: string; endTime: string }
+// Sync atom changes back to the dashboard store
+function DashboardTimeRangeSync({
+  onTimeRangeChange,
+}: {
+  onTimeRangeChange?: (timeRange: TimeRange) => void
+}) {
+  const callbackRef = useRef(onTimeRangeChange)
+  callbackRef.current = onTimeRangeChange
 
-function resolveTimeRange(timeRange: TimeRange): ResolvedTimeRange | null {
-  if (timeRange.type === "absolute") {
-    return { startTime: timeRange.startTime, endTime: timeRange.endTime }
-  }
-  return relativeToAbsolute(timeRange.value)
+  const stableCallback = useCallback((tr: TimeRange) => {
+    callbackRef.current?.(tr)
+  }, [])
+
+  const timeRangeAtom = DashboardTimeRange.use()
+  useAtomSubscribe(timeRangeAtom, stableCallback)
+  return null
 }
 
-interface DashboardTimeRangeContextValue {
-  state: {
-    timeRange: TimeRange
-    resolvedTimeRange: ResolvedTimeRange | null
-  }
-  actions: {
-    setTimeRange: (timeRange: TimeRange) => void
-    refreshTimeRange: () => void
-  }
-  meta: {}
-}
-
-const DashboardTimeRangeContext = createContext<DashboardTimeRangeContextValue | null>(null)
-
-export function useDashboardTimeRange() {
-  const context = use(DashboardTimeRangeContext)
-  if (!context) {
-    throw new Error(
-      "useDashboardTimeRange must be used within DashboardTimeRangeProvider."
-    )
-  }
-  return context
-}
-
-interface DashboardTimeRangeProviderProps {
+interface DashboardTimeRangeWrapperProps {
   initialTimeRange: TimeRange
   onTimeRangeChange?: (timeRange: TimeRange) => void
   children: ReactNode
 }
 
-export function DashboardTimeRangeProvider({
+export function DashboardTimeRangeWrapper({
   initialTimeRange,
   onTimeRangeChange,
   children,
-}: DashboardTimeRangeProviderProps) {
-  const [timeRange, setTimeRangeState] = useState<TimeRange>(initialTimeRange)
-  const [resolvedTimeRange, setResolvedTimeRange] = useState<ResolvedTimeRange | null>(
-    () => resolveTimeRange(initialTimeRange)
-  )
-  const timeRangeRef = useRef(timeRange)
-  timeRangeRef.current = timeRange
-
-  const setTimeRange = useCallback(
-    (tr: TimeRange) => {
-      setTimeRangeState(tr)
-      setResolvedTimeRange(resolveTimeRange(tr))
-      onTimeRangeChange?.(tr)
-    },
-    [onTimeRangeChange]
-  )
-
-  const refreshTimeRange = useCallback(() => {
-    setResolvedTimeRange(resolveTimeRange(timeRangeRef.current))
-  }, [])
-
-  const value = useMemo<DashboardTimeRangeContextValue>(
-    () => ({
-      state: { timeRange, resolvedTimeRange },
-      actions: { setTimeRange, refreshTimeRange },
-      meta: {},
-    }),
-    [timeRange, resolvedTimeRange, setTimeRange, refreshTimeRange]
-  )
-
+}: DashboardTimeRangeWrapperProps) {
   return (
-    <DashboardTimeRangeContext.Provider value={value}>
+    <DashboardTimeRangeProvider value={initialTimeRange}>
+      <DashboardTimeRangeSync onTimeRangeChange={onTimeRangeChange} />
       {children}
-    </DashboardTimeRangeContext.Provider>
+    </DashboardTimeRangeProvider>
   )
 }
