@@ -1,5 +1,5 @@
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Exit, Schema } from "effect"
 import {
   DashboardCreateRequest,
@@ -117,10 +117,14 @@ function toPortableDashboardDocument(
   })
 }
 
+function parseDashboards(raw: readonly unknown[]): Dashboard[] {
+  return raw
+    .map((d) => ensureDashboard(d))
+    .filter((d): d is Dashboard => d !== null)
+}
+
 export function useDashboardStore() {
   const [dashboards, setDashboards] = useState<Dashboard[]>([])
-  const [isHydrated, setIsHydrated] = useState(false)
-  const [readOnly, setReadOnly] = useState(false)
   const [persistenceError, setPersistenceError] = useState<string | null>(null)
 
   const listResult = useAtomValue(MapleApiAtomClient.query("dashboards", "list", { reactivityKeys: ["dashboards"] }))
@@ -128,83 +132,63 @@ export function useDashboardStore() {
   const upsertMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "upsert"), { mode: "promiseExit" })
   const deleteMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "delete"), { mode: "promiseExit" })
 
-  const setPersistenceFailure = useCallback((error: unknown) => {
-    setReadOnly(true)
-    setPersistenceError(getErrorMessage(error))
-  }, [])
+  const readOnly = persistenceError !== null
 
-  const persistUpsert = useCallback(
-    (rollback: Dashboard[], dashboard: Dashboard) => {
-      void upsertMutation({
-        params: { dashboardId: asDashboardId(dashboard.id) },
-        payload: new DashboardUpsertRequest({
-          dashboard: toDashboardDocument(dashboard),
-        }),
-        reactivityKeys: ["dashboards"],
-      }).then((result) => {
-        if (Exit.isFailure(result)) {
-          setDashboards(rollback)
-          setPersistenceFailure(result)
-        }
-      })
-    },
-    [upsertMutation, setPersistenceFailure],
-  )
+  // Keep local dashboards in sync with server data.
+  // Runs on mount (picks up cached atom data) and after every refetch
+  // triggered by mutation reactivityKeys.
+  useEffect(() => {
+    if (Result.isSuccess(listResult)) {
+      setDashboards(parseDashboards(listResult.value.dashboards))
+      setPersistenceError(null)
+    } else if (Result.isFailure(listResult)) {
+      setPersistenceError(getErrorMessage(listResult))
+    }
+  }, [listResult])
 
-  const persistDelete = useCallback(
-    (rollback: Dashboard[], dashboardId: string) => {
-      void deleteMutation({ params: { dashboardId: asDashboardId(dashboardId) }, reactivityKeys: ["dashboards"] }).then((result) => {
-        if (Exit.isFailure(result)) {
-          setDashboards(rollback)
-          setPersistenceFailure(result)
-        }
-      })
-    },
-    [deleteMutation, setPersistenceFailure],
-  )
+  const isLoading = dashboards.length === 0 && !Result.isSuccess(listResult)
+
+  const upsertRef = useRef(upsertMutation)
+  upsertRef.current = upsertMutation
+  const deleteRef = useRef(deleteMutation)
+  deleteRef.current = deleteMutation
 
   const mutateDashboard = useCallback(
-    (
+    async (
       dashboardId: string,
       updater: (dashboard: Dashboard) => Dashboard,
-    ) => {
-      if (readOnly) return
+    ): Promise<void> => {
+      let updated: Dashboard | null = null
+      let rollback: Dashboard[] = []
 
       setDashboards((previous) => {
-        const index = previous.findIndex((dashboard) => dashboard.id === dashboardId)
+        const index = previous.findIndex((d) => d.id === dashboardId)
         if (index < 0) return previous
 
-        const current = previous[index]
-        const updated = updater(current)
+        rollback = previous
+        updated = updater(previous[index])
         const next = [...previous]
         next[index] = updated
-
-        persistUpsert(previous, updated)
         return next
       })
+
+      if (!updated) return
+
+      const result = await upsertRef.current({
+        params: { dashboardId: asDashboardId((updated as Dashboard).id) },
+        payload: new DashboardUpsertRequest({
+          dashboard: toDashboardDocument(updated as Dashboard),
+        }),
+        reactivityKeys: ["dashboards"],
+      })
+
+      if (Exit.isFailure(result)) {
+        setDashboards(rollback)
+        setPersistenceError(getErrorMessage(result))
+      }
     },
-    [persistUpsert, readOnly],
+    [],
   )
-
-  const [prevListResult, setPrevListResult] = useState<Result.Result<any, any> | null>(null)
-
-  if (listResult !== prevListResult && !Result.isInitial(listResult)) {
-    setPrevListResult(listResult)
-    if (Result.isSuccess(listResult)) {
-      const nextDashboards = listResult.value.dashboards
-        .map((dashboard) => ensureDashboard(dashboard))
-        .filter((dashboard): dashboard is Dashboard => dashboard !== null)
-
-      setDashboards(nextDashboards)
-      setReadOnly(false)
-      setPersistenceError(null)
-    } else {
-      setPersistenceFailure(listResult)
-    }
-    setIsHydrated(true)
-  }
-
-  const isLoading = !isHydrated && Result.isInitial(listResult)
 
   const importDashboard = useCallback(
     async (imported: PortableDashboard): Promise<Dashboard> => {
@@ -220,7 +204,7 @@ export function useDashboardStore() {
       })
 
       if (Exit.isFailure(result)) {
-        setPersistenceFailure(result)
+        setPersistenceError(getErrorMessage(result))
         throw new Error(getErrorMessage(result))
       }
 
@@ -237,7 +221,7 @@ export function useDashboardStore() {
 
       return dashboard
     },
-    [createMutation, readOnly, setPersistenceFailure],
+    [createMutation, readOnly],
   )
 
   const createDashboard = useCallback(
@@ -258,7 +242,7 @@ export function useDashboardStore() {
       })
 
       if (Exit.isFailure(result)) {
-        setPersistenceFailure(result)
+        setPersistenceError(getErrorMessage(result))
         throw new Error(getErrorMessage(result))
       }
 
@@ -275,7 +259,7 @@ export function useDashboardStore() {
 
       return dashboard
     },
-    [createMutation, readOnly, setPersistenceFailure],
+    [createMutation, readOnly],
   )
 
   const updateDashboard = useCallback(
@@ -300,11 +284,16 @@ export function useDashboardStore() {
         const next = previous.filter((dashboard) => dashboard.id !== id)
         if (next.length === previous.length) return previous
 
-        persistDelete(previous, id)
+        void deleteRef.current({ params: { dashboardId: asDashboardId(id) }, reactivityKeys: ["dashboards"] }).then((result) => {
+          if (Exit.isFailure(result)) {
+            setDashboards(previous)
+            setPersistenceError(getErrorMessage(result))
+          }
+        })
         return next
       })
     },
-    [persistDelete, readOnly],
+    [readOnly],
   )
 
   const updateDashboardTimeRange = useCallback(
@@ -466,7 +455,7 @@ export function useDashboardStore() {
         >
       >,
     ) => {
-      mutateDashboard(dashboardId, (dashboard) => ({
+      return mutateDashboard(dashboardId, (dashboard) => ({
         ...dashboard,
         widgets: dashboard.widgets.map((widget) =>
           widget.id === widgetId ? { ...widget, ...updates } : widget,

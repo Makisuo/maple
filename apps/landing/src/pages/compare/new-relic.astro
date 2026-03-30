@@ -7,6 +7,7 @@ import ComparisonTable from "../../components/ComparisonTable.astro";
 import PainPoints from "../../components/PainPoints.astro";
 import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
 import MigrationSteps from "../../components/MigrationSteps.astro";
+import PricingCalculatorSection from "../../components/PricingCalculatorSection.astro";
 import FAQ from "../../components/FAQ.astro";
 import RelatedComparisons from "../../components/RelatedComparisons.astro";
 import BottomCTA from "../../components/BottomCTA.astro";
@@ -67,6 +68,11 @@ const pageDescription = `Compare Maple and New Relic for observability. Maple of
     <MigrationSteps
         competitorName={competitor.name}
         steps={competitor.migrationSteps}
+    />
+
+    <PricingCalculatorSection
+        competitor="new-relic"
+        competitorName={competitor.name}
     />
 
     <FAQ items={competitor.faqs} />

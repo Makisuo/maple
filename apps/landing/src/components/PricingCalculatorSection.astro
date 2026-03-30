@@ -1,0 +1,61 @@
+---
+import { PricingCalculator } from "./PricingCalculator";
+
+interface Props {
+    competitor: "datadog" | "grafana" | "new-relic";
+    competitorName: string;
+}
+
+const { competitor, competitorName } = Astro.props;
+---
+
+<section class="py-24 md:py-32">
+    <div class="mx-auto max-w-5xl px-6">
+        <div class="mb-10">
+            <span class="inline-block border border-border px-3 py-1 text-[11px] text-accent uppercase tracking-wider mb-4">
+                Pricing
+            </span>
+            <h2 class="text-2xl sm:text-3xl font-bold text-fg">
+                Estimated monthly cost: Maple vs {competitorName}
+            </h2>
+            <p class="mt-2 text-sm text-fg-muted max-w-2xl">
+                Drag the sliders to match your usage and see how the costs compare.
+            </p>
+        </div>
+
+        <PricingCalculator competitor={competitor} client:visible />
+    </div>
+</section>
+
+<style is:global>
+    .slider-input::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 0;
+        background: oklch(0.75 0.12 70);
+        cursor: pointer;
+        position: relative;
+        z-index: 2;
+    }
+    .slider-input::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        border-radius: 0;
+        border: none;
+        background: oklch(0.75 0.12 70);
+        cursor: pointer;
+        position: relative;
+        z-index: 2;
+    }
+    .slider-input::-webkit-slider-thumb:hover {
+        background: oklch(0.8 0.14 70);
+    }
+    .slider-input::-moz-range-thumb:hover {
+        background: oklch(0.8 0.14 70);
+    }
+    .slider-input:focus {
+        outline: none;
+    }
+</style>

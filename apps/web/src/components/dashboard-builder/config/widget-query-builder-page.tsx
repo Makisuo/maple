@@ -69,6 +69,7 @@ interface WidgetQueryBuilderPageProps {
     dataSource: WidgetDataSource
     display: WidgetDisplayConfig
   }) => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 interface QueryBuilderWidgetState {
@@ -499,9 +500,16 @@ const WidgetPreview = React.memo(function WidgetPreview({ widget }: { widget: Da
 export function WidgetQueryBuilderPage({
   widget,
   onApply,
+  onDirtyChange,
   ref,
 }: WidgetQueryBuilderPageProps & { ref?: React.Ref<WidgetQueryBuilderPageHandle> }) {
-  const [state, setState] = React.useState<QueryBuilderWidgetState>(() => toInitialState(widget))
+  const [state, setStateRaw] = React.useState<QueryBuilderWidgetState>(() => toInitialState(widget))
+  const hasMounted = React.useRef(false)
+  const setState: typeof setStateRaw = (action) => {
+    setStateRaw(action)
+    if (hasMounted.current) onDirtyChange?.(true)
+  }
+  React.useEffect(() => { hasMounted.current = true }, [])
   const [stagedState, setStagedState] = React.useState<QueryBuilderWidgetState>(() =>
     cloneWidgetState(toInitialState(widget))
   )
