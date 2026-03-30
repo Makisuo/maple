@@ -49,15 +49,6 @@ export function buildSpec(output: StructuredToolOutput): Spec {
       return { root, elements }
     }
 
-    case "service_overview": {
-      const d = output.data
-      const root = addElement(elements, "ServiceTable", {
-        services: d.services,
-        dataVolume: d.dataVolume,
-      })
-      return { root, elements }
-    }
-
     case "search_traces": {
       const d = output.data
       const root = addElement(elements, "TraceList", {

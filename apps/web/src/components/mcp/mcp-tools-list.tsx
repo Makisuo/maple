@@ -10,12 +10,7 @@ const MCP_TOOLS = [
   {
     name: "system_health",
     description:
-      "Get an overall health snapshot: error rate, active services, latency stats, and top errors.",
-  },
-  {
-    name: "service_overview",
-    description:
-      "List all services with health metrics: latency (P50/P95/P99), error rate, and throughput.",
+      "Get system health: error rate, latency, top errors, and per-service breakdown. Pass service_name to scope to one service.",
   },
   {
     name: "diagnose_service",

@@ -13,7 +13,6 @@ import {
   MagnifierIcon,
   NetworkNodesIcon,
   PulseIcon,
-  ServerIcon,
 } from "@/components/icons"
 import type { IconComponent } from "@/components/icons"
 import type { StructuredToolOutput } from "@maple/domain"
@@ -31,7 +30,6 @@ const LazyToolRenderer = lazy(() =>
 
 const toolLabels: Record<string, string> = {
   system_health: "System Health",
-  service_overview: "Service Overview",
   diagnose_service: "Diagnose Service",
   find_errors: "Find Errors",
   error_detail: "Error Detail",
@@ -45,7 +43,6 @@ const toolLabels: Record<string, string> = {
 
 const toolIcons: Record<string, IconComponent> = {
   system_health: PulseIcon,
-  service_overview: ServerIcon,
   diagnose_service: MagnifierIcon,
   find_errors: CircleXmarkIcon,
   error_detail: CircleWarningIcon,
