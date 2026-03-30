@@ -283,21 +283,23 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 
       {/* Savings callout */}
       {savings > 0 && (
-        <div className="mt-px border border-[oklch(0.3_0.02_60)] bg-[oklch(0.75_0.12_70)]/5 p-4 md:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div>
-            <span className="text-sm font-semibold text-[oklch(0.75_0.12_70)]">
-              Save {formatCurrency(savings)}/month with Maple
-            </span>
-            <span className="text-xs text-[oklch(0.5_0.02_60)] ml-2">
-              ({savingsPct}% less)
-            </span>
+        <div className="mt-px border-2 border-[oklch(0.75_0.12_70)]/40 bg-[oklch(0.75_0.12_70)]/10 p-6 md:p-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <div className="text-2xl md:text-3xl font-bold text-[oklch(0.75_0.12_70)]">
+                Save {formatCurrency(savings)}/month
+              </div>
+              <p className="text-sm text-[oklch(0.65_0.02_60)] mt-1">
+                That's <span className="font-semibold text-[oklch(0.75_0.12_70)]">{savingsPct}% less</span> than {config.name} — or <span className="font-semibold text-[oklch(0.75_0.12_70)]">{formatCurrency(savings * 12)}/year</span> back in your budget.
+              </p>
+            </div>
+            <a
+              href="https://app.maple.dev"
+              className="shrink-0 bg-[oklch(0.75_0.12_70)] text-[oklch(0.15_0.02_60)] px-6 py-2.5 text-sm font-medium hover:opacity-90 transition-opacity"
+            >
+              Get started free
+            </a>
           </div>
-          <a
-            href="https://app.maple.dev"
-            className="shrink-0 bg-[oklch(0.75_0.12_70)] text-[oklch(0.15_0.02_60)] px-5 py-2 text-xs font-medium hover:opacity-90 transition-opacity"
-          >
-            Get started free
-          </a>
         </div>
       )}
 
