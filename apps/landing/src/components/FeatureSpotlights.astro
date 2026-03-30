@@ -6,7 +6,7 @@ const locale = Astro.currentLocale ?? "en";
 const l = (path: string) => getRelativeLocaleUrl(locale, path);
 ---
 
-<section id="features" class="py-24 md:py-32 scroll-mt-24">
+<section id="features" class="py-16 md:py-24 lg:py-32 scroll-mt-24">
     <div class="mx-auto max-w-6xl px-6">
         <div class="mb-16">
             <span class="text-[11px] text-accent uppercase tracking-wider">{m.features_badge()}</span>
@@ -14,7 +14,7 @@ const l = (path: string) => getRelativeLocaleUrl(locale, path);
         </div>
 
         <!-- Feature 1: Distributed Tracing (text left, demo right) -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center pb-16 border-b border-border">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center pb-16 border-b border-border">
             <div>
                 <span class="text-[11px] text-accent uppercase tracking-wider">{m.features_tracing_badge()}</span>
                 <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">{m.features_tracing_heading()}</h3>
@@ -59,7 +59,7 @@ const l = (path: string) => getRelativeLocaleUrl(locale, path);
         </div>
 
         <!-- Feature 2: Structured Logs (demo left, text right) -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center py-16 border-b border-border">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center py-16 border-b border-border">
             <div class="order-2 md:order-1 border border-border bg-bg-elevated overflow-hidden transition-colors duration-200 hover:border-accent/30">
                 <!-- Mini log table -->
                 <div class="flex items-center text-[8px] text-fg-muted border-b border-border bg-muted/30 px-2 py-1">
@@ -104,7 +104,7 @@ const l = (path: string) => getRelativeLocaleUrl(locale, path);
         </div>
 
         <!-- Feature 3: Metrics & Dashboards (text left, demo right) -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center py-16 border-b border-border">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center py-16 border-b border-border">
             <div>
                 <span class="text-[11px] text-accent uppercase tracking-wider">{m.features_metrics_badge()}</span>
                 <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">{m.features_metrics_heading()}</h3>
@@ -146,7 +146,7 @@ const l = (path: string) => getRelativeLocaleUrl(locale, path);
         </div>
 
         <!-- Feature 4: Service Overview (demo left, text right) -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center py-16 border-b border-border">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center py-16 border-b border-border">
             <div class="order-2 md:order-1 border border-border bg-bg-elevated overflow-hidden transition-colors duration-200 hover:border-accent/30">
                 <!-- Mini services table -->
                 <div class="flex items-center text-[8px] text-fg-muted border-b border-border bg-muted/30 px-2 py-1">
@@ -191,7 +191,7 @@ const l = (path: string) => getRelativeLocaleUrl(locale, path);
         </div>
 
         <!-- Feature 5: Error Tracking (text left, demo right) -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center pt-16">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center pt-16">
             <div>
                 <span class="text-[11px] text-accent uppercase tracking-wider">{m.features_errors_badge()}</span>
                 <h3 class="mt-3 text-xl md:text-2xl font-bold text-fg">{m.features_errors_heading()}</h3>

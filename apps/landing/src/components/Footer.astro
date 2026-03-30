@@ -77,7 +77,7 @@ const l = (path: string) => getRelativeLocaleUrl(locale, path);
         </div>
 
         <!-- Bottom bar -->
-        <div class="mt-12 pt-6 border-t border-border flex items-center justify-between">
+        <div class="mt-12 pt-6 border-t border-border flex flex-col sm:flex-row items-center sm:justify-between gap-4">
             <p class="text-fg-muted text-[10px]">&copy; {m.footer_copyright()}</p>
             <div class="flex items-center gap-4">
                 <a href={l("/privacy")} class="text-fg-muted text-[10px] hover:text-fg transition-colors">{m.footer_privacy()}</a>
