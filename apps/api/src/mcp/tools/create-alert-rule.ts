@@ -70,7 +70,7 @@ const ALERT_TEMPLATES: Record<string, AlertTemplate> = {
 
 interface CreateAlertRuleParams {
   name: string
-  severity: string
+  severity?: string
   signal_type?: string
   comparator?: string
   threshold?: number

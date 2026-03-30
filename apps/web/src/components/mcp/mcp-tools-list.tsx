@@ -67,6 +67,46 @@ const MCP_TOOLS = [
     description:
       "Generate timeseries or breakdown charts from custom metrics. Requires metric_name and metric_type. Aggregations: avg, sum, min, max, count. Group by: service, attribute, or none.",
   },
+  {
+    name: "compare_periods",
+    description:
+      "Compare system health between two time periods to detect regressions. Defaults to comparing the last hour against the previous hour.",
+  },
+  {
+    name: "explore_attributes",
+    description:
+      "Discover available attribute keys and values for filtering traces and metrics.",
+  },
+  {
+    name: "list_alert_rules",
+    description:
+      "List configured alert rules with their severity, signal type, and condition.",
+  },
+  {
+    name: "list_alert_incidents",
+    description:
+      "List triggered alert incidents with their status, severity, and observed values.",
+  },
+  {
+    name: "create_alert_rule",
+    description:
+      "Create an alert rule from a template (high_error_rate, slow_p95, slow_p99, low_apdex, throughput_drop) or with custom parameters.",
+  },
+  {
+    name: "list_dashboards",
+    description:
+      "List all dashboards with widget counts and timestamps.",
+  },
+  {
+    name: "get_dashboard",
+    description:
+      "Retrieve full dashboard configuration with all widgets.",
+  },
+  {
+    name: "create_dashboard",
+    description:
+      "Create a dashboard from a template (service_health, error_tracking, blank) or custom JSON.",
+  },
 ] as const
 
 export function McpToolsList() {
