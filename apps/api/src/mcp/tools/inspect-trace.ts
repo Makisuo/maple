@@ -4,6 +4,7 @@ import {
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { formatDurationFromMs, truncate } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 
@@ -21,7 +22,7 @@ interface SpanNode {
 export function registerInspectTraceTool(server: McpToolRegistrar) {
   server.tool(
     "inspect_trace",
-    "Deep-dive into a trace: shows the full span tree with durations and status, plus correlated logs.",
+    "Get the full span tree and logs for a single trace. Use this to understand request flow, find bottlenecks, and see error context.",
     Schema.Struct({
       trace_id: requiredStringParam("The trace ID to inspect"),
     }),
@@ -69,7 +70,7 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
         const rootDuration = roots[0]?.durationMs ?? 0
 
         const lines: string[] = [
-          `=== Trace ${trace_id} (${serviceSet.size} services, ${spans.length} spans, ${formatDurationFromMs(rootDuration)}) ===`,
+          `## Trace ${trace_id} (${serviceSet.size} services, ${spans.length} spans, ${formatDurationFromMs(rootDuration)})`,
           ``,
         ]
 
@@ -108,6 +109,18 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
             lines.push(`  ... and ${logs.length - 20} more logs`)
           }
         }
+
+        const nextSteps: string[] = []
+        const hasErrors = spans.some((s) => s.statusCode === "Error")
+        if (hasErrors) {
+          nextSteps.push(`\`search_logs trace_id="${trace_id}"\` — see all logs for this trace`)
+        }
+        if (serviceSet.size > 1) {
+          for (const svc of [...serviceSet].slice(0, 2)) {
+            nextSteps.push(`\`diagnose_service service_name="${svc}"\` — investigate this service`)
+          }
+        }
+        lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {

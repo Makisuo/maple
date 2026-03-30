@@ -6,13 +6,14 @@ import {
 import { queryTinybird } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatNumber, formatTable } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 
 export function registerListMetricsTool(server: McpToolRegistrar) {
   server.tool(
     "list_metrics",
-    "Discover available metrics with type, service, description, and data point counts.",
+    "Discover available custom metrics with their types and data volume. Use chart_metrics with a discovered metric_name and metric_type.",
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
@@ -48,7 +49,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
         const summary = summaryResult.data
 
         const lines: string[] = [
-          `=== Available Metrics ===`,
+          `## Available Metrics`,
           `Time range: ${st} — ${et}`,
         ]
 
@@ -79,6 +80,11 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
         ])
 
         lines.push(formatTable(headers, rows))
+
+        const nextSteps = metrics.slice(0, 3).map((m) =>
+          `\`chart_metrics kind="timeseries" metric_name="${m.metricName}" metric_type="${m.metricType}"\` — chart this metric`
+        )
+        lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {

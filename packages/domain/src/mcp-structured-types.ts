@@ -17,10 +17,6 @@ export interface SystemHealthData {
     count: number
     affectedServicesCount: number
   }>
-}
-
-export interface ServiceOverviewData {
-  timeRange: { start: string; end: string }
   services: Array<{
     name: string
     throughput: number
@@ -184,19 +180,27 @@ export interface ListMetricsData {
 
 export interface QueryDataData {
   timeRange: { start: string; end: string }
-  source: string
   kind: string
   metric: string
   groupBy?: string
   result:
-    | {
-        kind: "timeseries"
-        data: Array<{ bucket: string; series: Record<string, number> }>
-      }
-    | {
-        kind: "breakdown"
-        data: Array<{ name: string; value: number }>
-      }
+    | { kind: "timeseries"; data: Array<{ bucket: string; series: Record<string, number> }> }
+    | { kind: "breakdown"; data: Array<{ name: string; value: number }> }
+}
+
+export interface ServiceMapEdge {
+  sourceService: string
+  targetService: string
+  callCount: number
+  errorCount: number
+  avgDurationMs: number
+  p95DurationMs: number
+}
+
+export interface ServiceMapData {
+  timeRange: { start: string; end: string }
+  edges: ServiceMapEdge[]
+  serviceCount: number
 }
 
 // ---------------------------------------------------------------------------
@@ -280,9 +284,39 @@ export interface CreateDashboardData {
   dashboard: DashboardRow
 }
 
+// ---------------------------------------------------------------------------
+// Compare periods types
+// ---------------------------------------------------------------------------
+
+export interface ComparePeriodsData {
+  currentPeriod: { start: string; end: string }
+  previousPeriod: { start: string; end: string }
+  overall: {
+    current: { totalSpans: number; totalErrors: number; errorRate: number }
+    previous: { totalSpans: number; totalErrors: number; errorRate: number }
+  }
+  services: Array<{
+    name: string
+    current: { throughput: number; errorRate: number; p95Ms: number }
+    previous: { throughput: number; errorRate: number; p95Ms: number }
+  }>
+}
+
+// ---------------------------------------------------------------------------
+// Explore attributes types
+// ---------------------------------------------------------------------------
+
+export interface ExploreAttributesData {
+  source: string
+  scope?: string
+  key?: string
+  timeRange: { start: string; end: string }
+  keys?: Array<{ key: string; count: number }>
+  values?: Array<{ value: string; count: number }>
+}
+
 export type StructuredToolOutput =
   | { tool: "system_health"; data: SystemHealthData }
-  | { tool: "service_overview"; data: ServiceOverviewData }
   | { tool: "search_traces"; data: SearchTracesData }
   | { tool: "find_slow_traces"; data: FindSlowTracesData }
   | { tool: "find_errors"; data: FindErrorsData }
@@ -292,9 +326,12 @@ export type StructuredToolOutput =
   | { tool: "diagnose_service"; data: DiagnoseServiceData }
   | { tool: "list_metrics"; data: ListMetricsData }
   | { tool: "query_data"; data: QueryDataData }
+  | { tool: "service_map"; data: ServiceMapData }
   | { tool: "list_alert_rules"; data: ListAlertRulesData }
   | { tool: "list_alert_incidents"; data: ListAlertIncidentsData }
   | { tool: "create_alert_rule"; data: CreateAlertRuleData }
   | { tool: "list_dashboards"; data: ListDashboardsData }
   | { tool: "get_dashboard"; data: GetDashboardData }
   | { tool: "create_dashboard"; data: CreateDashboardData }
+  | { tool: "compare_periods"; data: ComparePeriodsData }
+  | { tool: "explore_attributes"; data: ExploreAttributesData }

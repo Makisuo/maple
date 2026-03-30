@@ -6,13 +6,14 @@ import {
 import { queryTinybird } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { truncate, formatNumber } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 
 export function registerSearchLogsTool(server: McpToolRegistrar) {
   server.tool(
     "search_logs",
-    "Search and filter logs by service, severity, time range, or body text.",
+    "Search and filter logs by service, severity, keyword, or trace_id. Use inspect_trace to see the full trace for a log entry.",
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
@@ -20,9 +21,10 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
       severity: optionalStringParam("Filter by severity (e.g. ERROR, WARN, INFO)"),
       search: optionalStringParam("Search text in log body"),
       trace_id: optionalStringParam("Filter by trace ID"),
+      span_id: optionalStringParam("Filter by span ID (scope to a specific span within a trace)"),
       limit: optionalNumberParam("Max results (default 30)"),
     }),
-    ({ start_time, end_time, service, severity, search, trace_id, limit }) =>
+    ({ start_time, end_time, service, severity, search, trace_id, span_id, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 30
@@ -36,6 +38,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
               severity,
               search,
               trace_id,
+              ...(span_id && { span_id }),
               limit: lim,
             }),
             queryTinybird("logs_count", {
@@ -45,6 +48,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
               severity,
               search,
               trace_id,
+              ...(span_id && { span_id }),
             }),
           ],
           { concurrency: "unbounded" },
@@ -58,7 +62,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
         }
 
         const lines: string[] = [
-          `=== Logs (${formatNumber(total)} total, showing ${logs.length}) ===`,
+          `## Logs (${formatNumber(total)} total, showing ${logs.length})`,
           `Time range: ${st} — ${et}`,
         ]
 
@@ -84,6 +88,12 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
         if (total > logs.length) {
           lines.push(``, `... ${formatNumber(total - logs.length)} more logs not shown`)
         }
+
+        const traceIds = [...new Set(logs.filter((l) => l.traceId).map((l) => l.traceId))].slice(0, 3)
+        const nextSteps = traceIds.map((tid) =>
+          `\`inspect_trace trace_id="${tid}"\` — see full trace`
+        )
+        lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {

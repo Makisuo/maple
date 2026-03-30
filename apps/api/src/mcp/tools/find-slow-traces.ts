@@ -6,6 +6,7 @@ import {
 import { queryTinybird } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationMs, formatDurationFromMs, formatTable } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 
@@ -18,14 +19,15 @@ function isSystemTrace(rootSpanName: string): boolean {
 export function registerFindSlowTracesTool(server: McpToolRegistrar) {
   server.tool(
     "find_slow_traces",
-    "Find the slowest traces with percentile context (P50, P95 benchmarks).",
+    "Find the slowest traces with percentile context (p50, p95, min, max). Use inspect_trace on slow trace_ids to find bottleneck spans.",
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
       service: optionalStringParam("Filter by service name"),
+      environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
       limit: optionalNumberParam("Max results (default 10)"),
     }),
-    ({ start_time, end_time, service, limit }) =>
+    ({ start_time, end_time, service, environment, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 10
@@ -36,6 +38,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
               start_time: st,
               end_time: et,
               service,
+              ...(environment && { deployment_env: environment }),
               limit: 500,
             }),
             queryTinybird("traces_duration_stats", {
@@ -58,7 +61,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
         }
 
         const lines: string[] = [
-          `=== Slowest Traces ===`,
+          `## Slowest Traces`,
           `Time range: ${st} — ${et}`,
         ]
 
@@ -86,6 +89,11 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
         ])
 
         lines.push(formatTable(headers, rows))
+
+        const nextSteps = traces.slice(0, 3).map((t) =>
+          `\`inspect_trace trace_id="${t.traceId}"\` — find bottleneck spans`
+        )
+        lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {

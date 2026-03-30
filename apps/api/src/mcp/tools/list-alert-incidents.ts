@@ -5,6 +5,7 @@ import {
   type McpToolRegistrar,
 } from "./types"
 import { formatTable, truncate } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
@@ -20,7 +21,7 @@ const comparatorLabel: Record<string, string> = {
 export function registerListAlertIncidentsTool(server: McpToolRegistrar) {
   server.tool(
     "list_alert_incidents",
-    "List alert incidents (triggered alerts). Shows rule name, severity, status (open/resolved), observed value vs threshold, and timestamps. Supports filtering by status, severity, and service.",
+    "List triggered alert incidents with their status, severity, and observed values. Use diagnose_service to investigate affected services.",
     Schema.Struct({
       status: optionalStringParam("Filter by status: open, resolved (default: all)"),
       severity: optionalStringParam("Filter by severity: warning, critical"),
@@ -61,7 +62,7 @@ export function registerListAlertIncidentsTool(server: McpToolRegistrar) {
         const resolvedCount = incidents.filter((i) => i.status === "resolved").length
 
         const lines: string[] = [
-          `=== Alert Incidents ===`,
+          `## Alert Incidents`,
           `Total: ${incidents.length} (${openCount} open, ${resolvedCount} resolved)`,
           ``,
         ]
@@ -81,6 +82,17 @@ export function registerListAlertIncidentsTool(server: McpToolRegistrar) {
           ])
           lines.push(formatTable(headers, rows))
         }
+
+        const openIncidents = incidents.filter((inc) => inc.status === "open")
+        const nextSteps: string[] = []
+        const affectedServices = [...new Set(openIncidents.filter((inc) => inc.serviceName).map((inc) => inc.serviceName))].slice(0, 3)
+        for (const svc of affectedServices) {
+          nextSteps.push(`\`diagnose_service service_name="${svc}"\` — investigate this service`)
+        }
+        if (nextSteps.length === 0) {
+          nextSteps.push('`list_alert_rules` — review alert configuration')
+        }
+        lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {

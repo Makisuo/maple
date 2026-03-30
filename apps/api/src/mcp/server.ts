@@ -5,18 +5,20 @@ import { registerFindErrorsTool } from "./tools/find-errors"
 import { registerInspectTraceTool } from "./tools/inspect-trace"
 import { registerSearchLogsTool } from "./tools/search-logs"
 import { registerSearchTracesTool } from "./tools/search-traces"
-import { registerServiceOverviewTool } from "./tools/service-overview"
 import { registerDiagnoseServiceTool } from "./tools/diagnose-service"
 import { registerFindSlowTracesTool } from "./tools/find-slow-traces"
 import { registerErrorDetailTool } from "./tools/error-detail"
 import { registerListMetricsTool } from "./tools/list-metrics"
 import { registerQueryDataTool } from "./tools/query-data"
+import { registerServiceMapTool } from "./tools/service-map"
 import { registerListAlertRulesTool } from "./tools/list-alert-rules"
 import { registerListAlertIncidentsTool } from "./tools/list-alert-incidents"
 import { registerCreateAlertRuleTool } from "./tools/create-alert-rule"
 import { registerListDashboardsTool } from "./tools/list-dashboards"
 import { registerGetDashboardTool } from "./tools/get-dashboard"
 import { registerCreateDashboardTool } from "./tools/create-dashboard"
+import { registerComparePeriodsTool } from "./tools/compare-periods"
+import { registerExploreAttributesTool } from "./tools/explore-attributes"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "./tools/types"
 
 interface ToolDefinition {
@@ -51,24 +53,8 @@ const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
     : document.schema
 }
 
-const toDecodeErrorMessage = (definition: ToolDefinition, error: unknown): string => {
-  const base = Schema.isSchemaError(error) ? String(error) : String(error)
-
-  if (definition.name !== "query_data") {
-    return base
-  }
-
-  return [
-    base,
-    "Supported combinations:",
-    "- traces timeseries: metric=count|avg_duration|p50_duration|p95_duration|p99_duration|error_rate, group_by=service|span_name|status_code|http_method|attribute|none",
-    "- traces breakdown: metric=count|avg_duration|p50_duration|p95_duration|p99_duration|error_rate, group_by=service|span_name|status_code|http_method|attribute",
-    "- logs timeseries: metric=count, group_by=service|severity|none",
-    "- logs breakdown: metric=count, group_by=service|severity",
-    "- metrics timeseries: metric=avg|sum|min|max|count, group_by=service|none",
-    "- metrics breakdown: metric=avg|sum|count, group_by=service",
-    "Use `list_metrics` first to discover `metric_name` and `metric_type`.",
-  ].join("\n")
+const toDecodeErrorMessage = (_definition: ToolDefinition, error: unknown): string => {
+  return Schema.isSchemaError(error) ? String(error) : String(error)
 }
 
 const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
@@ -89,12 +75,12 @@ const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
   registerInspectTraceTool(registrar)
   registerSearchLogsTool(registrar)
   registerSearchTracesTool(registrar)
-  registerServiceOverviewTool(registrar)
   registerDiagnoseServiceTool(registrar)
   registerFindSlowTracesTool(registrar)
   registerErrorDetailTool(registrar)
   registerListMetricsTool(registrar)
   registerQueryDataTool(registrar)
+  registerServiceMapTool(registrar)
 
   // Alert management
   registerListAlertRulesTool(registrar)
@@ -105,6 +91,10 @@ const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
   registerListDashboardsTool(registrar)
   registerGetDashboardTool(registrar)
   registerCreateDashboardTool(registrar)
+
+  // Workflow tools
+  registerComparePeriodsTool(registrar)
+  registerExploreAttributesTool(registrar)
 
   return definitions
 }

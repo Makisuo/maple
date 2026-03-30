@@ -1,4 +1,5 @@
 import {
+  optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
   requiredStringParam,
@@ -8,21 +9,23 @@ import { queryTinybird } from "../lib/query-tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationMs, truncate } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 
 export function registerErrorDetailTool(server: McpToolRegistrar) {
   server.tool(
     "error_detail",
-    "Investigate a specific error type: shows sample traces with their metadata and correlated logs.",
+    "Get sample traces and correlated logs for a specific error type. Optionally include a timeseries to see if the error is getting worse. Use inspect_trace on a trace_id for the full span tree.",
     Schema.Struct({
       error_type: requiredStringParam("The error type / StatusMessage to investigate"),
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
       service: optionalStringParam("Filter by service name"),
+      include_timeseries: optionalBooleanParam("Include error count over time to see if the error is trending up or down"),
       limit: optionalNumberParam("Max sample traces (default 5)"),
     }),
-    ({ error_type, start_time, end_time, service, limit }) =>
+    ({ error_type, start_time, end_time, service, include_timeseries, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 5
@@ -41,7 +44,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
           return { content: [{ type: "text", text: `No traces found for error type "${error_type}" in ${st} — ${et}` }] }
         }
 
-        // Fetch logs for the first few trace IDs
+        // Fetch logs and optional timeseries in parallel
         const traceIds = traces.slice(0, 3).map((t) => t.traceId)
         const logsResults = yield* Effect.all(
           traceIds.map((tid) =>
@@ -50,8 +53,19 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
           { concurrency: "unbounded" },
         )
 
+        // Optionally fetch error timeseries
+        const timeseriesData = include_timeseries
+          ? yield* queryTinybird("errors_timeseries", {
+              error_type,
+              start_time: st,
+              end_time: et,
+              ...(service && { services: service }),
+              exclude_spam_patterns: getSpamPatternsParam(),
+            }).pipe(Effect.map((r) => r.data))
+          : undefined
+
         const lines: string[] = [
-          `=== Error Detail: "${truncate(error_type, 80)}" ===`,
+          `## Error Detail: "${truncate(error_type, 80)}"`,
           `Time range: ${st} — ${et}`,
           `Sample traces: ${traces.length}`,
           ``,
@@ -61,7 +75,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
           const t = traces[i]!
           const dur = formatDurationMs(t.durationMicros)
           lines.push(
-            `--- Trace ${i + 1}: ${t.traceId.slice(0, 16)}... ---`,
+            `### Trace ${i + 1}: ${t.traceId.slice(0, 16)}...`,
             `  Root span: ${t.rootSpanName}`,
             `  Duration: ${dur}`,
             `  Spans: ${Number(t.spanCount)}`,
@@ -92,6 +106,23 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 
           lines.push(``)
         }
+
+        // Show timeseries if included
+        if (timeseriesData && timeseriesData.length > 0) {
+          lines.push(`### Error Trend`)
+          for (const point of timeseriesData) {
+            const ts = String(point.bucket)
+            const time = ts.includes("T") ? ts.slice(11, 19) : ts.split(" ")[1] ?? ts
+            lines.push(`  ${time}: ${Number(point.count)} errors`)
+          }
+          lines.push(``)
+        }
+
+        const nextSteps = traces.slice(0, 3).map((t) =>
+          `\`inspect_trace trace_id="${t.traceId}"\` — full span tree`
+        )
+        nextSteps.push(`\`search_logs service="${service ?? ""}" severity="ERROR"\` — search for related error logs`)
+        lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {

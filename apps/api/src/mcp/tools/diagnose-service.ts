@@ -7,31 +7,34 @@ import { queryTinybird } from "../lib/query-tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationFromMs, formatPercent, formatNumber, truncate } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 
 export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
   server.tool(
     "diagnose_service",
-    "Deep investigation of a single service: health metrics, top errors, recent logs, slow traces, and Apdex score.",
+    "Deep investigation of one service: health metrics, Apdex, top errors, recent traces and logs. Use after system_health identifies a problem service.",
     Schema.Struct({
       service_name: requiredStringParam("The service name to diagnose"),
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+      environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
     }),
-    ({ service_name, start_time, end_time }) =>
+    ({ service_name, start_time, end_time, environment }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
 
         const [overviewResult, errorsResult, logsResult, tracesResult, apdexResult] =
           yield* Effect.all(
             [
-              queryTinybird("service_overview", { start_time: st, end_time: et }),
+              queryTinybird("service_overview", { start_time: st, end_time: et, ...(environment && { environments: environment }) }),
               queryTinybird("errors_by_type", {
                 start_time: st,
                 end_time: et,
                 services: service_name,
                 limit: 10,
+                ...(environment && { deployment_envs: environment }),
                 exclude_spam_patterns: getSpamPatternsParam(),
               }),
               queryTinybird("list_logs", {
@@ -89,7 +92,7 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
             : 0
 
         const lines: string[] = [
-          `=== Diagnosis: ${service_name} ===`,
+          `## Diagnosis: ${service_name}`,
           `Time range: ${st} — ${et}`,
           ``,
           `Health Metrics:`,
@@ -135,6 +138,19 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
             lines.push(`  ${time} [${sev}] ${truncate(log.body, 100)}`)
           }
         }
+
+        const nextSteps: string[] = []
+        if (errorsResult.data.length > 0) {
+          nextSteps.push(`\`find_errors service="${service_name}"\` — see all error types`)
+        }
+        if (p95 > 500) {
+          nextSteps.push(`\`find_slow_traces service="${service_name}"\` — find slow traces`)
+        }
+        for (const t of tracesResult.data.filter((t) => Number(t.hasError)).slice(0, 2)) {
+          nextSteps.push(`\`inspect_trace trace_id="${t.traceId}"\` — inspect error trace`)
+        }
+        nextSteps.push(`\`service_map service_name="${service_name}"\` — see upstream/downstream dependencies`)
+        lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {

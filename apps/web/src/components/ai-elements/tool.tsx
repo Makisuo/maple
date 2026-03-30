@@ -13,7 +13,6 @@ import {
   MagnifierIcon,
   NetworkNodesIcon,
   PulseIcon,
-  ServerIcon,
 } from "@/components/icons"
 import type { IconComponent } from "@/components/icons"
 import type { StructuredToolOutput } from "@maple/domain"
@@ -31,7 +30,6 @@ const LazyToolRenderer = lazy(() =>
 
 const toolLabels: Record<string, string> = {
   system_health: "System Health",
-  service_overview: "Service Overview",
   diagnose_service: "Diagnose Service",
   find_errors: "Find Errors",
   error_detail: "Error Detail",
@@ -40,12 +38,15 @@ const toolLabels: Record<string, string> = {
   inspect_trace: "Inspect Trace",
   search_logs: "Search Logs",
   list_metrics: "List Metrics",
-  query_data: "Query Data",
+  chart_traces: "Chart Traces",
+  chart_logs: "Chart Logs",
+  chart_metrics: "Chart Metrics",
+  compare_periods: "Compare Periods",
+  explore_attributes: "Explore Attributes",
 }
 
 const toolIcons: Record<string, IconComponent> = {
   system_health: PulseIcon,
-  service_overview: ServerIcon,
   diagnose_service: MagnifierIcon,
   find_errors: CircleXmarkIcon,
   error_detail: CircleWarningIcon,
@@ -54,7 +55,11 @@ const toolIcons: Record<string, IconComponent> = {
   inspect_trace: MagnifierIcon,
   search_logs: DatabaseIcon,
   list_metrics: ChartBarIcon,
-  query_data: CodeIcon,
+  chart_traces: ChartBarIcon,
+  chart_logs: ChartBarIcon,
+  chart_metrics: ChartBarIcon,
+  compare_periods: ClockIcon,
+  explore_attributes: DatabaseIcon,
 }
 
 // ---------------------------------------------------------------------------

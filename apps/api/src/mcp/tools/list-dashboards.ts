@@ -4,6 +4,7 @@ import {
   type McpToolRegistrar,
 } from "./types"
 import { formatTable } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
@@ -12,7 +13,7 @@ import { DashboardPersistenceService } from "@/services/DashboardPersistenceServ
 export function registerListDashboardsTool(server: McpToolRegistrar) {
   server.tool(
     "list_dashboards",
-    "List all dashboards in the organization. Returns dashboard ID, name, description, widget count, and timestamps. Use get_dashboard with a dashboard ID to see the full widget configuration.",
+    "List all dashboards with widget counts and timestamps. Use get_dashboard to see full widget configuration.",
     Schema.Struct({
       search: optionalStringParam("Filter dashboards by name (case-insensitive contains)"),
     }),
@@ -41,7 +42,7 @@ export function registerListDashboardsTool(server: McpToolRegistrar) {
         }
 
         const lines: string[] = [
-          `=== Dashboards ===`,
+          `## Dashboards`,
           `Total: ${dashboards.length} dashboard${dashboards.length !== 1 ? "s" : ""}`,
           ``,
         ]
@@ -58,6 +59,13 @@ export function registerListDashboardsTool(server: McpToolRegistrar) {
           ])
           lines.push(formatTable(headers, rows))
         }
+
+        const nextSteps: string[] = []
+        for (const d of dashboards.slice(0, 3)) {
+          nextSteps.push(`\`get_dashboard dashboard_id="${d.id}"\` — view dashboard configuration`)
+        }
+        nextSteps.push('`create_dashboard template="service_health"` — create a new dashboard from template')
+        lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {

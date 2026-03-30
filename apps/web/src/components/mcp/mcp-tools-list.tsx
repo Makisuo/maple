@@ -10,12 +10,7 @@ const MCP_TOOLS = [
   {
     name: "system_health",
     description:
-      "Get an overall health snapshot: error rate, active services, latency stats, and top errors.",
-  },
-  {
-    name: "service_overview",
-    description:
-      "List all services with health metrics: latency (P50/P95/P99), error rate, and throughput.",
+      "Get system health snapshot: error rate, latency percentiles (P50/P95), top errors, per-service breakdown, and data volume. Best starting point for any investigation.",
   },
   {
     name: "diagnose_service",
@@ -35,7 +30,7 @@ const MCP_TOOLS = [
   {
     name: "search_traces",
     description:
-      "Search and filter traces by service, duration, error status, HTTP method, and more.",
+      "Search traces by service, duration, error status, HTTP method, span name, or custom attributes (e.g. user.id).",
   },
   {
     name: "find_slow_traces",
@@ -60,7 +55,52 @@ const MCP_TOOLS = [
   {
     name: "query_data",
     description:
-      "Execute supported structured queries across traces, logs, and metrics. Use list_metrics first for metric_name and metric_type; metrics breakdown supports avg, sum, and count grouped by service.",
+      "Query timeseries or breakdown data from traces, logs, or metrics. Supports attribute filtering, environment/commit comparison, and apdex.",
+  },
+  {
+    name: "service_map",
+    description:
+      "Show service-to-service dependencies with call counts, error rates, and latency per edge.",
+  },
+  {
+    name: "compare_periods",
+    description:
+      "Compare system health between two time periods to detect regressions. Flags error_rate_up, latency_up, throughput_drop automatically.",
+  },
+  {
+    name: "explore_attributes",
+    description:
+      "Discover attribute keys/values for traces and metrics. Also discover environments and commit SHAs (source=services).",
+  },
+  {
+    name: "list_alert_rules",
+    description:
+      "List configured alert rules with their severity, signal type, and condition.",
+  },
+  {
+    name: "list_alert_incidents",
+    description:
+      "List triggered alert incidents with their status, severity, and observed values.",
+  },
+  {
+    name: "create_alert_rule",
+    description:
+      "Create an alert rule from a template (high_error_rate, slow_p95, slow_p99, low_apdex, throughput_drop) or with custom parameters.",
+  },
+  {
+    name: "list_dashboards",
+    description:
+      "List all dashboards with widget counts and timestamps.",
+  },
+  {
+    name: "get_dashboard",
+    description:
+      "Retrieve full dashboard configuration with all widgets.",
+  },
+  {
+    name: "create_dashboard",
+    description:
+      "Create a dashboard from a template (service_health, error_tracking, blank) or custom JSON.",
   },
 ] as const
 

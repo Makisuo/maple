@@ -5,6 +5,7 @@ import {
   type McpToolRegistrar,
 } from "./types"
 import { formatTable } from "../lib/format"
+import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
@@ -20,7 +21,7 @@ const comparatorLabel: Record<string, string> = {
 export function registerListAlertRulesTool(server: McpToolRegistrar) {
   server.tool(
     "list_alert_rules",
-    "List all alert rules configured for the organization. Returns rule name, severity, signal type, threshold, enabled status, and destination count. Supports filtering by service, signal type, severity, and enabled state.",
+    "List configured alert rules with their severity, signal type, and condition. Use list_alert_incidents to see triggered alerts.",
     Schema.Struct({
       service_name: optionalStringParam("Filter rules by service name"),
       signal_type: optionalStringParam(
@@ -64,7 +65,7 @@ export function registerListAlertRulesTool(server: McpToolRegistrar) {
         }
 
         const lines: string[] = [
-          `=== Alert Rules ===`,
+          `## Alert Rules`,
           `Total: ${rules.length} rule${rules.length !== 1 ? "s" : ""}`,
           ``,
         ]
@@ -83,6 +84,11 @@ export function registerListAlertRulesTool(server: McpToolRegistrar) {
           ])
           lines.push(formatTable(headers, rows))
         }
+
+        lines.push(formatNextSteps([
+          '`list_alert_incidents` — see triggered alerts',
+          '`create_alert_rule template="high_error_rate"` — create a new rule from template',
+        ]))
 
         return {
           content: createDualContent(lines.join("\n"), {
