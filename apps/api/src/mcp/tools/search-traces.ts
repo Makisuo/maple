@@ -23,7 +23,7 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
       min_duration_ms: optionalNumberParam("Minimum duration in milliseconds"),
       max_duration_ms: optionalNumberParam("Maximum duration in milliseconds"),
       http_method: optionalStringParam("Filter by HTTP method (GET, POST, etc.)"),
-      span_name: optionalStringParam("Filter by root span name"),
+      span_name: optionalStringParam("Filter by root span name (substring match, case-insensitive)"),
       limit: optionalNumberParam("Max results (default 20)"),
     }),
     (params) =>
@@ -39,6 +39,7 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
           max_duration_ms: params.max_duration_ms,
           http_method: params.http_method,
           span_name: params.span_name,
+          span_name_match_mode: params.span_name ? "contains" : undefined,
           limit: params.limit ?? 20,
         })
 
