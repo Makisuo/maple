@@ -1,21 +1,32 @@
 ---
-
+import * as m from "../paraglide/messages";
 ---
 
 <section class="pt-16 pb-24 md:pt-20 md:pb-32">
     <div class="mx-auto max-w-6xl px-6">
         <div class="mb-12">
-            <span class="text-[11px] text-accent uppercase tracking-wider">Alerting</span>
-            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg">Know before your users do</h2>
+            <span class="text-[11px] text-accent uppercase tracking-wider">{m.alert_badge()}</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg">{m.alert_heading()}</h2>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-border border border-border">
             <!-- Left Panel — Alert rules -->
             <div class="bg-bg p-6 md:p-8">
-                <h3 class="text-base font-semibold text-fg mb-2">Alert rules</h3>
+                <h3 class="text-base font-semibold text-fg mb-2">{m.alert_rules_title()}</h3>
                 <p class="text-sm text-fg-muted leading-relaxed mb-6">
-                    Define conditions on any metric. When thresholds are breached, Maple fires alerts instantly.
+                    {m.alert_rules_desc()}
                 </p>
+
+                <!-- Signal type pills -->
+                <div class="flex flex-wrap gap-1.5 mb-4">
+                    <span class="text-[8px] text-fg px-1.5 py-0.5 border border-border bg-bg-elevated">error_rate</span>
+                    <span class="text-[8px] text-fg px-1.5 py-0.5 border border-border bg-bg-elevated">p95_latency</span>
+                    <span class="text-[8px] text-fg px-1.5 py-0.5 border border-border bg-bg-elevated">p99_latency</span>
+                    <span class="text-[8px] text-fg-muted px-1.5 py-0.5 border border-border">apdex</span>
+                    <span class="text-[8px] text-fg-muted px-1.5 py-0.5 border border-border">throughput</span>
+                    <span class="text-[8px] text-fg-muted px-1.5 py-0.5 border border-border">metric</span>
+                    <span class="text-[8px] text-fg-muted px-1.5 py-0.5 border border-border">query</span>
+                </div>
 
                 <div class="bg-bg-elevated border border-border p-4">
                     <div class="flex items-center gap-2 mb-3">
@@ -23,6 +34,7 @@
                         <div class="w-2 h-2 bg-border"></div>
                         <div class="w-2 h-2 bg-border"></div>
                         <span class="text-[9px] text-fg-muted ml-2">alert rule</span>
+                        <span class="text-[7px] text-destructive bg-destructive/10 px-1.5 py-0.5 ml-auto uppercase tracking-wider">critical</span>
                     </div>
 
                     <!-- Key-value fields -->
@@ -36,12 +48,16 @@
                             <span class="text-[9px] text-chart-1 font-mono">api-gateway</span>
                         </div>
                         <div class="flex items-center justify-between">
+                            <span class="text-[9px] text-fg-muted">Signal</span>
+                            <span class="text-[9px] text-fg font-mono">error_rate</span>
+                        </div>
+                        <div class="flex items-center justify-between">
                             <span class="text-[9px] text-fg-muted">Condition</span>
                             <span class="text-[9px] text-fg font-mono">error_rate &gt; <span class="text-destructive">5%</span></span>
                         </div>
                         <div class="flex items-center justify-between">
                             <span class="text-[9px] text-fg-muted">Window</span>
-                            <span class="text-[9px] text-fg font-mono">5 min</span>
+                            <span class="text-[9px] text-fg font-mono">5 min &middot; 3 consecutive</span>
                         </div>
                     </div>
 
@@ -70,18 +86,18 @@
                     <div class="pt-3 border-t border-border flex items-center justify-between">
                         <div class="flex items-center gap-2">
                             <div class="w-2 h-2 bg-destructive animate-pulse-dot"></div>
-                            <span class="text-[9px] text-destructive font-medium uppercase tracking-wider">Firing</span>
+                            <span class="text-[9px] text-destructive font-medium uppercase tracking-wider">{m.alert_firing()}</span>
                         </div>
-                        <span class="text-[9px] text-fg-muted">Triggered 34s ago</span>
+                        <span class="text-[9px] text-fg-muted">{m.alert_triggered_ago()}</span>
                     </div>
                 </div>
             </div>
 
             <!-- Right Panel — Route everywhere -->
             <div class="bg-bg p-6 md:p-8">
-                <h3 class="text-base font-semibold text-fg mb-2">Route everywhere</h3>
+                <h3 class="text-base font-semibold text-fg mb-2">{m.alert_route_title()}</h3>
                 <p class="text-sm text-fg-muted leading-relaxed mb-6">
-                    Push alerts to Slack, Discord, PagerDuty, or any webhook. Your team gets notified where they already work.
+                    {m.alert_route_desc()}
                 </p>
 
                 <!-- Slack notification preview -->
@@ -118,8 +134,8 @@
 
                             <!-- Action buttons -->
                             <div class="flex items-center gap-2 mt-2">
-                                <span class="text-[9px] text-accent border border-border bg-bg px-2 py-0.5 cursor-default">View in Maple</span>
-                                <span class="text-[9px] text-fg-muted border border-border bg-bg px-2 py-0.5 cursor-default">Acknowledge</span>
+                                <span class="text-[9px] text-accent border border-border bg-bg px-2 py-0.5 cursor-default">{m.alert_view()}</span>
+                                <span class="text-[9px] text-fg-muted border border-border bg-bg px-2 py-0.5 cursor-default">{m.alert_acknowledge()}</span>
                             </div>
                         </div>
                     </div>
@@ -163,7 +179,7 @@
                     </div>
                 </div>
 
-                <p class="text-[9px] text-fg-muted mt-3">+ any custom webhook endpoint</p>
+                <p class="text-[9px] text-fg-muted mt-3">{m.alert_webhook_note()}</p>
             </div>
         </div>
     </div>

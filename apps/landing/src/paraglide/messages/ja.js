@@ -522,6 +522,20 @@ export const features_col_p99 = () => `P99`
 export const features_col_throughput = () => `スループット`
 
 
+export { features_errors_badge } from "./en.js"
+
+export { features_errors_heading } from "./en.js"
+
+export { features_errors_desc } from "./en.js"
+
+export { features_col_error_type } from "./en.js"
+
+export { features_col_count } from "./en.js"
+
+export { features_col_services } from "./en.js"
+
+export { features_col_last_seen } from "./en.js"
+
 /**
  * 
  * @returns {string}
@@ -914,6 +928,10 @@ export const tech_ingestion_rate = () => `取り込みレート`
 export const tech_avg_latency = () => `平均レイテンシ`
 
 
+export { tech_connectors_title } from "./en.js"
+
+export { tech_connectors_desc } from "./en.js"
+
 /**
  * 
  * @returns {string}
@@ -1049,6 +1067,56 @@ export const ai_any_mcp = () => `任意のMCPクライアント`
 /* @__NO_SIDE_EFFECTS__ */
 export const ai_open_protocol = () => `オープンプロトコル`
 
+
+export { chat_badge } from "./en.js"
+
+export { chat_heading } from "./en.js"
+
+export { chat_desc } from "./en.js"
+
+export { chat_user_label } from "./en.js"
+
+export { chat_user_msg } from "./en.js"
+
+export { chat_assistant_label } from "./en.js"
+
+export { chat_response_1 } from "./en.js"
+
+export { chat_response_2 } from "./en.js"
+
+export { chat_trace_link } from "./en.js"
+
+export { dashboard_badge } from "./en.js"
+
+export { dashboard_heading } from "./en.js"
+
+export { dashboard_desc } from "./en.js"
+
+export { dashboard_ai_label } from "./en.js"
+
+export { dashboard_ai_text } from "./en.js"
+
+export { alert_badge } from "./en.js"
+
+export { alert_heading } from "./en.js"
+
+export { alert_rules_title } from "./en.js"
+
+export { alert_rules_desc } from "./en.js"
+
+export { alert_route_title } from "./en.js"
+
+export { alert_route_desc } from "./en.js"
+
+export { alert_firing } from "./en.js"
+
+export { alert_triggered_ago } from "./en.js"
+
+export { alert_view } from "./en.js"
+
+export { alert_acknowledge } from "./en.js"
+
+export { alert_webhook_note } from "./en.js"
 
 /**
  * 

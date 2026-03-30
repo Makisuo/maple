@@ -1,0 +1,110 @@
+---
+import * as m from "../paraglide/messages";
+---
+
+<section class="py-24 md:py-32">
+    <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-12">
+            <span class="text-[11px] text-accent uppercase tracking-wider">{m.dashboard_badge()}</span>
+            <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg">{m.dashboard_heading()}</h2>
+            <p class="mt-3 text-sm text-fg-muted max-w-xl leading-relaxed">
+                {m.dashboard_desc()}
+            </p>
+        </div>
+
+        <!-- Dashboard mock -->
+        <div class="border border-border bg-bg-elevated overflow-hidden">
+            <!-- Window chrome -->
+            <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <div class="w-2 h-2 bg-border"></div>
+                    <span class="text-[9px] text-fg-muted ml-2">Production Overview</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[8px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
+                    <span class="text-[8px] text-accent border border-accent/30 bg-accent/5 px-2 py-0.5">Edit</span>
+                </div>
+            </div>
+
+            <!-- Dashboard grid -->
+            <div class="p-4 md:p-6">
+                <div class="grid grid-cols-4 md:grid-cols-12 gap-3">
+                    <!-- Stat: Total Traces -->
+                    <div class="col-span-2 md:col-span-3 border border-border bg-bg p-3">
+                        <div class="text-[8px] text-fg-muted mb-1">Total Traces</div>
+                        <div class="text-base md:text-lg text-fg font-mono font-medium">2.4M</div>
+                        <div class="text-[8px] text-chart-apdex mt-1">+12%</div>
+                    </div>
+                    <!-- Stat: Error Rate -->
+                    <div class="col-span-2 md:col-span-3 border border-border bg-bg p-3">
+                        <div class="text-[8px] text-fg-muted mb-1">Error Rate</div>
+                        <div class="text-base md:text-lg text-fg font-mono font-medium">1.2%</div>
+                        <div class="text-[8px] text-chart-apdex mt-1">-0.3%</div>
+                    </div>
+                    <!-- Stat: P95 Latency -->
+                    <div class="col-span-2 md:col-span-3 border border-border bg-bg p-3">
+                        <div class="text-[8px] text-fg-muted mb-1">P95 Latency</div>
+                        <div class="text-base md:text-lg text-fg font-mono font-medium">142ms</div>
+                        <div class="text-[8px] text-destructive mt-1">+18ms</div>
+                    </div>
+                    <!-- Stat: Active Services -->
+                    <div class="col-span-2 md:col-span-3 border border-border bg-bg p-3">
+                        <div class="text-[8px] text-fg-muted mb-1">Active Services</div>
+                        <div class="text-base md:text-lg text-fg font-mono font-medium">12</div>
+                        <div class="text-[8px] text-fg-muted mt-1">all healthy</div>
+                    </div>
+
+                    <!-- Chart: Throughput (wide) -->
+                    <div class="col-span-4 md:col-span-8 border border-border bg-bg p-3">
+                        <div class="text-[8px] text-fg-muted mb-3">Request Throughput</div>
+                        <div class="flex items-end gap-[3px] h-16">
+                            <div class="flex-1 bg-chart-throughput/30 h-[45%]"></div>
+                            <div class="flex-1 bg-chart-throughput/35 h-[52%]"></div>
+                            <div class="flex-1 bg-chart-throughput/40 h-[48%]"></div>
+                            <div class="flex-1 bg-chart-throughput/45 h-[60%]"></div>
+                            <div class="flex-1 bg-chart-throughput/50 h-[72%]"></div>
+                            <div class="flex-1 bg-chart-throughput/55 h-[68%]"></div>
+                            <div class="flex-1 bg-chart-throughput/60 h-[80%]"></div>
+                            <div class="flex-1 bg-chart-throughput/65 h-[85%]"></div>
+                            <div class="flex-1 bg-chart-throughput/70 h-[78%]"></div>
+                            <div class="flex-1 bg-chart-throughput/75 h-[90%]"></div>
+                            <div class="flex-1 bg-chart-throughput/80 h-[88%]"></div>
+                            <div class="flex-1 bg-chart-throughput h-[92%]"></div>
+                        </div>
+                    </div>
+
+                    <!-- Chart: Error Rate (narrow) -->
+                    <div class="col-span-4 md:col-span-4 border border-border bg-bg p-3">
+                        <div class="text-[8px] text-fg-muted mb-3">Error Rate</div>
+                        <div class="flex items-end gap-[3px] h-16">
+                            <div class="flex-1 bg-chart-error/30 h-[8%]"></div>
+                            <div class="flex-1 bg-chart-error/35 h-[12%]"></div>
+                            <div class="flex-1 bg-chart-error/40 h-[10%]"></div>
+                            <div class="flex-1 bg-chart-error/50 h-[22%]"></div>
+                            <div class="flex-1 bg-chart-error/60 h-[45%]"></div>
+                            <div class="flex-1 bg-chart-error/50 h-[30%]"></div>
+                            <div class="flex-1 bg-chart-error/40 h-[18%]"></div>
+                            <div class="flex-1 bg-chart-error/35 h-[12%]"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI suggestion popover -->
+                <div class="mt-4 border border-accent/30 bg-accent/5 p-3 flex items-center gap-3">
+                    <div class="w-5 h-5 border border-accent/30 flex items-center justify-center shrink-0">
+                        <svg class="w-3 h-3 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                        </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <span class="text-[9px] text-accent font-medium">{m.dashboard_ai_label()}</span>
+                        <p class="text-[9px] text-fg-muted mt-0.5">{m.dashboard_ai_text()}</p>
+                    </div>
+                    <span class="text-[8px] text-accent border border-accent/30 px-2 py-0.5 shrink-0 cursor-default">+ Add</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>

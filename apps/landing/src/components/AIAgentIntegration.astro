@@ -149,8 +149,36 @@ import * as m from "../paraglide/messages";
             </div>
         </div>
 
+        <!-- MCP tools grid -->
+        <div class="mt-6 border border-border bg-bg-elevated p-4 md:p-6">
+            <div class="flex items-center justify-between mb-4">
+                <span class="text-[10px] text-fg font-medium">18 MCP tools available</span>
+                <span class="text-[8px] text-fg-muted">read &amp; write capabilities</span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+                <span class="text-[8px] text-chart-1 font-mono px-2 py-0.5 border border-chart-1/20 bg-chart-1/5">system_health</span>
+                <span class="text-[8px] text-chart-2 font-mono px-2 py-0.5 border border-chart-2/20 bg-chart-2/5">find_errors</span>
+                <span class="text-[8px] text-chart-3 font-mono px-2 py-0.5 border border-chart-3/20 bg-chart-3/5">inspect_trace</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">search_traces</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">search_logs</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">service_overview</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">diagnose_service</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">find_slow_traces</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">error_detail</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">list_metrics</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">query_data</span>
+                <span class="text-[8px] text-accent font-mono px-2 py-0.5 border border-accent/20 bg-accent/5">create_alert_rule</span>
+                <span class="text-[8px] text-accent font-mono px-2 py-0.5 border border-accent/20 bg-accent/5">create_dashboard</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">get_dashboard</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">list_dashboards</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">list_alert_rules</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">list_alert_incidents</span>
+                <span class="text-[8px] text-fg-muted font-mono px-2 py-0.5 border border-border">list_metrics</span>
+            </div>
+        </div>
+
         <!-- Compatible agents -->
-        <div class="mt-12">
+        <div class="mt-6">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
                 <div class="bg-bg p-4 md:p-6 flex items-center gap-3">
                     <img src="https://cdn.brandfetch.io/idW5s392j1/w/400/h/400/theme/dark/icon.png" alt="Claude" class="w-6 h-6 shrink-0" />
@@ -167,10 +195,12 @@ import * as m from "../paraglide/messages";
                     </div>
                 </div>
                 <div class="bg-bg p-4 md:p-6 flex items-center gap-3">
-                    <img src="https://cdn.brandfetch.io/id8ixWaeze/w/400/h/400/theme/dark/icon.png" alt="OpenCode" class="w-6 h-6 shrink-0" />
+                    <div class="w-6 h-6 bg-[#00D47E]/10 border border-[#00D47E]/20 flex items-center justify-center shrink-0">
+                        <span class="text-[10px] text-[#00D47E] font-bold">W</span>
+                    </div>
                     <div>
-                        <span class="text-[11px] text-fg font-medium">OpenCode</span>
-                        <span class="text-[9px] text-fg-muted block">Terminal Agent</span>
+                        <span class="text-[11px] text-fg font-medium">Windsurf</span>
+                        <span class="text-[9px] text-fg-muted block">AI Editor</span>
                     </div>
                 </div>
                 <div class="bg-bg p-4 md:p-6 flex items-center gap-3">

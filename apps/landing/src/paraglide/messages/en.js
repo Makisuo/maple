@@ -527,6 +527,62 @@ export const features_col_throughput = () => `Throughput`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const features_errors_badge = () => `Error Tracking`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_errors_heading = () => `Group, track, and fix errors systematically`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_errors_desc = () => `Errors are automatically grouped by type across all your services. See trends over time, affected services, and drill into sample traces to find the root cause.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_error_type = () => `Error Type`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_count = () => `Count`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_services = () => `Services`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_last_seen = () => `Last Seen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const usecases_badge = () => `Use Cases`
 
 
@@ -919,6 +975,22 @@ export const tech_avg_latency = () => `Avg latency`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const tech_connectors_title = () => `Beyond OTLP`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const tech_connectors_desc = () => `Pull data from Cloudflare Logpush and Prometheus scrape targets alongside your OpenTelemetry signals.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const ai_badge = () => `AI Agents`
 
 
@@ -1048,6 +1120,206 @@ export const ai_any_mcp = () => `Any MCP client`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const ai_open_protocol = () => `Open protocol`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_badge = () => `AI Assistant`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_heading = () => `Ask your data anything`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_desc = () => `A built-in AI assistant that understands your traces, logs, and metrics. Ask questions in plain language and get answers with direct links to the relevant data.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_user_label = () => `You`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_user_msg = () => `What caused the latency spike on payment-service in the last hour?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_assistant_label = () => `Maple AI`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_response_1 = () => `I found a latency spike starting at 14:12 UTC. The P95 jumped from 140ms to 890ms.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_response_2 = () => `Root cause: 3 slow database queries in the checkout flow averaging 720ms each. The connection pool hit its max limit (20/20).`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_trace_link = () => `View trace f7e8d9c0`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_badge = () => `Dashboards`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_heading = () => `Build dashboards that tell the story`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_desc = () => `Drag-and-drop widgets, pick from pre-built presets, or let AI suggest the right charts for your services. Export and share as JSON.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_ai_label = () => `AI Suggestion`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_ai_text = () => `Add a P95 latency chart for payment-service`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_badge = () => `Alerting`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_heading = () => `Know before your users do`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_rules_title = () => `Alert rules`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_rules_desc = () => `7 built-in signal types — error rate, P95/P99 latency, Apdex, throughput, custom metrics, and custom queries. With severity levels, incident tracking, and auto-resolution.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_route_title = () => `Route everywhere`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_route_desc = () => `Push alerts to Slack, Discord, PagerDuty, or any webhook. Your team gets notified where they already work.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_firing = () => `Firing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_triggered_ago = () => `Triggered 34s ago`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_view = () => `View in Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_acknowledge = () => `Acknowledge`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_webhook_note = () => `+ any custom webhook endpoint`
 
 
 /**
