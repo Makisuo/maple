@@ -165,7 +165,7 @@ interface ServicesTableProps {
 function LoadingState() {
   return (
     <div className="space-y-4">
-      <div className="rounded-md border">
+      <div className="rounded-md border overflow-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -252,7 +252,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 
       return (
         <div className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}>
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-auto">
             <Table aria-label="Services">
               <TableHeader>
                 <TableRow>

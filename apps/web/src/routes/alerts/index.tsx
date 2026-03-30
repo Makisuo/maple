@@ -160,7 +160,7 @@ function OverviewTab({
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Skeleton className="h-[98px]" />
           <Skeleton className="h-[98px]" />
           <Skeleton className="h-[98px]" />
@@ -173,7 +173,7 @@ function OverviewTab({
   return (
     <div className="space-y-8">
       {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
@@ -555,7 +555,7 @@ function AlertsPage() {
           </div>
         }
         headerActions={
-          <Button size="sm" render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}>
+          <Button size="sm" nativeButton={false} render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}>
             <PlusIcon size={14} />
             New Rule
           </Button>
@@ -612,7 +612,7 @@ function AlertsPage() {
                     </EmptyDescription>
                   </EmptyHeader>
                   {isAdmin && (
-                    <Button size="sm" render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}>
+                    <Button size="sm" nativeButton={false} render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}>
                       <PlusIcon size={14} />
                       Add Rule
                     </Button>
@@ -762,12 +762,12 @@ function AlertsPage() {
                             </div>
                           </div>
                           {incident.serviceName ? (
-                            <Button variant="outline" size="sm" render={<Link to="/services/$serviceName" params={{ serviceName: incident.serviceName }} />}>
+                            <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/services/$serviceName" params={{ serviceName: incident.serviceName }} />}>
                               <ServerIcon size={14} />
                               Open Service
                             </Button>
                           ) : (
-                            <Button variant="outline" size="sm" render={<Link to="/alerts" search={{ tab: "rules" }} />}>
+                            <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/alerts" search={{ tab: "rules" }} />}>
                               <BellIcon size={14} />
                               Open Rules
                             </Button>

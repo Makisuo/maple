@@ -12,6 +12,16 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@maple/ui/components/ui/breadcrumb"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@maple/ui/components/ui/sheet"
+import { Button } from "@maple/ui/components/ui/button"
+import { useIsMobile } from "@maple/ui/hooks/use-mobile"
+import { LayoutLeftIcon } from "@/components/icons"
 import { Link, defaultParseSearch } from "@tanstack/react-router"
 
 export interface BreadcrumbItem {
@@ -58,6 +68,8 @@ export function DashboardLayout({
 }: DashboardLayoutProps) {
   const isScrolledAtom = React.useMemo(() => Atom.make(false), [])
   const [isScrolled, setIsScrolled] = useAtom(isScrolledAtom)
+  const [filterSheetOpen, setFilterSheetOpen] = React.useState(false)
+  const isMobile = useIsMobile()
   const hasHeader = title || titleContent || description || headerActions
 
   return (
@@ -103,13 +115,38 @@ export function DashboardLayout({
               ))}
             </BreadcrumbList>
           </Breadcrumb>
-          {breadcrumbActions && <div className="ml-auto shrink-0">{breadcrumbActions}</div>}
+          {(breadcrumbActions || (filterSidebar && isMobile)) && (
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {filterSidebar && isMobile && (
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => setFilterSheetOpen(true)}
+                  aria-label="Open filters"
+                >
+                  <LayoutLeftIcon size={16} />
+                </Button>
+              )}
+              {breadcrumbActions}
+            </div>
+          )}
         </header>
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          {filterSidebar && (
-            <aside className="sticky top-0 h-full w-64 max-w-[40vw] shrink-0 overflow-y-auto border-r p-4">
+          {filterSidebar && !isMobile && (
+            <aside className="sticky top-0 h-full w-64 shrink-0 overflow-y-auto border-r p-4">
               {filterSidebar}
             </aside>
+          )}
+          {filterSidebar && isMobile && (
+            <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+              <SheetContent side="left" className="w-72 p-4 overflow-y-auto">
+                <SheetHeader className="sr-only">
+                  <SheetTitle>Filters</SheetTitle>
+                  <SheetDescription>Filter options for this page.</SheetDescription>
+                </SheetHeader>
+                {filterSidebar}
+              </SheetContent>
+            </Sheet>
           )}
           <main id="main-content" className="flex min-h-0 min-w-0 flex-1 flex-col">
             {(hasHeader || stickyContent) && (
@@ -124,7 +161,7 @@ export function DashboardLayout({
                         <p className="text-muted-foreground">{description}</p>
                       )}
                     </div>
-                    {headerActions && <div className="shrink-0">{headerActions}</div>}
+                    {headerActions && <div className="shrink-0 overflow-x-auto">{headerActions}</div>}
                   </div>
                 )}
                 {stickyContent}

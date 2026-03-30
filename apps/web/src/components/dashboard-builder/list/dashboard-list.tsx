@@ -85,11 +85,18 @@ export function DashboardList({
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {dashboards.map((dashboard) => (
-        <button
+        <div
           key={dashboard.id}
-          type="button"
-          className="group ring-1 ring-border hover:ring-border-active bg-card text-left transition-all flex flex-col overflow-hidden rounded-md"
+          role="button"
+          tabIndex={0}
+          className="group ring-1 ring-border hover:ring-border-active bg-card text-left transition-all flex flex-col overflow-hidden rounded-md cursor-pointer"
           onClick={() => onSelect(dashboard.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+              onSelect(dashboard.id)
+            }
+          }}
         >
           {/* Preview thumbnail */}
           <div className="h-[100px] w-full bg-background border-b border-border p-3">
@@ -122,7 +129,7 @@ export function DashboardList({
               <span>Updated {formatTimeAgo(dashboard.updatedAt)}</span>
             </div>
           </div>
-        </button>
+        </div>
       ))}
 
       {/* Create button */}

@@ -195,7 +195,7 @@ function RuleDetailPage() {
         </div>
       }
       headerActions={
-        <Button variant="outline" size="sm" render={<Link to="/alerts/create" search={{ ruleId: rule.id }} />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/alerts/create" search={{ ruleId: rule.id }} />}>
           <PencilIcon size={14} />
           Edit Rule
         </Button>

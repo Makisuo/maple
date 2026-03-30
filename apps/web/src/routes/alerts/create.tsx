@@ -300,7 +300,7 @@ function AlertCreatePage() {
       }
       headerActions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" render={<Link to="/alerts" search={{ tab: "rules" }} />}>
+          <Button variant="outline" nativeButton={false} render={<Link to="/alerts" search={{ tab: "rules" }} />}>
             Cancel
           </Button>
           <Button

@@ -180,15 +180,15 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
 function LoadingState() {
   return (
     <div className="space-y-4">
-      <div className="rounded-md border">
+      <div className="rounded-md border overflow-auto">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-[32px]" />
               <TableHead>Error Type</TableHead>
               <TableHead className="w-[100px]">Count</TableHead>
-              <TableHead className="w-[140px]">Affected Services</TableHead>
-              <TableHead className="w-[140px]">Last Seen</TableHead>
+              <TableHead className="hidden md:table-cell w-[140px]">Affected Services</TableHead>
+              <TableHead className="hidden md:table-cell w-[140px]">Last Seen</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -201,10 +201,10 @@ function LoadingState() {
                 <TableCell>
                   <Skeleton className="h-5 w-16" />
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden md:table-cell">
                   <Skeleton className="h-4 w-20" />
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden md:table-cell">
                   <Skeleton className="h-4 w-24" />
                 </TableCell>
               </TableRow>
@@ -238,15 +238,15 @@ export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
 
       return (
         <div className={`space-y-4 ${result.waiting ? "opacity-60" : ""}`}>
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[32px]" />
                   <TableHead>Error Type</TableHead>
                   <TableHead className="w-[100px]">Count</TableHead>
-                  <TableHead className="w-[140px]">Affected Services</TableHead>
-                  <TableHead className="w-[140px]">Last Seen</TableHead>
+                  <TableHead className="hidden md:table-cell w-[140px]">Affected Services</TableHead>
+                  <TableHead className="hidden md:table-cell w-[140px]">Last Seen</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -293,10 +293,10 @@ export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
                               {formatNumber(errorRow.count)}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
                             {errorRow.affectedServicesCount} service{errorRow.affectedServicesCount !== 1 ? "s" : ""}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
                             {formatTimeAgo(errorRow.lastSeen)}
                           </TableCell>
                         </TableRow>

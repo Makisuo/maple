@@ -48,25 +48,25 @@ interface MetricsTableProps {
 
 function LoadingState() {
   return (
-    <div className="rounded-md border">
+    <div className="rounded-md border overflow-auto">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Metric Name</TableHead>
-            <TableHead className="w-[100px]">Type</TableHead>
-            <TableHead className="w-[120px]">Service</TableHead>
-            <TableHead className="w-[100px]">Points</TableHead>
-            <TableHead className="w-[100px]">Last Seen</TableHead>
+            <TableHead className="hidden md:table-cell w-[100px]">Type</TableHead>
+            <TableHead className="hidden md:table-cell w-[120px]">Service</TableHead>
+            <TableHead className="hidden md:table-cell w-[100px]">Points</TableHead>
+            <TableHead className="hidden md:table-cell w-[100px]">Last Seen</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {Array.from({ length: 10 }).map((_, i) => (
             <TableRow key={i}>
               <TableCell><Skeleton className="h-4 w-48" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-12" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+              <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-16" /></TableCell>
+              <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
+              <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-12" /></TableCell>
+              <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-16" /></TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -101,7 +101,7 @@ export function MetricsTable({
     ))
     .onSuccess((response, result) => (
       <div className={`space-y-4 ${result.waiting ? "opacity-60" : ""}`}>
-        <div className="rounded-md border">
+        <div className="rounded-md border overflow-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -141,18 +141,18 @@ export function MetricsTable({
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         <MetricTypeBadge type={metric.metricType} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         <Badge variant="outline" className="font-mono text-[10px]">
                           {metric.serviceName}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="hidden md:table-cell font-mono text-xs">
                         {formatNumber(metric.dataPointCount)}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
                         {formatTimeAgo(metric.lastSeen)}
                       </TableCell>
                     </TableRow>

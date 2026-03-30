@@ -145,6 +145,7 @@ function ServiceDetailContent() {
           />
           <Button
             variant="outline"
+            nativeButton={false}
             render={
               <Link
                 to="/alerts/create"
