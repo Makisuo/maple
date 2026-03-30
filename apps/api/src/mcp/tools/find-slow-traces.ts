@@ -24,9 +24,10 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
       service: optionalStringParam("Filter by service name"),
+      environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
       limit: optionalNumberParam("Max results (default 10)"),
     }),
-    ({ start_time, end_time, service, limit }) =>
+    ({ start_time, end_time, service, environment, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 10
@@ -37,6 +38,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
               start_time: st,
               end_time: et,
               service,
+              ...(environment && { deployment_env: environment }),
               limit: 500,
             }),
             queryTinybird("traces_duration_stats", {

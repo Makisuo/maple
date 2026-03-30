@@ -19,20 +19,22 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
       service_name: requiredStringParam("The service name to diagnose"),
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
+      environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
     }),
-    ({ service_name, start_time, end_time }) =>
+    ({ service_name, start_time, end_time, environment }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
 
         const [overviewResult, errorsResult, logsResult, tracesResult, apdexResult] =
           yield* Effect.all(
             [
-              queryTinybird("service_overview", { start_time: st, end_time: et }),
+              queryTinybird("service_overview", { start_time: st, end_time: et, ...(environment && { environments: environment }) }),
               queryTinybird("errors_by_type", {
                 start_time: st,
                 end_time: et,
                 services: service_name,
                 limit: 10,
+                ...(environment && { deployment_envs: environment }),
                 exclude_spam_patterns: getSpamPatternsParam(),
               }),
               queryTinybird("list_logs", {
@@ -147,6 +149,7 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
         for (const t of tracesResult.data.filter((t) => Number(t.hasError)).slice(0, 2)) {
           nextSteps.push(`\`inspect_trace trace_id="${t.traceId}"\` — inspect error trace`)
         }
+        nextSteps.push(`\`service_map service_name="${service_name}"\` — see upstream/downstream dependencies`)
         lines.push(formatNextSteps(nextSteps))
 
         return {

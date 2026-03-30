@@ -19,9 +19,10 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
       service: optionalStringParam("Filter to a specific service"),
+      environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
       limit: optionalNumberParam("Max results (default 20)"),
     }),
-    ({ start_time, end_time, service, limit }) =>
+    ({ start_time, end_time, service, environment, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
 
@@ -29,6 +30,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
           start_time: st,
           end_time: et,
           services: service,
+          ...(environment && { deployment_envs: environment }),
           limit: limit ?? 20,
           exclude_spam_patterns: getSpamPatternsParam(),
         })
@@ -58,6 +60,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
           const errorTypeShort = e.errorType.length > 50 ? e.errorType.slice(0, 47) + "..." : e.errorType
           nextSteps.push(`\`error_detail error_type="${errorTypeShort}"\` — see sample traces and logs`)
         }
+        nextSteps.push('`query_data source="traces" kind="timeseries" metric="error_rate"` — chart error rate trend')
         lines.push(formatNextSteps(nextSteps))
 
         return {

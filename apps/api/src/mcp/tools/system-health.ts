@@ -13,13 +13,14 @@ import { formatNextSteps } from "../lib/next-steps"
 export function registerSystemHealthTool(server: McpToolRegistrar) {
   server.tool(
     "system_health",
-    "Get system health: error rate, latency, top errors, and per-service breakdown. Pass service_name to scope to one service. Start here for any investigation, then follow up with diagnose_service or find_errors.",
+    "Get system health snapshot: error rate, latency percentiles (P50/P95), top errors, per-service breakdown, and data volume. Best starting point for any investigation. Use diagnose_service or find_errors to drill deeper.",
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
       service_name: optionalStringParam("Scope to a specific service"),
+      environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
     }),
-    ({ start_time, end_time, service_name }) =>
+    ({ start_time, end_time, service_name, environment }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
 
@@ -33,12 +34,14 @@ export function registerSystemHealthTool(server: McpToolRegistrar) {
             queryTinybird("service_overview", {
               start_time: st,
               end_time: et,
+              ...(environment && { environments: environment }),
             }),
             queryTinybird("errors_by_type", {
               start_time: st,
               end_time: et,
               limit: 5,
               ...(service_name && { services: service_name }),
+              ...(environment && { deployment_envs: environment }),
               exclude_spam_patterns: getSpamPatternsParam(),
             }),
             queryTinybird("get_service_usage", {
@@ -187,6 +190,9 @@ export function registerSystemHealthTool(server: McpToolRegistrar) {
         }
         if (worstService && worstErrorRate > 1) {
           nextSteps.push(`\`diagnose_service service_name="${worstService}"\` — investigate highest error rate service`)
+        }
+        if (avgP95 > 500) {
+          nextSteps.push('`query_data source="traces" kind="timeseries" metric="p95_duration"` — chart latency trend')
         }
         nextSteps.push('`compare_periods` — check for regressions vs previous period')
         lines.push(formatNextSteps(nextSteps))

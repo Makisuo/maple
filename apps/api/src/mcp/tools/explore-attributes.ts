@@ -13,10 +13,10 @@ import { formatNextSteps } from "../lib/next-steps"
 export function registerExploreAttributesTool(server: McpToolRegistrar) {
   server.tool(
     "explore_attributes",
-    "Discover available attribute keys and values for filtering traces and metrics. Use before chart_traces or chart_metrics when you need to filter by custom attributes.",
+    "Discover available attribute keys and values for traces and metrics. Also discover available environments and commit SHAs (source=services). Use before query_data when you need to filter by custom attributes.",
     Schema.Struct({
-      source: Schema.Literals(["traces", "metrics"]).annotate({
-        description: "Data source: traces or metrics",
+      source: Schema.Literals(["traces", "metrics", "services"]).annotate({
+        description: "Data source: traces, metrics, or services (for environments/commit SHAs)",
       }),
       scope: optionalStringParam("Attribute scope for traces: span or resource (default: span). Ignored for metrics"),
       key: optionalStringParam("When provided, returns values for this key instead of listing all keys"),
@@ -63,7 +63,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
             }
 
             const nextSteps = [
-              `\`chart_traces kind="timeseries" attribute_key="${params.key}" attribute_value="<value>"\` — chart traces filtered by this attribute`,
+              `\`query_data source="traces" kind="timeseries" attribute_key="${params.key}" attribute_value="<value>"\` — chart traces filtered by this attribute`,
             ]
             lines.push(formatNextSteps(nextSteps))
 
@@ -135,13 +135,82 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
           }
         }
 
+        // Services source — discover environments and commit SHAs
+        if (params.source === "services") {
+          const result = yield* queryTinybird("services_facets", {
+            start_time: st,
+            end_time: et,
+          })
+
+          const environments = result.data.filter((r: any) => r.facetType === "environment")
+          const commitShas = result.data.filter((r: any) => r.facetType === "commit_sha")
+
+          const lines: string[] = [
+            `## Available Environments & Deployments`,
+            `Time range: ${st} — ${et}`,
+            ``,
+          ]
+
+          if (environments.length > 0) {
+            lines.push(`### Environments`)
+            const headers = ["Environment", "Span Count"]
+            const rows = environments.map((r: any) => [
+              String(r.name),
+              formatNumber(r.count ?? 0),
+            ])
+            lines.push(formatTable(headers, rows))
+          } else {
+            lines.push("No environments found.")
+          }
+
+          if (commitShas.length > 0) {
+            lines.push(``, `### Commit SHAs`)
+            const headers = ["Commit SHA", "Span Count"]
+            const rows = commitShas.map((r: any) => [
+              String(r.name),
+              formatNumber(r.count ?? 0),
+            ])
+            lines.push(formatTable(headers, rows))
+          }
+
+          const nextSteps: string[] = []
+          if (environments.length > 0) {
+            const topEnv = String(environments[0].name)
+            nextSteps.push(`\`system_health environment="${topEnv}"\` — see health for this environment`)
+          }
+          if (commitShas.length > 1) {
+            nextSteps.push('`compare_periods` — compare performance between deploys')
+          }
+          lines.push(formatNextSteps(nextSteps))
+
+          return {
+            content: createDualContent(lines.join("\n"), {
+              tool: "explore_attributes" as any,
+              data: {
+                source: "services",
+                timeRange: { start: st, end: et },
+                keys: [
+                  ...environments.map((r: any) => ({
+                    key: `environment:${String(r.name)}`,
+                    count: Number(r.count ?? 0),
+                  })),
+                  ...commitShas.map((r: any) => ({
+                    key: `commit_sha:${String(r.name)}`,
+                    count: Number(r.count ?? 0),
+                  })),
+                ],
+              },
+            }),
+          }
+        }
+
         // Metrics source
         if (params.key) {
           // Metrics don't have a values endpoint — return helpful message
           return {
             content: [{
               type: "text" as const,
-              text: "Metric attribute value exploration is not yet supported. Use `chart_metrics` with `attribute_key` and `attribute_value` directly.",
+              text: "Metric attribute value exploration is not yet supported. Use `query_data source=\"metrics\"` with `attribute_key` and `attribute_value` directly.",
             }],
           }
         }
@@ -172,7 +241,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
 
         const nextSteps = result.data.slice(0, 3).map((r: any) => {
           const key = String(r.attributeKey ?? "")
-          return `\`chart_metrics kind="timeseries" metric_name="<name>" metric_type="<type>" attribute_key="${key}"\` — group by this attribute`
+          return `\`query_data source="metrics" kind="timeseries" metric_name="<name>" metric_type="<type>" attribute_key="${key}"\` — group by this attribute`
         })
         lines.push(formatNextSteps(nextSteps))
 

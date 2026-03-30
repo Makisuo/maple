@@ -178,7 +178,15 @@ export interface ListMetricsData {
   metrics: MetricRow[]
 }
 
-export interface ChartTracesData {
+export interface QueryDataResult {
+  kind: "timeseries"
+  data: Array<{ bucket: string; series: Record<string, number> }>
+} | {
+  kind: "breakdown"
+  data: Array<{ name: string; value: number }>
+}
+
+export interface QueryDataData {
   timeRange: { start: string; end: string }
   kind: string
   metric: string
@@ -188,24 +196,19 @@ export interface ChartTracesData {
     | { kind: "breakdown"; data: Array<{ name: string; value: number }> }
 }
 
-export interface ChartLogsData {
-  timeRange: { start: string; end: string }
-  kind: string
-  metric: string
-  groupBy?: string
-  result:
-    | { kind: "timeseries"; data: Array<{ bucket: string; series: Record<string, number> }> }
-    | { kind: "breakdown"; data: Array<{ name: string; value: number }> }
+export interface ServiceMapEdge {
+  sourceService: string
+  targetService: string
+  callCount: number
+  errorCount: number
+  avgDurationMs: number
+  p95DurationMs: number
 }
 
-export interface ChartMetricsData {
+export interface ServiceMapData {
   timeRange: { start: string; end: string }
-  kind: string
-  metric: string
-  groupBy?: string
-  result:
-    | { kind: "timeseries"; data: Array<{ bucket: string; series: Record<string, number> }> }
-    | { kind: "breakdown"; data: Array<{ name: string; value: number }> }
+  edges: ServiceMapEdge[]
+  serviceCount: number
 }
 
 // ---------------------------------------------------------------------------
@@ -330,9 +333,8 @@ export type StructuredToolOutput =
   | { tool: "search_logs"; data: SearchLogsData }
   | { tool: "diagnose_service"; data: DiagnoseServiceData }
   | { tool: "list_metrics"; data: ListMetricsData }
-  | { tool: "chart_traces"; data: ChartTracesData }
-  | { tool: "chart_logs"; data: ChartLogsData }
-  | { tool: "chart_metrics"; data: ChartMetricsData }
+  | { tool: "query_data"; data: QueryDataData }
+  | { tool: "service_map"; data: ServiceMapData }
   | { tool: "list_alert_rules"; data: ListAlertRulesData }
   | { tool: "list_alert_incidents"; data: ListAlertIncidentsData }
   | { tool: "create_alert_rule"; data: CreateAlertRuleData }

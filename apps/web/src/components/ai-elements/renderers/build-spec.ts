@@ -198,12 +198,10 @@ export function buildSpec(output: StructuredToolOutput): Spec {
       return { root, elements }
     }
 
-    case "chart_traces":
-    case "chart_logs":
-    case "chart_metrics": {
+    case "query_data": {
       const d = output.data
       const result = d.result
-      const sourceLabel = output.tool.replace("chart_", "")
+      const sourceLabel = d.kind
 
       if (result.kind === "timeseries") {
         const allKeys = new Set<string>()
@@ -232,6 +230,25 @@ export function buildSpec(output: StructuredToolOutput): Spec {
         headers,
         rows,
         title: `${d.metric} (${sourceLabel})`,
+      })
+      return { root, elements }
+    }
+
+    case "service_map": {
+      const d = output.data
+      const headers = ["Source", "Target", "Calls", "Errors", "Avg Duration", "P95 Duration"]
+      const rows = d.edges.map((e) => [
+        e.sourceService,
+        e.targetService,
+        String(e.callCount),
+        String(e.errorCount),
+        `${e.avgDurationMs.toFixed(1)}ms`,
+        `${e.p95DurationMs.toFixed(1)}ms`,
+      ])
+      const root = addElement(elements, "DataTable", {
+        headers,
+        rows,
+        title: `Service Map (${d.serviceCount} services, ${d.edges.length} edges)`,
       })
       return { root, elements }
     }

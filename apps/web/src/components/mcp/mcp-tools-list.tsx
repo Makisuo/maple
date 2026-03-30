@@ -10,7 +10,7 @@ const MCP_TOOLS = [
   {
     name: "system_health",
     description:
-      "Get system health: error rate, latency, top errors, and per-service breakdown. Pass service_name to scope to one service.",
+      "Get system health snapshot: error rate, latency percentiles (P50/P95), top errors, per-service breakdown, and data volume. Best starting point for any investigation.",
   },
   {
     name: "diagnose_service",
@@ -30,7 +30,7 @@ const MCP_TOOLS = [
   {
     name: "search_traces",
     description:
-      "Search and filter traces by service, duration, error status, HTTP method, and more.",
+      "Search traces by service, duration, error status, HTTP method, span name, or custom attributes (e.g. user.id).",
   },
   {
     name: "find_slow_traces",
@@ -53,29 +53,24 @@ const MCP_TOOLS = [
       "Discover available metrics with type, service, description, and data point counts.",
   },
   {
-    name: "chart_traces",
+    name: "query_data",
     description:
-      "Generate timeseries or breakdown charts from trace data. Metrics: count, avg_duration, p50_duration, p95_duration, p99_duration, error_rate. Group by: service, span_name, status_code, http_method, attribute, or none.",
+      "Query timeseries or breakdown data from traces, logs, or metrics. Supports attribute filtering, environment/commit comparison, and apdex.",
   },
   {
-    name: "chart_logs",
+    name: "service_map",
     description:
-      "Generate timeseries or breakdown charts from log data. Metric is always count. Group by: service, severity, or none.",
-  },
-  {
-    name: "chart_metrics",
-    description:
-      "Generate timeseries or breakdown charts from custom metrics. Requires metric_name and metric_type. Aggregations: avg, sum, min, max, count. Group by: service, attribute, or none.",
+      "Show service-to-service dependencies with call counts, error rates, and latency per edge.",
   },
   {
     name: "compare_periods",
     description:
-      "Compare system health between two time periods to detect regressions. Defaults to comparing the last hour against the previous hour.",
+      "Compare system health between two time periods to detect regressions. Flags error_rate_up, latency_up, throughput_drop automatically.",
   },
   {
     name: "explore_attributes",
     description:
-      "Discover available attribute keys and values for filtering traces and metrics.",
+      "Discover attribute keys/values for traces and metrics. Also discover environments and commit SHAs (source=services).",
   },
   {
     name: "list_alert_rules",

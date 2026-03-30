@@ -21,9 +21,10 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
       severity: optionalStringParam("Filter by severity (e.g. ERROR, WARN, INFO)"),
       search: optionalStringParam("Search text in log body"),
       trace_id: optionalStringParam("Filter by trace ID"),
+      span_id: optionalStringParam("Filter by span ID (scope to a specific span within a trace)"),
       limit: optionalNumberParam("Max results (default 30)"),
     }),
-    ({ start_time, end_time, service, severity, search, trace_id, limit }) =>
+    ({ start_time, end_time, service, severity, search, trace_id, span_id, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 30
@@ -37,6 +38,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
               severity,
               search,
               trace_id,
+              ...(span_id && { span_id }),
               limit: lim,
             }),
             queryTinybird("logs_count", {
@@ -46,6 +48,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
               severity,
               search,
               trace_id,
+              ...(span_id && { span_id }),
             }),
           ],
           { concurrency: "unbounded" },

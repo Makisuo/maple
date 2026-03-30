@@ -9,9 +9,8 @@ import { registerDiagnoseServiceTool } from "./tools/diagnose-service"
 import { registerFindSlowTracesTool } from "./tools/find-slow-traces"
 import { registerErrorDetailTool } from "./tools/error-detail"
 import { registerListMetricsTool } from "./tools/list-metrics"
-import { registerChartTracesTool } from "./tools/chart-traces"
-import { registerChartLogsTool } from "./tools/chart-logs"
-import { registerChartMetricsTool } from "./tools/chart-metrics"
+import { registerQueryDataTool } from "./tools/query-data"
+import { registerServiceMapTool } from "./tools/service-map"
 import { registerListAlertRulesTool } from "./tools/list-alert-rules"
 import { registerListAlertIncidentsTool } from "./tools/list-alert-incidents"
 import { registerCreateAlertRuleTool } from "./tools/create-alert-rule"
@@ -80,9 +79,8 @@ const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
   registerFindSlowTracesTool(registrar)
   registerErrorDetailTool(registrar)
   registerListMetricsTool(registrar)
-  registerChartTracesTool(registrar)
-  registerChartLogsTool(registrar)
-  registerChartMetricsTool(registrar)
+  registerQueryDataTool(registrar)
+  registerServiceMapTool(registrar)
 
   // Alert management
   registerListAlertRulesTool(registrar)

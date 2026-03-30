@@ -13,39 +13,51 @@ import { formatNextSteps } from "../lib/next-steps"
 export function registerComparePeriodsTool(server: McpToolRegistrar) {
   server.tool(
     "compare_periods",
-    "Compare system health between two time periods to detect regressions. Defaults to comparing the last hour against the previous hour. Useful after deploys or incident reports.",
+    "Compare system health between two time periods to detect regressions. Flags regressions automatically: error_rate_up, latency_up, throughput_drop. Useful after deploys or incident reports. Use around_time to auto-generate a 30min before/after comparison.",
     Schema.Struct({
       current_start: optionalStringParam("Start of current period (YYYY-MM-DD HH:mm:ss). Defaults to 1 hour ago"),
       current_end: optionalStringParam("End of current period (YYYY-MM-DD HH:mm:ss). Defaults to now"),
       previous_start: optionalStringParam("Start of previous period. Defaults to 1 hour before current_start"),
       previous_end: optionalStringParam("End of previous period. Defaults to current_start"),
+      around_time: optionalStringParam("Auto-generate 30min before/after comparison around this time (YYYY-MM-DD HH:mm:ss). Overrides current_start/end and previous_start/end"),
       service_name: optionalStringParam("Scope comparison to a specific service"),
+      environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
     }),
-    ({ current_start, current_end, previous_start, previous_end, service_name }) =>
+    ({ current_start, current_end, previous_start, previous_end, around_time, service_name, environment }) =>
       Effect.gen(function* () {
-        // Resolve current period
-        const current = resolveTimeRange(current_start, current_end, 1)
+        let curSt: string, curEt: string, prevSt: string, prevEt: string
 
-        // Resolve previous period: default to same duration before current
-        // Calculate duration of current period for previous period default
-        const currentStartDate = new Date(current.st.replace(" ", "T") + "Z")
-        const currentEndDate = new Date(current.et.replace(" ", "T") + "Z")
-        const durationMs = currentEndDate.getTime() - currentStartDate.getTime()
+        if (around_time) {
+          // Auto-generate 30min before/after comparison
+          const center = new Date(around_time.replace(" ", "T") + "Z")
+          const halfWindow = 30 * 60 * 1000 // 30 minutes
+          prevSt = new Date(center.getTime() - halfWindow).toISOString().replace("T", " ").slice(0, 19)
+          prevEt = around_time
+          curSt = around_time
+          curEt = new Date(center.getTime() + halfWindow).toISOString().replace("T", " ").slice(0, 19)
+        } else {
+          // Resolve current period
+          const current = resolveTimeRange(current_start, current_end, 1)
+          curSt = current.st
+          curEt = current.et
 
-        const prevEndDefault = current.st
-        const prevStartDefault = new Date(currentStartDate.getTime() - durationMs)
-          .toISOString().replace("T", " ").slice(0, 19)
+          // Resolve previous period: default to same duration before current
+          const currentStartDate = new Date(current.st.replace(" ", "T") + "Z")
+          const currentEndDate = new Date(current.et.replace(" ", "T") + "Z")
+          const durationMs = currentEndDate.getTime() - currentStartDate.getTime()
 
-        const prevSt = previous_start ?? prevStartDefault
-        const prevEt = previous_end ?? prevEndDefault
+          prevEt = previous_end ?? current.st
+          prevSt = previous_start ?? new Date(currentStartDate.getTime() - durationMs)
+            .toISOString().replace("T", " ").slice(0, 19)
+        }
 
         // Query both periods in parallel
         const [currentSummary, previousSummary, currentServices, previousServices] =
           yield* Effect.all(
             [
               queryTinybird("errors_summary", {
-                start_time: current.st,
-                end_time: current.et,
+                start_time: curSt,
+                end_time: curEt,
                 exclude_spam_patterns: getSpamPatternsParam(),
               }),
               queryTinybird("errors_summary", {
@@ -54,12 +66,14 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
                 exclude_spam_patterns: getSpamPatternsParam(),
               }),
               queryTinybird("service_overview", {
-                start_time: current.st,
-                end_time: current.et,
+                start_time: curSt,
+                end_time: curEt,
+                ...(environment && { environments: environment }),
               }),
               queryTinybird("service_overview", {
                 start_time: prevSt,
                 end_time: prevEt,
+                ...(environment && { environments: environment }),
               }),
             ],
             { concurrency: "unbounded" },
@@ -113,7 +127,7 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 
         const lines: string[] = [
           `## Period Comparison`,
-          `Current: ${current.st} — ${current.et}`,
+          `Current: ${curSt} — ${curEt}`,
           `Previous: ${prevSt} — ${prevEt}`,
           ``,
         ]
@@ -194,7 +208,7 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
           content: createDualContent(lines.join("\n"), {
             tool: "compare_periods" as any,
             data: {
-              currentPeriod: { start: current.st, end: current.et },
+              currentPeriod: { start: curSt, end: curEt },
               previousPeriod: { start: prevSt, end: prevEt },
               overall: {
                 current: { totalSpans: curSpans, totalErrors: curErrors, errorRate: curErrorRate },
