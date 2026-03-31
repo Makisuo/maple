@@ -9,7 +9,8 @@
     "./tinybird-project-sync": "./src/tinybird/project-sync.ts",
     "./tinybird-pipes": "./src/tinybird-pipes.ts",
     "./tinybird": "./src/tinybird/index.ts",
-    "./where-clause": "./src/where-clause.ts"
+    "./where-clause": "./src/where-clause.ts",
+    "./http/observability": "./src/http/observability.ts"
   },
   "scripts": {
     "test": "bun test",

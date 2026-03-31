@@ -1,14 +1,18 @@
 import {
   optionalNumberParam,
   optionalStringParam,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
+import { resolveTenant } from "../lib/query-tinybird"
 import { queryTinybird } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatNumber, formatTable } from "../lib/format"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { formatNextSteps } from "../lib/next-steps"
+import { exploreAttributeKeys, exploreAttributeValues } from "@maple/query-engine/observability"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerExploreAttributesTool(server: McpToolRegistrar) {
   server.tool(
@@ -22,7 +26,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
           "Use 'metrics' to discover metric attribute keys. " +
           "Use 'services' to discover available environments and commit SHAs.",
       }),
-      scope: optionalStringParam("Attribute scope for traces: 'span' (default) for span-level attributes, 'resource' for service/deployment attributes. Ignored for metrics/services."),
+      scope: optionalStringParam("Attribute scope for traces: 'span' (default) or 'resource'. Ignored for metrics/services."),
       key: optionalStringParam("When provided, returns values for this key instead of listing all keys"),
       service_name: optionalStringParam("Filter by service name"),
       start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss)"),
@@ -33,158 +37,72 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(params.start_time, params.end_time)
         const lim = params.limit ?? 50
-        const scope = params.scope ?? "span"
+        const scope = (params.scope ?? "span") as "span" | "resource"
+        const tenant = yield* resolveTenant
+        const executorLayer = makeTinybirdExecutorFromTenant(tenant)
+        const mapError = (e: any) => new McpQueryError({ message: e.message, pipe: "explore_attributes" })
 
-        if (params.source === "traces") {
-          if (params.key) {
-            // Return values for a specific key
-            const pipeName = scope === "resource"
-              ? "resource_attribute_values" as const
-              : "span_attribute_values" as const
-            const result = yield* queryTinybird(pipeName, {
-              start_time: st,
-              end_time: et,
-              attribute_key: params.key,
-              limit: lim,
-            })
+        const baseInput = {
+          source: params.source as "traces" | "metrics" | "services",
+          scope,
+          service: params.service_name ?? undefined,
+          timeRange: { startTime: st, endTime: et },
+          limit: lim,
+        }
 
-            const lines: string[] = [
-              `## Attribute Values: ${params.key}`,
-              `Source: traces (${scope})`,
-              `Time range: ${st} — ${et}`,
-              ``,
-            ]
-
-            if (result.data.length === 0) {
-              lines.push("No values found for this key.")
-            } else {
-              const headers = ["Value", "Count"]
-              const rows = result.data.map((r: any) => [
-                String(r.attributeValue ?? ""),
-                formatNumber(r.usageCount ?? 0),
-              ])
-              lines.push(formatTable(headers, rows))
-            }
-
-            const nextSteps = [
-              `\`query_data source="traces" kind="timeseries" attribute_key="${params.key}" attribute_value="<value>"\` — chart traces filtered by this attribute`,
-            ]
-            lines.push(formatNextSteps(nextSteps))
-
-            return {
-              content: createDualContent(lines.join("\n"), {
-                tool: "explore_attributes" as any,
-                data: {
-                  source: "traces",
-                  scope,
-                  key: params.key,
-                  timeRange: { start: st, end: et },
-                  values: result.data.map((r: any) => ({
-                    value: String(r.attributeValue ?? ""),
-                    count: Number(r.usageCount ?? 0),
-                  })),
-                },
-              }),
-            }
-          }
-
-          // List keys
-          const pipeName = scope === "resource"
-            ? "resource_attribute_keys" as const
-            : "span_attribute_keys" as const
-          const result = yield* queryTinybird(pipeName, {
-            start_time: st,
-            end_time: et,
-            limit: lim,
-          })
+        if (params.key) {
+          // Return values for a specific key
+          const values = yield* exploreAttributeValues({ ...baseInput, key: params.key }).pipe(
+            Effect.provide(executorLayer),
+            Effect.mapError(mapError),
+          )
 
           const lines: string[] = [
-            `## Attribute Keys`,
-            `Source: traces (${scope})`,
+            `## Attribute Values: ${params.key}`,
+            `Source: ${params.source} (${scope})`,
             `Time range: ${st} — ${et}`,
             ``,
           ]
 
-          if (result.data.length === 0) {
-            lines.push("No attribute keys found.")
+          if (values.length === 0) {
+            lines.push("No values found for this key.")
           } else {
-            const headers = ["Key", "Count"]
-            const rows = result.data.map((r: any) => [
-              String(r.attributeKey ?? ""),
-              formatNumber(r.usageCount ?? 0),
-            ])
-            lines.push(formatTable(headers, rows))
+            lines.push(formatTable(["Value", "Count"], values.map((v) => [v.value, formatNumber(v.count)])))
           }
 
-          const sampleKeys = result.data.slice(0, 3)
-          const nextSteps = sampleKeys.map((r: any) => {
-            const key = String(r.attributeKey ?? "")
-            return `\`explore_attributes source="traces" key="${key}"\` — see values for this key`
-          })
-          lines.push(formatNextSteps(nextSteps))
+          lines.push(formatNextSteps([
+            `\`query_data source="traces" kind="timeseries" attribute_key="${params.key}" attribute_value="<value>"\` — chart traces filtered by this attribute`,
+          ]))
 
           return {
             content: createDualContent(lines.join("\n"), {
               tool: "explore_attributes" as any,
-              data: {
-                source: "traces",
-                scope,
-                timeRange: { start: st, end: et },
-                keys: result.data.map((r: any) => ({
-                  key: String(r.attributeKey ?? ""),
-                  count: Number(r.usageCount ?? 0),
-                })),
-              },
+              data: { source: params.source, scope, key: params.key, timeRange: { start: st, end: et }, values: [...values] },
             }),
           }
         }
 
-        // Services source — discover environments and commit SHAs
+        // Services source uses different pipe - delegate to queryTinybird directly
         if (params.source === "services") {
-          const result = yield* queryTinybird("services_facets", {
-            start_time: st,
-            end_time: et,
-          })
+          const result = yield* queryTinybird("services_facets", { start_time: st, end_time: et })
 
           const environments = result.data.filter((r: any) => r.facetType === "environment")
           const commitShas = result.data.filter((r: any) => r.facetType === "commit_sha")
 
-          const lines: string[] = [
-            `## Available Environments & Deployments`,
-            `Time range: ${st} — ${et}`,
-            ``,
-          ]
+          const lines: string[] = [`## Available Environments & Deployments`, `Time range: ${st} — ${et}`, ``]
 
           if (environments.length > 0) {
             lines.push(`### Environments`)
-            const headers = ["Environment", "Span Count"]
-            const rows = environments.map((r: any) => [
-              String(r.name),
-              formatNumber(r.count ?? 0),
-            ])
-            lines.push(formatTable(headers, rows))
-          } else {
-            lines.push("No environments found.")
+            lines.push(formatTable(["Environment", "Span Count"], environments.map((r: any) => [String(r.name), formatNumber(r.count ?? 0)])))
           }
-
           if (commitShas.length > 0) {
             lines.push(``, `### Commit SHAs`)
-            const headers = ["Commit SHA", "Span Count"]
-            const rows = commitShas.map((r: any) => [
-              String(r.name),
-              formatNumber(r.count ?? 0),
-            ])
-            lines.push(formatTable(headers, rows))
+            lines.push(formatTable(["Commit SHA", "Span Count"], commitShas.map((r: any) => [String(r.name), formatNumber(r.count ?? 0)])))
           }
 
           const nextSteps: string[] = []
-          if (environments.length > 0) {
-            const topEnv = String(environments[0].name)
-            nextSteps.push(`\`list_services environment="${topEnv}"\` — see services in this environment`)
-          }
-          if (commitShas.length > 1) {
-            nextSteps.push('`compare_periods` — compare performance between deploys')
-          }
+          if (environments.length > 0) nextSteps.push(`\`list_services environment="${String(environments[0].name)}"\` — see services in this environment`)
+          if (commitShas.length > 1) nextSteps.push('`compare_periods` — compare performance between deploys')
           lines.push(formatNextSteps(nextSteps))
 
           return {
@@ -194,72 +112,42 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
                 source: "services",
                 timeRange: { start: st, end: et },
                 keys: [
-                  ...environments.map((r: any) => ({
-                    key: `environment:${String(r.name)}`,
-                    count: Number(r.count ?? 0),
-                  })),
-                  ...commitShas.map((r: any) => ({
-                    key: `commit_sha:${String(r.name)}`,
-                    count: Number(r.count ?? 0),
-                  })),
+                  ...environments.map((r: any) => ({ key: `environment:${String(r.name)}`, count: Number(r.count ?? 0) })),
+                  ...commitShas.map((r: any) => ({ key: `commit_sha:${String(r.name)}`, count: Number(r.count ?? 0) })),
                 ],
               },
             }),
           }
         }
 
-        // Metrics source
-        if (params.key) {
-          // Metrics don't have a values endpoint — return helpful message
-          return {
-            content: [{
-              type: "text" as const,
-              text: "Metric attribute value exploration is not yet supported. Use `query_data source=\"metrics\"` with `attribute_key` and `attribute_value` directly.",
-            }],
-          }
-        }
-
-        const result = yield* queryTinybird("metric_attribute_keys", {
-          start_time: st,
-          end_time: et,
-          ...(params.service_name && { metric_name: params.service_name }),
-          limit: lim,
-        })
+        // List keys for traces or metrics
+        const keys = yield* exploreAttributeKeys(baseInput).pipe(
+          Effect.provide(executorLayer),
+          Effect.mapError(mapError),
+        )
 
         const lines: string[] = [
-          `## Metric Attribute Keys`,
+          `## Attribute Keys`,
+          `Source: ${params.source} (${scope})`,
           `Time range: ${st} — ${et}`,
           ``,
         ]
 
-        if (result.data.length === 0) {
-          lines.push("No metric attribute keys found.")
+        if (keys.length === 0) {
+          lines.push("No attribute keys found.")
         } else {
-          const headers = ["Key", "Count"]
-          const rows = result.data.map((r: any) => [
-            String(r.attributeKey ?? ""),
-            formatNumber(r.usageCount ?? 0),
-          ])
-          lines.push(formatTable(headers, rows))
+          lines.push(formatTable(["Key", "Count"], keys.map((k) => [k.key, formatNumber(k.count)])))
         }
 
-        const nextSteps = result.data.slice(0, 3).map((r: any) => {
-          const key = String(r.attributeKey ?? "")
-          return `\`query_data source="metrics" kind="timeseries" metric_name="<name>" metric_type="<type>" attribute_key="${key}"\` — group by this attribute`
-        })
+        const nextSteps = keys.slice(0, 3).map((k) =>
+          `\`explore_attributes source="${params.source}" key="${k.key}"\` — see values for this key`
+        )
         lines.push(formatNextSteps(nextSteps))
 
         return {
           content: createDualContent(lines.join("\n"), {
             tool: "explore_attributes" as any,
-            data: {
-              source: "metrics",
-              timeRange: { start: st, end: et },
-              keys: result.data.map((r: any) => ({
-                key: String(r.attributeKey ?? ""),
-                count: Number(r.usageCount ?? 0),
-              })),
-            },
+            data: { source: params.source, scope, timeRange: { start: st, end: et }, keys: [...keys] },
           }),
         }
       }),

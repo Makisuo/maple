@@ -2,6 +2,7 @@ import {
   optionalNumberParam,
   optionalStringParam,
   requiredStringParam,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
@@ -10,11 +11,10 @@ import { formatTable } from "../lib/format"
 import { formatMetricValue } from "../lib/format-query-result"
 import { formatNextSteps } from "../lib/next-steps"
 import { createDualContent } from "../lib/structured-output"
-import { Cause, Effect, Exit, Option, Schema } from "effect"
-import { QueryEngineService } from "@/services/QueryEngineService"
-import { QuerySpec, type QuerySpec as QuerySpecType } from "@maple/query-engine"
-
-const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
+import { Effect, Schema } from "effect"
+import { topOperations } from "@maple/query-engine/observability"
+import type { TracesMetric } from "@maple/query-engine"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
   server.tool(
@@ -32,53 +32,19 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
     ({ service_name, metric, start_time, end_time, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
-
-        const resolvedMetric = metric ?? "count"
+        const resolvedMetric = (metric ?? "count") as TracesMetric
         const resolvedLimit = limit ?? 20
-
-        let decodedQuery: QuerySpecType
-        try {
-          decodedQuery = decodeQuerySpecSync({
-            kind: "breakdown",
-            source: "traces",
-            metric: resolvedMetric,
-            groupBy: "span_name",
-            filters: { serviceName: service_name },
-            limit: resolvedLimit,
-          })
-        } catch (error) {
-          return {
-            isError: true,
-            content: [{ type: "text" as const, text: `Invalid query specification:\n${String(error)}` }],
-          }
-        }
-
         const tenant = yield* resolveTenant
-        const queryEngine = yield* QueryEngineService
-        const exit = yield* queryEngine.execute(tenant, {
-          startTime: st,
-          endTime: et,
-          query: decodedQuery,
-        }).pipe(Effect.exit)
 
-        if (Exit.isFailure(exit)) {
-          const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-          if (failure && typeof failure === "object" && "_tag" in failure) {
-            const tagged = failure as { _tag: string; message: string; details?: string[] }
-            const details = tagged.details ? `\n${tagged.details.join("\n")}` : ""
-            return {
-              isError: true,
-              content: [{ type: "text" as const, text: `${tagged._tag}: ${tagged.message}${details}` }],
-            }
-          }
-
-          return {
-            isError: true,
-            content: [{ type: "text" as const, text: Cause.pretty(exit.cause) }],
-          }
-        }
-
-        const result = exit.value.result
+        const operations = yield* topOperations({
+          serviceName: service_name,
+          metric: resolvedMetric,
+          timeRange: { startTime: st, endTime: et },
+          limit: resolvedLimit,
+        }).pipe(
+          Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
+          Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "top_operations" })),
+        )
 
         const lines: string[] = [
           `## Top Operations: ${service_name}`,
@@ -87,52 +53,30 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
           ``,
         ]
 
-        if (result.kind !== "breakdown" || result.data.length === 0) {
+        if (operations.length === 0) {
           lines.push("No operations found for this service in the given time range.")
           lines.push(formatNextSteps([
             `\`search_traces service_name="${service_name}"\` — search for traces from this service`,
             `\`list_services\` — verify the service name`,
           ]))
-
           return {
             content: createDualContent(lines.join("\n"), {
               tool: "get_service_top_operations",
-              data: {
-                timeRange: { start: st, end: et },
-                serviceName: service_name,
-                metric: resolvedMetric,
-                total: 0,
-                operations: [],
-              },
+              data: { timeRange: { start: st, end: et }, serviceName: service_name, metric: resolvedMetric, total: 0, operations: [] },
             }),
           }
         }
 
-        const headers = ["Operation", resolvedMetric]
-        const rows = result.data.map((item) => [
-          item.name,
-          formatMetricValue(resolvedMetric, item.value),
-        ])
+        lines.push(formatTable(
+          ["Operation", resolvedMetric],
+          operations.map((op) => [op.name, formatMetricValue(resolvedMetric, op.value)]),
+        ))
 
-        lines.push(formatTable(headers, rows))
-
-        // Next steps: suggest search_traces for top operations
-        const nextSteps: string[] = []
-        const top3 = result.data.slice(0, 3)
-        for (const op of top3) {
-          nextSteps.push(
-            `\`search_traces service_name="${service_name}" span_name="${op.name}"\` — find traces for ${op.name}`,
-          )
-        }
-        nextSteps.push(
-          `\`query_data source="traces" kind="timeseries" metric="${resolvedMetric}" service_name="${service_name}"\` — chart trend over time`,
+        const nextSteps = operations.slice(0, 3).map((op) =>
+          `\`search_traces service_name="${service_name}" span_name="${op.name}"\` — find traces for ${op.name}`
         )
+        nextSteps.push(`\`query_data source="traces" kind="timeseries" metric="${resolvedMetric}" service_name="${service_name}"\` — chart trend over time`)
         lines.push(formatNextSteps(nextSteps))
-
-        const operationsArray = result.data.map((item) => ({
-          name: item.name,
-          value: item.value,
-        }))
 
         return {
           content: createDualContent(lines.join("\n"), {
@@ -141,8 +85,8 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
               timeRange: { start: st, end: et },
               serviceName: service_name,
               metric: resolvedMetric,
-              total: result.data.length,
-              operations: operationsArray,
+              total: operations.length,
+              operations: [...operations],
             },
           }),
         }

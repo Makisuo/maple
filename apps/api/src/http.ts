@@ -7,6 +7,7 @@ import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http";
 import { HttpCloudflareLogpushLive } from "./routes/cloudflare-logpush.http";
 import { HttpDashboardsLive } from "./routes/dashboards.http";
 import { HttpIngestKeysLive } from "./routes/ingest-keys.http";
+import { HttpObservabilityLive } from "./routes/observability.http";
 import { HttpOrgTinybirdSettingsLive } from "./routes/org-tinybird-settings.http";
 import { HttpQueryEngineLive } from "./routes/query-engine.http";
 import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http";
@@ -21,6 +22,7 @@ export const HttpApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
   Layer.provide(HttpCloudflareLogpushLive),
   Layer.provide(HttpDashboardsLive),
   Layer.provide(HttpIngestKeysLive),
+  Layer.provide(HttpObservabilityLive),
   Layer.provide(HttpOrgTinybirdSettingsLive),
   Layer.provide(HttpScrapeTargetsLive),
   Layer.provide(HttpServiceDiscoveryLive),
