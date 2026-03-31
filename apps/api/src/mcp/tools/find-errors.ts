@@ -44,11 +44,11 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
           ``,
         ]
 
-        const headers = ["Error Type", "Count", "Services", "Last Seen"]
+        const headers = ["Error Type", "Count", "Affected Services", "Last Seen"]
         const rows = result.data.map((e) => [
           e.errorType.length > 60 ? e.errorType.slice(0, 57) + "..." : e.errorType,
           formatNumber(e.count),
-          e.affectedServices.join(", "),
+          Array.isArray(e.affectedServices) ? e.affectedServices.join(", ") : String(e.affectedServicesCount ?? ""),
           String(e.lastSeen),
         ])
 
@@ -71,7 +71,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
               errors: result.data.map((e) => ({
                 errorType: e.errorType,
                 count: Number(e.count),
-                affectedServices: e.affectedServices,
+                affectedServicesCount: Number(e.affectedServicesCount ?? 0),
                 lastSeen: String(e.lastSeen),
               })),
             },
