@@ -117,6 +117,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
             ...(params.root_spans_only && { rootSpansOnly: params.root_spans_only }),
             ...(params.environments && { environments: splitCsv(params.environments) }),
             ...(params.commit_shas && { commitShas: splitCsv(params.commit_shas) }),
+            ...(params.group_by === "attribute" && params.attribute_key && { groupByAttributeKeys: [params.attribute_key] }),
             ...(attributeFilters.length > 0 && { attributeFilters }),
             ...(params.apdex_threshold_ms && { apdexThresholdMs: params.apdex_threshold_ms }),
           }
