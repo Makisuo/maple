@@ -1805,6 +1805,52 @@ export type ServicesFacetsParams = InferParams<typeof servicesFacets>;
 export type ServicesFacetsOutput = InferOutputRow<typeof servicesFacets>;
 
 /**
+ * Service releases timeline endpoint - get commit SHA activity bucketed over time
+ */
+export const serviceReleasesTimeline = defineEndpoint("service_releases_timeline", {
+  description: "Get commit SHA activity per time bucket for a service. Used to detect release boundaries on charts.",
+  params: {
+    org_id: p.string().describe("Organization ID"),
+    service_name: p.string().describe("Service name"),
+    start_time: p.dateTime().optional().describe("Start of time range"),
+    end_time: p.dateTime().optional().describe("End of time range"),
+    bucket_seconds: p.int32().optional(300).describe("Bucket interval in seconds"),
+  },
+  nodes: [
+    node({
+      name: "service_releases_timeline_node",
+      sql: `
+        SELECT
+          toStartOfInterval(Timestamp, INTERVAL {{Int32(bucket_seconds, 300)}} second) AS bucket,
+          CommitSha AS commitSha,
+          count() AS count
+        FROM service_overview_spans
+        WHERE OrgId = {{String(org_id)}}
+          AND ServiceName = {{String(service_name)}}
+          AND CommitSha != ''
+        {% if defined(start_time) %}
+          AND Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+        {% end %}
+        {% if defined(end_time) %}
+          AND Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+        {% end %}
+        GROUP BY bucket, commitSha
+        ORDER BY bucket ASC
+        LIMIT 1000
+      `,
+    }),
+  ],
+  output: {
+    bucket: t.dateTime(),
+    commitSha: t.string(),
+    count: t.uint64(),
+  },
+});
+
+export type ServiceReleasesTimelineParams = InferParams<typeof serviceReleasesTimeline>;
+export type ServiceReleasesTimelineOutput = InferOutputRow<typeof serviceReleasesTimeline>;
+
+/**
  * Errors by type endpoint - get aggregated error counts grouped by error type
  */
 export const errorsByType = defineEndpoint("errors_by_type", {

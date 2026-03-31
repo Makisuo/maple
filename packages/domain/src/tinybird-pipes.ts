@@ -12,6 +12,7 @@ export const tinybirdPipes = [
   "traces_duration_stats",
   "service_overview",
   "services_facets",
+  "service_releases_timeline",
   "errors_by_type",
   "error_detail_traces",
   "errors_facets",

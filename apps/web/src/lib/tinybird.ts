@@ -28,6 +28,7 @@ import type {
   MetricAttributeKeysOutput,
   ResourceAttributeKeysOutput,
   ResourceAttributeValuesOutput,
+  ServiceReleasesTimelineOutput,
   SpanAttributeKeysOutput,
   SpanAttributeValuesOutput,
   SpanHierarchyOutput,
@@ -82,6 +83,8 @@ export type {
   ResourceAttributeKeysOutput,
   ResourceAttributeValuesParams,
   ResourceAttributeValuesOutput,
+  ServiceReleasesTimelineParams,
+  ServiceReleasesTimelineOutput,
   MetricAttributeKeysParams,
   MetricAttributeKeysOutput,
   SpanAttributeKeysParams,
@@ -178,6 +181,8 @@ const query = {
     queryTinybird<ResourceAttributeKeysOutput>("resource_attribute_keys", params),
   resource_attribute_values: (params?: Record<string, unknown>) =>
     queryTinybird<ResourceAttributeValuesOutput>("resource_attribute_values", params),
+  service_releases_timeline: (params?: Record<string, unknown>) =>
+    queryTinybird<ServiceReleasesTimelineOutput>("service_releases_timeline", params),
 }
 
 export function createTinybird() {

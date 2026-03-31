@@ -317,6 +317,53 @@ const getServicesFacetsEffect = Effect.fn("Tinybird.getServicesFacets")(function
     }
 })
 
+// Service releases timeline
+export interface ServiceReleasesTimelinePoint {
+  bucket: string;
+  commitSha: string;
+  count: number;
+}
+
+export interface ServiceReleasesTimelineResponse {
+  data: ServiceReleasesTimelinePoint[];
+}
+
+export function getServiceReleasesTimeline({
+  data,
+}: {
+  data: GetServiceDetailInput
+}) {
+  return getServiceReleasesTimelineEffect({ data })
+}
+
+const getServiceReleasesTimelineEffect = Effect.fn("Tinybird.getServiceReleasesTimeline")(
+  function* ({
+    data,
+  }: {
+    data: GetServiceDetailInput
+  }) {
+    const input = yield* decodeInput(GetServiceDetailInput, data, "getServiceReleasesTimeline")
+    const tinybird = getTinybird()
+    const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+    const result = yield* runTinybirdQuery("service_releases_timeline", () =>
+      tinybird.query.service_releases_timeline({
+        service_name: input.serviceName,
+        start_time: input.startTime,
+        end_time: input.endTime,
+        bucket_seconds: bucketSeconds,
+      }),
+    )
+
+    return {
+      data: result.data.map((row) => ({
+        bucket: toIsoBucket(row.bucket),
+        commitSha: row.commitSha,
+        count: Number(row.count),
+      })),
+    }
+  },
+)
+
 // Service detail types
 export interface ServiceDetailTimeSeriesPoint {
   bucket: string;

@@ -20,6 +20,7 @@ import { getServiceMap } from "@/api/tinybird/service-map"
 import {
   getServiceApdexTimeSeries,
   getServiceOverview,
+  getServiceReleasesTimeline,
   getServicesFacets,
 } from "@/api/tinybird/services"
 import { getResourceAttributeKeys, getResourceAttributeValues, getSpanAttributeKeys, getSpanAttributeValues, getSpanHierarchy, getTracesFacets, listTraces } from "@/api/tinybird/traces"
@@ -179,6 +180,13 @@ export const getServiceApdexTimeSeriesResultAtom = makeQueryAtomFamily(
   getServiceApdexTimeSeries,
   {
     staleTime: 30_000,
+  },
+)
+
+export const getServiceReleasesTimelineResultAtom = makeQueryAtomFamily(
+  getServiceReleasesTimeline,
+  {
+    staleTime: 60_000,
   },
 )
 

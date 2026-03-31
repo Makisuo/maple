@@ -1,5 +1,5 @@
 import { useId, useMemo } from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { apdexTimeSeriesData } from "../_shared/sample-data"
@@ -21,7 +21,7 @@ const baseChartConfig = {
   apdexScore: { label: "Apdex", color: "var(--chart-apdex)" },
 } satisfies ChartConfig
 
-export function ApdexAreaChart({ data, className, legend, tooltip }: BaseChartProps) {
+export function ApdexAreaChart({ data, className, legend, tooltip, referenceLines }: BaseChartProps) {
   const id = useId()
   const gradientId = `apdexGradient-${id.replace(/:/g, "")}`
   const fadedGradientId = `apdexGradientFaded-${id.replace(/:/g, "")}`
@@ -52,6 +52,15 @@ export function ApdexAreaChart({ data, className, legend, tooltip }: BaseChartPr
           )}
         </defs>
         <CartesianGrid vertical={false} />
+        {referenceLines?.map((rl, i) => (
+          <ReferenceLine
+            key={`release-${i}`}
+            x={rl.x}
+            stroke={rl.color ?? "var(--muted-foreground)"}
+            strokeDasharray={rl.strokeDasharray ?? "6 4"}
+            strokeWidth={1}
+          />
+        ))}
         <XAxis
           dataKey="bucket"
           tickLine={false}
@@ -66,7 +75,16 @@ export function ApdexAreaChart({ data, className, legend, tooltip }: BaseChartPr
               <ChartTooltipContent
                 labelFormatter={(_, payload) => {
                   if (!payload?.[0]?.payload?.bucket) return ""
-                  return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
+                  const bucket = payload[0].payload.bucket as string
+                  const release = referenceLines?.find((rl) => rl.x === bucket)
+                  return (
+                    <span>
+                      {formatBucketLabel(bucket, axisContext, "tooltip")}
+                      {release?.label && (
+                        <span className="ml-2 text-muted-foreground">Deploy: {release.label}</span>
+                      )}
+                    </span>
+                  )
                 }}
                 formatter={(value, name, item) => {
                   const nameStr = String(name)

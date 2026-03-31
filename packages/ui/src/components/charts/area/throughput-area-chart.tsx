@@ -1,5 +1,5 @@
 import { useMemo, useId } from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { throughputTimeSeriesData } from "../_shared/sample-data"
@@ -17,7 +17,7 @@ import { inferBucketSeconds, inferRangeMs, formatBucketLabel, bucketIntervalLabe
 
 const VALUE_KEYS = ["throughput"]
 
-export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode }: BaseChartProps) {
+export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode, referenceLines }: BaseChartProps) {
   const id = useId()
   const gradientId = `throughputGradient-${id.replace(/:/g, "")}`
   const fadedGradientId = `throughputGradientFaded-${id.replace(/:/g, "")}`
@@ -121,6 +121,15 @@ export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode
           )}
         </defs>
         <CartesianGrid vertical={false} />
+        {referenceLines?.map((rl, i) => (
+          <ReferenceLine
+            key={`release-${i}`}
+            x={rl.x}
+            stroke={rl.color ?? "var(--muted-foreground)"}
+            strokeDasharray={rl.strokeDasharray ?? "6 4"}
+            strokeWidth={1}
+          />
+        ))}
         <XAxis
           dataKey="bucket"
           tickLine={false}
@@ -141,7 +150,16 @@ export function ThroughputAreaChart({ data, className, legend, tooltip, rateMode
               <ChartTooltipContent
                 labelFormatter={(_, payload) => {
                   if (!payload?.[0]?.payload?.bucket) return ""
-                  return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
+                  const bucket = payload[0].payload.bucket as string
+                  const release = referenceLines?.find((rl) => rl.x === bucket)
+                  return (
+                    <span>
+                      {formatBucketLabel(bucket, axisContext, "tooltip")}
+                      {release?.label && (
+                        <span className="ml-2 text-muted-foreground">Deploy: {release.label}</span>
+                      )}
+                    </span>
+                  )
                 }}
                 formatter={(value, name, item) => {
                   const nameStr = String(name)

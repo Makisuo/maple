@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { useMemo } from "react"
 import { Result } from "@/lib/effect-atom"
 import { Schema } from "effect"
 
@@ -8,12 +9,15 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
 import type {
   ChartLegendMode,
+  ChartReferenceLine,
   ChartTooltipMode,
 } from "@maple/ui/components/charts/_shared/chart-types"
 import {
   getCustomChartServiceDetailResultAtom,
   getServiceApdexTimeSeriesResultAtom,
+  getServiceReleasesTimelineResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
+import { detectReleaseMarkers } from "@/lib/services/release-markers"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -99,6 +103,28 @@ function ServiceDetailContent() {
     }),
   )
 
+  const releasesResult = useRetainedRefreshableResultValue(
+    getServiceReleasesTimelineResultAtom({
+      data: {
+        serviceName,
+        startTime: effectiveStartTime,
+        endTime: effectiveEndTime,
+      },
+    }),
+  )
+
+  const releaseMarkers: ChartReferenceLine[] = useMemo(() => {
+    const timeline = Result.builder(releasesResult)
+      .onSuccess((r) => r.data as Array<{ bucket: string; commitSha: string; count: number }>)
+      .orElse(() => [])
+    return detectReleaseMarkers(timeline).map((m) => ({
+      x: m.bucket,
+      label: m.label,
+      color: "var(--muted-foreground)",
+      strokeDasharray: "6 4",
+    }))
+  }, [releasesResult])
+
   const isWaiting =
     (Result.isSuccess(detailResult) && detailResult.waiting) ||
     (Result.isSuccess(apdexResult) && apdexResult.waiting)
@@ -126,6 +152,7 @@ function ServiceDetailContent() {
     legend: chart.legend,
     tooltip: chart.tooltip,
     rateMode: chart.rateMode,
+    referenceLines: releaseMarkers,
   }))
 
   return (

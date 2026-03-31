@@ -5,6 +5,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { getChartById } from "@maple/ui/components/charts/registry"
 import type {
   ChartLegendMode,
+  ChartReferenceLine,
   ChartTooltipMode,
 } from "@maple/ui/components/charts/_shared/chart-types"
 import { ReadonlyWidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
@@ -18,6 +19,7 @@ interface MetricsGridItem {
   legend?: ChartLegendMode
   tooltip?: ChartTooltipMode
   rateMode?: "per_second"
+  referenceLines?: ChartReferenceLine[]
   isLoading?: boolean
 }
 
@@ -55,6 +57,7 @@ export function MetricsGrid({ items, className, waiting }: MetricsGridProps) {
                     legend={item.legend}
                     tooltip={item.tooltip}
                     rateMode={item.rateMode}
+                    referenceLines={item.referenceLines}
                   />
                 </Suspense>
               )}

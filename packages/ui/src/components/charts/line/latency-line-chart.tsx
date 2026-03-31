@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { latencyTimeSeriesData } from "../_shared/sample-data"
@@ -22,7 +22,7 @@ const baseChartConfig = {
   p50LatencyMs: { label: "P50", color: "var(--chart-p50)" },
 } satisfies ChartConfig
 
-export function LatencyLineChart({ data, className, legend, tooltip }: BaseChartProps) {
+export function LatencyLineChart({ data, className, legend, tooltip, referenceLines }: BaseChartProps) {
   const chartData = data ?? latencyTimeSeriesData
 
   const { data: processedData, hasIncomplete, incompleteKeys } = useIncompleteSegments(chartData, VALUE_KEYS)
@@ -44,6 +44,15 @@ export function LatencyLineChart({ data, className, legend, tooltip }: BaseChart
     <ChartContainer config={chartConfig} className={className}>
       <LineChart data={processedData} accessibilityLayer>
         <CartesianGrid vertical={false} />
+        {referenceLines?.map((rl, i) => (
+          <ReferenceLine
+            key={`release-${i}`}
+            x={rl.x}
+            stroke={rl.color ?? "var(--muted-foreground)"}
+            strokeDasharray={rl.strokeDasharray ?? "6 4"}
+            strokeWidth={1}
+          />
+        ))}
         <XAxis
           dataKey="bucket"
           tickLine={false}
@@ -63,7 +72,16 @@ export function LatencyLineChart({ data, className, legend, tooltip }: BaseChart
               <ChartTooltipContent
                 labelFormatter={(_, payload) => {
                   if (!payload?.[0]?.payload?.bucket) return ""
-                  return formatBucketLabel(payload[0].payload.bucket, axisContext, "tooltip")
+                  const bucket = payload[0].payload.bucket as string
+                  const release = referenceLines?.find((rl) => rl.x === bucket)
+                  return (
+                    <span>
+                      {formatBucketLabel(bucket, axisContext, "tooltip")}
+                      {release?.label && (
+                        <span className="ml-2 text-muted-foreground">Deploy: {release.label}</span>
+                      )}
+                    </span>
+                  )
                 }}
                 formatter={(value, name, item) => {
                   const nameStr = String(name)

@@ -3,6 +3,13 @@ import type React from "react"
 export type ChartLegendMode = "visible" | "hidden" | "right"
 export type ChartTooltipMode = "visible" | "hidden"
 
+export interface ChartReferenceLine {
+  x: string
+  label?: string
+  color?: string
+  strokeDasharray?: string
+}
+
 export interface BaseChartProps {
   data?: Record<string, unknown>[]
   className?: string
@@ -11,6 +18,7 @@ export interface BaseChartProps {
   rateMode?: "per_second"
   stacked?: boolean
   curveType?: "linear" | "monotone"
+  referenceLines?: ChartReferenceLine[]
 }
 
 export type ChartCategory = "bar" | "area" | "line" | "radar"
