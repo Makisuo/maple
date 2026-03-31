@@ -46,9 +46,10 @@ export const topOperations = (input: {
       FORMAT JSON
     `
 
-    const rows = yield* executor.sqlQuery(sql)
+    interface TopOpRow { readonly name: string; readonly value: number }
+    const rows = yield* executor.sqlQuery<TopOpRow>(sql)
     return pipe(
-      rows as any[],
+      rows,
       Arr.map((r): TopOperation => ({ name: r.name, value: Number(r.value) })),
     )
   })

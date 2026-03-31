@@ -1,4 +1,5 @@
 import { Array as Arr, Effect, Option, pipe } from "effect"
+import type { ListTracesOutput } from "@maple/domain/tinybird"
 import { TinybirdExecutor, ObservabilityError, type TinybirdExecutorShape } from "./TinybirdExecutor"
 import type { SearchTracesInput, SearchTracesOutput, SpanResult } from "./types"
 import { toSpanResult } from "./row-mappers"
@@ -101,11 +102,23 @@ const spanLevelSearch = (
     FORMAT JSON
   `
 
+  interface RawSpanRow {
+    readonly traceId: string
+    readonly spanId: string
+    readonly spanName: string
+    readonly serviceName: string
+    readonly durationMs: number
+    readonly statusCode: string
+    readonly statusMessage: string
+    readonly attributesStr: string
+    readonly timestamp: string
+  }
+
   return Effect.map(
-    executor.sqlQuery(sql),
-    (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<SpanResult> =>
+    executor.sqlQuery<RawSpanRow>(sql),
+    (rows): ReadonlyArray<SpanResult> =>
       pipe(
-        rows as any[],
+        rows,
         Arr.map((row) => ({
           traceId: row.traceId,
           spanId: row.spanId,
@@ -153,8 +166,8 @@ const rootLevelSearch = (
   }
 
   return Effect.map(
-    executor.query<any>("list_traces", params),
-    (result: { data: ReadonlyArray<any> }): ReadonlyArray<SpanResult> =>
+    executor.query<ListTracesOutput>("list_traces", params),
+    (result): ReadonlyArray<SpanResult> =>
       pipe(result.data, Arr.map(toSpanResult)),
   )
 }

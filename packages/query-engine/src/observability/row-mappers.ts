@@ -1,18 +1,19 @@
+import type { ListTracesOutput, ListLogsOutput, ErrorsByTypeOutput } from "@maple/domain/tinybird"
 import type { SpanResult, LogEntry, ErrorSummary } from "./types"
 
-export const toSpanResult = (t: any): SpanResult => ({
+export const toSpanResult = (t: ListTracesOutput): SpanResult => ({
   traceId: t.traceId,
-  spanId: t.spanId ?? "",
-  spanName: t.rootSpanName ?? t.spanName ?? "",
-  serviceName: t.serviceName ?? (t.services as string[])?.[0] ?? "",
-  durationMs: t.durationMs ?? Number(t.durationMicros) / 1000,
-  statusCode: t.statusCode ?? (Number(t.hasError) ? "Error" : "Ok"),
-  statusMessage: t.statusMessage ?? "",
-  attributes: t.attributes ?? {},
-  timestamp: t.timestamp ?? String(t.startTime ?? ""),
+  spanId: "",
+  spanName: t.rootSpanName,
+  serviceName: t.services[0] ?? "",
+  durationMs: Number(t.durationMicros) / 1000,
+  statusCode: Number(t.hasError) ? "Error" : "Ok",
+  statusMessage: "",
+  attributes: {},
+  timestamp: String(t.startTime ?? ""),
 })
 
-export const toLogEntry = (l: any): LogEntry => ({
+export const toLogEntry = (l: ListLogsOutput): LogEntry => ({
   timestamp: String(l.timestamp),
   severityText: l.severityText || "INFO",
   serviceName: l.serviceName,
@@ -21,9 +22,9 @@ export const toLogEntry = (l: any): LogEntry => ({
   spanId: l.spanId ?? "",
 })
 
-export const toErrorSummary = (e: any): ErrorSummary => ({
+export const toErrorSummary = (e: ErrorsByTypeOutput): ErrorSummary => ({
   errorType: e.errorType,
   count: Number(e.count),
-  affectedServicesCount: Number(e.affectedServicesCount ?? 0),
+  affectedServicesCount: Number(e.affectedServicesCount),
   lastSeen: String(e.lastSeen),
 })

@@ -19,9 +19,9 @@ export interface TinybirdExecutorShape {
   ) => Effect.Effect<{ data: ReadonlyArray<T> }, ObservabilityError>
 
   /** Execute raw ClickHouse SQL. The SQL MUST include an OrgId filter. */
-  readonly sqlQuery: (
+  readonly sqlQuery: <T = Record<string, unknown>>(
     sql: string,
-  ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, ObservabilityError>
+  ) => Effect.Effect<ReadonlyArray<T>, ObservabilityError>
 }
 
 export class TinybirdExecutor extends ServiceMap.Service<TinybirdExecutor, TinybirdExecutorShape>()(

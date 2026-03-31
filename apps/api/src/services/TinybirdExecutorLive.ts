@@ -19,15 +19,16 @@ export const makeTinybirdExecutorFromTenant = (tenant: TenantContext) =>
 
       return TinybirdExecutor.of({
         orgId: tenant.orgId,
-        query: (pipe, params) =>
-          tinybird.query(tenant, { pipe, params }).pipe(
-            Effect.map((response) => ({ data: response.data as any[] })),
+        query: <T>(pipe: string, params: Record<string, unknown>) =>
+          tinybird.query(tenant, { pipe: pipe as any, params }).pipe(
+            Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
             Effect.mapError(
               (error) => new ObservabilityError({ message: error.message, pipe }),
             ),
           ),
-        sqlQuery: (sql) =>
+        sqlQuery: <T>(sql: string) =>
           tinybird.sqlQuery(tenant, sql).pipe(
+            Effect.map((rows) => rows as unknown as ReadonlyArray<T>),
             Effect.mapError(
               (error) => new ObservabilityError({ message: error.message }),
             ),

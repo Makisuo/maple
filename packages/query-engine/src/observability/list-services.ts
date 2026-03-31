@@ -1,4 +1,5 @@
 import { Array as Arr, Effect, pipe, Record } from "effect"
+import type { ServiceOverviewOutput } from "@maple/domain/tinybird"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { ListServicesInput, ServiceSummary } from "./types"
 import { aggregateServiceRows, weightedAvg } from "./aggregation"
@@ -9,15 +10,15 @@ export const listServices = (
   Effect.gen(function* () {
     const executor = yield* TinybirdExecutor
 
-    const result = yield* executor.query("service_overview", {
+    const result = yield* executor.query<ServiceOverviewOutput>("service_overview", {
       start_time: input.timeRange.startTime,
       end_time: input.timeRange.endTime,
       ...(input.environment && { environments: input.environment }),
     })
 
     return pipe(
-      result.data as any[],
-      Arr.groupBy((r) => r.serviceName as string),
+      result.data,
+      Arr.groupBy((r) => r.serviceName),
       Record.map((group) => aggregateServiceRows(group)),
       Record.toEntries,
       Arr.map(([name, svc]): ServiceSummary => ({

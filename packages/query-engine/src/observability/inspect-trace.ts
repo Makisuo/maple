@@ -1,4 +1,5 @@
 import { Array as Arr, Effect, HashMap, Option, pipe } from "effect"
+import type { SpanHierarchyOutput, ListLogsOutput } from "@maple/domain/tinybird"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { InspectTraceOutput, SpanNode } from "./types"
 import { toLogEntry } from "./row-mappers"
@@ -37,13 +38,13 @@ export const inspectTrace = (
 
     const [spansResult, logsResult] = yield* Effect.all(
       [
-        executor.query("span_hierarchy", { trace_id: traceId }),
-        executor.query("list_logs", { trace_id: traceId, limit: 50 }),
+        executor.query<SpanHierarchyOutput>("span_hierarchy", { trace_id: traceId }),
+        executor.query<ListLogsOutput>("list_logs", { trace_id: traceId, limit: 50 }),
       ],
       { concurrency: "unbounded" },
     )
 
-    const spans = spansResult.data as any[]
+    const spans = spansResult.data
 
     // Build nodes
     const nodes: MutableSpanNode[] = pipe(
@@ -89,6 +90,6 @@ export const inspectTrace = (
       spanCount: spans.length,
       rootDurationMs: roots[0]?.durationMs ?? 0,
       spans: roots,
-      logs: pipe(logsResult.data as any[], Arr.take(20), Arr.map(toLogEntry)),
+      logs: pipe(logsResult.data, Arr.take(20), Arr.map(toLogEntry)),
     }
   })

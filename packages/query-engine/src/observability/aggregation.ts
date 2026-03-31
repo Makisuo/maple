@@ -1,15 +1,7 @@
 import { Array as Arr, pipe } from "effect"
+import type { ServiceOverviewOutput } from "@maple/domain/tinybird"
 
-interface ServiceOverviewRow {
-  readonly serviceName: string
-  readonly throughput: number | string
-  readonly errorCount: number | string
-  readonly p50LatencyMs?: number
-  readonly p95LatencyMs?: number
-  readonly p99LatencyMs?: number
-}
-
-interface AggregatedService {
+export interface AggregatedService {
   readonly throughput: number
   readonly errorCount: number
   readonly weightedP50: number
@@ -18,25 +10,25 @@ interface AggregatedService {
 }
 
 export const aggregateServiceRows = (
-  rows: ReadonlyArray<any>,
+  rows: ReadonlyArray<ServiceOverviewOutput>,
   serviceName?: string,
 ): AggregatedService => {
   const filtered = serviceName
-    ? pipe(rows, Arr.filter((r: any) => r.serviceName === serviceName))
+    ? pipe(rows, Arr.filter((r) => r.serviceName === serviceName))
     : rows
 
   return pipe(
     filtered,
     Arr.reduce(
-      { throughput: 0, errorCount: 0, weightedP50: 0, weightedP95: 0, weightedP99: 0 },
-      (acc, r: any) => {
+      { throughput: 0, errorCount: 0, weightedP50: 0, weightedP95: 0, weightedP99: 0 } as AggregatedService,
+      (acc, r) => {
         const tp = Number(r.throughput)
         return {
           throughput: acc.throughput + tp,
           errorCount: acc.errorCount + Number(r.errorCount),
-          weightedP50: acc.weightedP50 + (r.p50LatencyMs ?? 0) * tp,
-          weightedP95: acc.weightedP95 + (r.p95LatencyMs ?? 0) * tp,
-          weightedP99: acc.weightedP99 + (r.p99LatencyMs ?? 0) * tp,
+          weightedP50: acc.weightedP50 + r.p50LatencyMs * tp,
+          weightedP95: acc.weightedP95 + r.p95LatencyMs * tp,
+          weightedP99: acc.weightedP99 + r.p99LatencyMs * tp,
         }
       },
     ),

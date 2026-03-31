@@ -1,4 +1,5 @@
 import { Array as Arr, Effect, pipe } from "effect"
+import type { ListTracesOutput, TracesDurationStatsOutput } from "@maple/domain/tinybird"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { FindSlowTracesInput, FindSlowTracesOutput } from "./types"
 import { toSpanResult } from "./row-mappers"
@@ -12,14 +13,14 @@ export const findSlowTraces = (
 
     const [tracesResult, statsResult] = yield* Effect.all(
       [
-        executor.query("list_traces", {
+        executor.query<ListTracesOutput>("list_traces", {
           start_time: input.timeRange.startTime,
           end_time: input.timeRange.endTime,
           ...(input.service && { service: input.service }),
           ...(input.environment && { deployment_env: input.environment }),
           limit: 500,
         }),
-        executor.query("traces_duration_stats", {
+        executor.query<TracesDurationStatsOutput>("traces_duration_stats", {
           start_time: input.timeRange.startTime,
           end_time: input.timeRange.endTime,
           ...(input.service && { service: input.service }),
@@ -29,13 +30,17 @@ export const findSlowTraces = (
     )
 
     const traces = pipe(
-      tracesResult.data as any[],
-      Arr.sort((a: any, b: any) => Number(b.durationMicros) > Number(a.durationMicros) ? -1 : Number(b.durationMicros) < Number(a.durationMicros) ? 1 : 0),
+      tracesResult.data,
+      Arr.sort((a: ListTracesOutput, b: ListTracesOutput) =>
+        Number(b.durationMicros) > Number(a.durationMicros) ? -1
+        : Number(b.durationMicros) < Number(a.durationMicros) ? 1
+        : 0,
+      ),
       Arr.take(limit),
       Arr.map(toSpanResult),
     )
 
-    const rawStats = (statsResult.data as any[])[0]
+    const rawStats = tracesResult.data.length > 0 ? statsResult.data[0] : undefined
 
     return {
       timeRange: input.timeRange,

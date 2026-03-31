@@ -1,4 +1,5 @@
 import { Array as Arr, Effect, pipe } from "effect"
+import type { ErrorDetailTracesOutput, ErrorsTimeseriesOutput, ListLogsOutput } from "@maple/domain/tinybird"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { TimeRange } from "./types"
 
@@ -31,7 +32,7 @@ export const errorDetail = (input: {
     const executor = yield* TinybirdExecutor
     const limit = input.limit ?? 5
 
-    const tracesResult = yield* executor.query("error_detail_traces", {
+    const tracesResult = yield* executor.query<ErrorDetailTracesOutput>("error_detail_traces", {
       error_type: input.errorType,
       start_time: input.timeRange.startTime,
       end_time: input.timeRange.endTime,
@@ -39,28 +40,28 @@ export const errorDetail = (input: {
       limit,
     })
 
-    const traces = tracesResult.data as any[]
+    const traces = tracesResult.data
 
     // Fetch logs for first 3 traces in parallel
     const logsResults = yield* pipe(
       traces,
       Arr.take(3),
       Effect.forEach(
-        (t) => executor.query("list_logs", { trace_id: t.traceId, limit: 10 }),
+        (t) => executor.query<ListLogsOutput>("list_logs", { trace_id: t.traceId, limit: 10 }),
         { concurrency: "unbounded" },
       ),
     )
 
     // Optionally fetch timeseries
     const timeseries = input.includeTimeseries
-      ? yield* executor.query("errors_timeseries", {
+      ? yield* executor.query<ErrorsTimeseriesOutput>("errors_timeseries", {
           error_type: input.errorType,
           start_time: input.timeRange.startTime,
           end_time: input.timeRange.endTime,
           ...(input.service && { services: input.service }),
         }).pipe(
           Effect.map((r) => pipe(
-            r.data as any[],
+            r.data,
             Arr.map((p) => ({ bucket: String(p.bucket), count: Number(p.count) })),
           )),
         )
@@ -80,7 +81,7 @@ export const errorDetail = (input: {
           startTime: String(t.startTime),
           errorMessage: t.errorMessage ?? "",
           logs: pipe(
-            i < logsResults.length ? (logsResults[i]!.data as any[]) : [],
+            i < logsResults.length ? logsResults[i]!.data : [],
             Arr.take(5),
             Arr.map((l) => ({
               timestamp: String(l.timestamp),
