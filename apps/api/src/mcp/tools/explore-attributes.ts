@@ -8,7 +8,7 @@ import { resolveTenant } from "../lib/query-tinybird"
 import { queryTinybird } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatNumber, formatTable } from "../lib/format"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { formatNextSteps } from "../lib/next-steps"
 import { exploreAttributeKeys, exploreAttributeValues } from "@maple/query-engine/observability"
@@ -67,7 +67,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
           if (values.length === 0) {
             lines.push("No values found for this key.")
           } else {
-            lines.push(formatTable(["Value", "Count"], values.map((v) => [v.value, formatNumber(v.count)])))
+            lines.push(formatTable(["Value", "Count"], Arr.map(values, (v) => [v.value, formatNumber(v.count)])))
           }
 
           lines.push(formatNextSteps([
@@ -86,18 +86,18 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
         if (params.source === "services") {
           const result = yield* queryTinybird("services_facets", { start_time: st, end_time: et })
 
-          const environments = result.data.filter((r: any) => r.facetType === "environment")
-          const commitShas = result.data.filter((r: any) => r.facetType === "commit_sha")
+          const environments = Arr.filter(result.data, (r: any) => r.facetType === "environment")
+          const commitShas = Arr.filter(result.data, (r: any) => r.facetType === "commit_sha")
 
           const lines: string[] = [`## Available Environments & Deployments`, `Time range: ${st} — ${et}`, ``]
 
           if (environments.length > 0) {
             lines.push(`### Environments`)
-            lines.push(formatTable(["Environment", "Span Count"], environments.map((r: any) => [String(r.name), formatNumber(r.count ?? 0)])))
+            lines.push(formatTable(["Environment", "Span Count"], Arr.map(environments, (r: any) => [String(r.name), formatNumber(r.count ?? 0)])))
           }
           if (commitShas.length > 0) {
             lines.push(``, `### Commit SHAs`)
-            lines.push(formatTable(["Commit SHA", "Span Count"], commitShas.map((r: any) => [String(r.name), formatNumber(r.count ?? 0)])))
+            lines.push(formatTable(["Commit SHA", "Span Count"], Arr.map(commitShas, (r: any) => [String(r.name), formatNumber(r.count ?? 0)])))
           }
 
           const nextSteps: string[] = []
@@ -112,8 +112,8 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
                 source: "services",
                 timeRange: { start: st, end: et },
                 keys: [
-                  ...environments.map((r: any) => ({ key: `environment:${String(r.name)}`, count: Number(r.count ?? 0) })),
-                  ...commitShas.map((r: any) => ({ key: `commit_sha:${String(r.name)}`, count: Number(r.count ?? 0) })),
+                  ...Arr.map(environments, (r: any) => ({ key: `environment:${String(r.name)}`, count: Number(r.count ?? 0) })),
+                  ...Arr.map(commitShas, (r: any) => ({ key: `commit_sha:${String(r.name)}`, count: Number(r.count ?? 0) })),
                 ],
               },
             }),
@@ -136,10 +136,10 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
         if (keys.length === 0) {
           lines.push("No attribute keys found.")
         } else {
-          lines.push(formatTable(["Key", "Count"], keys.map((k) => [k.key, formatNumber(k.count)])))
+          lines.push(formatTable(["Key", "Count"], Arr.map(keys, (k) => [k.key, formatNumber(k.count)])))
         }
 
-        const nextSteps = keys.slice(0, 3).map((k) =>
+        const nextSteps = Arr.map(Arr.take(keys, 3), (k) =>
           `\`explore_attributes source="${params.source}" key="${k.key}"\` — see values for this key`
         )
         lines.push(formatNextSteps(nextSteps))

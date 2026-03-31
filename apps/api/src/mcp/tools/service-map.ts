@@ -7,7 +7,7 @@ import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatNumber, formatDurationFromMs, formatPercent, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { serviceMap } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
@@ -38,7 +38,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 
         // Filter to edges involving the specified service
         if (service_name) {
-          edges = edges.filter(
+          edges = Arr.filter(edges,
             (e) => e.sourceService === service_name || e.targetService === service_name,
           )
         }
@@ -62,7 +62,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
         ]
 
         const headers = ["Source → Target", "Calls", "Errors", "Error Rate", "Avg Duration", "P95 Duration"]
-        const rows = edges.map((e) => {
+        const rows = Arr.map(edges, (e) => {
           const errorRate = e.callCount > 0 ? (e.errorCount / e.callCount) * 100 : 0
           return [
             `${e.sourceService} → ${e.targetService}`,
@@ -77,12 +77,12 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
         lines.push(formatTable(headers, rows))
 
         const nextSteps: string[] = []
-        const errorEdges = edges
-          .map((e) => ({ service: e.targetService, errorRate: e.callCount > 0 ? e.errorCount / e.callCount * 100 : 0 }))
-          .filter((e) => e.errorRate > 1)
-          .sort((a, b) => b.errorRate - a.errorRate)
+        const errorEdges = Arr.filter(
+          Arr.map(edges, (e) => ({ service: e.targetService, errorRate: e.callCount > 0 ? e.errorCount / e.callCount * 100 : 0 })),
+          (e) => e.errorRate > 1,
+        ).sort((a, b) => b.errorRate - a.errorRate)
 
-        for (const e of errorEdges.slice(0, 2)) {
+        for (const e of Arr.take(errorEdges, 2)) {
           nextSteps.push(`\`diagnose_service service_name="${e.service}"\` — investigate high error rate dependency`)
         }
         if (nextSteps.length === 0) {
@@ -95,7 +95,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
             tool: "service_map",
             data: {
               timeRange: { start: st, end: et },
-              edges: edges.map((e) => ({
+              edges: Arr.map(edges, (e) => ({
                 sourceService: e.sourceService,
                 targetService: e.targetService,
                 callCount: e.callCount,

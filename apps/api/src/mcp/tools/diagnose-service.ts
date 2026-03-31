@@ -8,7 +8,7 @@ import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationFromMs, formatPercent, formatNumber, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { diagnoseService } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
@@ -84,7 +84,7 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
         if (h.p95Ms > 500) {
           nextSteps.push(`\`find_slow_traces service="${service_name}"\` — find slow traces`)
         }
-        for (const t of result.recentTraces.filter((t) => t.hasError).slice(0, 2)) {
+        for (const t of Arr.take(Arr.filter(result.recentTraces, (t) => t.hasError), 2)) {
           nextSteps.push(`\`inspect_trace trace_id="${t.traceId}"\` — inspect error trace`)
         }
         nextSteps.push(`\`service_map service_name="${service_name}"\` — see upstream/downstream dependencies`)
@@ -98,7 +98,7 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
               timeRange: { start: st, end: et },
               health: h,
               topErrors: [...result.topErrors],
-              recentTraces: result.recentTraces.map((t) => ({
+              recentTraces: Arr.map(result.recentTraces, (t) => ({
                 traceId: t.traceId,
                 rootSpanName: t.rootSpanName,
                 durationMs: t.durationMs,
@@ -106,7 +106,7 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
                 services: [],
                 hasError: t.hasError,
               })),
-              recentLogs: result.recentLogs.map((l) => ({ ...l })),
+              recentLogs: Arr.map(result.recentLogs, (l) => ({ ...l })),
             },
           }),
         }

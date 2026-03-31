@@ -7,7 +7,7 @@ import { queryTinybird } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatNumber, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 
 export function registerListMetricsTool(server: McpToolRegistrar) {
@@ -75,7 +75,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
         lines.push(``, `Metrics (${metrics.length}):`, ``)
 
         const headers = ["Name", "Type", "Service", "Unit", "Data Points"]
-        const rows = metrics.map((m) => [
+        const rows = Arr.map(metrics, (m) => [
           m.metricName.length > 40 ? m.metricName.slice(0, 37) + "..." : m.metricName,
           m.metricType,
           m.serviceName,
@@ -91,7 +91,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
           lines.push(``, `More metrics available. Call again with offset=${nextOffset} for the next page.`)
         }
 
-        const nextSteps = metrics.slice(0, 3).map((m) =>
+        const nextSteps = Arr.map(Arr.take(metrics, 3), (m) =>
           `\`query_data source="metrics" kind="timeseries" metric_name="${m.metricName}" metric_type="${m.metricType}"\` — chart this metric`
         )
         lines.push(formatNextSteps(nextSteps))
@@ -107,12 +107,12 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
                 hasMore,
                 ...(hasMore && { nextOffset: off + metrics.length }),
               },
-              summary: summary.map((s) => ({
+              summary: Arr.map(summary, (s) => ({
                 metricType: s.metricType,
                 metricCount: Number(s.metricCount),
                 dataPointCount: Number(s.dataPointCount),
               })),
-              metrics: metrics.map((m) => ({
+              metrics: Arr.map(metrics, (m) => ({
                 metricName: m.metricName,
                 metricType: m.metricType,
                 serviceName: m.serviceName,

@@ -6,7 +6,7 @@ import {
 import { resolveTenant } from "../lib/query-tinybird"
 import { formatDurationFromMs, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { inspectTrace, type SpanNode } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
@@ -82,7 +82,7 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
         if (hasErrors) {
           nextSteps.push(`\`search_logs trace_id="${trace_id}"\` — see all logs for this trace`)
         }
-        for (const svc of [...serviceSet].slice(0, 2)) {
+        for (const svc of Arr.take(Arr.fromIterable(serviceSet), 2)) {
           nextSteps.push(`\`diagnose_service service_name="${svc}"\` — investigate this service`)
         }
         lines.push(formatNextSteps(nextSteps))

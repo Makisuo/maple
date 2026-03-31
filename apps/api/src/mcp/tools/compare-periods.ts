@@ -6,7 +6,7 @@ import { queryTinybird } from "../lib/query-tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { resolveTimeRange } from "../lib/time"
 import { formatPercent, formatDurationFromMs, formatNumber, formatTable } from "../lib/format"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { formatNextSteps } from "../lib/next-steps"
 
@@ -192,7 +192,7 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 
           // Next steps
           const nextSteps: string[] = []
-          for (const svc of regressions.slice(0, 3)) {
+          for (const svc of Arr.take(regressions, 3)) {
             nextSteps.push(`\`diagnose_service service_name="${svc}"\` — investigate regression`)
           }
           if (curErrorRate > prevErrorRate && curErrorRate > 1) {
@@ -214,7 +214,7 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
                 current: { totalSpans: curSpans, totalErrors: curErrors, errorRate: curErrorRate },
                 previous: { totalSpans: prevSpans, totalErrors: prevErrors, errorRate: prevErrorRate },
               },
-              services: Array.from(allServiceNames).map((name) => {
+              services: Arr.map(Arr.fromIterable(allServiceNames), (name) => {
                 const cur = currentSvcMap.get(name)
                 const prev = previousSvcMap.get(name)
                 return {

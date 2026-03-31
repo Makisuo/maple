@@ -8,7 +8,7 @@ import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatNumber, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { findErrors } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
@@ -46,7 +46,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
         const lines: string[] = [`## Errors by Type`, ``]
 
         const headers = ["Error Type", "Count", "Affected Services", "Last Seen"]
-        const rows = errors.map((e) => [
+        const rows = Arr.map(errors, (e) => [
           e.errorType.length > 60 ? e.errorType.slice(0, 57) + "..." : e.errorType,
           formatNumber(e.count),
           String(e.affectedServicesCount),
@@ -57,7 +57,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
         lines.push(``, `Total: ${errors.length} error types`)
 
         const nextSteps: string[] = []
-        for (const e of errors.slice(0, 3)) {
+        for (const e of Arr.take(errors, 3)) {
           const short = e.errorType.length > 50 ? e.errorType.slice(0, 47) + "..." : e.errorType
           nextSteps.push(`\`error_detail error_type="${short}"\` — see sample traces and logs`)
         }
@@ -69,7 +69,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
             tool: "find_errors",
             data: {
               timeRange: { start: st, end: et },
-              errors: errors.map((e) => ({
+              errors: Arr.map(errors, (e) => ({
                 errorType: e.errorType,
                 count: e.count,
                 affectedServicesCount: e.affectedServicesCount,

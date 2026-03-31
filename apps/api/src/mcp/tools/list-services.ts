@@ -7,7 +7,7 @@ import { resolveTimeRange } from "../lib/time"
 import { formatPercent, formatDurationFromMs, formatNumber, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { createDualContent } from "../lib/structured-output"
-import { Effect, Layer, Schema } from "effect"
+import { Array as Arr, Effect, Layer, Schema } from "effect"
 import { listServices } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 import { McpQueryError } from "./types"
@@ -45,7 +45,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
           lines.push("No active services found in this time range.")
         } else {
           const headers = ["Service", "Throughput (rpm)", "Error Rate", "P95 Latency"]
-          const rows = services.map((s) => [
+          const rows = Arr.map(services, (s) => [
             s.name,
             formatNumber(s.throughput),
             formatPercent(s.errorRate),
@@ -55,7 +55,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
         }
 
         const nextSteps: string[] = []
-        for (const s of services.slice(0, 3)) {
+        for (const s of Arr.take(services, 3)) {
           nextSteps.push(`\`diagnose_service service_name="${s.name}"\` — deep-dive into ${s.name}`)
         }
         if (services.length > 0) {
@@ -69,7 +69,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
             data: {
               timeRange: { start: st, end: et },
               total: services.length,
-              services: services.map((s) => ({
+              services: Arr.map(services, (s) => ({
                 name: s.name,
                 throughput: s.throughput,
                 errorRate: s.errorRate,

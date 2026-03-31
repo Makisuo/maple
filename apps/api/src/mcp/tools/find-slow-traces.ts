@@ -8,7 +8,7 @@ import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationMs, formatDurationFromMs, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { findSlowTraces } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
@@ -58,7 +58,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
         lines.push(``)
 
         const headers = ["Trace ID", "Root Span", "Duration", "Service", "Error"]
-        const rows = result.traces.map((t) => [
+        const rows = Arr.map(result.traces, (t) => [
           t.traceId.slice(0, 12) + "...",
           t.spanName.length > 30 ? t.spanName.slice(0, 27) + "..." : t.spanName,
           formatDurationFromMs(t.durationMs),
@@ -68,7 +68,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
 
         lines.push(formatTable(headers, rows))
 
-        const nextSteps = result.traces.slice(0, 3).map((t) =>
+        const nextSteps = Arr.map(Arr.take(result.traces, 3), (t) =>
           `\`inspect_trace trace_id="${t.traceId}"\` — find bottleneck spans`
         )
         lines.push(formatNextSteps(nextSteps))
@@ -79,7 +79,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
             data: {
               timeRange: { start: st, end: et },
               stats: result.stats ?? undefined,
-              traces: result.traces.map((t) => ({
+              traces: Arr.map(result.traces, (t) => ({
                 traceId: t.traceId,
                 rootSpanName: t.spanName,
                 durationMs: t.durationMs,

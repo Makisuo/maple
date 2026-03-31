@@ -16,7 +16,7 @@ import {
   QueryEngineValidationError,
   TinybirdQueryError,
 } from "@maple/domain/http"
-import { Duration, Effect, Layer, ServiceMap } from "effect"
+import { Array as Arr, Duration, Effect, Layer, Match, Option, Result, ServiceMap } from "effect"
 import type { TenantContext } from "./AuthService"
 import { TinybirdService, type TinybirdServiceShape } from "./TinybirdService"
 
@@ -456,49 +456,40 @@ const metricsAggregateValueForMetric = (
     readonly rateValue?: number
     readonly increaseValue?: number
   },
-): number => {
-  switch (metric) {
-    case "avg":
-      return Number(row.avgValue)
-    case "min":
-      return Number(row.minValue)
-    case "max":
-      return Number(row.maxValue)
-    case "sum":
-      return Number(row.sumValue)
-    case "count":
-      return Number(row.dataPointCount)
-    case "rate":
-      return Number(row.rateValue)
-    case "increase":
-      return Number(row.increaseValue)
-  }
-}
+): number =>
+  Match.value(metric).pipe(
+    Match.when("avg", () => Number(row.avgValue)),
+    Match.when("min", () => Number(row.minValue)),
+    Match.when("max", () => Number(row.maxValue)),
+    Match.when("sum", () => Number(row.sumValue)),
+    Match.when("count", () => Number(row.dataPointCount)),
+    Match.when("rate", () => Number(row.rateValue)),
+    Match.when("increase", () => Number(row.increaseValue)),
+    Match.exhaustive,
+  )
 
 const applyAlertReducer = (
   observations: ReadonlyArray<AlertObservation>,
   reducer: QueryEngineAlertReducer,
 ): number | null => {
-  const values = observations
-    .filter((observation) => observation.hasData && observation.value != null)
-    .map((observation) => observation.value as number)
+  const values = Arr.filterMap(observations, (observation) =>
+    observation.hasData && observation.value != null
+      ? Result.succeed(observation.value as number)
+      : Result.failVoid,
+  )
 
   if (values.length === 0) {
     return null
   }
 
-  switch (reducer) {
-    case "identity":
-      return values[0] ?? null
-    case "sum":
-      return values.reduce((sum, value) => sum + value, 0)
-    case "avg":
-      return values.reduce((sum, value) => sum + value, 0) / values.length
-    case "min":
-      return Math.min(...values)
-    case "max":
-      return Math.max(...values)
-  }
+  return Match.value(reducer).pipe(
+    Match.when("identity", () => Option.getOrNull(Arr.head(values))),
+    Match.when("sum", () => Arr.reduce(values, 0, (sum, value) => sum + value)),
+    Match.when("avg", () => Arr.reduce(values, 0, (sum, value) => sum + value) / values.length),
+    Match.when("min", () => Math.min(...values)),
+    Match.when("max", () => Math.max(...values)),
+    Match.exhaustive,
+  )
 }
 
 const sampleCountForStrategy = (

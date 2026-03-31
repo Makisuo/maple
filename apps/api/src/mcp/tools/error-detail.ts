@@ -10,7 +10,7 @@ import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationFromMs, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
-import { Effect, Schema } from "effect"
+import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { errorDetail } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
@@ -87,7 +87,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
           lines.push(``)
         }
 
-        const nextSteps = result.traces.slice(0, 3).map((t) =>
+        const nextSteps = Arr.map(Arr.take(result.traces, 3), (t) =>
           `\`inspect_trace trace_id="${t.traceId}"\` — full span tree`
         )
         nextSteps.push(`\`search_logs service="${service ?? ""}" severity="ERROR"\` — search for related error logs`)
@@ -99,7 +99,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
             data: {
               timeRange: { start: st, end: et },
               errorType: error_type,
-              traces: result.traces.map((t) => ({
+              traces: Arr.map(result.traces, (t) => ({
                 traceId: t.traceId,
                 rootSpanName: t.rootSpanName,
                 durationMs: t.durationMs,
@@ -107,7 +107,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
                 services: [...t.services],
                 startTime: t.startTime,
                 errorMessage: t.errorMessage || undefined,
-                logs: t.logs.map((l) => ({ ...l })),
+                logs: Arr.map(t.logs, (l) => ({ ...l })),
               })),
             },
           }),

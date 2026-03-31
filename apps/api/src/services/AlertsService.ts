@@ -74,6 +74,7 @@ import {
   Effect,
   HashSet,
   Layer,
+  Match,
   Metric,
   Option,
   Redacted,
@@ -323,18 +324,14 @@ const compareThreshold = (
   value: number,
   comparator: AlertComparator,
   threshold: number,
-) => {
-  switch (comparator) {
-    case "gt":
-      return value > threshold
-    case "gte":
-      return value >= threshold
-    case "lt":
-      return value < threshold
-    case "lte":
-      return value <= threshold
-  }
-}
+): boolean =>
+  Match.value(comparator).pipe(
+    Match.when("gt", () => value > threshold),
+    Match.when("gte", () => value >= threshold),
+    Match.when("lt", () => value < threshold),
+    Match.when("lte", () => value <= threshold),
+    Match.exhaustive,
+  )
 
 const normalizeOptionalString = (value: string | null | undefined) => {
   const trimmed = value?.trim()
@@ -425,48 +422,44 @@ const summarizeWebhookUrl = (url: string) =>
 
 const buildPublicConfig = (
   request: AlertDestinationCreateRequest,
-): DestinationPublicConfig => {
-  switch (request.type) {
-    case "slack":
-      return {
-        summary: request.channelLabel?.trim() || "Slack incoming webhook",
-        channelLabel: normalizeOptionalString(request.channelLabel),
-      }
-    case "pagerduty":
-      return {
-        summary: "PagerDuty Events API v2",
+): DestinationPublicConfig =>
+  Match.value(request).pipe(
+    Match.discriminatorsExhaustive("type")({
+      slack: (r) => ({
+        summary: r.channelLabel?.trim() || "Slack incoming webhook",
+        channelLabel: normalizeOptionalString(r.channelLabel),
+      }),
+      pagerduty: () => ({
+        summary: "PagerDuty Events API v2" as string,
         channelLabel: null,
-      }
-    case "webhook":
-      return {
-        summary: summarizeWebhookUrl(request.url),
+      }),
+      webhook: (r) => ({
+        summary: summarizeWebhookUrl(r.url),
         channelLabel: null,
-      }
-  }
-}
+      }),
+    }),
+  )
 
 const buildSecretConfig = (
   request: AlertDestinationCreateRequest,
-): DestinationSecretConfig => {
-  switch (request.type) {
-    case "slack":
-      return {
-        type: "slack",
-        webhookUrl: request.webhookUrl.trim(),
-      }
-    case "pagerduty":
-      return {
-        type: "pagerduty",
-        integrationKey: request.integrationKey.trim(),
-      }
-    case "webhook":
-      return {
-        type: "webhook",
-        url: request.url.trim(),
-        signingSecret: normalizeOptionalString(request.signingSecret),
-      }
-  }
-}
+): DestinationSecretConfig =>
+  Match.value(request).pipe(
+    Match.discriminatorsExhaustive("type")({
+      slack: (r) => ({
+        type: "slack" as const,
+        webhookUrl: r.webhookUrl.trim(),
+      }),
+      pagerduty: (r) => ({
+        type: "pagerduty" as const,
+        integrationKey: r.integrationKey.trim(),
+      }),
+      webhook: (r) => ({
+        type: "webhook" as const,
+        url: r.url.trim(),
+        signingSecret: normalizeOptionalString(r.signingSecret),
+      }),
+    }),
+  )
 
 const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfig =>
   Option.getOrElse(
