@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Array as Arr, Effect, pipe } from "effect"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { TimeRange } from "./types"
 import type { TracesMetric } from "../query-engine"
@@ -7,6 +7,16 @@ import { escapeForSQL } from "./sql-utils"
 export interface TopOperation {
   readonly name: string
   readonly value: number
+}
+
+const METRIC_EXPRESSIONS: Record<string, string> = {
+  count: "count()",
+  avg_duration: "avg(Duration) / 1000000",
+  p50_duration: "quantile(0.5)(Duration) / 1000000",
+  p95_duration: "quantile(0.95)(Duration) / 1000000",
+  p99_duration: "quantile(0.99)(Duration) / 1000000",
+  error_rate: "if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0)",
+  apdex: "if(count() > 0, round((countIf(Duration / 1000000 < 500) + countIf(Duration / 1000000 >= 500 AND Duration / 1000000 < 2000) * 0.5) / count(), 4), 0)",
 }
 
 export const topOperations = (input: {
@@ -18,46 +28,18 @@ export const topOperations = (input: {
   Effect.gen(function* () {
     const executor = yield* TinybirdExecutor
     const limit = input.limit ?? 20
-    const svc = escapeForSQL(input.serviceName)
-    const orgId = escapeForSQL(executor.orgId)
-
-    // Build metric expression
-    let metricExpr: string
-    switch (input.metric) {
-      case "count":
-        metricExpr = "count()"
-        break
-      case "avg_duration":
-        metricExpr = "avg(Duration) / 1000000"
-        break
-      case "p50_duration":
-        metricExpr = "quantile(0.5)(Duration) / 1000000"
-        break
-      case "p95_duration":
-        metricExpr = "quantile(0.95)(Duration) / 1000000"
-        break
-      case "p99_duration":
-        metricExpr = "quantile(0.99)(Duration) / 1000000"
-        break
-      case "error_rate":
-        metricExpr = "if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0)"
-        break
-      case "apdex":
-        metricExpr = "if(count() > 0, round((countIf(Duration / 1000000 < 500) + countIf(Duration / 1000000 >= 500 AND Duration / 1000000 < 2000) * 0.5) / count(), 4), 0)"
-        break
-      default:
-        metricExpr = "count()"
-    }
+    const esc = escapeForSQL
+    const metricExpr = METRIC_EXPRESSIONS[input.metric] ?? "count()"
 
     const sql = `
       SELECT
         SpanName as name,
         ${metricExpr} as value
       FROM traces
-      WHERE OrgId = '${orgId}'
-        AND ServiceName = '${svc}'
-        AND Timestamp >= parseDateTimeBestEffort('${escapeForSQL(input.timeRange.startTime)}')
-        AND Timestamp <= parseDateTimeBestEffort('${escapeForSQL(input.timeRange.endTime)}')
+      WHERE OrgId = '${esc(executor.orgId)}'
+        AND ServiceName = '${esc(input.serviceName)}'
+        AND Timestamp >= parseDateTimeBestEffort('${esc(input.timeRange.startTime)}')
+        AND Timestamp <= parseDateTimeBestEffort('${esc(input.timeRange.endTime)}')
       GROUP BY name
       ORDER BY value DESC
       LIMIT ${limit}
@@ -65,8 +47,8 @@ export const topOperations = (input: {
     `
 
     const rows = yield* executor.sqlQuery(sql)
-    return rows.map((r: any): TopOperation => ({
-      name: r.name,
-      value: Number(r.value),
-    }))
+    return pipe(
+      rows as any[],
+      Arr.map((r): TopOperation => ({ name: r.name, value: Number(r.value) })),
+    )
   })

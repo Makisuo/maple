@@ -1,6 +1,7 @@
-import { Effect } from "effect"
+import { Array as Arr, Effect, pipe } from "effect"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { FindErrorsInput, ErrorSummary } from "./types"
+import { toErrorSummary } from "./row-mappers"
 
 export const findErrors = (
   input: FindErrorsInput,
@@ -16,10 +17,5 @@ export const findErrors = (
       limit: input.limit ?? 20,
     })
 
-    return (result.data as any[]).map((e): ErrorSummary => ({
-      errorType: e.errorType,
-      count: Number(e.count),
-      affectedServicesCount: Number(e.affectedServicesCount ?? 0),
-      lastSeen: String(e.lastSeen),
-    }))
+    return pipe(result.data as any[], Arr.map(toErrorSummary))
   })

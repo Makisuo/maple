@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Array as Arr, Effect, pipe } from "effect"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { TimeRange, ServiceEdge } from "./types"
 
@@ -17,12 +17,15 @@ export const serviceMap = (input: {
       ...(input.environment && { deployment_env: input.environment }),
     })
 
-    return (result.data as any[]).map((e): ServiceEdge => ({
-      sourceService: e.sourceService ?? e.source ?? "",
-      targetService: e.targetService ?? e.target ?? "",
-      callCount: Number(e.callCount ?? e.count ?? 0),
-      errorCount: Number(e.errorCount ?? 0),
-      avgDurationMs: Number(e.avgDurationMs ?? 0),
-      p95DurationMs: Number(e.p95DurationMs ?? 0),
-    }))
+    return pipe(
+      result.data as any[],
+      Arr.map((e): ServiceEdge => ({
+        sourceService: e.sourceService ?? e.source ?? "",
+        targetService: e.targetService ?? e.target ?? "",
+        callCount: Number(e.callCount ?? e.count ?? 0),
+        errorCount: Number(e.errorCount ?? 0),
+        avgDurationMs: Number(e.avgDurationMs ?? 0),
+        p95DurationMs: Number(e.p95DurationMs ?? 0),
+      })),
+    )
   })

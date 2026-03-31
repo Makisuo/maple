@@ -1,6 +1,7 @@
-import { Effect } from "effect"
+import { Array as Arr, Effect, pipe } from "effect"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
-import type { FindSlowTracesInput, FindSlowTracesOutput, SpanResult } from "./types"
+import type { FindSlowTracesInput, FindSlowTracesOutput } from "./types"
+import { toSpanResult } from "./row-mappers"
 
 export const findSlowTraces = (
   input: FindSlowTracesInput,
@@ -27,9 +28,12 @@ export const findSlowTraces = (
       { concurrency: "unbounded" },
     )
 
-    const traces = (tracesResult.data as any[])
-      .sort((a, b) => Number(b.durationMicros) - Number(a.durationMicros))
-      .slice(0, limit)
+    const traces = pipe(
+      tracesResult.data as any[],
+      Arr.sort((a: any, b: any) => Number(b.durationMicros) > Number(a.durationMicros) ? -1 : Number(b.durationMicros) < Number(a.durationMicros) ? 1 : 0),
+      Arr.take(limit),
+      Arr.map(toSpanResult),
+    )
 
     const rawStats = (statsResult.data as any[])[0]
 
@@ -41,16 +45,6 @@ export const findSlowTraces = (
         minMs: Number(rawStats.minDurationMs ?? 0),
         maxMs: Number(rawStats.maxDurationMs ?? 0),
       } : null,
-      traces: traces.map((t): SpanResult => ({
-        traceId: t.traceId,
-        spanId: "",
-        spanName: t.rootSpanName ?? "",
-        serviceName: (t.services as string[])?.[0] ?? "",
-        durationMs: Number(t.durationMicros) / 1000,
-        statusCode: Number(t.hasError) ? "Error" : "Ok",
-        statusMessage: "",
-        attributes: {},
-        timestamp: String(t.startTime ?? ""),
-      })),
+      traces,
     }
   })

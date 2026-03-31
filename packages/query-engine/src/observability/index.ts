@@ -1,5 +1,7 @@
 export { TinybirdExecutor, ObservabilityError, type TinybirdExecutorShape } from "./TinybirdExecutor"
 export type * from "./types"
+export { toSpanResult, toLogEntry, toErrorSummary } from "./row-mappers"
+export { aggregateServiceRows, weightedAvg } from "./aggregation"
 export { listServices } from "./list-services"
 export { searchTraces } from "./search-traces"
 export { inspectTrace } from "./inspect-trace"

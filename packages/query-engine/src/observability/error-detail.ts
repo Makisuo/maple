@@ -1,6 +1,6 @@
-import { Effect } from "effect"
+import { Array as Arr, Effect, pipe } from "effect"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
-import type { TimeRange, LogEntry } from "./types"
+import type { TimeRange } from "./types"
 
 export interface ErrorDetailTrace {
   readonly traceId: string
@@ -42,12 +42,13 @@ export const errorDetail = (input: {
     const traces = tracesResult.data as any[]
 
     // Fetch logs for first 3 traces in parallel
-    const traceIds = traces.slice(0, 3).map((t) => t.traceId)
-    const logsResults = yield* Effect.all(
-      traceIds.map((tid) =>
-        executor.query("list_logs", { trace_id: tid, limit: 10 }),
+    const logsResults = yield* pipe(
+      traces,
+      Arr.take(3),
+      Effect.forEach(
+        (t) => executor.query("list_logs", { trace_id: t.traceId, limit: 10 }),
+        { concurrency: "unbounded" },
       ),
-      { concurrency: "unbounded" },
     )
 
     // Optionally fetch timeseries
@@ -57,29 +58,38 @@ export const errorDetail = (input: {
           start_time: input.timeRange.startTime,
           end_time: input.timeRange.endTime,
           ...(input.service && { services: input.service }),
-        }).pipe(Effect.map((r) => (r.data as any[]).map((p) => ({
-          bucket: String(p.bucket),
-          count: Number(p.count),
-        }))))
+        }).pipe(
+          Effect.map((r) => pipe(
+            r.data as any[],
+            Arr.map((p) => ({ bucket: String(p.bucket), count: Number(p.count) })),
+          )),
+        )
       : undefined
 
     return {
       errorType: input.errorType,
       timeRange: input.timeRange,
-      traces: traces.map((t, i): ErrorDetailTrace => ({
-        traceId: t.traceId,
-        rootSpanName: t.rootSpanName,
-        durationMs: Number(t.durationMicros) / 1000,
-        spanCount: Number(t.spanCount),
-        services: t.services ?? [],
-        startTime: String(t.startTime),
-        errorMessage: t.errorMessage ?? "",
-        logs: (i < logsResults.length ? (logsResults[i]!.data as any[]).slice(0, 5) : []).map((l) => ({
-          timestamp: String(l.timestamp),
-          severityText: l.severityText || "INFO",
-          body: l.body,
+      traces: pipe(
+        traces,
+        Arr.map((t, i): ErrorDetailTrace => ({
+          traceId: t.traceId,
+          rootSpanName: t.rootSpanName,
+          durationMs: Number(t.durationMicros) / 1000,
+          spanCount: Number(t.spanCount),
+          services: t.services ?? [],
+          startTime: String(t.startTime),
+          errorMessage: t.errorMessage ?? "",
+          logs: pipe(
+            i < logsResults.length ? (logsResults[i]!.data as any[]) : [],
+            Arr.take(5),
+            Arr.map((l) => ({
+              timestamp: String(l.timestamp),
+              severityText: l.severityText || "INFO",
+              body: l.body,
+            })),
+          ),
         })),
-      })),
+      ),
       timeseries,
     }
   })
