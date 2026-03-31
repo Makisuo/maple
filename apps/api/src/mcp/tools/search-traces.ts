@@ -18,15 +18,16 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
-      service: optionalStringParam("Filter by service name"),
+      service: optionalStringParam("Filter by service name (searches all spans in the trace, not just root)"),
       has_error: optionalBooleanParam("Filter traces with errors only"),
       min_duration_ms: optionalNumberParam("Minimum duration in milliseconds"),
       max_duration_ms: optionalNumberParam("Maximum duration in milliseconds"),
       http_method: optionalStringParam("Filter by HTTP method (GET, POST, etc.)"),
-      span_name: optionalStringParam("Filter by root span name (substring match, case-insensitive)"),
+      span_name: optionalStringParam("Filter by span name (searches all spans, substring match, case-insensitive)"),
       trace_id: optionalStringParam("Find a specific trace by ID"),
       attribute_key: optionalStringParam("Filter by span attribute key (e.g. user.id, request.id)"),
       attribute_value: optionalStringParam("Filter by span attribute value (requires attribute_key)"),
+      root_only: optionalBooleanParam("Only match root spans for service/span_name filters (default: false, searches all spans)"),
       limit: optionalNumberParam("Max results (default 20)"),
     }),
     (params) =>
@@ -40,16 +41,24 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
           }
         }
 
+        // Default: search all spans in the trace. root_only=true restricts to root span only.
+        const rootOnly = params.root_only === true
+
         const result = yield* queryTinybird("list_traces", {
           start_time: st,
           end_time: et,
-          service: params.service,
+          ...(params.service && (rootOnly
+            ? { service: params.service }
+            : { any_service: params.service }
+          )),
           has_error: params.has_error,
           min_duration_ms: params.min_duration_ms,
           max_duration_ms: params.max_duration_ms,
           http_method: params.http_method,
-          span_name: params.span_name,
-          span_name_match_mode: params.span_name ? "contains" : undefined,
+          ...(params.span_name && (rootOnly
+            ? { span_name: params.span_name, span_name_match_mode: "contains" }
+            : { any_span_name: params.span_name, any_span_name_match_mode: "contains" }
+          )),
           ...(params.trace_id && { trace_id: params.trace_id }),
           ...(params.attribute_key && { attribute_filter_key: params.attribute_key }),
           ...(params.attribute_value && { attribute_filter_value: params.attribute_value }),

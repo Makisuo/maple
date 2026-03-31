@@ -52,6 +52,9 @@ export const listTraces = defineEndpoint("list_traces", {
     resource_filter_key: p.string().optional().describe("Filter where ResourceAttributes[key] matches value"),
     resource_filter_value: p.string().optional().describe("Value to match for resource attribute filter"),
     resource_filter_value_match_mode: p.string().optional().describe("Match mode for resource attribute value: 'contains' for substring match"),
+    any_service: p.string().optional().describe("Find traces where ANY span (not just root) belongs to this service"),
+    any_span_name: p.string().optional().describe("Find traces where ANY span (not just root) matches this span name"),
+    any_span_name_match_mode: p.string().optional().describe("Match mode for any_span_name: 'contains' for substring match"),
   },
   nodes: [
     node({
@@ -148,6 +151,38 @@ export const listTraces = defineEndpoint("list_traces", {
               AND positionCaseInsensitive(t_res.ResourceAttributes[{{String(resource_filter_key)}}], {{String(resource_filter_value, '')}}) > 0
             {% else %}
               AND t_res.ResourceAttributes[{{String(resource_filter_key)}}] = {{String(resource_filter_value, '')}}
+            {% end %}
+          )
+        {% end %}
+        {% if defined(any_service) %}
+          AND EXISTS (
+            SELECT 1 FROM traces AS t_svc
+            WHERE t_svc.TraceId = TraceId
+              AND t_svc.OrgId = {{String(org_id)}}
+              AND t_svc.ServiceName = {{String(any_service)}}
+            {% if defined(start_time) %}
+              AND t_svc.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+            {% end %}
+            {% if defined(end_time) %}
+              AND t_svc.Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
+            {% end %}
+          )
+        {% end %}
+        {% if defined(any_span_name) %}
+          AND EXISTS (
+            SELECT 1 FROM traces AS t_spn
+            WHERE t_spn.TraceId = TraceId
+              AND t_spn.OrgId = {{String(org_id)}}
+            {% if defined(any_span_name_match_mode) and any_span_name_match_mode == "contains" %}
+              AND positionCaseInsensitive(t_spn.SpanName, {{String(any_span_name)}}) > 0
+            {% else %}
+              AND t_spn.SpanName = {{String(any_span_name)}}
+            {% end %}
+            {% if defined(start_time) %}
+              AND t_spn.Timestamp >= {{DateTime(start_time, "2023-01-01 00:00:00")}}
+            {% end %}
+            {% if defined(end_time) %}
+              AND t_spn.Timestamp <= {{DateTime(end_time, "2099-12-31 23:59:59")}}
             {% end %}
           )
         {% end %}
