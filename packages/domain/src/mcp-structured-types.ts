@@ -101,6 +101,7 @@ export interface SpanNodeData {
   durationMs: number
   statusCode: string
   statusMessage: string
+  attributes: Record<string, string>
   children: SpanNodeData[]
 }
 

@@ -16,7 +16,28 @@ interface SpanNode {
   durationMs: number
   statusCode: string
   statusMessage: string
+  attributes: Record<string, string>
   children: SpanNode[]
+}
+
+/** Keys that are noisy HTTP headers / framework internals — skip in summaries */
+const SKIP_ATTR_PREFIXES = ["http.request.header.", "http.response.header.", "signoz."]
+const SKIP_ATTR_KEYS = new Set(["http.request.method", "url.scheme", "url.full", "url.path", "http.route", "http.response.status_code", "user_agent.original", "server.address", "server.port", "client.address"])
+
+function extractKeyAttributes(raw: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, string>
+    const result: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (!v || v === "") continue
+      if (SKIP_ATTR_KEYS.has(k)) continue
+      if (SKIP_ATTR_PREFIXES.some((p) => k.startsWith(p))) continue
+      result[k] = String(v)
+    }
+    return result
+  } catch {
+    return {}
+  }
 }
 
 export function registerInspectTraceTool(server: McpToolRegistrar) {
@@ -54,6 +75,7 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
             durationMs: span.durationMs,
             statusCode: span.statusCode,
             statusMessage: span.statusMessage,
+            attributes: extractKeyAttributes(span.spanAttributes),
             children: [],
           })
         }
@@ -80,9 +102,14 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
           lines.push(
             `${prefix}${connector}${node.spanName} — ${node.serviceName} (${formatDurationFromMs(node.durationMs)})${status}`,
           )
+          const detailPrefix = prefix + (prefix === "" ? "" : isLast ? "    " : "\u2502   ")
           if (node.statusCode === "Error" && node.statusMessage) {
-            const childPrefix = prefix + (prefix === "" ? "" : isLast ? "    " : "\u2502   ")
-            lines.push(`${childPrefix}    Status: "${truncate(node.statusMessage, 100)}"`)
+            lines.push(`${detailPrefix}    Status: "${truncate(node.statusMessage, 100)}"`)
+          }
+          const attrEntries = Object.entries(node.attributes)
+          if (attrEntries.length > 0) {
+            const attrStr = attrEntries.slice(0, 5).map(([k, v]) => `${k}=${truncate(String(v), 60)}`).join(", ")
+            lines.push(`${detailPrefix}    {${attrStr}}`)
           }
           const childPrefix = prefix + (prefix === "" ? "" : isLast ? "    " : "\u2502   ")
           node.children.forEach((child, i) => {
