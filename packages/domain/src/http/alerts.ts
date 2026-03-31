@@ -1,7 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import type { LogsFilters, MetricsFilters, TracesFilters } from "@maple/query-engine"
-import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "@maple/query-engine/where-clause"
+import type { LogsFilters, MetricsFilters, TracesFilters } from "../query-engine"
+import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "../where-clause"
 import {
   AlertDeliveryEventId,
   AlertDestinationId,

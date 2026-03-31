@@ -17,7 +17,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@maple/query-engine": "workspace:*",
     "@tinybirdco/sdk": "catalog:tinybird",
     "effect": "catalog:effect"
   },
