@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "lib/*"
   ],
   "scripts": {
     "dev": "turbo dev --ui=tui",

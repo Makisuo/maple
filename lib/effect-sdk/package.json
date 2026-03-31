@@ -1,0 +1,45 @@
+{
+  "name": "@maple-dev/effect-sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Maple observability SDK for Effect applications",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "node": {
+        "types": "./dist/index.server.d.mts",
+        "import": "./dist/index.server.mjs"
+      },
+      "default": {
+        "types": "./dist/index.client.d.mts",
+        "import": "./dist/index.client.mjs"
+      }
+    },
+    "./server": {
+      "types": "./dist/server/index.d.mts",
+      "import": "./dist/server/index.mjs"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.mts",
+      "import": "./dist/client/index.mjs"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "effect": ">=4.0.0-beta.33"
+  },
+  "devDependencies": {
+    "@effect/language-service": "catalog:effect",
+    "@types/node": "catalog:tooling",
+    "effect": "catalog:effect",
+    "tsdown": "^0.21.7",
+    "typescript": "catalog:tooling"
+  },
+  "dependencies": {
+    "std-env": "^4.0.0"
+  }
+}
