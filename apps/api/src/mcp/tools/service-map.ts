@@ -1,13 +1,16 @@
 import {
   optionalStringParam,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
-import { queryTinybird } from "../lib/query-tinybird"
+import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatNumber, formatDurationFromMs, formatPercent, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
+import { serviceMap } from "@maple/query-engine/observability"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerServiceMapTool(server: McpToolRegistrar) {
   server.tool(
@@ -22,14 +25,16 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
     ({ start_time, end_time, service_name, environment }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
+        const tenant = yield* resolveTenant
 
-        const result = yield* queryTinybird("service_dependencies", {
-          start_time: st,
-          end_time: et,
-          ...(environment && { deployment_env: environment }),
-        })
-
-        let edges = result.data
+        let edges = yield* serviceMap({
+          timeRange: { startTime: st, endTime: et },
+          service: service_name ?? undefined,
+          environment: environment ?? undefined,
+        }).pipe(
+          Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
+          Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "service_dependencies" })),
+        )
 
         // Filter to edges involving the specified service
         if (service_name) {
@@ -43,7 +48,6 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
           return { content: [{ type: "text", text: `No service dependencies found${filterInfo} in ${st} — ${et}` }] }
         }
 
-        // Collect unique services
         const services = new Set<string>()
         for (const e of edges) {
           services.add(e.sourceService)
@@ -59,13 +63,11 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 
         const headers = ["Source → Target", "Calls", "Errors", "Error Rate", "Avg Duration", "P95 Duration"]
         const rows = edges.map((e) => {
-          const callCount = Number(e.callCount)
-          const errorCount = Number(e.errorCount)
-          const errorRate = callCount > 0 ? (errorCount / callCount) * 100 : 0
+          const errorRate = e.callCount > 0 ? (e.errorCount / e.callCount) * 100 : 0
           return [
             `${e.sourceService} → ${e.targetService}`,
-            formatNumber(callCount),
-            formatNumber(errorCount),
+            formatNumber(e.callCount),
+            formatNumber(e.errorCount),
             formatPercent(errorRate),
             formatDurationFromMs(e.avgDurationMs),
             formatDurationFromMs(e.p95DurationMs),
@@ -74,32 +76,15 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 
         lines.push(formatTable(headers, rows))
 
-        // Next steps
         const nextSteps: string[] = []
-        // Suggest diagnosing services with highest error rates on edges
         const errorEdges = edges
-          .map((e) => ({
-            service: e.targetService,
-            errorRate: Number(e.callCount) > 0 ? Number(e.errorCount) / Number(e.callCount) * 100 : 0,
-          }))
+          .map((e) => ({ service: e.targetService, errorRate: e.callCount > 0 ? e.errorCount / e.callCount * 100 : 0 }))
           .filter((e) => e.errorRate > 1)
           .sort((a, b) => b.errorRate - a.errorRate)
 
         for (const e of errorEdges.slice(0, 2)) {
           nextSteps.push(`\`diagnose_service service_name="${e.service}"\` — investigate high error rate dependency`)
         }
-
-        if (service_name) {
-          const upstreamCallers = edges.filter((e) => e.targetService === service_name).map((e) => e.sourceService)
-          const downstreamDeps = edges.filter((e) => e.sourceService === service_name).map((e) => e.targetService)
-          if (upstreamCallers.length > 0) {
-            lines.push(``, `Upstream callers: ${upstreamCallers.join(", ")}`)
-          }
-          if (downstreamDeps.length > 0) {
-            lines.push(`Downstream dependencies: ${downstreamDeps.join(", ")}`)
-          }
-        }
-
         if (nextSteps.length === 0) {
           nextSteps.push('`list_services` — see all services with health metrics')
         }
@@ -113,8 +98,8 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
               edges: edges.map((e) => ({
                 sourceService: e.sourceService,
                 targetService: e.targetService,
-                callCount: Number(e.callCount),
-                errorCount: Number(e.errorCount),
+                callCount: e.callCount,
+                errorCount: e.errorCount,
                 avgDurationMs: e.avgDurationMs,
                 p95DurationMs: e.p95DurationMs,
               })),

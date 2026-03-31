@@ -7,13 +7,15 @@
     "./query-engine": "./src/query-engine.ts",
     "./where-clause": "./src/where-clause.ts",
     "./sql": "./src/sql/index.ts",
-    "./ch": "./src/ch/index.ts"
+    "./ch": "./src/ch/index.ts",
+    "./observability": "./src/observability/index.ts"
   },
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@maple/domain": "workspace:*",
     "effect": "catalog:effect"
   },
   "devDependencies": {

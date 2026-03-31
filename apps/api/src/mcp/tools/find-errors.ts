@@ -1,15 +1,17 @@
 import {
   optionalNumberParam,
   optionalStringParam,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
-import { queryTinybird } from "../lib/query-tinybird"
-import { getSpamPatternsParam } from "@/lib/spam-patterns"
+import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatNumber, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
+import { findErrors } from "@maple/query-engine/observability"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerFindErrorsTool(server: McpToolRegistrar) {
   server.tool(
@@ -25,40 +27,39 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
     ({ start_time, end_time, service, environment, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
+        const tenant = yield* resolveTenant
 
-        const result = yield* queryTinybird("errors_by_type", {
-          start_time: st,
-          end_time: et,
-          services: service,
-          ...(environment && { deployment_envs: environment }),
+        const errors = yield* findErrors({
+          timeRange: { startTime: st, endTime: et },
+          service: service ?? undefined,
+          environment: environment ?? undefined,
           limit: limit ?? 20,
-          exclude_spam_patterns: getSpamPatternsParam(),
-        })
+        }).pipe(
+          Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
+          Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "errors_by_type" })),
+        )
 
-        if (result.data.length === 0) {
+        if (errors.length === 0) {
           return { content: [{ type: "text", text: `No errors found in ${st} — ${et}` }] }
         }
 
-        const lines: string[] = [
-          `## Errors by Type`,
-          ``,
-        ]
+        const lines: string[] = [`## Errors by Type`, ``]
 
         const headers = ["Error Type", "Count", "Affected Services", "Last Seen"]
-        const rows = result.data.map((e) => [
+        const rows = errors.map((e) => [
           e.errorType.length > 60 ? e.errorType.slice(0, 57) + "..." : e.errorType,
           formatNumber(e.count),
-          Array.isArray(e.affectedServices) ? e.affectedServices.join(", ") : String(e.affectedServicesCount ?? ""),
-          String(e.lastSeen),
+          String(e.affectedServicesCount),
+          e.lastSeen,
         ])
 
         lines.push(formatTable(headers, rows))
-        lines.push(``, `Total: ${result.data.length} error types`)
+        lines.push(``, `Total: ${errors.length} error types`)
 
         const nextSteps: string[] = []
-        for (const e of result.data.slice(0, 3)) {
-          const errorTypeShort = e.errorType.length > 50 ? e.errorType.slice(0, 47) + "..." : e.errorType
-          nextSteps.push(`\`error_detail error_type="${errorTypeShort}"\` — see sample traces and logs`)
+        for (const e of errors.slice(0, 3)) {
+          const short = e.errorType.length > 50 ? e.errorType.slice(0, 47) + "..." : e.errorType
+          nextSteps.push(`\`error_detail error_type="${short}"\` — see sample traces and logs`)
         }
         nextSteps.push('`query_data source="traces" kind="timeseries" metric="error_rate"` — chart error rate trend')
         lines.push(formatNextSteps(nextSteps))
@@ -68,11 +69,11 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
             tool: "find_errors",
             data: {
               timeRange: { start: st, end: et },
-              errors: result.data.map((e) => ({
+              errors: errors.map((e) => ({
                 errorType: e.errorType,
-                count: Number(e.count),
-                affectedServicesCount: Number(e.affectedServicesCount ?? 0),
-                lastSeen: String(e.lastSeen),
+                count: e.count,
+                affectedServicesCount: e.affectedServicesCount,
+                lastSeen: e.lastSeen,
               })),
             },
           }),

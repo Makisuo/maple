@@ -71,9 +71,16 @@ export const search = Command.make("search", {
 
       if (Option.isSome(f.attr)) {
         const entries = Object.entries(f.attr.value)
-        if (entries.length > 0) {
+        if (entries.length === 1) {
+          // Single attr: use search_traces directly
           params.attribute_filter_key = entries[0]![0]
           params.attribute_filter_value = entries[0]![1]
+        } else if (entries.length > 1) {
+          // Multiple attrs: warn that only the first is used
+          params.attribute_filter_key = entries[0]![0]
+          params.attribute_filter_value = entries[0]![1]
+          yield* Effect.log(`Note: search_traces only supports 1 attribute filter. Using ${entries[0]![0]}=${entries[0]![1]}. Other filters ignored.`)
+          yield* Effect.log(`Tip: Use 'maple breakdown' or 'maple timeseries' with --attr for multi-attribute filtering.`)
         }
       }
 

@@ -1,14 +1,17 @@
 import {
   optionalNumberParam,
   optionalStringParam,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
-import { queryTinybird } from "../lib/query-tinybird"
+import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { truncate, formatNumber } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
+import { searchLogs } from "@maple/query-engine/observability"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerSearchLogsTool(server: McpToolRegistrar) {
   server.tool(
@@ -30,42 +33,27 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 30
         const off = offset ?? 0
+        const tenant = yield* resolveTenant
 
-        const [logsResult, countResult] = yield* Effect.all(
-          [
-            queryTinybird("list_logs", {
-              start_time: st,
-              end_time: et,
-              service,
-              severity,
-              search,
-              trace_id,
-              ...(span_id && { span_id }),
-              offset: off,
-              limit: lim,
-            }),
-            queryTinybird("logs_count", {
-              start_time: st,
-              end_time: et,
-              service,
-              severity,
-              search,
-              trace_id,
-              ...(span_id && { span_id }),
-            }),
-          ],
-          { concurrency: "unbounded" },
+        const result = yield* searchLogs({
+          timeRange: { startTime: st, endTime: et },
+          service: service ?? undefined,
+          severity: severity ?? undefined,
+          search: search ?? undefined,
+          traceId: trace_id ?? undefined,
+          limit: lim,
+          offset: off,
+        }).pipe(
+          Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
+          Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "list_logs" })),
         )
 
-        const total = countResult.data[0] ? Number(countResult.data[0].total) : 0
-        const logs = logsResult.data
-
-        if (logs.length === 0) {
+        if (result.logs.length === 0) {
           return { content: [{ type: "text", text: `No logs found matching filters (${st} — ${et})` }] }
         }
 
         const lines: string[] = [
-          `## Logs (${formatNumber(total)} total, showing ${logs.length})`,
+          `## Logs (${formatNumber(result.total)} total, showing ${result.logs.length})`,
           `Time range: ${st} — ${et}`,
         ]
 
@@ -75,29 +63,23 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
         if (search) filters.push(`search="${search}"`)
         if (trace_id) filters.push(`trace_id=${trace_id}`)
         if (filters.length > 0) lines.push(`Filters: ${filters.join(", ")}`)
-
         lines.push(``)
 
-        for (const log of logs) {
-          const ts = String(log.timestamp)
-          const time = ts.split(" ")[1] ?? ts
-          const sev = (log.severityText || "INFO").padEnd(5)
-          const svc = log.serviceName
-          const body = truncate(log.body, 120)
+        for (const log of result.logs) {
+          const time = log.timestamp.split(" ")[1] ?? log.timestamp
+          const sev = log.severityText.padEnd(5)
           const traceRef = log.traceId ? ` [trace:${log.traceId.slice(0, 8)}]` : ""
-          lines.push(`${time} [${sev}] ${svc}: ${body}${traceRef}`)
+          lines.push(`${time} [${sev}] ${log.serviceName}: ${truncate(log.body, 120)}${traceRef}`)
         }
 
-        const hasMore = off + logs.length < total
+        const hasMore = result.pagination.hasMore
         if (hasMore) {
-          const nextOffset = off + logs.length
-          lines.push(``, `Showing ${off + 1}–${off + logs.length} of ${formatNumber(total)}. Call again with offset=${nextOffset} for more.`)
+          const nextOffset = off + result.logs.length
+          lines.push(``, `Showing ${off + 1}–${off + result.logs.length} of ${formatNumber(result.total)}. Call again with offset=${nextOffset} for more.`)
         }
 
-        const traceIds = [...new Set(logs.filter((l) => l.traceId).map((l) => l.traceId))].slice(0, 3)
-        const nextSteps = traceIds.map((tid) =>
-          `\`inspect_trace trace_id="${tid}"\` — see full trace`
-        )
+        const traceIds = [...new Set(result.logs.filter((l) => l.traceId).map((l) => l.traceId))].slice(0, 3)
+        const nextSteps = traceIds.map((tid) => `\`inspect_trace trace_id="${tid}"\` — see full trace`)
         lines.push(formatNextSteps(nextSteps))
 
         return {
@@ -105,28 +87,9 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
             tool: "search_logs",
             data: {
               timeRange: { start: st, end: et },
-              totalCount: total,
-              pagination: {
-                total,
-                offset: off,
-                limit: lim,
-                hasMore,
-                ...(hasMore && { nextOffset: off + logs.length }),
-              },
-              logs: logs.map((l) => ({
-                timestamp: String(l.timestamp),
-                severityText: l.severityText || "INFO",
-                serviceName: l.serviceName,
-                body: l.body,
-                traceId: l.traceId || undefined,
-                spanId: l.spanId || undefined,
-              })),
-              filters: {
-                ...(service && { service }),
-                ...(severity && { severity }),
-                ...(search && { search }),
-                ...(trace_id && { traceId: trace_id }),
-              },
+              totalCount: result.total,
+              pagination: result.pagination,
+              logs: result.logs.map((l) => ({ ...l })),
             },
           }),
         }

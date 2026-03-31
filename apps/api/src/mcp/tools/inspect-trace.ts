@@ -1,44 +1,15 @@
 import {
   requiredStringParam,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
-import { queryTinybird } from "../lib/query-tinybird"
+import { resolveTenant } from "../lib/query-tinybird"
 import { formatDurationFromMs, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
-
-interface SpanNode {
-  spanId: string
-  parentSpanId: string
-  spanName: string
-  serviceName: string
-  durationMs: number
-  statusCode: string
-  statusMessage: string
-  attributes: Record<string, string>
-  children: SpanNode[]
-}
-
-/** Keys that are noisy HTTP headers / framework internals — skip in summaries */
-const SKIP_ATTR_PREFIXES = ["http.request.header.", "http.response.header.", "signoz."]
-const SKIP_ATTR_KEYS = new Set(["http.request.method", "url.scheme", "url.full", "url.path", "http.route", "http.response.status_code", "user_agent.original", "server.address", "server.port", "client.address"])
-
-function extractKeyAttributes(raw: string): Record<string, string> {
-  try {
-    const parsed = JSON.parse(raw) as Record<string, string>
-    const result: Record<string, string> = {}
-    for (const [k, v] of Object.entries(parsed)) {
-      if (!v || v === "") continue
-      if (SKIP_ATTR_KEYS.has(k)) continue
-      if (SKIP_ATTR_PREFIXES.some((p) => k.startsWith(p))) continue
-      result[k] = String(v)
-    }
-    return result
-  } catch {
-    return {}
-  }
-}
+import { inspectTrace, type SpanNode } from "@maple/query-engine/observability"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerInspectTraceTool(server: McpToolRegistrar) {
   server.tool(
@@ -49,50 +20,19 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
     }),
     ({ trace_id }) =>
       Effect.gen(function* () {
-        const [spansResult, logsResult] = yield* Effect.all(
-          [
-            queryTinybird("span_hierarchy", { trace_id }),
-            queryTinybird("list_logs", { trace_id, limit: 50 }),
-          ],
-          { concurrency: "unbounded" },
+        const tenant = yield* resolveTenant
+
+        const result = yield* inspectTrace(trace_id).pipe(
+          Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
+          Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "span_hierarchy" })),
         )
 
-        const spans = spansResult.data
-        if (spans.length === 0) {
+        if (result.spanCount === 0) {
           return { content: [{ type: "text", text: `No spans found for trace ${trace_id}` }] }
         }
 
-        // Build span tree
-        const nodeMap = new Map<string, SpanNode>()
-        const roots: SpanNode[] = []
-
-        for (const span of spans) {
-          nodeMap.set(span.spanId, {
-            spanId: span.spanId,
-            parentSpanId: span.parentSpanId,
-            spanName: span.spanName,
-            serviceName: span.serviceName,
-            durationMs: span.durationMs,
-            statusCode: span.statusCode,
-            statusMessage: span.statusMessage,
-            attributes: extractKeyAttributes(span.spanAttributes),
-            children: [],
-          })
-        }
-
-        for (const node of nodeMap.values()) {
-          if (node.parentSpanId && nodeMap.has(node.parentSpanId)) {
-            nodeMap.get(node.parentSpanId)!.children.push(node)
-          } else {
-            roots.push(node)
-          }
-        }
-
-        const serviceSet = new Set(spans.map((s) => s.serviceName))
-        const rootDuration = roots[0]?.durationMs ?? 0
-
         const lines: string[] = [
-          `## Trace ${trace_id} (${serviceSet.size} services, ${spans.length} spans, ${formatDurationFromMs(rootDuration)})`,
+          `## Trace ${trace_id} (${result.serviceCount} services, ${result.spanCount} spans, ${formatDurationFromMs(result.rootDurationMs)})`,
           ``,
         ]
 
@@ -117,35 +57,33 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
           })
         }
 
-        for (const root of roots) {
+        for (const root of result.spans) {
           renderNode(root, "", true)
         }
 
-        const logs = logsResult.data
-        if (logs.length > 0) {
-          lines.push(``, `Related Logs (${logs.length}):`)
-          for (const log of logs.slice(0, 20)) {
-            const ts = String(log.timestamp)
+        if (result.logs.length > 0) {
+          lines.push(``, `Related Logs (${result.logs.length}):`)
+          for (const log of result.logs) {
+            const ts = log.timestamp
             const time = ts.split(" ")[1] ?? ts
-            const sev = (log.severityText || "INFO").padEnd(5)
-            const svc = log.serviceName
-            const body = truncate(log.body, 100)
-            lines.push(`  ${time} [${sev}] ${svc}: ${body}`)
-          }
-          if (logs.length > 20) {
-            lines.push(`  ... and ${logs.length - 20} more logs`)
+            const sev = log.severityText.padEnd(5)
+            lines.push(`  ${time} [${sev}] ${log.serviceName}: ${truncate(log.body, 100)}`)
           }
         }
 
+        const serviceSet = new Set(result.spans.map(function collectServices(n: SpanNode): string[] {
+          return [n.serviceName, ...n.children.flatMap(collectServices)]
+        }).flat())
+
         const nextSteps: string[] = []
-        const hasErrors = spans.some((s) => s.statusCode === "Error")
+        const hasErrors = result.spans.some(function hasError(n: SpanNode): boolean {
+          return n.statusCode === "Error" || n.children.some(hasError)
+        })
         if (hasErrors) {
           nextSteps.push(`\`search_logs trace_id="${trace_id}"\` — see all logs for this trace`)
         }
-        if (serviceSet.size > 1) {
-          for (const svc of [...serviceSet].slice(0, 2)) {
-            nextSteps.push(`\`diagnose_service service_name="${svc}"\` — investigate this service`)
-          }
+        for (const svc of [...serviceSet].slice(0, 2)) {
+          nextSteps.push(`\`diagnose_service service_name="${svc}"\` — investigate this service`)
         }
         lines.push(formatNextSteps(nextSteps))
 
@@ -154,17 +92,11 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
             tool: "inspect_trace",
             data: {
               traceId: trace_id,
-              serviceCount: serviceSet.size,
-              spanCount: spans.length,
-              rootDurationMs: rootDuration,
-              spans: roots,
-              logs: logsResult.data.slice(0, 20).map((l) => ({
-                timestamp: String(l.timestamp),
-                severityText: l.severityText || "INFO",
-                serviceName: l.serviceName,
-                body: l.body,
-                spanId: l.spanId,
-              })),
+              serviceCount: result.serviceCount,
+              spanCount: result.spanCount,
+              rootDurationMs: result.rootDurationMs,
+              spans: [...result.spans] as any,
+              logs: result.logs.map((l) => ({ ...l })),
             },
           }),
         }

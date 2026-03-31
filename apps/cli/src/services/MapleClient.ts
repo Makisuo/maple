@@ -111,15 +111,16 @@ export class MapleClient extends ServiceMap.Service<MapleClient, MapleClientShap
               }),
           })
 
-          if (result.error) {
+          const res = result as any
+          if (res.error) {
             return yield* Effect.fail(
-              new MapleApiError({ message: `MCP error: ${JSON.stringify(result.error)}` }),
+              new MapleApiError({ message: `MCP error: ${JSON.stringify(res.error)}` }),
             )
           }
 
           // Extract structured data from the dual content format
           // Second text content item contains JSON with __maple_ui marker
-          const content = result.result?.content ?? []
+          const content = res.result?.content ?? []
           const textContent = content.filter((c: any) => c.type === "text" && !c.text?.includes("__maple_ui")).map((c: any) => c.text).join("\n")
 
           for (const c of content) {
@@ -205,14 +206,15 @@ export class MapleClient extends ServiceMap.Service<MapleClient, MapleClientShap
               }),
           })
 
-          if (result.error) {
+          const res = result as any
+          if (res.error) {
             return yield* Effect.fail(
-              new MapleApiError({ message: `MCP error: ${JSON.stringify(result.error)}`, pipe }),
+              new MapleApiError({ message: `MCP error: ${JSON.stringify(res.error)}`, pipe }),
             )
           }
 
           // Parse structured data from dual content (second text item has __maple_ui marker)
-          const content = result.result?.content ?? []
+          const content = res.result?.content ?? []
           for (const c of content) {
             if (c.type === "text" && c.text?.includes("__maple_ui")) {
               try {

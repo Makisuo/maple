@@ -244,6 +244,7 @@
     "packages/query-engine": {
       "name": "@maple/query-engine",
       "dependencies": {
+        "@maple/domain": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
