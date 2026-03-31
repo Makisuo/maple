@@ -1,20 +1,17 @@
 import {
   optionalNumberParam,
   optionalStringParam,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
-import { queryTinybird } from "../lib/query-tinybird"
+import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationMs, formatDurationFromMs, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
-
-const SYSTEM_SPAN_PATTERNS = ["ClusterCron"]
-
-function isSystemTrace(rootSpanName: string): boolean {
-  return SYSTEM_SPAN_PATTERNS.some((pattern) => rootSpanName.includes(pattern))
-}
+import { findSlowTraces } from "@maple/query-engine/observability"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerFindSlowTracesTool(server: McpToolRegistrar) {
   server.tool(
@@ -30,67 +27,48 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
     ({ start_time, end_time, service, environment, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
-        const lim = limit ?? 10
+        const tenant = yield* resolveTenant
 
-        const [tracesResult, statsResult] = yield* Effect.all(
-          [
-            queryTinybird("list_traces", {
-              start_time: st,
-              end_time: et,
-              service,
-              ...(environment && { deployment_env: environment }),
-              limit: 500,
-            }),
-            queryTinybird("traces_duration_stats", {
-              start_time: st,
-              end_time: et,
-              service,
-            }),
-          ],
-          { concurrency: "unbounded" },
+        const result = yield* findSlowTraces({
+          timeRange: { startTime: st, endTime: et },
+          service: service ?? undefined,
+          environment: environment ?? undefined,
+          limit: limit ?? 10,
+        }).pipe(
+          Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
+          Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "list_traces" })),
         )
 
-        const stats = statsResult.data[0]
-        const traces = [...tracesResult.data]
-          .filter((t) => !isSystemTrace(t.rootSpanName))
-          .sort((a, b) => Number(b.durationMicros) - Number(a.durationMicros))
-          .slice(0, lim)
-
-        if (traces.length === 0) {
+        if (result.traces.length === 0) {
           return { content: [{ type: "text", text: `No traces found in ${st} — ${et}` }] }
         }
 
-        const lines: string[] = [
-          `## Slowest Traces`,
-          `Time range: ${st} — ${et}`,
-        ]
+        const lines: string[] = [`## Slowest Traces`, `Time range: ${st} — ${et}`]
 
-        if (stats) {
+        if (result.stats) {
           lines.push(
-            ``,
-            `Duration Percentiles:`,
-            `  P50: ${formatDurationFromMs(stats.p50DurationMs)}`,
-            `  P95: ${formatDurationFromMs(stats.p95DurationMs)}`,
-            `  Min: ${formatDurationFromMs(stats.minDurationMs)}`,
-            `  Max: ${formatDurationFromMs(stats.maxDurationMs)}`,
+            ``, `Duration Percentiles:`,
+            `  P50: ${formatDurationFromMs(result.stats.p50Ms)}`,
+            `  P95: ${formatDurationFromMs(result.stats.p95Ms)}`,
+            `  Min: ${formatDurationFromMs(result.stats.minMs)}`,
+            `  Max: ${formatDurationFromMs(result.stats.maxMs)}`,
           )
         }
 
         lines.push(``)
 
-        const headers = ["Trace ID", "Root Span", "Duration", "Spans", "Services", "Error"]
-        const rows = traces.map((t) => [
+        const headers = ["Trace ID", "Root Span", "Duration", "Service", "Error"]
+        const rows = result.traces.map((t) => [
           t.traceId.slice(0, 12) + "...",
-          t.rootSpanName.length > 30 ? t.rootSpanName.slice(0, 27) + "..." : t.rootSpanName,
-          formatDurationMs(t.durationMicros),
-          String(Number(t.spanCount)),
-          t.services.join(", "),
-          Number(t.hasError) ? "Yes" : "",
+          t.spanName.length > 30 ? t.spanName.slice(0, 27) + "..." : t.spanName,
+          formatDurationFromMs(t.durationMs),
+          t.serviceName,
+          t.statusCode === "Error" ? "Yes" : "",
         ])
 
         lines.push(formatTable(headers, rows))
 
-        const nextSteps = traces.slice(0, 3).map((t) =>
+        const nextSteps = result.traces.slice(0, 3).map((t) =>
           `\`inspect_trace trace_id="${t.traceId}"\` — find bottleneck spans`
         )
         lines.push(formatNextSteps(nextSteps))
@@ -100,21 +78,14 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
             tool: "find_slow_traces",
             data: {
               timeRange: { start: st, end: et },
-              stats: stats
-                ? {
-                    p50Ms: stats.p50DurationMs,
-                    p95Ms: stats.p95DurationMs,
-                    minMs: stats.minDurationMs,
-                    maxMs: stats.maxDurationMs,
-                  }
-                : undefined,
-              traces: traces.map((t) => ({
+              stats: result.stats ?? undefined,
+              traces: result.traces.map((t) => ({
                 traceId: t.traceId,
-                rootSpanName: t.rootSpanName,
-                durationMs: Number(t.durationMicros) / 1000,
-                spanCount: Number(t.spanCount),
-                services: t.services,
-                hasError: Boolean(Number(t.hasError)),
+                rootSpanName: t.spanName,
+                durationMs: t.durationMs,
+                spanCount: 1,
+                services: [t.serviceName],
+                hasError: t.statusCode === "Error",
               })),
             },
           }),

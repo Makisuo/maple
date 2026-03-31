@@ -3,15 +3,17 @@ import {
   optionalNumberParam,
   optionalStringParam,
   requiredStringParam,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
-import { queryTinybird } from "../lib/query-tinybird"
-import { getSpamPatternsParam } from "@/lib/spam-patterns"
+import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
-import { formatDurationMs, truncate } from "../lib/format"
+import { formatDurationFromMs, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
+import { errorDetail } from "@maple/query-engine/observability"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerErrorDetailTool(server: McpToolRegistrar) {
   server.tool(
@@ -28,97 +30,64 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
     ({ error_type, start_time, end_time, service, include_timeseries, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
-        const lim = limit ?? 5
+        const tenant = yield* resolveTenant
 
-        const tracesResult = yield* queryTinybird("error_detail_traces", {
-          error_type,
-          start_time: st,
-          end_time: et,
-          services: service,
-          limit: lim,
-          exclude_spam_patterns: getSpamPatternsParam(),
-        })
-
-        const traces = tracesResult.data
-        if (traces.length === 0) {
-          return { content: [{ type: "text", text: `No traces found for error type "${error_type}" in ${st} — ${et}` }] }
-        }
-
-        // Fetch logs and optional timeseries in parallel
-        const traceIds = traces.slice(0, 3).map((t) => t.traceId)
-        const logsResults = yield* Effect.all(
-          traceIds.map((tid) =>
-            queryTinybird("list_logs", { trace_id: tid, limit: 10 }),
-          ),
-          { concurrency: "unbounded" },
+        const result = yield* errorDetail({
+          errorType: error_type,
+          timeRange: { startTime: st, endTime: et },
+          service: service ?? undefined,
+          includeTimeseries: include_timeseries ?? false,
+          limit: limit ?? 5,
+        }).pipe(
+          Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
+          Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "error_detail_traces" })),
         )
 
-        // Optionally fetch error timeseries
-        const timeseriesData = include_timeseries
-          ? yield* queryTinybird("errors_timeseries", {
-              error_type,
-              start_time: st,
-              end_time: et,
-              ...(service && { services: service }),
-              exclude_spam_patterns: getSpamPatternsParam(),
-            }).pipe(Effect.map((r) => r.data))
-          : undefined
+        if (result.traces.length === 0) {
+          return { content: [{ type: "text", text: `No traces found for error type "${error_type}" in ${st} — ${et}` }] }
+        }
 
         const lines: string[] = [
           `## Error Detail: "${truncate(error_type, 80)}"`,
           `Time range: ${st} — ${et}`,
-          `Sample traces: ${traces.length}`,
+          `Sample traces: ${result.traces.length}`,
           ``,
         ]
 
-        for (let i = 0; i < traces.length; i++) {
-          const t = traces[i]!
-          const dur = formatDurationMs(t.durationMicros)
+        for (let i = 0; i < result.traces.length; i++) {
+          const t = result.traces[i]!
           lines.push(
             `### Trace ${i + 1}: ${t.traceId.slice(0, 16)}...`,
             `  Root span: ${t.rootSpanName}`,
-            `  Duration: ${dur}`,
-            `  Spans: ${Number(t.spanCount)}`,
+            `  Duration: ${formatDurationFromMs(t.durationMs)}`,
+            `  Spans: ${t.spanCount}`,
             `  Services: ${t.services.join(", ")}`,
             `  Time: ${t.startTime}`,
           )
-
           if (t.errorMessage) {
             lines.push(`  Error: ${truncate(t.errorMessage, 120)}`)
           }
-
-          // Show logs if available
-          if (i < logsResults.length) {
-            const logs = logsResults[i]!.data
-            if (logs.length > 0) {
-              lines.push(`  Logs (${logs.length}):`)
-              for (const log of logs.slice(0, 5)) {
-                const ts = String(log.timestamp)
-                const time = ts.split(" ")[1] ?? ts
-                const sev = (log.severityText || "INFO").padEnd(5)
-                lines.push(`    ${time} [${sev}] ${truncate(log.body, 90)}`)
-              }
-              if (logs.length > 5) {
-                lines.push(`    ... and ${logs.length - 5} more`)
-              }
+          if (t.logs.length > 0) {
+            lines.push(`  Logs (${t.logs.length}):`)
+            for (const log of t.logs) {
+              const time = log.timestamp.split(" ")[1] ?? log.timestamp
+              const sev = log.severityText.padEnd(5)
+              lines.push(`    ${time} [${sev}] ${truncate(log.body, 90)}`)
             }
           }
-
           lines.push(``)
         }
 
-        // Show timeseries if included
-        if (timeseriesData && timeseriesData.length > 0) {
+        if (result.timeseries && result.timeseries.length > 0) {
           lines.push(`### Error Trend`)
-          for (const point of timeseriesData) {
-            const ts = String(point.bucket)
-            const time = ts.includes("T") ? ts.slice(11, 19) : ts.split(" ")[1] ?? ts
-            lines.push(`  ${time}: ${Number(point.count)} errors`)
+          for (const point of result.timeseries) {
+            const time = point.bucket.includes("T") ? point.bucket.slice(11, 19) : point.bucket.split(" ")[1] ?? point.bucket
+            lines.push(`  ${time}: ${point.count} errors`)
           }
           lines.push(``)
         }
 
-        const nextSteps = traces.slice(0, 3).map((t) =>
+        const nextSteps = result.traces.slice(0, 3).map((t) =>
           `\`inspect_trace trace_id="${t.traceId}"\` — full span tree`
         )
         nextSteps.push(`\`search_logs service="${service ?? ""}" severity="ERROR"\` — search for related error logs`)
@@ -130,19 +99,15 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
             data: {
               timeRange: { start: st, end: et },
               errorType: error_type,
-              traces: traces.map((t, i) => ({
+              traces: result.traces.map((t) => ({
                 traceId: t.traceId,
                 rootSpanName: t.rootSpanName,
-                durationMs: Number(t.durationMicros) / 1000,
-                spanCount: Number(t.spanCount),
-                services: t.services,
-                startTime: String(t.startTime),
+                durationMs: t.durationMs,
+                spanCount: t.spanCount,
+                services: [...t.services],
+                startTime: t.startTime,
                 errorMessage: t.errorMessage || undefined,
-                logs: (i < logsResults.length ? logsResults[i]!.data.slice(0, 5) : []).map((l) => ({
-                  timestamp: String(l.timestamp),
-                  severityText: l.severityText || "INFO",
-                  body: l.body,
-                })),
+                logs: t.logs.map((l) => ({ ...l })),
               })),
             },
           }),

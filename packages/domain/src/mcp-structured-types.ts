@@ -72,7 +72,7 @@ export interface FindSlowTracesData {
 export interface ErrorTypeRow {
   errorType: string
   count: number
-  affectedServices: string[]
+  affectedServicesCount: number
   lastSeen: string
 }
 

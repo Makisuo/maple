@@ -3,19 +3,22 @@ import {
   optionalNumberParam,
   optionalStringParam,
   validationError,
+  McpQueryError,
   type McpToolRegistrar,
 } from "./types"
-import { queryTinybird } from "../lib/query-tinybird"
+import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
-import { formatDurationMs, formatTable } from "../lib/format"
+import { formatDurationFromMs, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
+import { searchTraces } from "@maple/query-engine/observability"
+import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 
 export function registerSearchTracesTool(server: McpToolRegistrar) {
   server.tool(
     "search_traces",
-    "Search traces by service, duration, error status, HTTP method, span name, or custom attributes. Supports pagination — check hasMore in the response. Use inspect_trace on interesting trace_ids. Use explore_attributes to discover attribute keys.",
+    "Search traces by service, duration, error status, HTTP method, span name, or custom attributes. When span_name is provided, searches at the span level (not just root spans) for accurate results. Use inspect_trace on interesting trace_ids. Use explore_attributes to discover attribute keys.",
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
@@ -45,62 +48,74 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
           )
         }
 
-        // Default: search all spans in the trace. root_only=true restricts to root span only.
-        const rootOnly = params.root_only === true
+        const tenant = yield* resolveTenant
 
-        const result = yield* queryTinybird("list_traces", {
-          start_time: st,
-          end_time: et,
-          ...(params.service && (rootOnly
-            ? { service: params.service }
-            : { any_service: params.service }
-          )),
-          has_error: params.has_error,
-          min_duration_ms: params.min_duration_ms,
-          max_duration_ms: params.max_duration_ms,
-          http_method: params.http_method,
-          ...(params.span_name && (rootOnly
-            ? { span_name: params.span_name, span_name_match_mode: "contains" }
-            : { any_span_name: params.span_name, any_span_name_match_mode: "contains" }
-          )),
-          ...(params.trace_id && { trace_id: params.trace_id }),
-          ...(params.attribute_key && { attribute_filter_key: params.attribute_key }),
-          ...(params.attribute_value && { attribute_filter_value: params.attribute_value }),
-          offset: off,
+        const result = yield* searchTraces({
+          timeRange: { startTime: st, endTime: et },
+          service: params.service ?? undefined,
+          spanName: params.span_name ?? undefined,
+          spanNameMatchMode: params.span_name ? "contains" : undefined,
+          hasError: params.has_error ?? undefined,
+          minDurationMs: params.min_duration_ms ?? undefined,
+          maxDurationMs: params.max_duration_ms ?? undefined,
+          httpMethod: params.http_method ?? undefined,
+          traceId: params.trace_id ?? undefined,
+          attributeFilters: params.attribute_key
+            ? [{ key: params.attribute_key, value: params.attribute_value ?? "" }]
+            : undefined,
+          rootOnly: params.root_only ?? false,
           limit: lim,
-        })
+          offset: off,
+        }).pipe(
+          Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
+          Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "list_traces" })),
+        )
 
-        const traces = result.data
-        if (traces.length === 0) {
+        const spans = result.spans
+        if (spans.length === 0) {
           return { content: [{ type: "text", text: `No traces found matching filters (${st} — ${et})` }] }
         }
 
-        const hasMore = traces.length === lim
+        const hasMore = result.pagination.hasMore
+        const isSpanLevel = !!(params.span_name && !params.root_only)
+
         const lines: string[] = [
-          `## Traces (showing ${off + 1}–${off + traces.length})`,
+          `## ${isSpanLevel ? "Matching Spans" : "Traces"} (showing ${off + 1}–${off + spans.length})`,
           `Time range: ${st} — ${et}`,
           ``,
         ]
 
-        const headers = ["Trace ID", "Root Span", "Duration", "Spans", "Services", "Error"]
-        const rows = traces.map((t) => [
-          t.traceId.slice(0, 12) + "...",
-          t.rootSpanName.length > 30 ? t.rootSpanName.slice(0, 27) + "..." : t.rootSpanName,
-          formatDurationMs(t.durationMicros),
-          String(Number(t.spanCount)),
-          t.services.join(", "),
-          Number(t.hasError) ? "Yes" : "",
-        ])
+        const headers = isSpanLevel
+          ? ["Trace ID", "Span Name", "Service", "Duration", "Status"]
+          : ["Trace ID", "Root Span", "Duration", "Service", "Error"]
+
+        const rows = spans.map((s) =>
+          isSpanLevel
+            ? [
+                s.traceId.slice(0, 12) + "...",
+                s.spanName.length > 40 ? s.spanName.slice(0, 37) + "..." : s.spanName,
+                s.serviceName,
+                formatDurationFromMs(s.durationMs),
+                s.statusCode === "Error" ? "Error" : "",
+              ]
+            : [
+                s.traceId.slice(0, 12) + "...",
+                s.spanName.length > 30 ? s.spanName.slice(0, 27) + "..." : s.spanName,
+                formatDurationFromMs(s.durationMs),
+                s.serviceName,
+                s.statusCode === "Error" ? "Yes" : "",
+              ],
+        )
 
         lines.push(formatTable(headers, rows))
 
         if (hasMore) {
-          const nextOffset = off + traces.length
+          const nextOffset = off + spans.length
           lines.push(``, `More results available. Call again with offset=${nextOffset} for the next page.`)
         }
 
-        const nextSteps = traces.slice(0, 3).map((t) =>
-          `\`inspect_trace trace_id="${t.traceId}"\` — full span tree`
+        const nextSteps = spans.slice(0, 3).map((s) =>
+          `\`inspect_trace trace_id="${s.traceId}"\` — full span tree`
         )
         lines.push(formatNextSteps(nextSteps))
 
@@ -113,15 +128,15 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
                 offset: off,
                 limit: lim,
                 hasMore,
-                ...(hasMore && { nextOffset: off + traces.length }),
+                ...(hasMore && { nextOffset: off + spans.length }),
               },
-              traces: traces.map((t) => ({
-                traceId: t.traceId,
-                rootSpanName: t.rootSpanName,
-                durationMs: Number(t.durationMicros) / 1000,
-                spanCount: Number(t.spanCount),
-                services: t.services,
-                hasError: Boolean(Number(t.hasError)),
+              traces: spans.map((s) => ({
+                traceId: s.traceId,
+                rootSpanName: s.spanName,
+                durationMs: s.durationMs,
+                spanCount: 1,
+                services: [s.serviceName],
+                hasError: s.statusCode === "Error",
               })),
             },
           }),
