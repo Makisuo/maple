@@ -44,8 +44,17 @@ export interface TraceRow {
   errorMessage?: string
 }
 
+export interface PaginationMeta {
+  offset: number
+  limit: number
+  hasMore: boolean
+  total?: number
+  nextOffset?: number
+}
+
 export interface SearchTracesData {
   timeRange: { start: string; end: string }
+  pagination?: PaginationMeta
   traces: TraceRow[]
 }
 
@@ -132,6 +141,7 @@ export interface LogRow {
 export interface SearchLogsData {
   timeRange: { start: string; end: string }
   totalCount: number
+  pagination?: PaginationMeta
   logs: LogRow[]
   filters?: {
     service?: string
@@ -171,6 +181,7 @@ export interface MetricRow {
 
 export interface ListMetricsData {
   timeRange: { start: string; end: string }
+  pagination?: PaginationMeta
   summary: Array<{
     metricType: string
     metricCount: number
@@ -184,6 +195,7 @@ export interface QueryDataData {
   kind: string
   metric: string
   groupBy?: string
+  decisions?: string[]
   result:
     | { kind: "timeseries"; data: Array<{ bucket: string; series: Record<string, number> }> }
     | { kind: "breakdown"; data: Array<{ name: string; value: number }> }
@@ -230,6 +242,27 @@ export interface ListAlertRulesData {
 
 export interface CreateAlertRuleData {
   rule: AlertRuleRow
+}
+
+export interface AlertRuleDetailRow extends AlertRuleRow {
+  serviceNames: string[]
+  excludeServiceNames: string[]
+  groupBy: string | null
+  minimumSampleCount: number
+  consecutiveBreachesRequired: number
+  consecutiveHealthyRequired: number
+  renotifyIntervalMinutes: number
+  metricName: string | null
+  metricType: string | null
+  metricAggregation: string | null
+  apdexThresholdMs: number | null
+  queryDataSource: string | null
+  queryAggregation: string | null
+  queryWhereClause: string | null
+}
+
+export interface GetAlertRuleData {
+  rule: AlertRuleDetailRow
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +318,10 @@ export interface CreateDashboardData {
   dashboard: DashboardRow
 }
 
+export interface UpdateDashboardData {
+  dashboard: DashboardRow
+}
+
 // ---------------------------------------------------------------------------
 // Compare periods types
 // ---------------------------------------------------------------------------
@@ -316,8 +353,65 @@ export interface ExploreAttributesData {
   values?: Array<{ value: string; count: number }>
 }
 
+// ---------------------------------------------------------------------------
+// List services types
+// ---------------------------------------------------------------------------
+
+export interface ListServicesData {
+  timeRange: { start: string; end: string }
+  total: number
+  services: Array<{
+    name: string
+    throughput: number
+    errorRate: number
+    p95Ms: number
+  }>
+}
+
+// ---------------------------------------------------------------------------
+// Get service top operations types
+// ---------------------------------------------------------------------------
+
+export interface GetServiceTopOperationsData {
+  timeRange: { start: string; end: string }
+  serviceName: string
+  metric: string
+  total: number
+  operations: Array<{
+    name: string
+    value: number
+  }>
+}
+
+// ---------------------------------------------------------------------------
+// Get incident timeline types
+// ---------------------------------------------------------------------------
+
+export interface IncidentTimelineRow {
+  id: string
+  ruleId: string
+  ruleName: string
+  serviceName: string | null
+  signalType: string
+  severity: string
+  status: string
+  comparator: string
+  threshold: number
+  lastObservedValue: number | null
+  firstTriggeredAt: string
+  lastTriggeredAt: string
+  resolvedAt: string | null
+  lastNotifiedAt: string | null
+}
+
+export interface GetIncidentTimelineData {
+  incidents: IncidentTimelineRow[]
+  total: number
+  openCount: number
+  resolvedCount: number
+}
+
 export type StructuredToolOutput =
-  | { tool: "system_health"; data: SystemHealthData }
   | { tool: "search_traces"; data: SearchTracesData }
   | { tool: "find_slow_traces"; data: FindSlowTracesData }
   | { tool: "find_errors"; data: FindErrorsData }
@@ -331,8 +425,13 @@ export type StructuredToolOutput =
   | { tool: "list_alert_rules"; data: ListAlertRulesData }
   | { tool: "list_alert_incidents"; data: ListAlertIncidentsData }
   | { tool: "create_alert_rule"; data: CreateAlertRuleData }
+  | { tool: "get_alert_rule"; data: GetAlertRuleData }
   | { tool: "list_dashboards"; data: ListDashboardsData }
   | { tool: "get_dashboard"; data: GetDashboardData }
   | { tool: "create_dashboard"; data: CreateDashboardData }
+  | { tool: "update_dashboard"; data: UpdateDashboardData }
   | { tool: "compare_periods"; data: ComparePeriodsData }
   | { tool: "explore_attributes"; data: ExploreAttributesData }
+  | { tool: "list_services"; data: ListServicesData }
+  | { tool: "get_service_top_operations"; data: GetServiceTopOperationsData }
+  | { tool: "get_incident_timeline"; data: GetIncidentTimelineData }

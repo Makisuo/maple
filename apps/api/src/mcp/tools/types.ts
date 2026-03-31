@@ -58,3 +58,12 @@ export const optionalNumberParam = (description: string) =>
 
 export const optionalBooleanParam = (description: string) =>
   Schema.optional(Schema.Boolean).annotate({ description })
+
+/**
+ * Create a validation error response with an optional usage example.
+ * Including examples helps LLMs self-correct on retry.
+ */
+export function validationError(message: string, example?: string): McpToolResult {
+  const text = example ? `${message}\n\nExample:\n  ${example}` : message
+  return { isError: true, content: [{ type: "text", text }] }
+}

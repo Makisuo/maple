@@ -35,20 +35,6 @@ export function buildSpec(output: StructuredToolOutput): Spec {
   const elements: ElementMap = {}
 
   switch (output.tool) {
-    case "system_health": {
-      const d = output.data
-      const root = addElement(elements, "SystemHealthCard", {
-        serviceCount: d.serviceCount,
-        totalSpans: d.totalSpans,
-        totalErrors: d.totalErrors,
-        errorRate: d.errorRate,
-        affectedServicesCount: d.affectedServicesCount,
-        latency: d.latency,
-        topErrors: d.topErrors,
-      })
-      return { root, elements }
-    }
-
     case "search_traces": {
       const d = output.data
       const root = addElement(elements, "TraceList", {
@@ -407,6 +393,83 @@ export function buildSpec(output: StructuredToolOutput): Spec {
 
       const root = addElement(elements, "StatCards", {
         cards: [{ label: "Source", value: d.source, format: "text" }],
+      })
+      return { root, elements }
+    }
+
+    case "list_services": {
+      const d = output.data
+      const headers = ["Service", "Throughput", "Error Rate", "P95"]
+      const rows = d.services.map((s) => [
+        s.name,
+        String(s.throughput),
+        `${s.errorRate.toFixed(2)}%`,
+        `${s.p95Ms.toFixed(1)}ms`,
+      ])
+      const root = addElement(elements, "DataTable", {
+        headers,
+        rows,
+        title: `Services (${d.total})`,
+      })
+      return { root, elements }
+    }
+
+    case "get_service_top_operations": {
+      const d = output.data
+      const headers = ["Operation", d.metric]
+      const rows = d.operations.map((op) => [op.name, String(op.value)])
+      const root = addElement(elements, "DataTable", {
+        headers,
+        rows,
+        title: `Top Operations: ${d.serviceName} (${d.metric})`,
+      })
+      return { root, elements }
+    }
+
+    case "get_alert_rule": {
+      const d = output.data
+      const r = d.rule
+      const root = addElement(elements, "StatCards", {
+        cards: [
+          { label: "Rule", value: r.name, format: "text" },
+          { label: "Severity", value: r.severity, format: "text" },
+          { label: "Signal", value: r.signalType, format: "text" },
+          { label: "Threshold", value: `${r.comparator} ${r.threshold}`, format: "text" },
+          { label: "Window", value: `${r.windowMinutes}m`, format: "text" },
+          { label: "Enabled", value: r.enabled ? "Yes" : "No", format: "text" },
+        ],
+      })
+      return { root, elements }
+    }
+
+    case "update_dashboard": {
+      const d = output.data
+      const db = d.dashboard
+      const root = addElement(elements, "StatCards", {
+        cards: [
+          { label: "Dashboard", value: db.name, format: "text" },
+          { label: "ID", value: db.id, format: "text" },
+          { label: "Widgets", value: db.widgetCount, format: "number" },
+        ],
+      })
+      return { root, elements }
+    }
+
+    case "get_incident_timeline": {
+      const d = output.data
+      const headers = ["Rule", "Severity", "Status", "Signal", "Value", "Triggered"]
+      const rows = d.incidents.map((i) => [
+        i.ruleName,
+        i.severity,
+        i.status,
+        i.signalType,
+        i.lastObservedValue != null ? String(i.lastObservedValue) : "—",
+        i.firstTriggeredAt.slice(0, 19),
+      ])
+      const root = addElement(elements, "DataTable", {
+        headers,
+        rows,
+        title: `Incident Timeline (${d.openCount} open, ${d.resolvedCount} resolved)`,
       })
       return { root, elements }
     }

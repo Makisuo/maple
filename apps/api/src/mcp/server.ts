@@ -1,6 +1,5 @@
 import { McpSchema, McpServer as EffectMcpServer } from "effect/unstable/ai"
 import { Effect, Layer, Schema, ServiceMap } from "effect"
-import { registerSystemHealthTool } from "./tools/system-health"
 import { registerFindErrorsTool } from "./tools/find-errors"
 import { registerInspectTraceTool } from "./tools/inspect-trace"
 import { registerSearchLogsTool } from "./tools/search-logs"
@@ -13,12 +12,17 @@ import { registerQueryDataTool } from "./tools/query-data"
 import { registerServiceMapTool } from "./tools/service-map"
 import { registerListAlertRulesTool } from "./tools/list-alert-rules"
 import { registerListAlertIncidentsTool } from "./tools/list-alert-incidents"
+import { registerGetIncidentTimelineTool } from "./tools/get-incident-timeline"
 import { registerCreateAlertRuleTool } from "./tools/create-alert-rule"
 import { registerListDashboardsTool } from "./tools/list-dashboards"
 import { registerGetDashboardTool } from "./tools/get-dashboard"
 import { registerCreateDashboardTool } from "./tools/create-dashboard"
+import { registerUpdateDashboardTool } from "./tools/update-dashboard"
+import { registerGetAlertRuleTool } from "./tools/get-alert-rule"
 import { registerComparePeriodsTool } from "./tools/compare-periods"
 import { registerExploreAttributesTool } from "./tools/explore-attributes"
+import { registerListServicesTool } from "./tools/list-services"
+import { registerGetServiceTopOperationsTool } from "./tools/get-service-top-operations"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "./tools/types"
 
 interface ToolDefinition {
@@ -53,8 +57,11 @@ const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
     : document.schema
 }
 
-const toDecodeErrorMessage = (_definition: ToolDefinition, error: unknown): string => {
-  return Schema.isSchemaError(error) ? String(error) : String(error)
+const toDecodeErrorMessage = (definition: ToolDefinition, error: unknown): string => {
+  if (Schema.isSchemaError(error)) {
+    return `${String(error)}. Check the "${definition.name}" tool schema for valid parameter names and types.`
+  }
+  return String(error)
 }
 
 const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
@@ -70,7 +77,6 @@ const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
     },
   }
 
-  registerSystemHealthTool(registrar)
   registerFindErrorsTool(registrar)
   registerInspectTraceTool(registrar)
   registerSearchLogsTool(registrar)
@@ -84,17 +90,24 @@ const collectToolDefinitions = (): ReadonlyArray<ToolDefinition> => {
 
   // Alert management
   registerListAlertRulesTool(registrar)
+  registerGetAlertRuleTool(registrar)
   registerListAlertIncidentsTool(registrar)
+  registerGetIncidentTimelineTool(registrar)
   registerCreateAlertRuleTool(registrar)
 
   // Dashboard management
   registerListDashboardsTool(registrar)
   registerGetDashboardTool(registrar)
   registerCreateDashboardTool(registrar)
+  registerUpdateDashboardTool(registrar)
 
   // Workflow tools
   registerComparePeriodsTool(registrar)
   registerExploreAttributesTool(registrar)
+
+  // Service discovery
+  registerListServicesTool(registrar)
+  registerGetServiceTopOperationsTool(registrar)
 
   return definitions
 }

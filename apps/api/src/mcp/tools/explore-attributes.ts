@@ -13,12 +13,16 @@ import { formatNextSteps } from "../lib/next-steps"
 export function registerExploreAttributesTool(server: McpToolRegistrar) {
   server.tool(
     "explore_attributes",
-    "Discover available attribute keys and values for traces and metrics. Also discover available environments and commit SHAs (source=services). Use before query_data when you need to filter by custom attributes.",
+    "Discover available attribute keys and their values. Call this before query_data or search_traces when you need to filter by custom attributes. " +
+    "Use source=services to discover available environments and commit SHAs for comparison.",
     Schema.Struct({
       source: Schema.Literals(["traces", "metrics", "services"]).annotate({
-        description: "Data source: traces, metrics, or services (for environments/commit SHAs)",
+        description:
+          "Data source. Use 'traces' to discover span/resource attribute keys (e.g. http.method, user.id). " +
+          "Use 'metrics' to discover metric attribute keys. " +
+          "Use 'services' to discover available environments and commit SHAs.",
       }),
-      scope: optionalStringParam("Attribute scope for traces: span or resource (default: span). Ignored for metrics"),
+      scope: optionalStringParam("Attribute scope for traces: 'span' (default) for span-level attributes, 'resource' for service/deployment attributes. Ignored for metrics/services."),
       key: optionalStringParam("When provided, returns values for this key instead of listing all keys"),
       service_name: optionalStringParam("Filter by service name"),
       start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss)"),
@@ -176,7 +180,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
           const nextSteps: string[] = []
           if (environments.length > 0) {
             const topEnv = String(environments[0].name)
-            nextSteps.push(`\`system_health environment="${topEnv}"\` — see health for this environment`)
+            nextSteps.push(`\`list_services environment="${topEnv}"\` — see services in this environment`)
           }
           if (commitShas.length > 1) {
             nextSteps.push('`compare_periods` — compare performance between deploys')

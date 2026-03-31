@@ -2,6 +2,7 @@ import {
   optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
+  validationError,
   type McpToolRegistrar,
   type McpToolResult,
 } from "./types"
@@ -21,33 +22,42 @@ import { formatQueryResult } from "../lib/format-query-result"
 const queryDataSchema = Schema.Struct({
   source: Schema.Literals(["traces", "logs", "metrics"]).annotate({
     description:
-      "Data source to query: traces, logs, or metrics",
+      "Data source. Use 'traces' for request/span analysis (latency, errors, throughput). " +
+      "Use 'logs' for log volume analysis. " +
+      "Use 'metrics' for custom metric aggregation (requires metric_name and metric_type — call list_metrics first).",
   }),
   kind: Schema.Literals(["timeseries", "breakdown"]).annotate({
-    description: "Query type: timeseries for trends over time, breakdown for top-N ranking",
+    description:
+      "Query shape. Use 'timeseries' when the user asks about trends, patterns, or 'how has X changed over time'. " +
+      "Use 'breakdown' when asking about top-N, distribution, or 'which services have the most errors'. " +
+      "Pick the right kind first — do not call this tool twice for the same question.",
   }),
   metric: optionalStringParam(
-    "Metric to compute. Traces: count, avg_duration, p50_duration, p95_duration, p99_duration, error_rate, apdex. Logs: count. Metrics: avg, sum, min, max, count.",
+    "Metric to compute. Traces: count (request volume), avg_duration, p50_duration, p95_duration, p99_duration (latency), " +
+    "error_rate (0-1 ratio), apdex (user satisfaction, requires apdex_threshold_ms). Logs: count only. " +
+    "Metrics: avg, sum, min, max, count. Default: 'count' for traces/logs, 'avg' for metrics.",
   ),
   group_by: optionalStringParam(
-    "Grouping dimension. Traces: service, span_name, status_code, http_method, attribute, none. Logs: service, severity, none. Metrics: service, attribute, none.",
+    "Grouping dimension. Traces: service, span_name, status_code, http_method, attribute, none. " +
+    "Logs: service, severity, none. Metrics: service, attribute, none. " +
+    "Default: 'none' for timeseries, 'service' for breakdown.",
   ),
-  start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss). Defaults to 1 hour ago"),
-  end_time: optionalStringParam("End time (YYYY-MM-DD HH:mm:ss). Defaults to now"),
-  service_name: optionalStringParam("Filter by service name"),
+  start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss UTC). Defaults to 1 hour ago"),
+  end_time: optionalStringParam("End time (YYYY-MM-DD HH:mm:ss UTC). Defaults to now"),
+  service_name: optionalStringParam("Filter by service name (use list_services to discover)"),
   // Traces-specific
   span_name: optionalStringParam("Filter by span name (traces only)"),
   root_spans_only: optionalBooleanParam("Only include root spans (traces only)"),
-  environments: optionalStringParam("Comma-separated environments to filter (traces only)"),
+  environments: optionalStringParam("Comma-separated environments to filter (traces only, use explore_attributes source=services to discover)"),
   commit_shas: optionalStringParam("Comma-separated commit SHAs to filter (traces only)"),
-  apdex_threshold_ms: optionalNumberParam("Apdex threshold in milliseconds (traces only, for apdex metric)"),
+  apdex_threshold_ms: optionalNumberParam("Apdex threshold in milliseconds (traces only, required for apdex metric)"),
   // Logs-specific
-  severity: optionalStringParam("Filter by severity e.g. ERROR, WARN, INFO (logs only)"),
+  severity: optionalStringParam("Filter by log severity: TRACE, DEBUG, INFO, WARN, ERROR, FATAL (logs only)"),
   // Metrics-specific
-  metric_name: optionalStringParam("Metric name - required for source=metrics (use list_metrics to discover)"),
-  metric_type: optionalStringParam("Metric type - required for source=metrics: sum, gauge, histogram, exponential_histogram"),
+  metric_name: optionalStringParam("Metric name — required for source=metrics. Use list_metrics to discover available metrics."),
+  metric_type: optionalStringParam("Metric type — required for source=metrics. Values: sum, gauge, histogram, exponential_histogram"),
   // Shared attribute filtering
-  attribute_key: optionalStringParam("Attribute key for filtering or group_by=attribute"),
+  attribute_key: optionalStringParam("Attribute key for filtering or group_by=attribute. Use explore_attributes to discover keys."),
   attribute_value: optionalStringParam("Attribute value filter (requires attribute_key)"),
   bucket_seconds: optionalNumberParam("Bucket size in seconds (timeseries only, auto-computed if omitted)"),
   limit: optionalNumberParam("Max breakdown rows (breakdown only, default 10, max 100)"),
@@ -55,10 +65,10 @@ const queryDataSchema = Schema.Struct({
 
 const queryDataDescription =
   "Query timeseries or breakdown data from traces, logs, or metrics. " +
-  "Traces metrics: count, avg_duration, p50/p95/p99_duration, error_rate, apdex. " +
-  "Logs metric: count. Metrics aggregations: avg, sum, min, max, count. " +
-  "Supports attribute filtering, environment/commit comparison. " +
-  "Use explore_attributes to discover attribute keys for filtering."
+  "Start here for trend analysis, comparisons, and top-N queries. " +
+  "For error investigation, prefer find_errors and error_detail. " +
+  "For attribute discovery, call explore_attributes first. " +
+  "Defaults are applied automatically and shown in the response."
 
 const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
 
@@ -76,28 +86,34 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
 
         // Validate attribute params
         if (params.attribute_value && !params.attribute_key) {
-          return {
-            isError: true,
-            content: [{ type: "text", text: "`attribute_value` requires `attribute_key`." }],
-          }
+          return validationError(
+            "`attribute_value` requires `attribute_key`. Use explore_attributes to discover available keys.",
+            'attribute_key="http.method" attribute_value="GET"',
+          )
         }
 
         if (params.group_by === "attribute" && !params.attribute_key) {
-          return {
-            isError: true,
-            content: [{ type: "text", text: "`group_by=attribute` requires `attribute_key`." }],
-          }
+          return validationError(
+            "`group_by=attribute` requires `attribute_key`. Use explore_attributes to discover available keys.",
+            'group_by="attribute" attribute_key="http.method"',
+          )
         }
 
         // Validate metrics-specific required params
         if (params.source === "metrics") {
           if (!params.metric_name || !params.metric_type) {
-            return {
-              isError: true,
-              content: [{ type: "text", text: "`source=metrics` requires `metric_name` and `metric_type`. Use `list_metrics` to discover available metrics." }],
-            }
+            return validationError(
+              "`source=metrics` requires `metric_name` and `metric_type`. Use list_metrics to discover available metrics.",
+              'source="metrics" metric_name="http.server.duration" metric_type="histogram" metric="avg"',
+            )
           }
         }
+
+        // Track defaults applied for transparency
+        const decisions: string[] = []
+
+        if (!params.start_time) decisions.push(`start_time: defaulted to 1 hour ago (${st})`)
+        if (!params.end_time) decisions.push(`end_time: defaulted to now (${et})`)
 
         type AnySpec = Record<string, unknown>
         let rawSpec: QuerySpecType
@@ -123,26 +139,35 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           }
           const hasFilters = Object.keys(filters).length > 0
 
+          const tracesMetric = params.metric ?? "count"
+          if (!params.metric) decisions.push(`metric: defaulted to "count" (available: count, avg_duration, p50_duration, p95_duration, p99_duration, error_rate, apdex)`)
+
           if (params.kind === "timeseries") {
+            const groupBy = params.group_by ? [params.group_by] : ["none"]
+            if (!params.group_by) decisions.push(`group_by: defaulted to "none" (available: service, span_name, status_code, http_method, attribute, none)`)
             rawSpec = {
               kind: "timeseries",
               source: "traces",
-              metric: params.metric ?? "count",
-              groupBy: params.group_by ? [params.group_by] : ["none"],
+              metric: tracesMetric,
+              groupBy,
               ...(hasFilters && { filters }),
               ...(params.bucket_seconds && { bucketSeconds: params.bucket_seconds }),
             } as AnySpec as QuerySpecType
           } else {
+            const groupBy = params.group_by ?? "service"
+            if (!params.group_by) decisions.push(`group_by: defaulted to "service" (available: service, span_name, status_code, http_method, attribute)`)
             rawSpec = {
               kind: "breakdown",
               source: "traces",
-              metric: params.metric ?? "count",
-              groupBy: params.group_by ?? "service",
+              metric: tracesMetric,
+              groupBy,
               ...(hasFilters && { filters }),
               ...(params.limit && { limit: params.limit }),
             } as AnySpec as QuerySpecType
           }
         } else if (params.source === "logs") {
+          if (!params.metric) decisions.push(`metric: fixed to "count" (only option for logs)`)
+
           const filters: LogsFilters = {
             ...(params.service_name && { serviceName: params.service_name }),
             ...(params.severity && { severity: params.severity }),
@@ -150,20 +175,24 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           const hasFilters = Object.keys(filters).length > 0
 
           if (params.kind === "timeseries") {
+            const groupBy = params.group_by ? [params.group_by] : ["none"]
+            if (!params.group_by) decisions.push(`group_by: defaulted to "none" (available: service, severity, none)`)
             rawSpec = {
               kind: "timeseries",
               source: "logs",
               metric: "count",
-              groupBy: params.group_by ? [params.group_by] : ["none"],
+              groupBy,
               ...(hasFilters && { filters }),
               ...(params.bucket_seconds && { bucketSeconds: params.bucket_seconds }),
             } as AnySpec as QuerySpecType
           } else {
+            const groupBy = params.group_by ?? "service"
+            if (!params.group_by) decisions.push(`group_by: defaulted to "service" (available: service, severity)`)
             rawSpec = {
               kind: "breakdown",
               source: "logs",
               metric: "count",
-              groupBy: params.group_by ?? "service",
+              groupBy,
               ...(hasFilters && { filters }),
               ...(params.limit && { limit: params.limit }),
             } as AnySpec as QuerySpecType
@@ -186,20 +215,26 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
             ...(metricsAttributeFilters.length > 0 && { attributeFilters: metricsAttributeFilters }),
           }
 
+          const metricsMetric = params.metric ?? "avg"
+          if (!params.metric) decisions.push(`metric: defaulted to "avg" (available: avg, sum, min, max, count)`)
+
           if (params.kind === "timeseries") {
+            const groupBy = params.group_by ? [params.group_by] : ["none"]
+            if (!params.group_by) decisions.push(`group_by: defaulted to "none" (available: service, attribute, none)`)
             rawSpec = {
               kind: "timeseries",
               source: "metrics",
-              metric: params.metric ?? "avg",
-              groupBy: params.group_by ? [params.group_by] : ["none"],
+              metric: metricsMetric,
+              groupBy,
               filters,
               ...(params.bucket_seconds && { bucketSeconds: params.bucket_seconds }),
             } as AnySpec as QuerySpecType
           } else {
+            if (!params.group_by) decisions.push(`group_by: defaulted to "service"`)
             rawSpec = {
               kind: "breakdown",
               source: "metrics",
-              metric: params.metric ?? "avg",
+              metric: metricsMetric,
               groupBy: "service",
               filters,
               ...(params.limit && { limit: params.limit }),
@@ -251,6 +286,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           st,
           et,
           params.group_by,
+          decisions,
         )
       }),
   )

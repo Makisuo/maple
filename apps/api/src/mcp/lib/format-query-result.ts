@@ -46,6 +46,7 @@ export function formatQueryResult(
   startTime: string,
   endTime: string,
   groupBy: string | undefined,
+  decisions?: string[],
 ): McpToolResult {
   const result = response.result
   const metricLabel = metric ?? (source === "metrics" ? "avg" : "count")
@@ -55,6 +56,13 @@ export function formatQueryResult(
     `Time range: ${startTime} — ${endTime}`,
   ]
 
+  if (decisions && decisions.length > 0) {
+    lines.push(``, `[Defaults applied]`)
+    for (const d of decisions) {
+      lines.push(`- ${d}`)
+    }
+  }
+
   if (result.kind === "timeseries") {
     const structuredData = {
       tool: toolName,
@@ -63,6 +71,7 @@ export function formatQueryResult(
         kind,
         metric: metricLabel,
         groupBy,
+        ...(decisions && decisions.length > 0 && { decisions }),
         result: {
           kind: "timeseries" as const,
           data: result.data.map((point) => ({
@@ -105,6 +114,7 @@ export function formatQueryResult(
         kind,
         metric: metricLabel,
         groupBy,
+        ...(decisions && decisions.length > 0 && { decisions }),
         result: {
           kind: "breakdown" as const,
           data: result.data.map((item) => ({

@@ -205,7 +205,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
               content: [
                 {
                   type: "text" as const,
-                  text: 'template="custom" requires dashboard_json. Use get_dashboard to see the expected schema, or use a template (service_health, error_tracking, blank).',
+                  text: 'template="custom" requires dashboard_json. Use get_dashboard on an existing dashboard to see the expected schema, or use a template (service_health, error_tracking, blank).\n\nExample:\n  dashboard_json=\'{"name":"My Dashboard","widgets":[{"id":"w1","visualization":"chart","dataSource":{"endpoint":"custom_traces_timeseries","params":{"metric":"count"}},"display":{"title":"Request Count"},"layout":{"x":0,"y":0,"w":12,"h":4}}]}\'',
                 },
               ],
             }

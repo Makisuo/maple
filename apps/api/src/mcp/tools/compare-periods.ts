@@ -199,7 +199,7 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
             nextSteps.push('`find_errors` — categorize new errors')
           }
           if (nextSteps.length === 0) {
-            nextSteps.push('`system_health` — see current system state')
+            nextSteps.push('`list_services` — see current service health')
           }
           lines.push(formatNextSteps(nextSteps))
         }

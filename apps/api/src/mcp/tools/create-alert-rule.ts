@@ -118,22 +118,22 @@ function buildAlertRuleRequest(
     templateDefaults = tmpl.defaults
   }
 
-  if (!signalType) return { error: "signal_type is required (or use a template)" }
-  if (!comparator) return { error: "comparator is required (or use a template)" }
-  if (threshold === undefined) return { error: "threshold is required (or use a template)" }
+  if (!signalType) return { error: 'signal_type is required (or use a template).\n\nExample:\n  signal_type="error_rate" comparator="gt" threshold=5\n  OR template="high_error_rate"' }
+  if (!comparator) return { error: 'comparator is required (or use a template). Values: gt (>), gte (>=), lt (<), lte (<=).\n\nExample:\n  comparator="gt" threshold=5' }
+  if (threshold === undefined) return { error: 'threshold is required (or use a template).\n\nExample:\n  threshold=5 (for 5% error rate)' }
 
   if (signalType === "metric") {
     if (!params.metric_name || !params.metric_type || !params.metric_aggregation) {
       return {
         error:
-          "signal_type=metric requires metric_name, metric_type, and metric_aggregation",
+          'signal_type=metric requires metric_name, metric_type, and metric_aggregation. Use list_metrics to discover available metrics.\n\nExample:\n  signal_type="metric" metric_name="http.server.duration" metric_type="histogram" metric_aggregation="avg"',
       }
     }
   }
 
   if (signalType === "apdex") {
     if (!params.apdex_threshold_ms && !templateDefaults.apdexThresholdMs) {
-      return { error: "signal_type=apdex requires apdex_threshold_ms" }
+      return { error: 'signal_type=apdex requires apdex_threshold_ms (milliseconds defining satisfactory response time).\n\nExample:\n  signal_type="apdex" apdex_threshold_ms=500 comparator="lt" threshold=0.8' }
     }
   }
 
@@ -141,7 +141,7 @@ function buildAlertRuleRequest(
     if (!params.query_data_source || !params.query_aggregation) {
       return {
         error:
-          "signal_type=query requires query_data_source and query_aggregation",
+          'signal_type=query requires query_data_source and query_aggregation.\n\nExample:\n  signal_type="query" query_data_source="traces" query_aggregation="count" comparator="gt" threshold=100',
       }
     }
   }
@@ -205,7 +205,10 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
         "Comma-separated destination IDs to notify (use list_alert_rules to find IDs)",
       ),
       template: optionalStringParam(
-        "Template: high_error_rate, slow_p95, slow_p99, low_apdex, throughput_drop, or custom (default: custom)",
+        "Template to auto-fill signal_type, comparator, and threshold. " +
+        "high_error_rate: error_rate > 5%. slow_p95: p95_latency > 1s. slow_p99: p99_latency > 2s. " +
+        "low_apdex: apdex < 0.8. throughput_drop: throughput < 100rpm. " +
+        "Use 'custom' for full control over signal_type/comparator/threshold. Default: custom.",
       ),
       severity: optionalStringParam("Alert severity: warning or critical (default: warning)"),
       threshold: optionalNumberParam(

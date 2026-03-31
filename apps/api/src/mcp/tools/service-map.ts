@@ -101,7 +101,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
         }
 
         if (nextSteps.length === 0) {
-          nextSteps.push('`system_health` — see overall system health')
+          nextSteps.push('`list_services` — see all services with health metrics')
         }
         lines.push(formatNextSteps(nextSteps))
 

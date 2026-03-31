@@ -13,21 +13,23 @@ import { createDualContent } from "../lib/structured-output"
 export function registerSearchLogsTool(server: McpToolRegistrar) {
   server.tool(
     "search_logs",
-    "Search and filter logs by service, severity, keyword, or trace_id. Use inspect_trace to see the full trace for a log entry.",
+    "Search and filter logs by service, severity, keyword, or trace_id. Supports pagination — check hasMore in the response for additional results. Use inspect_trace to see the full trace for a log entry.",
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
       service: optionalStringParam("Filter by service name"),
-      severity: optionalStringParam("Filter by severity (e.g. ERROR, WARN, INFO)"),
+      severity: optionalStringParam("Filter by log severity level. Valid values: TRACE, DEBUG, INFO, WARN, ERROR, FATAL. Case-insensitive."),
       search: optionalStringParam("Search text in log body"),
       trace_id: optionalStringParam("Filter by trace ID"),
       span_id: optionalStringParam("Filter by span ID (scope to a specific span within a trace)"),
+      offset: optionalNumberParam("Offset for pagination (default 0). Use nextOffset from previous response."),
       limit: optionalNumberParam("Max results (default 30)"),
     }),
-    ({ start_time, end_time, service, severity, search, trace_id, span_id, limit }) =>
+    ({ start_time, end_time, service, severity, search, trace_id, span_id, offset, limit }) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 30
+        const off = offset ?? 0
 
         const [logsResult, countResult] = yield* Effect.all(
           [
@@ -39,6 +41,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
               search,
               trace_id,
               ...(span_id && { span_id }),
+              offset: off,
               limit: lim,
             }),
             queryTinybird("logs_count", {
@@ -85,8 +88,10 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
           lines.push(`${time} [${sev}] ${svc}: ${body}${traceRef}`)
         }
 
-        if (total > logs.length) {
-          lines.push(``, `... ${formatNumber(total - logs.length)} more logs not shown`)
+        const hasMore = off + logs.length < total
+        if (hasMore) {
+          const nextOffset = off + logs.length
+          lines.push(``, `Showing ${off + 1}–${off + logs.length} of ${formatNumber(total)}. Call again with offset=${nextOffset} for more.`)
         }
 
         const traceIds = [...new Set(logs.filter((l) => l.traceId).map((l) => l.traceId))].slice(0, 3)
@@ -101,6 +106,13 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
             data: {
               timeRange: { start: st, end: et },
               totalCount: total,
+              pagination: {
+                total,
+                offset: off,
+                limit: lim,
+                hasMore,
+                ...(hasMore && { nextOffset: off + logs.length }),
+              },
               logs: logs.map((l) => ({
                 timestamp: String(l.timestamp),
                 severityText: l.severityText || "INFO",

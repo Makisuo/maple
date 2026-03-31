@@ -14,7 +14,7 @@ import { createDualContent } from "../lib/structured-output"
 export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
   server.tool(
     "diagnose_service",
-    "Deep investigation of one service: health metrics, Apdex, top errors, recent traces and logs. Use after system_health identifies a problem service.",
+    "Deep investigation of one service: health metrics, Apdex, top errors, recent traces and logs. Use after list_services identifies a problem service.",
     Schema.Struct({
       service_name: requiredStringParam("The service name to diagnose"),
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),

@@ -2,6 +2,7 @@ import {
   optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
+  validationError,
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
@@ -14,7 +15,7 @@ import { createDualContent } from "../lib/structured-output"
 export function registerSearchTracesTool(server: McpToolRegistrar) {
   server.tool(
     "search_traces",
-    "Search traces by service, duration, error status, HTTP method, span name, or custom attributes. Use inspect_trace on interesting trace_ids. Use explore_attributes to discover attribute keys.",
+    "Search traces by service, duration, error status, HTTP method, span name, or custom attributes. Supports pagination — check hasMore in the response. Use inspect_trace on interesting trace_ids. Use explore_attributes to discover attribute keys.",
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
@@ -28,17 +29,20 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
       attribute_key: optionalStringParam("Filter by span attribute key (e.g. user.id, request.id)"),
       attribute_value: optionalStringParam("Filter by span attribute value (requires attribute_key)"),
       root_only: optionalBooleanParam("Only match root spans for service/span_name filters (default: false, searches all spans)"),
+      offset: optionalNumberParam("Offset for pagination (default 0). Use nextOffset from previous response."),
       limit: optionalNumberParam("Max results (default 20)"),
     }),
     (params) =>
       Effect.gen(function* () {
         const { st, et } = resolveTimeRange(params.start_time, params.end_time)
+        const lim = params.limit ?? 20
+        const off = params.offset ?? 0
 
         if (params.attribute_value && !params.attribute_key) {
-          return {
-            isError: true,
-            content: [{ type: "text", text: "`attribute_value` requires `attribute_key`." }],
-          }
+          return validationError(
+            "`attribute_value` requires `attribute_key`. Use explore_attributes to discover available keys.",
+            'attribute_key="user.id" attribute_value="abc123"',
+          )
         }
 
         // Default: search all spans in the trace. root_only=true restricts to root span only.
@@ -62,7 +66,8 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
           ...(params.trace_id && { trace_id: params.trace_id }),
           ...(params.attribute_key && { attribute_filter_key: params.attribute_key }),
           ...(params.attribute_value && { attribute_filter_value: params.attribute_value }),
-          limit: params.limit ?? 20,
+          offset: off,
+          limit: lim,
         })
 
         const traces = result.data
@@ -70,8 +75,9 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
           return { content: [{ type: "text", text: `No traces found matching filters (${st} — ${et})` }] }
         }
 
+        const hasMore = traces.length === lim
         const lines: string[] = [
-          `## Traces (showing ${traces.length})`,
+          `## Traces (showing ${off + 1}–${off + traces.length})`,
           `Time range: ${st} — ${et}`,
           ``,
         ]
@@ -88,6 +94,11 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 
         lines.push(formatTable(headers, rows))
 
+        if (hasMore) {
+          const nextOffset = off + traces.length
+          lines.push(``, `More results available. Call again with offset=${nextOffset} for the next page.`)
+        }
+
         const nextSteps = traces.slice(0, 3).map((t) =>
           `\`inspect_trace trace_id="${t.traceId}"\` — full span tree`
         )
@@ -98,6 +109,12 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
             tool: "search_traces",
             data: {
               timeRange: { start: st, end: et },
+              pagination: {
+                offset: off,
+                limit: lim,
+                hasMore,
+                ...(hasMore && { nextOffset: off + traces.length }),
+              },
               traces: traces.map((t) => ({
                 traceId: t.traceId,
                 rootSpanName: t.rootSpanName,
