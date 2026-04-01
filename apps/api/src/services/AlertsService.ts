@@ -55,6 +55,7 @@ import {
   type AlertDestinationId,
   type AlertIncidentId,
   QueryEngineExecutionError,
+  QueryEngineTimeoutError,
   QueryEngineValidationError,
   RoleName,
   UserId as UserIdSchema,
@@ -1104,11 +1105,14 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         authMode: "self_hosted",
       })
 
-      const mapQueryEngineError = (error: unknown) => {
-        if (error instanceof QueryEngineValidationError) return makeValidationError(error.message, error.details)
-        if (error instanceof QueryEngineExecutionError) return makeDeliveryError(error.message)
-        return makeDeliveryError("Alert evaluation failed")
-      }
+      const catchQueryEngineErrors = <A, R>(effect: Effect.Effect<A, QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError, R>) =>
+        effect.pipe(
+          Effect.catchTags({
+            "@maple/http/errors/QueryEngineValidationError": (e) => Effect.fail(makeValidationError(e.message, e.details)),
+            "@maple/http/errors/QueryEngineExecutionError": (e) => Effect.fail(makeDeliveryError(e.message)),
+            "@maple/http/errors/QueryEngineTimeoutError": (e) => Effect.fail(makeDeliveryError(e.message ?? "Alert evaluation timed out")),
+          }),
+        )
 
       const evaluateRule = Effect.fn("AlertsService.evaluateRule")(function* (
         orgId: OrgId,
@@ -1122,7 +1126,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           query: rule.compiledPlan.query,
           reducer: rule.compiledPlan.reducer,
           sampleCountStrategy: rule.compiledPlan.sampleCountStrategy,
-        }).pipe(Effect.mapError(mapQueryEngineError))
+        }).pipe(catchQueryEngineErrors)
 
         return applyEvaluationLogic(rule, evaluated, evaluated.reason ?? undefined)
       })
@@ -1208,7 +1212,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           query: rule.compiledPlan.query,
           reducer: rule.compiledPlan.reducer,
           sampleCountStrategy: rule.compiledPlan.sampleCountStrategy,
-        }, rule.groupBy).pipe(Effect.mapError(mapQueryEngineError))
+        }, rule.groupBy).pipe(catchQueryEngineErrors)
 
         return groupedResults.map((obs) => ({
           evaluation: applyEvaluationLogic(rule, obs),
