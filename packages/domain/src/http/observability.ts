@@ -107,7 +107,7 @@ interface SpanNodeResponse {
   readonly children: ReadonlyArray<SpanNodeResponse>
 }
 
-const SpanNode: Schema.Schema<SpanNodeResponse> = Schema.Struct({
+const SpanNode: Schema.Codec<SpanNodeResponse> = Schema.Struct({
   spanId: Schema.String,
   parentSpanId: Schema.String,
   spanName: Schema.String,
@@ -117,7 +117,7 @@ const SpanNode: Schema.Schema<SpanNodeResponse> = Schema.Struct({
   statusMessage: Schema.String,
   attributes: Schema.Record(Schema.String, Schema.String),
   resourceAttributes: Schema.Record(Schema.String, Schema.String),
-  children: Schema.Array(Schema.suspend((): Schema.Schema<SpanNodeResponse> => SpanNode)),
+  children: Schema.Array(Schema.suspend((): Schema.Codec<SpanNodeResponse> => SpanNode)),
 })
 
 const InspectTraceResponse = Schema.Struct({
