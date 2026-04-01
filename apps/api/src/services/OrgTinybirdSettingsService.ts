@@ -299,7 +299,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         const row = yield* selectRow(orgId)
         const currentRevision = yield* getCurrentProjectRevision().pipe(
           Effect.map((revision) => revision as string | null),
-          Effect.catchTag("OrgTinybirdSettingsSyncError", () => Effect.succeed(null)),
+          Effect.catchTag("@maple/http/errors/OrgTinybirdSettingsSyncError", () => Effect.succeed(null)),
         )
 
         return toResponse(Option.getOrUndefined(row), currentRevision)

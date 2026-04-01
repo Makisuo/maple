@@ -23,8 +23,7 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
       service_name: optionalStringParam("Scope comparison to a specific service"),
       environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
     }),
-    ({ current_start, current_end, previous_start, previous_end, around_time, service_name, environment }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.comparePeriods")(function* ({ current_start, current_end, previous_start, previous_end, around_time, service_name, environment }) {
         let curSt: string, curEt: string, prevSt: string, prevEt: string
 
         if (around_time) {

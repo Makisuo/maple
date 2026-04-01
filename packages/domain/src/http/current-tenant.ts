@@ -3,7 +3,7 @@ import { Schema, ServiceMap } from "effect"
 import { AuthMode, OrgId, RoleName, UserId } from "../primitives"
 
 export class UnauthorizedError extends Schema.TaggedErrorClass<UnauthorizedError>()(
-  "UnauthorizedError",
+  "@maple/http/errors/UnauthorizedError",
   {
     message: Schema.String,
   },

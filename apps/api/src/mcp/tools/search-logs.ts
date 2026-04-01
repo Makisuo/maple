@@ -28,8 +28,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
       offset: optionalNumberParam("Offset for pagination (default 0). Use nextOffset from previous response."),
       limit: optionalNumberParam("Max results (default 30)"),
     }),
-    ({ start_time, end_time, service, severity, search, trace_id, span_id, offset, limit }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.searchLogs")(function* ({ start_time, end_time, service, severity, search, trace_id, span_id, offset, limit }) {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 30
         const off = offset ?? 0

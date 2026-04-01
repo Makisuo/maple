@@ -34,8 +34,7 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
         "Full dashboard JSON to replace the current configuration. Use get_dashboard to see the current schema.",
       ),
     }),
-    ({ dashboard_id, name, description, time_range, dashboard_json }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.updateDashboard")(function* ({ dashboard_id, name, description, time_range, dashboard_json }) {
         const tenant = yield* resolveTenant
         const persistence = yield* DashboardPersistenceService
 
@@ -68,35 +67,15 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
         let updated: DashboardDocument
 
         if (dashboard_json) {
-          let parsed: unknown
-          try {
-            parsed = JSON.parse(dashboard_json)
-          } catch {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text" as const,
-                  text: "Invalid JSON: could not parse dashboard_json",
-                },
-              ],
-            }
-          }
+          const parsed = yield* Effect.try({
+            try: () => JSON.parse(dashboard_json) as unknown,
+            catch: () => new McpQueryError({ message: "Invalid JSON: could not parse dashboard_json", pipe: "update_dashboard" }),
+          })
 
-          let portable: PortableDashboardDocument
-          try {
-            portable = decodePortableDashboard(parsed)
-          } catch (error) {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Invalid dashboard schema: ${String(error)}`,
-                },
-              ],
-            }
-          }
+          const portable = yield* Effect.try({
+            try: () => decodePortableDashboard(parsed),
+            catch: (error) => new McpQueryError({ message: `Invalid dashboard schema: ${String(error)}`, pipe: "update_dashboard" }),
+          })
 
           updated = new DashboardDocument({
             id: existing.id,

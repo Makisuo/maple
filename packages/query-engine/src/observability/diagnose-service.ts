@@ -6,17 +6,17 @@ import type {
   ListTracesOutput,
   ServiceApdexTimeSeriesOutput,
 } from "@maple/domain/tinybird"
-import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
-import type { TimeRange, ServiceHealthOutput } from "./types"
+import { TinybirdExecutor } from "./TinybirdExecutor"
+import type { TimeRange } from "./types"
 import { toLogEntry } from "./row-mappers"
 import { aggregateServiceRows, weightedAvg } from "./aggregation"
 
-export const diagnoseService = (input: {
-  readonly serviceName: string
-  readonly timeRange: TimeRange
-  readonly environment?: string
-}): Effect.Effect<ServiceHealthOutput, ObservabilityError, TinybirdExecutor> =>
-  Effect.gen(function* () {
+export const diagnoseService = Effect.fn("Observability.diagnoseService")(
+  function* (input: {
+    readonly serviceName: string
+    readonly timeRange: TimeRange
+    readonly environment?: string
+  }) {
     const executor = yield* TinybirdExecutor
     const envFilter = input.environment ? { deployment_envs: input.environment } : {}
 
@@ -95,4 +95,5 @@ export const diagnoseService = (input: {
       ),
       recentLogs: pipe(logsResult.data, Arr.map(toLogEntry)),
     }
-  })
+  },
+)

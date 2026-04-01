@@ -11,7 +11,7 @@ export class IngestKeysResponse extends Schema.Class<IngestKeysResponse>("Ingest
 }) {}
 
 export class IngestKeyPersistenceError extends Schema.TaggedErrorClass<IngestKeyPersistenceError>()(
-  "IngestKeyPersistenceError",
+  "@maple/http/errors/IngestKeyPersistenceError",
   {
     message: Schema.String,
   },
@@ -19,7 +19,7 @@ export class IngestKeyPersistenceError extends Schema.TaggedErrorClass<IngestKey
 ) {}
 
 export class IngestKeyEncryptionError extends Schema.TaggedErrorClass<IngestKeyEncryptionError>()(
-  "IngestKeyEncryptionError",
+  "@maple/http/errors/IngestKeyEncryptionError",
   {
     message: Schema.String,
   },

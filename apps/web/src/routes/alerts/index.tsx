@@ -491,7 +491,7 @@ function AlertsPage() {
         typeof failure === "object" &&
         failure !== null &&
         "_tag" in failure &&
-        failure._tag === "AlertDestinationInUseError" &&
+        failure._tag === "@maple/http/errors/AlertDestinationInUseError" &&
         "ruleNames" in failure &&
         Array.isArray(failure.ruleNames)
       ) {

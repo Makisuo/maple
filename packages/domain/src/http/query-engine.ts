@@ -7,7 +7,7 @@ import { Authorization } from "./current-tenant"
 const TinybirdPipeSchema = Schema.Literals(tinybirdPipes)
 
 export class QueryEngineValidationError extends Schema.TaggedErrorClass<QueryEngineValidationError>()(
-  "QueryEngineValidationError",
+  "@maple/http/errors/QueryEngineValidationError",
   {
     message: Schema.String,
     details: Schema.Array(Schema.String),
@@ -16,7 +16,7 @@ export class QueryEngineValidationError extends Schema.TaggedErrorClass<QueryEng
 ) {}
 
 export class QueryEngineExecutionError extends Schema.TaggedErrorClass<QueryEngineExecutionError>()(
-  "QueryEngineExecutionError",
+  "@maple/http/errors/QueryEngineExecutionError",
   {
     message: Schema.String,
     causeTag: Schema.optional(Schema.String),
@@ -26,7 +26,7 @@ export class QueryEngineExecutionError extends Schema.TaggedErrorClass<QueryEngi
 ) {}
 
 export class QueryEngineTimeoutError extends Schema.TaggedErrorClass<QueryEngineTimeoutError>()(
-  "QueryEngineTimeoutError",
+  "@maple/http/errors/QueryEngineTimeoutError",
   {
     message: Schema.String,
   },

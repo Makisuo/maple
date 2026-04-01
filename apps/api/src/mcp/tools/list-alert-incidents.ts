@@ -28,8 +28,7 @@ export function registerListAlertIncidentsTool(server: McpToolRegistrar) {
       service_name: optionalStringParam("Filter incidents by service name"),
       limit: optionalNumberParam("Max results to return (default 50)"),
     }),
-    ({ status, severity, service_name, limit }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.listAlertIncidents")(function* ({ status, severity, service_name, limit }) {
         const tenant = yield* resolveTenant
         const alerts = yield* AlertsService
 

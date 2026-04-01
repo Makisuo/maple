@@ -23,8 +23,7 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
     Schema.Struct({
       rule_id: requiredStringParam("Alert rule ID"),
     }),
-    ({ rule_id }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.getAlertRule")(function* ({ rule_id }) {
         const tenant = yield* resolveTenant
         const alerts = yield* AlertsService
 

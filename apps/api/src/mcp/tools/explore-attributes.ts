@@ -33,8 +33,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
       end_time: optionalStringParam("End time (YYYY-MM-DD HH:mm:ss)"),
       limit: optionalNumberParam("Max results (default 50)"),
     }),
-    (params) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.exploreAttributes")(function* (params) {
         const { st, et } = resolveTimeRange(params.start_time, params.end_time)
         const lim = params.limit ?? 50
         const scope = (params.scope ?? "span") as "span" | "resource"

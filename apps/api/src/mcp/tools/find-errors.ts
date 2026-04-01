@@ -24,8 +24,7 @@ export function registerFindErrorsTool(server: McpToolRegistrar) {
       environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
       limit: optionalNumberParam("Max results (default 20)"),
     }),
-    ({ start_time, end_time, service, environment, limit }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.findErrors")(function* ({ start_time, end_time, service, environment, limit }) {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const tenant = yield* resolveTenant
 

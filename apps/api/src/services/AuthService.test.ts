@@ -82,7 +82,7 @@ describe("makeResolveTenant", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "UnauthorizedError",
+      _tag: "@maple/http/errors/UnauthorizedError",
       message: "Session token missing",
     })
   })
@@ -109,7 +109,7 @@ describe("makeResolveTenant", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "UnauthorizedError",
+      _tag: "@maple/http/errors/UnauthorizedError",
       message: "Clerk authentication failed: token verification failed",
     })
   })
@@ -144,7 +144,7 @@ describe("makeResolveTenant", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "UnauthorizedError",
+      _tag: "@maple/http/errors/UnauthorizedError",
       message: "Active organization is required",
     })
   })
@@ -157,7 +157,7 @@ describe("makeResolveTenant", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "UnauthorizedError",
+      _tag: "@maple/http/errors/UnauthorizedError",
       message: "Self-hosted mode requires a valid bearer token",
     })
   })
@@ -174,7 +174,7 @@ describe("makeResolveTenant", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "UnauthorizedError",
+      _tag: "@maple/http/errors/UnauthorizedError",
     })
   })
 
@@ -300,7 +300,7 @@ describe("makeResolveMcpTenant", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "UnauthorizedError",
+      _tag: "@maple/http/errors/UnauthorizedError",
       message: "Active organization is required",
     })
   })
@@ -333,7 +333,7 @@ describe("makeLoginSelfHosted", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "SelfHostedInvalidPasswordError",
+      _tag: "@maple/http/errors/SelfHostedInvalidPasswordError",
       message: "Invalid root password",
     })
   })

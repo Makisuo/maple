@@ -7,7 +7,7 @@ import {
   SDPersistenceError,
   SDUnauthorizedError,
 } from "@maple/domain/http"
-import { Effect, Option, Redacted } from "effect"
+import { Array as Arr, Effect, Option, Redacted } from "effect"
 import { Env } from "../services/Env"
 import { ScrapeTargetsService } from "../services/ScrapeTargetsService"
 
@@ -52,49 +52,54 @@ export const HttpServiceDiscoveryLive = HttpApiBuilder.group(
             ),
           )
 
-          const sdTargets: Array<PrometheusSDTarget> = []
-
-          for (const row of rows) {
-            let url: URL
-            try {
-              url = new URL(row.url)
-            } catch {
-              yield* Effect.logWarning("Skipping scrape target with invalid URL").pipe(
-                Effect.annotateLogs({
-                  scrapeTargetId: row.id,
-                  url: row.url,
-                }),
+          const sdTargets = yield* Effect.forEach(rows, (row) =>
+            Effect.gen(function* () {
+              const url = yield* Effect.try({
+                try: () => new URL(row.url),
+                catch: () => new Error("Invalid URL"),
+              }).pipe(
+                Effect.option,
               )
-              continue
-            }
 
-            const labels: Record<string, string> = {
-              __scheme__: url.protocol.replace(":", ""),
-              __metrics_path__: url.pathname,
-              __scrape_interval__: `${row.scrapeIntervalSeconds}s`,
-              job: row.serviceName ?? row.name,
-              maple_org_id: row.orgId,
-              maple_scrape_target_id: row.id,
-              maple_scrape_target_name: row.name,
-            }
+              if (Option.isNone(url)) {
+                yield* Effect.logWarning("Skipping scrape target with invalid URL").pipe(
+                  Effect.annotateLogs({
+                    scrapeTargetId: row.id,
+                    url: row.url,
+                  }),
+                )
+                return Option.none<PrometheusSDTarget>()
+              }
 
-            if (row.labelsJson) {
-              try {
-                const extra = JSON.parse(row.labelsJson)
-                if (extra && typeof extra === "object") {
-                  for (const [k, v] of Object.entries(extra)) {
+              const labels: Record<string, string> = {
+                __scheme__: url.value.protocol.replace(":", ""),
+                __metrics_path__: url.value.pathname,
+                __scrape_interval__: `${row.scrapeIntervalSeconds}s`,
+                job: row.serviceName ?? row.name,
+                maple_org_id: row.orgId,
+                maple_scrape_target_id: row.id,
+                maple_scrape_target_name: row.name,
+              }
+
+              if (row.labelsJson) {
+                const labelsJson = row.labelsJson
+                const extra = yield* Effect.try({
+                  try: () => JSON.parse(labelsJson) as unknown,
+                  catch: () => new Error("Invalid JSON"),
+                }).pipe(Effect.option)
+
+                if (Option.isSome(extra) && extra.value && typeof extra.value === "object") {
+                  for (const [k, v] of Object.entries(extra.value)) {
                     if (typeof v === "string") {
                       labels[k] = v
                     }
                   }
                 }
-              } catch {
-                // ignore invalid labels JSON
               }
-            }
 
-            sdTargets.push(new PrometheusSDTarget({ targets: [url.host], labels }))
-          }
+              return Option.some(new PrometheusSDTarget({ targets: [url.value.host], labels }))
+            }),
+          ).pipe(Effect.map(Arr.getSomes))
 
           return sdTargets
         }),

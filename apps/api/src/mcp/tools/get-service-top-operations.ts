@@ -29,8 +29,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss UTC)"),
       limit: optionalNumberParam("Max operations to return (default 20)"),
     }),
-    ({ service_name, metric, start_time, end_time, limit }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.getServiceTopOperations")(function* ({ service_name, metric, start_time, end_time, limit }) {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const resolvedMetric = (metric ?? "count") as TracesMetric
         const resolvedLimit = limit ?? 20

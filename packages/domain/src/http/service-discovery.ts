@@ -7,7 +7,7 @@ export class PrometheusSDTarget extends Schema.Class<PrometheusSDTarget>("Promet
 }) {}
 
 export class SDUnauthorizedError extends Schema.TaggedErrorClass<SDUnauthorizedError>()(
-  "SDUnauthorizedError",
+  "@maple/http/errors/SDUnauthorizedError",
   {
     message: Schema.String,
   },
@@ -15,7 +15,7 @@ export class SDUnauthorizedError extends Schema.TaggedErrorClass<SDUnauthorizedE
 ) {}
 
 export class SDPersistenceError extends Schema.TaggedErrorClass<SDPersistenceError>()(
-  "SDPersistenceError",
+  "@maple/http/errors/SDPersistenceError",
   {
     message: Schema.String,
   },

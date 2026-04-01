@@ -19,7 +19,7 @@ export class TinybirdQueryResponse extends Schema.Class<TinybirdQueryResponse>("
 }) {}
 
 export class TinybirdQueryError extends Schema.TaggedErrorClass<TinybirdQueryError>()(
-  "TinybirdQueryError",
+  "@maple/http/errors/TinybirdQueryError",
   {
     message: Schema.String,
     pipe: TinybirdPipeSchema,

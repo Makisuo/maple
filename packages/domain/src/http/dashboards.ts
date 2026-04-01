@@ -172,7 +172,7 @@ export class DashboardDeleteResponse extends Schema.Class<DashboardDeleteRespons
 }) {}
 
 export class DashboardPersistenceError extends Schema.TaggedErrorClass<DashboardPersistenceError>()(
-  "DashboardPersistenceError",
+  "@maple/http/errors/DashboardPersistenceError",
   {
     message: Schema.String,
   },
@@ -180,7 +180,7 @@ export class DashboardPersistenceError extends Schema.TaggedErrorClass<Dashboard
 ) {}
 
 export class DashboardNotFoundError extends Schema.TaggedErrorClass<DashboardNotFoundError>()(
-  "DashboardNotFoundError",
+  "@maple/http/errors/DashboardNotFoundError",
   {
     dashboardId: DashboardId,
     message: Schema.String,
@@ -189,7 +189,7 @@ export class DashboardNotFoundError extends Schema.TaggedErrorClass<DashboardNot
 ) {}
 
 export class DashboardValidationError extends Schema.TaggedErrorClass<DashboardValidationError>()(
-  "DashboardValidationError",
+  "@maple/http/errors/DashboardValidationError",
   {
     message: Schema.String,
     details: Schema.Array(Schema.String),

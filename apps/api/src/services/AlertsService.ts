@@ -51,6 +51,9 @@ import {
   type AlertSignalType,
   type AlertGroupBy,
   type OrgId,
+  type AlertRuleId,
+  type AlertDestinationId,
+  type AlertIncidentId,
   QueryEngineExecutionError,
   QueryEngineValidationError,
   RoleName,
@@ -116,7 +119,7 @@ type DestinationSecretConfig =
     }
 
 interface NormalizedRule {
-  readonly id: string
+  readonly id: AlertRuleId
   readonly name: string
   readonly enabled: boolean
   readonly severity: AlertSeverity
@@ -139,7 +142,7 @@ interface NormalizedRule {
   readonly queryDataSource: string | null
   readonly queryAggregation: string | null
   readonly queryWhereClause: string | null
-  readonly destinationIds: ReadonlyArray<string>
+  readonly destinationIds: ReadonlyArray<AlertDestinationId>
   readonly compiledPlan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>
   readonly createdAt: number
   readonly updatedAt: number
@@ -159,7 +162,7 @@ interface DispatchContext {
   readonly destination: AlertDestinationRow
   readonly publicConfig: DestinationPublicConfig
   readonly secretConfig: DestinationSecretConfig
-  readonly ruleId: string
+  readonly ruleId: AlertRuleId
   readonly ruleName: string
   readonly serviceName: string | null
   readonly signalType: AlertSignalType
@@ -167,7 +170,7 @@ interface DispatchContext {
   readonly comparator: AlertComparator
   readonly threshold: number
   readonly eventType: AlertEventTypeValue
-  readonly incidentId: string | null
+  readonly incidentId: AlertIncidentId | null
   readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
   readonly dedupeKey: string
   readonly windowMinutes: number
@@ -183,10 +186,10 @@ interface DispatchResult {
 
 interface DeliveryPayloadContext {
   readonly eventType: AlertEventTypeValue
-  readonly incidentId: string | null
+  readonly incidentId: AlertIncidentId | null
   readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
   readonly dedupeKey: string
-  readonly ruleId: string
+  readonly ruleId: AlertRuleId
   readonly ruleName: string
   readonly serviceName: string | null
   readonly signalType: AlertSignalType
@@ -259,11 +262,13 @@ const StoredDeliveryPayloadSchema = Schema.Struct({
 })
 
 const StringArraySchema = Schema.Array(Schema.String)
+const DestinationIdArraySchema = Schema.Array(AlertDestinationDocument.fields.id)
 
 const PublicConfigFromJson = Schema.fromJsonString(DestinationPublicConfigSchema)
 const SecretConfigFromJson = Schema.fromJsonString(DestinationSecretConfigSchema)
 const DeliveryPayloadFromJson = Schema.fromJsonString(StoredDeliveryPayloadSchema)
 const StringArrayFromJson = Schema.fromJsonString(StringArraySchema)
+const DestinationIdArrayFromJson = Schema.fromJsonString(DestinationIdArraySchema)
 
 const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.id)
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
@@ -926,8 +931,8 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         )
       })
 
-      const parseDestinationIds = (value: string): Effect.Effect<ReadonlyArray<string>, AlertValidationError> =>
-        Schema.decodeUnknownEffect(StringArrayFromJson)(value).pipe(
+      const parseDestinationIds = (value: string): Effect.Effect<ReadonlyArray<AlertDestinationId>, AlertValidationError> =>
+        Schema.decodeUnknownEffect(DestinationIdArrayFromJson)(value).pipe(
           Effect.mapError(() => makeValidationError("Stored rule destinations are invalid")),
         )
 
@@ -936,7 +941,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       ): Effect.fn.Return<NormalizedRule, AlertValidationError> {
         const serviceNames = serviceNamesFromRow(row)
         return {
-          id: row.id,
+          id: decodeAlertRuleIdSync(row.id),
           name: row.name,
           enabled: row.enabled === 1,
           severity: decodeAlertSeveritySync(row.severity),
@@ -979,7 +984,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           ? request.excludeServiceNames.map((s) => s.trim()).filter((s) => s.length > 0)
           : []
         const metricName = normalizeOptionalString(request.metricName)
-        const destinationIds = request.destinationIds.map((id) => id as string)
+        const destinationIds = request.destinationIds
 
         const details: string[] = []
         if (name.length === 0) details.push("name is required")
@@ -1030,7 +1035,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         }
 
         const normalizedBase = {
-          id: makeUuid(),
+          id: decodeAlertRuleIdSync(makeUuid()),
           name,
           enabled: request.enabled ?? true,
           severity: request.severity,
@@ -1067,7 +1072,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
       const requireDestinationIds = Effect.fn("AlertsService.requireDestinationIds")(function* (
         orgId: OrgId,
-        destinationIds: ReadonlyArray<string>,
+        destinationIds: ReadonlyArray<AlertDestinationId>,
       ) {
         if (destinationIds.length === 0) return
 
@@ -1221,9 +1226,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const insertDeliveryEventRecord = (
         db: DatabaseExecutor,
         orgId: OrgId,
-        incidentId: string | null,
-        ruleId: string,
-        destinationId: string,
+        incidentId: AlertIncidentId | null,
+        ruleId: AlertRuleId,
+        destinationId: AlertDestinationId,
         eventType: AlertEventTypeValue,
         payload: Record<string, unknown>,
         scheduledAt: number,
@@ -1256,9 +1261,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
       const insertDeliveryEvent = Effect.fn("AlertsService.insertDeliveryEvent")(function* (
         orgId: OrgId,
-        incidentId: string | null,
-        ruleId: string,
-        destinationId: string,
+        incidentId: AlertIncidentId | null,
+        ruleId: AlertRuleId,
+        destinationId: AlertDestinationId,
         eventType: AlertEventTypeValue,
         payload: Record<string, unknown>,
         scheduledAt: number,
@@ -1283,7 +1288,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
       const markDestinationTest = Effect.fn("AlertsService.markDestinationTest")(function* (
         orgId: OrgId,
-        destinationId: string,
+        destinationId: AlertDestinationId,
         errorMessage: string | null,
       ) {
         const timestamp = now()
@@ -1419,9 +1424,10 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           )
           .then(async (rows) => {
             const destinations = new Map(rows.map((row) => [row.id, row]))
+            const brandedIncidentId = decodeAlertIncidentIdSync(incident.id)
             const payload = buildPayload({
               eventType,
-              incidentId: incident.id,
+              incidentId: brandedIncidentId,
               incidentStatus: decodeAlertIncidentStatusSync(incident.status),
               dedupeKey: incident.dedupeKey,
               ruleId: rule.id,
@@ -1443,7 +1449,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               await insertDeliveryEventRecord(
                 db,
                 orgId,
-                incident.id,
+                brandedIncidentId,
                 rule.id,
                 destinationId,
                 eventType,
@@ -1701,7 +1707,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         const row = yield* requireDestinationRow(orgId, destinationId)
         const result = yield* sendImmediateNotification(row, {
           deliveryKey: `${orgId}:${destinationId}:test`,
-          ruleId: makeUuid(),
+          ruleId: decodeAlertRuleIdSync(makeUuid()),
           ruleName: "Test alert",
           serviceName: null,
           signalType: "throughput",
@@ -1745,7 +1751,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
       const upsertRuleRow = Effect.fn("AlertsService.upsertRuleRow")(function* (
         orgId: OrgId,
         userId: UserId,
-        existingId: string | null,
+        existingId: AlertRuleId | null,
         request: AlertRuleUpsertRequest,
       ) {
         const normalized = yield* normalizeRule(request)
@@ -1949,14 +1955,14 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           const byId = new Map(rows.map((row) => [row.id, row]))
           const enabledDestinations = normalized.destinationIds
             .map((id) => ({ id, row: byId.get(id) }))
-            .filter((d): d is { id: string; row: AlertDestinationRow } => d.row != null && d.row.enabled === 1)
+            .filter((d): d is { id: AlertDestinationId; row: AlertDestinationRow } => d.row != null && d.row.enabled === 1)
 
           yield* Effect.forEach(
             enabledDestinations,
             ({ id: destinationId, row: destination }) =>
               sendImmediateNotification(destination, {
                 deliveryKey: `${orgId}:${destinationId}:rule-test`,
-                ruleId: makeUuid(),
+                ruleId: decodeAlertRuleIdSync(makeUuid()),
                 ruleName: normalized.name,
                 serviceName: normalized.serviceName,
                 signalType: normalized.signalType,
@@ -2212,7 +2218,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               destination: hydrated.row,
               publicConfig: hydrated.publicConfig,
               secretConfig: hydrated.secretConfig,
-              ruleId: row.ruleId,
+              ruleId: decodeAlertRuleIdSync(row.ruleId),
               ruleName: ruleRow?.name ?? String(payloadRule?.name ?? "Alert"),
               serviceName: incidentRow?.serviceName ?? payloadRule?.serviceName ?? null,
               signalType: decodeAlertSignalTypeSync(incidentRow?.signalType ?? payloadRule?.signalType ?? "throughput"),
@@ -2221,7 +2227,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
               threshold: incidentRow?.threshold ?? payloadRule?.threshold ?? 0,
               windowMinutes: ruleRow?.windowMinutes ?? payloadRule?.windowMinutes ?? 5,
               eventType: decodeAlertEventTypeSync(row.eventType),
-              incidentId: row.incidentId,
+              incidentId: row.incidentId ? decodeAlertIncidentIdSync(row.incidentId) : null,
               incidentStatus: decodeAlertIncidentStatusSync(incidentRow?.status ?? "resolved"),
               dedupeKey: incidentRow?.dedupeKey ?? String(payload.dedupeKey ?? row.deliveryKey),
               value: payload.observed?.value ?? null,
@@ -2281,9 +2287,9 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                 if (failure.retryable && row.attemptNumber < MAX_DELIVERY_ATTEMPTS) {
                   yield* insertDeliveryEvent(
                     row.orgId as OrgId,
-                    row.incidentId,
-                    row.ruleId,
-                    row.destinationId,
+                    row.incidentId ? decodeAlertIncidentIdSync(row.incidentId) : null,
+                    decodeAlertRuleIdSync(row.ruleId),
+                    decodeAlertDestinationIdSync(row.destinationId),
                     decodeAlertEventTypeSync(row.eventType),
                     {} as Record<string, unknown>,
                     currentTime + computeRetryDelayMs(row.attemptNumber),
@@ -2592,7 +2598,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
       const resolveStaleIncidents = Effect.fn("AlertsService.resolveStaleIncidents")(function* (
         orgId: OrgId,
-        ruleId: string,
+        ruleId: AlertRuleId,
         normalized: NormalizedRule,
         opts: {
           readonly staleServiceNames?: HashSet.HashSet<string>
@@ -2690,7 +2696,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
         "AlertsService.resolveOrphanedGroupIncidents",
       )(function* (
         orgId: OrgId,
-        ruleId: string,
+        ruleId: AlertRuleId,
         normalized: NormalizedRule,
         evaluatedGroups: HashSet.HashSet<string>,
         timestamp: number,
@@ -2761,7 +2767,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
       const SCHEDULER_LOCK_TTL_MS = 30_000
 
-      const claimRule = (ruleId: string, timestamp: number) =>
+      const claimRule = (ruleId: AlertRuleId, timestamp: number) =>
         dbExecute((db) =>
           db
             .update(alertRules)
@@ -2800,7 +2806,8 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
           (row) =>
             Effect.gen(function* () {
               const timestamp = now()
-              const claimed = yield* claimRule(row.id, timestamp)
+              const brandedRuleId = decodeAlertRuleIdSync(row.id)
+              const claimed = yield* claimRule(brandedRuleId, timestamp)
               if (claimed.rowsAffected === 0) return
 
               yield* Effect.gen(function* () {
@@ -2821,7 +2828,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
                   const evaluatedGroups = HashSet.fromIterable(Arr.map(eligible, (r) => r.groupKey))
                   yield* resolveOrphanedGroupIncidents(
                     row.orgId as OrgId,
-                    row.id,
+                    normalized.id,
                     normalized,
                     evaluatedGroups,
                     timestamp,
@@ -2849,7 +2856,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
 
                   yield* resolveOrphanedGroupIncidents(
                     row.orgId as OrgId,
-                    row.id,
+                    normalized.id,
                     normalized,
                     HashSet.fromIterable(normalized.serviceNames),
                     timestamp,
@@ -2916,7 +2923,7 @@ export class AlertsService extends ServiceMap.Service<AlertsService, AlertsServi
             ))[0]
             if (!ruleRow) return
             const normalized = yield* normalizeRuleRow(ruleRow)
-            yield* resolveStaleIncidents(orgId as OrgId, ruleId, normalized, { resolveAll: true })
+            yield* resolveStaleIncidents(orgId as OrgId, normalized.id, normalized, { resolveAll: true })
           }))
 
         const deliveryResult = yield* processQueuedDeliveries()

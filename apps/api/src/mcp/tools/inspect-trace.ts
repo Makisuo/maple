@@ -17,8 +17,7 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
     Schema.Struct({
       trace_id: requiredStringParam("The trace ID to inspect"),
     }),
-    ({ trace_id }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.inspectTrace")(function* ({ trace_id }) {
         yield* Effect.annotateCurrentSpan("traceId", trace_id)
 
         const result = yield* withTenantExecutor(inspectTrace(trace_id)).pipe(
@@ -110,6 +109,6 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
             },
           }),
         }
-      }).pipe(Effect.withSpan("McpTool.inspectTrace")),
+      }),
   )
 }

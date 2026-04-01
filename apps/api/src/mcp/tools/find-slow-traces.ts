@@ -23,8 +23,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
       environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
       limit: optionalNumberParam("Max results (default 10)"),
     }),
-    ({ start_time, end_time, service, environment, limit }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.findSlowTraces")(function* ({ start_time, end_time, service, environment, limit }) {
         const { st, et } = resolveTimeRange(start_time, end_time)
 
         const result = yield* withTenantExecutor(findSlowTraces({
@@ -92,6 +91,6 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
             },
           }),
         }
-      }).pipe(Effect.withSpan("McpTool.findSlowTraces")),
+      }),
   )
 }

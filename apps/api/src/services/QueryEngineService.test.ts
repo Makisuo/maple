@@ -198,7 +198,7 @@ describe("makeQueryEngineExecute", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "QueryEngineValidationError",
+      _tag: "@maple/http/errors/QueryEngineValidationError",
       message: "Timeseries query too expensive",
     })
   })
@@ -221,7 +221,7 @@ describe("makeQueryEngineExecute", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "QueryEngineValidationError",
+      _tag: "@maple/http/errors/QueryEngineValidationError",
       message: "Invalid traces attribute filters",
     })
   })
@@ -676,7 +676,7 @@ describe("makeQueryEngineEvaluate", () => {
     const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
     expect(Exit.isFailure(exit)).toBe(true)
     expect(failure).toMatchObject({
-      _tag: "QueryEngineValidationError",
+      _tag: "@maple/http/errors/QueryEngineValidationError",
       message: "Unsupported alert evaluation query",
     })
   })

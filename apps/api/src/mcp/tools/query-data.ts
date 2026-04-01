@@ -1,4 +1,5 @@
 import {
+  McpQueryError,
   optionalBooleanParam,
   optionalNumberParam,
   optionalStringParam,
@@ -80,8 +81,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
     "query_data",
     queryDataDescription,
     queryDataSchema,
-    (params) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.queryData")(function* (params) {
         const { st, et } = resolveTimeRange(params.start_time, params.end_time)
 
         // Validate attribute params
@@ -242,15 +242,10 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           }
         }
 
-        let decodedQuery: QuerySpecType
-        try {
-          decodedQuery = decodeQuerySpecSync(rawSpec)
-        } catch (error) {
-          return {
-            isError: true,
-            content: [{ type: "text", text: `Invalid query specification:\n${String(error)}` }],
-          }
-        }
+        const decodedQuery = yield* Effect.try({
+          try: () => decodeQuerySpecSync(rawSpec) as QuerySpecType,
+          catch: (error) => new McpQueryError({ message: `Invalid query specification:\n${String(error)}`, pipe: "query_data" }),
+        })
 
         const tenant = yield* resolveTenant
         const queryEngine = yield* QueryEngineService

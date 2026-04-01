@@ -71,7 +71,7 @@ export class ScrapeTargetProbeResponse extends Schema.Class<ScrapeTargetProbeRes
 }) {}
 
 export class ScrapeTargetPersistenceError extends Schema.TaggedErrorClass<ScrapeTargetPersistenceError>()(
-  "ScrapeTargetPersistenceError",
+  "@maple/http/errors/ScrapeTargetPersistenceError",
   {
     message: Schema.String,
   },
@@ -79,7 +79,7 @@ export class ScrapeTargetPersistenceError extends Schema.TaggedErrorClass<Scrape
 ) {}
 
 export class ScrapeTargetNotFoundError extends Schema.TaggedErrorClass<ScrapeTargetNotFoundError>()(
-  "ScrapeTargetNotFoundError",
+  "@maple/http/errors/ScrapeTargetNotFoundError",
   {
     targetId: ScrapeTargetId,
     message: Schema.String,
@@ -88,7 +88,7 @@ export class ScrapeTargetNotFoundError extends Schema.TaggedErrorClass<ScrapeTar
 ) {}
 
 export class ScrapeTargetValidationError extends Schema.TaggedErrorClass<ScrapeTargetValidationError>()(
-  "ScrapeTargetValidationError",
+  "@maple/http/errors/ScrapeTargetValidationError",
   {
     message: Schema.String,
   },
@@ -96,7 +96,7 @@ export class ScrapeTargetValidationError extends Schema.TaggedErrorClass<ScrapeT
 ) {}
 
 export class ScrapeTargetEncryptionError extends Schema.TaggedErrorClass<ScrapeTargetEncryptionError>()(
-  "ScrapeTargetEncryptionError",
+  "@maple/http/errors/ScrapeTargetEncryptionError",
   {
     message: Schema.String,
   },

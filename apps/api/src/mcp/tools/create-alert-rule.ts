@@ -259,8 +259,7 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
         "Query WHERE clause for filtering (optional, for signal_type=query)",
       ),
     }),
-    (params) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.createAlertRule")(function* (params) {
         const built = buildAlertRuleRequest(params)
         if ("error" in built) {
           return {
@@ -269,20 +268,10 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
           }
         }
 
-        let decoded: AlertRuleUpsertRequest
-        try {
-          decoded = decodeAlertRuleRequest(built.request)
-        } catch (error) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: `Invalid alert rule: ${String(error)}`,
-              },
-            ],
-          }
-        }
+        const decoded = yield* Effect.try({
+          try: () => decodeAlertRuleRequest(built.request),
+          catch: (error) => new McpQueryError({ message: `Invalid alert rule: ${String(error)}`, pipe: "create_alert_rule" }),
+        })
 
         const tenant = yield* resolveTenant
         const alerts = yield* AlertsService

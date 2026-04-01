@@ -57,7 +57,7 @@ export class OrgTinybirdSettingsDeleteResponse extends Schema.Class<OrgTinybirdS
 }) {}
 
 export class OrgTinybirdSettingsForbiddenError extends Schema.TaggedErrorClass<OrgTinybirdSettingsForbiddenError>()(
-  "OrgTinybirdSettingsForbiddenError",
+  "@maple/http/errors/OrgTinybirdSettingsForbiddenError",
   {
     message: Schema.String,
   },
@@ -65,7 +65,7 @@ export class OrgTinybirdSettingsForbiddenError extends Schema.TaggedErrorClass<O
 ) {}
 
 export class OrgTinybirdSettingsValidationError extends Schema.TaggedErrorClass<OrgTinybirdSettingsValidationError>()(
-  "OrgTinybirdSettingsValidationError",
+  "@maple/http/errors/OrgTinybirdSettingsValidationError",
   {
     message: Schema.String,
   },
@@ -73,7 +73,7 @@ export class OrgTinybirdSettingsValidationError extends Schema.TaggedErrorClass<
 ) {}
 
 export class OrgTinybirdSettingsPersistenceError extends Schema.TaggedErrorClass<OrgTinybirdSettingsPersistenceError>()(
-  "OrgTinybirdSettingsPersistenceError",
+  "@maple/http/errors/OrgTinybirdSettingsPersistenceError",
   {
     message: Schema.String,
   },
@@ -81,7 +81,7 @@ export class OrgTinybirdSettingsPersistenceError extends Schema.TaggedErrorClass
 ) {}
 
 export class OrgTinybirdSettingsEncryptionError extends Schema.TaggedErrorClass<OrgTinybirdSettingsEncryptionError>()(
-  "OrgTinybirdSettingsEncryptionError",
+  "@maple/http/errors/OrgTinybirdSettingsEncryptionError",
   {
     message: Schema.String,
   },
@@ -89,7 +89,7 @@ export class OrgTinybirdSettingsEncryptionError extends Schema.TaggedErrorClass<
 ) {}
 
 export class OrgTinybirdSettingsSyncError extends Schema.TaggedErrorClass<OrgTinybirdSettingsSyncError>()(
-  "OrgTinybirdSettingsSyncError",
+  "@maple/http/errors/OrgTinybirdSettingsSyncError",
   {
     message: Schema.String,
   },

@@ -41,7 +41,7 @@ export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("Crea
 }) {}
 
 export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersistenceError>()(
-  "ApiKeyPersistenceError",
+  "@maple/http/errors/ApiKeyPersistenceError",
   {
     message: Schema.String,
   },
@@ -49,7 +49,7 @@ export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersis
 ) {}
 
 export class ApiKeyNotFoundError extends Schema.TaggedErrorClass<ApiKeyNotFoundError>()(
-  "ApiKeyNotFoundError",
+  "@maple/http/errors/ApiKeyNotFoundError",
   {
     keyId: ApiKeyId,
     message: Schema.String,

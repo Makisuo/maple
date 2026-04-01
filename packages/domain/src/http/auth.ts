@@ -14,7 +14,7 @@ export class SelfHostedLoginResponse extends Schema.Class<SelfHostedLoginRespons
 }) {}
 
 export class SelfHostedAuthDisabledError extends Schema.TaggedErrorClass<SelfHostedAuthDisabledError>()(
-  "SelfHostedAuthDisabledError",
+  "@maple/http/errors/SelfHostedAuthDisabledError",
   {
     message: Schema.String,
   },
@@ -22,7 +22,7 @@ export class SelfHostedAuthDisabledError extends Schema.TaggedErrorClass<SelfHos
 ) {}
 
 export class SelfHostedInvalidPasswordError extends Schema.TaggedErrorClass<SelfHostedInvalidPasswordError>()(
-  "SelfHostedInvalidPasswordError",
+  "@maple/http/errors/SelfHostedInvalidPasswordError",
   {
     message: Schema.String,
   },

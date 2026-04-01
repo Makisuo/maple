@@ -43,8 +43,7 @@ export function registerGetIncidentTimelineTool(server: McpToolRegistrar) {
       service_name: optionalStringParam("Filter by service name"),
       limit: optionalNumberParam("Max incidents to return (default 20)"),
     }),
-    ({ rule_id, status, severity, service_name, limit }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.getIncidentTimeline")(function* ({ rule_id, status, severity, service_name, limit }) {
         const tenant = yield* resolveTenant
         const alerts = yield* AlertsService
 

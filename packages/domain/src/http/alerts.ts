@@ -449,7 +449,7 @@ export class AlertDestinationTestResponse extends Schema.Class<AlertDestinationT
 }) {}
 
 export class AlertForbiddenError extends Schema.TaggedErrorClass<AlertForbiddenError>()(
-  "AlertForbiddenError",
+  "@maple/http/errors/AlertForbiddenError",
   {
     message: Schema.String,
     roles: Schema.optionalKey(Schema.Array(RoleName)),
@@ -458,7 +458,7 @@ export class AlertForbiddenError extends Schema.TaggedErrorClass<AlertForbiddenE
 ) {}
 
 export class AlertValidationError extends Schema.TaggedErrorClass<AlertValidationError>()(
-  "AlertValidationError",
+  "@maple/http/errors/AlertValidationError",
   {
     message: Schema.String,
     details: Schema.Array(Schema.String),
@@ -467,7 +467,7 @@ export class AlertValidationError extends Schema.TaggedErrorClass<AlertValidatio
 ) {}
 
 export class AlertPersistenceError extends Schema.TaggedErrorClass<AlertPersistenceError>()(
-  "AlertPersistenceError",
+  "@maple/http/errors/AlertPersistenceError",
   {
     message: Schema.String,
   },
@@ -475,7 +475,7 @@ export class AlertPersistenceError extends Schema.TaggedErrorClass<AlertPersiste
 ) {}
 
 export class AlertNotFoundError extends Schema.TaggedErrorClass<AlertNotFoundError>()(
-  "AlertNotFoundError",
+  "@maple/http/errors/AlertNotFoundError",
   {
     message: Schema.String,
     resourceType: Schema.String,
@@ -485,7 +485,7 @@ export class AlertNotFoundError extends Schema.TaggedErrorClass<AlertNotFoundErr
 ) {}
 
 export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryError>()(
-  "AlertDeliveryError",
+  "@maple/http/errors/AlertDeliveryError",
   {
     message: Schema.String,
     destinationType: Schema.optionalKey(AlertDestinationType),
@@ -494,7 +494,7 @@ export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryErr
 ) {}
 
 export class AlertDestinationInUseError extends Schema.TaggedErrorClass<AlertDestinationInUseError>()(
-  "AlertDestinationInUseError",
+  "@maple/http/errors/AlertDestinationInUseError",
   {
     message: Schema.String,
     destinationId: AlertDestinationId,

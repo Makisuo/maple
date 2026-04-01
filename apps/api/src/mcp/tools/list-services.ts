@@ -21,8 +21,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss UTC)"),
       environment: optionalStringParam("Filter by deployment environment (e.g. production, staging)"),
     }),
-    ({ start_time, end_time, environment }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.listServices")(function* ({ start_time, end_time, environment }) {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const tenant = yield* resolveTenant
 

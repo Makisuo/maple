@@ -34,8 +34,7 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
       offset: optionalNumberParam("Offset for pagination (default 0). Use nextOffset from previous response."),
       limit: optionalNumberParam("Max results (default 20)"),
     }),
-    (params) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.searchTraces")(function* (params) {
         const { st, et } = resolveTimeRange(params.start_time, params.end_time)
         const lim = params.limit ?? 20
         const off = params.offset ?? 0
@@ -148,6 +147,6 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
             },
           }),
         }
-      }).pipe(Effect.withSpan("McpTool.searchTraces")),
+      }),
   )
 }

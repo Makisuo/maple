@@ -30,8 +30,7 @@ export function registerListAlertRulesTool(server: McpToolRegistrar) {
       severity: optionalStringParam("Filter by severity: warning, critical"),
       enabled_only: optionalBooleanParam("Only return enabled rules (default: false)"),
     }),
-    ({ service_name, signal_type, severity, enabled_only }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.listAlertRules")(function* ({ service_name, signal_type, severity, enabled_only }) {
         const tenant = yield* resolveTenant
         const alerts = yield* AlertsService
 

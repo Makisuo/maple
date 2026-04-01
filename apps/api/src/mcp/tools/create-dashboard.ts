@@ -192,8 +192,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
           "Use get_dashboard to see the expected schema.",
       ),
     }),
-    (params) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.createDashboard")(function* (params) {
         let portable: PortableDashboardDocument
 
         const templateName = params.template ?? (params.dashboard_json ? "custom" : "service_health")
@@ -211,34 +210,15 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
             }
           }
 
-          let parsed: unknown
-          try {
-            parsed = JSON.parse(params.dashboard_json)
-          } catch {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text" as const,
-                  text: "Invalid JSON: could not parse dashboard_json",
-                },
-              ],
-            }
-          }
+          const parsed = yield* Effect.try({
+            try: () => JSON.parse(params.dashboard_json!) as unknown,
+            catch: () => new McpQueryError({ message: "Invalid JSON: could not parse dashboard_json", pipe: "create_dashboard" }),
+          })
 
-          try {
-            portable = decodePortableDashboard(parsed)
-          } catch (error) {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Invalid dashboard schema: ${String(error)}`,
-                },
-              ],
-            }
-          }
+          portable = yield* Effect.try({
+            try: () => decodePortableDashboard(parsed),
+            catch: (error) => new McpQueryError({ message: `Invalid dashboard schema: ${String(error)}`, pipe: "create_dashboard" }),
+          })
         } else {
           const templateFn = DASHBOARD_TEMPLATES[templateName]
           if (!templateFn) {
@@ -256,24 +236,15 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
           const timeRangeValue = TIME_RANGE_MAP[params.time_range ?? "1h"] ?? "1h"
           const widgets = templateFn(params.service_name)
 
-          try {
-            portable = decodePortableDashboard({
+          portable = yield* Effect.try({
+            try: () => decodePortableDashboard({
               name: params.name,
               ...(params.description && { description: params.description }),
               timeRange: { type: "relative", value: timeRangeValue },
               widgets,
-            })
-          } catch (error) {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Template generation error: ${String(error)}`,
-                },
-              ],
-            }
-          }
+            }),
+            catch: (error) => new McpQueryError({ message: `Template generation error: ${String(error)}`, pipe: "create_dashboard" }),
+          })
         }
 
         const tenant = yield* resolveTenant

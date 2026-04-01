@@ -22,8 +22,7 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
       service_name: optionalStringParam("Filter to edges involving this service (as source or target)"),
       environment: optionalStringParam("Filter by deployment environment"),
     }),
-    ({ start_time, end_time, service_name, environment }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.serviceMap")(function* ({ start_time, end_time, service_name, environment }) {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const tenant = yield* resolveTenant
 

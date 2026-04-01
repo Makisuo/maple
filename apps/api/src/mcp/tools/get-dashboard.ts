@@ -15,8 +15,7 @@ export function registerGetDashboardTool(server: McpToolRegistrar) {
     Schema.Struct({
       dashboard_id: requiredStringParam("Dashboard ID to retrieve"),
     }),
-    ({ dashboard_id }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.getDashboard")(function* ({ dashboard_id }) {
         const tenant = yield* resolveTenant
         const persistence = yield* DashboardPersistenceService
 

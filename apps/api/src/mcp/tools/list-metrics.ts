@@ -23,8 +23,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
       offset: optionalNumberParam("Offset for pagination (default 0). Use nextOffset from previous response."),
       limit: optionalNumberParam("Max results (default 50)"),
     }),
-    ({ start_time, end_time, service, search, metric_type, offset, limit }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.listMetrics")(function* ({ start_time, end_time, service, search, metric_type, offset, limit }) {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const lim = limit ?? 50
         const off = offset ?? 0

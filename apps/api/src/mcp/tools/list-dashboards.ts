@@ -17,8 +17,7 @@ export function registerListDashboardsTool(server: McpToolRegistrar) {
     Schema.Struct({
       search: optionalStringParam("Filter dashboards by name (case-insensitive contains)"),
     }),
-    ({ search }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.listDashboards")(function* ({ search }) {
         const tenant = yield* resolveTenant
         const persistence = yield* DashboardPersistenceService
 

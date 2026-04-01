@@ -384,7 +384,7 @@ const mapTinybirdError = <A, R>(
   context: string,
 ): Effect.Effect<A, QueryEngineExecutionError, R> =>
   effect.pipe(
-    Effect.catchTag("TinybirdQueryError", (error: TinybirdQueryError) =>
+    Effect.catchTag("@maple/http/errors/TinybirdQueryError", (error: TinybirdQueryError) =>
       Effect.fail(
         new QueryEngineExecutionError({
           message: `${context}: ${error.message}`,

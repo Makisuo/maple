@@ -1,13 +1,11 @@
 import { Array as Arr, Effect, pipe } from "effect"
 import type { ErrorsByTypeOutput } from "@maple/domain/tinybird"
-import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
-import type { FindErrorsInput, ErrorSummary } from "./types"
+import { TinybirdExecutor } from "./TinybirdExecutor"
+import type { FindErrorsInput } from "./types"
 import { toErrorSummary } from "./row-mappers"
 
-export const findErrors = (
-  input: FindErrorsInput,
-): Effect.Effect<ReadonlyArray<ErrorSummary>, ObservabilityError, TinybirdExecutor> =>
-  Effect.gen(function* () {
+export const findErrors = Effect.fn("Observability.findErrors")(
+  function* (input: FindErrorsInput) {
     const executor = yield* TinybirdExecutor
 
     const result = yield* executor.query<ErrorsByTypeOutput>("errors_by_type", {
@@ -19,4 +17,5 @@ export const findErrors = (
     })
 
     return pipe(result.data, Arr.map(toErrorSummary))
-  })
+  },
+)

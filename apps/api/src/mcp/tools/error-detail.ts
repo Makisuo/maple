@@ -27,8 +27,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
       include_timeseries: optionalBooleanParam("Include error count over time to see if the error is trending up or down"),
       limit: optionalNumberParam("Max sample traces (default 5)"),
     }),
-    ({ error_type, start_time, end_time, service, include_timeseries, limit }) =>
-      Effect.gen(function* () {
+    Effect.fn("McpTool.errorDetail")(function* ({ error_type, start_time, end_time, service, include_timeseries, limit }) {
         const { st, et } = resolveTimeRange(start_time, end_time)
         const tenant = yield* resolveTenant
 

@@ -73,7 +73,7 @@ export class UpdateCloudflareLogpushConnectorRequest extends Schema.Class<Update
 }) {}
 
 export class CloudflareLogpushPersistenceError extends Schema.TaggedErrorClass<CloudflareLogpushPersistenceError>()(
-  "CloudflareLogpushPersistenceError",
+  "@maple/http/errors/CloudflareLogpushPersistenceError",
   {
     message: Schema.String,
   },
@@ -81,7 +81,7 @@ export class CloudflareLogpushPersistenceError extends Schema.TaggedErrorClass<C
 ) {}
 
 export class CloudflareLogpushNotFoundError extends Schema.TaggedErrorClass<CloudflareLogpushNotFoundError>()(
-  "CloudflareLogpushNotFoundError",
+  "@maple/http/errors/CloudflareLogpushNotFoundError",
   {
     connectorId: CloudflareLogpushConnectorId,
     message: Schema.String,
@@ -90,7 +90,7 @@ export class CloudflareLogpushNotFoundError extends Schema.TaggedErrorClass<Clou
 ) {}
 
 export class CloudflareLogpushValidationError extends Schema.TaggedErrorClass<CloudflareLogpushValidationError>()(
-  "CloudflareLogpushValidationError",
+  "@maple/http/errors/CloudflareLogpushValidationError",
   {
     message: Schema.String,
   },
@@ -98,7 +98,7 @@ export class CloudflareLogpushValidationError extends Schema.TaggedErrorClass<Cl
 ) {}
 
 export class CloudflareLogpushEncryptionError extends Schema.TaggedErrorClass<CloudflareLogpushEncryptionError>()(
-  "CloudflareLogpushEncryptionError",
+  "@maple/http/errors/CloudflareLogpushEncryptionError",
   {
     message: Schema.String,
   },
