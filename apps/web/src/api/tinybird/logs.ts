@@ -1,10 +1,14 @@
 import { Effect, Schema } from "effect"
+import { TraceId, SpanId } from "@maple/domain"
 import { getTinybird, type ListLogsOutput } from "@/lib/tinybird"
 import {
   TinybirdDateTimeString,
   decodeInput,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
+
+const toTraceId = Schema.decodeSync(TraceId)
+const toSpanId = Schema.decodeSync(SpanId)
 
 const ListLogsInputSchema = Schema.Struct({
   limit: Schema.optional(
@@ -33,8 +37,8 @@ export interface Log {
   severityNumber: number
   serviceName: string
   body: string
-  traceId: string
-  spanId: string
+  traceId: TraceId
+  spanId: SpanId
   logAttributes: Record<string, string>
   resourceAttributes: Record<string, string>
 }
@@ -49,8 +53,12 @@ export interface LogsResponse {
 
 function parseAttributes(value: string | null | undefined): Record<string, string> {
   if (!value) return {}
-  const parsed = JSON.parse(value)
-  return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
 }
 
 function transformLog(raw: ListLogsOutput): Log {
@@ -60,8 +68,8 @@ function transformLog(raw: ListLogsOutput): Log {
     severityNumber: Number(raw.severityNumber),
     serviceName: raw.serviceName,
     body: raw.body,
-    traceId: raw.traceId,
-    spanId: raw.spanId,
+    traceId: toTraceId(raw.traceId),
+    spanId: toSpanId(raw.spanId),
     logAttributes: parseAttributes(raw.logAttributes),
     resourceAttributes: parseAttributes(raw.resourceAttributes),
   }

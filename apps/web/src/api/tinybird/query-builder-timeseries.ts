@@ -14,7 +14,7 @@ import {
 } from "@/lib/query-builder/model"
 import {
   decodeInput,
-  TinybirdApiError as TinybirdApiErrorClass,
+  TinybirdQueryError,
 } from "@/api/tinybird/effect-utils"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 
@@ -904,9 +904,8 @@ const getQueryBuilderTimeseriesEffect = Effect.fn("Tinybird.getQueryBuilderTimes
     return yield* Effect.tryPromise({
       try: () => getQueryBuilderTimeseriesInternal(input),
       catch: (cause) =>
-        new TinybirdApiErrorClass({
+        new TinybirdQueryError({
           operation: "getQueryBuilderTimeseries",
-          stage: "query",
           message:
             cause instanceof Error
               ? cause.message

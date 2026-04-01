@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { QueryEngineExecuteRequest, type AttributeFilter } from "@maple/query-engine"
+import { TraceId, SpanId } from "@maple/domain"
 import {
   getTinybird,
   type ListTracesOutput,
@@ -9,12 +10,15 @@ import {
 } from "@/lib/tinybird"
 import {
   TinybirdDateTimeString,
-  TinybirdApiError,
+  TinybirdTransformError,
   decodeInput,
   executeQueryEngine,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
 import { getHttpInfo, type HttpInfo } from "@maple/ui/lib/http"
+
+const toTraceId = Schema.decodeSync(TraceId)
+const toSpanId = Schema.decodeSync(SpanId)
 
 const ContainsMatchMode = Schema.optional(Schema.Literals(["contains"]))
 
@@ -59,7 +63,7 @@ export interface TraceRootSpanSummary {
 }
 
 export interface Trace {
-  traceId: string
+  traceId: TraceId
   startTime: string
   endTime: string
   durationMs: number
@@ -100,7 +104,7 @@ function transformTrace(raw: ListTracesOutput): Trace {
   const rootSpanAttributes = buildRootSpanAttributes(raw)
 
   return {
-    traceId: raw.traceId,
+    traceId: toTraceId(raw.traceId),
     startTime: String(raw.startTime),
     endTime: String(raw.endTime),
     durationMs: Number(raw.durationMicros) / 1000,
@@ -222,7 +226,7 @@ function transformRootListRow(row: Record<string, unknown>): Trace {
   if (row.rootHttpStatusCode) rootSpanAttributes["http.status_code"] = String(row.rootHttpStatusCode)
 
   return {
-    traceId: String(row.traceId),
+    traceId: toTraceId(String(row.traceId)),
     startTime: String(row.startTime),
     endTime: String(row.endTime),
     durationMs: Number(row.durationMicros) / 1000,
@@ -250,7 +254,7 @@ function transformSpanListRow(row: Record<string, unknown>): Trace {
 
   const timestamp = String(row.timestamp)
   return {
-    traceId: String(row.traceId),
+    traceId: toTraceId(String(row.traceId)),
     startTime: timestamp,
     endTime: timestamp,
     durationMs: Number(row.durationMs),
@@ -326,9 +330,8 @@ const listTracesViaQueryEngineEffect = Effect.fn("QueryEngine.listTraces")(funct
 
   if (response.result.kind !== "list") {
     return yield* Effect.fail(
-      new TinybirdApiError({
+      new TinybirdTransformError({
         operation: "queryEngine.listTraces",
-        stage: "transform",
         message: `Unexpected result kind from query engine: ${response.result.kind}`,
       }),
     )
@@ -345,8 +348,8 @@ const listTracesViaQueryEngineEffect = Effect.fn("QueryEngine.listTraces")(funct
 })
 
 export interface Span {
-  traceId: string
-  spanId: string
+  traceId: TraceId
+  spanId: SpanId
   parentSpanId: string
   spanName: string
   serviceName: string
@@ -366,15 +369,15 @@ export interface SpanNode extends Span {
 }
 
 export interface SpanHierarchyResponse {
-  traceId: string
+  traceId: TraceId
   spans: Span[]
   rootSpans: SpanNode[]
   totalDurationMs: number
 }
 
 const GetSpanHierarchyInputSchema = Schema.Struct({
-  traceId: Schema.String.check(Schema.isMinLength(1)),
-  spanId: Schema.optional(Schema.String),
+  traceId: TraceId,
+  spanId: Schema.optional(SpanId),
 })
 
 export type GetSpanHierarchyInput = Schema.Schema.Type<typeof GetSpanHierarchyInputSchema>
@@ -391,8 +394,8 @@ function parseAttributes(value: string | null | undefined): Record<string, strin
 
 function transformSpan(raw: SpanHierarchyOutput): Span {
   return {
-    traceId: raw.traceId,
-    spanId: raw.spanId,
+    traceId: toTraceId(raw.traceId),
+    spanId: toSpanId(raw.spanId),
     parentSpanId: raw.parentSpanId,
     spanName: raw.spanName,
     serviceName: raw.serviceName,
@@ -436,7 +439,7 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
   for (const [missingParentId, children] of missingParentGroups) {
     const placeholder: SpanNode = {
       traceId: children[0].traceId,
-      spanId: missingParentId,
+      spanId: toSpanId(missingParentId),
       parentSpanId: "",
       spanName: "Missing Span",
       serviceName: "unknown",

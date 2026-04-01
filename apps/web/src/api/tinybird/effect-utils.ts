@@ -4,15 +4,46 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
 export const TinybirdDateTimeString = TinybirdDateTime
 
-export class TinybirdApiError extends Schema.TaggedErrorClass<TinybirdApiError>()(
-  "TinybirdApiError",
+export class TinybirdDecodeError extends Schema.TaggedErrorClass<TinybirdDecodeError>()(
+  "TinybirdDecodeError",
   {
     operation: Schema.String,
-    stage: Schema.Literals(["decode", "query", "transform", "invalid"]),
     message: Schema.String,
     cause: Schema.optional(Schema.Unknown),
   },
 ) {}
+
+export class TinybirdQueryError extends Schema.TaggedErrorClass<TinybirdQueryError>()(
+  "TinybirdQueryError",
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown),
+  },
+) {}
+
+export class TinybirdTransformError extends Schema.TaggedErrorClass<TinybirdTransformError>()(
+  "TinybirdTransformError",
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown),
+  },
+) {}
+
+export class TinybirdInvalidInputError extends Schema.TaggedErrorClass<TinybirdInvalidInputError>()(
+  "TinybirdInvalidInputError",
+  {
+    operation: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
+export type TinybirdApiError =
+  | TinybirdDecodeError
+  | TinybirdQueryError
+  | TinybirdTransformError
+  | TinybirdInvalidInputError
 
 function toMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error ? cause.message : fallback
@@ -22,13 +53,12 @@ export function decodeInput<S extends Schema.Top & { readonly DecodingServices: 
   schema: S,
   input: unknown,
   operation: string,
-): Effect.Effect<S["Type"], TinybirdApiError> {
+): Effect.Effect<S["Type"], TinybirdDecodeError> {
   return Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError(
       (cause) =>
-        new TinybirdApiError({
+        new TinybirdDecodeError({
           operation,
-          stage: "decode",
           message: toMessage(cause, `Invalid input for ${operation}`),
           cause,
         }),
@@ -39,20 +69,17 @@ export function decodeInput<S extends Schema.Top & { readonly DecodingServices: 
 export function runTinybirdQuery<A>(
   operation: string,
   execute: () => Effect.Effect<A, unknown, MapleApiAtomClient>,
-): Effect.Effect<A, TinybirdApiError> {
+): Effect.Effect<A, TinybirdQueryError> {
   return Effect.suspend(execute).pipe(
     Effect.withSpan(operation),
     Effect.provide(MapleApiAtomClient.layer),
     Effect.mapError(
       (cause) =>
-        cause instanceof TinybirdApiError
-          ? cause
-          : new TinybirdApiError({
-              operation,
-              stage: "query",
-              message: toMessage(cause, `Tinybird query failed for ${operation}`),
-              cause,
-            }),
+        new TinybirdQueryError({
+          operation,
+          message: toMessage(cause, `Tinybird query failed for ${operation}`),
+          cause,
+        }),
     ),
   )
 }
@@ -60,11 +87,10 @@ export function runTinybirdQuery<A>(
 export function invalidTinybirdInput(
   operation: string,
   message: string,
-): Effect.Effect<never, TinybirdApiError> {
+): Effect.Effect<never, TinybirdInvalidInputError> {
   return Effect.fail(
-    new TinybirdApiError({
+    new TinybirdInvalidInputError({
       operation,
-      stage: "invalid",
       message,
     }),
   )
@@ -82,14 +108,11 @@ export function executeQueryEngine(operation: string, payload: QueryEngineExecut
     Effect.provide(MapleApiAtomClient.layer),
     Effect.mapError(
       (cause) =>
-        cause instanceof TinybirdApiError
-          ? cause
-          : new TinybirdApiError({
-              operation,
-              stage: "query",
-              message: toMessage(cause, "Query engine request failed"),
-              cause,
-            }),
+        new TinybirdQueryError({
+          operation,
+          message: toMessage(cause, "Query engine request failed"),
+          cause,
+        }),
     ),
   )
 }

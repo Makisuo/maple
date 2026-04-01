@@ -7,7 +7,7 @@ import {
 } from "@/lib/query-builder/model"
 import {
   decodeInput,
-  TinybirdApiError as TinybirdApiErrorClass,
+  TinybirdQueryError,
 } from "@/api/tinybird/effect-utils"
 
 const dateTimeString = Schema.String.check(
@@ -244,9 +244,8 @@ const getQueryBuilderBreakdownEffect = Effect.fn("Tinybird.getQueryBuilderBreakd
     return yield* Effect.tryPromise({
       try: () => getQueryBuilderBreakdownInternal(input),
       catch: (cause) =>
-        new TinybirdApiErrorClass({
+        new TinybirdQueryError({
           operation: "getQueryBuilderBreakdown",
-          stage: "query",
           message:
             cause instanceof Error
               ? cause.message

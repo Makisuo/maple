@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
+import { TraceId } from "@maple/domain"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -43,7 +44,7 @@ function TraceDetailPage() {
   const searchStr = useRouterState({ select: (state) => state.location.searchStr })
   const backToTracesHref = buildBackToTracesHref(searchStr)
   const navigate = useNavigate({ from: Route.fullPath })
-  const result = useAtomValue(getSpanHierarchyResultAtom({ data: { traceId } }))
+  const result = useAtomValue(getSpanHierarchyResultAtom({ data: { traceId: Schema.decodeSync(TraceId)(traceId) } }))
 
   return Result.builder(result)
     .onInitial(() => (

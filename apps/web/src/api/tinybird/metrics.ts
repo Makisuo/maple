@@ -9,7 +9,7 @@ import {
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
   TinybirdDateTimeString,
-  TinybirdApiError,
+  TinybirdQueryError,
   decodeInput,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
@@ -141,9 +141,8 @@ function executeMetricsQueryEngine(payload: QueryEngineExecuteRequest) {
     Effect.provide(MapleApiAtomClient.layer),
     Effect.mapError(
       (cause) =>
-        new TinybirdApiError({
+        new TinybirdQueryError({
           operation: "queryEngine.execute",
-          stage: "query",
           message: toMessage(cause, "Metrics query engine request failed"),
           cause,
         }),
