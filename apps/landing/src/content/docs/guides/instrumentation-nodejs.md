@@ -23,16 +23,16 @@ npm install @opentelemetry/sdk-node \
 
 ## Configure the SDK
 
-Create a `tracing.js` file that initializes the SDK before your application code:
+Create a `tracing.ts` file that initializes the SDK before your application code:
 
-```javascript
-// tracing.js
-const { NodeSDK } = require("@opentelemetry/sdk-node");
-const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
-const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
-const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-http");
-const { SimpleLogRecordProcessor } = require("@opentelemetry/sdk-logs");
-const { Resource } = require("@opentelemetry/resources");
+```typescript
+// tracing.ts
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
+import { Resource } from "@opentelemetry/resources";
 
 const sdk = new NodeSDK({
   resource: new Resource({
@@ -61,10 +61,10 @@ sdk.start();
 Run your application with the tracing file loaded first:
 
 ```bash
-node --require ./tracing.js app.js
+node --import ./tracing.ts app.ts
 ```
 
-For ES modules, use the `--import` flag with a register hook instead.
+> If you're using TypeScript directly, run with a loader like [tsx](https://github.com/privatenumber/tsx): `node --import tsx/esm --import ./tracing.ts app.ts`
 
 ## Auto-Instrumentation
 
@@ -72,7 +72,7 @@ For ES modules, use the `--import` flag with a register hook instead.
 
 To disable specific instrumentations:
 
-```javascript
+```typescript
 instrumentations: [
   getNodeAutoInstrumentations({
     "@opentelemetry/instrumentation-fs": { enabled: false },
@@ -85,12 +85,12 @@ instrumentations: [
 
 Create custom spans to trace specific operations in your code:
 
-```javascript
-const { trace, SpanStatusCode } = require("@opentelemetry/api");
+```typescript
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 
 const tracer = trace.getTracer("my-app");
 
-async function processOrder(orderId) {
+async function processOrder(orderId: string) {
   return tracer.startActiveSpan("process-order", async (span) => {
     try {
       span.setAttribute("order.id", orderId);
@@ -99,8 +99,8 @@ async function processOrder(orderId) {
       const result = await chargePayment(orderId);
       return result;
     } catch (error) {
-      span.recordException(error);
-      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      span.recordException(error as Error);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
       throw error;
     } finally {
       span.end();
@@ -146,40 +146,17 @@ export function register() {
 }
 ```
 
-Enable the instrumentation hook in `next.config.js`:
+Enable the instrumentation hook in `next.config.ts`:
 
-```javascript
-module.exports = {
+```typescript
+export default {
   experimental: { instrumentationHook: true },
 };
 ```
 
 ## Effect
 
-If you're using Effect, the `@maple-dev/effect-sdk` provides a pre-configured layer:
-
-```bash
-npm install @maple-dev/effect-sdk effect
-```
-
-```typescript
-import { Maple } from "@maple-dev/effect-sdk";
-import { Effect } from "effect";
-
-// Auto-detects MAPLE_ENDPOINT, MAPLE_INGEST_KEY,
-// commit SHA, and deployment environment from env vars
-const TracerLive = Maple.layer({
-  serviceName: "my-effect-app",
-});
-
-const program = Effect.gen(function* () {
-  yield* Effect.log("Hello from Effect!");
-}).pipe(Effect.withSpan("hello-maple"));
-
-Effect.runPromise(program.pipe(Effect.provide(TracerLive)));
-```
-
-The Effect SDK auto-detects environment variables for commit SHA (`COMMIT_SHA`, `RAILWAY_GIT_COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA`) and environment (`MAPLE_ENVIRONMENT`, `RAILWAY_ENVIRONMENT`, `VERCEL_ENV`, `NODE_ENV`).
+If you're using Effect, see the dedicated [Effect Instrumentation](/docs/guides/instrumentation-effect) guide.
 
 ## Verify
 

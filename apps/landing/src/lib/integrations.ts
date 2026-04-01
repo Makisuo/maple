@@ -159,7 +159,7 @@ with tracer.start_as_current_span("hello-maple"):
       },
       {
         title: "Configure tracing",
-        code: `// tracing.ts — run with: node --import ./tracing.js app.js
+        code: `// tracing.ts — run with: node --import ./tracing.ts app.ts
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";

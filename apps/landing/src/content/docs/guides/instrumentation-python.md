@@ -2,7 +2,7 @@
 title: "Python Instrumentation"
 description: "Instrument a Python application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Guides"
-order: 4
+order: 5
 ---
 
 This guide covers instrumenting a Python application to send traces and logs to Maple using the OpenTelemetry SDK.

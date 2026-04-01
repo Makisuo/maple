@@ -41,7 +41,8 @@ export OTEL_SERVICE_NAME="my-service"
 
 Follow our language-specific guides:
 
-- [Node.js Instrumentation](/docs/guides/instrumentation-nodejs) -- includes Next.js and Effect setup
+- [Node.js Instrumentation](/docs/guides/instrumentation-nodejs) -- includes Next.js setup
+- [Effect Instrumentation](/docs/guides/instrumentation-effect)
 - [Python Instrumentation](/docs/guides/instrumentation-python)
 - [Go Instrumentation](/docs/guides/instrumentation-go)
 

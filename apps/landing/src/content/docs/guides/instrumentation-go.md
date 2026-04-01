@@ -2,7 +2,7 @@
 title: "Go Instrumentation"
 description: "Instrument a Go application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Guides"
-order: 5
+order: 6
 ---
 
 This guide covers instrumenting a Go application to send traces and logs to Maple using the OpenTelemetry SDK.

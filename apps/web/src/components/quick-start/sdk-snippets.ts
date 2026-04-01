@@ -41,12 +41,12 @@ export function register() {
     description: "JavaScript runtime",
     iconKey: "nodejs",
     install: { packages: ["@opentelemetry/sdk-node", "@opentelemetry/auto-instrumentations-node", "@opentelemetry/exporter-trace-otlp-http", "@opentelemetry/exporter-logs-otlp-http"] },
-    instrument: `// tracing.js — run with: node --require ./tracing.js app.js
-const { NodeSDK } = require("@opentelemetry/sdk-node");
-const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
-const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
-const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-http");
-const { SimpleLogRecordProcessor } = require("@opentelemetry/sdk-logs");
+    instrument: `// tracing.ts — run with: node --import ./tracing.ts app.ts
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
 
 const sdk = new NodeSDK({
   traceExporter: new OTLPTraceExporter({
