@@ -96,7 +96,7 @@ function calculateNewRelic(values: Record<string, number>) {
 }
 
 function calculateMaple(values: Record<string, number>, competitor: Competitor) {
-  const baseCost = 29
+  const baseCost = 39
   let totalDataGB: number
 
   if (competitor === "datadog") {

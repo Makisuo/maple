@@ -1503,19 +1503,19 @@ export const pricing_for_growing = () => `成長中のチーム向け`
 
 
 /**
- * 
+ * @param {{ duration: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_badge = () => `30日間無料トライアル`
+export const pricing_trial_badge = (params) => `${params.duration}日間無料トライアル`
 
 
 /**
- * 
+ * @param {{ duration: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_notice = () => `30日間は課金されません · クレジットカードが必要です`
+export const pricing_trial_notice = (params) => `${params.duration}日間は課金されません · クレジットカードが必要です`
 
 
 /**

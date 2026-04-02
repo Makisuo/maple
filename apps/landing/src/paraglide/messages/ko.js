@@ -1503,19 +1503,19 @@ export const pricing_for_growing = () => `성장하는 팀용`
 
 
 /**
- * 
+ * @param {{ duration: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_badge = () => `30일 무료 체험`
+export const pricing_trial_badge = (params) => `${params.duration}일 무료 체험`
 
 
 /**
- * 
+ * @param {{ duration: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_notice = () => `30일간 과금되지 않습니다 · 신용카드 필요`
+export const pricing_trial_notice = (params) => `${params.duration}일간 과금되지 않습니다 · 신용카드 필요`
 
 
 /**

@@ -26,6 +26,7 @@ interface PlanCard {
     interval?: string
     isFree: boolean
     hasTrial: boolean
+    trialDuration?: number
     subtitle: string
     dataFeatures: { label: string; value: string; detail?: string }[]
     platformFeatures: { label: string }[]
@@ -37,35 +38,34 @@ let plans: PlanCard[] = []
 
 try {
     const autumn = new Autumn({ secretKey: import.meta.env.AUTUMN_SECRET_KEY })
-    const result = await autumn.products.list()
+    const result = await autumn.plans.list()
 
-    if (result.data) {
-        const products = result.data.list
-            .filter((p) => !p.is_add_on)
+    if (result.list) {
+        const products = result.list
+            .filter((p) => !p.addOn)
             .sort((a, b) => {
-                if (a.properties.is_free && !b.properties.is_free) return -1
-                if (!a.properties.is_free && b.properties.is_free) return 1
-                const priceA = a.items.find((i) => !i.feature_id && i.price != null)?.price ?? 0
-                const priceB = b.items.find((i) => !i.feature_id && i.price != null)?.price ?? 0
+                if (a.autoEnable && !b.autoEnable) return -1
+                if (!a.autoEnable && b.autoEnable) return 1
+                const priceA = a.price?.amount ?? 0
+                const priceB = b.price?.amount ?? 0
                 return priceA - priceB
             })
 
         plans = products.map((product) => {
-            const isFree = product.properties.is_free
+            const isFree = product.autoEnable
             const slug = isFree ? "starter" : product.id?.toLowerCase() ?? product.name?.toLowerCase() ?? "startup"
-            const baseItem = product.items.find((i) => !i.feature_id && i.price != null)
-            const price = isFree ? 0 : (baseItem?.price ?? 0)
-            const interval = baseItem?.interval
+            const price = isFree ? 0 : (product.price?.amount ?? 0)
+            const interval = product.price?.interval
 
             const dataFeatures = product.items
-                .filter((item) => item.feature_id)
+                .filter((item) => item.featureId)
                 .map((item) => ({
-                    label: item.feature?.name ?? item.feature_id ?? "",
-                    value: item.included_usage === "inf" ? "Unlimited" : `${Number(item.included_usage ?? 0)} GB`,
-                    detail: item.display?.secondary_text
-                        ? item.display.secondary_text.replace(/\bper\s+(?:[\d,]+\s+)?(?:logs?|traces?|metrics?)\b/i, "per GB")
-                        : item.price != null
-                          ? `then $${item.price} per GB`
+                    label: item.feature?.name ?? item.featureId ?? "",
+                    value: item.unlimited ? "Unlimited" : `${Number(item.included ?? 0)} GB`,
+                    detail: item.price?.display?.secondaryText
+                        ? item.price.display.secondaryText.replace(/\bper\s+(?:[\d,]+\s+)?(?:logs?|traces?|metrics?)\b/i, "per GB")
+                        : item.price?.amount != null
+                          ? `then $${item.price.amount} per GB`
                           : undefined,
                 }))
 
@@ -73,16 +73,17 @@ try {
                 .map((f) => ({ label: f.label }))
 
             return {
-                name: product.display?.name ?? product.name,
+                name: product.name,
                 slug,
                 price,
                 interval: interval ? `/${interval}` : undefined,
                 isFree,
-                hasTrial: product.properties.has_trial,
-                subtitle: isFree ? m.pricing_free_forever() : (product.display?.description ?? (slug === "starter" ? m.pricing_for_small() : m.pricing_for_growing())),
+                hasTrial: !!product.freeTrial,
+                trialDuration: product.freeTrial?.durationLength,
+                subtitle: isFree ? m.pricing_free_forever() : (product.description ?? (slug === "starter" ? m.pricing_for_small() : m.pricing_for_growing())),
                 dataFeatures,
                 platformFeatures,
-                ctaLabel: isFree ? m.cta_get_started() : (product.free_trial ? m.pricing_start_trial({ duration: String(product.free_trial.length) }) : m.pricing_subscribe()),
+                ctaLabel: isFree ? m.cta_get_started() : (product.freeTrial ? m.pricing_start_trial({ duration: String(product.freeTrial.durationLength) }) : m.pricing_subscribe()),
                 ctaStyle: isFree ? "outline" as const : "accent" as const,
             }
         })
@@ -97,26 +98,29 @@ if (plans.length === 0) {
         {
             name: "Starter",
             slug: "starter",
-            price: 0,
-            isFree: true,
-            hasTrial: false,
-            subtitle: m.pricing_free_forever(),
+            price: 19,
+            interval: "/month",
+            isFree: false,
+            hasTrial: true,
+            trialDuration: 14,
+            subtitle: m.pricing_for_small(),
             dataFeatures: [
                 { label: m.pricing_logs(), value: "50 GB" },
                 { label: m.pricing_traces(), value: "50 GB" },
                 { label: m.pricing_metrics(), value: "50 GB" },
             ],
             platformFeatures: PLAN_FEATURES["starter"]!.map((f) => ({ label: f.label })),
-            ctaLabel: m.cta_get_started(),
-            ctaStyle: "outline",
+            ctaLabel: m.pricing_start_trial({ duration: "14" }),
+            ctaStyle: "accent",
         },
         {
             name: "Startup",
             slug: "startup",
-            price: 29,
+            price: 39,
             interval: "/month",
             isFree: false,
             hasTrial: true,
+            trialDuration: 30,
             subtitle: m.pricing_for_growing(),
             dataFeatures: [
                 { label: m.pricing_logs(), value: "100 GB", detail: "then $0.25/GB" },
@@ -139,9 +143,9 @@ if (plans.length === 0) {
                     <div class="p-6 md:p-8 flex flex-col flex-1">
                         <div class="flex items-center gap-2">
                             <span class="text-[11px] uppercase tracking-widest text-fg-muted">{plan.name}</span>
-                            {plan.hasTrial && (
+                            {plan.hasTrial && plan.trialDuration && (
                                 <span class="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
-                                    {m.pricing_trial_badge()}
+                                    {m.pricing_trial_badge({ duration: String(plan.trialDuration) })}
                                 </span>
                             )}
                         </div>
@@ -150,11 +154,6 @@ if (plans.length === 0) {
                             {plan.interval && <span class="text-base font-normal text-fg-muted">{plan.interval}</span>}
                         </div>
                         <p class="mt-1 text-sm text-fg-muted">{plan.subtitle}</p>
-                        {plan.slug === "starter" && (
-                            <div class="mt-3 rounded-md bg-accent/10 px-3 py-1.5 text-center text-xs font-medium text-accent">
-                                {m.pricing_no_usage_charges()}
-                            </div>
-                        )}
 
                         <div class="mt-6">
                             <span class="text-[10px] uppercase tracking-widest text-fg-muted/70">{m.pricing_data_included()}</span>
@@ -208,9 +207,9 @@ if (plans.length === 0) {
                                     {plan.ctaLabel}
                                 </a>
                             )}
-                            {plan.hasTrial && (
+                            {plan.hasTrial && plan.trialDuration && (
                                 <p class="text-[11px] text-fg-muted text-center">
-                                    {m.pricing_trial_notice()}
+                                    {m.pricing_trial_notice({ duration: String(plan.trialDuration) })}
                                 </p>
                             )}
                         </div>

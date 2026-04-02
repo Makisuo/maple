@@ -1707,19 +1707,19 @@ export const pricing_for_growing = () => `For growing teams`
 
 
 /**
- * 
+ * @param {{ duration: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_badge = () => `30-day trial`
+export const pricing_trial_badge = (params) => `${params.duration}-day trial`
 
 
 /**
- * 
+ * @param {{ duration: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_notice = () => `You won't be charged for 30 days · Credit card required`
+export const pricing_trial_notice = (params) => `You won't be charged for ${params.duration} days · Credit card required`
 
 
 /**
@@ -1863,7 +1863,7 @@ export const faq_limits_q = () => `What happens if I exceed my plan limits?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_limits_a = () => `We'll notify you as you approach your limits. On the free plan, ingestion pauses once you hit the cap. On paid plans, additional usage is billed at transparent per-GB rates with no surprises.`
+export const faq_limits_a = () => `We'll notify you as you approach your limits. On the Starter plan, ingestion pauses once you hit the cap. On the Startup plan, additional usage is billed at transparent per-GB rates with no surprises.`
 
 
 /**
@@ -1927,7 +1927,7 @@ export const faq_trial_q = () => `Do you offer a free trial for paid plans?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_trial_a = () => `Yes, paid plans include a 30-day free trial so you can explore all features before committing.`
+export const faq_trial_a = () => `Yes, all plans include a free trial so you can explore all features before committing.`
 
 
 /**
