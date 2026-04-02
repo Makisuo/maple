@@ -142,7 +142,7 @@ function DashboardViewPage() {
             onChange={(name) => updateDashboard(dashboardId, { name })}
           />
         }
-        description="Custom dashboard"
+
         headerActions={
           <DashboardToolbar
             mode={mode}
