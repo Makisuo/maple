@@ -1,6 +1,6 @@
 import { memo } from "react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { WidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
+import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type {
   WidgetDataState,
   WidgetDisplayConfig,
@@ -80,26 +80,22 @@ export const StatWidget = memo(function StatWidget({
   const thresholdColor = getThresholdColor(value, display.thresholds)
 
   return (
-    <WidgetShell
+    <WidgetFrame
       title={displayName}
+      dataState={dataState}
       mode={mode}
       onRemove={onRemove}
       onClone={onClone}
       onConfigure={onConfigure}
       contentClassName="flex-1 min-h-0 flex items-center justify-center p-4"
+      loadingSkeleton={<Skeleton className="h-8 w-24" />}
     >
-      {dataState.status === "loading" ? (
-        <Skeleton className="h-8 w-24" />
-      ) : dataState.status === "error" ? (
-        <span className="text-xs text-muted-foreground">Unable to load</span>
-      ) : (
-        <span
-          className="text-2xl font-bold"
-          style={thresholdColor ? { color: thresholdColor } : undefined}
-        >
-          {formattedValue}
-        </span>
-      )}
-    </WidgetShell>
+      <span
+        className="text-2xl font-bold"
+        style={thresholdColor ? { color: thresholdColor } : undefined}
+      >
+        {formattedValue}
+      </span>
+    </WidgetFrame>
   )
 })

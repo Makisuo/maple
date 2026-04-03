@@ -8,6 +8,8 @@ import { getCacheInfo } from "@/lib/cache"
 import type { TimelineBar } from "./trace-timeline-types"
 import { ROW_HEIGHT, ROW_GAP, DEPTH_INDENT } from "./trace-timeline-types"
 
+export type BarSearchState = "match" | "dimmed" | null
+
 interface TraceTimelineBarProps {
   bar: TimelineBar
   leftPercent: number
@@ -15,8 +17,7 @@ interface TraceTimelineBarProps {
   services: string[]
   isSelected: boolean
   isFocused: boolean
-  isSearchMatch: boolean
-  isSearchActive: boolean
+  searchState: BarSearchState
   containerWidth: number
 }
 
@@ -41,8 +42,7 @@ function TraceTimelineBarInner({
   services,
   isSelected,
   isFocused,
-  isSearchMatch,
-  isSearchActive,
+  searchState,
   containerWidth,
 }: TraceTimelineBarProps) {
   const borderColor = bar.isError
@@ -88,8 +88,8 @@ function TraceTimelineBarInner({
         "transition-[background-color,box-shadow] duration-75",
         isSelected && "ring-1 ring-primary bg-primary/10 z-20",
         isFocused && "outline-2 outline-dashed outline-primary outline-offset-[-2px] z-10",
-        isSearchActive && !isSearchMatch && "opacity-25",
-        isSearchActive && isSearchMatch && "ring-1 ring-primary/50 z-10",
+        searchState === "dimmed" && "opacity-25",
+        searchState === "match" && "ring-1 ring-primary/50 z-10",
         bar.span.isMissing && "border-dashed italic text-muted-foreground",
       )}
       style={barStyle}
@@ -166,8 +166,7 @@ export const TraceTimelineBar = React.memo(TraceTimelineBarInner, (prev, next) =
     prev.widthPercent === next.widthPercent &&
     prev.isSelected === next.isSelected &&
     prev.isFocused === next.isFocused &&
-    prev.isSearchMatch === next.isSearchMatch &&
-    prev.isSearchActive === next.isSearchActive &&
+    prev.searchState === next.searchState &&
     prev.containerWidth === next.containerWidth
   )
 })

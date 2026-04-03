@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@maple/ui/components/ui/dropdown-menu"
-import type { WidgetMode } from "@/components/dashboard-builder/types"
+import type { WidgetMode, WidgetDataState } from "@/components/dashboard-builder/types"
 
 interface WidgetShellProps {
   title: string
@@ -92,4 +92,54 @@ export function WidgetShell({
 
 export function ReadonlyWidgetShell(props: Omit<WidgetShellProps, "mode">) {
   return <WidgetShell {...props} mode="view" />
+}
+
+interface WidgetFrameProps {
+  title: string
+  dataState: WidgetDataState
+  mode: WidgetMode
+  onRemove: () => void
+  onClone?: () => void
+  onConfigure?: () => void
+  contentClassName?: string
+  loadingSkeleton: ReactNode
+  children: ReactNode
+}
+
+export function WidgetFrame({
+  title,
+  dataState,
+  mode,
+  onRemove,
+  onClone,
+  onConfigure,
+  contentClassName,
+  loadingSkeleton,
+  children,
+}: WidgetFrameProps) {
+  return (
+    <WidgetShell
+      title={title}
+      mode={mode}
+      onRemove={onRemove}
+      onClone={onClone}
+      onConfigure={onConfigure}
+      contentClassName={contentClassName}
+    >
+      {dataState.status === "loading" ? (
+        loadingSkeleton
+      ) : dataState.status === "error" ? (
+        <div className="flex items-center justify-center h-full flex-col gap-1">
+          <span className="text-xs text-muted-foreground">Unable to load</span>
+          {dataState.message && (
+            <span className="text-[10px] text-destructive/70 max-w-[90%] text-center truncate">
+              {dataState.message}
+            </span>
+          )}
+        </div>
+      ) : (
+        children
+      )}
+    </WidgetShell>
+  )
 }

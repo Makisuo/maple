@@ -1,16 +1,11 @@
 import * as React from "react"
 
 import { SpanRow } from "./span-row"
+import { useTraceView } from "./trace-view-context"
 import type { SpanNode } from "@/api/tinybird/traces"
 
 interface SpanHierarchyProps {
-  rootSpans: SpanNode[]
-  totalDurationMs: number
-  traceStartTime: string
-  services: string[]
   defaultExpandDepth?: number
-  selectedSpanId?: string
-  onSelectSpan?: (span: SpanNode) => void
 }
 
 function collectSpanIds(nodes: SpanNode[], depth: number, maxDepth: number): Set<string> {
@@ -26,14 +21,10 @@ function collectSpanIds(nodes: SpanNode[], depth: number, maxDepth: number): Set
 }
 
 export function SpanHierarchy({
-  rootSpans,
-  totalDurationMs,
-  traceStartTime,
-  services,
   defaultExpandDepth = Infinity,
-  selectedSpanId,
-  onSelectSpan,
 }: SpanHierarchyProps) {
+  const { rootSpans, totalDurationMs, traceStartTime, services, selectedSpanId, onSelectSpan } = useTraceView()
+
   const [expandedSpans, setExpandedSpans] = React.useState<Set<string>>(() => {
     return collectSpanIds(rootSpans, 0, defaultExpandDepth)
   })

@@ -4,6 +4,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/u
 import { SpanHierarchy } from "./span-hierarchy"
 import { TraceTimeline } from "./trace-timeline"
 import { TraceFlowView } from "./flow-view"
+import { TraceViewProvider } from "./trace-view-context"
 import type { SpanNode, Span } from "@/api/tinybird/traces"
 
 interface TraceViewTabsProps {
@@ -29,55 +30,42 @@ export function TraceViewTabs({
 }: TraceViewTabsProps) {
   // _spans is reserved for future Flow view implementation
   return (
-    <Tabs defaultValue="waterfall" className="flex flex-col h-full">
-      <TabsList variant="line" className="shrink-0">
-        <TabsTrigger value="waterfall">
-          <MenuIcon size={14} />
-          Waterfall
-        </TabsTrigger>
-        <TabsTrigger value="timeline">
-          <FireIcon size={14} />
-          Timeline
-        </TabsTrigger>
-        <TabsTrigger value="flow">
-          <NetworkNodesIcon size={14} />
-          Flow
-        </TabsTrigger>
-      </TabsList>
+    <TraceViewProvider
+      rootSpans={rootSpans}
+      totalDurationMs={totalDurationMs}
+      traceStartTime={traceStartTime}
+      services={services}
+      selectedSpanId={selectedSpanId}
+      onSelectSpan={onSelectSpan}
+    >
+      <Tabs defaultValue="waterfall" className="flex flex-col h-full">
+        <TabsList variant="line" className="shrink-0">
+          <TabsTrigger value="waterfall">
+            <MenuIcon size={14} />
+            Waterfall
+          </TabsTrigger>
+          <TabsTrigger value="timeline">
+            <FireIcon size={14} />
+            Timeline
+          </TabsTrigger>
+          <TabsTrigger value="flow">
+            <NetworkNodesIcon size={14} />
+            Flow
+          </TabsTrigger>
+        </TabsList>
 
-      <TabsContent value="waterfall" className="flex-1 min-h-0 overflow-auto">
-        <SpanHierarchy
-          rootSpans={rootSpans}
-          totalDurationMs={totalDurationMs}
-          traceStartTime={traceStartTime}
-          services={services}
-          defaultExpandDepth={defaultExpandDepth}
-          selectedSpanId={selectedSpanId}
-          onSelectSpan={onSelectSpan}
-        />
-      </TabsContent>
+        <TabsContent value="waterfall" className="flex-1 min-h-0 overflow-auto">
+          <SpanHierarchy defaultExpandDepth={defaultExpandDepth} />
+        </TabsContent>
 
-      <TabsContent value="timeline" className="flex-1 min-h-0">
-        <TraceTimeline
-          rootSpans={rootSpans}
-          totalDurationMs={totalDurationMs}
-          traceStartTime={traceStartTime}
-          services={services}
-          selectedSpanId={selectedSpanId}
-          onSelectSpan={onSelectSpan}
-        />
-      </TabsContent>
+        <TabsContent value="timeline" className="flex-1 min-h-0">
+          <TraceTimeline />
+        </TabsContent>
 
-      <TabsContent value="flow" className="flex-1 min-h-0">
-        <TraceFlowView
-          rootSpans={rootSpans}
-          totalDurationMs={totalDurationMs}
-          traceStartTime={traceStartTime}
-          services={services}
-          selectedSpanId={selectedSpanId}
-          onSelectSpan={onSelectSpan}
-        />
-      </TabsContent>
-    </Tabs>
+        <TabsContent value="flow" className="flex-1 min-h-0">
+          <TraceFlowView />
+        </TabsContent>
+      </Tabs>
+    </TraceViewProvider>
   )
 }

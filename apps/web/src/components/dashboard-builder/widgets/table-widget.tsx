@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "@maple/ui/components/ui/table"
-import { WidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
+import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type {
   WidgetDataState,
   WidgetDisplayConfig,
@@ -81,70 +81,66 @@ export const TableWidget = memo(function TableWidget({
         : []
 
   return (
-    <WidgetShell
+    <WidgetFrame
       title={displayName}
+      dataState={dataState}
       mode={mode}
       onRemove={onRemove}
       onClone={onClone}
       onConfigure={onConfigure}
       contentClassName="flex-1 min-h-0 overflow-auto p-0"
-    >
-      {dataState.status === "loading" ? (
+      loadingSkeleton={
         <div className="p-3 flex flex-col gap-2">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-6 w-full" />
           ))}
         </div>
-      ) : dataState.status === "error" ? (
-        <div className="flex items-center justify-center h-full">
-          <span className="text-xs text-muted-foreground">Unable to load</span>
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {effectiveColumns.map((col) => (
+              <TableHead
+                key={col.field}
+                className="text-xs"
+                style={{
+                  textAlign: col.align ?? "left",
+                  width: col.width ? `${col.width}px` : undefined,
+                }}
+              >
+                {col.header}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
             <TableRow>
-              {effectiveColumns.map((col) => (
-                <TableHead
-                  key={col.field}
-                  className="text-xs"
-                  style={{
-                    textAlign: col.align ?? "left",
-                    width: col.width ? `${col.width}px` : undefined,
-                  }}
-                >
-                  {col.header}
-                </TableHead>
-              ))}
+              <TableCell
+                colSpan={effectiveColumns.length}
+                className="text-center text-xs text-muted-foreground"
+              >
+                No data
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={effectiveColumns.length}
-                  className="text-center text-xs text-muted-foreground"
-                >
-                  No data
-                </TableCell>
+          ) : (
+            rows.map((row, i) => (
+              <TableRow key={i}>
+                {effectiveColumns.map((col) => (
+                  <TableCell
+                    key={col.field}
+                    className="text-xs"
+                    style={{ textAlign: col.align ?? "left" }}
+                  >
+                    {formatCellValue(row[col.field], col.unit)}
+                  </TableCell>
+                ))}
               </TableRow>
-            ) : (
-              rows.map((row, i) => (
-                <TableRow key={i}>
-                  {effectiveColumns.map((col) => (
-                    <TableCell
-                      key={col.field}
-                      className="text-xs"
-                      style={{ textAlign: col.align ?? "left" }}
-                    >
-                      {formatCellValue(row[col.field], col.unit)}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      )}
-    </WidgetShell>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </WidgetFrame>
   )
 })

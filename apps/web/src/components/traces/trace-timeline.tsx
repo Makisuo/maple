@@ -5,6 +5,7 @@ import { ChevronExpandYIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { getServiceLegendColor } from "@maple/ui/colors"
 import type { SpanNode } from "@/api/tinybird/traces"
+import { useTraceView } from "./trace-view-context"
 import { useTraceTimeline, clampViewport } from "./use-trace-timeline"
 import { TraceTimelineSearch } from "./trace-timeline-search"
 import { TraceTimelineMinimap } from "./trace-timeline-minimap"
@@ -14,23 +15,8 @@ import { TraceTimelineConnectors } from "./trace-timeline-connectors"
 import { TraceTimelineTooltipContent } from "./trace-timeline-tooltip"
 import { ROW_HEIGHT, ROW_GAP } from "./trace-timeline-types"
 
-interface TraceTimelineProps {
-  rootSpans: SpanNode[]
-  totalDurationMs: number
-  traceStartTime: string
-  services: string[]
-  selectedSpanId?: string
-  onSelectSpan?: (span: SpanNode) => void
-}
-
-export function TraceTimeline({
-  rootSpans,
-  totalDurationMs,
-  traceStartTime,
-  services,
-  selectedSpanId,
-  onSelectSpan,
-}: TraceTimelineProps) {
+export function TraceTimeline() {
+  const { rootSpans, totalDurationMs, traceStartTime, services, selectedSpanId, onSelectSpan } = useTraceView()
   const containerRef = React.useRef<HTMLDivElement>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const searchInputRef = React.useRef<HTMLInputElement>(null)

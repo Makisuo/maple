@@ -15,6 +15,7 @@ import { EyeIcon } from "@/components/icons"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { getServiceLegendColor } from "@maple/ui/colors"
+import { useTraceView } from "./trace-view-context"
 import { FlowSpanNode } from "./flow-node"
 import {
   transformSpansToFlow,
@@ -22,17 +23,6 @@ import {
   findSpanById,
   type FlowNodeData,
 } from "./flow-utils"
-import type { SpanNode } from "@/api/tinybird/traces"
-
-interface TraceFlowViewProps {
-  rootSpans: SpanNode[]
-  totalDurationMs: number
-  traceStartTime: string
-  services: string[]
-  selectedSpanId?: string
-  onSelectSpan?: (span: SpanNode) => void
-}
-
 const nodeTypes = {
   span: FlowSpanNode,
 }
@@ -46,12 +36,8 @@ const defaultEdgeOptions = {
   },
 }
 
-export function TraceFlowView({
-  rootSpans,
-  services,
-  selectedSpanId,
-  onSelectSpan,
-}: TraceFlowViewProps) {
+export function TraceFlowView() {
+  const { rootSpans, services, selectedSpanId, onSelectSpan } = useTraceView()
   // Calculate initial layout
   const { initialNodes, initialEdges } = useMemo(() => {
     const { nodes, edges } = transformSpansToFlow(rootSpans, services, selectedSpanId)

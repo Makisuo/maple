@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { TraceTimelineBar } from "./trace-timeline-bar"
+import { TraceTimelineBar, type BarSearchState } from "./trace-timeline-bar"
 import type { TimelineBar, ViewportState } from "./trace-timeline-types"
 import { ROW_HEIGHT, ROW_GAP, OVERSCAN } from "./trace-timeline-types"
 
@@ -106,6 +106,9 @@ export function TraceTimelineRows({
       {visibleBars.map((bar) => {
         const leftPercent = ((bar.startMs - viewport.startMs) / visibleDuration) * 100
         const widthPercent = ((bar.endMs - bar.startMs) / visibleDuration) * 100
+        const searchState: BarSearchState = isSearchActive
+          ? searchMatches.has(bar.span.spanId) ? "match" : "dimmed"
+          : null
 
         return (
           <TraceTimelineBar
@@ -116,8 +119,7 @@ export function TraceTimelineRows({
             services={services}
             isSelected={selectedSpanId === bar.span.spanId}
             isFocused={focusedIndex !== null && bar.row === focusedIndex}
-            isSearchMatch={searchMatches.has(bar.span.spanId)}
-            isSearchActive={isSearchActive}
+            searchState={searchState}
             containerWidth={containerWidth}
           />
         )

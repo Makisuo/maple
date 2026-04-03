@@ -2,7 +2,7 @@ import { memo, Suspense } from "react"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { getChartById } from "@maple/ui/components/charts/registry"
-import { WidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
+import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type {
   WidgetDataState,
   WidgetDisplayConfig,
@@ -39,31 +39,25 @@ export const ChartWidget = memo(function ChartWidget({
   const tooltip = display.chartPresentation?.tooltip
 
   return (
-    <WidgetShell
+    <WidgetFrame
       title={display.title || entry.name}
+      dataState={dataState}
       mode={mode}
       onRemove={onRemove}
       onClone={onClone}
       onConfigure={onConfigure}
+      loadingSkeleton={<Skeleton className="h-full w-full" />}
     >
-      {dataState.status === "loading" ? (
-        <Skeleton className="h-full w-full" />
-      ) : dataState.status === "error" ? (
-        <div className="flex items-center justify-center h-full">
-          <span className="text-xs text-muted-foreground">Unable to load</span>
-        </div>
-      ) : (
-        <Suspense fallback={<Skeleton className="h-full w-full" />}>
-          <ChartComponent
-            data={chartData}
-            className="h-full w-full aspect-auto"
-            legend={legend}
-            tooltip={tooltip}
-            stacked={display.stacked}
-            curveType={display.curveType}
-          />
-        </Suspense>
-      )}
-    </WidgetShell>
+      <Suspense fallback={<Skeleton className="h-full w-full" />}>
+        <ChartComponent
+          data={chartData}
+          className="h-full w-full aspect-auto"
+          legend={legend}
+          tooltip={tooltip}
+          stacked={display.stacked}
+          curveType={display.curveType}
+        />
+      </Suspense>
+    </WidgetFrame>
   )
 })
