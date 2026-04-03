@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Reorder, useDragControls } from "motion/react"
 import { Atom, useAtom } from "@/lib/effect-atom"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
@@ -14,7 +15,8 @@ import { WhereClauseEditor } from "@/components/query-builder/where-clause-edito
 import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
 import type { ValueUnit } from "@/components/dashboard-builder/types"
 import { Switch } from "@maple/ui/components/ui/switch"
-import { getListPerformanceHints, hasSlowHints } from "@/lib/query-builder/performance-hints"
+import { getListPerformanceHints } from "@/lib/query-builder/performance-hints"
+import { GripDotsIcon } from "@/components/icons"
 
 type ListDataSource = "traces" | "logs"
 
@@ -94,6 +96,140 @@ const UNIT_OPTIONS: Array<{ value: string; label: string }> = [
 export { TRACE_DEFAULT_COLUMNS, LOG_DEFAULT_COLUMNS }
 export type { ListColumnDraft, ListDataSource }
 
+function DraggableColumnRow({
+  id,
+  column,
+  index,
+  showFieldSuggestions,
+  onFocusField,
+  onBlurField,
+  allSuggestedFields,
+  updateColumn,
+  removeColumn,
+}: {
+  id: string
+  column: ListColumnDraft
+  index: number
+  showFieldSuggestions: boolean
+  onFocusField: () => void
+  onBlurField: () => void
+  allSuggestedFields: string[]
+  updateColumn: (index: number, updates: Partial<ListColumnDraft>) => void
+  removeColumn: (index: number) => void
+}) {
+  const controls = useDragControls()
+
+  return (
+    <Reorder.Item
+      value={id}
+      dragListener={false}
+      dragControls={controls}
+      as="div"
+      className="flex items-center gap-2 rounded-md bg-background py-1 relative"
+      whileDrag={{
+        scale: 1.02,
+        boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+        zIndex: 50,
+      }}
+      transition={{ duration: 0.15 }}
+    >
+      <button
+        type="button"
+        className="shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground touch-none"
+        onPointerDown={(e) => controls.start(e)}
+      >
+        <GripDotsIcon size={14} />
+      </button>
+      <div className="relative flex-1">
+        <Input
+          value={column.field}
+          onChange={(e) => updateColumn(index, { field: e.target.value })}
+          onFocus={onFocusField}
+          onBlur={onBlurField}
+          placeholder="Field path"
+          className="text-xs h-8"
+        />
+        {showFieldSuggestions && (
+          <div className="absolute top-full left-0 z-50 mt-1 w-full max-h-48 overflow-auto rounded-md border bg-popover shadow-md">
+            {allSuggestedFields
+              .filter(
+                (f) =>
+                  !column.field || f.toLowerCase().includes(column.field.toLowerCase()),
+              )
+              .slice(0, 20)
+              .map((field) => (
+                <button
+                  key={field}
+                  type="button"
+                  className="w-full px-2 py-1 text-left text-xs hover:bg-accent truncate"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    updateColumn(index, {
+                      field,
+                      header: field.split(".").pop() ?? field,
+                    })
+                  }}
+                >
+                  {field}
+                </button>
+              ))}
+          </div>
+        )}
+      </div>
+      <Input
+        value={column.header}
+        onChange={(e) => updateColumn(index, { header: e.target.value })}
+        placeholder="Header"
+        className="text-xs h-8 w-28"
+      />
+      <Select
+        items={UNIT_OPTIONS}
+        value={column.unit ?? "none"}
+        onValueChange={(value) =>
+          updateColumn(index, {
+            unit: value === "none" ? undefined : (value as ValueUnit),
+          })
+        }
+      >
+        <SelectTrigger className="h-8 w-24 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {UNIT_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        items={{ left: "Left", center: "Center", right: "Right" }}
+        value={column.align ?? "left"}
+        onValueChange={(value) =>
+          updateColumn(index, { align: value as "left" | "center" | "right" })
+        }
+      >
+        <SelectTrigger className="h-8 w-20 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="left">Left</SelectItem>
+          <SelectItem value="center">Center</SelectItem>
+          <SelectItem value="right">Right</SelectItem>
+        </SelectContent>
+      </Select>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+        onClick={() => removeColumn(index)}
+      >
+        &times;
+      </Button>
+    </Reorder.Item>
+  )
+}
+
 export function ListConfigPanel({
   listDataSource,
   whereClause,
@@ -107,6 +243,16 @@ export function ListConfigPanel({
 }: ListConfigPanelProps) {
   const showFieldSuggestionsAtom = React.useMemo(() => Atom.make<number | null>(null), [])
   const [showFieldSuggestions, setShowFieldSuggestions] = useAtom(showFieldSuggestionsAtom)
+
+  // Stable IDs for Reorder — kept in sync with columns array.
+  // addColumn/removeColumn/reorderColumns update the ref before calling onChange,
+  // so a length mismatch here means an external reset (e.g. parent replaced columns).
+  const columnIdsRef = React.useRef<string[]>(columns.map(() => crypto.randomUUID()))
+  if (columnIdsRef.current.length !== columns.length) {
+    columnIdsRef.current = columns.map(() => crypto.randomUUID())
+  }
+
+  const columnIds = columnIdsRef.current
 
   const knownFields = listDataSource === "traces" ? TRACE_FIELDS : LOG_FIELDS
   // Query engine list returns full SpanAttributes/ResourceAttributes maps,
@@ -136,10 +282,12 @@ export function ListConfigPanel({
   )
 
   const handleDataSourceChange = (ds: ListDataSource) => {
+    const newCols = ds === "traces" ? TRACE_DEFAULT_COLUMNS : LOG_DEFAULT_COLUMNS
+    columnIdsRef.current = newCols.map(() => crypto.randomUUID())
     onChange({
       listDataSource: ds,
       listWhereClause: "",
-      listColumns: ds === "traces" ? TRACE_DEFAULT_COLUMNS : LOG_DEFAULT_COLUMNS,
+      listColumns: newCols,
     })
   }
 
@@ -149,16 +297,27 @@ export function ListConfigPanel({
   }
 
   const removeColumn = (index: number) => {
+    columnIdsRef.current = columnIdsRef.current.filter((_, i) => i !== index)
     onChange({ listColumns: columns.filter((_, i) => i !== index) })
   }
 
   const addColumn = (field?: string) => {
+    columnIdsRef.current = [...columnIdsRef.current, crypto.randomUUID()]
     const newCol: ListColumnDraft = {
       field: field ?? "",
       header: field ?? "",
     }
     onChange({ listColumns: [...columns, newCol] })
     setShowFieldSuggestions(null)
+  }
+
+  const reorderColumns = (newIdOrder: string[]) => {
+    const reordered = newIdOrder.map((id) => {
+      const idx = columnIds.indexOf(id)
+      return columns[idx]!
+    })
+    columnIdsRef.current = newIdOrder
+    onChange({ listColumns: reordered })
   }
 
   return (
@@ -234,16 +393,29 @@ export function ListConfigPanel({
             Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 25,
             rootOnly,
           )
-          if (!hasSlowHints(hints)) return null
+          const slow = hints.filter((h) => h.speed === "slow")
+          const fast = hints.filter((h) => h.speed === "fast")
+          if (slow.length === 0 && fast.length === 0) return null
           return (
-            <div className="mt-1.5 space-y-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-              {hints
-                .filter((h) => h.speed === "slow")
-                .map((h) => (
-                  <p key={h.key} className="text-[11px] text-amber-500">
-                    {h.reason}
-                  </p>
-                ))}
+            <div className="mt-1.5 space-y-1.5">
+              {slow.length > 0 && (
+                <div className="space-y-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                  {slow.map((h) => (
+                    <p key={h.key} className="text-[11px] text-amber-500">
+                      {h.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {fast.length > 0 && (
+                <div className="space-y-1 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+                  {fast.map((h) => (
+                    <p key={h.key} className="text-[11px] text-emerald-500">
+                      {h.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )
         })()}
@@ -274,91 +446,28 @@ export function ListConfigPanel({
           Columns
         </p>
 
-        <div className="space-y-2">
+        <Reorder.Group
+          axis="y"
+          values={columnIds}
+          onReorder={reorderColumns}
+          as="div"
+          className="space-y-2"
+        >
           {columns.map((col, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Input
-                  value={col.field}
-                  onChange={(e) => updateColumn(i, { field: e.target.value })}
-                  onFocus={() => setShowFieldSuggestions(i)}
-                  onBlur={() => setTimeout(() => setShowFieldSuggestions(null), 150)}
-                  placeholder="Field path"
-                  className="text-xs h-8"
-                />
-                {showFieldSuggestions === i && (
-                  <div className="absolute top-full left-0 z-50 mt-1 w-full max-h-48 overflow-auto rounded-md border bg-popover shadow-md">
-                    {allSuggestedFields
-                      .filter((f) => !col.field || f.toLowerCase().includes(col.field.toLowerCase()))
-                      .slice(0, 20)
-                      .map((field) => (
-                        <button
-                          key={field}
-                          type="button"
-                          className="w-full px-2 py-1 text-left text-xs hover:bg-accent truncate"
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            updateColumn(i, { field, header: field.split(".").pop() ?? field })
-                            setShowFieldSuggestions(null)
-                          }}
-                        >
-                          {field}
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-              <Input
-                value={col.header}
-                onChange={(e) => updateColumn(i, { header: e.target.value })}
-                placeholder="Header"
-                className="text-xs h-8 w-28"
-              />
-              <Select
-                items={UNIT_OPTIONS}
-                value={col.unit ?? "none"}
-                onValueChange={(value) =>
-                  updateColumn(i, { unit: value === "none" ? undefined : (value as ValueUnit) })
-                }
-              >
-                <SelectTrigger className="h-8 w-24 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {UNIT_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                items={{ left: "Left", center: "Center", right: "Right" }}
-                value={col.align ?? "left"}
-                onValueChange={(value) =>
-                  updateColumn(i, { align: value as "left" | "center" | "right" })
-                }
-              >
-                <SelectTrigger className="h-8 w-20 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="left">Left</SelectItem>
-                  <SelectItem value="center">Center</SelectItem>
-                  <SelectItem value="right">Right</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                onClick={() => removeColumn(i)}
-              >
-                &times;
-              </Button>
-            </div>
+            <DraggableColumnRow
+              key={columnIds[i]}
+              id={columnIds[i]!}
+              column={col}
+              index={i}
+              showFieldSuggestions={showFieldSuggestions === i}
+              onFocusField={() => setShowFieldSuggestions(i)}
+              onBlurField={() => setTimeout(() => setShowFieldSuggestions(null), 150)}
+              allSuggestedFields={allSuggestedFields}
+              updateColumn={updateColumn}
+              removeColumn={removeColumn}
+            />
           ))}
-        </div>
+        </Reorder.Group>
 
         <Button variant="outline" size="sm" onClick={() => addColumn()}>
           + Column

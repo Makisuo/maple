@@ -1,4 +1,8 @@
 import { parseWhereClause, normalizeKey } from "@maple/query-engine/where-clause"
+import {
+  TRACE_LIST_MV_ATTR_MAP,
+  TRACE_LIST_MV_RESOURCE_MAP,
+} from "@maple/query-engine/traces-shared"
 
 export interface PerformanceHint {
   key: string
@@ -21,6 +25,23 @@ const FAST_GROUP_BY_KEYS = new Set([
   "status.code",
   "none",
 ])
+
+/**
+ * Check if an attr.* or resource.* key has a materialized view column,
+ * meaning it's fast when root_only is enabled.
+ */
+function hasMvMapping(normalizedKey: string): boolean {
+  if (normalizedKey.startsWith("attr.")) {
+    return normalizedKey.slice(5) in TRACE_LIST_MV_ATTR_MAP
+  }
+  if (normalizedKey.startsWith("resource.")) {
+    return normalizedKey.slice(9) in TRACE_LIST_MV_RESOURCE_MAP
+  }
+  if (normalizedKey === "deployment.environment") {
+    return "deployment.environment" in TRACE_LIST_MV_RESOURCE_MAP
+  }
+  return false
+}
 
 export function getPerformanceHints(
   whereClause: string,
@@ -94,15 +115,39 @@ export function getListPerformanceHints(
   const hints: PerformanceHint[] = []
   const filterHints = getPerformanceHints(whereClause, [])
 
-  // Consolidate slow filter hints into a single message
+  // When rootOnly is on, attr filters that have MV columns are actually fast.
+  // Only warn about truly slow filters.
   const slowFilters = filterHints.filter((h) => h.speed === "slow")
-  if (slowFilters.length > 0) {
-    const keys = slowFilters.map((h) => h.key).join(", ")
+  const trulySlowFilters: string[] = []
+  const mvAcceleratedFilters: string[] = []
+
+  for (const h of slowFilters) {
+    const key = normalizeKey(h.key)
+    if (rootOnly && hasMvMapping(key)) {
+      mvAcceleratedFilters.push(h.key)
+    } else {
+      trulySlowFilters.push(h.key)
+    }
+  }
+
+  if (trulySlowFilters.length > 0) {
+    const keys = trulySlowFilters.join(", ")
     hints.push({
       key: "_slow_filters",
       location: "filter",
       speed: "slow",
-      reason: `Slow filters: ${keys} — these scan Map columns for every row`,
+      reason: rootOnly
+        ? `Slow filters: ${keys} — no materialized column, scans Map for every row`
+        : `Slow filters: ${keys} — enable "Root spans only" to use materialized columns`,
+    })
+  }
+
+  if (mvAcceleratedFilters.length > 0) {
+    hints.push({
+      key: "_mv_accelerated",
+      location: "filter",
+      speed: "fast",
+      reason: `${mvAcceleratedFilters.join(", ")} — accelerated by materialized view`,
     })
   }
 
@@ -120,7 +165,7 @@ export function getListPerformanceHints(
       key: "_no_root_only",
       location: "filter",
       speed: "slow",
-      reason: "Scanning all spans. Enable \"Root spans only\" for faster queries.",
+      reason: "Scanning all spans. Enable \"Root spans only\" to use the materialized view.",
     })
   }
 
