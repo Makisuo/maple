@@ -1,6 +1,6 @@
 import type { ManagedRuntime } from "effect"
 import { Effect, Fiber } from "effect"
-import type { EffectRouterContext } from "./router.ts"
+import { type EffectRouterContext, getCurrentNavigationSpan } from "./router.ts"
 
 // ---------------------------------------------------------------------------
 // Structural types for TanStack Router contexts
@@ -117,7 +117,7 @@ export function effectLoader<A, E = never>(
       context: ctx.context,
     })
 
-    const traced = effect.pipe(
+    let traced = effect.pipe(
       Effect.withSpan(`route.loader ${ctx.route.fullPath}`, {
         attributes: {
           "route.path": ctx.route.fullPath,
@@ -126,6 +126,11 @@ export function effectLoader<A, E = never>(
         },
       }),
     )
+
+    const navSpan = getCurrentNavigationSpan()
+    if (navSpan) {
+      traced = Effect.withParentSpan(traced, navSpan)
+    }
 
     return runWithAbort(effectCtx.effectManagedRuntime, traced, ctx.abortController.signal)
   }
@@ -172,7 +177,7 @@ export function effectBeforeLoad<A extends Record<string, unknown>, E = never>(
       cause: ctx.cause,
     })
 
-    const traced = effect.pipe(
+    let traced = effect.pipe(
       Effect.withSpan(`route.beforeLoad ${routePath}`, {
         attributes: {
           "route.path": routePath,
@@ -181,6 +186,11 @@ export function effectBeforeLoad<A extends Record<string, unknown>, E = never>(
         },
       }),
     )
+
+    const navSpan = getCurrentNavigationSpan()
+    if (navSpan) {
+      traced = Effect.withParentSpan(traced, navSpan)
+    }
 
     return runWithAbort(effectCtx.effectManagedRuntime, traced, ctx.abortController.signal)
   }

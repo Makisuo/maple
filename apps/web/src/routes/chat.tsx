@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { ChatPage } from "@/components/chat/chat-page"
 
@@ -7,9 +7,9 @@ const ChatSearch = Schema.Struct({
   tab: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/chat")({
+export const Route = effectRoute(createFileRoute("/chat"))({
   component: ChatRoute,
-  validateSearch: wrapEffectSchema(ChatSearch),
+  validateSearch: Schema.toStandardSchemaV1(ChatSearch),
 })
 
 function ChatRoute() {

@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { wrapEffectSchema } from "@effect-router/core"
+import { useNavigate, createFileRoute } from "@tanstack/react-router"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -15,9 +15,9 @@ const serviceMapSearchSchema = Schema.Struct({
   timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/service-map")({
+export const Route = effectRoute(createFileRoute("/service-map"))({
   component: ServiceMapPage,
-  validateSearch: wrapEffectSchema(serviceMapSearchSchema),
+  validateSearch: Schema.toStandardSchemaV1(serviceMapSearchSchema),
 })
 
 function ServiceMapPage() {

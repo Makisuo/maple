@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { wrapEffectSchema } from "@effect-router/core"
+import { useNavigate, createFileRoute } from "@tanstack/react-router";
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -17,9 +17,9 @@ const ConnectorsSearch = Schema.Struct({
   tab: Schema.optional(Schema.Literals(["cloudflare", "prometheus"])),
 })
 
-export const Route = createFileRoute("/connectors")({
+export const Route = effectRoute(createFileRoute("/connectors"))({
   component: ConnectorsPage,
-  validateSearch: wrapEffectSchema(ConnectorsSearch),
+  validateSearch: Schema.toStandardSchemaV1(ConnectorsSearch),
 })
 
 function ConnectorsPage() {

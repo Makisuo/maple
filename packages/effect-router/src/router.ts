@@ -1,6 +1,6 @@
 import type { AnyRoute, RouterConstructorOptions, RouterHistory, TrailingSlashOption } from "@tanstack/react-router"
 import { createRouter } from "@tanstack/react-router"
-import type { ManagedRuntime } from "effect"
+import { Effect, Exit, type ManagedRuntime, type Tracer } from "effect"
 import type { Atom, AtomRegistry } from "effect/unstable/reactivity"
 
 // ---------------------------------------------------------------------------
@@ -115,8 +115,53 @@ export function createEffectRouter<
   // context. Generic TRouteTree constraints don't survive the spread, and the
   // context type is wider than what createRouter expects. The user's root route
   // should include EffectRouterContext in its context type for full type safety.
-  return createRouter<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>({
+  const router = createRouter<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>({
     ...options as any,
     context: { ...userContext, ...effectContext },
   })
+
+  // ---------------------------------------------------------------------------
+  // Navigation-level span tracking
+  // ---------------------------------------------------------------------------
+
+  router.subscribe("onBeforeNavigate", (event) => {
+    // End any lingering span from a previous navigation (shouldn't happen, but defensive)
+    if (_currentNavigationSpan) {
+      _currentNavigationSpan.end(BigInt(Date.now() * 1_000_000), Exit.void)
+    }
+
+    _currentNavigationSpan = managedRuntime.runSync(
+      Effect.makeSpan("navigation", {
+        attributes: {
+          "navigation.from": event.fromLocation?.pathname ?? "",
+          "navigation.to": event.toLocation.pathname,
+          "navigation.pathChanged": event.pathChanged,
+        },
+      }),
+    )
+  })
+
+  router.subscribe("onResolved", () => {
+    if (_currentNavigationSpan) {
+      _currentNavigationSpan.end(BigInt(Date.now() * 1_000_000), Exit.void)
+      _currentNavigationSpan = undefined
+    }
+  })
+
+  return router
+}
+
+// ---------------------------------------------------------------------------
+// Navigation span access
+// ---------------------------------------------------------------------------
+
+let _currentNavigationSpan: Tracer.Span | undefined
+
+/**
+ * Returns the active navigation span, if any. Used internally by
+ * `effectLoader` and `effectBeforeLoad` to parent their spans under
+ * a single navigation-level span.
+ */
+export function getCurrentNavigationSpan(): Tracer.AnySpan | undefined {
+  return _currentNavigationSpan
 }

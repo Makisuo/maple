@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect";
 import { Atom, useAtom } from "@/lib/effect-atom";
 
@@ -26,9 +26,9 @@ const dashboardViewSearchSchema = Schema.Struct({
   mode: Schema.optional(Schema.Literal("edit")),
 });
 
-export const Route = createFileRoute("/dashboards/$dashboardId")({
+export const Route = effectRoute(createFileRoute("/dashboards/$dashboardId"))({
   component: DashboardViewPage,
-  validateSearch: wrapEffectSchema(dashboardViewSearchSchema),
+  validateSearch: Schema.toStandardSchemaV1(dashboardViewSearchSchema),
 });
 
 function DashboardViewPage() {

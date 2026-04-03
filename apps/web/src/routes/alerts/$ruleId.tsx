@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { useMemo, useState } from "react"
 
@@ -64,9 +64,9 @@ const RuleDetailSearch = Schema.Struct({
   tab: Schema.optional(Schema.Literals(tabValues)),
 })
 
-export const Route = createFileRoute("/alerts/$ruleId")({
+export const Route = effectRoute(createFileRoute("/alerts/$ruleId"))({
   component: RuleDetailPage,
-  validateSearch: wrapEffectSchema(RuleDetailSearch),
+  validateSearch: Schema.toStandardSchemaV1(RuleDetailSearch),
 })
 
 

@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Exit, Option, Schema } from "effect"
 import { useState, useMemo } from "react"
 import { toast } from "sonner"
@@ -96,9 +96,9 @@ const AlertsSearch = Schema.Struct({
   serviceName: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/alerts/")({
+export const Route = effectRoute(createFileRoute("/alerts/"))({
   component: AlertsPage,
-  validateSearch: wrapEffectSchema(AlertsSearch),
+  validateSearch: Schema.toStandardSchemaV1(AlertsSearch),
 })
 
 type AlertDestination = AlertDestinationDocument

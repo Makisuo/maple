@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { wrapEffectSchema } from "@effect-router/core"
+import { useNavigate, createFileRoute } from "@tanstack/react-router"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { QueryBuilderLab } from "@/components/query-builder/query-builder-lab"
@@ -15,9 +15,9 @@ const queryBuilderLabSearchSchema = Schema.Struct({
   timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/query-builder-lab")({
+export const Route = effectRoute(createFileRoute("/query-builder-lab"))({
   component: QueryBuilderLabPage,
-  validateSearch: wrapEffectSchema(queryBuilderLabSearchSchema),
+  validateSearch: Schema.toStandardSchemaV1(queryBuilderLabSearchSchema),
 })
 
 function QueryBuilderLabPage() {

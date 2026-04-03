@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { wrapEffectSchema } from "@effect-router/core"
+import { useNavigate, createFileRoute } from "@tanstack/react-router"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { OptionalStringArrayParam } from "@/lib/search-params"
@@ -22,9 +22,9 @@ const logsSearchSchema = Schema.Struct({
 
 export type LogsSearchParams = Schema.Schema.Type<typeof logsSearchSchema>
 
-export const Route = createFileRoute("/logs")({
+export const Route = effectRoute(createFileRoute("/logs"))({
   component: LogsPage,
-  validateSearch: wrapEffectSchema(logsSearchSchema),
+  validateSearch: Schema.toStandardSchemaV1(logsSearchSchema),
 })
 
 export function LogsPage() {

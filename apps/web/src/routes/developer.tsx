@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { wrapEffectSchema } from "@effect-router/core"
+import { useNavigate, createFileRoute } from "@tanstack/react-router"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -11,9 +11,9 @@ const DeveloperSearch = Schema.Struct({
   tab: Schema.optional(Schema.Literals(["ingestion", "api-keys"])),
 })
 
-export const Route = createFileRoute("/developer")({
+export const Route = effectRoute(createFileRoute("/developer"))({
   component: DeveloperPage,
-  validateSearch: wrapEffectSchema(DeveloperSearch),
+  validateSearch: Schema.toStandardSchemaV1(DeveloperSearch),
 })
 
 function DeveloperPage() {

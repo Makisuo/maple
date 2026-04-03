@@ -1,6 +1,6 @@
 import { SignUp } from "@clerk/clerk-react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { AuthLayout } from "@/components/layout/auth-layout"
@@ -10,9 +10,9 @@ const SignUpSearch = Schema.Struct({
   redirect_url: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/sign-up")({
+export const Route = effectRoute(createFileRoute("/sign-up"))({
   component: SignUpPage,
-  validateSearch: wrapEffectSchema(SignUpSearch),
+  validateSearch: Schema.toStandardSchemaV1(SignUpSearch),
 })
 
 function SignUpPage() {

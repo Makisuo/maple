@@ -1,8 +1,8 @@
+import { createFileRoute } from "@tanstack/react-router"
 import { SignIn } from "@clerk/clerk-react"
 
 import { FormEvent, useState } from "react"
-import { createFileRoute } from "@tanstack/react-router"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
@@ -16,9 +16,9 @@ const SignInSearch = Schema.Struct({
   redirect_url: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/sign-in")({
+export const Route = effectRoute(createFileRoute("/sign-in"))({
   component: SignInPage,
-  validateSearch: wrapEffectSchema(SignInSearch),
+  validateSearch: Schema.toStandardSchemaV1(SignInSearch),
 })
 
 export const redirectToDashboard = () => {

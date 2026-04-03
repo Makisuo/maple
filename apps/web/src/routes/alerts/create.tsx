@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -79,9 +79,9 @@ const AlertCreateSearch = Schema.Struct({
   ruleId: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/alerts/create")({
+export const Route = effectRoute(createFileRoute("/alerts/create"))({
   component: AlertCreatePage,
-  validateSearch: wrapEffectSchema(AlertCreateSearch),
+  validateSearch: Schema.toStandardSchemaV1(AlertCreateSearch),
 })
 
 const signalTypes = Object.entries(signalLabels).map(([value, label]) => ({

@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/clerk-react"
 import { useCustomer } from "autumn-js/react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { RocketIcon } from "@/components/icons"
 import { PricingCards } from "@/components/settings/pricing-cards"
@@ -13,9 +13,9 @@ const SelectPlanSearch = Schema.Struct({
   redirect_url: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/select-plan")({
+export const Route = effectRoute(createFileRoute("/select-plan"))({
   component: SelectPlanPage,
-  validateSearch: wrapEffectSchema(SelectPlanSearch),
+  validateSearch: Schema.toStandardSchemaV1(SelectPlanSearch),
 })
 
 function resolveRedirectTarget(target: string | undefined): string {

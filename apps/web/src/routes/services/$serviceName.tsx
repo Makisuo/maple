@@ -1,7 +1,7 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, createFileRoute } from "@tanstack/react-router"
 import { useMemo } from "react"
 import { Result } from "@/lib/effect-atom"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -31,9 +31,9 @@ const serviceDetailSearchSchema = Schema.Struct({
   timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/services/$serviceName")({
+export const Route = effectRoute(createFileRoute("/services/$serviceName"))({
   component: ServiceDetailPage,
-  validateSearch: wrapEffectSchema(serviceDetailSearchSchema),
+  validateSearch: Schema.toStandardSchemaV1(serviceDetailSearchSchema),
 })
 
 interface ServiceChartConfig {

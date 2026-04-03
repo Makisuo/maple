@@ -1,7 +1,7 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useCustomer } from "autumn-js/react"
-import { wrapEffectSchema } from "@effect-router/core"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -35,9 +35,9 @@ const SettingsSearch = Schema.Struct({
   tab: Schema.optional(Schema.Literals(tabValues)),
 })
 
-export const Route = createFileRoute("/settings")({
+export const Route = effectRoute(createFileRoute("/settings"))({
   component: SettingsPage,
-  validateSearch: wrapEffectSchema(SettingsSearch),
+  validateSearch: Schema.toStandardSchemaV1(SettingsSearch),
 })
 
 interface NavItem {
