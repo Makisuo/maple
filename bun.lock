@@ -132,6 +132,7 @@
         "@hugeicons/react": "^1.1.5",
         "@json-render/core": "^0.10.0",
         "@json-render/react": "^0.10.0",
+        "@maple-dev/effect-sdk": "workspace:*",
         "@maple/domain": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/query-engine": "workspace:*",

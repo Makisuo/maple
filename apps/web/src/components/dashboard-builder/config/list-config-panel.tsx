@@ -13,6 +13,8 @@ import { cn } from "@maple/ui/utils"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
 import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
 import type { ValueUnit } from "@/components/dashboard-builder/types"
+import { Switch } from "@maple/ui/components/ui/switch"
+import { getListPerformanceHints, hasSlowHints } from "@/lib/query-builder/performance-hints"
 
 type ListDataSource = "traces" | "logs"
 
@@ -27,6 +29,7 @@ interface ListConfigPanelProps {
   listDataSource: ListDataSource
   whereClause: string
   limit: string
+  rootOnly: boolean
   columns: ListColumnDraft[]
   autocompleteValues: Record<string, WhereClauseAutocompleteValues | undefined>
   onActiveAttributeKey?: (key: string | null) => void
@@ -35,6 +38,7 @@ interface ListConfigPanelProps {
     listDataSource?: ListDataSource
     listWhereClause?: string
     listLimit?: string
+    listRootOnly?: boolean
     listColumns?: ListColumnDraft[]
   }) => void
 }
@@ -94,6 +98,7 @@ export function ListConfigPanel({
   listDataSource,
   whereClause,
   limit,
+  rootOnly,
   columns,
   autocompleteValues,
   onActiveAttributeKey,
@@ -182,6 +187,24 @@ export function ListConfigPanel({
         </div>
       </div>
 
+      {/* Root spans only (traces only) */}
+      {listDataSource === "traces" && (
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
+              Root spans only
+            </p>
+            <p className="text-[10px] text-muted-foreground">
+              Uses pre-aggregated data for faster queries
+            </p>
+          </div>
+          <Switch
+            checked={rootOnly}
+            onCheckedChange={(checked) => onChange({ listRootOnly: checked })}
+          />
+        </div>
+      )}
+
       {/* Where clause */}
       <div className="space-y-1.5">
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
@@ -203,6 +226,27 @@ export function ListConfigPanel({
           textareaClassName="min-h-[32px] resize-y text-xs"
           ariaLabel="List filter"
         />
+        {(() => {
+          if (listDataSource !== "traces") return null
+          const parsedLimit = Number.parseInt(limit, 10)
+          const hints = getListPerformanceHints(
+            whereClause,
+            Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 25,
+            rootOnly,
+          )
+          if (!hasSlowHints(hints)) return null
+          return (
+            <div className="mt-1.5 space-y-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+              {hints
+                .filter((h) => h.speed === "slow")
+                .map((h) => (
+                  <p key={h.key} className="text-[11px] text-amber-500">
+                    {h.reason}
+                  </p>
+                ))}
+            </div>
+          )
+        })()}
       </div>
 
       {/* Limit */}
@@ -213,12 +257,15 @@ export function ListConfigPanel({
         <Input
           value={limit}
           onChange={(e) => onChange({ listLimit: e.target.value })}
-          placeholder="50"
+          placeholder="25"
           type="number"
           min={1}
-          max={1000}
+          max={200}
           className="w-32"
         />
+        <p className="text-[10px] text-muted-foreground">
+          Max 200. Recommended: 25-50 for dashboard widgets.
+        </p>
       </div>
 
       {/* Columns */}

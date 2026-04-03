@@ -368,6 +368,7 @@ export function tracesBreakdownQuery(
 export interface TracesListOpts extends TracesQueryOpts {
   limit?: number
   offset?: number
+  columns?: readonly string[]
 }
 
 export interface TracesListOutput {
@@ -384,28 +385,79 @@ export interface TracesListOutput {
   readonly resourceAttributes: Record<string, string>
 }
 
+/**
+ * Build a ClickHouse map() literal that extracts only the requested attribute
+ * keys, using MV columns when available and falling back to the raw Map.
+ */
+function buildProjectedMapExpr(
+  requestedKeys: string[],
+  useMv: boolean,
+  mapName: "SpanAttributes" | "ResourceAttributes",
+  mvMap: Record<string, string>,
+): string {
+  if (requestedKeys.length === 0) return "map()"
+  const pairs: string[] = []
+  for (const key of requestedKeys) {
+    const escaped = `'${key.replace(/'/g, "\\'")}'`
+    const mvCol = useMv ? mvMap[key] : undefined
+    const value = mvCol ?? `${mapName}[${escaped}]`
+    pairs.push(`${escaped}, ${value}`)
+  }
+  return `map(${pairs.join(", ")})`
+}
+
 export function tracesListQuery(
   opts: TracesListOpts,
 ): CHQuery<any, TracesListOutput, { orgId: string; startTime: string; endTime: string }> {
-  const limit = opts.limit ?? 100
+  const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
+  const useTraceListMv = canUseTraceListMv({ ...opts, rootOnly: opts.rootOnly })
+  const tbl = useTraceListMv ? TraceListMv : Traces
 
-  // List queries always use the raw traces table for full attributes
-  let q = from(Traces)
+  // Parse requested columns to determine which attribute keys are needed
+  const requestedSpanAttrKeys: string[] = []
+  const requestedResourceAttrKeys: string[] = []
+  let needsFullMaps = !opts.columns // backward-compatible when columns not specified
+
+  if (opts.columns) {
+    for (const col of opts.columns) {
+      if (col.startsWith("spanAttributes.")) {
+        requestedSpanAttrKeys.push(col.slice("spanAttributes.".length))
+      } else if (col.startsWith("resourceAttributes.")) {
+        requestedResourceAttrKeys.push(col.slice("resourceAttributes.".length))
+      }
+    }
+  }
+
+  // When using the raw table and no specific attr columns are requested, skip the full maps
+  const spanAttrExpr = needsFullMaps && !useTraceListMv
+    ? undefined // use $.SpanAttributes directly
+    : CH.rawExpr<Record<string, string>>(
+        buildProjectedMapExpr(requestedSpanAttrKeys, useTraceListMv, "SpanAttributes", TRACE_LIST_MV_ATTR_MAP),
+      )
+  const resourceAttrExpr = needsFullMaps && !useTraceListMv
+    ? undefined // use $.ResourceAttributes directly
+    : CH.rawExpr<Record<string, string>>(
+        buildProjectedMapExpr(requestedResourceAttrKeys, useTraceListMv, "ResourceAttributes", TRACE_LIST_MV_RESOURCE_MAP),
+      )
+
+  let q = from(tbl as typeof Traces)
     .select(($) => ({
       traceId: $.TraceId,
       timestamp: $.Timestamp,
-      spanId: $.SpanId,
+      spanId: useTraceListMv ? CH.rawExpr<string>("''") : $.SpanId,
       serviceName: $.ServiceName,
       spanName: $.SpanName,
       durationMs: CH.rawExpr<number>("Duration / 1000000"),
       statusCode: $.StatusCode,
-      spanKind: $.SpanKind,
-      hasError: CH.rawExpr<number>("if(StatusCode = 'Error', 1, 0)"),
-      spanAttributes: $.SpanAttributes,
-      resourceAttributes: $.ResourceAttributes,
+      spanKind: useTraceListMv ? CH.rawExpr<string>("SpanKind") : $.SpanKind,
+      hasError: useTraceListMv
+        ? CH.rawExpr<number>("HasError")
+        : CH.rawExpr<number>("if(StatusCode = 'Error', 1, 0)"),
+      spanAttributes: spanAttrExpr ?? $.SpanAttributes,
+      resourceAttributes: resourceAttrExpr ?? $.ResourceAttributes,
     }))
-    .where(($) => buildWhereConditions($, opts, false))
+    .where(($) => buildWhereConditions($, opts, useTraceListMv))
     .orderBy(["timestamp", "desc"])
     .limit(limit)
     .format("JSON")
@@ -446,7 +498,7 @@ export interface TracesRootListOutput {
 export function tracesRootListQuery(
   opts: TracesRootListOpts,
 ): CHQuery<any, TracesRootListOutput, { orgId: string; startTime: string; endTime: string }> {
-  const limit = opts.limit ?? 100
+  const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
   const useTraceListMv = canUseTraceListMv({ ...opts, rootOnly: true })
   const tbl = useTraceListMv ? TraceListMv : Traces

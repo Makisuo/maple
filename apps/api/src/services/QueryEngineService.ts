@@ -78,6 +78,7 @@ export interface QueryEngineServiceShape {
 }
 
 const MAX_RANGE_SECONDS = 60 * 60 * 24 * 31
+const MAX_LIST_RANGE_SECONDS = 60 * 60 * 24 * 7
 const MAX_TIMESERIES_POINTS = 1_500
 const QUERY_ENGINE_TIMEOUT = Duration.seconds(30)
 
@@ -275,6 +276,23 @@ const validatePointBudget = Effect.fn("QueryEngineService.validatePointBudget")(
   })
 })
 
+const validateListQuery = Effect.fn("QueryEngineService.validateListQuery")(function* (
+  request: QueryEngineExecuteRequest,
+  range: TimeRangeBounds,
+): Effect.fn.Return<void, QueryEngineValidationError> {
+  if (request.query.kind !== "list") return
+
+  if (range.rangeSeconds > MAX_LIST_RANGE_SECONDS) {
+    return yield* new QueryEngineValidationError({
+      message: "List query time range too large",
+      details: [
+        `List queries support a maximum range of 7 days`,
+        "Narrow the time range or use a timeseries/breakdown query for wider ranges",
+      ],
+    })
+  }
+})
+
 function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: string }>(
   rows: ReadonlyArray<T>,
   valueExtractor: (row: T) => number,
@@ -368,6 +386,7 @@ const validateExecute = Effect.fn("QueryEngineService.validateExecute")(function
   const range = yield* validateTimeRange(request)
   yield* validateTraceAttributeFilters(request.query)
   yield* validatePointBudget(request, range)
+  yield* validateListQuery(request, range)
   return range
 })
 
@@ -830,8 +849,14 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     if (request.query.source === "traces" && request.query.kind === "list") {
       type AttrFilterArray = Array<{ key: string; value?: string; mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" }>
       const filters = request.query.filters
+
+      // Graceful limit clamping: cap at 200, auto-reduce to 50 when no indexed filters
+      const hasIndexedFilter = !!(filters?.serviceName || filters?.spanName || filters?.errorsOnly || filters?.rootSpansOnly)
+      const maxLimit = hasIndexedFilter ? 200 : 50
+      const clampedLimit = Math.min(request.query.limit ?? 25, maxLimit)
+
       const sharedOpts = {
-        limit: request.query.limit,
+        limit: clampedLimit,
         offset: request.query.offset,
         serviceName: filters?.serviceName,
         spanName: filters?.spanName,
@@ -844,42 +869,12 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         matchModes: filters?.matchModes as { serviceName?: "contains"; spanName?: "contains"; deploymentEnv?: "contains" } | undefined,
         attributeFilters: filters?.attributeFilters as AttrFilterArray | undefined,
         resourceAttributeFilters: filters?.resourceAttributeFilters as AttrFilterArray | undefined,
+        columns: (request.query as { columns?: readonly string[] }).columns as string[] | undefined,
       }
 
-      // Root-aggregated query for trace list UI
-      if (filters?.rootSpansOnly) {
-        const rows = yield* executeCHQuery(
-          tinybird,
-          tenant,
-          CH.tracesRootListQuery(sharedOpts),
-          { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
-          "Failed to execute traces root list query",
-        )
-
-        return new QueryEngineExecuteResponse({
-          result: {
-            kind: "list",
-            source: "traces",
-            data: rows.map((row) => ({
-              traceId: row.traceId,
-              startTime: String(row.startTime),
-              endTime: String(row.endTime),
-              durationMicros: Number(row.durationMicros),
-              spanCount: Number(row.spanCount),
-              services: row.services,
-              rootSpanName: row.rootSpanName,
-              rootSpanKind: row.rootSpanKind,
-              rootSpanStatusCode: row.rootSpanStatusCode,
-              rootHttpMethod: row.rootHttpMethod ?? "",
-              rootHttpRoute: row.rootHttpRoute ?? "",
-              rootHttpStatusCode: row.rootHttpStatusCode ?? "",
-              hasError: Number(row.hasError),
-            })),
-          },
-        })
-      }
-
-      // Span-level list query (existing behavior)
+      // Always use tracesListQuery — it handles MV usage when rootOnly=true
+      // and returns a consistent field shape for dashboard widgets.
+      // (tracesRootListQuery has a different output shape for the built-in trace list page)
       const rows = yield* executeCHQuery(
         tinybird,
         tenant,

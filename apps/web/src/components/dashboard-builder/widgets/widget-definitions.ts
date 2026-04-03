@@ -149,8 +149,8 @@ export const statPresets: WidgetPresetDefinition[] = [
 export const listPresets: WidgetPresetDefinition[] = [
   {
     id: "list-traces",
-    name: "Recent Spans",
-    description: "Latest spans with service, duration, and status",
+    name: "Recent Traces",
+    description: "Latest traces with service, duration, and status",
     visualization: "list",
     dataSource: {
       endpoint: "custom_query_builder_list",
@@ -164,7 +164,7 @@ export const listPresets: WidgetPresetDefinition[] = [
           metricName: "",
           metricType: "sum",
           isMonotonic: false,
-          whereClause: "",
+          whereClause: "root_only = true",
           aggregation: "count",
           stepInterval: "",
           orderByDirection: "desc",
@@ -179,10 +179,11 @@ export const listPresets: WidgetPresetDefinition[] = [
       },
     },
     display: {
-      title: "Recent Spans",
+      title: "Recent Traces",
       listDataSource: "traces",
       listWhereClause: "",
       listLimit: 25,
+      listRootOnly: true,
       columns: [
         { field: "serviceName", header: "Service" },
         { field: "spanName", header: "Span" },
@@ -193,8 +194,8 @@ export const listPresets: WidgetPresetDefinition[] = [
   },
   {
     id: "list-error-traces",
-    name: "Error Spans",
-    description: "Spans with errors",
+    name: "Error Traces",
+    description: "Traces with errors",
     visualization: "list",
     dataSource: {
       endpoint: "custom_query_builder_list",
@@ -208,7 +209,7 @@ export const listPresets: WidgetPresetDefinition[] = [
           metricName: "",
           metricType: "sum",
           isMonotonic: false,
-          whereClause: "has_error = true",
+          whereClause: "root_only = true AND has_error = true",
           aggregation: "count",
           stepInterval: "",
           orderByDirection: "desc",
@@ -223,10 +224,11 @@ export const listPresets: WidgetPresetDefinition[] = [
       },
     },
     display: {
-      title: "Error Spans",
+      title: "Error Traces",
       listDataSource: "traces",
       listWhereClause: "has_error = true",
       listLimit: 25,
+      listRootOnly: true,
       columns: [
         { field: "serviceName", header: "Service" },
         { field: "spanName", header: "Span" },

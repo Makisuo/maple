@@ -23,6 +23,7 @@ import type {
   WidgetDataSource,
   WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
+import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useWidgetData } from "@/hooks/use-widget-data"
 import {
@@ -94,6 +95,7 @@ export interface QueryBuilderWidgetState {
   listWhereClause: string
   listLimit: string
   listColumns: ListColumnDraft[]
+  listRootOnly: boolean
 }
 
 function parsePositiveNumber(raw: string): number | undefined {
@@ -202,6 +204,7 @@ function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState {
         ? String(widget.display.listLimit)
         : "",
     listColumns: (widget.display.columns ?? (listDs === "logs" ? LOG_DEFAULT_COLUMNS : TRACE_DEFAULT_COLUMNS)) as ListColumnDraft[],
+    listRootOnly: widget.display.listRootOnly ?? true,
   } satisfies Omit<QueryBuilderWidgetState, "queries" | "formulas">
 
   // List widgets don't use the query builder — return early with a dummy query
@@ -331,17 +334,25 @@ function buildWidgetDataSource(
     }
     // For traces, use the query engine which supports full attr.* filtering
     const listQuery = createQueryDraft(0)
+    // Inject root_only filter when toggle is on (enables MV usage for faster queries)
+    const effectiveWhereClause = state.listRootOnly
+      ? state.listWhereClause.trim()
+        ? `root_only = true AND ${state.listWhereClause}`
+        : "root_only = true"
+      : state.listWhereClause
     const queryForEngine: QueryBuilderQueryDraft = {
       ...listQuery,
       dataSource: state.listDataSource,
-      whereClause: state.listWhereClause,
+      whereClause: effectiveWhereClause,
       aggregation: "count", // required by the spec builder but unused for list
     }
+    const columnFields = state.listColumns.map((c) => c.field).filter(Boolean)
     return {
       endpoint: "custom_query_builder_list" as const,
       params: {
         queries: [queryForEngine],
         limit,
+        columns: columnFields.length > 0 ? columnFields : undefined,
       },
     }
   }
@@ -407,7 +418,8 @@ function buildWidgetDisplay(
       description: state.description.trim() || undefined,
       listDataSource: state.listDataSource,
       listWhereClause: state.listWhereClause,
-      listLimit: parsePositiveNumber(state.listLimit) ?? 50,
+      listLimit: parsePositiveNumber(state.listLimit) ?? 25,
+      listRootOnly: state.listRootOnly,
       columns: state.listColumns.length > 0 ? state.listColumns : undefined,
     }
   }
@@ -497,6 +509,7 @@ export function WidgetQueryBuilderPage({
   // Component remounts on route change, so this is correct.
   // Using useState (not Atom) prevents dashboard mutations from resetting form state.
   const [state, setState] = React.useState<QueryBuilderWidgetState>(() => toInitialState(widget))
+  const [stagedState, setStagedState] = React.useState<QueryBuilderWidgetState>(() => toInitialState(widget))
   const initialJsonRef = React.useRef(JSON.stringify(toInitialState(widget)))
 
   // Derived — no state needed
@@ -508,7 +521,10 @@ export function WidgetQueryBuilderPage({
   const [metricSearch, setMetricSearch] = React.useState("")
   const deferredMetricSearch = React.useDeferredValue(metricSearch)
 
-  const { state: { resolvedTimeRange: resolvedTime } } = useDashboardTimeRange()
+  const {
+    state: { timeRange, resolvedTimeRange: resolvedTime },
+    actions: { setTimeRange },
+  } = useDashboardTimeRange()
 
   const metricsResult = useAtomValue(
     listMetricsResultAtom({ data: { limit: 100, search: deferredMetricSearch || undefined } }),
@@ -736,16 +752,25 @@ export function WidgetQueryBuilderPage({
       ? seriesFieldOptions[0]
       : state.statValueField
 
-  // Preview reads live state — no separate stagedState needed
+  const runPreview = () => {
+    if (validationError) return
+    setStagedState({
+      ...state,
+      queries: state.queries.map((q) => ({ ...q, addOns: { ...q.addOns } })),
+      formulas: state.formulas.map((f) => ({ ...f })),
+      listColumns: state.listColumns.map((c) => ({ ...c })),
+    })
+  }
+
   const previewWidget = React.useMemo(() => {
-    const previewSeriesOptions = toSeriesFieldOptions(state)
+    const previewSeriesOptions = toSeriesFieldOptions(stagedState)
     return {
       ...widget,
-      visualization: state.visualization,
-      dataSource: buildWidgetDataSource(widget, state, previewSeriesOptions),
-      display: buildWidgetDisplay(widget, state),
+      visualization: stagedState.visualization,
+      dataSource: buildWidgetDataSource(widget, stagedState, previewSeriesOptions),
+      display: buildWidgetDisplay(widget, stagedState),
     }
-  }, [state, widget])
+  }, [stagedState, widget])
 
   const applyChanges = () => {
     if (validationError) return
@@ -840,6 +865,22 @@ export function WidgetQueryBuilderPage({
       <div className="flex-1 min-w-0 overflow-y-auto">
         {/* Preview hero section */}
         <div className="border-b bg-muted/30 px-6 py-6">
+          <div className="flex justify-end mb-3">
+            <TimeRangePicker
+              startTime={resolvedTime?.startTime}
+              endTime={resolvedTime?.endTime}
+              presetValue={timeRange.type === "relative" ? timeRange.value : undefined}
+              onChange={(range) => {
+                if (range.startTime && range.endTime) {
+                  if (range.presetValue) {
+                    setTimeRange({ type: "relative", value: range.presetValue })
+                  } else {
+                    setTimeRange({ type: "absolute", startTime: range.startTime, endTime: range.endTime })
+                  }
+                }
+              }}
+            />
+          </div>
           <div className="h-[400px]">
             <WidgetPreview widget={previewWidget} />
           </div>
@@ -857,6 +898,7 @@ export function WidgetQueryBuilderPage({
                 listDataSource={state.listDataSource}
                 whereClause={state.listWhereClause}
                 limit={state.listLimit}
+                rootOnly={state.listRootOnly}
                 columns={state.listColumns}
                 autocompleteValues={autocompleteValuesBySource}
                 onActiveAttributeKey={setActiveAttributeKey}
@@ -865,6 +907,11 @@ export function WidgetQueryBuilderPage({
                   setState((current) => ({ ...current, ...updates }))
                 }
               />
+              <div className="flex items-center gap-3">
+                <Button size="sm" onClick={runPreview}>
+                  Run Preview
+                </Button>
+              </div>
             </>
           ) : (
             <>
@@ -908,12 +955,15 @@ export function WidgetQueryBuilderPage({
               )}
 
               {/* Toolbar */}
-              <div className="flex items-center gap-3 border-t pt-4">
+              <div className="flex items-center gap-3">
                 <Button variant="outline" size="sm" onClick={addQuery}>
                   + Query
                 </Button>
                 <Button variant="outline" size="sm" onClick={addFormula}>
                   + Formula
+                </Button>
+                <Button size="sm" onClick={runPreview} disabled={!!validationError}>
+                  Run Preview
                 </Button>
                 <span className="text-[11px] text-muted-foreground ml-auto">
                   {state.queries.map((q) => q.name).join(", ")}

@@ -734,6 +734,7 @@ export function buildBreakdownQuerySpec(
 export function buildListQuerySpec(
   query: QueryBuilderQueryDraft,
   limit?: number,
+  columns?: string[],
 ): BuildSpecResult {
   // Reuse the timeseries spec builder to parse the where clause into filters
   const timeseriesResult = buildTimeseriesQuerySpec(query)
@@ -748,6 +749,7 @@ export function buildListQuerySpec(
       source: spec.source,
       filters: (spec as { filters?: unknown }).filters,
       limit,
+      ...(columns?.length ? { columns } : {}),
     } as QuerySpec,
     warnings: timeseriesResult.warnings,
     error: null,

@@ -114,6 +114,7 @@ export interface WidgetDisplayConfig {
   listDataSource?: "traces" | "logs"
   listWhereClause?: string
   listLimit?: number
+  listRootOnly?: boolean
 }
 
 // --- Widget Layout ---

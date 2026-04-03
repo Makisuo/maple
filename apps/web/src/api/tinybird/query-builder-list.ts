@@ -53,6 +53,7 @@ const QueryBuilderListInputSchema = Schema.Struct({
   endTime: dateTimeString,
   queries: Schema.mutable(Schema.Array(QueryDraftSchema)),
   limit: Schema.optional(Schema.Number),
+  columns: Schema.optional(Schema.Array(Schema.String)),
 })
 
 export type QueryBuilderListInput = Schema.Schema.Type<typeof QueryBuilderListInputSchema>
@@ -85,6 +86,7 @@ async function executeListQueryInternal(
   const built = buildListQuerySpec(
     { ...query, metricType: query.metricType as QueryBuilderMetricType, isMonotonic: query.isMonotonic ?? (query.metricType === "sum") },
     input.limit,
+    input.columns as string[] | undefined,
   )
 
   if (!built.query) {

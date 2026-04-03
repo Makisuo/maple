@@ -66,14 +66,14 @@ const statSampleValues: Record<string, number> = {
 // Sample rows for list previews
 const listSampleRows: Record<string, Record<string, unknown>[]> = {
   "list-traces": [
-    { rootSpanName: "GET /api/users", durationMs: 142, hasError: false },
-    { rootSpanName: "POST /api/orders", durationMs: 891, hasError: true },
-    { rootSpanName: "GET /api/health", durationMs: 3, hasError: false },
+    { serviceName: "api-gw", spanName: "GET /api/users", durationMs: 142, statusCode: "Ok" },
+    { serviceName: "order-svc", spanName: "POST /api/orders", durationMs: 891, statusCode: "Error" },
+    { serviceName: "api-gw", spanName: "GET /api/health", durationMs: 3, statusCode: "Ok" },
   ],
   "list-error-traces": [
-    { rootSpanName: "POST /api/orders", durationMs: 891, services: "order-svc" },
-    { rootSpanName: "GET /api/auth", durationMs: 2301, services: "auth-svc" },
-    { rootSpanName: "PUT /api/items", durationMs: 445, services: "item-svc" },
+    { serviceName: "order-svc", spanName: "POST /api/orders", durationMs: 891, statusCode: "Error" },
+    { serviceName: "auth-svc", spanName: "GET /api/auth", durationMs: 2301, statusCode: "Error" },
+    { serviceName: "item-svc", spanName: "PUT /api/items", durationMs: 445, statusCode: "Error" },
   ],
   "list-logs": [
     { timestamp: "12:04:23", severityText: "ERROR", serviceName: "api-gw", body: "Connection refused" },
@@ -85,9 +85,9 @@ const listSampleRows: Record<string, Record<string, unknown>[]> = {
 // Sample rows for table previews
 const tableSampleRows: Record<string, Record<string, unknown>[]> = {
   "table-traces": [
-    { rootSpanName: "GET /api/users", durationMs: 142, hasError: false },
-    { rootSpanName: "POST /api/orders", durationMs: 891, hasError: true },
-    { rootSpanName: "GET /api/health", durationMs: 3, hasError: false },
+    { serviceName: "api-gw", spanName: "GET /api/users", durationMs: 142, hasError: false },
+    { serviceName: "order-svc", spanName: "POST /api/orders", durationMs: 891, hasError: true },
+    { serviceName: "api-gw", spanName: "GET /api/health", durationMs: 3, hasError: false },
   ],
   "table-errors": [
     { errorType: "ConnectionTimeout", count: 342, affectedServicesCount: 5 },

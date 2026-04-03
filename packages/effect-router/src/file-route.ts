@@ -1,50 +1,75 @@
-import { effectLoader, effectBeforeLoad } from "./route.ts"
+import type { Atom } from "effect/unstable/reactivity"
+import { effectLoader, effectBeforeLoad, getEffectContext } from "./route.ts"
+
+/**
+ * Context passed to a preload function.
+ */
+export interface PreloadContext {
+  readonly params: Record<string, string>
+  readonly search: Record<string, unknown>
+}
+
+/**
+ * A function that returns atoms to mount before the component renders.
+ * Atoms are mounted (fire-and-forget) so fetches are already in-flight
+ * when the component calls `useAtomValue`.
+ */
+export type PreloadFn = (ctx: PreloadContext) => ReadonlyArray<Atom.Atom<any>>
 
 /**
  * Wraps a TanStack Router file route builder with Effect support.
  *
  * - `loader` accepts Effect-returning functions (auto-wrapped with tracing + abort support)
  * - `beforeLoad` accepts Effect-returning functions
- * - `validateSearch` accepts `Schema.toStandardSchemaV1(schema)` (same as before)
+ * - `validateSearch` accepts `Schema.toStandardSchemaV1(schema)`
  *
- * The returned builder has the same type signature as `createFileRoute(path)`,
- * preserving full type inference for `useSearch()`, `useParams()`, etc.
+ * Pass a `preload` function as the second argument to warm atoms during
+ * route transition without blocking navigation.
  *
  * @example
  * ```ts
  * import { createFileRoute } from "@tanstack/react-router"
  * import { effectRoute } from "@effect-router/core"
- * import { Effect, Schema } from "effect"
+ * import { Schema } from "effect"
  *
- * const SearchSchema = Schema.Struct({
- *   tab: Schema.optional(Schema.String),
- * })
- *
- * export const Route = effectRoute(createFileRoute("/chat"))({
+ * export const Route = effectRoute(createFileRoute("/traces/$traceId"), ({ params }) => [
+ *   getSpanHierarchyResultAtom({ traceId: params.traceId }),
+ *   getTraceDataResultAtom({ traceId: params.traceId }),
+ * ])({
  *   validateSearch: Schema.toStandardSchemaV1(SearchSchema),
- *   component: ChatPage,
- *   loader: ({ params }) =>
- *     Effect.gen(function* () {
- *       const svc = yield* MyService
- *       return yield* svc.getData(params)
- *     }),
+ *   component: TraceDetailPage,
  * })
  * ```
  */
-export function effectRoute<T extends (...args: any[]) => any>(fileRoute: T): T {
+export function effectRoute<T extends (...args: any[]) => any>(
+  fileRoute: T,
+  preload?: PreloadFn,
+): T {
   return ((options?: any) => {
     if (!options) return (fileRoute as any)()
-    return (fileRoute as any)(transformOptions(options))
+    return (fileRoute as any)(transformOptions(options, preload))
   }) as T
 }
 
 function transformOptions(
   options: Record<string, any>,
+  preload?: PreloadFn,
 ): Record<string, any> {
   const result = { ...options }
 
-  if (typeof options.loader === "function") {
-    result.loader = effectLoader(options.loader)
+  const userLoader = typeof options.loader === "function"
+    ? effectLoader(options.loader)
+    : undefined
+
+  if (preload || userLoader) {
+    result.loader = (ctx: any) => {
+      if (preload) {
+        const { effectRegistry } = getEffectContext(ctx.context)
+        const atoms = preload({ params: ctx.params, search: ctx.search ?? {} })
+        for (const atom of atoms) effectRegistry.mount(atom)
+      }
+      if (userLoader) return userLoader(ctx)
+    }
   }
 
   if (typeof options.beforeLoad === "function") {

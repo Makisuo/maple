@@ -186,11 +186,12 @@ export const TracesListQuery = Schema.Struct({
   kind: Schema.Literal("list"),
   source: Schema.Literal("traces"),
   filters: Schema.optional(TracesFilters),
+  columns: Schema.optional(Schema.Array(Schema.String)),
   limit: Schema.optional(
     Schema.Number.check(
       Schema.isInt(),
       Schema.isGreaterThan(0),
-      Schema.isLessThanOrEqualTo(1000),
+      Schema.isLessThanOrEqualTo(200),
     ),
   ),
   offset: Schema.optional(
@@ -210,7 +211,7 @@ export const LogsListQuery = Schema.Struct({
     Schema.Number.check(
       Schema.isInt(),
       Schema.isGreaterThan(0),
-      Schema.isLessThanOrEqualTo(1000),
+      Schema.isLessThanOrEqualTo(200),
     ),
   ),
 })

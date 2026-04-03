@@ -34,7 +34,9 @@ function buildBackToTracesHref(searchStr: string): string {
   return nextSearch ? `/traces?${nextSearch}` : "/traces"
 }
 
-export const Route = effectRoute(createFileRoute("/traces/$traceId"))({
+export const Route = effectRoute(createFileRoute("/traces/$traceId"), ({ params }) => [
+  getSpanHierarchyResultAtom({ data: { traceId: Schema.decodeSync(TraceId)(params.traceId) } }),
+])({
   component: TraceDetailPage,
   validateSearch: Schema.toStandardSchemaV1(TraceDetailSearchSchema),
 })

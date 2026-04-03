@@ -204,7 +204,7 @@ export function effectBeforeLoad<A extends Record<string, unknown>, E = never>(
  * Extracts the EffectRouterContext from the router context with a runtime
  * check, avoiding an unsafe `as` cast.
  */
-function getEffectContext(context: Record<string, unknown>): EffectRouterContext {
+export function getEffectContext(context: Record<string, unknown>): EffectRouterContext {
   if (
     !("effectManagedRuntime" in context) ||
     !("effectAtomRuntime" in context) ||
