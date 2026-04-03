@@ -1,4 +1,4 @@
-import { type ReactNode, createElement } from "react"
+import { type ReactNode, createElement, useMemo } from "react"
 import { Atom, ScopedAtom, useAtom } from "@/lib/effect-atom"
 import type { TimeRange } from "@/components/dashboard-builder/types"
 import { relativeToAbsolute } from "@/lib/time-utils"
@@ -21,7 +21,7 @@ export function useDashboardTimeRange() {
   const timeRangeAtom = DashboardTimeRange.use()
   const [timeRange, setTimeRange] = useAtom(timeRangeAtom)
 
-  const resolvedTimeRange = resolveTimeRange(timeRange)
+  const resolvedTimeRange = useMemo(() => resolveTimeRange(timeRange), [timeRange])
 
   return {
     state: { timeRange, resolvedTimeRange },
