@@ -6,6 +6,7 @@ import {
   WidgetQueryBuilderPage,
   type WidgetQueryBuilderPageHandle,
 } from "@/components/dashboard-builder/config/widget-query-builder-page";
+import { WidgetBuilderProvider } from "@/components/dashboard-builder/config/widget-builder-provider";
 import { DashboardTimeRangeWrapper } from "@/components/dashboard-builder/dashboard-providers";
 import type {
   TimeRange,
@@ -112,11 +113,13 @@ function WidgetConfigurePage() {
           </div>
         }
       >
-        <WidgetQueryBuilderPage
-          ref={builderRef}
-          widget={configureWidget}
-          onApply={handleApply}
-        />
+        <WidgetBuilderProvider widget={configureWidget}>
+          <WidgetQueryBuilderPage
+            ref={builderRef}
+            widget={configureWidget}
+            onApply={handleApply}
+          />
+        </WidgetBuilderProvider>
       </DashboardLayout>
 
       {status === "blocked" && (

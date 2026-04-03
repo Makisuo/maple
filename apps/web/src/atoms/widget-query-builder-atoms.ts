@@ -1,5 +1,5 @@
 import { Atom, ScopedAtom } from "@/lib/effect-atom"
-import type { QueryBuilderWidgetState } from "@/components/dashboard-builder/config/widget-query-builder-page"
+import type { QueryBuilderWidgetState } from "@/lib/query-builder/widget-builder-utils"
 
 export const WidgetBuilderForm = ScopedAtom.make(
   (initial: QueryBuilderWidgetState) => Atom.make(initial),

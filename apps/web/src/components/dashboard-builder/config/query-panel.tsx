@@ -21,6 +21,7 @@ import {
 import { cn } from "@maple/ui/utils";
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor";
 import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete";
+import { useAutocompleteContext } from "@/hooks/use-autocomplete-context";
 import {
   AGGREGATIONS_BY_SOURCE,
   GROUP_BY_OPTIONS,
@@ -57,8 +58,6 @@ interface QueryPanelProps {
   metricSelectionOptions: MetricSelectionOption[];
   onMetricSearch?: (search: string) => void;
   autocompleteValues: AutocompleteValues;
-  onActiveAttributeKey?: (key: string | null) => void;
-  onActiveResourceAttributeKey?: (key: string | null) => void;
   onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void;
   onClone: () => void;
   onRemove: () => void;
@@ -266,8 +265,6 @@ export function QueryPanel({
   metricSelectionOptions,
   onMetricSearch,
   autocompleteValues,
-  onActiveAttributeKey,
-  onActiveResourceAttributeKey,
   onUpdate,
   onClone,
   onRemove,
@@ -353,8 +350,6 @@ export function QueryPanel({
               metricSelectionOptions={metricSelectionOptions}
               onMetricSearch={onMetricSearch}
               autocompleteValues={autocompleteValues}
-              onActiveAttributeKey={onActiveAttributeKey}
-              onActiveResourceAttributeKey={onActiveResourceAttributeKey}
               onUpdate={onUpdate}
             />
           ) : (
@@ -362,8 +357,6 @@ export function QueryPanel({
               query={query}
               aggregateOptions={aggregateOptions}
               autocompleteValues={autocompleteValues}
-              onActiveAttributeKey={onActiveAttributeKey}
-              onActiveResourceAttributeKey={onActiveResourceAttributeKey}
               onUpdate={onUpdate}
             />
           )}
@@ -415,17 +408,14 @@ function TracesLogsBody({
   query,
   aggregateOptions,
   autocompleteValues,
-  onActiveAttributeKey,
-  onActiveResourceAttributeKey,
   onUpdate,
 }: {
   query: QueryBuilderQueryDraft;
   aggregateOptions: Array<{ label: string; value: string }>;
   autocompleteValues: AutocompleteValues;
-  onActiveAttributeKey?: (key: string | null) => void;
-  onActiveResourceAttributeKey?: (key: string | null) => void;
   onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void;
 }) {
+  const { setActiveAttributeKey, setActiveResourceAttributeKey } = useAutocompleteContext();
   return (
     <>
       {/* Row 1: Where clause */}
@@ -436,8 +426,8 @@ function TracesLogsBody({
           value={query.whereClause}
           dataSource={query.dataSource}
           values={autocompleteValues[query.dataSource]}
-          onActiveAttributeKey={onActiveAttributeKey}
-          onActiveResourceAttributeKey={onActiveResourceAttributeKey}
+          onActiveAttributeKey={setActiveAttributeKey}
+          onActiveResourceAttributeKey={setActiveResourceAttributeKey}
           onChange={(nextWhereClause) =>
             onUpdate((current) => ({
               ...current,
@@ -535,8 +525,6 @@ function MetricsBody({
   metricSelectionOptions,
   onMetricSearch,
   autocompleteValues,
-  onActiveAttributeKey,
-  onActiveResourceAttributeKey,
   onUpdate,
 }: {
   query: QueryBuilderQueryDraft;
@@ -545,10 +533,9 @@ function MetricsBody({
   metricSelectionOptions: MetricSelectionOption[];
   onMetricSearch?: (search: string) => void;
   autocompleteValues: AutocompleteValues;
-  onActiveAttributeKey?: (key: string | null) => void;
-  onActiveResourceAttributeKey?: (key: string | null) => void;
   onUpdate: (updater: (q: QueryBuilderQueryDraft) => QueryBuilderQueryDraft) => void;
 }) {
+  const { setActiveAttributeKey, setActiveResourceAttributeKey } = useAutocompleteContext();
   return (
     <>
       {/* Row 1: Metric type + name */}
@@ -603,8 +590,8 @@ function MetricsBody({
         value={query.whereClause}
         dataSource={query.dataSource}
         values={autocompleteValues.metrics}
-        onActiveAttributeKey={onActiveAttributeKey}
-        onActiveResourceAttributeKey={onActiveResourceAttributeKey}
+        onActiveAttributeKey={setActiveAttributeKey}
+        onActiveResourceAttributeKey={setActiveResourceAttributeKey}
         onChange={(nextWhereClause) =>
           onUpdate((current) => ({
             ...current,

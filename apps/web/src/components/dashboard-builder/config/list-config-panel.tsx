@@ -12,7 +12,9 @@ import {
 } from "@maple/ui/components/ui/select"
 import { cn } from "@maple/ui/utils"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
-import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
+import { useAutocompleteContext } from "@/hooks/use-autocomplete-context"
+import { useWidgetBuilder } from "@/hooks/use-widget-builder"
+import { useWidgetBuilderData } from "@/hooks/use-widget-builder-data"
 import type { ValueUnit } from "@/components/dashboard-builder/types"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { getListPerformanceHints } from "@/lib/query-builder/performance-hints"
@@ -27,23 +29,7 @@ interface ListColumnDraft {
   align?: "left" | "center" | "right"
 }
 
-interface ListConfigPanelProps {
-  listDataSource: ListDataSource
-  whereClause: string
-  limit: string
-  rootOnly: boolean
-  columns: ListColumnDraft[]
-  autocompleteValues: Record<string, WhereClauseAutocompleteValues | undefined>
-  onActiveAttributeKey?: (key: string | null) => void
-  onActiveResourceAttributeKey?: (key: string | null) => void
-  onChange: (updates: {
-    listDataSource?: ListDataSource
-    listWhereClause?: string
-    listLimit?: string
-    listRootOnly?: boolean
-    listColumns?: ListColumnDraft[]
-  }) => void
-}
+// Props interface removed — ListConfigPanel now reads from context
 
 const TRACE_DEFAULT_COLUMNS: ListColumnDraft[] = [
   { field: "serviceName", header: "Service" },
@@ -230,17 +216,24 @@ function DraggableColumnRow({
   )
 }
 
-export function ListConfigPanel({
-  listDataSource,
-  whereClause,
-  limit,
-  rootOnly,
-  columns,
-  autocompleteValues,
-  onActiveAttributeKey,
-  onActiveResourceAttributeKey,
-  onChange,
-}: ListConfigPanelProps) {
+export function ListConfigPanel() {
+  const { state, actions: { setState } } = useWidgetBuilder()
+  const { autocompleteValues } = useWidgetBuilderData()
+  const { setActiveAttributeKey, setActiveResourceAttributeKey } = useAutocompleteContext()
+
+  const listDataSource = state.listDataSource
+  const whereClause = state.listWhereClause
+  const limit = state.listLimit
+  const rootOnly = state.listRootOnly
+  const columns = state.listColumns
+
+  const onChange = (updates: {
+    listDataSource?: ListDataSource
+    listWhereClause?: string
+    listLimit?: string
+    listRootOnly?: boolean
+    listColumns?: ListColumnDraft[]
+  }) => setState((current) => ({ ...current, ...updates }))
   const showFieldSuggestionsAtom = React.useMemo(() => Atom.make<number | null>(null), [])
   const [showFieldSuggestions, setShowFieldSuggestions] = useAtom(showFieldSuggestionsAtom)
 
@@ -374,8 +367,8 @@ export function ListConfigPanel({
           value={whereClause}
           dataSource={listDataSource}
           values={autocompleteValues[listDataSource]}
-          onActiveAttributeKey={onActiveAttributeKey}
-          onActiveResourceAttributeKey={onActiveResourceAttributeKey}
+          onActiveAttributeKey={setActiveAttributeKey}
+          onActiveResourceAttributeKey={setActiveResourceAttributeKey}
           onChange={(value) => onChange({ listWhereClause: value })}
           placeholder={
             listDataSource === "traces"

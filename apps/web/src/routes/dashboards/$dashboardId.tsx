@@ -31,6 +31,8 @@ export const Route = effectRoute(createFileRoute("/dashboards/$dashboardId"))({
   validateSearch: Schema.toStandardSchemaV1(dashboardViewSearchSchema),
 });
 
+
+
 function DashboardViewPage() {
   const { dashboardId } = Route.useParams();
   const search = Route.useSearch();
