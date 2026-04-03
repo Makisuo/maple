@@ -218,33 +218,7 @@ function buildResourceAttributeFilters(input: ListTracesInput): AttributeFilter[
   return filters
 }
 
-/** Transform a root-level list row (from tracesRootListQuery / trace_list_mv) */
-function transformRootListRow(row: Record<string, unknown>): Trace {
-  const rootSpanAttributes: Record<string, string> = {}
-  if (row.rootHttpMethod) rootSpanAttributes["http.method"] = String(row.rootHttpMethod)
-  if (row.rootHttpRoute) rootSpanAttributes["http.route"] = String(row.rootHttpRoute)
-  if (row.rootHttpStatusCode) rootSpanAttributes["http.status_code"] = String(row.rootHttpStatusCode)
-
-  return {
-    traceId: toTraceId(String(row.traceId)),
-    startTime: String(row.startTime),
-    endTime: String(row.endTime),
-    durationMs: Number(row.durationMicros) / 1000,
-    spanCount: Number(row.spanCount),
-    services: (row.services as string[]) ?? [],
-    rootSpan: {
-      name: String(row.rootSpanName),
-      kind: String(row.rootSpanKind),
-      statusCode: String(row.rootSpanStatusCode),
-      attributes: rootSpanAttributes,
-      http: getHttpInfo(String(row.rootSpanName), rootSpanAttributes),
-    },
-    rootSpanName: String(row.rootSpanName),
-    hasError: Number(row.hasError) === 1,
-  }
-}
-
-/** Transform a span-level list row (from tracesListQuery / raw traces table) */
+/** Transform a list row from tracesListQuery */
 function transformSpanListRow(row: Record<string, unknown>): Trace {
   const spanAttrs = (row.spanAttributes ?? {}) as Record<string, string>
   const rootSpanAttributes: Record<string, string> = {}
@@ -337,9 +311,7 @@ const listTracesViaQueryEngineEffect = Effect.fn("QueryEngine.listTraces")(funct
     )
   }
 
-  const traces = rootOnly
-    ? response.result.data.map(transformRootListRow)
-    : response.result.data.map(transformSpanListRow)
+  const traces = response.result.data.map(transformSpanListRow)
 
   return {
     data: traces,
