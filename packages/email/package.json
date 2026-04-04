@@ -6,7 +6,7 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "dev": "email dev",
+    "dev:email": "email dev",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@types/react": "catalog:react",
-    "react-email": "^4.0.14",
+    "react-email": "^5.2.10",
     "typescript": "catalog:tooling"
   }
 }
