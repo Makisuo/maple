@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./*": "./src/*"
+    "./weekly-digest": "./src/weekly-digest.tsx"
   },
   "scripts": {
     "dev:email": "email dev",

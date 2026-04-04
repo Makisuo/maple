@@ -1,5 +1,6 @@
 {
   "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/render-preview*"],
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

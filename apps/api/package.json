@@ -23,6 +23,8 @@
     "@libsql/client": "0.15.15",
     "@maple/db": "workspace:*",
     "@maple/domain": "workspace:*",
+    "@maple/email": "workspace:*",
+    "@react-email/components": "^1.0.11",
     "@maple/query-engine": "workspace:*",
     "@tinybirdco/sdk": "catalog:tinybird",
     "autumn-js": "^1.1.2",

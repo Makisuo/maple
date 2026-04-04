@@ -21,6 +21,8 @@ export interface EnvShape {
   readonly AUTUMN_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
   readonly SD_INTERNAL_TOKEN: Option.Option<Redacted.Redacted<string>>
   readonly INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
+  readonly RESEND_API_KEY: Option.Option<Redacted.Redacted<string>>
+  readonly RESEND_FROM_EMAIL: string
 }
 
 export class Env extends ServiceMap.Service<Env, EnvShape>()("Env", {
@@ -77,6 +79,12 @@ export class Env extends ServiceMap.Service<Env, EnvShape>()("Env", {
       INTERNAL_SERVICE_TOKEN: yield* Config.option(
         Config.redacted("INTERNAL_SERVICE_TOKEN"),
       ),
+      RESEND_API_KEY: yield* Config.option(
+        Config.redacted("RESEND_API_KEY"),
+      ),
+      RESEND_FROM_EMAIL: yield* Config.string("RESEND_FROM_EMAIL").pipe(
+        Config.withDefault("Maple <notifications@maple.dev>"),
+      ),
     } as const;
 
     const normalizedEnv = {
@@ -90,6 +98,8 @@ export class Env extends ServiceMap.Service<Env, EnvShape>()("Env", {
       AUTUMN_SECRET_KEY: normalizeOptionalSecret(env.AUTUMN_SECRET_KEY),
       SD_INTERNAL_TOKEN: normalizeOptionalSecret(env.SD_INTERNAL_TOKEN),
       INTERNAL_SERVICE_TOKEN: normalizeOptionalSecret(env.INTERNAL_SERVICE_TOKEN),
+      RESEND_API_KEY: normalizeOptionalSecret(env.RESEND_API_KEY),
+      RESEND_FROM_EMAIL: env.RESEND_FROM_EMAIL,
     } as const
 
     const authMode = normalizedEnv.MAPLE_AUTH_MODE.toLowerCase()

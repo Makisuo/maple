@@ -78,6 +78,13 @@
       "when": 1774400000000,
       "tag": "0010_exclude_service_names",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1775300000000,
+      "tag": "0011_digest_subscriptions",
+      "breakpoints": true
     }
   ]
 }
