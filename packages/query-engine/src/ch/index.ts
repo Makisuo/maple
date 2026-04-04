@@ -85,6 +85,13 @@ export {
   type TracesRootListOutput,
 } from "./queries/traces"
 
+// Queries — Attribute Keys
+export {
+  attributeKeysQuery,
+  type AttributeKeysQueryOpts,
+  type AttributeKeysOutput,
+} from "./queries/attribute-keys"
+
 // Queries — Metrics
 export {
   metricsTimeseriesQuery,

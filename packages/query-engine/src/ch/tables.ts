@@ -147,6 +147,14 @@ export const MetricsHistogram = table("metrics_histogram", {
   AggregationTemporality: T.int32,
 })
 
+export const AttributeKeysHourly = table("attribute_keys_hourly", {
+  OrgId: T.string,
+  Hour: T.dateTime,
+  AttributeKey: T.string,
+  AttributeScope: T.string,
+  UsageCount: T.uint64,
+})
+
 export const MetricsExpHistogram = table("metrics_exponential_histogram", {
   OrgId: T.string,
   ResourceAttributes: T.map(T.string, T.string),

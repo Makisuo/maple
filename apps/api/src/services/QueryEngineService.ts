@@ -531,6 +531,16 @@ const sampleCountForStrategy = (
 ): number =>
   observations.reduce((sum, observation) => sum + Number(observation.sampleCount), 0)
 
+/** Map query engine source/scope to the MV's AttributeScope value. */
+function resolveAttributeScope(
+  source: "traces" | "logs" | "metrics",
+  scope?: "span" | "resource",
+): string {
+  if (source === "metrics") return "metric"
+  if (source === "logs") return scope === "resource" ? "resource" : "log"
+  return scope === "resource" ? "resource" : "span"
+}
+
 const isScalarAlertQuery = (
   query: QuerySpec,
 ): query is Extract<QuerySpec, { kind: "timeseries"; source: "traces" | "logs" | "metrics" }> => {
@@ -913,6 +923,35 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
             hasError: Number(row.hasError) === 1,
             spanAttributes: row.spanAttributes ?? {},
             resourceAttributes: row.resourceAttributes ?? {},
+          })),
+        },
+      })
+    }
+
+    if (request.query.kind === "attributeKeys") {
+      const scope = resolveAttributeScope(request.query.source, request.query.scope)
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.attributeKeysQuery({
+          scope,
+          limit: request.query.limit,
+        }),
+        {
+          orgId: tenant.orgId,
+          startTime: request.startTime,
+          endTime: request.endTime,
+        },
+        "Failed to execute attribute keys query",
+      )
+
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "attributeKeys",
+          source: request.query.source,
+          data: rows.map((row) => ({
+            key: row.attributeKey,
+            count: Number(row.usageCount),
           })),
         },
       })

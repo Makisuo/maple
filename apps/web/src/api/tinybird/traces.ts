@@ -720,7 +720,14 @@ export function getSpanAttributeKeys({
   return getSpanAttributeKeysEffect({ data })
 }
 
-const getSpanAttributeKeysEffect = Effect.fn("Tinybird.getSpanAttributeKeys")(function* ({
+const defaultTimeRange = () => {
+  const now = new Date()
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
+  return { startTime: fmt(dayAgo), endTime: fmt(now) }
+}
+
+const getSpanAttributeKeysEffect = Effect.fn("QueryEngine.getSpanAttributeKeys")(function* ({
   data,
 }: {
   data: GetSpanAttributeKeysInput
@@ -730,18 +737,20 @@ const getSpanAttributeKeysEffect = Effect.fn("Tinybird.getSpanAttributeKeys")(fu
       data ?? {},
       "getSpanAttributeKeys",
     )
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("span_attribute_keys", () =>
-      tinybird.query.span_attribute_keys({
-        start_time: input.startTime,
-        end_time: input.endTime,
-      }),
-    )
+    const fallback = defaultTimeRange()
+    const request = new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "attributeKeys" as const, source: "traces" as const, scope: "span" as const },
+    })
+    const response = yield* executeQueryEngine("queryEngine.getSpanAttributeKeys", request)
+    const result = response.result
+    if (result.kind !== "attributeKeys") return { data: [] }
 
     return {
       data: result.data.map((row) => ({
-        attributeKey: row.attributeKey,
-        usageCount: Number(row.usageCount),
+        attributeKey: row.key,
+        usageCount: Number(row.count),
       })),
     }
 })
@@ -821,7 +830,7 @@ export function getResourceAttributeKeys({
   return getResourceAttributeKeysEffect({ data })
 }
 
-const getResourceAttributeKeysEffect = Effect.fn("Tinybird.getResourceAttributeKeys")(function* ({
+const getResourceAttributeKeysEffect = Effect.fn("QueryEngine.getResourceAttributeKeys")(function* ({
   data,
 }: {
   data: GetResourceAttributeKeysInput
@@ -831,18 +840,20 @@ const getResourceAttributeKeysEffect = Effect.fn("Tinybird.getResourceAttributeK
       data ?? {},
       "getResourceAttributeKeys",
     )
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("resource_attribute_keys", () =>
-      tinybird.query.resource_attribute_keys({
-        start_time: input.startTime,
-        end_time: input.endTime,
-      }),
-    )
+    const fallback = defaultTimeRange()
+    const request = new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "attributeKeys" as const, source: "traces" as const, scope: "resource" as const },
+    })
+    const response = yield* executeQueryEngine("queryEngine.getResourceAttributeKeys", request)
+    const result = response.result
+    if (result.kind !== "attributeKeys") return { data: [] }
 
     return {
       data: result.data.map((row) => ({
-        attributeKey: row.attributeKey,
-        usageCount: Number(row.usageCount),
+        attributeKey: row.key,
+        usageCount: Number(row.count),
       })),
     }
 })

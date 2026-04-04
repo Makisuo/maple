@@ -3,7 +3,6 @@ import { Effect, Schema } from "effect"
 import {
   getTinybird,
   type ListMetricsOutput,
-  type MetricAttributeKeysOutput,
   type MetricsSummaryOutput,
 } from "@/lib/tinybird"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -11,6 +10,7 @@ import {
   TinybirdDateTimeString,
   TinybirdQueryError,
   decodeInput,
+  executeQueryEngine,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
@@ -306,7 +306,14 @@ export function getMetricAttributeKeys({
   return getMetricAttributeKeysEffect({ data })
 }
 
-const getMetricAttributeKeysEffect = Effect.fn("Tinybird.getMetricAttributeKeys")(function* ({
+const defaultTimeRange = () => {
+  const now = new Date()
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
+  return { startTime: fmt(dayAgo), endTime: fmt(now) }
+}
+
+const getMetricAttributeKeysEffect = Effect.fn("QueryEngine.getMetricAttributeKeys")(function* ({
   data,
 }: {
   data: GetMetricAttributeKeysInput
@@ -316,20 +323,20 @@ const getMetricAttributeKeysEffect = Effect.fn("Tinybird.getMetricAttributeKeys"
       data ?? {},
       "getMetricAttributeKeys",
     )
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("metric_attribute_keys", () =>
-      tinybird.query.metric_attribute_keys({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        metric_name: input.metricName,
-        metric_type: input.metricType,
-      }),
-    )
+    const fallback = defaultTimeRange()
+    const request = new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "attributeKeys" as const, source: "metrics" as const },
+    })
+    const response = yield* executeQueryEngine("queryEngine.getMetricAttributeKeys", request)
+    const result = response.result
+    if (result.kind !== "attributeKeys") return { data: [] }
 
     return {
-      data: result.data.map((row: MetricAttributeKeysOutput) => ({
-        attributeKey: row.attributeKey,
-        usageCount: Number(row.usageCount),
+      data: result.data.map((row) => ({
+        attributeKey: row.key,
+        usageCount: Number(row.count),
       })),
     }
 })

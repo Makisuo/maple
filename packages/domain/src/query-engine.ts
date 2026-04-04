@@ -217,6 +217,20 @@ export const LogsListQuery = Schema.Struct({
 })
 export type LogsListQuery = Schema.Schema.Type<typeof LogsListQuery>
 
+export const AttributeKeysQuery = Schema.Struct({
+  kind: Schema.Literal("attributeKeys"),
+  source: Schema.Literals(["traces", "logs", "metrics"]),
+  scope: Schema.optional(Schema.Literals(["span", "resource"])),
+  limit: Schema.optional(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isGreaterThan(0),
+      Schema.isLessThanOrEqualTo(500),
+    ),
+  ),
+})
+export type AttributeKeysQuery = Schema.Schema.Type<typeof AttributeKeysQuery>
+
 export const QuerySpec = Schema.Union([
   TracesTimeseriesQuery,
   LogsTimeseriesQuery,
@@ -226,6 +240,7 @@ export const QuerySpec = Schema.Union([
   MetricsBreakdownQuery,
   TracesListQuery,
   LogsListQuery,
+  AttributeKeysQuery,
 ])
 export type QuerySpec = Schema.Schema.Type<typeof QuerySpec>
 
@@ -252,6 +267,12 @@ export type BreakdownItem = Schema.Schema.Type<typeof BreakdownItem>
 export const ListRow = Schema.Record(Schema.String, Schema.Unknown)
 export type ListRow = Schema.Schema.Type<typeof ListRow>
 
+export const AttributeKeyItem = Schema.Struct({
+  key: Schema.String,
+  count: Schema.Number,
+})
+export type AttributeKeyItem = Schema.Schema.Type<typeof AttributeKeyItem>
+
 export const QueryEngineResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("timeseries"),
@@ -267,6 +288,11 @@ export const QueryEngineResult = Schema.Union([
     kind: Schema.Literal("list"),
     source: Schema.Literals(["traces", "logs"]),
     data: Schema.Array(ListRow),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("attributeKeys"),
+    source: Schema.Literals(["traces", "logs", "metrics"]),
+    data: Schema.Array(AttributeKeyItem),
   }),
 ])
 export type QueryEngineResult = Schema.Schema.Type<typeof QueryEngineResult>

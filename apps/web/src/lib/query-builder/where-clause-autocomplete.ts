@@ -133,6 +133,16 @@ const KEY_DEFINITIONS: Record<QueryBuilderDataSource, KeyDefinition[]> = {
       insertText: "severity",
       description: "Filter by severity",
     },
+    {
+      label: "attr.<key>",
+      insertText: "attr.",
+      description: "Filter by a log attribute",
+    },
+    {
+      label: "resource.<key>",
+      insertText: "resource.",
+      description: "Filter by a resource attribute",
+    },
   ],
   metrics: [
     {
@@ -144,6 +154,11 @@ const KEY_DEFINITIONS: Record<QueryBuilderDataSource, KeyDefinition[]> = {
       label: "metric.type",
       insertText: "metric.type",
       description: "sum | gauge | histogram | exponential_histogram",
+    },
+    {
+      label: "attr.<key>",
+      insertText: "attr.",
+      description: "Filter by a metric attribute",
     },
   ],
 }
@@ -786,7 +801,6 @@ function buildSuggestions(
 
     // When typing attr., show dynamic attribute keys instead of static definitions
     if (
-      dataSource === "traces" &&
       query.startsWith("attr.") &&
       values?.attributeKeys &&
       values.attributeKeys.length > 0
@@ -797,7 +811,6 @@ function buildSuggestions(
 
     // When typing resource., show dynamic resource attribute keys
     if (
-      dataSource === "traces" &&
       query.startsWith("resource.") &&
       values?.resourceAttributeKeys &&
       values.resourceAttributeKeys.length > 0

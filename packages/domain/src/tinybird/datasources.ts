@@ -777,3 +777,27 @@ export const metricsExponentialHistogram = defineDatasource(
 export type MetricsExponentialHistogramRow = InferRow<
   typeof metricsExponentialHistogram
 >;
+
+/**
+ * Pre-aggregated attribute keys with hourly usage counts.
+ * Fed by MVs from traces (span + resource), logs, and metrics tables.
+ */
+export const attributeKeysHourly = defineDatasource("attribute_keys_hourly", {
+  description:
+    "Pre-aggregated attribute keys with hourly usage counts from traces, logs, and metrics.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Hour: t.dateTime(),
+    AttributeKey: t.string().lowCardinality(),
+    AttributeScope: t.string().lowCardinality(),
+    UsageCount: t.simpleAggregateFunction("sum", t.uint64()),
+  },
+  engine: engine.aggregatingMergeTree({
+    partitionKey: "toDate(Hour)",
+    sortingKey: ["OrgId", "AttributeScope", "Hour", "AttributeKey"],
+    ttl: "Hour + INTERVAL 90 DAY",
+  }),
+});
+
+export type AttributeKeysHourlyRow = InferRow<typeof attributeKeysHourly>;

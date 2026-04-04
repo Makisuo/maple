@@ -1,10 +1,25 @@
 {
   "version": 1,
   "skills": {
+    "clickhouse-best-practices": {
+      "source": "clickhouse/agent-skills",
+      "sourceType": "github",
+      "computedHash": "2b8d018f92874e50d28d9c1d18dd3d979e6750c9a322f4f54984da69454292d2"
+    },
     "coss": {
       "source": "cosscom/coss",
       "sourceType": "github",
       "computedHash": "876a7033152b2aa9592e77dfd1cacd15e02d751e22c92c8422143296f1765006"
+    },
+    "tinybird": {
+      "source": "tinybirdco/tinybird-agent-skills",
+      "sourceType": "github",
+      "computedHash": "9a3ed9630867759e995fd881f488a97bb28c123a9c73a4312305171d0fc86b9a"
+    },
+    "tinybird-typescript-sdk-guidelines": {
+      "source": "tinybirdco/tinybird-agent-skills",
+      "sourceType": "github",
+      "computedHash": "b05e3924ea0f220fea4bb98bc0c3cdb7317384c4e8e40809dcf7e6c999bff351"
     }
   }
 }

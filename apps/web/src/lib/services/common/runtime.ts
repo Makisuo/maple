@@ -12,6 +12,6 @@ const mapleOtelLayer = Maple.layer({
   serviceVersion: import.meta.env.VITE_COMMIT_SHA,
 })
 
-export const runtimeLayer = Layer.merge(MapleApiAtomClient.layer, mapleOtelLayer)
+export const runtimeLayer = Layer.merge(MapleApiAtomClient.layer, Layer.empty)
 
-export const runtime = ManagedRuntime.make(runtimeLayer, { memoMap: Atom.defaultMemoMap })
+export const runtime = ManagedRuntime.make(MapleApiAtomClient.layer, { memoMap: Atom.defaultMemoMap })
