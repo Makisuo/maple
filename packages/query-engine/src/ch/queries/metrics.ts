@@ -132,8 +132,8 @@ function buildHistogramTimeseries(
         ? $.Attributes.get(opts.groupByAttributeKey)
         : CH.lit(""),
       avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
-      minValue: CH.min_($.Min) as unknown as CH.Expr<number>,
-      maxValue: CH.max_($.Max) as unknown as CH.Expr<number>,
+      minValue: CH.min_($.Min),
+      maxValue: CH.max_($.Max),
       sumValue: CH.sum($.Sum),
       dataPointCount: CH.sum($.Count),
     }))

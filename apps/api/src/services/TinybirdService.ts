@@ -37,13 +37,10 @@ interface SqlClient {
   readonly sql: (sql: string) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
 }
 
-const createClient = (baseUrl: string, token: string): SqlClient =>
-  new Tinybird({
-    baseUrl,
-    token,
-    datasources: {},
-    pipes: {},
-  }) as unknown as SqlClient
+const createClient = (baseUrl: string, token: string): SqlClient => {
+  const tb = new Tinybird({ baseUrl, token, datasources: {}, pipes: {} })
+  return { sql: (sql: string) => tb.sql(sql) }
+}
 
 let tinybirdClientFactory: typeof createClient = createClient
 
@@ -58,7 +55,7 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
         pipe,
       })
 
-    const getCachedOrCreateClient = (orgId: string, host: string, token: string) => {
+    const getCachedOrCreateClient = (orgId: OrgId | "__managed__", host: string, token: string) => {
       const now = Date.now()
       const cached = clientCache.get(orgId)
       if (cached && cached.host === host && cached.token === token && cached.expiresAt > now) {
@@ -128,7 +125,7 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
 
       const compiled = compilePipeQuery(payload.pipe, {
         ...(payload.params ?? {}),
-        org_id: tenant.orgId as OrgId,
+        org_id: tenant.orgId,
       })
 
       if (!compiled) {
@@ -150,10 +147,10 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       sql: string,
     ) {
       if (!tenant.orgId || tenant.orgId.trim() === "") {
-        return yield* new TinybirdQueryError({ pipe: "list_traces", message: "org_id must not be empty" })
+        return yield* new TinybirdQueryError({ pipe: "list_traces", message: "org_id must not be empty (sqlQuery)" })
       }
       if (!sql.includes("OrgId")) {
-        return yield* new TinybirdQueryError({ pipe: "list_traces", message: "SQL query must contain OrgId filter" })
+        return yield* new TinybirdQueryError({ pipe: "list_traces", message: "SQL query must contain OrgId filter (sqlQuery)" })
       }
       return yield* executeSql(tenant, sql, "sqlQuery")
     })

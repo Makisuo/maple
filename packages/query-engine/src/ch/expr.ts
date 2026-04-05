@@ -165,12 +165,12 @@ export function sum(expr: Expr<number>): Expr<number> {
   return makeExpr<number>(raw(`sum(${compile(expr.toFragment())})`))
 }
 
-export function min_<T>(expr: Expr<T>): Expr<T> {
-  return makeExpr<T>(raw(`min(${compile(expr.toFragment())})`))
+export function min_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
+  return makeExpr<NonNullable<T>>(raw(`min(${compile(expr.toFragment())})`))
 }
 
-export function max_<T>(expr: Expr<T>): Expr<T> {
-  return makeExpr<T>(raw(`max(${compile(expr.toFragment())})`))
+export function max_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
+  return makeExpr<NonNullable<T>>(raw(`max(${compile(expr.toFragment())})`))
 }
 
 export function quantile(q: number) {
@@ -326,6 +326,11 @@ export function rawExpr<T = unknown>(sql: string): Expr<T> {
 
 export function rawCond(sql: string): Condition {
   return makeCond(raw(sql))
+}
+
+/** Create an Expr from a runtime column name (for dynamic column access). */
+export function dynamicColumn<T = string>(name: string): Expr<T> {
+  return makeExpr<T>(raw(name))
 }
 
 // ---------------------------------------------------------------------------

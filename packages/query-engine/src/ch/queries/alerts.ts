@@ -9,7 +9,7 @@
 import type { AttributeFilter, MetricType } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
 import {
   Traces,
   Logs,
@@ -54,7 +54,7 @@ export interface AlertTracesAggregateByServiceOutput extends AlertTracesAggregat
 
 type AlertTracesParams = { orgId: string; startTime: string; endTime: string }
 
-function alertTracesSelectExprs($: any, apdexThresholdMs: number) {
+function alertTracesSelectExprs($: ColumnAccessor<typeof Traces.columns>, apdexThresholdMs: number) {
   const t = apdexThresholdMs
   return {
     count: CH.count(),
@@ -72,7 +72,7 @@ function alertTracesSelectExprs($: any, apdexThresholdMs: number) {
 }
 
 function alertTracesWhereConditions(
-  $: any,
+  $: ColumnAccessor<typeof Traces.columns>,
   opts: AlertTracesOpts,
 ): Array<CH.Condition | undefined> {
   const conditions: Array<CH.Condition | undefined> = [
@@ -201,8 +201,8 @@ function buildHistogramMetricsAggregate(
   return from(tbl as typeof MetricsHistogram)
     .select(($) => ({
       avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
-      minValue: CH.min_($.Min) as unknown as CH.Expr<number>,
-      maxValue: CH.max_($.Max) as unknown as CH.Expr<number>,
+      minValue: CH.min_($.Min),
+      maxValue: CH.max_($.Max),
       sumValue: CH.sum($.Sum),
       dataPointCount: CH.sum($.Count),
     }))
@@ -252,8 +252,8 @@ function buildHistogramMetricsAggregateByService(
     .select(($) => ({
       serviceName: $.ServiceName,
       avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
-      minValue: CH.min_($.Min) as unknown as CH.Expr<number>,
-      maxValue: CH.max_($.Max) as unknown as CH.Expr<number>,
+      minValue: CH.min_($.Min),
+      maxValue: CH.max_($.Max),
       sumValue: CH.sum($.Sum),
       dataPointCount: CH.sum($.Count),
     }))

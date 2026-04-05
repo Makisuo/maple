@@ -17,6 +17,19 @@ import { raw, ident, escapeClickHouseString } from "../sql/sql-fragment"
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
 
 // ---------------------------------------------------------------------------
+// QueryBuilderError — tagged error for invariant violations in the DSL.
+// Catchable via `Effect.catchTag("QueryBuilderError")` at the service layer.
+// ---------------------------------------------------------------------------
+
+export class QueryBuilderError extends Error {
+  readonly _tag = "QueryBuilderError" as const
+  constructor(readonly code: "SelectRequired" | "UnresolvedParam", message: string) {
+    super(message)
+    this.name = "QueryBuilderError"
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CompiledQuery — bundles the SQL string with its output type so consumers
 // never need to cast manually.
 // ---------------------------------------------------------------------------
@@ -47,7 +60,7 @@ export function compileCH<
   )
 
   if (selectFragments.length === 0) {
-    throw new Error("CHQuery: select() is required")
+    throw new QueryBuilderError("SelectRequired", "CHQuery: select() is required")
   }
 
   // WHERE — resolve params by injecting values into the accessor

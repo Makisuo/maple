@@ -7,7 +7,7 @@
 import type { TracesMetric, AttributeFilter } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
 import { Traces, TraceListMv } from "../tables"
 import { compile, str } from "../../sql/sql-fragment"
 import {
@@ -23,7 +23,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function metricSelectExprs(
-  $: any,
+  $: ColumnAccessor<typeof Traces.columns>,
   metric: TracesMetric,
   apdexThresholdMs: number,
   needsSampling: boolean,
@@ -169,7 +169,7 @@ function buildAttrFilterCondition(
 }
 
 function buildWhereConditions(
-  $: any,
+  $: ColumnAccessor<typeof Traces.columns>,
   opts: TracesQueryOpts,
   useTraceListMv: boolean,
 ): Array<CH.Condition | undefined> {

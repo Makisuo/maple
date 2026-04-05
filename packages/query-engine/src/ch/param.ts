@@ -9,6 +9,7 @@
 import type { SqlFragment } from "../sql/sql-fragment"
 import { raw } from "../sql/sql-fragment"
 import type { Expr } from "./expr"
+import { QueryBuilderError } from "./compile"
 
 // ---------------------------------------------------------------------------
 // Param marker — used during query definition (before compilation)
@@ -24,19 +25,19 @@ function makeParamMarker<N extends string, T>(name: N, fragment: SqlFragment): P
     _brand: "Expr" as const,
     _paramName: name,
     toFragment: () => fragment,
-    eq: () => { throw new Error(`Param '${name}' not resolved — compile the query first`) },
-    neq: () => { throw new Error(`Param '${name}' not resolved`) },
-    gt: () => { throw new Error(`Param '${name}' not resolved`) },
-    gte: () => { throw new Error(`Param '${name}' not resolved`) },
-    lt: () => { throw new Error(`Param '${name}' not resolved`) },
-    lte: () => { throw new Error(`Param '${name}' not resolved`) },
-    like: () => { throw new Error(`Param '${name}' not resolved`) },
-    notLike: () => { throw new Error(`Param '${name}' not resolved`) },
-    ilike: () => { throw new Error(`Param '${name}' not resolved`) },
-    div: () => { throw new Error(`Param '${name}' not resolved`) },
-    mul: () => { throw new Error(`Param '${name}' not resolved`) },
-    add: () => { throw new Error(`Param '${name}' not resolved`) },
-    sub: () => { throw new Error(`Param '${name}' not resolved`) },
+    eq: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved — compile the query first`) },
+    neq: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    gt: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    gte: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    lt: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    lte: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    like: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    notLike: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    ilike: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    div: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    mul: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    add: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
+    sub: () => { throw new QueryBuilderError("UnresolvedParam", `Param '${name}' not resolved`) },
   } as ParamMarker<N, T>
 }
 

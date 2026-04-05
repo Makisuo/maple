@@ -6,7 +6,7 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { ErrorSpans, TraceListMv, Traces } from "../tables"
 import { escapeClickHouseString } from "../../sql/sql-fragment"
@@ -303,7 +303,7 @@ export function tracesFacetsQuery(
 ): CHUnionQuery<TracesFacetsOutput, TracesFacetsParams> {
   const esc = escapeClickHouseString
 
-  const baseWhere = ($: any): Array<CH.Condition | undefined> => {
+  const baseWhere = ($: ColumnAccessor<typeof TraceListMv.columns>): Array<CH.Condition | undefined> => {
     const conditions: Array<CH.Condition | undefined> = [
       $.OrgId.eq(param.string("orgId")),
       $.Timestamp.gte(param.dateTime("startTime")),
@@ -369,12 +369,12 @@ export function tracesFacetsQuery(
   const makeFacetQuery = (
     colName: string,
     facetType: string,
-    extraWhere?: ($: any) => CH.Condition,
+    extraWhere?: ($: ColumnAccessor<typeof TraceListMv.columns>) => CH.Condition,
     limit = 50,
   ) =>
     from(TraceListMv)
       .select(($) => ({
-        name: ($ as any)[colName] as CH.Expr<string>,
+        name: CH.dynamicColumn<string>(colName),
         count: CH.count(),
         facetType: CH.lit(facetType),
       }))
@@ -426,7 +426,7 @@ type ErrorsFacetsParams = { orgId: string; startTime: string; endTime: string }
 export function errorsFacetsQuery(
   opts: ErrorsFacetsOpts,
 ): CHUnionQuery<ErrorsFacetsOutput, ErrorsFacetsParams> {
-  const baseWhere = ($: any): Array<CH.Condition | undefined> => [
+  const baseWhere = ($: ColumnAccessor<typeof ErrorSpans.columns>): Array<CH.Condition | undefined> => [
     $.OrgId.eq(param.string("orgId")),
     $.Timestamp.gte(param.dateTime("startTime")),
     $.Timestamp.lte(param.dateTime("endTime")),

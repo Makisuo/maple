@@ -6,7 +6,7 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { ServiceOverviewSpans, ServiceUsage, Traces } from "../tables"
 
@@ -228,7 +228,7 @@ type ServicesFacetsParams = { orgId: string; startTime: string; endTime: string 
 
 export function servicesFacetsQuery(
 ): CHUnionQuery<ServicesFacetsOutput, ServicesFacetsParams> {
-  const baseWhere = ($: any): Array<CH.Condition | undefined> => [
+  const baseWhere = ($: ColumnAccessor<typeof ServiceOverviewSpans.columns>): Array<CH.Condition | undefined> => [
     $.OrgId.eq(param.string("orgId")),
     $.Timestamp.gte(param.dateTime("startTime")),
     $.Timestamp.lte(param.dateTime("endTime")),

@@ -22,7 +22,7 @@ export function attributeKeysQuery(
 > {
   return from(AttributeKeysHourly)
     .select(($) => ({
-      attributeKey: $.AttributeKey as unknown as CH.Expr<string>,
+      attributeKey: $.AttributeKey,
       usageCount: CH.sum($.UsageCount),
     }))
     .where(($) => [

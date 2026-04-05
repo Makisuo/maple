@@ -109,6 +109,40 @@ describe("Tinybird routing", () => {
     ])
   })
 
+  it("sqlQuery rejects SQL without OrgId filter", async () => {
+    const { url } = createTempDbUrl()
+
+    tinybirdTestables.setClientFactory(() => ({
+      sql: async () => ({ data: [] }),
+    }))
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* TinybirdService
+        return yield* service.sqlQuery(tenant, "SELECT 1").pipe(Effect.flip)
+      }).pipe(Effect.provide(makeTinybirdLayer(url))),
+    )
+
+    expect(error.message).toContain("OrgId filter")
+  })
+
+  it("sqlQuery accepts SQL with OrgId filter", async () => {
+    const { url } = createTempDbUrl()
+
+    tinybirdTestables.setClientFactory(() => ({
+      sql: async () => ({ data: [{ result: 1 }] }),
+    }))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* TinybirdService
+        return yield* service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+      }).pipe(Effect.provide(makeTinybirdLayer(url))),
+    )
+
+    expect(result).toEqual([{ result: 1 }])
+  })
+
   it("uses the org-specific Tinybird client for raw queries when an override exists", async () => {
     const { url } = createTempDbUrl()
     orgTinybirdTestables.setStartDeploymentImpl(async () => ({

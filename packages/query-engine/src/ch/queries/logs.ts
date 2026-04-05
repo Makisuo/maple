@@ -6,7 +6,7 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { Logs } from "../tables"
 import { escapeClickHouseString } from "../../sql/sql-fragment"
@@ -253,7 +253,7 @@ type LogsFacetsParams = { orgId: string; startTime: string; endTime: string }
 export function logsFacetsQuery(
   opts: LogsQueryOpts,
 ): CHUnionQuery<LogsFacetsOutput, LogsFacetsParams> {
-  const baseWhere = ($: any): Array<CH.Condition | undefined> => [
+  const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
     $.OrgId.eq(param.string("orgId")),
     $.Timestamp.gte(param.dateTime("startTime")),
     $.Timestamp.lte(param.dateTime("endTime")),

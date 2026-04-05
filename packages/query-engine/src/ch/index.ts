@@ -67,6 +67,7 @@ export {
   toUInt16OrZero,
   rawExpr,
   rawCond,
+  dynamicColumn,
   when,
   whenTrue,
 } from "./expr"
@@ -83,7 +84,7 @@ export {
 } from "./query"
 
 // Compilation
-export { compileCH as compile, compileUnion, type CompiledQuery } from "./compile"
+export { compileCH as compile, compileUnion, type CompiledQuery, QueryBuilderError } from "./compile"
 
 // Union
 export { unionAll, type CHUnionQuery } from "./union"
