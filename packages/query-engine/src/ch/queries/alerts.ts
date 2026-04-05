@@ -9,7 +9,7 @@
 import type { AttributeFilter, MetricType } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
 import {
   Traces,
   Logs,
@@ -54,8 +54,8 @@ export interface AlertTracesAggregateByServiceOutput extends AlertTracesAggregat
 
 type AlertTracesParams = { orgId: string; startTime: string; endTime: string }
 
-function alertTracesSelectExprs($: any, apdexThresholdMs: number) {
-  const t = String(apdexThresholdMs)
+function alertTracesSelectExprs($: ColumnAccessor<typeof Traces.columns>, apdexThresholdMs: number) {
+  const t = apdexThresholdMs
   return {
     count: CH.count(),
     avgDuration: CH.avg($.Duration).div(1000000),
@@ -63,14 +63,16 @@ function alertTracesSelectExprs($: any, apdexThresholdMs: number) {
     p95Duration: CH.quantile(0.95)($.Duration).div(1000000),
     p99Duration: CH.quantile(0.99)($.Duration).div(1000000),
     errorRate: CH.rawExpr<number>(`if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0)`),
-    satisfiedCount: CH.rawExpr<number>(`countIf(Duration / 1000000 < ${t})`),
-    toleratingCount: CH.rawExpr<number>(`countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4)`),
-    apdexScore: CH.rawExpr<number>(`if(count() > 0, round((countIf(Duration / 1000000 < ${t}) + countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4) * 0.5) / count(), 4), 0)`),
+    satisfiedCount: CH.countIf($.Duration.div(1000000).lt(t)),
+    toleratingCount: CH.countIf($.Duration.div(1000000).gte(t).and($.Duration.div(1000000).lt(t * 4))),
+    apdexScore: CH.rawExpr<number>(
+      `if(count() > 0, round((countIf(Duration / 1000000 < ${t}) + countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4) * 0.5) / count(), 4), 0)`,
+    ),
   }
 }
 
 function alertTracesWhereConditions(
-  $: any,
+  $: ColumnAccessor<typeof Traces.columns>,
   opts: AlertTracesOpts,
 ): Array<CH.Condition | undefined> {
   const conditions: Array<CH.Condition | undefined> = [
@@ -82,14 +84,14 @@ function alertTracesWhereConditions(
     CH.whenTrue(!!opts.rootOnly, () =>
       CH.rawCond("(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '')"),
     ),
-    CH.whenTrue(!!opts.errorsOnly, () => CH.rawCond("StatusCode = 'Error'")),
+    CH.whenTrue(!!opts.errorsOnly, () => $.StatusCode.eq("Error")),
   ]
 
   if (opts.environments?.length) {
-    conditions.push(CH.inList(CH.rawExpr<string>("ResourceAttributes['deployment.environment']"), opts.environments))
+    conditions.push(CH.inList($.ResourceAttributes.get("deployment.environment"), opts.environments))
   }
   if (opts.commitShas?.length) {
-    conditions.push(CH.inList(CH.rawExpr<string>("ResourceAttributes['deployment.commit_sha']"), opts.commitShas))
+    conditions.push(CH.inList($.ResourceAttributes.get("deployment.commit_sha"), opts.commitShas))
   }
   if (opts.attributeFilters) {
     for (const af of opts.attributeFilters) {
@@ -197,12 +199,12 @@ function buildHistogramMetricsAggregate(
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   return from(tbl as typeof MetricsHistogram)
-    .select(() => ({
-      avgValue: CH.rawExpr<number>("if(sum(Count) > 0, sum(Sum) / sum(Count), 0)"),
-      minValue: CH.rawExpr<number>("min(Min)"),
-      maxValue: CH.rawExpr<number>("max(Max)"),
-      sumValue: CH.rawExpr<number>("sum(Sum)"),
-      dataPointCount: CH.rawExpr<number>("sum(Count)"),
+    .select(($) => ({
+      avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
+      minValue: CH.min_($.Min),
+      maxValue: CH.max_($.Max),
+      sumValue: CH.sum($.Sum),
+      dataPointCount: CH.sum($.Count),
     }))
     .where(($) => [
       $.MetricName.eq(param.string("metricName")),
@@ -249,11 +251,11 @@ function buildHistogramMetricsAggregateByService(
   return from(tbl as typeof MetricsHistogram)
     .select(($) => ({
       serviceName: $.ServiceName,
-      avgValue: CH.rawExpr<number>("if(sum(Count) > 0, sum(Sum) / sum(Count), 0)"),
-      minValue: CH.rawExpr<number>("min(Min)"),
-      maxValue: CH.rawExpr<number>("max(Max)"),
-      sumValue: CH.rawExpr<number>("sum(Sum)"),
-      dataPointCount: CH.rawExpr<number>("sum(Count)"),
+      avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
+      minValue: CH.min_($.Min),
+      maxValue: CH.max_($.Max),
+      sumValue: CH.sum($.Sum),
+      dataPointCount: CH.sum($.Count),
     }))
     .where(($) => [
       $.MetricName.eq(param.string("metricName")),

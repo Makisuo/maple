@@ -124,14 +124,13 @@ describe("buildTracesTimeseriesSQL", () => {
     expect(sql).toContain("SpanAttributes['http.route']")
   })
 
-  it("uses trace_list_mv when rootOnly with mapped filters", () => {
+  it("uses traces table when rootOnly (MV disabled)", () => {
     const sql = buildTracesTimeseriesSQL({
       ...baseParams,
       rootOnly: true,
     })
-    expect(sql).toContain("FROM trace_list_mv")
-    // Should NOT contain ParentSpanId filter since MV only has root spans
-    expect(sql).not.toContain("ParentSpanId")
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''")
   })
 
   it("uses traces table when not rootOnly", () => {
@@ -174,13 +173,13 @@ describe("buildTracesTimeseriesSQL", () => {
     expect(sql).toContain("StatusCode = 'Error'")
   })
 
-  it("filters errorsOnly on MV uses HasError", () => {
+  it("filters errorsOnly with rootOnly (MV disabled)", () => {
     const sql = buildTracesTimeseriesSQL({
       ...baseParams,
       rootOnly: true,
       errorsOnly: true,
     })
-    expect(sql).toContain("HasError = 1")
+    expect(sql).toContain("StatusCode = 'Error'")
   })
 
   it("filters by environments", () => {
@@ -191,13 +190,13 @@ describe("buildTracesTimeseriesSQL", () => {
     expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
   })
 
-  it("filters by environments on MV uses DeploymentEnv", () => {
+  it("filters by environments with rootOnly (MV disabled)", () => {
     const sql = buildTracesTimeseriesSQL({
       ...baseParams,
       rootOnly: true,
       environments: ["production"],
     })
-    expect(sql).toContain("DeploymentEnv IN ('production')")
+    expect(sql).toContain("deployment.environment")
   })
 
   it("filters by attribute filters (equals)", () => {
@@ -240,14 +239,14 @@ describe("buildTracesTimeseriesSQL", () => {
     expect(sql).toContain("ResourceAttributes['host.name'] = 'server-1'")
   })
 
-  it("uses MV column for mapped attribute filters on MV", () => {
+  it("filters attribute with rootOnly on raw table (MV disabled)", () => {
     const sql = buildTracesTimeseriesSQL({
       ...baseParams,
       rootOnly: true,
       attributeFilters: [{ key: "http.method", value: "GET", mode: "equals" }],
     })
-    expect(sql).toContain("FROM trace_list_mv")
-    expect(sql).toContain("HttpMethod = 'GET'")
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("SpanAttributes['http.method'] = 'GET'")
   })
 
   it("escapes special characters in filter values", () => {

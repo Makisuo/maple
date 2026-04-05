@@ -1,4 +1,4 @@
-/// <reference types="bun-types" />
+/// <reference types="@types/bun" />
 import { render } from "@react-email/components"
 import { WeeklyDigest } from "./weekly-digest"
 

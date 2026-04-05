@@ -45,7 +45,7 @@ export const NUMERIC_MV_COLUMNS = new Set(["HttpStatusCode"])
 // trace_list_mv eligibility check
 // ---------------------------------------------------------------------------
 
-export function canUseTraceListMv(params: {
+export function canUseTraceListMv(_params: {
   rootOnly?: boolean
   attributeFilters?: readonly AttributeFilter[]
   resourceAttributeFilters?: readonly AttributeFilter[]
@@ -54,30 +54,10 @@ export function canUseTraceListMv(params: {
   groupByAttributeKeys?: readonly string[]
   groupByAttributeKey?: string
 }): boolean {
-  if (!params.rootOnly) return false
-  if (params.commitShas?.length) return false
-
-  if (params.attributeFilters) {
-    for (const af of params.attributeFilters) {
-      if (!TRACE_LIST_MV_ATTR_MAP[af.key]) return false
-    }
-  }
-
-  if (params.resourceAttributeFilters) {
-    for (const rf of params.resourceAttributeFilters) {
-      if (!TRACE_LIST_MV_RESOURCE_MAP[rf.key]) return false
-    }
-  }
-
-  const groupByArray = Array.isArray(params.groupBy) ? params.groupBy : params.groupBy ? [params.groupBy] : []
-  if (groupByArray.includes("attribute")) {
-    const attrKeys = params.groupByAttributeKeys ?? (params.groupByAttributeKey ? [params.groupByAttributeKey] : [])
-    for (const key of attrKeys) {
-      if (!TRACE_LIST_MV_ATTR_MAP[key]) return false
-    }
-  }
-
-  return true
+  // The MV only contains ParentSpanId='' rows, but rootOnly means
+  // "entry point spans" (Server/Consumer OR ParentSpanId=''), which is broader.
+  // Disable MV until it is updated to include Server/Consumer spans.
+  return false
 }
 
 // ---------------------------------------------------------------------------

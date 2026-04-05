@@ -1,7 +1,7 @@
 import { AIChatAgent } from "@cloudflare/ai-chat"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { createMCPClient } from "@ai-sdk/mcp"
-import { convertToModelMessages, streamText, stepCountIs, tool, createUIMessageStream, createUIMessageStreamResponse, type StreamTextOnFinishCallback } from "ai"
+import { convertToModelMessages, streamText, stepCountIs, tool, createUIMessageStream, createUIMessageStreamResponse, type StreamTextOnFinishCallback, type ToolSet } from "ai"
 import { routeAgentRequest } from "agents"
 import { z } from "zod"
 import type { Env } from "./lib/types"
@@ -480,12 +480,12 @@ class ChatAgent extends AIChatAgent<Env> {
         model: openrouter.chatModel("moonshotai/kimi-k2.5:nitro"),
         system: systemPrompt,
         messages: await convertToModelMessages(this.messages),
-        tools: allTools,
+        tools: allTools as ToolSet,
         stopWhen: stepCountIs(20),
         abortSignal: options?.abortSignal,
         onFinish: async (event) => {
           await mcpClient?.close()
-          await (onFinish as unknown as StreamTextOnFinishCallback<typeof allTools>)(event)
+          await (onFinish as unknown as StreamTextOnFinishCallback<ToolSet>)(event)
         },
       })
 

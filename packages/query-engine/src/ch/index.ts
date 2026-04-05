@@ -43,11 +43,31 @@ export {
   min_ as min,
   max_ as max,
   quantile,
+  any_ as any,
+  anyIf,
+  uniq,
+  sumIf,
+  groupUniqArray,
   toStartOfInterval,
+  toJSONString,
   if_,
+  concat,
+  round_,
+  intDiv,
   inList,
+  positionCaseInsensitive,
+  mapContains,
+  arrayStringConcat,
+  arrayFilter,
+  extract_ as extract,
+  toString_ as toString,
+  coalesce,
+  nullIf,
+  toFloat64OrZero,
+  toUInt16OrZero,
   rawExpr,
   rawCond,
+  dynamicColumn,
   when,
   whenTrue,
 } from "./expr"
@@ -64,7 +84,10 @@ export {
 } from "./query"
 
 // Compilation
-export { compileCH as compile, type CompiledQuery } from "./compile"
+export { compileCH as compile, compileUnion, type CompiledQuery, QueryBuilderError } from "./compile"
+
+// Union
+export { unionAll, type CHUnionQuery } from "./union"
 
 // Tables
 export * as tables from "./tables"
@@ -88,8 +111,8 @@ export {
 // Queries — Attribute Keys & Values
 export {
   attributeKeysQuery,
-  spanAttributeValuesSQL,
-  resourceAttributeValuesSQL,
+  spanAttributeValuesQuery,
+  resourceAttributeValuesQuery,
   type AttributeKeysQueryOpts,
   type AttributeKeysOutput,
   type AttributeValuesOpts,
@@ -107,6 +130,12 @@ export {
   type MetricsRateTimeseriesOutput,
   type MetricsBreakdownOpts,
   type MetricsBreakdownOutput,
+  listMetricsQuery,
+  metricsSummaryQuery,
+  type ListMetricsOpts,
+  type ListMetricsOutput,
+  type MetricsSummaryOpts,
+  type MetricsSummaryOutput,
 } from "./queries/metrics"
 
 // Queries — Logs
@@ -114,7 +143,8 @@ export {
   logsTimeseriesQuery,
   logsBreakdownQuery,
   logsCountQuery,
-  logsListSQL,
+  logsListQuery,
+  logsFacetsQuery,
   errorRateByServiceQuery,
   type LogsTimeseriesOpts,
   type LogsTimeseriesOutput,
@@ -123,6 +153,7 @@ export {
   type LogsCountOutput,
   type LogsListOpts,
   type LogsListOutput,
+  type LogsFacetsOutput,
   type ErrorRateByServiceOutput,
 } from "./queries/logs"
 
@@ -132,6 +163,7 @@ export {
   serviceReleasesTimelineQuery,
   serviceApdexTimeseriesQuery,
   serviceUsageQuery,
+  servicesFacetsQuery,
   type ServiceOverviewOpts,
   type ServiceOverviewOutput,
   type ServiceReleasesTimelineOpts,
@@ -140,6 +172,7 @@ export {
   type ServiceApdexTimeseriesOutput,
   type ServiceUsageOpts,
   type ServiceUsageOutput,
+  type ServicesFacetsOutput,
 } from "./queries/services"
 
 // Queries — Errors
@@ -147,8 +180,12 @@ export {
   ERROR_FINGERPRINT_SQL,
   errorsByTypeQuery,
   errorsTimeseriesQuery,
-  spanHierarchySQL,
-  tracesDurationStatsSQL,
+  spanHierarchyQuery,
+  tracesDurationStatsQuery,
+  tracesFacetsQuery,
+  errorsFacetsQuery,
+  errorsSummarySQL,
+  errorDetailTracesSQL,
   type ErrorsByTypeOpts,
   type ErrorsByTypeOutput,
   type ErrorsTimeseriesOpts,
@@ -157,7 +194,22 @@ export {
   type SpanHierarchyOutput,
   type TracesDurationStatsOpts,
   type TracesDurationStatsOutput,
+  type TracesFacetsOpts,
+  type TracesFacetsOutput,
+  type ErrorsFacetsOpts,
+  type ErrorsFacetsOutput,
+  type ErrorsSummaryOpts,
+  type ErrorsSummaryOutput,
+  type ErrorDetailTracesOpts,
+  type ErrorDetailTracesOutput,
 } from "./queries/errors"
+
+// Queries — Service Map
+export {
+  serviceDependenciesSQL,
+  type ServiceDependenciesOpts,
+  type ServiceDependenciesOutput,
+} from "./queries/service-map"
 
 // Queries — Alerts
 export {

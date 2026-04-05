@@ -4,7 +4,8 @@ import { Maple } from "@maple-dev/effect-sdk/client"
 import { MapleApiAtomClient } from "./atom-client"
 import { ingestUrl } from "./ingest-url"
 
-const mapleOtelLayer = Maple.layer({
+// TODO: wire into runtimeLayer once ready
+export const mapleOtelLayer = Maple.layer({
   serviceName: "maple-web",
   endpoint: ingestUrl,
   ingestKey: import.meta.env.VITE_MAPLE_INGEST_KEY,

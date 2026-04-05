@@ -7,7 +7,7 @@
 import type { TracesMetric, AttributeFilter } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
 import { Traces, TraceListMv } from "../tables"
 import { compile, str } from "../../sql/sql-fragment"
 import {
@@ -23,12 +23,15 @@ import {
 // ---------------------------------------------------------------------------
 
 function metricSelectExprs(
-  $: any,
+  $: ColumnAccessor<typeof Traces.columns>,
   metric: TracesMetric,
   apdexThresholdMs: number,
   needsSampling: boolean,
+  allMetrics?: boolean,
 ) {
-  const needs = new Set(METRIC_NEEDS[metric])
+  const needs = allMetrics
+    ? new Set<string>(["count", "avg_duration", "quantiles", "error_rate", "apdex"])
+    : new Set(METRIC_NEEDS[metric])
   const t = String(apdexThresholdMs)
 
   return {
@@ -166,7 +169,7 @@ function buildAttrFilterCondition(
 }
 
 function buildWhereConditions(
-  $: any,
+  $: ColumnAccessor<typeof Traces.columns>,
   opts: TracesQueryOpts,
   useTraceListMv: boolean,
 ): Array<CH.Condition | undefined> {
@@ -185,7 +188,9 @@ function buildWhereConditions(
         ? CH.rawCond(`positionCaseInsensitive(SpanName, ${compile(str(v))}) > 0`)
         : $.SpanName.eq(v),
     ),
-    CH.whenTrue(!!opts.rootOnly && !useTraceListMv, () => CH.rawCond("ParentSpanId = ''")),
+    CH.whenTrue(!!opts.rootOnly && !useTraceListMv, () =>
+      CH.rawCond("(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '')"),
+    ),
   ]
 
   // Duration filters (Duration column is nanoseconds in both MV and raw table)
@@ -268,6 +273,8 @@ export interface TracesTimeseriesOpts extends TracesQueryOpts {
   groupBy?: readonly string[]
   groupByAttributeKeys?: readonly string[]
   apdexThresholdMs?: number
+  /** When true, emit all metric columns regardless of the selected metric. Used by custom charts. */
+  allMetrics?: boolean
 }
 
 export interface TracesTimeseriesOutput {
@@ -298,7 +305,7 @@ export function tracesTimeseriesQuery(
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
       groupName: buildGroupNameExpr(opts.groupBy, opts.groupByAttributeKeys, useTraceListMv),
-      ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling),
+      ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
     }))
     .where(($) => buildWhereConditions($, opts, useTraceListMv))
     .groupBy("bucket", "groupName")
@@ -317,6 +324,8 @@ export interface TracesBreakdownOpts extends TracesQueryOpts {
   groupByAttributeKey?: string
   limit?: number
   apdexThresholdMs?: number
+  /** When true, emit all metric columns regardless of the selected metric. Used by custom charts. */
+  allMetrics?: boolean
 }
 
 export interface TracesBreakdownOutput {
@@ -347,7 +356,7 @@ export function tracesBreakdownQuery(
   return from(tbl as typeof Traces)
     .select(($) => {
       const { sampledSpanCount, unsampledSpanCount, dominantThreshold, ...metrics } =
-        metricSelectExprs($, opts.metric, apdexThresholdMs, false)
+        metricSelectExprs($, opts.metric, apdexThresholdMs, false, opts.allMetrics)
       return {
         name: buildBreakdownGroupExpr(opts.groupBy, opts.groupByAttributeKey),
         ...metrics,

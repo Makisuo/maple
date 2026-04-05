@@ -6,7 +6,8 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
+import { unionAll, type CHUnionQuery } from "../union"
 import { ServiceOverviewSpans, ServiceUsage, Traces } from "../tables"
 
 // ---------------------------------------------------------------------------
@@ -42,24 +43,24 @@ export function serviceOverviewQuery(
       environment: $.DeploymentEnv,
       commitSha: $.CommitSha,
       throughput: CH.count(),
-      errorCount: CH.countIf(CH.rawCond("StatusCode = 'Error'")),
+      errorCount: CH.countIf($.StatusCode.eq("Error")),
       spanCount: CH.count(),
       p50LatencyMs: CH.quantile(0.5)($.Duration).div(1000000),
       p95LatencyMs: CH.quantile(0.95)($.Duration).div(1000000),
       p99LatencyMs: CH.quantile(0.99)($.Duration).div(1000000),
-      sampledSpanCount: CH.rawExpr<number>("countIf(TraceState LIKE '%th:%')"),
-      unsampledSpanCount: CH.rawExpr<number>("countIf(TraceState = '' OR TraceState NOT LIKE '%th:%')"),
-      dominantThreshold: CH.rawExpr<string>("anyIf(extract(TraceState, 'th:([0-9a-f]+)'), TraceState LIKE '%th:%')"),
+      sampledSpanCount: CH.countIf($.TraceState.like("%th:%")),
+      unsampledSpanCount: CH.countIf($.TraceState.eq("").or($.TraceState.notLike("%th:%"))),
+      dominantThreshold: CH.anyIf(CH.extract_($.TraceState, "th:([0-9a-f]+)"), $.TraceState.like("%th:%")),
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
       opts.environments?.length
-        ? CH.inList(CH.rawExpr<string>("DeploymentEnv"), opts.environments)
+        ? CH.inList($.DeploymentEnv, opts.environments)
         : undefined,
       opts.commitShas?.length
-        ? CH.inList(CH.rawExpr<string>("CommitSha"), opts.commitShas)
+        ? CH.inList($.CommitSha, opts.commitShas)
         : undefined,
     ])
     .groupBy("serviceName", "environment", "commitSha")
@@ -95,7 +96,7 @@ export function serviceReleasesTimelineQuery(
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
       $.ServiceName.eq(opts.serviceName),
-      CH.rawCond("CommitSha != ''"),
+      $.CommitSha.neq(""),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
     ])
@@ -132,12 +133,14 @@ export function serviceApdexTimeseriesQuery(
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
       totalCount: CH.count(),
-      satisfiedCount: CH.rawExpr<number>(`countIf(Duration / 1000000 < ${t})`),
-      toleratingCount: CH.rawExpr<number>(`countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4)`),
-      apdexScore: CH.rawExpr<number>(`if(count() > 0, round((countIf(Duration / 1000000 < ${t}) + countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4) * 0.5) / count(), 4), 0)`),
+      satisfiedCount: CH.countIf($.Duration.div(1000000).lt(Number(t))),
+      toleratingCount: CH.countIf($.Duration.div(1000000).gte(Number(t)).and($.Duration.div(1000000).lt(Number(t) * 4))),
+      apdexScore: CH.rawExpr<number>(
+        `if(count() > 0, round((countIf(Duration / 1000000 < ${t}) + countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4) * 0.5) / count(), 4), 0)`,
+      ),
     }))
     .where(($) => [
-      CH.rawCond("ParentSpanId = ''"),
+      CH.rawCond("(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '')"),
       $.OrgId.eq(param.string("orgId")),
       $.ServiceName.eq(opts.serviceName),
       $.Timestamp.gte(param.dateTime("startTime")),
@@ -192,9 +195,12 @@ export function serviceUsageQuery(
       totalHistogramMetricSizeBytes: CH.sum($.HistogramMetricSizeBytes),
       totalExpHistogramMetricCount: CH.sum($.ExpHistogramMetricCount),
       totalExpHistogramMetricSizeBytes: CH.sum($.ExpHistogramMetricSizeBytes),
-      totalSizeBytes: CH.rawExpr<number>(
-        "sum(LogSizeBytes) + sum(TraceSizeBytes) + sum(SumMetricSizeBytes) + sum(GaugeMetricSizeBytes) + sum(HistogramMetricSizeBytes) + sum(ExpHistogramMetricSizeBytes)",
-      ),
+      totalSizeBytes: CH.sum($.LogSizeBytes)
+        .add(CH.sum($.TraceSizeBytes))
+        .add(CH.sum($.SumMetricSizeBytes))
+        .add(CH.sum($.GaugeMetricSizeBytes))
+        .add(CH.sum($.HistogramMetricSizeBytes))
+        .add(CH.sum($.ExpHistogramMetricSizeBytes)),
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
@@ -206,4 +212,52 @@ export function serviceUsageQuery(
     .orderBy(["totalSizeBytes", "desc"])
     .format("JSON")
     .withParams<{ orgId: string; startTime: string; endTime: string }>()
+}
+
+// ---------------------------------------------------------------------------
+// Services facets (UNION ALL — environment + commit_sha facets)
+// ---------------------------------------------------------------------------
+
+export interface ServicesFacetsOutput {
+  readonly name: string
+  readonly count: number
+  readonly facetType: string
+}
+
+type ServicesFacetsParams = { orgId: string; startTime: string; endTime: string }
+
+export function servicesFacetsQuery(
+): CHUnionQuery<ServicesFacetsOutput, ServicesFacetsParams> {
+  const baseWhere = ($: ColumnAccessor<typeof ServiceOverviewSpans.columns>): Array<CH.Condition | undefined> => [
+    $.OrgId.eq(param.string("orgId")),
+    $.Timestamp.gte(param.dateTime("startTime")),
+    $.Timestamp.lte(param.dateTime("endTime")),
+  ]
+
+  const envQuery = from(ServiceOverviewSpans)
+    .select(($) => ({
+      name: $.DeploymentEnv,
+      count: CH.count(),
+      facetType: CH.lit("environment"),
+    }))
+    .where(($) => [...baseWhere($), $.DeploymentEnv.neq("")])
+    .groupBy("name")
+    .orderBy(["count", "desc"])
+    .limit(50)
+    .withParams<ServicesFacetsParams>()
+
+  const commitQuery = from(ServiceOverviewSpans)
+    .select(($) => ({
+      name: $.CommitSha,
+      count: CH.count(),
+      facetType: CH.lit("commit_sha"),
+    }))
+    .where(($) => [...baseWhere($), $.CommitSha.neq("")])
+    .groupBy("name")
+    .orderBy(["count", "desc"])
+    .limit(50)
+    .withParams<ServicesFacetsParams>()
+
+  return unionAll(envQuery, commitQuery)
+    .format("JSON")
 }

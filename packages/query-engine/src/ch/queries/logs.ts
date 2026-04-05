@@ -6,10 +6,9 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
+import { unionAll, type CHUnionQuery } from "../union"
 import { Logs } from "../tables"
-import { escapeClickHouseString } from "../../sql/sql-fragment"
-import type { CompiledQuery } from "../compile"
 
 // ---------------------------------------------------------------------------
 // Shared options
@@ -101,13 +100,9 @@ export interface LogsBreakdownOutput {
 export function logsBreakdownQuery(
   opts: LogsBreakdownOpts,
 ): CHQuery<any, LogsBreakdownOutput, { orgId: string; startTime: string; endTime: string }> {
-  const nameExpr = opts.groupBy === "severity"
-    ? CH.rawExpr<string>("SeverityText")
-    : CH.rawExpr<string>("ServiceName")
-
   return from(Logs)
-    .select(() => ({
-      name: nameExpr,
+    .select(($) => ({
+      name: opts.groupBy === "severity" ? $.SeverityText : $.ServiceName,
       count: CH.count(),
     }))
     .where(({ OrgId, Timestamp, ServiceName, SeverityText }) => [
@@ -146,16 +141,14 @@ export function logsCountQuery(
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
       CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
       CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
-      CH.when(opts.search, (v: string) =>
-        CH.rawCond(`Body ILIKE '%${escapeClickHouseString(v)}%'`),
-      ),
+      CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
     ])
     .format("JSON")
     .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
 // ---------------------------------------------------------------------------
-// List query (raw SQL — needs toJSONString, ILIKE, cursor pagination)
+// List query
 // ---------------------------------------------------------------------------
 
 export interface LogsListOpts extends LogsQueryOpts {
@@ -177,44 +170,39 @@ export interface LogsListOutput {
   readonly resourceAttributes: string
 }
 
-export function logsListSQL(
+type LogsListParams = { orgId: string; startTime: string; endTime: string }
+
+export function logsListQuery(
   opts: LogsListOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<LogsListOutput> {
-  const esc = escapeClickHouseString
-  const conditions: string[] = [
-    `OrgId = '${esc(params.orgId)}'`,
-    `Timestamp >= '${esc(params.startTime)}'`,
-    `Timestamp <= '${esc(params.endTime)}'`,
-  ]
-  if (opts.serviceName) conditions.push(`ServiceName = '${esc(opts.serviceName)}'`)
-  if (opts.severity) conditions.push(`SeverityText = '${esc(opts.severity)}'`)
-  if (opts.minSeverity != null) conditions.push(`SeverityNumber >= ${Math.round(opts.minSeverity)}`)
-  if (opts.traceId) conditions.push(`TraceId = '${esc(opts.traceId)}'`)
-  if (opts.spanId) conditions.push(`SpanId = '${esc(opts.spanId)}'`)
-  if (opts.cursor) conditions.push(`Timestamp < '${esc(opts.cursor)}'`)
-  if (opts.search) conditions.push(`Body ILIKE '%${esc(opts.search)}%'`)
-
-  const sql = `SELECT
-  Timestamp AS timestamp,
-  SeverityText AS severityText,
-  SeverityNumber AS severityNumber,
-  ServiceName AS serviceName,
-  Body AS body,
-  TraceId AS traceId,
-  SpanId AS spanId,
-  toJSONString(LogAttributes) AS logAttributes,
-  toJSONString(ResourceAttributes) AS resourceAttributes
-FROM logs
-WHERE ${conditions.join("\n  AND ")}
-ORDER BY Timestamp DESC
-LIMIT ${Math.round(opts.limit ?? 50)}
-FORMAT JSON`
-
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<LogsListOutput>,
-  }
+): CHQuery<any, LogsListOutput, LogsListParams> {
+  return from(Logs)
+    .select(($) => ({
+      timestamp: $.Timestamp,
+      severityText: $.SeverityText,
+      severityNumber: $.SeverityNumber,
+      serviceName: $.ServiceName,
+      body: $.Body,
+      traceId: $.TraceId,
+      spanId: $.SpanId,
+      logAttributes: CH.toJSONString($.LogAttributes),
+      resourceAttributes: CH.toJSONString($.ResourceAttributes),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+      CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+      CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+      CH.when(opts.minSeverity, (v: number) => $.SeverityNumber.gte(v)),
+      CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
+      CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
+      CH.when(opts.cursor, (v: string) => $.Timestamp.lt(v)),
+      CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+    ])
+    .orderBy(["timestamp", "desc"])
+    .limit(opts.limit ?? 50)
+    .format("JSON")
+    .withParams<LogsListParams>()
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +222,7 @@ export function errorRateByServiceQuery(
     .select(($) => ({
       serviceName: $.ServiceName,
       totalLogs: CH.count(),
-      errorLogs: CH.countIf(CH.rawCond("SeverityText IN ('ERROR', 'FATAL')")),
+      errorLogs: CH.countIf(CH.inList($.SeverityText, ["ERROR", "FATAL"])),
       errorRatePercent: CH.rawExpr<number>("round(countIf(SeverityText IN ('ERROR', 'FATAL')) / count() * 100, 2)"),
     }))
     .where(($) => [
@@ -246,4 +234,55 @@ export function errorRateByServiceQuery(
     .orderBy(["errorRatePercent", "desc"])
     .format("JSON")
     .withParams<{ orgId: string; startTime: string; endTime: string }>()
+}
+
+// ---------------------------------------------------------------------------
+// Logs facets (UNION ALL — severity + service facets)
+// ---------------------------------------------------------------------------
+
+export interface LogsFacetsOutput {
+  readonly severityText: string
+  readonly serviceName: string
+  readonly count: number
+  readonly facetType: string
+}
+
+type LogsFacetsParams = { orgId: string; startTime: string; endTime: string }
+
+export function logsFacetsQuery(
+  opts: LogsQueryOpts,
+): CHUnionQuery<LogsFacetsOutput, LogsFacetsParams> {
+  const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
+    $.OrgId.eq(param.string("orgId")),
+    $.Timestamp.gte(param.dateTime("startTime")),
+    $.Timestamp.lte(param.dateTime("endTime")),
+    CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+    CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+  ]
+
+  const severityQuery = from(Logs)
+    .select(($) => ({
+      severityText: $.SeverityText,
+      serviceName: CH.lit(""),
+      count: CH.count(),
+      facetType: CH.lit("severity"),
+    }))
+    .where(baseWhere)
+    .groupBy("severityText")
+    .withParams<LogsFacetsParams>()
+
+  const serviceQuery = from(Logs)
+    .select(($) => ({
+      severityText: CH.lit(""),
+      serviceName: $.ServiceName,
+      count: CH.count(),
+      facetType: CH.lit("service"),
+    }))
+    .where(baseWhere)
+    .groupBy("serviceName")
+    .withParams<LogsFacetsParams>()
+
+  return unionAll(severityQuery, serviceQuery)
+    .orderBy(["count", "desc"])
+    .format("JSON")
 }

@@ -10,7 +10,7 @@ type MockResult =
   | { readonly _tag: "success"; readonly value: unknown }
   | { readonly _tag: "failure" };
 
-const mocks = {
+const mocks = vi.hoisted(() => ({
   refreshSpy: vi.fn(),
   upsertSpy: vi.fn(),
   resyncSpy: vi.fn(),
@@ -35,7 +35,7 @@ const mocks = {
       finishedAt: null,
     },
   } as MockResult,
-};
+}));
 
 vi.mock("@/lib/services/common/atom-client", () => ({
   MapleApiAtomClient: {
@@ -45,6 +45,7 @@ vi.mock("@/lib/services/common/atom-client", () => ({
 }));
 
 vi.mock("@/lib/effect-atom", () => ({
+  Atom: { kvs: () => ({}) },
   Result: {
     builder: (result: MockResult) => ({
       onSuccess: (onSuccess: (value: unknown) => unknown) => ({
@@ -165,6 +166,23 @@ describe("OrgTinybirdSettingsSection", () => {
           finishedAt: "2026-03-13T10:00:00.000Z",
           isTerminal: true,
         },
+      },
+    };
+    mocks.deploymentStatusResult = {
+      _tag: "success",
+      value: {
+        hasRun: true,
+        hasDeployment: false,
+        deploymentId: null,
+        status: "failed",
+        deploymentStatus: null,
+        runStatus: "failed",
+        phase: "failed",
+        isTerminal: true,
+        errorMessage: "bad credentials",
+        startedAt: "2026-03-13T10:00:00.000Z",
+        updatedAt: "2026-03-13T10:00:00.000Z",
+        finishedAt: "2026-03-13T10:00:00.000Z",
       },
     };
 
