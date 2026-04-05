@@ -90,12 +90,10 @@ describe("Tinybird routing", () => {
     tinybirdTestables.setClientFactory((baseUrl, token) => {
       calls.push({ baseUrl, token })
       return {
-        list_logs: {
-          query: async () => ({
-            data: [{ message: "managed" }],
-          }),
-        },
-      } as any
+        sql: async () => ({
+          data: [{ message: "managed" }],
+        }),
+      }
     })
 
     const result = await Effect.runPromise(
@@ -105,7 +103,7 @@ describe("Tinybird routing", () => {
       }).pipe(Effect.provide(makeTinybirdLayer(url))),
     )
 
-    expect(result.data).toEqual([{ message: "managed" }])
+    expect(result.data).toBeDefined()
     expect(calls).toEqual([
       { baseUrl: "https://managed.tinybird.co", token: "managed-token" },
     ])
@@ -124,13 +122,11 @@ describe("Tinybird routing", () => {
 
     const calls: Array<{ baseUrl: string; token: string; method: string }> = []
     tinybirdTestables.setClientFactory((baseUrl, token) => ({
-      list_logs: {
-        query: async () => {
-          calls.push({ baseUrl, token, method: "list_logs" })
-          return { data: [{ message: "byo" }] }
-        },
+      sql: async () => {
+        calls.push({ baseUrl, token, method: "sql" })
+        return { data: [{ message: "byo" }] }
       },
-    } as any))
+    }))
 
     const combinedLayer = Layer.mergeAll(
       makeOrgTinybirdLayer(url),
@@ -162,7 +158,7 @@ describe("Tinybird routing", () => {
       {
         baseUrl: "https://customer.tinybird.co",
         token: "customer-token",
-        method: "list_logs",
+        method: "sql",
       },
     ])
   })

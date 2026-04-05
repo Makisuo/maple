@@ -9,10 +9,11 @@ import { Effect, Layer, Option, Redacted, ServiceMap } from "effect"
 import { Env } from "./Env"
 import type { TenantContext } from "./AuthService"
 import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
+import { compilePipeQuery } from "./PipeQueryDispatcher"
 
 const CLIENT_CACHE_TTL_MS = 30_000
 interface CachedClient {
-  client: TinybirdClient
+  client: SqlClient
   host: string
   token: string
   expiresAt: number
@@ -28,97 +29,21 @@ export interface TinybirdServiceShape {
     sql: string,
   ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, TinybirdQueryError>
 }
+
 const clientCache = new Map<string, CachedClient>()
-import {
-  type CustomTracesBreakdownOutput,
-  type CustomTracesBreakdownParams,
-  type CustomTracesTimeseriesOutput,
-  type CustomTracesTimeseriesParams,
-  customTracesBreakdown,
-  customTracesTimeseries,
-  errorDetailTraces,
-  errorRateByService,
-  errorsByType,
-  errorsFacets,
-  errorsSummary,
-  errorsTimeseries,
-  getServiceUsage,
-  listLogs,
-  listMetrics,
-  listTraces,
-  logsCount,
-  logsFacets,
-  metricAttributeKeys,
-  metricsSummary,
-  serviceApdexTimeSeries,
-  serviceDependencies,
-  serviceOverview,
-  serviceReleasesTimeline,
-  servicesFacets,
-  resourceAttributeKeys,
-  resourceAttributeValues,
-  spanAttributeKeys,
-  spanAttributeValues,
-  spanHierarchy,
-  tracesDurationStats,
-  tracesFacets,
-} from "@maple/domain/tinybird"
 
-const pipes = {
-  list_traces: listTraces,
-  span_hierarchy: spanHierarchy,
-  list_logs: listLogs,
-  logs_count: logsCount,
-  logs_facets: logsFacets,
-  error_rate_by_service: errorRateByService,
-  get_service_usage: getServiceUsage,
-  list_metrics: listMetrics,
-  metrics_summary: metricsSummary,
-  traces_facets: tracesFacets,
-  traces_duration_stats: tracesDurationStats,
-  service_overview: serviceOverview,
-  services_facets: servicesFacets,
-  service_releases_timeline: serviceReleasesTimeline,
-  errors_by_type: errorsByType,
-  error_detail_traces: errorDetailTraces,
-  errors_facets: errorsFacets,
-  errors_summary: errorsSummary,
-  errors_timeseries: errorsTimeseries,
-  service_apdex_time_series: serviceApdexTimeSeries,
-  custom_traces_timeseries: customTracesTimeseries,
-  custom_traces_breakdown: customTracesBreakdown,
-  service_dependencies: serviceDependencies,
-  metric_attribute_keys: metricAttributeKeys,
-  span_attribute_keys: spanAttributeKeys,
-  span_attribute_values: spanAttributeValues,
-  resource_attribute_keys: resourceAttributeKeys,
-  resource_attribute_values: resourceAttributeValues,
-} as const
-
-interface TinybirdPipeQuery<TParams extends Record<string, unknown>, TRow> {
-  readonly query: (
-    params: TParams & { org_id: OrgId },
-  ) => Promise<{ data: ReadonlyArray<TRow> }>
+/** Minimal client interface — only raw SQL execution is needed now. */
+interface SqlClient {
+  readonly sql: (sql: string) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
 }
 
-interface TinybirdClient {
-  readonly custom_traces_timeseries: TinybirdPipeQuery<
-    Omit<CustomTracesTimeseriesParams, "org_id">,
-    CustomTracesTimeseriesOutput
-  >
-  readonly custom_traces_breakdown: TinybirdPipeQuery<
-    Omit<CustomTracesBreakdownParams, "org_id">,
-    CustomTracesBreakdownOutput
-  >
-}
-
-const createClient = (baseUrl: string, token: string): TinybirdClient =>
+const createClient = (baseUrl: string, token: string): SqlClient =>
   new Tinybird({
     baseUrl,
     token,
     datasources: {},
-    pipes,
-  }) as unknown as TinybirdClient
+    pipes: {},
+  }) as unknown as SqlClient
 
 let tinybirdClientFactory: typeof createClient = createClient
 
@@ -144,16 +69,16 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       return client
     }
 
-      const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
-        tenant: TenantContext,
-        pipe: TinybirdQueryRequest["pipe"],
-      ) {
+    const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
+      tenant: TenantContext,
+      pipe: string,
+    ) {
       yield* Effect.annotateCurrentSpan("pipe", pipe)
       yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 
       const override = yield* orgTinybirdSettings
         .resolveRuntimeConfig(tenant.orgId)
-        .pipe(Effect.mapError((error) => toTinybirdQueryError(pipe, error)))
+        .pipe(Effect.mapError((error) => toTinybirdQueryError(pipe as TinybirdQueryRequest["pipe"], error)))
 
       if (Option.isSome(override)) {
         yield* Effect.annotateCurrentSpan("clientSource", "org_override")
@@ -164,39 +89,30 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       return getCachedOrCreateClient("__managed__", env.TINYBIRD_HOST, Redacted.value(env.TINYBIRD_TOKEN))
     })
 
-    const runPipe = Effect.fn("TinybirdService.runPipe")(function* <
-      TPipe extends TinybirdQueryRequest["pipe"],
-      TParams extends Record<string, unknown>,
-      TRow,
-    >(
-      pipe: TPipe,
-      tenant: TenantContext,
-      params: TParams,
-      execute: (
-        params: TParams & { org_id: OrgId },
-      ) => PromiseLike<{ data: ReadonlyArray<TRow> }>,
-    ) {
-      yield* Effect.annotateCurrentSpan("pipe", pipe)
-      yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+    const truncateSql = (s: string, maxLen = 1000) =>
+      s.length > maxLen ? s.slice(0, maxLen) + "...[truncated]" : s
 
-      if (!tenant.orgId || tenant.orgId.trim() === "") {
-        return yield* new TinybirdQueryError({ pipe, message: "org_id must not be empty" })
-      }
+    const executeSql = Effect.fn("TinybirdService.executeSql")(function* (
+      tenant: TenantContext,
+      sql: string,
+      pipe: string,
+    ) {
+      yield* Effect.annotateCurrentSpan("db.system", "clickhouse")
+      yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+      yield* Effect.annotateCurrentSpan("db.statement", truncateSql(sql))
+
+      const client = yield* resolveClient(tenant, pipe)
       const result = yield* Effect.tryPromise({
-        try: async (_signal) =>
-          execute({
-            ...params,
-            org_id: tenant.orgId,
-          }),
-        catch: (error) => toTinybirdQueryError(pipe, error),
+        try: () => client.sql(sql),
+        catch: (error) => toTinybirdQueryError(pipe as TinybirdQueryRequest["pipe"], error),
       }).pipe(
         Effect.tapError((error) =>
-          Effect.logError("TinybirdService.runPipe failed", { pipe, error: String(error) })
-        )
+          Effect.logError("TinybirdService.executeSql failed", { pipe, error: String(error) }),
+        ),
       )
 
       yield* Effect.annotateCurrentSpan("result.rowCount", result.data.length)
-      return result.data as ReadonlyArray<TRow>
+      return result.data
     })
 
     const query = Effect.fn("TinybirdService.query")(function* (
@@ -209,76 +125,37 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       if (!tenant.orgId || tenant.orgId.trim() === "") {
         return yield* new TinybirdQueryError({ pipe: payload.pipe, message: "org_id must not be empty" })
       }
-      const client = yield* resolveClient(tenant, payload.pipe)
-      const pipeAccessor = (
-        client as unknown as Record<
-          string,
-          {
-            readonly query: (
-              params?: Record<string, unknown>,
-            ) => Promise<{ data?: ReadonlyArray<unknown> }>
-          }
-        >
-      )[payload.pipe]
-      const queryFunction = pipeAccessor?.query
 
-      if (!queryFunction) {
+      const compiled = compilePipeQuery(payload.pipe, {
+        ...(payload.params ?? {}),
+        org_id: tenant.orgId as OrgId,
+      })
+
+      if (!compiled) {
         return yield* new TinybirdQueryError({
-          message: `Unsupported Tinybird pipe: ${payload.pipe}`,
+          message: `Unsupported pipe: ${payload.pipe}`,
           pipe: payload.pipe,
         })
       }
 
-      const result = yield* Effect.tryPromise({
-        try: async (_signal) =>
-          queryFunction({
-            ...(payload.params ?? {}),
-            org_id: tenant.orgId,
-          }),
-        catch: (error) => toTinybirdQueryError(payload.pipe, error),
-      }).pipe(
-        Effect.tapError((error) =>
-          Effect.logError("TinybirdService.query failed", { pipe: payload.pipe, error: String(error) })
-        )
-      )
-
-      yield* Effect.annotateCurrentSpan("result.rowCount", result.data?.length ?? 0)
+      const rows = yield* executeSql(tenant, compiled.sql, payload.pipe)
 
       return new TinybirdQueryResponse({
-        data: Array.from(result.data ?? []),
+        data: Array.from(compiled.castRows(rows)),
       })
     })
-
-    const truncateSql = (s: string, maxLen = 1000) =>
-      s.length > maxLen ? s.slice(0, maxLen) + "...[truncated]" : s
 
     const sqlQuery = Effect.fn("TinybirdService.sqlQuery")(function* (
       tenant: TenantContext,
       sql: string,
     ) {
-      yield* Effect.annotateCurrentSpan("db.system", "clickhouse")
-      yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
-      yield* Effect.annotateCurrentSpan("db.statement", truncateSql(sql))
-
       if (!tenant.orgId || tenant.orgId.trim() === "") {
-        return yield* new TinybirdQueryError({ pipe: "custom_traces_timeseries", message: "org_id must not be empty" })
+        return yield* new TinybirdQueryError({ pipe: "list_traces", message: "org_id must not be empty" })
       }
       if (!sql.includes("OrgId")) {
-        return yield* new TinybirdQueryError({ pipe: "custom_traces_timeseries", message: "SQL query must contain OrgId filter" })
+        return yield* new TinybirdQueryError({ pipe: "list_traces", message: "SQL query must contain OrgId filter" })
       }
-      // Use "custom_traces_timeseries" as the pipe identifier for client resolution / error context
-      const client = yield* resolveClient(tenant, "custom_traces_timeseries")
-      const result = yield* Effect.tryPromise({
-        try: () => (client as unknown as { sql: (sql: string) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }> }).sql(sql),
-        catch: (error) => toTinybirdQueryError("custom_traces_timeseries", error),
-      }).pipe(
-        Effect.tapError((error) =>
-          Effect.logError("TinybirdService.sqlQuery failed", { error: String(error) })
-        ),
-      )
-
-      yield* Effect.annotateCurrentSpan("result.rowCount", result.data.length)
-      return result.data
+      return yield* executeSql(tenant, sql, "sqlQuery")
     })
 
     return {

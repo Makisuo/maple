@@ -347,3 +347,134 @@ function buildHistogramBreakdown(
     .format("JSON")
     .withParams<MetricsBreakdownParams>()
 }
+
+// ---------------------------------------------------------------------------
+// List metrics (raw SQL — 4 UNION ALL across metric tables)
+// ---------------------------------------------------------------------------
+
+export interface ListMetricsOpts {
+  serviceName?: string
+  metricType?: string
+  search?: string
+  limit?: number
+  offset?: number
+}
+
+export interface ListMetricsOutput {
+  readonly metricName: string
+  readonly metricType: string
+  readonly serviceName: string
+  readonly metricDescription: string
+  readonly metricUnit: string
+  readonly dataPointCount: number
+  readonly firstSeen: string
+  readonly lastSeen: string
+  readonly isMonotonic: boolean | number
+}
+
+export function listMetricsSQL(
+  opts: ListMetricsOpts,
+  params: { orgId: string; startTime: string; endTime: string },
+): CompiledQuery<ListMetricsOutput> {
+  const esc = escapeClickHouseString
+  const limit = Math.round(opts.limit ?? 100)
+  const offset = Math.round(opts.offset ?? 0)
+
+  function buildMetricSubquery(
+    table: string,
+    metricType: string,
+    hasIsMonotonic: boolean,
+  ): string {
+    const conditions = [
+      `OrgId = '${esc(params.orgId)}'`,
+      `TimeUnix >= '${esc(params.startTime)}'`,
+      `TimeUnix <= '${esc(params.endTime)}'`,
+    ]
+    if (opts.serviceName) conditions.push(`ServiceName = '${esc(opts.serviceName)}'`)
+    if (opts.search) conditions.push(`MetricName ILIKE '%${esc(opts.search)}%'`)
+
+    return `SELECT
+      MetricName AS metricName,
+      '${metricType}' AS metricType,
+      ServiceName AS serviceName,
+      any(MetricDescription) AS metricDescription,
+      any(MetricUnit) AS metricUnit,
+      count() AS dataPointCount,
+      min(TimeUnix) AS firstSeen,
+      max(TimeUnix) AS lastSeen,
+      ${hasIsMonotonic ? "any(IsMonotonic)" : "0"} AS isMonotonic
+    FROM ${table}
+    WHERE ${conditions.join(" AND ")}
+    GROUP BY metricName, serviceName`
+  }
+
+  const showSum = !opts.metricType || opts.metricType === "sum"
+  const showGauge = !opts.metricType || opts.metricType === "gauge"
+  const showHist = !opts.metricType || opts.metricType === "histogram"
+  const showExpHist = !opts.metricType || opts.metricType === "exponential_histogram"
+
+  const subqueries: string[] = []
+  if (showSum) subqueries.push(buildMetricSubquery("metrics_sum", "sum", true))
+  if (showGauge) subqueries.push(buildMetricSubquery("metrics_gauge", "gauge", false))
+  if (showHist) subqueries.push(buildMetricSubquery("metrics_histogram", "histogram", false))
+  if (showExpHist) subqueries.push(buildMetricSubquery("metrics_exponential_histogram", "exponential_histogram", false))
+
+  const sql = `SELECT *
+FROM (
+${subqueries.join("\nUNION ALL\n")}
+)
+ORDER BY lastSeen DESC
+LIMIT ${limit}
+OFFSET ${offset}
+FORMAT JSON`
+
+  return {
+    sql,
+    castRows: (rows) => rows as unknown as ReadonlyArray<ListMetricsOutput>,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Metrics summary (raw SQL — 4 UNION ALL across metric tables)
+// ---------------------------------------------------------------------------
+
+export interface MetricsSummaryOutput {
+  readonly metricType: string
+  readonly metricCount: number
+  readonly dataPointCount: number
+}
+
+export function metricsSummarySQL(
+  params: { orgId: string; startTime: string; endTime: string; serviceName?: string },
+): CompiledQuery<MetricsSummaryOutput> {
+  const esc = escapeClickHouseString
+  const serviceFilter = params.serviceName
+    ? `AND ServiceName = '${esc(params.serviceName)}'`
+    : ""
+
+  function buildCountSubquery(table: string, metricType: string): string {
+    return `SELECT
+      '${metricType}' AS metricType,
+      uniq(MetricName) AS metricCount,
+      count() AS dataPointCount
+    FROM ${table}
+    WHERE OrgId = '${esc(params.orgId)}'
+      AND TimeUnix >= '${esc(params.startTime)}'
+      AND TimeUnix <= '${esc(params.endTime)}'
+      ${serviceFilter}`
+  }
+
+  const sql = `${buildCountSubquery("metrics_sum", "sum")}
+UNION ALL
+${buildCountSubquery("metrics_gauge", "gauge")}
+UNION ALL
+${buildCountSubquery("metrics_histogram", "histogram")}
+UNION ALL
+${buildCountSubquery("metrics_exponential_histogram", "exponential_histogram")}
+FORMAT JSON`
+
+  return {
+    sql,
+    castRows: (rows) => rows as unknown as ReadonlyArray<MetricsSummaryOutput>,
+  }
+}

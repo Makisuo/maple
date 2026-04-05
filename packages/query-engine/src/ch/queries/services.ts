@@ -8,6 +8,8 @@ import * as CH from "../expr"
 import { param } from "../param"
 import { from, type CHQuery } from "../query"
 import { ServiceOverviewSpans, ServiceUsage, Traces } from "../tables"
+import { escapeClickHouseString } from "../../sql/sql-fragment"
+import type { CompiledQuery } from "../compile"
 
 // ---------------------------------------------------------------------------
 // Service overview
@@ -206,4 +208,55 @@ export function serviceUsageQuery(
     .orderBy(["totalSizeBytes", "desc"])
     .format("JSON")
     .withParams<{ orgId: string; startTime: string; endTime: string }>()
+}
+
+// ---------------------------------------------------------------------------
+// Services facets (raw SQL — 2 UNION ALL subqueries)
+// ---------------------------------------------------------------------------
+
+export interface ServicesFacetsOutput {
+  readonly name: string
+  readonly count: number
+  readonly facetType: string
+}
+
+export function servicesFacetsSQL(
+  params: { orgId: string; startTime: string; endTime: string },
+): CompiledQuery<ServicesFacetsOutput> {
+  const esc = escapeClickHouseString
+  const where = `OrgId = '${esc(params.orgId)}'
+  AND Timestamp >= '${esc(params.startTime)}'
+  AND Timestamp <= '${esc(params.endTime)}'`
+
+  const sql = `SELECT name, count, facetType FROM (
+SELECT
+  DeploymentEnv AS name,
+  count() AS count,
+  'environment' AS facetType
+FROM service_overview_spans
+WHERE ${where}
+  AND DeploymentEnv != ''
+GROUP BY name
+ORDER BY count DESC
+LIMIT 50
+
+UNION ALL
+
+SELECT
+  CommitSha AS name,
+  count() AS count,
+  'commit_sha' AS facetType
+FROM service_overview_spans
+WHERE ${where}
+  AND CommitSha != ''
+GROUP BY name
+ORDER BY count DESC
+LIMIT 50
+)
+FORMAT JSON`
+
+  return {
+    sql,
+    castRows: (rows) => rows as unknown as ReadonlyArray<ServicesFacetsOutput>,
+  }
 }

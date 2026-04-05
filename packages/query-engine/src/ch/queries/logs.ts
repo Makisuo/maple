@@ -247,3 +247,58 @@ export function errorRateByServiceQuery(
     .format("JSON")
     .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
+
+// ---------------------------------------------------------------------------
+// Logs facets (raw SQL — 2 UNION ALL subqueries)
+// ---------------------------------------------------------------------------
+
+export interface LogsFacetsOutput {
+  readonly severityText: string
+  readonly serviceName: string
+  readonly count: number
+  readonly facetType: string
+}
+
+export function logsFacetsSQL(
+  opts: LogsQueryOpts,
+  params: { orgId: string; startTime: string; endTime: string },
+): CompiledQuery<LogsFacetsOutput> {
+  const esc = escapeClickHouseString
+  const baseWhere = [
+    `OrgId = '${esc(params.orgId)}'`,
+    `Timestamp >= '${esc(params.startTime)}'`,
+    `Timestamp <= '${esc(params.endTime)}'`,
+  ]
+  if (opts.serviceName) baseWhere.push(`ServiceName = '${esc(opts.serviceName)}'`)
+  if (opts.severity) baseWhere.push(`SeverityText = '${esc(opts.severity)}'`)
+  const where = baseWhere.join(" AND ")
+
+  const sql = `SELECT severityText, serviceName, count, facetType FROM (
+SELECT
+  SeverityText AS severityText,
+  '' AS serviceName,
+  count() AS count,
+  'severity' AS facetType
+FROM logs
+WHERE ${where}
+GROUP BY severityText
+
+UNION ALL
+
+SELECT
+  '' AS severityText,
+  ServiceName AS serviceName,
+  count() AS count,
+  'service' AS facetType
+FROM logs
+WHERE ${where}
+GROUP BY serviceName
+)
+ORDER BY count DESC
+FORMAT JSON`
+
+  return {
+    sql,
+    castRows: (rows) => rows as unknown as ReadonlyArray<LogsFacetsOutput>,
+  }
+}

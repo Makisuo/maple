@@ -107,6 +107,11 @@ export {
   type MetricsRateTimeseriesOutput,
   type MetricsBreakdownOpts,
   type MetricsBreakdownOutput,
+  listMetricsSQL,
+  metricsSummarySQL,
+  type ListMetricsOpts,
+  type ListMetricsOutput,
+  type MetricsSummaryOutput,
 } from "./queries/metrics"
 
 // Queries — Logs
@@ -115,6 +120,7 @@ export {
   logsBreakdownQuery,
   logsCountQuery,
   logsListSQL,
+  logsFacetsSQL,
   errorRateByServiceQuery,
   type LogsTimeseriesOpts,
   type LogsTimeseriesOutput,
@@ -123,6 +129,7 @@ export {
   type LogsCountOutput,
   type LogsListOpts,
   type LogsListOutput,
+  type LogsFacetsOutput,
   type ErrorRateByServiceOutput,
 } from "./queries/logs"
 
@@ -132,6 +139,7 @@ export {
   serviceReleasesTimelineQuery,
   serviceApdexTimeseriesQuery,
   serviceUsageQuery,
+  servicesFacetsSQL,
   type ServiceOverviewOpts,
   type ServiceOverviewOutput,
   type ServiceReleasesTimelineOpts,
@@ -140,6 +148,7 @@ export {
   type ServiceApdexTimeseriesOutput,
   type ServiceUsageOpts,
   type ServiceUsageOutput,
+  type ServicesFacetsOutput,
 } from "./queries/services"
 
 // Queries — Errors
@@ -149,6 +158,10 @@ export {
   errorsTimeseriesQuery,
   spanHierarchySQL,
   tracesDurationStatsSQL,
+  tracesFacetsSQL,
+  errorsFacetsSQL,
+  errorsSummarySQL,
+  errorDetailTracesSQL,
   type ErrorsByTypeOpts,
   type ErrorsByTypeOutput,
   type ErrorsTimeseriesOpts,
@@ -157,7 +170,22 @@ export {
   type SpanHierarchyOutput,
   type TracesDurationStatsOpts,
   type TracesDurationStatsOutput,
+  type TracesFacetsOpts,
+  type TracesFacetsOutput,
+  type ErrorsFacetsOpts,
+  type ErrorsFacetsOutput,
+  type ErrorsSummaryOpts,
+  type ErrorsSummaryOutput,
+  type ErrorDetailTracesOpts,
+  type ErrorDetailTracesOutput,
 } from "./queries/errors"
+
+// Queries — Service Map
+export {
+  serviceDependenciesSQL,
+  type ServiceDependenciesOpts,
+  type ServiceDependenciesOutput,
+} from "./queries/service-map"
 
 // Queries — Alerts
 export {
