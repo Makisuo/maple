@@ -25,7 +25,7 @@
     "@maple/domain": "workspace:*",
     "@maple/query-engine": "workspace:*",
     "@tinybirdco/sdk": "catalog:tinybird",
-    "autumn-js": "^1.1.2",
+    "autumn-js": "^1.2.5",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.1",
     "effect": "catalog:effect"
