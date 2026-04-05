@@ -452,7 +452,7 @@ export function OrgTinybirdSettingsSection({
                 </p>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border px-3 py-2">
                       <p className="text-muted-foreground text-xs">Storage</p>
                       <p className="text-lg font-semibold">{formatBytes(instanceHealth.totalBytes)}</p>
@@ -486,7 +486,7 @@ export function OrgTinybirdSettingsSection({
                     </div>
                   ) : null}
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border px-3 py-2">
                       <p className="text-muted-foreground text-xs">Errors (24h)</p>
                       <p className="text-lg font-semibold">{instanceHealth.recentErrorCount}</p>

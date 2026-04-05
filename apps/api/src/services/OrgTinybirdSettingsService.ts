@@ -13,10 +13,10 @@ import {
   OrgTinybirdSettingsUpstreamUnavailableError,
   OrgTinybirdSettingsValidationError,
   type OrgTinybirdSettingsUpsertRequest,
-  type OrgTinybirdSyncPhase,
-  type OrgTinybirdSyncRunStatus,
+  OrgTinybirdSyncPhase,
+  OrgTinybirdSyncRunStatus,
   OrgId,
-  type RoleName,
+  RoleName,
   UserId,
 } from "@maple/domain/http"
 import {
@@ -52,8 +52,15 @@ type ActiveRow = typeof orgTinybirdSettings.$inferSelect
 type SyncRunRow = typeof orgTinybirdSyncRuns.$inferSelect
 type SyncRunUpdate = Partial<Omit<typeof orgTinybirdSyncRuns.$inferInsert, "orgId">>
 
-const NON_TERMINAL_RUN_STATUSES = new Set<OrgTinybirdSyncRunStatus>(["queued", "running"])
-const TERMINAL_RUN_STATUSES = new Set<OrgTinybirdSyncRunStatus>(["failed", "succeeded"])
+const NON_TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["queued", "running"])
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["failed", "succeeded"])
+const decodeOrgId = Schema.decodeUnknownSync(OrgId)
+const decodeUserId = Schema.decodeUnknownSync(UserId)
+const decodeRunStatus = Schema.decodeUnknownSync(OrgTinybirdSyncRunStatus)
+const decodePhase = Schema.decodeUnknownSync(OrgTinybirdSyncPhase)
+const ROOT_ROLE = Schema.decodeUnknownSync(RoleName)("root")
+const ORG_ADMIN_ROLE = Schema.decodeUnknownSync(RoleName)("org:admin")
+
 const POLL_INTERVAL = Duration.millis(2_000)
 const MAX_DEPLOYMENT_POLL_ATTEMPTS = 300
 const SYNC_RUN_TIMEOUT_MS = Duration.toMillis(POLL_INTERVAL) * MAX_DEPLOYMENT_POLL_ATTEMPTS
@@ -218,10 +225,10 @@ const normalizeToken = (
   )
 
 const isOrgAdmin = (roles: ReadonlyArray<RoleName>) =>
-  roles.includes("root" as RoleName) || roles.includes("org:admin" as RoleName)
+  roles.includes(ROOT_ROLE) || roles.includes(ORG_ADMIN_ROLE)
 
 const isTerminalRun = (runStatus: string): runStatus is Extract<OrgTinybirdSyncRunStatus, "failed" | "succeeded"> =>
-  TERMINAL_RUN_STATUSES.has(runStatus as OrgTinybirdSyncRunStatus)
+  TERMINAL_RUN_STATUSES.has(runStatus)
 
 const isIsoDateTime = (value: number | null | undefined) =>
   value == null ? null : decodeIsoDateTimeStringSync(new Date(value).toISOString())
@@ -379,8 +386,8 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         return new OrgTinybirdCurrentRunResponse({
           targetHost: row.targetHost,
           targetProjectRevision: row.targetProjectRevision,
-          runStatus: row.runStatus as OrgTinybirdSyncRunStatus,
-          phase: row.phase as OrgTinybirdSyncPhase,
+          runStatus: decodeRunStatus(row.runStatus),
+          phase: decodePhase(row.phase),
           deploymentId: row.deploymentId ?? null,
           deploymentStatus: row.deploymentStatus ?? null,
           errorMessage: row.errorMessage ?? null,
@@ -396,7 +403,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         currentRevision: string | null,
         syncRun: SyncRunRow | null | undefined,
       ) => {
-        if (syncRun && NON_TERMINAL_RUN_STATUSES.has(syncRun.runStatus as OrgTinybirdSyncRunStatus)) {
+        if (syncRun && NON_TERMINAL_RUN_STATUSES.has(syncRun.runStatus)) {
           return "syncing" as const
         }
         if (syncRun?.runStatus === "failed") return "error" as const
@@ -437,12 +444,12 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
           ? deploymentId
             ? "succeeded"
             : null
-          : syncRun.runStatus as OrgTinybirdSyncRunStatus
+          : decodeRunStatus(syncRun.runStatus)
         const phase = syncRun?.phase == null
           ? deploymentStatus == null
             ? null
             : inferPhaseFromDeploymentStatus(deploymentStatus)
-          : syncRun.phase as OrgTinybirdSyncPhase
+          : decodePhase(syncRun.phase)
         const syncedAt = activeRow?.lastSyncAt ?? null
 
         return new OrgTinybirdDeploymentStatusResponse({
@@ -530,6 +537,8 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         token: string,
         deploymentId: string,
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
+        yield* Effect.annotateCurrentSpan("deploymentId", deploymentId)
         for (let attempt = 0; attempt < MAX_DEPLOYMENT_POLL_ATTEMPTS; attempt += 1) {
           if (attempt > 0) {
             yield* Effect.sleep(POLL_INTERVAL)
@@ -579,10 +588,13 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         run: SyncRunRow,
         token: string,
       ) {
+        const runOrgId = decodeOrgId(run.orgId)
+        const runUserId = decodeUserId(run.requestedBy)
+        yield* Effect.annotateCurrentSpan("orgId", runOrgId)
         let deploymentId = run.deploymentId ?? undefined
 
         if (!deploymentId) {
-          yield* updateSyncRun(run.orgId as OrgId, {
+          yield* updateSyncRun(runOrgId, {
             runStatus: "running",
             phase: "starting",
             deploymentId: null,
@@ -602,15 +614,15 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
 
           if (started.result === "no_changes") {
             yield* promoteActiveConfig(
-              run.orgId as OrgId,
-              run.requestedBy as UserId,
+              runOrgId,
+              runUserId,
               run.targetHost,
               token,
               started.projectRevision,
               started.deploymentId ?? null,
             )
 
-            yield* updateSyncRun(run.orgId as OrgId, {
+            yield* updateSyncRun(runOrgId, {
               runStatus: "succeeded",
               phase: "succeeded",
               deploymentId: started.deploymentId ?? null,
@@ -631,7 +643,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
             )
           }
 
-          yield* updateSyncRun(run.orgId as OrgId, {
+          yield* updateSyncRun(runOrgId, {
             runStatus: "running",
             phase: inferPhaseFromDeploymentStatus(started.deploymentStatus ?? "deploying"),
             deploymentId,
@@ -650,7 +662,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
           catch: (error) => mapTinybirdError(error),
         })
 
-        yield* updateSyncRun(run.orgId as OrgId, {
+        yield* updateSyncRun(runOrgId, {
           phase: inferPhaseFromDeploymentStatus(initialStatus.status),
           deploymentStatus: initialStatus.status,
           errorMessage: initialStatus.errorMessage,
@@ -669,10 +681,10 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
 
         const readyStatus = initialStatus.status === "data_ready" || initialStatus.status === "live"
           ? initialStatus
-          : yield* waitForDeploymentReady(run.orgId as OrgId, run.targetHost, token, deploymentId)
+          : yield* waitForDeploymentReady(runOrgId, run.targetHost, token, deploymentId)
 
         if (readyStatus.status !== "live") {
-          yield* updateSyncRun(run.orgId as OrgId, {
+          yield* updateSyncRun(runOrgId, {
             runStatus: "running",
             phase: "setting_live",
             deploymentStatus: readyStatus.status,
@@ -691,15 +703,15 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         }
 
         yield* promoteActiveConfig(
-          run.orgId as OrgId,
-          run.requestedBy as UserId,
+          runOrgId,
+          runUserId,
           run.targetHost,
           token,
           run.targetProjectRevision,
           deploymentId,
         )
 
-        yield* updateSyncRun(run.orgId as OrgId, {
+        yield* updateSyncRun(runOrgId, {
           runStatus: "succeeded",
           phase: "succeeded",
           deploymentId,
@@ -712,7 +724,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
       const resumeSyncRun = Effect.fn("OrgTinybirdSettingsService.resumeSyncRun")(function* (orgId: OrgId) {
         const syncRun = yield* selectSyncRunRow(orgId)
         if (Option.isNone(syncRun)) return
-        if (!NON_TERMINAL_RUN_STATUSES.has(syncRun.value.runStatus as OrgTinybirdSyncRunStatus)) return
+        if (!NON_TERMINAL_RUN_STATUSES.has(syncRun.value.runStatus)) return
 
         const token = yield* decryptToken(
           {
@@ -734,11 +746,12 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         options?: { readonly swallowUnavailable?: boolean },
       ) {
         if (syncRun == null) return null
-        if (!NON_TERMINAL_RUN_STATUSES.has(syncRun.runStatus as OrgTinybirdSyncRunStatus)) {
+        if (!NON_TERMINAL_RUN_STATUSES.has(syncRun.runStatus)) {
           return syncRun
         }
 
-        const orgId = syncRun.orgId as OrgId
+        const orgId = decodeOrgId(syncRun.orgId)
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
 
         if (!syncRun.deploymentId) {
           if (Date.now() - syncRun.startedAt >= SYNC_RUN_TIMEOUT_MS) {
@@ -763,6 +776,8 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
           return Option.getOrUndefined(refreshed) ?? syncRun
         }
 
+        const syncRunDeploymentId = syncRun.deploymentId
+
         const token = yield* decryptToken(
           {
             ciphertext: syncRun.targetTokenCiphertext,
@@ -777,14 +792,14 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
             getDeploymentTransportStatusImpl({
               baseUrl: syncRun.targetHost,
               token,
-              deploymentId: syncRun.deploymentId!,
+              deploymentId: syncRunDeploymentId,
             }),
           catch: (error) => mapTinybirdError(error),
         }).pipe(
           Effect.catchTag("@maple/http/errors/OrgTinybirdSettingsUpstreamRejectedError", (error) =>
             markRunFailed(orgId, error).pipe(
               Effect.as({
-                deploymentId: syncRun.deploymentId!,
+                deploymentId: syncRunDeploymentId,
                 status: "failed",
                 isTerminal: true,
                 errorMessage: error.message,
@@ -804,7 +819,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         if (status.status === "live") {
           yield* promoteActiveConfig(
             orgId,
-            syncRun.requestedBy as UserId,
+            decodeUserId(syncRun.requestedBy),
             syncRun.targetHost,
             token,
             syncRun.targetProjectRevision,
@@ -866,7 +881,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
 
             if (
               Option.isSome(existingRun)
-              && NON_TERMINAL_RUN_STATUSES.has(existingRun.value.runStatus as OrgTinybirdSyncRunStatus)
+              && NON_TERMINAL_RUN_STATUSES.has(existingRun.value.runStatus)
             ) {
               return yield* Effect.fail(
                 new OrgTinybirdSettingsSyncConflictError({
@@ -876,6 +891,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
             }
 
             if (Option.isSome(existingRun) && existingRun.value.deploymentId) {
+              const existingDeploymentId = existingRun.value.deploymentId
               const cleanupToken = yield* decryptToken(
                 {
                   ciphertext: existingRun.value.targetTokenCiphertext,
@@ -890,10 +906,13 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
                   cleanupOwnedDeploymentImpl({
                     baseUrl: existingRun.value.targetHost,
                     token: cleanupToken,
-                    deploymentId: existingRun.value.deploymentId!,
+                    deploymentId: existingDeploymentId,
                   }),
-                catch: () => null,
-              }).pipe(Effect.ignore)
+                catch: (error) => error,
+              }).pipe(
+                Effect.tapError(() => Effect.logWarning("Failed to cleanup previous Tinybird deployment")),
+                Effect.ignore,
+              )
             }
 
             const encrypted = yield* encryptToken(token, encryptionKey)
@@ -960,6 +979,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         orgId: OrgId,
         roles: ReadonlyArray<RoleName>,
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
         yield* requireAdmin(roles)
         const activeRow = yield* selectActiveRow(orgId)
         const storedSyncRun = yield* selectSyncRunRow(orgId)
@@ -988,6 +1008,8 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         roles: ReadonlyArray<RoleName>,
         payload: OrgTinybirdSettingsUpsertRequest,
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
+        yield* Effect.annotateCurrentSpan("userId", userId)
         yield* requireAdmin(roles)
         const host = yield* normalizeHost(payload.host)
         const activeRow = yield* selectActiveRow(orgId)
@@ -1010,6 +1032,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         orgId: OrgId,
         roles: ReadonlyArray<RoleName>,
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
         yield* requireAdmin(roles)
 
         yield* database.execute((db) =>
@@ -1030,6 +1053,8 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         userId: UserId,
         roles: ReadonlyArray<RoleName>,
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
+        yield* Effect.annotateCurrentSpan("userId", userId)
         yield* requireAdmin(roles)
         const activeRow = yield* requireActiveRow(orgId)
         const token = yield* decryptToken(
@@ -1076,6 +1101,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         orgId: OrgId,
         roles: ReadonlyArray<RoleName>,
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
         yield* requireAdmin(roles)
         const syncRun = yield* selectSyncRunRow(orgId).pipe(
           Effect.map(Option.getOrUndefined),
@@ -1092,6 +1118,7 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
         orgId: OrgId,
         roles: ReadonlyArray<RoleName>,
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
         yield* requireAdmin(roles)
         const row = yield* requireActiveRow(orgId)
         const token = yield* decryptToken(
@@ -1129,10 +1156,11 @@ export class OrgTinybirdSettingsService extends ServiceMap.Service<OrgTinybirdSe
             .from(orgTinybirdSyncRuns),
         ).pipe(Effect.mapError(toPersistenceError))
 
-        for (const row of rows) {
-          if (!NON_TERMINAL_RUN_STATUSES.has(row.runStatus as OrgTinybirdSyncRunStatus)) continue
-          yield* resumeSyncRun(row.orgId as OrgId).pipe(Effect.forkDetach)
-        }
+        yield* Effect.forEach(
+          rows.filter((row) => NON_TERMINAL_RUN_STATUSES.has(row.runStatus)),
+          (row) => resumeSyncRun(decodeOrgId(row.orgId)).pipe(Effect.forkDetach),
+          { discard: true },
+        )
       })
 
       yield* resumePendingRuns().pipe(Effect.forkDetach)

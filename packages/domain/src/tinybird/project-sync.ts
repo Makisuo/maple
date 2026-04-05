@@ -205,15 +205,15 @@ const mapApiFailure = (
   return toUnavailableError(fallback)
 }
 
-const parseJsonOrNull = <T>(rawBody: string): T | null => {
+const parseJsonOrNull = <T>(rawBody: string): Effect.Effect<T | null> => {
   const body = rawBody.trim()
-  if (body.length === 0) return null
-
-  try {
-    return JSON.parse(body) as T
-  } catch {
-    return null
-  }
+  if (body.length === 0) return Effect.succeed(null)
+  return Effect.try({
+    try: () => JSON.parse(body) as T,
+    catch: () => null,
+  }).pipe(
+    Effect.orElseSucceed(() => null as T | null),
+  )
 }
 
 const toNumberOrNull = (value: unknown): number | null => {
@@ -280,6 +280,7 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
 
       const fetchDeploymentStatusInternal = Effect.fn("TinybirdProjectSync.fetchDeploymentStatusInternal")(
         function* (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) {
+          yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
           const api = makeApi(params)
           const response = yield* Effect.tryPromise({
             try: () => api.request(`/v1/deployments/${params.deploymentId}`),
@@ -327,6 +328,7 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
 
       const startDeployment = Effect.fn("TinybirdProjectSync.startDeployment")(
         function* (params: TinybirdProjectSyncParams) {
+          yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
           const api = makeApi(params)
 
           const formData = new FormData()
@@ -357,7 +359,7 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
           const deployRawBody = yield* Effect.promise(() => deployResponse.text()).pipe(Effect.orElseSucceed(() => ""))
 
           if (deployResponse.status >= 400) {
-            const parsedDeployBody = parseJsonOrNull<DeployResponse>(deployRawBody)
+            const parsedDeployBody = yield* parseJsonOrNull<DeployResponse>(deployRawBody)
             return yield* Effect.fail(
               classifyHttpError(
                 deployResponse.status,
@@ -420,6 +422,7 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
 
       const setDeploymentLive = Effect.fn("TinybirdProjectSync.setDeploymentLive")(
         function* (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) {
+          yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
           const api = makeApi(params)
           const liveResponse = yield* Effect.tryPromise({
             try: () =>
@@ -447,6 +450,7 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
 
       const resumeDeployment = Effect.fn("TinybirdProjectSync.resumeDeployment")(
         function* (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) {
+          yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
           for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
             yield* Effect.sleep(Duration.millis(POLL_INTERVAL_MS))
 
@@ -473,6 +477,7 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
 
       const cleanupOwnedDeployment = Effect.fn("TinybirdProjectSync.cleanupOwnedDeployment")(
         function* (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) {
+          yield* Effect.annotateCurrentSpan("deploymentId", params.deploymentId)
           const status = yield* fetchDeploymentStatusInternal(params)
           if (!status.isTerminal || status.status === "live" || status.status === "data_ready") {
             return
@@ -509,6 +514,7 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
 
       const fetchInstanceHealth = Effect.fn("TinybirdProjectSync.fetchInstanceHealth")(
         function* (params: TinybirdProjectSyncParams) {
+          yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
           const api = makeApi(params)
 
           const requestJsonBestEffort = <T>(path: string, init?: RequestInit) =>
@@ -516,7 +522,7 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
               .pipe(
                 Effect.flatMap((response) =>
                   Effect.promise(() => response.text()).pipe(
-                    Effect.map((rawBody) => (response.ok ? parseJsonOrNull<T>(rawBody) : null)),
+                    Effect.flatMap((rawBody) => response.ok ? parseJsonOrNull<T>(rawBody) : Effect.succeed(null as T | null)),
                   )
                 ),
                 Effect.orElseSucceed(() => null as T | null),
