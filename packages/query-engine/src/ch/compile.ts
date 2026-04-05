@@ -25,7 +25,7 @@ import { Schema } from "effect"
 export class QueryBuilderError extends Schema.TaggedErrorClass<QueryBuilderError>()(
   "QueryBuilderError",
   {
-    code: Schema.Literal("SelectRequired", "UnresolvedParam"),
+    code: Schema.Literals(["SelectRequired", "UnresolvedParam"]),
     message: Schema.String,
   },
 ) {}
