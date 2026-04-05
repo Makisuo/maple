@@ -140,7 +140,7 @@ export function serviceApdexTimeseriesQuery(
       ),
     }))
     .where(($) => [
-      $.ParentSpanId.eq(""),
+      CH.rawCond("(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '')"),
       $.OrgId.eq(param.string("orgId")),
       $.ServiceName.eq(opts.serviceName),
       $.Timestamp.gte(param.dateTime("startTime")),

@@ -272,9 +272,9 @@ function buildWhereFragments(params: WhereClauseParams, useTraceListMv: boolean)
     lte("Timestamp", str(params.endTime)),
   )
 
-  // trace_list_mv only has root spans, so skip the ParentSpanId filter
+  // Entry point spans: Server/Consumer spans or true root spans
   clauses.push(
-    when(!!params.rootOnly && !useTraceListMv, raw("ParentSpanId = ''")),
+    when(!!params.rootOnly && !useTraceListMv, raw("(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '')")),
   )
   if (params.errorsOnly) {
     if (useTraceListMv) {

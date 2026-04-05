@@ -416,6 +416,7 @@ function pipeParamsToTracesTimeseriesOpts(params: PipeParams): CH.TracesTimeseri
     serviceName: str("service_name"),
     spanName: str("span_name"),
     rootOnly: !!str("root_only"),
+
     errorsOnly: !!str("errors_only"),
     environments: str("environments")?.split(",").filter(Boolean),
     commitShas: str("commit_shas")?.split(",").filter(Boolean),
@@ -449,6 +450,7 @@ function pipeParamsToTracesBreakdownOpts(params: PipeParams): CH.TracesBreakdown
     serviceName: str("service_name"),
     spanName: str("span_name"),
     rootOnly: !!str("root_only"),
+
     errorsOnly: !!str("errors_only"),
     environments: str("environments")?.split(",").filter(Boolean),
     commitShas: str("commit_shas")?.split(",").filter(Boolean),

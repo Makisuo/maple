@@ -188,7 +188,9 @@ function buildWhereConditions(
         ? CH.rawCond(`positionCaseInsensitive(SpanName, ${compile(str(v))}) > 0`)
         : $.SpanName.eq(v),
     ),
-    CH.whenTrue(!!opts.rootOnly && !useTraceListMv, () => CH.rawCond("ParentSpanId = ''")),
+    CH.whenTrue(!!opts.rootOnly && !useTraceListMv, () =>
+      CH.rawCond("(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '')"),
+    ),
   ]
 
   // Duration filters (Duration column is nanoseconds in both MV and raw table)

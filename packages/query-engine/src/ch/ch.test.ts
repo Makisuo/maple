@@ -257,11 +257,11 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("SpanAttributes['http.route']")
   })
 
-  it("uses trace_list_mv when rootOnly with mapped filters", () => {
+  it("uses traces table when rootOnly (MV disabled)", () => {
     const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, rootOnly: true })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("FROM trace_list_mv")
-    expect(sql).not.toContain("ParentSpanId")
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''")
   })
 
   it("uses traces table when not rootOnly", () => {
@@ -270,14 +270,14 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("FROM traces")
   })
 
-  it("falls back to traces table when commitShas present", () => {
+  it("includes commitShas filter with rootOnly", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       rootOnly: true, commitShas: ["abc123"],
     })
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("FROM traces")
-    expect(sql).toContain("ParentSpanId = ''")
+    expect(sql).toContain("SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''")
     expect(sql).toContain("deployment.commit_sha")
   })
 
@@ -299,10 +299,10 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("StatusCode = 'Error'")
   })
 
-  it("filters errorsOnly on MV uses HasError", () => {
+  it("filters errorsOnly with rootOnly", () => {
     const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, rootOnly: true, errorsOnly: true })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("HasError = 1")
+    expect(sql).toContain("StatusCode = 'Error'")
   })
 
   it("filters by environments", () => {
@@ -314,13 +314,13 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
   })
 
-  it("filters by environments on MV uses DeploymentEnv", () => {
+  it("filters by environments with rootOnly", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       rootOnly: true, environments: ["production"],
     })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("DeploymentEnv IN ('production')")
+    expect(sql).toContain("deployment.environment") // raw table uses ResourceAttributes
   })
 
   it("filters by attribute filters (equals)", () => {
@@ -368,15 +368,15 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("ResourceAttributes['host.name'] = 'server-1'")
   })
 
-  it("uses MV column for mapped attribute filters on MV", () => {
+  it("filters attribute with rootOnly on raw table", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       rootOnly: true,
       attributeFilters: [{ key: "http.method", value: "GET", mode: "equals" }],
     })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("FROM trace_list_mv")
-    expect(sql).toContain("HttpMethod = 'GET'")
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("SpanAttributes['http.method'] = 'GET'")
   })
 
   it("escapes special characters in filter values", () => {
@@ -512,10 +512,10 @@ describe("tracesListQuery", () => {
     expect(sql).toContain("ServiceName = 'api'")
   })
 
-  it("uses trace_list_mv when rootOnly", () => {
+  it("uses traces table when rootOnly (MV disabled)", () => {
     const q = tracesListQuery({ rootOnly: true })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("FROM trace_list_mv")
+    expect(sql).toContain("FROM traces")
   })
 })
 
@@ -727,7 +727,7 @@ describe("converted queries", () => {
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("positionCaseInsensitive(ServiceName, 'api') > 0")
     expect(sql).toContain("quantile(0.5)(Duration)")
-    expect(sql).toContain("FROM trace_list_mv")
+    expect(sql).toContain("FROM trace_list_mv") // tracesDurationStats always uses MV directly
   })
 
   it("spanHierarchyQuery compiles with toJSONString", () => {
