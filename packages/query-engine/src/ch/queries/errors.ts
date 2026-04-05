@@ -373,7 +373,7 @@ export function tracesFacetsQuery(
     limit = 50,
   ) =>
     from(TraceListMv)
-      .select(($) => ({
+      .select((_$) => ({
         name: CH.dynamicColumn<string>(colName),
         count: CH.count(),
         facetType: CH.lit(facetType),

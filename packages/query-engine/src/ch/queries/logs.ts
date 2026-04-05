@@ -9,7 +9,6 @@ import { param } from "../param"
 import { from, type CHQuery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { Logs } from "../tables"
-import { escapeClickHouseString } from "../../sql/sql-fragment"
 
 // ---------------------------------------------------------------------------
 // Shared options
