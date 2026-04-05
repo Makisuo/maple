@@ -104,6 +104,42 @@ describe("Tinybird project sync", () => {
     expect(error).toBeInstanceOf(TinybirdSyncRejectedError)
   })
 
+  it("extracts structured Tinybird feedback instead of showing the raw deploy response body", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(
+        JSON.stringify({
+          result: "failed",
+          deployment: {
+            id: "59",
+            status: "calculating",
+            feedback: [
+              {
+                resource: null,
+                level: "ERROR",
+                message:
+                  "There's already a deployment in progress.\n\nYou can check the status of your deployments with `tb deployment ls`.",
+              },
+            ],
+          },
+        }),
+        {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        },
+      )) as unknown as typeof fetch
+
+    await expect(
+      startTinybirdDeployment({
+        baseUrl: "https://customer.tinybird.co",
+        token: "token",
+      }),
+    ).rejects.toMatchObject({
+      name: "TinybirdSyncRejectedError",
+      message:
+        "Tinybird already has a deployment in progress. Wait for it to finish, then retry. If needed, promote or discard the existing deployment in Tinybird first.",
+    })
+  })
+
   it("treats invalid Tinybird JSON as an upstream availability problem", async () => {
     globalThis.fetch = mock(async () =>
       new Response("not-json", {

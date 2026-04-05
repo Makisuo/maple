@@ -123,18 +123,28 @@ export class TinybirdSyncUnavailableError extends TinybirdSyncError {
 
 const normalizeBaseUrl = (raw: string) => raw.trim().replace(/\/+$/, "")
 
+const simplifyDeployFailureMessage = (message: string): string => {
+  const trimmed = message.trim()
+
+  if (/already a deployment in progress/i.test(trimmed)) {
+    return "Tinybird already has a deployment in progress. Wait for it to finish, then retry. If needed, promote or discard the existing deployment in Tinybird first."
+  }
+
+  return trimmed
+}
+
 const toDeployErrorMessage = (body: DeployResponse, fallback: string): string => {
   const feedbackErrors = body.deployment?.feedback
     ?.filter((entry) => entry.level === "ERROR")
-    .map((entry) => entry.message)
+    .map((entry) => simplifyDeployFailureMessage(entry.message))
 
   if (feedbackErrors && feedbackErrors.length > 0) {
     return feedbackErrors.join("\n")
   }
 
-  if (body.error) return body.error
+  if (body.error) return simplifyDeployFailureMessage(body.error)
   if (body.errors && body.errors.length > 0) {
-    return body.errors.map((entry) => entry.error).join("\n")
+    return body.errors.map((entry) => simplifyDeployFailureMessage(entry.error)).join("\n")
   }
 
   return fallback
@@ -347,10 +357,16 @@ export class TinybirdProjectSync extends ServiceMap.Service<TinybirdProjectSync,
           const deployRawBody = yield* Effect.promise(() => deployResponse.text()).pipe(Effect.orElseSucceed(() => ""))
 
           if (deployResponse.status >= 400) {
+            const parsedDeployBody = parseJsonOrNull<DeployResponse>(deployRawBody)
             return yield* Effect.fail(
               classifyHttpError(
                 deployResponse.status,
-                `Tinybird project sync failed (HTTP ${deployResponse.status}).\nResponse: ${deployRawBody}`,
+                parsedDeployBody
+                  ? toDeployErrorMessage(
+                    parsedDeployBody,
+                    `Tinybird project sync failed (HTTP ${deployResponse.status}).\nResponse: ${deployRawBody}`,
+                  )
+                  : `Tinybird project sync failed (HTTP ${deployResponse.status}).\nResponse: ${deployRawBody}`,
               ),
             )
           }
