@@ -1,9 +1,7 @@
 import * as CH from "../expr"
 import { param } from "../param"
 import { from, type CHQuery } from "../query"
-import { AttributeKeysHourly } from "../tables"
-import { escapeClickHouseString } from "../../sql/sql-fragment"
-import type { CompiledQuery } from "../compile"
+import { AttributeKeysHourly, Traces } from "../tables"
 
 export interface AttributeKeysQueryOpts {
   scope: string
@@ -41,7 +39,7 @@ export function attributeKeysQuery(
 }
 
 // ---------------------------------------------------------------------------
-// Attribute values queries (raw SQL — dynamic map column access)
+// Attribute values queries
 // ---------------------------------------------------------------------------
 
 export interface AttributeValuesOpts {
@@ -54,50 +52,46 @@ export interface AttributeValuesOutput {
   readonly usageCount: number
 }
 
-export function spanAttributeValuesSQL(
-  opts: AttributeValuesOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<AttributeValuesOutput> {
-  const esc = escapeClickHouseString
-  const sql = `SELECT
-  SpanAttributes['${esc(opts.attributeKey)}'] AS attributeValue,
-  count() AS usageCount
-FROM traces
-WHERE OrgId = '${esc(params.orgId)}'
-  AND Timestamp >= '${esc(params.startTime)}'
-  AND Timestamp <= '${esc(params.endTime)}'
-  AND SpanAttributes['${esc(opts.attributeKey)}'] != ''
-GROUP BY attributeValue
-ORDER BY usageCount DESC
-LIMIT ${Math.round(opts.limit ?? 50)}
-FORMAT JSON`
+type AttributeValuesParams = { orgId: string; startTime: string; endTime: string }
 
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<AttributeValuesOutput>,
-  }
+export function spanAttributeValuesQuery(
+  opts: AttributeValuesOpts,
+): CHQuery<any, AttributeValuesOutput, AttributeValuesParams> {
+  return from(Traces)
+    .select(($) => ({
+      attributeValue: $.SpanAttributes.get(opts.attributeKey),
+      usageCount: CH.count(),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+      $.SpanAttributes.get(opts.attributeKey).neq(""),
+    ])
+    .groupBy("attributeValue")
+    .orderBy(["usageCount", "desc"])
+    .limit(opts.limit ?? 50)
+    .format("JSON")
+    .withParams<AttributeValuesParams>()
 }
 
-export function resourceAttributeValuesSQL(
+export function resourceAttributeValuesQuery(
   opts: AttributeValuesOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<AttributeValuesOutput> {
-  const esc = escapeClickHouseString
-  const sql = `SELECT
-  ResourceAttributes['${esc(opts.attributeKey)}'] AS attributeValue,
-  count() AS usageCount
-FROM traces
-WHERE OrgId = '${esc(params.orgId)}'
-  AND Timestamp >= '${esc(params.startTime)}'
-  AND Timestamp <= '${esc(params.endTime)}'
-  AND ResourceAttributes['${esc(opts.attributeKey)}'] != ''
-GROUP BY attributeValue
-ORDER BY usageCount DESC
-LIMIT ${Math.round(opts.limit ?? 50)}
-FORMAT JSON`
-
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<AttributeValuesOutput>,
-  }
+): CHQuery<any, AttributeValuesOutput, AttributeValuesParams> {
+  return from(Traces)
+    .select(($) => ({
+      attributeValue: $.ResourceAttributes.get(opts.attributeKey),
+      usageCount: CH.count(),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get(opts.attributeKey).neq(""),
+    ])
+    .groupBy("attributeValue")
+    .orderBy(["usageCount", "desc"])
+    .limit(opts.limit ?? 50)
+    .format("JSON")
+    .withParams<AttributeValuesParams>()
 }

@@ -9,6 +9,7 @@ import type { MetricType } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
 import { from, type CHQuery } from "../query"
+import { unionAll, type CHUnionQuery } from "../union"
 import {
   MetricsSum,
   MetricsGauge,
@@ -105,7 +106,7 @@ function buildValueTimeseries(
       $.TimeUnix.lte(param.dateTime("endTime")),
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
       CH.when(opts.attributeKey, (k: string) =>
-        CH.rawCond(`Attributes['${escapeClickHouseString(k)}'] = '${escapeClickHouseString(opts.attributeValue ?? '')}'`),
+        $.Attributes.get(k).eq(opts.attributeValue ?? ""),
       ),
     ])
 
@@ -130,11 +131,11 @@ function buildHistogramTimeseries(
       attributeValue: opts.groupByAttributeKey
         ? $.Attributes.get(opts.groupByAttributeKey)
         : CH.lit(""),
-      avgValue: CH.rawExpr<number>("if(sum(Count) > 0, sum(Sum) / sum(Count), 0)"),
-      minValue: CH.rawExpr<number>("min(Min)"),
-      maxValue: CH.rawExpr<number>("max(Max)"),
-      sumValue: CH.rawExpr<number>("sum(Sum)"),
-      dataPointCount: CH.rawExpr<number>("sum(Count)"),
+      avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
+      minValue: CH.min_($.Min) as unknown as CH.Expr<number>,
+      maxValue: CH.max_($.Max) as unknown as CH.Expr<number>,
+      sumValue: CH.sum($.Sum),
+      dataPointCount: CH.sum($.Count),
     }))
     .where(($) => [
       $.MetricName.eq(param.string("metricName")),
@@ -143,7 +144,7 @@ function buildHistogramTimeseries(
       $.TimeUnix.lte(param.dateTime("endTime")),
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
       CH.when(opts.attributeKey, (k: string) =>
-        CH.rawCond(`Attributes['${escapeClickHouseString(k)}'] = '${escapeClickHouseString(opts.attributeValue ?? '')}'`),
+        $.Attributes.get(k).eq(opts.attributeValue ?? ""),
       ),
     ])
 
@@ -331,9 +332,9 @@ function buildHistogramBreakdown(
   return from(tbl as typeof MetricsHistogram)
     .select(($) => ({
       name: $.ServiceName,
-      avgValue: CH.rawExpr<number>("if(sum(Count) > 0, sum(Sum) / sum(Count), 0)"),
-      sumValue: CH.rawExpr<number>("sum(Sum)"),
-      count: CH.rawExpr<number>("sum(Count)"),
+      avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
+      sumValue: CH.sum($.Sum),
+      count: CH.sum($.Count),
     }))
     .where(($) => [
       $.MetricName.eq(param.string("metricName")),
@@ -349,7 +350,7 @@ function buildHistogramBreakdown(
 }
 
 // ---------------------------------------------------------------------------
-// List metrics (raw SQL — 4 UNION ALL across metric tables)
+// List metrics (UNION ALL — 4 metric tables)
 // ---------------------------------------------------------------------------
 
 export interface ListMetricsOpts {
@@ -372,70 +373,61 @@ export interface ListMetricsOutput {
   readonly isMonotonic: boolean | number
 }
 
-export function listMetricsSQL(
-  opts: ListMetricsOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ListMetricsOutput> {
-  const esc = escapeClickHouseString
-  const limit = Math.round(opts.limit ?? 100)
-  const offset = Math.round(opts.offset ?? 0)
+type ListMetricsParams = { orgId: string; startTime: string; endTime: string }
 
-  function buildMetricSubquery(
-    table: string,
+export function listMetricsQuery(
+  opts: ListMetricsOpts,
+): CHUnionQuery<ListMetricsOutput, ListMetricsParams> {
+  function buildSubquery(
+    tbl: typeof MetricsSum | typeof MetricsGauge | typeof MetricsHistogram | typeof MetricsExpHistogram,
     metricType: string,
     hasIsMonotonic: boolean,
-  ): string {
-    const conditions = [
-      `OrgId = '${esc(params.orgId)}'`,
-      `TimeUnix >= '${esc(params.startTime)}'`,
-      `TimeUnix <= '${esc(params.endTime)}'`,
-    ]
-    if (opts.serviceName) conditions.push(`ServiceName = '${esc(opts.serviceName)}'`)
-    if (opts.search) conditions.push(`MetricName ILIKE '%${esc(opts.search)}%'`)
-
-    return `SELECT
-      MetricName AS metricName,
-      '${metricType}' AS metricType,
-      ServiceName AS serviceName,
-      any(MetricDescription) AS metricDescription,
-      any(MetricUnit) AS metricUnit,
-      count() AS dataPointCount,
-      min(TimeUnix) AS firstSeen,
-      max(TimeUnix) AS lastSeen,
-      ${hasIsMonotonic ? "any(IsMonotonic)" : "0"} AS isMonotonic
-    FROM ${table}
-    WHERE ${conditions.join(" AND ")}
-    GROUP BY metricName, serviceName`
+  ) {
+    return from(tbl as typeof MetricsSum)
+      .select(($) => ({
+        metricName: $.MetricName,
+        metricType: CH.lit(metricType),
+        serviceName: $.ServiceName,
+        metricDescription: CH.any_($.MetricDescription),
+        metricUnit: CH.any_($.MetricUnit),
+        dataPointCount: CH.count(),
+        firstSeen: CH.min_($.TimeUnix),
+        lastSeen: CH.max_($.TimeUnix),
+        isMonotonic: hasIsMonotonic
+          ? CH.rawExpr<boolean | number>("any(IsMonotonic)")
+          : CH.rawExpr<boolean | number>("0"),
+      }))
+      .where(($) => [
+        $.OrgId.eq(param.string("orgId")),
+        $.TimeUnix.gte(param.dateTime("startTime")),
+        $.TimeUnix.lte(param.dateTime("endTime")),
+        CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+        CH.when(opts.search, (v: string) => $.MetricName.ilike(`%${v}%`)),
+      ])
+      .groupBy("metricName", "serviceName")
+      .withParams<ListMetricsParams>()
   }
 
+  const queries: Array<CHQuery<any, ListMetricsOutput, ListMetricsParams>> = []
   const showSum = !opts.metricType || opts.metricType === "sum"
   const showGauge = !opts.metricType || opts.metricType === "gauge"
   const showHist = !opts.metricType || opts.metricType === "histogram"
   const showExpHist = !opts.metricType || opts.metricType === "exponential_histogram"
 
-  const subqueries: string[] = []
-  if (showSum) subqueries.push(buildMetricSubquery("metrics_sum", "sum", true))
-  if (showGauge) subqueries.push(buildMetricSubquery("metrics_gauge", "gauge", false))
-  if (showHist) subqueries.push(buildMetricSubquery("metrics_histogram", "histogram", false))
-  if (showExpHist) subqueries.push(buildMetricSubquery("metrics_exponential_histogram", "exponential_histogram", false))
+  if (showSum) queries.push(buildSubquery(MetricsSum, "sum", true))
+  if (showGauge) queries.push(buildSubquery(MetricsGauge, "gauge", false))
+  if (showHist) queries.push(buildSubquery(MetricsHistogram, "histogram", false))
+  if (showExpHist) queries.push(buildSubquery(MetricsExpHistogram, "exponential_histogram", false))
 
-  const sql = `SELECT *
-FROM (
-${subqueries.join("\nUNION ALL\n")}
-)
-ORDER BY lastSeen DESC
-LIMIT ${limit}
-OFFSET ${offset}
-FORMAT JSON`
-
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<ListMetricsOutput>,
-  }
+  return unionAll(...queries)
+    .orderBy(["lastSeen", "desc"])
+    .limit(opts.limit ?? 100)
+    .offset(opts.offset ?? 0)
+    .format("JSON")
 }
 
 // ---------------------------------------------------------------------------
-// Metrics summary (raw SQL — 4 UNION ALL across metric tables)
+// Metrics summary (UNION ALL — 4 metric tables)
 // ---------------------------------------------------------------------------
 
 export interface MetricsSummaryOutput {
@@ -444,37 +436,38 @@ export interface MetricsSummaryOutput {
   readonly dataPointCount: number
 }
 
-export function metricsSummarySQL(
-  params: { orgId: string; startTime: string; endTime: string; serviceName?: string },
-): CompiledQuery<MetricsSummaryOutput> {
-  const esc = escapeClickHouseString
-  const serviceFilter = params.serviceName
-    ? `AND ServiceName = '${esc(params.serviceName)}'`
-    : ""
+export interface MetricsSummaryOpts {
+  serviceName?: string
+}
 
-  function buildCountSubquery(table: string, metricType: string): string {
-    return `SELECT
-      '${metricType}' AS metricType,
-      uniq(MetricName) AS metricCount,
-      count() AS dataPointCount
-    FROM ${table}
-    WHERE OrgId = '${esc(params.orgId)}'
-      AND TimeUnix >= '${esc(params.startTime)}'
-      AND TimeUnix <= '${esc(params.endTime)}'
-      ${serviceFilter}`
+type MetricsSummaryParams = { orgId: string; startTime: string; endTime: string }
+
+export function metricsSummaryQuery(
+  opts?: MetricsSummaryOpts,
+): CHUnionQuery<MetricsSummaryOutput, MetricsSummaryParams> {
+  function buildSubquery(
+    tbl: typeof MetricsSum | typeof MetricsGauge | typeof MetricsHistogram | typeof MetricsExpHistogram,
+    metricType: string,
+  ) {
+    return from(tbl as typeof MetricsSum)
+      .select(($) => ({
+        metricType: CH.lit(metricType),
+        metricCount: CH.uniq($.MetricName),
+        dataPointCount: CH.count(),
+      }))
+      .where(($) => [
+        $.OrgId.eq(param.string("orgId")),
+        $.TimeUnix.gte(param.dateTime("startTime")),
+        $.TimeUnix.lte(param.dateTime("endTime")),
+        CH.when(opts?.serviceName, (v: string) => $.ServiceName.eq(v)),
+      ])
+      .withParams<MetricsSummaryParams>()
   }
 
-  const sql = `${buildCountSubquery("metrics_sum", "sum")}
-UNION ALL
-${buildCountSubquery("metrics_gauge", "gauge")}
-UNION ALL
-${buildCountSubquery("metrics_histogram", "histogram")}
-UNION ALL
-${buildCountSubquery("metrics_exponential_histogram", "exponential_histogram")}
-FORMAT JSON`
-
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<MetricsSummaryOutput>,
-  }
+  return unionAll(
+    buildSubquery(MetricsSum, "sum"),
+    buildSubquery(MetricsGauge, "gauge"),
+    buildSubquery(MetricsHistogram, "histogram"),
+    buildSubquery(MetricsExpHistogram, "exponential_histogram"),
+  ).format("JSON")
 }

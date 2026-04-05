@@ -27,8 +27,11 @@ function metricSelectExprs(
   metric: TracesMetric,
   apdexThresholdMs: number,
   needsSampling: boolean,
+  allMetrics?: boolean,
 ) {
-  const needs = new Set(METRIC_NEEDS[metric])
+  const needs = allMetrics
+    ? new Set<string>(["count", "avg_duration", "quantiles", "error_rate", "apdex"])
+    : new Set(METRIC_NEEDS[metric])
   const t = String(apdexThresholdMs)
 
   return {
@@ -268,6 +271,8 @@ export interface TracesTimeseriesOpts extends TracesQueryOpts {
   groupBy?: readonly string[]
   groupByAttributeKeys?: readonly string[]
   apdexThresholdMs?: number
+  /** When true, emit all metric columns regardless of the selected metric. Used by custom charts. */
+  allMetrics?: boolean
 }
 
 export interface TracesTimeseriesOutput {
@@ -298,7 +303,7 @@ export function tracesTimeseriesQuery(
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
       groupName: buildGroupNameExpr(opts.groupBy, opts.groupByAttributeKeys, useTraceListMv),
-      ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling),
+      ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
     }))
     .where(($) => buildWhereConditions($, opts, useTraceListMv))
     .groupBy("bucket", "groupName")
@@ -317,6 +322,8 @@ export interface TracesBreakdownOpts extends TracesQueryOpts {
   groupByAttributeKey?: string
   limit?: number
   apdexThresholdMs?: number
+  /** When true, emit all metric columns regardless of the selected metric. Used by custom charts. */
+  allMetrics?: boolean
 }
 
 export interface TracesBreakdownOutput {
@@ -347,7 +354,7 @@ export function tracesBreakdownQuery(
   return from(tbl as typeof Traces)
     .select(($) => {
       const { sampledSpanCount, unsampledSpanCount, dominantThreshold, ...metrics } =
-        metricSelectExprs($, opts.metric, apdexThresholdMs, false)
+        metricSelectExprs($, opts.metric, apdexThresholdMs, false, opts.allMetrics)
       return {
         name: buildBreakdownGroupExpr(opts.groupBy, opts.groupByAttributeKey),
         ...metrics,

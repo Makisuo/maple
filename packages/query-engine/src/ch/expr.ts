@@ -34,6 +34,7 @@ export interface Expr<TSType> {
   // String operations
   like(this: Expr<string>, pattern: string): Condition
   notLike(this: Expr<string>, pattern: string): Condition
+  ilike(this: Expr<string>, pattern: string): Condition
 
   // Arithmetic — only valid for number expressions
   div(this: Expr<number>, n: number | Expr<number>): Expr<number>
@@ -93,6 +94,7 @@ function makeExpr<T>(fragment: SqlFragment): Expr<T> {
 
     like: (pattern: string) => makeCond(raw(`${compile(fragment)} LIKE ${compile(str(pattern))}`)),
     notLike: (pattern: string) => makeCond(raw(`${compile(fragment)} NOT LIKE ${compile(str(pattern))}`)),
+    ilike: (pattern: string) => makeCond(raw(`${compile(fragment)} ILIKE ${compile(str(pattern))}`)),
 
     div: (n: number | Expr<number>) => makeExpr<number>(raw(`${compile(fragment)} / ${compile(toFragment(n))}`)),
     mul: (n: number | Expr<number>) => makeExpr<number>(raw(`${compile(fragment)} * ${compile(toFragment(n))}`)),
@@ -163,12 +165,12 @@ export function sum(expr: Expr<number>): Expr<number> {
   return makeExpr<number>(raw(`sum(${compile(expr.toFragment())})`))
 }
 
-export function min_(expr: Expr<number>): Expr<number> {
-  return makeExpr<number>(raw(`min(${compile(expr.toFragment())})`))
+export function min_<T>(expr: Expr<T>): Expr<T> {
+  return makeExpr<T>(raw(`min(${compile(expr.toFragment())})`))
 }
 
-export function max_(expr: Expr<number>): Expr<number> {
-  return makeExpr<number>(raw(`max(${compile(expr.toFragment())})`))
+export function max_<T>(expr: Expr<T>): Expr<T> {
+  return makeExpr<T>(raw(`max(${compile(expr.toFragment())})`))
 }
 
 export function quantile(q: number) {
@@ -176,8 +178,8 @@ export function quantile(q: number) {
     makeExpr<number>(raw(`quantile(${q})(${compile(expr.toFragment())})`))
 }
 
-export function any_(expr: Expr<string>): Expr<string> {
-  return makeExpr<string>(raw(`any(${compile(expr.toFragment())})`))
+export function any_<T>(expr: Expr<T>): Expr<T> {
+  return makeExpr<T>(raw(`any(${compile(expr.toFragment())})`))
 }
 
 export function anyIf<T>(expr: Expr<T>, cond: Condition): Expr<T> {
@@ -269,6 +271,49 @@ export function inList(
 ): Condition {
   const escaped = values.map((v) => compile(str(v))).join(", ")
   return makeCond(raw(`${compile(expr.toFragment())} IN (${escaped})`))
+}
+
+// ---------------------------------------------------------------------------
+// Additional aggregate functions
+// ---------------------------------------------------------------------------
+
+export function uniq<T>(expr: Expr<T>): Expr<number> {
+  return makeExpr<number>(raw(`uniq(${compile(expr.toFragment())})`))
+}
+
+export function sumIf(expr: Expr<number>, cond: Condition): Expr<number> {
+  return makeExpr<number>(raw(`sumIf(${compile(expr.toFragment())}, ${compile(cond.toFragment())})`))
+}
+
+export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
+  return makeExpr<ReadonlyArray<T>>(raw(`groupUniqArray(${compile(expr.toFragment())})`))
+}
+
+// ---------------------------------------------------------------------------
+// Additional ClickHouse functions
+// ---------------------------------------------------------------------------
+
+export function toJSONString(expr: Expr<any>): Expr<string> {
+  return makeExpr<string>(raw(`toJSONString(${compile(expr.toFragment())})`))
+}
+
+export function concat(...exprs: Array<Expr<string> | string>): Expr<string> {
+  const args = exprs
+    .map((e) => (typeof e === "string" ? compile(str(e)) : compile(e.toFragment())))
+    .join(", ")
+  return makeExpr<string>(raw(`concat(${args})`))
+}
+
+export function round_(expr: Expr<number>, decimals?: number): Expr<number> {
+  const args = decimals != null
+    ? `${compile(expr.toFragment())}, ${decimals}`
+    : compile(expr.toFragment())
+  return makeExpr<number>(raw(`round(${args})`))
+}
+
+export function intDiv(a: Expr<number>, b: number | Expr<number>): Expr<number> {
+  const bStr = typeof b === "number" ? String(b) : compile((b as Expr<number>).toFragment())
+  return makeExpr<number>(raw(`intDiv(${compile(a.toFragment())}, ${bStr})`))
 }
 
 // ---------------------------------------------------------------------------

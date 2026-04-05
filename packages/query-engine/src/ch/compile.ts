@@ -10,6 +10,7 @@
 
 import type { ColumnDefs } from "./types"
 import type { CHQuery } from "./query"
+import type { CHUnionQuery } from "./union"
 import { createColumnAccessor } from "./query"
 import { aliased } from "./expr"
 import { raw, ident, escapeClickHouseString } from "../sql/sql-fragment"
@@ -34,6 +35,7 @@ export function compileCH<
 >(
   query: CHQuery<Cols, Output, Params>,
   params: Params,
+  options?: { skipFormat?: boolean },
 ): CompiledQuery<Output> {
   const state = query._state
   const $ = createColumnAccessor(state.columns)
@@ -63,7 +65,7 @@ export function compileCH<
     orderBy: state.orderBySpecs.map(([k, dir]) => raw(`${k} ${dir.toUpperCase()}`)),
     limit: state.limitValue != null ? raw(String(Math.round(state.limitValue))) : undefined,
     offset: state.offsetValue != null ? raw(String(Math.round(state.offsetValue))) : undefined,
-    format: state.formatValue,
+    format: options?.skipFormat ? undefined : state.formatValue,
   }
 
   let sql = compileQuery(sqlQuery)
@@ -73,6 +75,55 @@ export function compileCH<
     const placeholder = `__PARAM_${name}__`
     const resolved = resolveParam(value)
     sql = sql.replaceAll(placeholder, resolved)
+  }
+
+  return {
+    sql,
+    castRows: (rows) => rows as unknown as ReadonlyArray<Output>,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UNION ALL compilation
+// ---------------------------------------------------------------------------
+
+export function compileUnion<
+  Output extends Record<string, any>,
+  Params extends Record<string, any>,
+>(
+  union: CHUnionQuery<Output, Params>,
+  params: Params,
+): CompiledQuery<Output> {
+  const state = union._state
+
+  // Compile each sub-query without FORMAT
+  const subSqls = state.queries.map((q) =>
+    compileCH(q, params, { skipFormat: true }).sql,
+  )
+
+  let sql = subSqls.join("\nUNION ALL\n")
+
+  // Wrap in outer SELECT if ordering/pagination is needed
+  const hasOuter =
+    state.outerOrderBySpecs.length > 0 ||
+    state.outerLimitValue != null ||
+    state.outerOffsetValue != null
+
+  if (hasOuter) {
+    sql = `SELECT * FROM (\n${sql}\n)`
+    if (state.outerOrderBySpecs.length > 0) {
+      sql += `\nORDER BY ${state.outerOrderBySpecs.map(([k, dir]) => `${k} ${dir.toUpperCase()}`).join(", ")}`
+    }
+    if (state.outerLimitValue != null) {
+      sql += `\nLIMIT ${Math.round(state.outerLimitValue)}`
+    }
+    if (state.outerOffsetValue != null) {
+      sql += `\nOFFSET ${Math.round(state.outerOffsetValue)}`
+    }
+  }
+
+  if (state.formatValue) {
+    sql += `\nFORMAT ${state.formatValue}`
   }
 
   return {

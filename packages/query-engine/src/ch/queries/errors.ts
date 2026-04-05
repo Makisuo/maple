@@ -7,7 +7,8 @@
 import * as CH from "../expr"
 import { param } from "../param"
 import { from, type CHQuery } from "../query"
-import { ErrorSpans } from "../tables"
+import { unionAll, type CHUnionQuery } from "../union"
+import { ErrorSpans, TraceListMv, Traces } from "../tables"
 import { escapeClickHouseString } from "../../sql/sql-fragment"
 import type { CompiledQuery } from "../compile"
 
@@ -50,24 +51,24 @@ export function errorsByTypeQuery(
   opts: ErrorsByTypeOpts,
 ): CHQuery<any, ErrorsByTypeOutput, { orgId: string; startTime: string; endTime: string }> {
   return from(ErrorSpans)
-    .select(() => ({
+    .select(($) => ({
       errorType: CH.rawExpr<string>(ERROR_FINGERPRINT_SQL),
-      sampleMessage: CH.rawExpr<string>("any(StatusMessage)"),
+      sampleMessage: CH.any_($.StatusMessage),
       count: CH.count(),
-      affectedServicesCount: CH.rawExpr<number>("uniq(ServiceName)"),
-      firstSeen: CH.rawExpr<string>("min(Timestamp)"),
-      lastSeen: CH.rawExpr<string>("max(Timestamp)"),
+      affectedServicesCount: CH.uniq($.ServiceName),
+      firstSeen: CH.min_($.Timestamp),
+      lastSeen: CH.max_($.Timestamp),
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
-      CH.whenTrue(!!opts.rootOnly, () => CH.rawCond("ParentSpanId = ''")),
+      CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
       opts.services?.length
-        ? CH.inList(CH.rawExpr<string>("ServiceName"), opts.services)
+        ? CH.inList($.ServiceName, opts.services)
         : undefined,
       opts.deploymentEnvs?.length
-        ? CH.inList(CH.rawExpr<string>("DeploymentEnv"), opts.deploymentEnvs)
+        ? CH.inList($.DeploymentEnv, opts.deploymentEnvs)
         : undefined,
       opts.errorTypes?.length
         ? CH.inList(CH.rawExpr<string>(ERROR_FINGERPRINT_SQL), opts.errorTypes)
@@ -109,7 +110,7 @@ export function errorsTimeseriesQuery(
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
       opts.services?.length
-        ? CH.inList(CH.rawExpr<string>("ServiceName"), opts.services)
+        ? CH.inList($.ServiceName, opts.services)
         : undefined,
     ])
     .groupBy("bucket")
@@ -119,7 +120,7 @@ export function errorsTimeseriesQuery(
 }
 
 // ---------------------------------------------------------------------------
-// Span hierarchy (raw SQL — needs toJSONString, conditional span name rewrite)
+// Span hierarchy
 // ---------------------------------------------------------------------------
 
 export interface SpanHierarchyOpts {
@@ -143,48 +144,54 @@ export interface SpanHierarchyOutput {
   readonly relationship: string
 }
 
-export function spanHierarchySQL(
+type SpanHierarchyParams = { orgId: string }
+
+export function spanHierarchyQuery(
   opts: SpanHierarchyOpts,
-  params: { orgId: string },
-): CompiledQuery<SpanHierarchyOutput> {
-  const esc = escapeClickHouseString
-  const relationshipExpr = opts.spanId
-    ? `if(SpanId = '${esc(opts.spanId)}', 'target', 'related')`
-    : `'related'`
-
-  const sql = `SELECT
-  TraceId AS traceId,
-  SpanId AS spanId,
-  ParentSpanId AS parentSpanId,
-  if(
-    (SpanName LIKE 'http.server %' OR SpanName IN ('GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'))
-    AND (SpanAttributes['http.route'] != '' OR SpanAttributes['url.path'] != ''),
-    concat(
-      if(SpanName LIKE 'http.server %', replaceOne(SpanName, 'http.server ', ''), SpanName),
-      ' ',
-      if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], SpanAttributes['url.path'])
+): CHQuery<any, SpanHierarchyOutput, SpanHierarchyParams> {
+  // HTTP span name rewriting: "http.server GET" + route → "GET /api/users"
+  const httpRewriteExpr = CH.if_(
+    CH.rawCond(
+      "(SpanName LIKE 'http.server %' OR SpanName IN ('GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'))" +
+      " AND (SpanAttributes['http.route'] != '' OR SpanAttributes['url.path'] != '')",
     ),
-    SpanName
-  ) AS spanName,
-  ServiceName AS serviceName,
-  SpanKind AS spanKind,
-  Duration / 1000000 AS durationMs,
-  Timestamp AS startTime,
-  StatusCode AS statusCode,
-  StatusMessage AS statusMessage,
-  toJSONString(SpanAttributes) AS spanAttributes,
-  toJSONString(ResourceAttributes) AS resourceAttributes,
-  ${relationshipExpr} AS relationship
-FROM traces
-WHERE TraceId = '${esc(opts.traceId)}'
-  AND OrgId = '${esc(params.orgId)}'
-ORDER BY Timestamp ASC
-FORMAT JSON`
+    CH.rawExpr<string>(
+      "concat(" +
+        "if(SpanName LIKE 'http.server %', replaceOne(SpanName, 'http.server ', ''), SpanName), " +
+        "' ', " +
+        "if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], SpanAttributes['url.path'])" +
+      ")",
+    ),
+    CH.rawExpr<string>("SpanName"),
+  )
 
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<SpanHierarchyOutput>,
-  }
+  const relationshipExpr = opts.spanId
+    ? CH.if_(CH.rawExpr<string>("SpanId").eq(opts.spanId), CH.lit("target"), CH.lit("related"))
+    : CH.lit("related")
+
+  return from(Traces)
+    .select(($) => ({
+      traceId: $.TraceId,
+      spanId: $.SpanId,
+      parentSpanId: $.ParentSpanId,
+      spanName: httpRewriteExpr,
+      serviceName: $.ServiceName,
+      spanKind: $.SpanKind,
+      durationMs: $.Duration.div(1000000),
+      startTime: $.Timestamp,
+      statusCode: $.StatusCode,
+      statusMessage: $.StatusMessage,
+      spanAttributes: CH.toJSONString($.SpanAttributes),
+      resourceAttributes: CH.toJSONString($.ResourceAttributes),
+      relationship: relationshipExpr,
+    }))
+    .where(($) => [
+      $.TraceId.eq(opts.traceId),
+      $.OrgId.eq(param.string("orgId")),
+    ])
+    .orderBy(["startTime", "asc"])
+    .format("JSON")
+    .withParams<SpanHierarchyParams>()
 }
 
 // ---------------------------------------------------------------------------
@@ -214,62 +221,51 @@ export interface TracesDurationStatsOutput {
   readonly p95DurationMs: number
 }
 
-export function tracesDurationStatsSQL(
+type TracesDurationStatsParams = { orgId: string; startTime: string; endTime: string }
+
+export function tracesDurationStatsQuery(
   opts: TracesDurationStatsOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<TracesDurationStatsOutput> {
-  const esc = escapeClickHouseString
+): CHQuery<any, TracesDurationStatsOutput, TracesDurationStatsParams> {
   const mm = opts.matchModes
-  const conditions: string[] = [
-    `OrgId = '${esc(params.orgId)}'`,
-    `Timestamp >= '${esc(params.startTime)}'`,
-    `Timestamp <= '${esc(params.endTime)}'`,
-  ]
 
-  if (opts.serviceName) {
-    conditions.push(
-      mm?.serviceName === "contains"
-        ? `positionCaseInsensitive(ServiceName, '${esc(opts.serviceName)}') > 0`
-        : `ServiceName = '${esc(opts.serviceName)}'`,
-    )
-  }
-  if (opts.spanName) {
-    conditions.push(
-      mm?.spanName === "contains"
-        ? `positionCaseInsensitive(SpanName, '${esc(opts.spanName)}') > 0`
-        : `SpanName = '${esc(opts.spanName)}'`,
-    )
-  }
-  if (opts.hasError) conditions.push("HasError = 1")
-  if (opts.minDurationMs != null) conditions.push(`Duration >= ${opts.minDurationMs} * 1000000`)
-  if (opts.maxDurationMs != null) conditions.push(`Duration <= ${opts.maxDurationMs} * 1000000`)
-  if (opts.httpMethod) conditions.push(`HttpMethod = '${esc(opts.httpMethod)}'`)
-  if (opts.httpStatusCode) conditions.push(`HttpStatusCode = '${esc(opts.httpStatusCode)}'`)
-  if (opts.deploymentEnv) {
-    conditions.push(
-      mm?.deploymentEnv === "contains"
-        ? `positionCaseInsensitive(DeploymentEnv, '${esc(opts.deploymentEnv)}') > 0`
-        : `DeploymentEnv = '${esc(opts.deploymentEnv)}'`,
-    )
-  }
-
-  const sql = `SELECT
-  min(Duration) / 1000000.0 AS minDurationMs,
-  max(Duration) / 1000000.0 AS maxDurationMs,
-  quantile(0.5)(Duration) / 1000000.0 AS p50DurationMs,
-  quantile(0.95)(Duration) / 1000000.0 AS p95DurationMs
-FROM trace_list_mv
-WHERE ${conditions.join("\n  AND ")}
-FORMAT JSON`
-
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<TracesDurationStatsOutput>,
-  }
+  return from(TraceListMv)
+    .select(($) => ({
+      minDurationMs: CH.min_($.Duration).div(1000000),
+      maxDurationMs: CH.max_($.Duration).div(1000000),
+      p50DurationMs: CH.quantile(0.5)($.Duration).div(1000000),
+      p95DurationMs: CH.quantile(0.95)($.Duration).div(1000000),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+      CH.when(opts.serviceName, (v: string) =>
+        mm?.serviceName === "contains"
+          ? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
+          : $.ServiceName.eq(v),
+      ),
+      CH.when(opts.spanName, (v: string) =>
+        mm?.spanName === "contains"
+          ? CH.positionCaseInsensitive($.SpanName, CH.lit(v)).gt(0)
+          : $.SpanName.eq(v),
+      ),
+      CH.whenTrue(!!opts.hasError, () => $.HasError.eq(1)),
+      CH.when(opts.minDurationMs, (v: number) => $.Duration.gte(v * 1000000)),
+      CH.when(opts.maxDurationMs, (v: number) => $.Duration.lte(v * 1000000)),
+      CH.when(opts.httpMethod, (v: string) => $.HttpMethod.eq(v)),
+      CH.when(opts.httpStatusCode, (v: string) => $.HttpStatusCode.eq(v)),
+      CH.when(opts.deploymentEnv, (v: string) =>
+        mm?.deploymentEnv === "contains"
+          ? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(v)).gt(0)
+          : $.DeploymentEnv.eq(v),
+      ),
+    ])
+    .format("JSON")
+    .withParams<TracesDurationStatsParams>()
 }
 
 // ---------------------------------------------------------------------------
-// Traces facets (raw SQL — 6 UNION ALL on trace_list_mv)
+// Traces facets (UNION ALL — 6 facet dimensions on trace_list_mv)
 // ---------------------------------------------------------------------------
 
 export interface TracesFacetsOpts {
@@ -300,104 +296,116 @@ export interface TracesFacetsOutput {
   readonly facetType: string
 }
 
-export function tracesFacetsSQL(
+type TracesFacetsParams = { orgId: string; startTime: string; endTime: string }
+
+export function tracesFacetsQuery(
   opts: TracesFacetsOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<TracesFacetsOutput> {
+): CHUnionQuery<TracesFacetsOutput, TracesFacetsParams> {
   const esc = escapeClickHouseString
-  const baseConditions: string[] = [
-    `OrgId = '${esc(params.orgId)}'`,
-    `Timestamp >= '${esc(params.startTime)}'`,
-    `Timestamp <= '${esc(params.endTime)}'`,
-  ]
 
-  if (opts.serviceName) {
-    baseConditions.push(
-      opts.matchModes?.serviceName === "contains"
-        ? `positionCaseInsensitive(ServiceName, '${esc(opts.serviceName)}') > 0`
-        : `ServiceName = '${esc(opts.serviceName)}'`,
-    )
-  }
-  if (opts.spanName) {
-    baseConditions.push(
-      opts.matchModes?.spanName === "contains"
-        ? `positionCaseInsensitive(SpanName, '${esc(opts.spanName)}') > 0`
-        : `SpanName = '${esc(opts.spanName)}'`,
-    )
-  }
-  if (opts.hasError) baseConditions.push("HasError = 1")
-  if (opts.minDurationMs != null) baseConditions.push(`Duration >= ${opts.minDurationMs} * 1000000`)
-  if (opts.maxDurationMs != null) baseConditions.push(`Duration <= ${opts.maxDurationMs} * 1000000`)
-  if (opts.httpMethod) baseConditions.push(`HttpMethod = '${esc(opts.httpMethod)}'`)
-  if (opts.httpStatusCode) baseConditions.push(`HttpStatusCode = '${esc(opts.httpStatusCode)}'`)
-  if (opts.deploymentEnv) {
-    baseConditions.push(
-      opts.matchModes?.deploymentEnv === "contains"
-        ? `positionCaseInsensitive(DeploymentEnv, '${esc(opts.deploymentEnv)}') > 0`
-        : `DeploymentEnv = '${esc(opts.deploymentEnv)}'`,
-    )
+  const baseWhere = ($: any): Array<CH.Condition | undefined> => {
+    const conditions: Array<CH.Condition | undefined> = [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+    ]
+
+    if (opts.serviceName) {
+      conditions.push(
+        opts.matchModes?.serviceName === "contains"
+          ? CH.positionCaseInsensitive($.ServiceName, CH.lit(opts.serviceName)).gt(0)
+          : $.ServiceName.eq(opts.serviceName),
+      )
+    }
+    if (opts.spanName) {
+      conditions.push(
+        opts.matchModes?.spanName === "contains"
+          ? CH.positionCaseInsensitive($.SpanName, CH.lit(opts.spanName)).gt(0)
+          : $.SpanName.eq(opts.spanName),
+      )
+    }
+    if (opts.hasError) conditions.push($.HasError.eq(1))
+    if (opts.minDurationMs != null) conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
+    if (opts.maxDurationMs != null) conditions.push($.Duration.lte(opts.maxDurationMs * 1000000))
+    if (opts.httpMethod) conditions.push($.HttpMethod.eq(opts.httpMethod))
+    if (opts.httpStatusCode) conditions.push($.HttpStatusCode.eq(opts.httpStatusCode))
+    if (opts.deploymentEnv) {
+      conditions.push(
+        opts.matchModes?.deploymentEnv === "contains"
+          ? CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(opts.deploymentEnv)).gt(0)
+          : $.DeploymentEnv.eq(opts.deploymentEnv),
+      )
+    }
+
+    // Attribute filter EXISTS subqueries (kept as rawCond — involves correlated subquery)
+    if (opts.attributeFilterKey) {
+      const matchExpr = opts.attributeFilterValueMatchMode === "contains"
+        ? `positionCaseInsensitive(t_attr.SpanAttributes['${esc(opts.attributeFilterKey)}'], '${esc(opts.attributeFilterValue ?? "")}') > 0`
+        : `t_attr.SpanAttributes['${esc(opts.attributeFilterKey)}'] = '${esc(opts.attributeFilterValue ?? "")}'`
+      conditions.push(CH.rawCond(`EXISTS (
+        SELECT 1 FROM traces AS t_attr
+        WHERE t_attr.TraceId = TraceId AND t_attr.OrgId = __PARAM_orgId__
+          AND t_attr.Timestamp >= __PARAM_startTime__
+          AND t_attr.Timestamp <= __PARAM_endTime__
+          AND ${matchExpr}
+      )`))
+    }
+    if (opts.resourceFilterKey) {
+      const matchExpr = opts.resourceFilterValueMatchMode === "contains"
+        ? `positionCaseInsensitive(t_res.ResourceAttributes['${esc(opts.resourceFilterKey)}'], '${esc(opts.resourceFilterValue ?? "")}') > 0`
+        : `t_res.ResourceAttributes['${esc(opts.resourceFilterKey)}'] = '${esc(opts.resourceFilterValue ?? "")}'`
+      conditions.push(CH.rawCond(`EXISTS (
+        SELECT 1 FROM traces AS t_res
+        WHERE t_res.TraceId = TraceId AND t_res.OrgId = __PARAM_orgId__
+          AND t_res.Timestamp >= __PARAM_startTime__
+          AND t_res.Timestamp <= __PARAM_endTime__
+          AND ${matchExpr}
+      )`))
+    }
+
+    return conditions
   }
 
-  // Attribute filter EXISTS subqueries
-  if (opts.attributeFilterKey) {
-    const matchExpr = opts.attributeFilterValueMatchMode === "contains"
-      ? `positionCaseInsensitive(t_attr.SpanAttributes['${esc(opts.attributeFilterKey)}'], '${esc(opts.attributeFilterValue ?? "")}') > 0`
-      : `t_attr.SpanAttributes['${esc(opts.attributeFilterKey)}'] = '${esc(opts.attributeFilterValue ?? "")}'`
-    baseConditions.push(`EXISTS (
-      SELECT 1 FROM traces AS t_attr
-      WHERE t_attr.TraceId = TraceId AND t_attr.OrgId = '${esc(params.orgId)}'
-        AND t_attr.Timestamp >= '${esc(params.startTime)}'
-        AND t_attr.Timestamp <= '${esc(params.endTime)}'
-        AND ${matchExpr}
-    )`)
-  }
-  if (opts.resourceFilterKey) {
-    const matchExpr = opts.resourceFilterValueMatchMode === "contains"
-      ? `positionCaseInsensitive(t_res.ResourceAttributes['${esc(opts.resourceFilterKey)}'], '${esc(opts.resourceFilterValue ?? "")}') > 0`
-      : `t_res.ResourceAttributes['${esc(opts.resourceFilterKey)}'] = '${esc(opts.resourceFilterValue ?? "")}'`
-    baseConditions.push(`EXISTS (
-      SELECT 1 FROM traces AS t_res
-      WHERE t_res.TraceId = TraceId AND t_res.OrgId = '${esc(params.orgId)}'
-        AND t_res.Timestamp >= '${esc(params.startTime)}'
-        AND t_res.Timestamp <= '${esc(params.endTime)}'
-        AND ${matchExpr}
-    )`)
-  }
+  const makeFacetQuery = (
+    colName: string,
+    facetType: string,
+    extraWhere?: ($: any) => CH.Condition,
+    limit = 50,
+  ) =>
+    from(TraceListMv)
+      .select(($) => ({
+        name: ($ as any)[colName] as CH.Expr<string>,
+        count: CH.count(),
+        facetType: CH.lit(facetType),
+      }))
+      .where(($) => [
+        ...baseWhere($),
+        extraWhere?.($),
+      ])
+      .groupBy("name")
+      .orderBy(["count", "desc"])
+      .limit(limit)
+      .withParams<TracesFacetsParams>()
 
-  const where = baseConditions.join("\n    AND ")
-
-  const facetQuery = (col: string, alias: string, facetType: string, extra?: string, limit = 50) =>
-    `SELECT ${col} AS name, count() AS count, '${facetType}' AS facetType
-FROM trace_list_mv
-WHERE ${where}${extra ? `\n    AND ${extra}` : ""}
-GROUP BY ${col}
-ORDER BY count DESC
-LIMIT ${limit}`
-
-  const sql = `${facetQuery("ServiceName", "name", "service")}
-UNION ALL
-${facetQuery("SpanName", "name", "spanName", "SpanName != ''", 20)}
-UNION ALL
-${facetQuery("HttpMethod", "name", "httpMethod", "HttpMethod != ''", 20)}
-UNION ALL
-${facetQuery("HttpStatusCode", "name", "httpStatus", "HttpStatusCode != ''", 20)}
-UNION ALL
-${facetQuery("DeploymentEnv", "name", "deploymentEnv", "DeploymentEnv != ''", 20)}
-UNION ALL
-SELECT 'error' AS name, count() AS count, 'errorCount' AS facetType
-FROM trace_list_mv
-WHERE ${where}
-    AND HasError = 1
-FORMAT JSON`
-
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<TracesFacetsOutput>,
-  }
+  return unionAll(
+    makeFacetQuery("ServiceName", "service"),
+    makeFacetQuery("SpanName", "spanName", ($) => $.SpanName.neq(""), 20),
+    makeFacetQuery("HttpMethod", "httpMethod", ($) => $.HttpMethod.neq(""), 20),
+    makeFacetQuery("HttpStatusCode", "httpStatus", ($) => $.HttpStatusCode.neq(""), 20),
+    makeFacetQuery("DeploymentEnv", "deploymentEnv", ($) => $.DeploymentEnv.neq(""), 20),
+    from(TraceListMv)
+      .select(() => ({
+        name: CH.lit("error"),
+        count: CH.count(),
+        facetType: CH.lit("errorCount"),
+      }))
+      .where(($) => [...baseWhere($), $.HasError.eq(1)])
+      .withParams<TracesFacetsParams>(),
+  ).format("JSON")
 }
 
 // ---------------------------------------------------------------------------
-// Errors facets (raw SQL — 3 UNION ALL facet subqueries)
+// Errors facets (UNION ALL — service + environment + error_type facets)
 // ---------------------------------------------------------------------------
 
 export interface ErrorsFacetsOpts {
@@ -413,70 +421,65 @@ export interface ErrorsFacetsOutput {
   readonly facetType: string
 }
 
-export function errorsFacetsSQL(
+type ErrorsFacetsParams = { orgId: string; startTime: string; endTime: string }
+
+export function errorsFacetsQuery(
   opts: ErrorsFacetsOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ErrorsFacetsOutput> {
-  const esc = escapeClickHouseString
-  const baseConditions: string[] = [
-    `OrgId = '${esc(params.orgId)}'`,
-    `Timestamp >= '${esc(params.startTime)}'`,
-    `Timestamp <= '${esc(params.endTime)}'`,
+): CHUnionQuery<ErrorsFacetsOutput, ErrorsFacetsParams> {
+  const baseWhere = ($: any): Array<CH.Condition | undefined> => [
+    $.OrgId.eq(param.string("orgId")),
+    $.Timestamp.gte(param.dateTime("startTime")),
+    $.Timestamp.lte(param.dateTime("endTime")),
+    CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
+    opts.services?.length
+      ? CH.inList($.ServiceName, opts.services)
+      : undefined,
+    opts.deploymentEnvs?.length
+      ? CH.inList($.DeploymentEnv, opts.deploymentEnvs)
+      : undefined,
+    opts.errorTypes?.length
+      ? CH.inList(CH.rawExpr<string>(ERROR_FINGERPRINT_SQL), opts.errorTypes)
+      : undefined,
   ]
-  if (opts.rootOnly) baseConditions.push("ParentSpanId = ''")
-  if (opts.services?.length) {
-    baseConditions.push(`ServiceName IN (${opts.services.map((s) => `'${esc(s)}'`).join(", ")})`)
-  }
-  if (opts.deploymentEnvs?.length) {
-    baseConditions.push(`DeploymentEnv IN (${opts.deploymentEnvs.map((e) => `'${esc(e)}'`).join(", ")})`)
-  }
-  if (opts.errorTypes?.length) {
-    baseConditions.push(`${ERROR_FINGERPRINT_SQL} IN (${opts.errorTypes.map((t) => `'${esc(t)}'`).join(", ")})`)
-  }
-  const where = baseConditions.join("\n    AND ")
 
-  const sql = `SELECT name, count, facetType FROM (
-SELECT
-  ServiceName AS name,
-  count() AS count,
-  'service' AS facetType
-FROM error_spans
-WHERE ${where}
-GROUP BY name
-ORDER BY count DESC
-LIMIT 100
+  const serviceQuery = from(ErrorSpans)
+    .select(($) => ({
+      name: $.ServiceName,
+      count: CH.count(),
+      facetType: CH.lit("service"),
+    }))
+    .where(baseWhere)
+    .groupBy("name")
+    .orderBy(["count", "desc"])
+    .limit(100)
+    .withParams<ErrorsFacetsParams>()
 
-UNION ALL
+  const envQuery = from(ErrorSpans)
+    .select(($) => ({
+      name: $.DeploymentEnv,
+      count: CH.count(),
+      facetType: CH.lit("environment"),
+    }))
+    .where(($) => [...baseWhere($), $.DeploymentEnv.neq("")])
+    .groupBy("name")
+    .orderBy(["count", "desc"])
+    .limit(100)
+    .withParams<ErrorsFacetsParams>()
 
-SELECT
-  DeploymentEnv AS name,
-  count() AS count,
-  'environment' AS facetType
-FROM error_spans
-WHERE ${where}
-  AND DeploymentEnv != ''
-GROUP BY name
-ORDER BY count DESC
-LIMIT 100
+  const errorTypeQuery = from(ErrorSpans)
+    .select(() => ({
+      name: CH.rawExpr<string>(ERROR_FINGERPRINT_SQL),
+      count: CH.count(),
+      facetType: CH.lit("error_type"),
+    }))
+    .where(baseWhere)
+    .groupBy("name")
+    .orderBy(["count", "desc"])
+    .limit(50)
+    .withParams<ErrorsFacetsParams>()
 
-UNION ALL
-
-SELECT
-  ${ERROR_FINGERPRINT_SQL} AS name,
-  count() AS count,
-  'error_type' AS facetType
-FROM error_spans
-WHERE ${where}
-GROUP BY name
-ORDER BY count DESC
-LIMIT 50
-)
-FORMAT JSON`
-
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<ErrorsFacetsOutput>,
-  }
+  return unionAll(serviceQuery, envQuery, errorTypeQuery)
+    .format("JSON")
 }
 
 // ---------------------------------------------------------------------------

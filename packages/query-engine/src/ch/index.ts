@@ -43,9 +43,28 @@ export {
   min_ as min,
   max_ as max,
   quantile,
+  any_ as any,
+  anyIf,
+  uniq,
+  sumIf,
+  groupUniqArray,
   toStartOfInterval,
+  toJSONString,
   if_,
+  concat,
+  round_,
+  intDiv,
   inList,
+  positionCaseInsensitive,
+  mapContains,
+  arrayStringConcat,
+  arrayFilter,
+  extract_ as extract,
+  toString_ as toString,
+  coalesce,
+  nullIf,
+  toFloat64OrZero,
+  toUInt16OrZero,
   rawExpr,
   rawCond,
   when,
@@ -64,7 +83,10 @@ export {
 } from "./query"
 
 // Compilation
-export { compileCH as compile, type CompiledQuery } from "./compile"
+export { compileCH as compile, compileUnion, type CompiledQuery } from "./compile"
+
+// Union
+export { unionAll, type CHUnionQuery } from "./union"
 
 // Tables
 export * as tables from "./tables"
@@ -88,8 +110,8 @@ export {
 // Queries — Attribute Keys & Values
 export {
   attributeKeysQuery,
-  spanAttributeValuesSQL,
-  resourceAttributeValuesSQL,
+  spanAttributeValuesQuery,
+  resourceAttributeValuesQuery,
   type AttributeKeysQueryOpts,
   type AttributeKeysOutput,
   type AttributeValuesOpts,
@@ -107,10 +129,11 @@ export {
   type MetricsRateTimeseriesOutput,
   type MetricsBreakdownOpts,
   type MetricsBreakdownOutput,
-  listMetricsSQL,
-  metricsSummarySQL,
+  listMetricsQuery,
+  metricsSummaryQuery,
   type ListMetricsOpts,
   type ListMetricsOutput,
+  type MetricsSummaryOpts,
   type MetricsSummaryOutput,
 } from "./queries/metrics"
 
@@ -119,8 +142,8 @@ export {
   logsTimeseriesQuery,
   logsBreakdownQuery,
   logsCountQuery,
-  logsListSQL,
-  logsFacetsSQL,
+  logsListQuery,
+  logsFacetsQuery,
   errorRateByServiceQuery,
   type LogsTimeseriesOpts,
   type LogsTimeseriesOutput,
@@ -139,7 +162,7 @@ export {
   serviceReleasesTimelineQuery,
   serviceApdexTimeseriesQuery,
   serviceUsageQuery,
-  servicesFacetsSQL,
+  servicesFacetsQuery,
   type ServiceOverviewOpts,
   type ServiceOverviewOutput,
   type ServiceReleasesTimelineOpts,
@@ -156,10 +179,10 @@ export {
   ERROR_FINGERPRINT_SQL,
   errorsByTypeQuery,
   errorsTimeseriesQuery,
-  spanHierarchySQL,
-  tracesDurationStatsSQL,
-  tracesFacetsSQL,
-  errorsFacetsSQL,
+  spanHierarchyQuery,
+  tracesDurationStatsQuery,
+  tracesFacetsQuery,
+  errorsFacetsQuery,
   errorsSummarySQL,
   errorDetailTracesSQL,
   type ErrorsByTypeOpts,

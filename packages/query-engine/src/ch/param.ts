@@ -32,6 +32,7 @@ function makeParamMarker<N extends string, T>(name: N, fragment: SqlFragment): P
     lte: () => { throw new Error(`Param '${name}' not resolved`) },
     like: () => { throw new Error(`Param '${name}' not resolved`) },
     notLike: () => { throw new Error(`Param '${name}' not resolved`) },
+    ilike: () => { throw new Error(`Param '${name}' not resolved`) },
     div: () => { throw new Error(`Param '${name}' not resolved`) },
     mul: () => { throw new Error(`Param '${name}' not resolved`) },
     add: () => { throw new Error(`Param '${name}' not resolved`) },
