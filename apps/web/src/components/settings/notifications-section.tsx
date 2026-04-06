@@ -3,7 +3,8 @@ import { Exit } from "effect"
 import { toast } from "sonner"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { useUser } from "@clerk/tanstack-react-start"
+import { UpsertDigestSubscriptionRequest } from "@maple/domain/http"
+import { useUser } from "@clerk/clerk-react"
 
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -12,7 +13,7 @@ import { cn } from "@maple/ui/utils"
 
 export function NotificationsSection() {
   const { user } = useUser()
-  const email = user?.primaryEmailAddress?.emailAddress ?? ""
+  const email = user?.primaryEmailAddress?.emailAddress
 
   const subscriptionQueryAtom = MapleApiAtomClient.query("digest", "getSubscription", {})
   const subscriptionResult = useAtomValue(subscriptionQueryAtom)
@@ -33,7 +34,6 @@ export function NotificationsSection() {
       setEnabled(subscriptionResult.value.enabled)
       setInitialized(true)
     } else if (!Result.isInitial(subscriptionResult)) {
-      // No subscription yet — default to enabled (opt-out model)
       setEnabled(true)
       setInitialized(true)
     }
@@ -46,8 +46,7 @@ export function NotificationsSection() {
     setIsSaving(true)
 
     const result = await upsertMutation({
-      email,
-      enabled: checked,
+      payload: new UpsertDigestSubscriptionRequest({ email, enabled: checked }),
     })
 
     if (Exit.isSuccess(result)) {
@@ -60,7 +59,7 @@ export function NotificationsSection() {
     setIsSaving(false)
   }
 
-  if (!initialized) {
+  if (!initialized || !user) {
     return (
       <div className="max-w-xl">
         <Skeleton className="h-16 w-full rounded-lg" />
@@ -88,7 +87,7 @@ export function NotificationsSection() {
         <Switch
           checked={enabled}
           onCheckedChange={handleToggle}
-          disabled={isSaving}
+          disabled={isSaving || !email}
         />
       </div>
     </div>

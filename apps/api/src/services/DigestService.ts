@@ -29,33 +29,35 @@ const toPersistenceError = (error: unknown) =>
     message: error instanceof Error ? `${error.message}` : `Digest persistence error: ${String(error)}`,
   })
 
-/** Row shapes for Tinybird query responses */
+/** Row shapes matching query engine output (camelCase from CH DSL) */
 interface ServiceOverviewRow {
-  service_name: string
-  total_count: number
-  error_count: number
-  p95_duration_ms: number
+  serviceName: string
+  throughput: number
+  errorCount: number
+  p95LatencyMs: number
 }
 
 interface ServiceUsageRow {
-  log_count: number
-  trace_count: number
-  sum_metric_count: number
-  gauge_metric_count: number
-  histogram_metric_count: number
-  exp_histogram_metric_count: number
-  log_size_bytes: number
-  trace_size_bytes: number
-  sum_metric_size_bytes: number
-  gauge_metric_size_bytes: number
-  histogram_metric_size_bytes: number
-  exp_histogram_metric_size_bytes: number
+  serviceName: string
+  totalLogCount: number
+  totalLogSizeBytes: number
+  totalTraceCount: number
+  totalTraceSizeBytes: number
+  totalSumMetricCount: number
+  totalSumMetricSizeBytes: number
+  totalGaugeMetricCount: number
+  totalGaugeMetricSizeBytes: number
+  totalHistogramMetricCount: number
+  totalHistogramMetricSizeBytes: number
+  totalExpHistogramMetricCount: number
+  totalExpHistogramMetricSizeBytes: number
+  totalSizeBytes: number
 }
 
 interface ErrorsByTypeRow {
-  error_fingerprint?: string
-  status_message?: string
-  error_count: number
+  errorType: string
+  sampleMessage: string
+  count: number
 }
 
 export class DigestService extends ServiceMap.Service<DigestService>()(
@@ -248,20 +250,20 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
         const prevOverviewData = previousOverview.data as Array<ServiceOverviewRow>
 
         const totalRequests = curOverviewData.reduce(
-          (sum, s) => sum + (Number(s.total_count) || 0),
+          (sum, s) => sum + (Number(s.throughput) || 0),
           0,
         )
         const prevTotalRequests = prevOverviewData.reduce(
-          (sum, s) => sum + (Number(s.total_count) || 0),
+          (sum, s) => sum + (Number(s.throughput) || 0),
           0,
         )
 
         const totalErrors = curOverviewData.reduce(
-          (sum, s) => sum + (Number(s.error_count) || 0),
+          (sum, s) => sum + (Number(s.errorCount) || 0),
           0,
         )
         const prevTotalErrors = prevOverviewData.reduce(
-          (sum, s) => sum + (Number(s.error_count) || 0),
+          (sum, s) => sum + (Number(s.errorCount) || 0),
           0,
         )
 
@@ -271,8 +273,8 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
             ? curOverviewData.reduce(
                 (sum, s) =>
                   sum +
-                  (Number(s.p95_duration_ms) || 0) *
-                    (Number(s.total_count) || 0),
+                  (Number(s.p95LatencyMs) || 0) *
+                    (Number(s.throughput) || 0),
                 0,
               ) / totalRequests
             : 0
@@ -281,8 +283,8 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
             ? prevOverviewData.reduce(
                 (sum, s) =>
                   sum +
-                  (Number(s.p95_duration_ms) || 0) *
-                    (Number(s.total_count) || 0),
+                  (Number(s.p95LatencyMs) || 0) *
+                    (Number(s.throughput) || 0),
                 0,
               ) / prevTotalRequests
             : 0
@@ -291,26 +293,26 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
         const curUsageData = currentUsage.data as Array<ServiceUsageRow>
         const prevUsageData = previousUsage.data as Array<ServiceUsageRow>
         const sumUsage = (data: Array<ServiceUsageRow>) => ({
-          logs: data.reduce((s, r) => s + (Number(r.log_count) || 0), 0),
-          traces: data.reduce((s, r) => s + (Number(r.trace_count) || 0), 0),
+          logs: data.reduce((s, r) => s + (Number(r.totalLogCount) || 0), 0),
+          traces: data.reduce((s, r) => s + (Number(r.totalTraceCount) || 0), 0),
           metrics: data.reduce(
             (s, r) =>
               s +
-              (Number(r.sum_metric_count) || 0) +
-              (Number(r.gauge_metric_count) || 0) +
-              (Number(r.histogram_metric_count) || 0) +
-              (Number(r.exp_histogram_metric_count) || 0),
+              (Number(r.totalSumMetricCount) || 0) +
+              (Number(r.totalGaugeMetricCount) || 0) +
+              (Number(r.totalHistogramMetricCount) || 0) +
+              (Number(r.totalExpHistogramMetricCount) || 0),
             0,
           ),
           totalBytes: data.reduce(
             (s, r) =>
               s +
-              (Number(r.log_size_bytes) || 0) +
-              (Number(r.trace_size_bytes) || 0) +
-              (Number(r.sum_metric_size_bytes) || 0) +
-              (Number(r.gauge_metric_size_bytes) || 0) +
-              (Number(r.histogram_metric_size_bytes) || 0) +
-              (Number(r.exp_histogram_metric_size_bytes) || 0),
+              (Number(r.totalLogSizeBytes) || 0) +
+              (Number(r.totalTraceSizeBytes) || 0) +
+              (Number(r.totalSumMetricSizeBytes) || 0) +
+              (Number(r.totalGaugeMetricSizeBytes) || 0) +
+              (Number(r.totalHistogramMetricSizeBytes) || 0) +
+              (Number(r.totalExpHistogramMetricSizeBytes) || 0),
             0,
           ),
         })
@@ -326,26 +328,26 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
         const services = curOverviewData
           .sort(
             (a, b) =>
-              (Number(b.total_count) || 0) - (Number(a.total_count) || 0),
+              (Number(b.throughput) || 0) - (Number(a.throughput) || 0),
           )
           .slice(0, 10)
           .map((s) => ({
-            name: String(s.service_name),
-            requests: Number(s.total_count) || 0,
+            name: String(s.serviceName),
+            requests: Number(s.throughput) || 0,
             errorRate:
-              (Number(s.total_count) || 0) > 0
-                ? ((Number(s.error_count) || 0) /
-                    (Number(s.total_count) || 0)) *
+              (Number(s.throughput) || 0) > 0
+                ? ((Number(s.errorCount) || 0) /
+                    (Number(s.throughput) || 0)) *
                   100
                 : 0,
-            p95Ms: Number(s.p95_duration_ms) || 0,
+            p95Ms: Number(s.p95LatencyMs) || 0,
           }))
 
         const errorsData = (topErrors.data as Array<ErrorsByTypeRow>)
           .slice(0, 5)
           .map((e) => ({
-            message: String(e.error_fingerprint || e.status_message || "Unknown"),
-            count: Number(e.error_count) || 0,
+            message: String(e.errorType || e.sampleMessage || "Unknown"),
+            count: Number(e.count) || 0,
           }))
 
         const startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)

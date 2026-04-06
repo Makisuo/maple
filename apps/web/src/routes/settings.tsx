@@ -119,7 +119,7 @@ export function SettingsPage() {
 
   // Build visible nav items based on permissions
   const visibleItems = allNavItems.filter((item) => {
-    if (item.id === "members" || item.id === "billing") return isClerkAuthEnabled
+    if (item.id === "members" || item.id === "billing" || item.id === "notifications") return isClerkAuthEnabled
     if (item.id === "data-platform") return canAccessDataPlatform
     return true
   })
