@@ -12,6 +12,8 @@ import { AuthorizationLive } from "./services/AuthorizationLive";
 import { CloudflareLogpushService } from "./services/CloudflareLogpushService";
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService";
 import { Database } from "./services/DatabaseLive";
+import { DigestService } from "./services/DigestService";
+import { EmailService } from "./services/EmailService";
 import { Env } from "./services/Env";
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService";
 import { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService";
@@ -62,11 +64,20 @@ const AlertsServiceLive = AlertsService.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(CoreServicesLive, QueryEngineServiceLive, AlertRuntime.Default)),
 )
 
+const EmailServiceLive = EmailService.layer.pipe(
+  Layer.provide(Env.layer),
+)
+
+const DigestServiceLive = DigestService.layer.pipe(
+  Layer.provideMerge(Layer.mergeAll(InfraLive, TinybirdServiceLive, EmailServiceLive)),
+)
+
 const MainLive = Layer.mergeAll(
   CoreServicesLive,
   TinybirdServiceLive,
   QueryEngineServiceLive,
   AlertsServiceLive,
+  DigestServiceLive,
 )
 
 const AllRoutes = Layer.mergeAll(
