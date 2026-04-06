@@ -1,7 +1,6 @@
 import { QueryEngineExecuteRequest, type MetricsMetric, type QuerySpec, type TracesMetric } from "@maple/query-engine"
 import { Effect, Schema } from "effect"
 
-import { getTinybird } from "@/lib/tinybird"
 import {
   buildBucketTimeline,
   computeBucketSeconds,
@@ -12,21 +11,17 @@ import {
   decodeInput,
   executeQueryEngine,
   invalidTinybirdInput,
-  runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
 import type {
   ServiceDetailTimeSeriesPoint,
   ServiceTimeSeriesPoint,
 } from "@/api/tinybird/services"
-import { parseSamplingThreshold } from "@/lib/sampling"
-
 const dateTimeString = TinybirdDateTimeString
 
 // SpanMetrics connector metric names — try namespaced first, then default
 const SPANMETRICS_CALLS_CANDIDATES = ["span.metrics.calls", "calls"]
 
 function querySpanMetricsCalls(
-  _tinybird: ReturnType<typeof getTinybird>,
   params: {
     service?: string
     start_time?: string
@@ -515,7 +510,55 @@ export function getCustomChartServiceDetail({
   return getCustomChartServiceDetailEffect({ data })
 }
 
-const getCustomChartServiceDetailEffect = Effect.fn("Tinybird.getCustomChartServiceDetail")(
+function makeTracesTimeseriesRequest(
+  metric: TracesMetric,
+  opts: {
+    startTime?: string
+    endTime?: string
+    bucketSeconds: number
+    serviceName?: string
+    rootSpansOnly?: boolean
+    environments?: string[]
+    commitShas?: string[]
+    groupBy?: string[]
+  },
+) {
+  return new QueryEngineExecuteRequest({
+    startTime: opts.startTime ?? "2020-01-01 00:00:00",
+    endTime: opts.endTime ?? "2099-12-31 23:59:59",
+    query: {
+      kind: "timeseries" as const,
+      source: "traces" as const,
+      metric,
+      groupBy: opts.groupBy as any,
+      filters: {
+        serviceName: opts.serviceName,
+        rootSpansOnly: opts.rootSpansOnly ?? true,
+        environments: opts.environments,
+        commitShas: opts.commitShas,
+      },
+      bucketSeconds: opts.bucketSeconds,
+    },
+  })
+}
+
+function extractSingleSeries(
+  response: { result: { kind: string; data: ReadonlyArray<{ bucket: string; series: Record<string, number> }> } },
+): Map<string, number> {
+  const map = new Map<string, number>()
+  if (response.result.kind !== "timeseries") return map
+  for (const point of (response.result as any).data) {
+    // Sum across all series keys (there's typically one or "all")
+    let total = 0
+    for (const v of Object.values(point.series)) {
+      total += Number(v)
+    }
+    map.set(point.bucket, total)
+  }
+  return map
+}
+
+const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartServiceDetail")(
   function* ({
     data,
   }: {
@@ -527,37 +570,47 @@ const getCustomChartServiceDetailEffect = Effect.fn("Tinybird.getCustomChartServ
       "getCustomChartServiceDetail",
     )
 
-    const tinybird = getTinybird()
     const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+    const reqOpts = {
+      startTime: input.startTime,
+      endTime: input.endTime,
+      bucketSeconds,
+      serviceName: input.serviceName,
+      rootSpansOnly: true,
+    }
 
-    const [tracesResult, metricsResult] = yield* Effect.all([
-      runTinybirdQuery("custom_traces_timeseries", () =>
-        tinybird.query.custom_traces_timeseries({
-          start_time: input.startTime,
-          end_time: input.endTime,
-          bucket_seconds: bucketSeconds,
-          service_name: input.serviceName,
-          root_only: "1",
-        }),
-      ),
-      querySpanMetricsCalls(tinybird, {
+    const [countRes, errorRateRes, p50Res, p95Res, p99Res, metricsResult] = yield* Effect.all([
+      executeQueryEngine("queryEngine.serviceDetail.count", makeTracesTimeseriesRequest("count", reqOpts)),
+      executeQueryEngine("queryEngine.serviceDetail.errorRate", makeTracesTimeseriesRequest("error_rate", reqOpts)),
+      executeQueryEngine("queryEngine.serviceDetail.p50", makeTracesTimeseriesRequest("p50_duration", reqOpts)),
+      executeQueryEngine("queryEngine.serviceDetail.p95", makeTracesTimeseriesRequest("p95_duration", reqOpts)),
+      executeQueryEngine("queryEngine.serviceDetail.p99", makeTracesTimeseriesRequest("p99_duration", reqOpts)),
+      querySpanMetricsCalls({
         service: input.serviceName,
         start_time: input.startTime,
         end_time: input.endTime,
         bucket_seconds: bucketSeconds,
       }),
-    ], { concurrency: 2 })
+    ], { concurrency: 6 })
+
+    const countMap = extractSingleSeries(countRes as any)
+    const errorRateMap = extractSingleSeries(errorRateRes as any)
+    const p50Map = extractSingleSeries(p50Res as any)
+    const p95Map = extractSingleSeries(p95Res as any)
+    const p99Map = extractSingleSeries(p99Res as any)
 
     const metricsMap = new Map(
       metricsResult.data.map((r) => [toIsoBucket(String(r.bucket)), Number(r.sumValue)]),
     )
 
-    const points = tracesResult.data.map((row): ServiceDetailTimeSeriesPoint => {
-      const rawCount = Number(row.count)
-      const bucket = toIsoBucket(row.bucket)
+    const allBuckets = new Set<string>()
+    for (const k of countMap.keys()) allBuckets.add(k)
+    for (const k of metricsMap.keys()) allBuckets.add(k)
+
+    const points = [...allBuckets].sort().map((bucket): ServiceDetailTimeSeriesPoint => {
+      const rawCount = countMap.get(bucket) ?? 0
       const metricsThroughput = metricsMap.get(bucket)
 
-      // Prefer SpanMetrics (exact) over TraceState extrapolation
       if (metricsThroughput != null && metricsThroughput > 0) {
         return {
           bucket,
@@ -565,32 +618,23 @@ const getCustomChartServiceDetailEffect = Effect.fn("Tinybird.getCustomChartServ
           tracedThroughput: rawCount,
           hasSampling: true,
           samplingWeight: rawCount > 0 ? metricsThroughput / rawCount : 1,
-          errorRate: Number(row.errorRate),
-          p50LatencyMs: Number(row.p50Duration),
-          p95LatencyMs: Number(row.p95Duration),
-          p99LatencyMs: Number(row.p99Duration),
+          errorRate: errorRateMap.get(bucket) ?? 0,
+          p50LatencyMs: p50Map.get(bucket) ?? 0,
+          p95LatencyMs: p95Map.get(bucket) ?? 0,
+          p99LatencyMs: p99Map.get(bucket) ?? 0,
         }
       }
 
-      // Fallback: TraceState-based extrapolation
-      const sampledCount = Number(row.sampledSpanCount)
-      const unsampledCount = Number(row.unsampledSpanCount)
-      const { weight } = parseSamplingThreshold(row.dominantThreshold || "")
-      const hasSampling = sampledCount > 0 && weight > 1.01
-      const estimatedCount = hasSampling
-        ? sampledCount * weight + unsampledCount
-        : rawCount
-
       return {
         bucket,
-        throughput: estimatedCount,
+        throughput: rawCount,
         tracedThroughput: rawCount,
-        hasSampling,
-        samplingWeight: weight,
-        errorRate: Number(row.errorRate),
-        p50LatencyMs: Number(row.p50Duration),
-        p95LatencyMs: Number(row.p95Duration),
-        p99LatencyMs: Number(row.p99Duration),
+        hasSampling: false,
+        samplingWeight: 1,
+        errorRate: errorRateMap.get(bucket) ?? 0,
+        p50LatencyMs: p50Map.get(bucket) ?? 0,
+        p95LatencyMs: p95Map.get(bucket) ?? 0,
+        p99LatencyMs: p99Map.get(bucket) ?? 0,
       }
     })
 
@@ -616,7 +660,7 @@ export function getOverviewTimeSeries({
   return getOverviewTimeSeriesEffect({ data })
 }
 
-const getOverviewTimeSeriesEffect = Effect.fn("Tinybird.getOverviewTimeSeries")(function* ({
+const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries")(function* ({
   data,
 }: {
   data: GetOverviewTimeSeriesInput
@@ -627,25 +671,33 @@ const getOverviewTimeSeriesEffect = Effect.fn("Tinybird.getOverviewTimeSeries")(
       "getOverviewTimeSeries",
     )
 
-    const tinybird = getTinybird()
     const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+    const reqOpts = {
+      startTime: input.startTime,
+      endTime: input.endTime,
+      bucketSeconds,
+      rootSpansOnly: true,
+      environments: input.environments,
+    }
 
-    const [tracesResult, metricsResult] = yield* Effect.all([
-      runTinybirdQuery("custom_traces_timeseries", () =>
-        tinybird.query.custom_traces_timeseries({
-          start_time: input.startTime,
-          end_time: input.endTime,
-          bucket_seconds: bucketSeconds,
-          root_only: "1",
-          environments: input.environments?.join(","),
-        }),
-      ),
-      querySpanMetricsCalls(tinybird, {
+    const [countRes, errorRateRes, p50Res, p95Res, p99Res, metricsResult] = yield* Effect.all([
+      executeQueryEngine("queryEngine.overview.count", makeTracesTimeseriesRequest("count", reqOpts)),
+      executeQueryEngine("queryEngine.overview.errorRate", makeTracesTimeseriesRequest("error_rate", reqOpts)),
+      executeQueryEngine("queryEngine.overview.p50", makeTracesTimeseriesRequest("p50_duration", reqOpts)),
+      executeQueryEngine("queryEngine.overview.p95", makeTracesTimeseriesRequest("p95_duration", reqOpts)),
+      executeQueryEngine("queryEngine.overview.p99", makeTracesTimeseriesRequest("p99_duration", reqOpts)),
+      querySpanMetricsCalls({
         start_time: input.startTime,
         end_time: input.endTime,
         bucket_seconds: bucketSeconds,
       }),
-    ], { concurrency: 2 })
+    ], { concurrency: 6 })
+
+    const countMap = extractSingleSeries(countRes as any)
+    const errorRateMap = extractSingleSeries(errorRateRes as any)
+    const p50Map = extractSingleSeries(p50Res as any)
+    const p95Map = extractSingleSeries(p95Res as any)
+    const p99Map = extractSingleSeries(p99Res as any)
 
     // SpanMetrics: aggregate across all services per bucket
     const metricsMap = new Map<string, number>()
@@ -654,9 +706,12 @@ const getOverviewTimeSeriesEffect = Effect.fn("Tinybird.getOverviewTimeSeries")(
       metricsMap.set(key, (metricsMap.get(key) ?? 0) + Number(r.sumValue))
     }
 
-    const points = tracesResult.data.map((row): ServiceDetailTimeSeriesPoint => {
-      const rawCount = Number(row.count)
-      const bucket = toIsoBucket(row.bucket)
+    const allBuckets = new Set<string>()
+    for (const k of countMap.keys()) allBuckets.add(k)
+    for (const k of metricsMap.keys()) allBuckets.add(k)
+
+    const points = [...allBuckets].sort().map((bucket): ServiceDetailTimeSeriesPoint => {
+      const rawCount = countMap.get(bucket) ?? 0
       const metricsThroughput = metricsMap.get(bucket)
 
       if (metricsThroughput != null && metricsThroughput > 0) {
@@ -666,31 +721,23 @@ const getOverviewTimeSeriesEffect = Effect.fn("Tinybird.getOverviewTimeSeries")(
           tracedThroughput: rawCount,
           hasSampling: true,
           samplingWeight: rawCount > 0 ? metricsThroughput / rawCount : 1,
-          errorRate: Number(row.errorRate),
-          p50LatencyMs: Number(row.p50Duration),
-          p95LatencyMs: Number(row.p95Duration),
-          p99LatencyMs: Number(row.p99Duration),
+          errorRate: errorRateMap.get(bucket) ?? 0,
+          p50LatencyMs: p50Map.get(bucket) ?? 0,
+          p95LatencyMs: p95Map.get(bucket) ?? 0,
+          p99LatencyMs: p99Map.get(bucket) ?? 0,
         }
       }
 
-      const sampledCount = Number(row.sampledSpanCount)
-      const unsampledCount = Number(row.unsampledSpanCount)
-      const { weight } = parseSamplingThreshold(row.dominantThreshold || "")
-      const hasSampling = sampledCount > 0 && weight > 1.01
-      const estimatedCount = hasSampling
-        ? sampledCount * weight + unsampledCount
-        : rawCount
-
       return {
         bucket,
-        throughput: estimatedCount,
+        throughput: rawCount,
         tracedThroughput: rawCount,
-        hasSampling,
-        samplingWeight: weight,
-        errorRate: Number(row.errorRate),
-        p50LatencyMs: Number(row.p50Duration),
-        p95LatencyMs: Number(row.p95Duration),
-        p99LatencyMs: Number(row.p99Duration),
+        hasSampling: false,
+        samplingWeight: 1,
+        errorRate: errorRateMap.get(bucket) ?? 0,
+        p50LatencyMs: p50Map.get(bucket) ?? 0,
+        p95LatencyMs: p95Map.get(bucket) ?? 0,
+        p99LatencyMs: p99Map.get(bucket) ?? 0,
       }
     })
 
@@ -718,7 +765,7 @@ export function getCustomChartServiceSparklines({
   return getCustomChartServiceSparklinesEffect({ data })
 }
 
-const getCustomChartServiceSparklinesEffect = Effect.fn("Tinybird.getCustomChartServiceSparklines")(
+const getCustomChartServiceSparklinesEffect = Effect.fn("QueryEngine.getCustomChartServiceSparklines")(
   function* ({
     data,
   }: {
@@ -730,27 +777,26 @@ const getCustomChartServiceSparklinesEffect = Effect.fn("Tinybird.getCustomChart
       "getCustomChartServiceSparklines",
     )
 
-    const tinybird = getTinybird()
     const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
+    const reqOpts = {
+      startTime: input.startTime,
+      endTime: input.endTime,
+      bucketSeconds,
+      rootSpansOnly: true,
+      environments: input.environments,
+      commitShas: input.commitShas,
+      groupBy: ["service"] as string[],
+    }
 
-    const [tracesResult, metricsResult] = yield* Effect.all([
-      runTinybirdQuery("custom_traces_timeseries", () =>
-        tinybird.query.custom_traces_timeseries({
-          start_time: input.startTime,
-          end_time: input.endTime,
-          bucket_seconds: bucketSeconds,
-          root_only: "1",
-          group_by_service: "1",
-          environments: input.environments?.join(","),
-          commit_shas: input.commitShas?.join(","),
-        }),
-      ),
-      querySpanMetricsCalls(tinybird, {
+    const [countRes, errorRateRes, metricsResult] = yield* Effect.all([
+      executeQueryEngine("queryEngine.sparklines.count", makeTracesTimeseriesRequest("count", reqOpts)),
+      executeQueryEngine("queryEngine.sparklines.errorRate", makeTracesTimeseriesRequest("error_rate", reqOpts)),
+      querySpanMetricsCalls({
         start_time: input.startTime,
         end_time: input.endTime,
         bucket_seconds: bucketSeconds,
       }),
-    ], { concurrency: 2 })
+    ], { concurrency: 3 })
 
     // SpanMetrics: keyed by "serviceName::bucket"
     const metricsMap = new Map<string, number>()
@@ -759,41 +805,62 @@ const getCustomChartServiceSparklinesEffect = Effect.fn("Tinybird.getCustomChart
       metricsMap.set(key, (metricsMap.get(key) ?? 0) + Number(r.sumValue))
     }
 
+    // Build per-service count and errorRate maps from grouped timeseries
+    const countByService = new Map<string, Map<string, number>>()
+    const errorRateByService = new Map<string, Map<string, number>>()
+
+    const extractGroupedSeries = (
+      response: typeof countRes,
+      target: Map<string, Map<string, number>>,
+    ) => {
+      if (response.result.kind !== "timeseries") return
+      for (const point of response.result.data) {
+        for (const [service, value] of Object.entries(point.series)) {
+          let serviceMap = target.get(service)
+          if (!serviceMap) {
+            serviceMap = new Map()
+            target.set(service, serviceMap)
+          }
+          serviceMap.set(point.bucket, Number(value))
+        }
+      }
+    }
+
+    extractGroupedSeries(countRes, countByService)
+    extractGroupedSeries(errorRateRes, errorRateByService)
+
     const timeline = buildBucketTimeline(input.startTime, input.endTime, bucketSeconds)
     const grouped: Record<string, ServiceTimeSeriesPoint[]> = {}
-    for (const row of tracesResult.data) {
-      const bucket = toIsoBucket(row.bucket)
-      const rawCount = Number(row.count)
-      const metricsKey = `${row.groupName}::${bucket}`
-      const metricsThroughput = metricsMap.get(metricsKey)
 
-      let throughput: number
-      let hasSampling: boolean
+    for (const [service, bucketCountMap] of countByService) {
+      const serviceErrorMap = errorRateByService.get(service) ?? new Map()
+      const points: ServiceTimeSeriesPoint[] = []
 
-      if (metricsThroughput != null && metricsThroughput > 0) {
-        throughput = metricsThroughput
-        hasSampling = true
-      } else {
-        const sampledCount = Number(row.sampledSpanCount)
-        const unsampledCount = Number(row.unsampledSpanCount)
-        const { weight } = parseSamplingThreshold(row.dominantThreshold || "")
-        hasSampling = sampledCount > 0 && weight > 1.01
-        throughput = hasSampling
-          ? sampledCount * weight + unsampledCount
-          : rawCount
+      for (const [bucket, rawCount] of bucketCountMap) {
+        const metricsKey = `${service}::${bucket}`
+        const metricsThroughput = metricsMap.get(metricsKey)
+
+        let throughput: number
+        let hasSampling: boolean
+
+        if (metricsThroughput != null && metricsThroughput > 0) {
+          throughput = metricsThroughput
+          hasSampling = true
+        } else {
+          throughput = rawCount
+          hasSampling = false
+        }
+
+        points.push({
+          bucket,
+          throughput,
+          tracedThroughput: rawCount,
+          hasSampling,
+          errorRate: serviceErrorMap.get(bucket) ?? 0,
+        })
       }
 
-      const point: ServiceTimeSeriesPoint = {
-        bucket,
-        throughput,
-        tracedThroughput: rawCount,
-        hasSampling,
-        errorRate: Number(row.errorRate),
-      }
-      if (!grouped[row.groupName]) {
-        grouped[row.groupName] = []
-      }
-      grouped[row.groupName].push(point)
+      grouped[service] = points
     }
 
     const filledGrouped = Object.fromEntries(

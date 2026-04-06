@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
-import { getTinybird, type ServiceDependenciesOutput } from "@/lib/tinybird"
+import { ServiceDependenciesRequest } from "@maple/domain/http"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { estimateThroughput } from "@/lib/sampling"
 import {
   TinybirdDateTimeString,
@@ -32,43 +33,56 @@ const GetServiceMapInputSchema = Schema.Struct({
 
 export type GetServiceMapInput = Schema.Schema.Type<typeof GetServiceMapInputSchema>
 
-function transformEdge(row: ServiceDependenciesOutput, durationSeconds: number): ServiceEdge {
-  const callCount = Number(row.callCount)
-  const errorCount = Number(row.errorCount)
-  const sampledSpanCount = Number(row.sampledSpanCount)
-  const unsampledSpanCount = Number(row.unsampledSpanCount)
-  const threshold = row.dominantThreshold || ""
+function transformEdge(row: Record<string, unknown>, durationSeconds: number): ServiceEdge {
+  const callCount = Number(row.callCount ?? 0)
+  const errorCount = Number(row.errorCount ?? 0)
+  const sampledSpanCount = Number(row.sampledSpanCount ?? 0)
+  const unsampledSpanCount = Number(row.unsampledSpanCount ?? 0)
+  const threshold = String(row.dominantThreshold ?? "")
   const sampling = estimateThroughput(sampledSpanCount, unsampledSpanCount, threshold, durationSeconds)
   const estimatedCallCount = sampling.hasSampling
     ? Math.round(sampling.estimated * durationSeconds)
     : callCount
   return {
-    sourceService: row.sourceService,
-    targetService: row.targetService,
+    sourceService: String(row.sourceService ?? ""),
+    targetService: String(row.targetService ?? ""),
     callCount,
     estimatedCallCount,
     errorCount,
     errorRate: callCount > 0 ? (errorCount / callCount) * 100 : 0,
-    avgDurationMs: Number(row.avgDurationMs),
-    p95DurationMs: Number(row.p95DurationMs),
+    avgDurationMs: Number(row.avgDurationMs ?? 0),
+    p95DurationMs: Number(row.p95DurationMs ?? 0),
     hasSampling: sampling.hasSampling,
     samplingWeight: sampling.weight,
   }
 }
 
-export const getServiceMap = Effect.fn("Tinybird.getServiceMap")(
+const defaultTimeRange = () => {
+  const now = new Date()
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
+  return { startTime: fmt(dayAgo), endTime: fmt(now) }
+}
+
+export const getServiceMap = Effect.fn("QueryEngine.getServiceMap")(
   function* ({
     data,
   }: {
     data: GetServiceMapInput
   }) {
     const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMap")
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("service_dependencies", () =>
-      tinybird.query.service_dependencies({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        deployment_env: input.deploymentEnv,
+    const fallback = defaultTimeRange()
+
+    const result = yield* runTinybirdQuery("serviceDependencies", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.serviceDependencies({
+          payload: new ServiceDependenciesRequest({
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            deploymentEnv: input.deploymentEnv,
+          }),
+        })
       }),
     )
 

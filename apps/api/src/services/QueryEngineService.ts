@@ -221,7 +221,7 @@ const validateTraceAttributeFilters = Effect.fn("QueryEngineService.validateTrac
   query: QuerySpec,
 ): Effect.fn.Return<void, QueryEngineValidationError> {
   if (query.source !== "traces") return
-  if (query.kind === "list" || query.kind === "attributeKeys") return
+  if (query.kind !== "timeseries" && query.kind !== "breakdown") return
 
   const details: string[] = []
   if (query.groupBy?.includes("attribute") && !query.filters?.groupByAttributeKeys?.length) {
@@ -416,6 +416,27 @@ const executeCHQuery = <Output extends Record<string, any>, Params extends Recor
   )
 }
 
+/** Compile a CHUnionQuery, execute it via Tinybird SQL, and return typed rows. */
+const executeCHUnionQuery = <Output extends Record<string, any>, Params extends Record<string, any>>(
+  tinybird: Pick<TinybirdServiceShape, "sqlQuery">,
+  tenant: TenantContext,
+  query: CH.CHUnionQuery<Output>,
+  params: Params,
+  context: string,
+): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {
+  const compiled = CH.compileUnion(query, params)
+  return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql), context).pipe(
+    Effect.map((rows) => compiled.castRows(rows)),
+    Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
+    Effect.withSpan("QueryEngineService.executeCHUnionQuery", {
+      attributes: {
+        "db.statement": truncateSql(compiled.sql),
+        "query.context": context,
+      },
+    }),
+  )
+}
+
 type QueryEngineTinybird = Pick<
   TinybirdServiceShape,
   | "sqlQuery"
@@ -531,6 +552,55 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
     attributeFilters: filters?.attributeFilters as AttrFilterArray | undefined,
     resourceAttributeFilters: filters?.resourceAttributeFilters as AttrFilterArray | undefined,
     groupByAttributeKeys: filters?.groupByAttributeKeys as string[] | undefined,
+  }
+}
+
+/**
+ * Map TracesFilters to the flat opts format expected by tracesFacetsQuery / tracesDurationStatsQuery.
+ * TracesFilters stores http filters as attributeFilters entries; facets opts want them as top-level fields.
+ */
+function extractTracesFacetsOpts(filters: Record<string, unknown> | undefined): CH.TracesFacetsOpts {
+  const attrFilters = (filters?.attributeFilters ?? []) as AttrFilterArray
+  const resFilters = (filters?.resourceAttributeFilters ?? []) as AttrFilterArray
+
+  const httpMethodFilter = attrFilters.find((f) => f.key === "http.method")
+  const httpStatusFilter = attrFilters.find((f) => f.key === "http.status_code")
+  const customAttr = attrFilters.find((f) => f.key !== "http.method" && f.key !== "http.status_code")
+  const customRes = resFilters[0]
+
+  const envs = filters?.environments as string[] | undefined
+
+  return {
+    serviceName: filters?.serviceName as string | undefined,
+    spanName: filters?.spanName as string | undefined,
+    hasError: filters?.errorsOnly as boolean | undefined,
+    minDurationMs: filters?.minDurationMs as number | undefined,
+    maxDurationMs: filters?.maxDurationMs as number | undefined,
+    httpMethod: httpMethodFilter?.value,
+    httpStatusCode: httpStatusFilter?.value,
+    deploymentEnv: envs?.[0],
+    matchModes: filters?.matchModes as CH.TracesFacetsOpts["matchModes"],
+    attributeFilterKey: customAttr?.key,
+    attributeFilterValue: customAttr?.value,
+    attributeFilterValueMatchMode: customAttr?.mode === "contains" ? "contains" : undefined,
+    resourceFilterKey: customRes?.key,
+    resourceFilterValue: customRes?.value,
+    resourceFilterValueMatchMode: customRes?.mode === "contains" ? "contains" : undefined,
+  }
+}
+
+function extractTracesDurationStatsOpts(filters: Record<string, unknown> | undefined): CH.TracesDurationStatsOpts {
+  const facetsOpts = extractTracesFacetsOpts(filters)
+  return {
+    serviceName: facetsOpts.serviceName,
+    spanName: facetsOpts.spanName,
+    hasError: facetsOpts.hasError,
+    minDurationMs: facetsOpts.minDurationMs,
+    maxDurationMs: facetsOpts.maxDurationMs,
+    httpMethod: facetsOpts.httpMethod,
+    httpStatusCode: facetsOpts.httpStatusCode,
+    deploymentEnv: facetsOpts.deploymentEnv,
+    matchModes: facetsOpts.matchModes,
   }
 }
 
@@ -933,6 +1003,147 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
             key: row.attributeKey,
             count: Number(row.usageCount),
           })),
+        },
+      })
+    }
+
+    // ---- Facets ----
+    if (request.query.kind === "facets") {
+      const baseParams = { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime }
+
+      if (request.query.source === "traces") {
+        const opts = extractTracesFacetsOpts(request.query.filters as Record<string, unknown> | undefined)
+        const rows = yield* executeCHUnionQuery(
+          tinybird, tenant, CH.tracesFacetsQuery(opts), baseParams,
+          "Failed to execute traces facets query",
+        )
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "facets", source: "traces",
+            data: rows.map((row) => ({ facetType: row.facetType, name: row.name, count: Number(row.count) })),
+          },
+        })
+      }
+
+      if (request.query.source === "logs") {
+        const filters = request.query.filters as Record<string, unknown> | undefined
+        const rows = yield* executeCHUnionQuery(
+          tinybird, tenant,
+          CH.logsFacetsQuery({
+            serviceName: filters?.serviceName as string | undefined,
+            severity: filters?.severity as string | undefined,
+          }),
+          baseParams,
+          "Failed to execute logs facets query",
+        )
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "facets", source: "logs",
+            data: rows.map((row) => ({
+              facetType: row.facetType,
+              name: row.facetType === "severity" ? row.severityText : row.serviceName,
+              count: Number(row.count),
+            })),
+          },
+        })
+      }
+
+      if (request.query.source === "errors") {
+        const filters = request.query.filters as Record<string, unknown> | undefined
+        const rows = yield* executeCHUnionQuery(
+          tinybird, tenant,
+          CH.errorsFacetsQuery({
+            rootOnly: filters?.rootOnly as boolean | undefined,
+            services: filters?.services as string[] | undefined,
+            deploymentEnvs: filters?.deploymentEnvs as string[] | undefined,
+            errorTypes: filters?.errorTypes as string[] | undefined,
+          }),
+          baseParams,
+          "Failed to execute errors facets query",
+        )
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "facets", source: "errors",
+            data: rows.map((row) => ({ facetType: row.facetType, name: row.name, count: Number(row.count) })),
+          },
+        })
+      }
+
+      if (request.query.source === "services") {
+        const rows = yield* executeCHUnionQuery(
+          tinybird, tenant, CH.servicesFacetsQuery(), baseParams,
+          "Failed to execute services facets query",
+        )
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "facets", source: "services",
+            data: rows.map((row) => ({ facetType: row.facetType, name: row.name, count: Number(row.count) })),
+          },
+        })
+      }
+    }
+
+    // ---- Stats ----
+    if (request.query.source === "traces" && request.query.kind === "stats") {
+      const opts = extractTracesDurationStatsOpts(request.query.filters as Record<string, unknown> | undefined)
+      const rows = yield* executeCHQuery(
+        tinybird, tenant, CH.tracesDurationStatsQuery(opts),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
+        "Failed to execute traces duration stats query",
+      )
+      const row = rows[0]
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "stats", source: "traces",
+          data: row
+            ? {
+                minDurationMs: Number(row.minDurationMs),
+                maxDurationMs: Number(row.maxDurationMs),
+                p50DurationMs: Number(row.p50DurationMs),
+                p95DurationMs: Number(row.p95DurationMs),
+              }
+            : { minDurationMs: 0, maxDurationMs: 0, p50DurationMs: 0, p95DurationMs: 0 },
+        },
+      })
+    }
+
+    // ---- Attribute Values ----
+    if (request.query.kind === "attributeValues") {
+      const queryFn = request.query.scope === "resource"
+        ? CH.resourceAttributeValuesQuery
+        : CH.spanAttributeValuesQuery
+      const rows = yield* executeCHQuery(
+        tinybird, tenant,
+        queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
+        `Failed to execute ${request.query.scope} attribute values query`,
+      )
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "attributeValues", source: "traces",
+          data: rows.map((row) => ({ value: row.attributeValue, count: Number(row.usageCount) })),
+        },
+      })
+    }
+
+    // ---- Count ----
+    if (request.query.source === "logs" && request.query.kind === "count") {
+      const filters = request.query.filters as Record<string, unknown> | undefined
+      const rows = yield* executeCHQuery(
+        tinybird, tenant,
+        CH.logsCountQuery({
+          serviceName: filters?.serviceName as string | undefined,
+          severity: filters?.severity as string | undefined,
+          traceId: filters?.traceId as string | undefined,
+          search: filters?.search as string | undefined,
+        }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
+        "Failed to execute logs count query",
+      )
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "count", source: "logs",
+          data: { total: rows[0] ? Number(rows[0].total) : 0 },
         },
       })
     }

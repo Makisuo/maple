@@ -104,20 +104,21 @@ describe("makeQueryEngineExecute", () => {
 
     expect(response.result.kind).toBe("timeseries")
     expect(response.result.source).toBe("traces")
-    expect(response.result.data).toHaveLength(4)
-    expect(response.result.data[0]).toEqual({
+    const data = response.result.data as ReadonlyArray<unknown>
+    expect(data).toHaveLength(4)
+    expect(data[0]).toEqual({
       bucket: "2026-01-01T00:00:00.000Z",
       series: { checkout: 2 },
     })
-    expect(response.result.data[1]).toEqual({
+    expect(data[1]).toEqual({
       bucket: "2026-01-01T00:05:00.000Z",
       series: {},
     })
-    expect(response.result.data[2]).toEqual({
+    expect(data[2]).toEqual({
       bucket: "2026-01-01T00:10:00.000Z",
       series: { checkout: 5 },
     })
-    expect(response.result.data[3]).toEqual({
+    expect(data[3]).toEqual({
       bucket: "2026-01-01T00:15:00.000Z",
       series: {},
     })
@@ -153,20 +154,21 @@ describe("makeQueryEngineExecute", () => {
 
     expect(response.result.kind).toBe("timeseries")
     expect(response.result.source).toBe("traces")
-    expect(response.result.data).toHaveLength(4)
-    expect(response.result.data[0]).toEqual({
+    const data = response.result.data as ReadonlyArray<unknown>
+    expect(data).toHaveLength(4)
+    expect(data[0]).toEqual({
       bucket: "2026-01-01T00:00:00.000Z",
       series: { checkout: 2 },
     })
-    expect(response.result.data[1]).toEqual({
+    expect(data[1]).toEqual({
       bucket: "2026-01-01T00:05:00.000Z",
       series: {},
     })
-    expect(response.result.data[2]).toEqual({
+    expect(data[2]).toEqual({
       bucket: "2026-01-01T00:10:00.000Z",
       series: { checkout: 5 },
     })
-    expect(response.result.data[3]).toEqual({
+    expect(data[3]).toEqual({
       bucket: "2026-01-01T00:15:00.000Z",
       series: {},
     })

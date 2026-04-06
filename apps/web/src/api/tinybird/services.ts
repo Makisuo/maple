@@ -1,5 +1,11 @@
 import { Effect, Schema } from "effect"
-import { getTinybird, type ServiceOverviewOutput, type ServicesFacetsOutput } from "@/lib/tinybird";
+import { QueryEngineExecuteRequest } from "@maple/query-engine"
+import {
+  ServiceOverviewRequest,
+  ServiceApdexRequest,
+  ServiceReleasesRequest,
+} from "@maple/domain/http"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
   buildBucketTimeline,
   computeBucketSeconds,
@@ -9,6 +15,8 @@ import { estimateThroughput } from "@/lib/sampling";
 import {
   TinybirdDateTimeString,
   decodeInput,
+  executeQueryEngine,
+  extractFacets,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
 
@@ -64,20 +72,20 @@ interface CoercedRow {
   dominantThreshold: string;
 }
 
-function coerceRow(raw: ServiceOverviewOutput): CoercedRow {
+function coerceRow(raw: Record<string, unknown>): CoercedRow {
   return {
-    serviceName: raw.serviceName,
-    environment: raw.environment || "unknown",
-    commitSha: raw.commitSha || "N/A",
-    spanCount: Number(raw.spanCount),
-    errorCount: Number(raw.errorCount),
-    totalCount: Number(raw.throughput),
-    p50LatencyMs: Number(raw.p50LatencyMs),
-    p95LatencyMs: Number(raw.p95LatencyMs),
-    p99LatencyMs: Number(raw.p99LatencyMs),
-    sampledSpanCount: Number(raw.sampledSpanCount),
-    unsampledSpanCount: Number(raw.unsampledSpanCount),
-    dominantThreshold: raw.dominantThreshold || "",
+    serviceName: String(raw.serviceName ?? ""),
+    environment: String(raw.environment ?? "unknown"),
+    commitSha: String(raw.commitSha ?? "N/A"),
+    spanCount: Number(raw.spanCount ?? 0),
+    errorCount: Number(raw.errorCount ?? 0),
+    totalCount: Number(raw.throughput ?? 0),
+    p50LatencyMs: Number(raw.p50LatencyMs ?? 0),
+    p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
+    p99LatencyMs: Number(raw.p99LatencyMs ?? 0),
+    sampledSpanCount: Number(raw.sampledSpanCount ?? 0),
+    unsampledSpanCount: Number(raw.unsampledSpanCount ?? 0),
+    dominantThreshold: String(raw.dominantThreshold ?? ""),
   };
 }
 
@@ -168,20 +176,25 @@ export function getServiceOverview({
   return getServiceOverviewEffect({ data })
 }
 
-const getServiceOverviewEffect = Effect.fn("Tinybird.getServiceOverview")(function* ({
+const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(function* ({
   data,
 }: {
   data: GetServiceOverviewInput
 }) {
     const input = yield* decodeInput(GetServiceOverviewInput, data ?? {}, "getServiceOverview")
+    const fallback = defaultServicesTimeRange()
 
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("service_overview", () =>
-      tinybird.query.service_overview({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        environments: input.environments?.join(","),
-        commit_shas: input.commitShas?.join(","),
+    const result = yield* runTinybirdQuery("serviceOverview", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.serviceOverview({
+          payload: new ServiceOverviewRequest({
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            environments: input.environments,
+            commitShas: input.commitShas,
+          }),
+        })
       }),
     )
 
@@ -271,23 +284,11 @@ const GetServicesFacetsInput = Schema.Struct({
 
 export type GetServicesFacetsInput = Schema.Schema.Type<typeof GetServicesFacetsInput>
 
-function transformServicesFacets(facetsData: ServicesFacetsOutput[]): ServicesFacets {
-  const environments: FacetItem[] = [];
-  const commitShas: FacetItem[] = [];
-
-  for (const row of facetsData) {
-    const item = { name: row.name, count: Number(row.count) };
-    switch (row.facetType) {
-      case "environment":
-        environments.push(item);
-        break;
-      case "commitSha":
-        commitShas.push(item);
-        break;
-    }
-  }
-
-  return { environments, commitShas };
+const defaultServicesTimeRange = () => {
+  const now = new Date()
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
+  return { startTime: fmt(dayAgo), endTime: fmt(now) }
 }
 
 export function getServicesFacets({
@@ -298,22 +299,38 @@ export function getServicesFacets({
   return getServicesFacetsEffect({ data })
 }
 
-const getServicesFacetsEffect = Effect.fn("Tinybird.getServicesFacets")(function* ({
+const getServicesFacetsEffect = Effect.fn("QueryEngine.getServicesFacets")(function* ({
   data,
 }: {
   data: GetServicesFacetsInput
 }) {
     const input = yield* decodeInput(GetServicesFacetsInput, data ?? {}, "getServicesFacets")
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("services_facets", () =>
-      tinybird.query.services_facets({
-        start_time: input.startTime,
-        end_time: input.endTime,
-      }),
-    )
+    const fallback = defaultServicesTimeRange()
+
+    const response = yield* executeQueryEngine("queryEngine.getServicesFacets", new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "facets" as const, source: "services" as const },
+    }))
+
+    const facetsData = extractFacets(response)
+    const environments: FacetItem[] = []
+    const commitShas: FacetItem[] = []
+
+    for (const row of facetsData) {
+      const item = { name: row.name, count: Number(row.count) }
+      switch (row.facetType) {
+        case "environment":
+          environments.push(item)
+          break
+        case "commitSha":
+          commitShas.push(item)
+          break
+      }
+    }
 
     return {
-      data: transformServicesFacets(result.data),
+      data: { environments, commitShas },
     }
 })
 
@@ -336,21 +353,27 @@ export function getServiceReleasesTimeline({
   return getServiceReleasesTimelineEffect({ data })
 }
 
-const getServiceReleasesTimelineEffect = Effect.fn("Tinybird.getServiceReleasesTimeline")(
+const getServiceReleasesTimelineEffect = Effect.fn("QueryEngine.getServiceReleasesTimeline")(
   function* ({
     data,
   }: {
     data: GetServiceDetailInput
   }) {
     const input = yield* decodeInput(GetServiceDetailInput, data, "getServiceReleasesTimeline")
-    const tinybird = getTinybird()
+    const fallback = defaultServicesTimeRange()
     const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
-    const result = yield* runTinybirdQuery("service_releases_timeline", () =>
-      tinybird.query.service_releases_timeline({
-        service_name: input.serviceName,
-        start_time: input.startTime,
-        end_time: input.endTime,
-        bucket_seconds: bucketSeconds,
+
+    const result = yield* runTinybirdQuery("serviceReleases", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.serviceReleases({
+          payload: new ServiceReleasesRequest({
+            serviceName: input.serviceName,
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            bucketSeconds,
+          }),
+        })
       }),
     )
 
@@ -407,21 +430,27 @@ export function getServiceApdexTimeSeries({
   return getServiceApdexTimeSeriesEffect({ data })
 }
 
-const getServiceApdexTimeSeriesEffect = Effect.fn("Tinybird.getServiceApdexTimeSeries")(
+const getServiceApdexTimeSeriesEffect = Effect.fn("QueryEngine.getServiceApdexTimeSeries")(
   function* ({
     data,
   }: {
     data: GetServiceDetailInput
   }) {
     const input = yield* decodeInput(GetServiceDetailInput, data, "getServiceApdexTimeSeries")
-    const tinybird = getTinybird()
+    const fallback = defaultServicesTimeRange()
     const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
-    const result = yield* runTinybirdQuery("service_apdex_time_series", () =>
-      tinybird.query.service_apdex_time_series({
-        service_name: input.serviceName,
-        start_time: input.startTime,
-        end_time: input.endTime,
-        bucket_seconds: bucketSeconds,
+
+    const result = yield* runTinybirdQuery("serviceApdex", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.serviceApdex({
+          payload: new ServiceApdexRequest({
+            serviceName: input.serviceName,
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            bucketSeconds,
+          }),
+        })
       }),
     )
 

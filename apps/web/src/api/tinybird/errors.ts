@@ -1,16 +1,17 @@
 import { Effect, Schema } from "effect"
+import { QueryEngineExecuteRequest } from "@maple/query-engine"
 import {
-  getTinybird,
-  type ErrorDetailTracesOutput,
-  type ErrorsByTypeOutput,
-  type ErrorsFacetsOutput,
-  type ErrorsSummaryOutput,
-  type ErrorsTimeseriesOutput,
-} from "@/lib/tinybird"
-import { getSpamPatternsParam } from "@/lib/spam-patterns"
+  ErrorsByTypeRequest,
+  ErrorsSummaryRequest,
+  ErrorDetailTracesRequest,
+  ErrorsTimeseriesRequest,
+} from "@maple/domain/http"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
   TinybirdDateTimeString,
   decodeInput,
+  executeQueryEngine,
+  extractFacets,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
 
@@ -42,17 +43,6 @@ const GetErrorsByTypeInputSchema = Schema.Struct({
 
 export type GetErrorsByTypeInput = Schema.Schema.Type<typeof GetErrorsByTypeInputSchema>
 
-function transformErrorByType(raw: ErrorsByTypeOutput): ErrorByType {
-  return {
-    errorType: raw.errorType,
-    sampleMessage: raw.sampleMessage,
-    count: Number(raw.count),
-    affectedServicesCount: Number(raw.affectedServicesCount),
-    firstSeen: new Date(raw.firstSeen),
-    lastSeen: new Date(raw.lastSeen),
-  }
-}
-
 export function getErrorsByType({
   data,
 }: {
@@ -61,29 +51,40 @@ export function getErrorsByType({
   return getErrorsByTypeEffect({ data })
 }
 
-const getErrorsByTypeEffect = Effect.fn("Tinybird.getErrorsByType")(function* ({
+const getErrorsByTypeEffect = Effect.fn("QueryEngine.getErrorsByType")(function* ({
   data,
 }: {
   data: GetErrorsByTypeInput
 }) {
     const input = yield* decodeInput(GetErrorsByTypeInputSchema, data ?? {}, "getErrorsByType")
-    const tinybird = getTinybird()
+    const fallback = defaultErrorsTimeRange()
 
-    const result = yield* runTinybirdQuery("errors_by_type", () =>
-      tinybird.query.errors_by_type({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        services: input.services?.join(","),
-        deployment_envs: input.deploymentEnvs?.join(","),
-        error_types: input.errorTypes?.join(","),
-        limit: input.limit,
-        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
-        root_only: input.rootOnly ? "1" : undefined,
+    const result = yield* runTinybirdQuery("errorsByType", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.errorsByType({
+          payload: new ErrorsByTypeRequest({
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            rootOnly: input.rootOnly,
+            services: input.services,
+            deploymentEnvs: input.deploymentEnvs,
+            errorTypes: input.errorTypes,
+            limit: input.limit,
+          }),
+        })
       }),
     )
 
     return {
-      data: result.data.map(transformErrorByType),
+      data: result.data.map((raw) => ({
+        errorType: raw.errorType,
+        sampleMessage: raw.sampleMessage,
+        count: Number(raw.count),
+        affectedServicesCount: Number(raw.affectedServicesCount),
+        firstSeen: new Date(raw.firstSeen),
+        lastSeen: new Date(raw.lastSeen),
+      })),
     }
 })
 
@@ -114,27 +115,11 @@ const GetErrorsFacetsInputSchema = Schema.Struct({
 
 export type GetErrorsFacetsInput = Schema.Schema.Type<typeof GetErrorsFacetsInputSchema>
 
-function transformErrorsFacets(facetsData: ErrorsFacetsOutput[]): ErrorsFacets {
-  const services: FacetItem[] = []
-  const deploymentEnvs: FacetItem[] = []
-  const errorTypes: FacetItem[] = []
-
-  for (const row of facetsData) {
-    const item = { name: row.name, count: Number(row.count) }
-    switch (row.facetType) {
-      case "service":
-        services.push(item)
-        break
-      case "deploymentEnv":
-        deploymentEnvs.push(item)
-        break
-      case "errorType":
-        errorTypes.push(item)
-        break
-    }
-  }
-
-  return { services, deploymentEnvs, errorTypes }
+const defaultErrorsTimeRange = () => {
+  const now = new Date()
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
+  return { startTime: fmt(dayAgo), endTime: fmt(now) }
 }
 
 export function getErrorsFacets({
@@ -145,28 +130,51 @@ export function getErrorsFacets({
   return getErrorsFacetsEffect({ data })
 }
 
-const getErrorsFacetsEffect = Effect.fn("Tinybird.getErrorsFacets")(function* ({
+const getErrorsFacetsEffect = Effect.fn("QueryEngine.getErrorsFacets")(function* ({
   data,
 }: {
   data: GetErrorsFacetsInput
 }) {
     const input = yield* decodeInput(GetErrorsFacetsInputSchema, data ?? {}, "getErrorsFacets")
-    const tinybird = getTinybird()
+    const fallback = defaultErrorsTimeRange()
 
-    const result = yield* runTinybirdQuery("errors_facets", () =>
-      tinybird.query.errors_facets({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        services: input.services?.join(","),
-        deployment_envs: input.deploymentEnvs?.join(","),
-        error_types: input.errorTypes?.join(","),
-        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
-        root_only: input.rootOnly ? "1" : undefined,
-      }),
-    )
+    const response = yield* executeQueryEngine("queryEngine.getErrorsFacets", new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: {
+        kind: "facets" as const,
+        source: "errors" as const,
+        filters: {
+          rootOnly: input.rootOnly,
+          services: input.services,
+          deploymentEnvs: input.deploymentEnvs,
+          errorTypes: input.errorTypes,
+        },
+      },
+    }))
+
+    const facetsData = extractFacets(response)
+    const services: FacetItem[] = []
+    const deploymentEnvs: FacetItem[] = []
+    const errorTypes: FacetItem[] = []
+
+    for (const row of facetsData) {
+      const item = { name: row.name, count: Number(row.count) }
+      switch (row.facetType) {
+        case "service":
+          services.push(item)
+          break
+        case "deploymentEnv":
+          deploymentEnvs.push(item)
+          break
+        case "errorType":
+          errorTypes.push(item)
+          break
+      }
+    }
 
     return {
-      data: transformErrorsFacets(result.data),
+      data: { services, deploymentEnvs, errorTypes },
     }
 })
 
@@ -194,16 +202,6 @@ const GetErrorsSummaryInputSchema = Schema.Struct({
 
 export type GetErrorsSummaryInput = Schema.Schema.Type<typeof GetErrorsSummaryInputSchema>
 
-function transformErrorsSummary(raw: ErrorsSummaryOutput): ErrorsSummary {
-  return {
-    totalErrors: Number(raw.totalErrors),
-    totalSpans: Number(raw.totalSpans),
-    errorRate: Number(raw.errorRate),
-    affectedServicesCount: Number(raw.affectedServicesCount),
-    affectedTracesCount: Number(raw.affectedTracesCount),
-  }
-}
-
 export function getErrorsSummary({
   data,
 }: {
@@ -212,29 +210,39 @@ export function getErrorsSummary({
   return getErrorsSummaryEffect({ data })
 }
 
-const getErrorsSummaryEffect = Effect.fn("Tinybird.getErrorsSummary")(function* ({
+const getErrorsSummaryEffect = Effect.fn("QueryEngine.getErrorsSummary")(function* ({
   data,
 }: {
   data: GetErrorsSummaryInput
 }) {
     const input = yield* decodeInput(GetErrorsSummaryInputSchema, data ?? {}, "getErrorsSummary")
-    const tinybird = getTinybird()
+    const fallback = defaultErrorsTimeRange()
 
-    const result = yield* runTinybirdQuery("errors_summary", () =>
-      tinybird.query.errors_summary({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        services: input.services?.join(","),
-        deployment_envs: input.deploymentEnvs?.join(","),
-        error_types: input.errorTypes?.join(","),
-        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
-        root_only: input.rootOnly ? "1" : undefined,
+    const result = yield* runTinybirdQuery("errorsSummary", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.errorsSummary({
+          payload: new ErrorsSummaryRequest({
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            rootOnly: input.rootOnly,
+            services: input.services,
+            deploymentEnvs: input.deploymentEnvs,
+            errorTypes: input.errorTypes,
+          }),
+        })
       }),
     )
 
-    const summary = result.data[0]
+    const summary = result.data
     return {
-      data: summary ? transformErrorsSummary(summary) : null,
+      data: summary ? {
+        totalErrors: Number(summary.totalErrors),
+        totalSpans: Number(summary.totalSpans),
+        errorRate: Number(summary.errorRate),
+        affectedServicesCount: Number(summary.affectedServicesCount),
+        affectedTracesCount: Number(summary.affectedTracesCount),
+      } : null,
     }
 })
 
@@ -264,18 +272,6 @@ const GetErrorDetailTracesInputSchema = Schema.Struct({
 
 export type GetErrorDetailTracesInput = Schema.Schema.Type<typeof GetErrorDetailTracesInputSchema>
 
-function transformErrorDetailTrace(raw: ErrorDetailTracesOutput): ErrorDetailTrace {
-  return {
-    traceId: raw.traceId,
-    startTime: new Date(raw.startTime),
-    durationMicros: Number(raw.durationMicros),
-    spanCount: Number(raw.spanCount),
-    services: raw.services,
-    rootSpanName: raw.rootSpanName,
-    errorMessage: raw.errorMessage,
-  }
-}
-
 export function getErrorDetailTraces({
   data,
 }: {
@@ -284,7 +280,7 @@ export function getErrorDetailTraces({
   return getErrorDetailTracesEffect({ data })
 }
 
-const getErrorDetailTracesEffect = Effect.fn("Tinybird.getErrorDetailTraces")(function* ({
+const getErrorDetailTracesEffect = Effect.fn("QueryEngine.getErrorDetailTraces")(function* ({
   data,
 }: {
   data: GetErrorDetailTracesInput
@@ -294,22 +290,34 @@ const getErrorDetailTracesEffect = Effect.fn("Tinybird.getErrorDetailTraces")(fu
       data ?? {},
       "getErrorDetailTraces",
     )
-    const tinybird = getTinybird()
+    const fallback = defaultErrorsTimeRange()
 
-    const result = yield* runTinybirdQuery("error_detail_traces", () =>
-      tinybird.query.error_detail_traces({
-        error_type: input.errorType,
-        start_time: input.startTime,
-        end_time: input.endTime,
-        services: input.services?.join(","),
-        limit: input.limit,
-        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
-        root_only: input.rootOnly ? "1" : undefined,
+    const result = yield* runTinybirdQuery("errorDetailTraces", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.errorDetailTraces({
+          payload: new ErrorDetailTracesRequest({
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            errorType: input.errorType,
+            rootOnly: input.rootOnly,
+            services: input.services,
+            limit: input.limit,
+          }),
+        })
       }),
     )
 
     return {
-      data: result.data.map(transformErrorDetailTrace),
+      data: result.data.map((raw) => ({
+        traceId: raw.traceId,
+        startTime: new Date(raw.startTime),
+        durationMicros: Number(raw.durationMicros),
+        spanCount: Number(raw.spanCount),
+        services: [...raw.services],
+        rootSpanName: raw.rootSpanName,
+        errorMessage: raw.errorMessage,
+      })),
     }
 })
 
@@ -329,13 +337,6 @@ const GetErrorsTimeseriesInputSchema = Schema.Struct({
 
 export type GetErrorsTimeseriesInput = Schema.Schema.Type<typeof GetErrorsTimeseriesInputSchema>
 
-function transformErrorsTimeseries(raw: ErrorsTimeseriesOutput): ErrorsTimeseriesItem {
-  return {
-    bucket: String(raw.bucket),
-    count: Number(raw.count),
-  }
-}
-
 export function getErrorsTimeseries({
   data,
 }: {
@@ -344,26 +345,33 @@ export function getErrorsTimeseries({
   return getErrorsTimeseriesEffect({ data })
 }
 
-const getErrorsTimeseriesEffect = Effect.fn("Tinybird.getErrorsTimeseries")(function* ({
+const getErrorsTimeseriesEffect = Effect.fn("QueryEngine.getErrorsTimeseries")(function* ({
   data,
 }: {
   data: GetErrorsTimeseriesInput
 }) {
     const input = yield* decodeInput(GetErrorsTimeseriesInputSchema, data ?? {}, "getErrorsTimeseries")
-    const tinybird = getTinybird()
+    const fallback = defaultErrorsTimeRange()
 
-    const result = yield* runTinybirdQuery("errors_timeseries", () =>
-      tinybird.query.errors_timeseries({
-        error_type: input.errorType,
-        start_time: input.startTime,
-        end_time: input.endTime,
-        services: input.services?.join(","),
-        bucket_seconds: input.bucketSeconds,
-        exclude_spam_patterns: getSpamPatternsParam(input.showSpam),
+    const result = yield* runTinybirdQuery("errorsTimeseries", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.errorsTimeseries({
+          payload: new ErrorsTimeseriesRequest({
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            errorType: input.errorType,
+            services: input.services,
+            bucketSeconds: input.bucketSeconds,
+          }),
+        })
       }),
     )
 
     return {
-      data: result.data.map(transformErrorsTimeseries),
+      data: result.data.map((raw) => ({
+        bucket: String(raw.bucket),
+        count: Number(raw.count),
+      })),
     }
 })

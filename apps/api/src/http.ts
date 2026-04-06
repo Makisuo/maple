@@ -12,8 +12,6 @@ import { HttpOrgTinybirdSettingsLive } from "./routes/org-tinybird-settings.http
 import { HttpQueryEngineLive } from "./routes/query-engine.http";
 import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http";
 import { HttpServiceDiscoveryLive } from "./routes/sd.http";
-import { HttpTinybirdLive } from "./routes/tinybird.http";
-
 export const HttpApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
   Layer.provide(HttpAuthPublicLive),
   Layer.provide(HttpAuthLive),
@@ -26,6 +24,5 @@ export const HttpApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
   Layer.provide(HttpOrgTinybirdSettingsLive),
   Layer.provide(HttpScrapeTargetsLive),
   Layer.provide(HttpServiceDiscoveryLive),
-  Layer.provide(HttpTinybirdLive),
   Layer.provide(HttpQueryEngineLive),
 );

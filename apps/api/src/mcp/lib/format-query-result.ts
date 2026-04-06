@@ -145,7 +145,11 @@ export function formatQueryResult(
     return { content: createDualContent(lines.join("\n"), structuredData) }
   }
 
-  // list results
-  lines.push(`Results: ${result.data.length}`)
+  // list / other results
+  if (Array.isArray(result.data)) {
+    lines.push(`Results: ${result.data.length}`)
+  } else {
+    lines.push(JSON.stringify(result.data, null, 2))
+  }
   return { content: [{ type: "text", text: lines.join("\n") }] }
 }
