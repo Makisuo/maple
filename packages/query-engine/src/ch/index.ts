@@ -32,12 +32,28 @@ export {
 // Table
 export { type Table, table } from "./table"
 
-// Expressions (only re-export what is actually used by queries or consumers)
+// Core expression primitives
 export {
   type Expr,
   type ColumnRef,
   type Condition,
   lit,
+  rawExpr,
+  rawCond,
+  when,
+  whenTrue,
+  inList,
+  exists,
+  inSubquery,
+  outerRef,
+} from "./expr"
+
+// Function factories (for extensibility by package consumers)
+export { defineFn, defineCondFn, compileFnCall, compileFnCallCond, makeExpr, makeCond } from "./define-fn"
+
+// ClickHouse functions (from category modules)
+export {
+  // Aggregate
   count,
   countIf,
   avg,
@@ -50,44 +66,43 @@ export {
   uniq,
   sumIf,
   groupUniqArray,
-  toStartOfInterval,
-  intervalSub,
-  toJSONString,
-  if_,
-  concat,
-  round_,
-  intDiv,
-  inList,
-  positionCaseInsensitive,
-  mapContains,
-  mapGet,
-  arrayStringConcat,
-  arrayFilter,
-  extract_ as extract,
+  // String
   toString_ as toString,
-  coalesce,
-  nullIf,
-  toFloat64OrZero,
-  toUInt16OrZero,
-  rawExpr,
-  rawCond,
-  when,
-  whenTrue,
-  arrayOf,
-  mapLiteral,
-  toUInt64,
-  toInt64,
-  multiIf,
+  positionCaseInsensitive,
   position_ as position,
   left_ as left,
   length_ as length,
   replaceOne,
+  extract_ as extract,
+  concat,
+  // Numeric
+  round_,
+  intDiv,
+  toFloat64OrZero,
+  toUInt16OrZero,
+  toUInt64,
+  toInt64,
   least_ as least,
   greatest_ as greatest,
-  exists,
-  inSubquery,
-  outerRef,
-} from "./expr"
+  // Date/time
+  toStartOfInterval,
+  intervalSub,
+  // Conditional
+  if_,
+  multiIf,
+  coalesce,
+  nullIf,
+  // Array
+  arrayOf,
+  arrayStringConcat,
+  arrayFilter,
+  // Map
+  mapContains,
+  mapGet,
+  mapLiteral,
+  // JSON
+  toJSONString,
+} from "./functions"
 
 // Params
 export { param, type ParamMarker } from "./param"
