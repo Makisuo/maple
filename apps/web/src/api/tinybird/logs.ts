@@ -68,8 +68,8 @@ function transformLog(raw: ListLogsOutput): Log {
     severityNumber: Number(raw.severityNumber),
     serviceName: raw.serviceName,
     body: raw.body,
-    traceId: toTraceId(raw.traceId),
-    spanId: toSpanId(raw.spanId),
+    traceId: raw.traceId ? toTraceId(raw.traceId) : ("" as TraceId),
+    spanId: raw.spanId ? toSpanId(raw.spanId) : ("" as SpanId),
     logAttributes: parseAttributes(raw.logAttributes),
     resourceAttributes: parseAttributes(raw.resourceAttributes),
   }
