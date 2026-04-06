@@ -1,26 +1,62 @@
 import { digestSubscriptions } from "@maple/db"
-import type {
-  DigestSubscriptionResponse,
-  DigestPreviewResponse,
-} from "@maple/domain/http"
 import {
   DigestNotConfiguredError,
+  DigestNotFoundError,
   DigestPersistenceError,
+  DigestPreviewResponse,
+  DigestRenderError,
+  DigestSubscriptionId,
+  DigestSubscriptionResponse,
+  OrgId,
+  UserId,
+  RoleName,
 } from "@maple/domain/http"
-import type { OrgId, UserId } from "@maple/domain/http"
+import type { OrgId as OrgIdType, RoleName as RoleNameType } from "@maple/domain/http"
 import { render } from "@react-email/components"
 import { and, eq } from "drizzle-orm"
-import { Cause, Effect, Layer, ServiceMap } from "effect"
+import { Array as Arr, Cause, Effect, Layer, ServiceMap } from "effect"
 import { WeeklyDigest, type WeeklyDigestProps } from "@maple/email/weekly-digest"
 import { Database } from "./DatabaseLive"
 import { EmailService } from "./EmailService"
 import { Env } from "./Env"
 import { TinybirdService } from "./TinybirdService"
 
+const SYSTEM_DIGEST_USER = UserId.makeUnsafe("system-digest")
+const ROOT_ROLE = RoleName.makeUnsafe("root")
+
 const toPersistenceError = (error: unknown) =>
   new DigestPersistenceError({
-    message: error instanceof Error ? error.message : "Digest persistence error",
+    message: error instanceof Error ? `${error.message}` : `Digest persistence error: ${String(error)}`,
   })
+
+/** Row shapes for Tinybird query responses */
+interface ServiceOverviewRow {
+  service_name: string
+  total_count: number
+  error_count: number
+  p95_duration_ms: number
+}
+
+interface ServiceUsageRow {
+  log_count: number
+  trace_count: number
+  sum_metric_count: number
+  gauge_metric_count: number
+  histogram_metric_count: number
+  exp_histogram_metric_count: number
+  log_size_bytes: number
+  trace_size_bytes: number
+  sum_metric_size_bytes: number
+  gauge_metric_size_bytes: number
+  histogram_metric_size_bytes: number
+  exp_histogram_metric_size_bytes: number
+}
+
+interface ErrorsByTypeRow {
+  error_fingerprint?: string
+  status_message?: string
+  error_count: number
+}
 
 export class DigestService extends ServiceMap.Service<DigestService>()(
   "DigestService",
@@ -33,6 +69,9 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
 
       const getSubscription = Effect.fn("DigestService.getSubscription")(
         function* (orgId: OrgId, userId: UserId) {
+          yield* Effect.annotateCurrentSpan("orgId", orgId)
+          yield* Effect.annotateCurrentSpan("userId", userId)
+
           const rows = yield* database
             .execute((db) =>
               db
@@ -50,11 +89,9 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
 
           const row = rows[0]
           if (!row) {
-            return yield* Effect.fail(
-              new DigestPersistenceError({
-                message: "No digest subscription found",
-              }),
-            )
+            return yield* new DigestNotFoundError({
+              message: "No digest subscription found",
+            })
           }
 
           return rowToResponse(row)
@@ -73,6 +110,9 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
           timezone?: string
         },
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
+        yield* Effect.annotateCurrentSpan("userId", userId)
+
         const now = Date.now()
         const id = crypto.randomUUID()
 
@@ -114,6 +154,9 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
       const deleteSubscription = Effect.fn(
         "DigestService.deleteSubscription",
       )(function* (orgId: OrgId, userId: UserId) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
+        yield* Effect.annotateCurrentSpan("userId", userId)
+
         yield* database
           .execute((db) =>
             db
@@ -131,6 +174,8 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
       const generateDigestData = Effect.fn(
         "DigestService.generateDigestData",
       )(function* (orgId: OrgId) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
+
         const now = new Date()
         const currentEnd = now.toISOString()
         const currentStart = new Date(
@@ -142,8 +187,8 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
 
         const systemTenant = {
           orgId,
-          userId: "system-digest" as UserId,
-          roles: ["root"] as any,
+          userId: SYSTEM_DIGEST_USER,
+          roles: [ROOT_ROLE] as ReadonlyArray<RoleNameType>,
           authMode: "self_hosted" as const,
         }
 
@@ -189,16 +234,18 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
           { concurrency: 6 },
         ).pipe(
           Effect.mapError(
-            () =>
+            (error) =>
               new DigestPersistenceError({
-                message: "Failed to fetch digest data from Tinybird",
+                message: `Failed to fetch digest data from Tinybird: ${error instanceof Error ? error.message : String(error)}`,
               }),
           ),
         )
 
+        void currentErrors
+
         // Aggregate service health
-        const curOverviewData = currentOverview.data as Array<Record<string, any>>
-        const prevOverviewData = previousOverview.data as Array<Record<string, any>>
+        const curOverviewData = currentOverview.data as Array<ServiceOverviewRow>
+        const prevOverviewData = previousOverview.data as Array<ServiceOverviewRow>
 
         const totalRequests = curOverviewData.reduce(
           (sum, s) => sum + (Number(s.total_count) || 0),
@@ -241,9 +288,9 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
             : 0
 
         // Data volume
-        const curUsageData = currentUsage.data as Array<Record<string, any>>
-        const prevUsageData = previousUsage.data as Array<Record<string, any>>
-        const sumUsage = (data: Array<Record<string, any>>) => ({
+        const curUsageData = currentUsage.data as Array<ServiceUsageRow>
+        const prevUsageData = previousUsage.data as Array<ServiceUsageRow>
+        const sumUsage = (data: Array<ServiceUsageRow>) => ({
           logs: data.reduce((s, r) => s + (Number(r.log_count) || 0), 0),
           traces: data.reduce((s, r) => s + (Number(r.trace_count) || 0), 0),
           metrics: data.reduce(
@@ -294,7 +341,7 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
             p95Ms: Number(s.p95_duration_ms) || 0,
           }))
 
-        const errorsData = (topErrors.data as Array<Record<string, any>>)
+        const errorsData = (topErrors.data as Array<ErrorsByTypeRow>)
           .slice(0, 5)
           .map((e) => ({
             message: String(e.error_fingerprint || e.status_message || "Unknown"),
@@ -334,6 +381,18 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
           unsubscribeUrl: `${env.MAPLE_APP_BASE_URL}/settings`,
         }
 
+        yield* Effect.annotateCurrentSpan("totalRequests", totalRequests)
+        yield* Effect.annotateCurrentSpan("totalErrors", totalErrors)
+        yield* Effect.annotateCurrentSpan("serviceCount", services.length)
+        yield* Effect.logInfo("Digest data generated").pipe(
+          Effect.annotateLogs({
+            orgId,
+            totalRequests,
+            totalErrors,
+            serviceCount: services.length,
+          }),
+        )
+
         return props
       })
 
@@ -342,7 +401,7 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
           return yield* Effect.tryPromise({
             try: () => render(WeeklyDigest(props)),
             catch: (error) =>
-              new DigestPersistenceError({
+              new DigestRenderError({
                 message:
                   error instanceof Error
                     ? error.message
@@ -355,9 +414,17 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
       const preview = Effect.fn("DigestService.preview")(function* (
         orgId: OrgId,
       ) {
+        yield* Effect.annotateCurrentSpan("orgId", orgId)
+
+        if (!email.isConfigured) {
+          return yield* new DigestNotConfiguredError({
+            message: "Email delivery is not configured",
+          })
+        }
+
         const props = yield* generateDigestData(orgId)
         const html = yield* renderDigestHtml(props)
-        return { html } as DigestPreviewResponse
+        return new DigestPreviewResponse({ html })
       })
 
       const runDigestTick = Effect.fn("DigestService.runDigestTick")(
@@ -391,56 +458,66 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
           }
 
           // Group by org to avoid duplicate Tinybird queries
-          const byOrg = new Map<string, typeof dueSubs>()
-          for (const sub of dueSubs) {
-            const existing = byOrg.get(sub.orgId) ?? []
-            existing.push(sub)
-            byOrg.set(sub.orgId, existing)
-          }
+          const byOrg = Arr.groupBy(dueSubs, (s) => s.orgId)
 
-          let sentCount = 0
-          let errorCount = 0
+          const results = yield* Effect.forEach(
+            Object.entries(byOrg),
+            ([rawOrgId, orgSubs]) =>
+              Effect.gen(function* () {
+                const orgId = OrgId.makeUnsafe(rawOrgId)
+                const props = yield* generateDigestData(orgId)
+                const html = yield* renderDigestHtml(props)
 
-          for (const [orgId, orgSubs] of byOrg) {
-            const sendForOrg = Effect.gen(function* () {
-              const props = yield* generateDigestData(orgId as OrgId)
-              const html = yield* renderDigestHtml(props)
-
-              for (const sub of orgSubs) {
-                yield* email
-                  .send(
-                    sub.email,
-                    `Maple Weekly Digest — ${props.dateRange.start} to ${props.dateRange.end}`,
-                    html,
-                  )
-                  .pipe(
-                    Effect.tap(() =>
-                      database.execute((db) =>
-                        db
-                          .update(digestSubscriptions)
-                          .set({ lastSentAt: Date.now() })
-                          .where(eq(digestSubscriptions.id, sub.id)),
+                const sendResults = yield* Effect.forEach(
+                  orgSubs,
+                  (sub) =>
+                    email
+                      .send(
+                        sub.email,
+                        `Maple Weekly Digest — ${props.dateRange.start} to ${props.dateRange.end}`,
+                        html,
+                      )
+                      .pipe(
+                        Effect.tap(() =>
+                          database.execute((db) =>
+                            db
+                              .update(digestSubscriptions)
+                              .set({ lastSentAt: Date.now() })
+                              .where(eq(digestSubscriptions.id, sub.id)),
+                          ),
+                        ),
+                        Effect.match({
+                          onSuccess: () => ({ sent: true }),
+                          onFailure: () => ({ sent: false }),
+                        }),
                       ),
-                    ),
-                    Effect.match({
-                      onSuccess: () => { sentCount++ },
-                      onFailure: () => { errorCount++ },
+                  { concurrency: 1 },
+                )
+
+                return sendResults
+              }).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("Digest failed for org").pipe(
+                    Effect.annotateLogs({
+                      orgId: rawOrgId,
+                      error: Cause.pretty(cause),
                     }),
-                  )
-              }
-            }).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logError("Digest failed for org").pipe(
-                  Effect.annotateLogs({ orgId, error: Cause.pretty(cause) }),
-                  Effect.tap(() =>
-                    Effect.sync(() => { errorCount += orgSubs.length }),
+                    Effect.map(() =>
+                      orgSubs.map(() => ({ sent: false })),
+                    ),
                   ),
                 ),
               ),
-            )
+            { concurrency: 1 },
+          )
 
-            yield* sendForOrg
-          }
+          const allResults = results.flat()
+          const sentCount = allResults.filter((r) => r.sent).length
+          const errorCount = allResults.filter((r) => !r.sent).length
+
+          yield* Effect.annotateCurrentSpan("sentCount", sentCount)
+          yield* Effect.annotateCurrentSpan("errorCount", errorCount)
+          yield* Effect.annotateCurrentSpan("orgCount", Object.keys(byOrg).length)
 
           return { sentCount, errorCount, skipped: false }
         },
@@ -456,16 +533,14 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make)
-  static readonly Live = this.layer
-  static readonly Default = this.layer
+  static readonly Default = Layer.effect(this, this.make)
 }
 
 function rowToResponse(
   row: typeof digestSubscriptions.$inferSelect,
 ): DigestSubscriptionResponse {
-  return {
-    id: row.id,
+  return new DigestSubscriptionResponse({
+    id: DigestSubscriptionId.makeUnsafe(row.id),
     email: row.email,
     enabled: row.enabled === 1,
     dayOfWeek: row.dayOfWeek,
@@ -473,5 +548,5 @@ function rowToResponse(
     lastSentAt: row.lastSentAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-  } as DigestSubscriptionResponse
+  })
 }

@@ -14,6 +14,7 @@ import { IngestionSection } from "@/components/settings/ingestion-section"
 import { ApiKeysSection } from "@/components/settings/api-keys-section"
 import { McpSection } from "@/components/settings/mcp-section"
 import { ConnectorsSection } from "@/components/settings/connectors-section"
+import { NotificationsSection } from "@/components/settings/notifications-section"
 import { OrgTinybirdSettingsSection } from "@/components/settings/org-tinybird-settings-section"
 import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -21,6 +22,7 @@ import {
   UserIcon,
   ServerIcon,
   KeyIcon,
+  BellIcon,
   CreditCardIcon,
   DatabaseIcon,
   CodeIcon,
@@ -28,7 +30,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 
-const tabValues = ["members", "ingestion", "api-keys", "mcp", "connectors", "billing", "data-platform"] as const
+const tabValues = ["members", "ingestion", "api-keys", "mcp", "connectors", "notifications", "billing", "data-platform"] as const
 type SettingsTab = (typeof tabValues)[number]
 
 const SettingsSearch = Schema.Struct({
@@ -53,6 +55,7 @@ const allNavItems: NavItem[] = [
   { id: "api-keys", label: "API Keys", icon: KeyIcon },
   { id: "mcp", label: "MCP", icon: CodeIcon },
   { id: "connectors", label: "Connectors", icon: DatabaseIcon },
+  { id: "notifications", label: "Notifications", icon: BellIcon },
   { id: "billing", label: "Billing", icon: CreditCardIcon },
   { id: "data-platform", label: "Data Platform", icon: DatabaseIcon },
 ]
@@ -96,6 +99,7 @@ const tabLabels: Record<SettingsTab, string> = {
   "api-keys": "API Keys",
   mcp: "MCP",
   connectors: "Connectors",
+  notifications: "Notifications",
   billing: "Billing",
   "data-platform": "Data Platform",
 }
@@ -179,6 +183,7 @@ export function SettingsPage() {
       {activeTab === "api-keys" && <ApiKeysSection />}
       {activeTab === "mcp" && <McpSection />}
       {activeTab === "connectors" && <ConnectorsSection />}
+      {activeTab === "notifications" && <NotificationsSection />}
       {activeTab === "billing" && <BillingSection />}
       {activeTab === "data-platform" && (
         <OrgTinybirdSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessDataPlatform} />

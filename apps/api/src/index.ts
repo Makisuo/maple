@@ -37,7 +37,7 @@ const DocsRoute = HttpApiScalar.layer(MapleApi, {
 });
 
 const InfraLive = Database.layer.pipe(
-  Layer.provideMerge(Env.layer),
+  Layer.provideMerge(Env.Default),
 )
 
 const CoreServicesLive = Layer.mergeAll(
@@ -64,11 +64,11 @@ const AlertsServiceLive = AlertsService.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(CoreServicesLive, QueryEngineServiceLive, AlertRuntime.Default)),
 )
 
-const EmailServiceLive = EmailService.layer.pipe(
-  Layer.provide(Env.layer),
+const EmailServiceLive = EmailService.Default.pipe(
+  Layer.provide(Env.Default),
 )
 
-const DigestServiceLive = DigestService.layer.pipe(
+const DigestServiceLive = DigestService.Default.pipe(
   Layer.provideMerge(Layer.mergeAll(InfraLive, TinybirdServiceLive, EmailServiceLive)),
 )
 
@@ -116,7 +116,7 @@ const RuntimeLive = Layer.mergeAll(
 const app = HttpRouter.serve(AllRoutes).pipe(
   Layer.provide(RuntimeLive),
   Layer.provide(MainLive),
-  Layer.provide(AuthorizationLive.pipe(Layer.provideMerge(Env.layer))),
+  Layer.provide(AuthorizationLive.pipe(Layer.provideMerge(Env.Default))),
 );
 
 BunRuntime.runMain(app.pipe(Layer.launch as never));

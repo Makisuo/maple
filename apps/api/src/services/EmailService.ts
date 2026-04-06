@@ -34,6 +34,10 @@ export class EmailService extends ServiceMap.Service<EmailService, EmailServiceS
         subject: string,
         html: string,
       ) {
+        yield* Effect.annotateCurrentSpan("email.to", to)
+        yield* Effect.annotateCurrentSpan("email.subject", subject)
+        yield* Effect.annotateCurrentSpan("email.provider", "resend")
+
         if (Option.isNone(apiKey)) {
           return yield* Effect.fail(
             new EmailDeliveryError({
@@ -75,6 +79,8 @@ export class EmailService extends ServiceMap.Service<EmailService, EmailServiceS
           }),
         )
 
+        yield* Effect.annotateCurrentSpan("http.status_code", response.status)
+
         if (!response.ok) {
           const body = yield* Effect.tryPromise({
             try: () => response.text(),
@@ -83,19 +89,24 @@ export class EmailService extends ServiceMap.Service<EmailService, EmailServiceS
                 message: `Resend API returned ${response.status}`,
               }),
           })
+          yield* Effect.logError("Email delivery failed").pipe(
+            Effect.annotateLogs({ to, subject, status: response.status, body }),
+          )
           return yield* Effect.fail(
             new EmailDeliveryError({
               message: `Resend API returned ${response.status}: ${body}`,
             }),
           )
         }
+
+        yield* Effect.logInfo("Email sent successfully").pipe(
+          Effect.annotateLogs({ to, subject }),
+        )
       })
 
       return { isConfigured, send }
     }),
   },
 ) {
-  static readonly layer = Layer.effect(this, this.make)
-  static readonly Live = this.layer
-  static readonly Default = this.layer
+  static readonly Default = Layer.effect(this, this.make)
 }

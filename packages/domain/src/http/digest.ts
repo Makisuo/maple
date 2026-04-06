@@ -65,18 +65,26 @@ export class DigestNotConfiguredError extends Schema.TaggedErrorClass<DigestNotC
   { httpApiStatus: 501 },
 ) {}
 
+export class DigestRenderError extends Schema.TaggedErrorClass<DigestRenderError>()(
+  "@maple/http/errors/DigestRenderError",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 500 },
+) {}
+
 export class DigestApiGroup extends HttpApiGroup.make("digest")
   .add(
     HttpApiEndpoint.get("getSubscription", "/", {
       success: DigestSubscriptionResponse,
-      error: DigestPersistenceError,
+      error: [DigestPersistenceError, DigestNotFoundError],
     }),
   )
   .add(
     HttpApiEndpoint.post("upsertSubscription", "/", {
       payload: UpsertDigestSubscriptionRequest,
       success: DigestSubscriptionResponse,
-      error: DigestPersistenceError,
+      error: [DigestPersistenceError, DigestNotFoundError],
     }),
   )
   .add(
@@ -88,7 +96,7 @@ export class DigestApiGroup extends HttpApiGroup.make("digest")
   .add(
     HttpApiEndpoint.post("preview", "/preview", {
       success: DigestPreviewResponse,
-      error: [DigestPersistenceError, DigestNotConfiguredError],
+      error: [DigestPersistenceError, DigestNotConfiguredError, DigestRenderError],
     }),
   )
   .prefix("/api/digest")

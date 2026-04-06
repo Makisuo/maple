@@ -38,7 +38,7 @@ const AlertsServiceLive = AlertsService.Live.pipe(
   Layer.provide(AlertsDependenciesLive),
 )
 
-const EmailServiceLive = EmailService.Live.pipe(
+const EmailServiceLive = EmailService.Default.pipe(
   Layer.provide(Env.Default),
 )
 
@@ -48,7 +48,7 @@ const DigestDependenciesLive = Layer.mergeAll(
   EmailServiceLive,
 )
 
-const DigestServiceLive = DigestService.Live.pipe(
+const DigestServiceLive = DigestService.Default.pipe(
   Layer.provide(DigestDependenciesLive),
 )
 
@@ -111,11 +111,21 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo("Alerting worker started")
 
   // Run digest loop detached, alert loop in foreground
-  yield* digestLoop.pipe(Effect.ignore, Effect.forkDetach)
+  yield* digestLoop.pipe(
+    Effect.catchCause((cause) =>
+      Effect.logError("Digest loop terminated unexpectedly").pipe(
+        Effect.annotateLogs({ error: Cause.pretty(cause) }),
+      ),
+    ),
+    Effect.forkDetach,
+  )
   yield* alertLoop
 }).pipe(
-  Effect.provide(Layer.mergeAll(AlertsServiceLive, DigestServiceLive)),
-  Effect.provide(TelemetryLive),
+  Effect.provide(
+    Layer.mergeAll(AlertsServiceLive, DigestServiceLive).pipe(
+      Layer.provide(TelemetryLive),
+    ),
+  ),
 )
 
 BunRuntime.runMain(program)
