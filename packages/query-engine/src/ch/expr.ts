@@ -211,6 +211,15 @@ export function toStartOfInterval(
   return makeExpr<string>(raw(`toStartOfInterval(${compile(col.toFragment())}, INTERVAL ${secStr} SECOND)`))
 }
 
+/** Subtract an interval: `expr - INTERVAL n SECOND` */
+export function intervalSub(
+  col: Expr<string>,
+  seconds: number | Expr<number>,
+): Expr<string> {
+  const secStr = typeof seconds === "number" ? String(Math.round(seconds)) : compile((seconds as Expr<number>).toFragment())
+  return makeExpr<string>(raw(`${compile(col.toFragment())} - INTERVAL ${secStr} SECOND`))
+}
+
 export function if_<T>(
   cond: Condition,
   then_: Expr<T>,

@@ -49,6 +49,7 @@ export {
   sumIf,
   groupUniqArray,
   toStartOfInterval,
+  intervalSub,
   toJSONString,
   if_,
   concat,

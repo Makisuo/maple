@@ -191,7 +191,7 @@ export function metricsTimeseriesRateQuery(
         $.MetricName.eq(param.string("metricName")),
         $.OrgId.eq(param.string("orgId")),
         CH.dynamicColumn<number>("IsMonotonic").eq(1),
-        CH.rawCond(`TimeUnix >= __PARAM_startTime__ - INTERVAL __PARAM_bucketSeconds__ SECOND`),
+        $.TimeUnix.gte(CH.intervalSub(param.dateTime("startTime"), param.int("bucketSeconds"))),
         $.TimeUnix.lte(param.dateTime("endTime")),
         CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
         CH.when(opts.attributeKey, (k: string) =>

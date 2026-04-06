@@ -10,7 +10,6 @@ import { from, fromSubquery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { compileCH } from "../compile"
 import { ErrorSpans, ServiceUsage, TraceListMv, Traces } from "../tables"
-import { escapeClickHouseString } from "../../sql/sql-fragment"
 
 // ---------------------------------------------------------------------------
 // Shared: Error fingerprint expression (typed DSL)
@@ -302,8 +301,6 @@ export interface TracesFacetsOutput {
 export function tracesFacetsQuery(
   opts: TracesFacetsOpts,
 ): CHUnionQuery<TracesFacetsOutput> {
-  const esc = escapeClickHouseString
-
   const baseWhere = ($: ColumnAccessor<typeof TraceListMv.columns>): Array<CH.Condition | undefined> => {
     const conditions: Array<CH.Condition | undefined> = [
       $.OrgId.eq(param.string("orgId")),
@@ -338,30 +335,49 @@ export function tracesFacetsQuery(
       )
     }
 
-    // Attribute filter EXISTS subqueries (kept as rawCond — involves correlated subquery)
+    // Attribute filter EXISTS subqueries (correlated — references outer TraceId)
     if (opts.attributeFilterKey) {
-      const matchExpr = opts.attributeFilterValueMatchMode === "contains"
-        ? `positionCaseInsensitive(t_attr.SpanAttributes['${esc(opts.attributeFilterKey)}'], '${esc(opts.attributeFilterValue ?? "")}') > 0`
-        : `t_attr.SpanAttributes['${esc(opts.attributeFilterKey)}'] = '${esc(opts.attributeFilterValue ?? "")}'`
-      conditions.push(CH.rawCond(`EXISTS (
-        SELECT 1 FROM traces AS t_attr
-        WHERE t_attr.TraceId = TraceId AND t_attr.OrgId = __PARAM_orgId__
-          AND t_attr.Timestamp >= __PARAM_startTime__
-          AND t_attr.Timestamp <= __PARAM_endTime__
-          AND ${matchExpr}
-      )`))
+      const attrCol = CH.mapGet(CH.dynamicColumn<Record<string, string>>("t_attr.SpanAttributes"), opts.attributeFilterKey)
+      const matchCond = opts.attributeFilterValueMatchMode === "contains"
+        ? CH.positionCaseInsensitive(attrCol, CH.lit(opts.attributeFilterValue ?? "")).gt(0)
+        : attrCol.eq(opts.attributeFilterValue ?? "")
+      const innerSql = compileCH(
+        from(Traces)
+          .select(() => ({ _: CH.lit(1) }))
+          .where(() => [
+            CH.dynamicColumn("t_attr.TraceId").eq(CH.outerRef("TraceId")),
+            CH.dynamicColumn("t_attr.OrgId").eq(param.string("orgId")),
+            CH.dynamicColumn<string>("t_attr.Timestamp").gte(param.dateTime("startTime")),
+            CH.dynamicColumn<string>("t_attr.Timestamp").lte(param.dateTime("endTime")),
+            matchCond,
+          ]),
+        {},
+        { skipFormat: true },
+      )
+      // Replace the FROM clause to use aliased table
+      const existsSql = innerSql.sql.replace("FROM traces", "FROM traces AS t_attr")
+      conditions.push(CH.exists(existsSql))
     }
     if (opts.resourceFilterKey) {
-      const matchExpr = opts.resourceFilterValueMatchMode === "contains"
-        ? `positionCaseInsensitive(t_res.ResourceAttributes['${esc(opts.resourceFilterKey)}'], '${esc(opts.resourceFilterValue ?? "")}') > 0`
-        : `t_res.ResourceAttributes['${esc(opts.resourceFilterKey)}'] = '${esc(opts.resourceFilterValue ?? "")}'`
-      conditions.push(CH.rawCond(`EXISTS (
-        SELECT 1 FROM traces AS t_res
-        WHERE t_res.TraceId = TraceId AND t_res.OrgId = __PARAM_orgId__
-          AND t_res.Timestamp >= __PARAM_startTime__
-          AND t_res.Timestamp <= __PARAM_endTime__
-          AND ${matchExpr}
-      )`))
+      const resCol = CH.mapGet(CH.dynamicColumn<Record<string, string>>("t_res.ResourceAttributes"), opts.resourceFilterKey)
+      const matchCond = opts.resourceFilterValueMatchMode === "contains"
+        ? CH.positionCaseInsensitive(resCol, CH.lit(opts.resourceFilterValue ?? "")).gt(0)
+        : resCol.eq(opts.resourceFilterValue ?? "")
+      const innerSql = compileCH(
+        from(Traces)
+          .select(() => ({ _: CH.lit(1) }))
+          .where(() => [
+            CH.dynamicColumn("t_res.TraceId").eq(CH.outerRef("TraceId")),
+            CH.dynamicColumn("t_res.OrgId").eq(param.string("orgId")),
+            CH.dynamicColumn<string>("t_res.Timestamp").gte(param.dateTime("startTime")),
+            CH.dynamicColumn<string>("t_res.Timestamp").lte(param.dateTime("endTime")),
+            matchCond,
+          ]),
+        {},
+        { skipFormat: true },
+      )
+      const existsSql = innerSql.sql.replace("FROM traces", "FROM traces AS t_res")
+      conditions.push(CH.exists(existsSql))
     }
 
     return conditions
@@ -597,7 +613,7 @@ export function errorDetailTracesQuery(
 
   // Outer query: join traces with error subquery
   return from(Traces)
-    .join(`(SELECT DISTINCT TraceId FROM (${errorSubquery.sql}))`, "e", CH.rawCond("traces.TraceId = e.TraceId"), "INNER")
+    .join(`(SELECT DISTINCT TraceId FROM (${errorSubquery.sql}))`, "e", CH.dynamicColumn("traces.TraceId").eq(CH.dynamicColumn("e.TraceId")), "INNER")
     .select(($) => ({
       traceId: $.TraceId,
       startTime: CH.min_($.Timestamp),

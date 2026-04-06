@@ -414,16 +414,16 @@ function buildProjectedMapExpr(
   useMv: boolean,
   mapName: "SpanAttributes" | "ResourceAttributes",
   mvMap: Record<string, string>,
-): string {
-  if (requestedKeys.length === 0) return "map()"
-  const pairs: string[] = []
-  for (const key of requestedKeys) {
-    const escaped = `'${key.replace(/'/g, "\\'")}'`
+): CH.Expr<Record<string, string>> {
+  if (requestedKeys.length === 0) return CH.mapLiteral()
+  const pairs: Array<[string, CH.Expr<string>]> = requestedKeys.map((key) => {
     const mvCol = useMv ? mvMap[key] : undefined
-    const value = mvCol ?? `${mapName}[${escaped}]`
-    pairs.push(`${escaped}, ${value}`)
-  }
-  return `map(${pairs.join(", ")})`
+    const valueExpr: CH.Expr<string> = mvCol
+      ? CH.dynamicColumn<string>(mvCol)
+      : CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), key)
+    return [key, valueExpr]
+  })
+  return CH.mapLiteral(...pairs)
 }
 
 export function tracesListQuery(
@@ -452,14 +452,10 @@ export function tracesListQuery(
   // When using the raw table and no specific attr columns are requested, skip the full maps
   const spanAttrExpr = needsFullMaps && !useTraceListMv
     ? undefined // use $.SpanAttributes directly
-    : CH.rawExpr<Record<string, string>>(
-        buildProjectedMapExpr(requestedSpanAttrKeys, useTraceListMv, "SpanAttributes", TRACE_LIST_MV_ATTR_MAP),
-      )
+    : buildProjectedMapExpr(requestedSpanAttrKeys, useTraceListMv, "SpanAttributes", TRACE_LIST_MV_ATTR_MAP)
   const resourceAttrExpr = needsFullMaps && !useTraceListMv
     ? undefined // use $.ResourceAttributes directly
-    : CH.rawExpr<Record<string, string>>(
-        buildProjectedMapExpr(requestedResourceAttrKeys, useTraceListMv, "ResourceAttributes", TRACE_LIST_MV_RESOURCE_MAP),
-      )
+    : buildProjectedMapExpr(requestedResourceAttrKeys, useTraceListMv, "ResourceAttributes", TRACE_LIST_MV_RESOURCE_MAP)
 
   let q = from(tbl as typeof Traces)
     .select(($) => ({
