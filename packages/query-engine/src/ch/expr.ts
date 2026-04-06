@@ -259,6 +259,14 @@ export function mapContains(
   return makeCond(raw(`mapContains(${compile(mapExpr.toFragment())}, ${compile(str(key))})`))
 }
 
+/** Access a key in a Map expression: `mapExpr['key']` */
+export function mapGet(
+  mapExpr: Expr<Record<string, string>>,
+  key: string,
+): Expr<string> {
+  return makeExpr<string>(raw(`${compile(mapExpr.toFragment())}[${compile(str(key))}]`))
+}
+
 export function arrayStringConcat(
   parts: Expr<string>[] | Expr<ReadonlyArray<string>>,
   sep: string,

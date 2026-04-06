@@ -366,8 +366,8 @@ export function listMetricsQuery(
         firstSeen: CH.min_($.TimeUnix),
         lastSeen: CH.max_($.TimeUnix),
         isMonotonic: hasIsMonotonic
-          ? CH.rawExpr<boolean | number>("any(IsMonotonic)")
-          : CH.rawExpr<boolean | number>("0"),
+          ? CH.any_(CH.dynamicColumn<number>("IsMonotonic"))
+          : CH.lit(0),
       }))
       .where(($) => [
         $.OrgId.eq(param.string("orgId")),

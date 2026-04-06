@@ -61,54 +61,58 @@ export function canUseTraceListMv(_params: {
 }
 
 // ---------------------------------------------------------------------------
-// Attribute filter → SQL string
+// Attribute filter → typed Condition
 // ---------------------------------------------------------------------------
 
-const MODE_TO_OPERATOR: Record<string, string> = {
-  gt: ">",
-  gte: ">=",
-  lt: "<",
-  lte: "<=",
-}
+import * as CH from "./ch/expr"
 
-export function buildAttrFilterSQL(
+export function buildAttrFilterCondition(
   af: AttributeFilter,
   useMv: boolean,
   mapName: "SpanAttributes" | "ResourceAttributes",
   mvMap: Record<string, string>,
-): string {
+): CH.Condition {
   const mvColumn = useMv ? mvMap[af.key] : undefined
-  const escapedKey = `'${escapeForSQL(af.key)}'`
-  const escapedValue = `'${escapeForSQL(af.value ?? "")}'`
+  const colExpr: CH.Expr<string> = mvColumn
+    ? CH.dynamicColumn<string>(mvColumn)
+    : CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
+  const value = af.value ?? ""
 
   if (af.mode === "exists") {
     return mvColumn
-      ? `${mvColumn} != ''`
-      : `mapContains(${mapName}, ${escapedKey})`
+      ? CH.dynamicColumn<string>(mvColumn).neq("")
+      : CH.mapContains(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
   }
 
   if (af.mode === "contains") {
-    const col = mvColumn ?? `${mapName}[${escapedKey}]`
-    return `positionCaseInsensitive(${col}, ${escapedValue}) > 0`
+    return CH.positionCaseInsensitive(colExpr, CH.lit(value)).gt(0)
   }
 
-  const op = MODE_TO_OPERATOR[af.mode]
-  if (op) {
-    if (mvColumn) {
-      const cast = NUMERIC_MV_COLUMNS.has(mvColumn) ? `toUInt16OrZero(${mvColumn})` : mvColumn
-      return `${cast} ${op} ${escapedValue}`
-    }
-    const rawEscaped = af.value?.replace(/\\/g, "\\\\").replace(/'/g, "\\'") ?? ""
-    return `toFloat64OrZero(${mapName}[${escapedKey}]) ${op} ${rawEscaped}`
+  if (af.mode === "gt") {
+    const numExpr = mvColumn && NUMERIC_MV_COLUMNS.has(mvColumn)
+      ? CH.toUInt16OrZero(CH.dynamicColumn<string>(mvColumn))
+      : CH.toFloat64OrZero(colExpr)
+    return numExpr.gt(Number(value))
+  }
+  if (af.mode === "gte") {
+    const numExpr = mvColumn && NUMERIC_MV_COLUMNS.has(mvColumn)
+      ? CH.toUInt16OrZero(CH.dynamicColumn<string>(mvColumn))
+      : CH.toFloat64OrZero(colExpr)
+    return numExpr.gte(Number(value))
+  }
+  if (af.mode === "lt") {
+    const numExpr = mvColumn && NUMERIC_MV_COLUMNS.has(mvColumn)
+      ? CH.toUInt16OrZero(CH.dynamicColumn<string>(mvColumn))
+      : CH.toFloat64OrZero(colExpr)
+    return numExpr.lt(Number(value))
+  }
+  if (af.mode === "lte") {
+    const numExpr = mvColumn && NUMERIC_MV_COLUMNS.has(mvColumn)
+      ? CH.toUInt16OrZero(CH.dynamicColumn<string>(mvColumn))
+      : CH.toFloat64OrZero(colExpr)
+    return numExpr.lte(Number(value))
   }
 
   // equals (default)
-  if (mvColumn) {
-    return `${mvColumn} = ${escapedValue}`
-  }
-  return `${mapName}[${escapedKey}] = ${escapedValue}`
-}
-
-function escapeForSQL(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+  return colExpr.eq(value)
 }

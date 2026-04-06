@@ -18,7 +18,7 @@ import {
   MetricsHistogram,
   MetricsExpHistogram,
 } from "../tables"
-import { buildAttrFilterSQL, TRACE_LIST_MV_ATTR_MAP, TRACE_LIST_MV_RESOURCE_MAP } from "../../traces-shared"
+import { buildAttrFilterCondition, TRACE_LIST_MV_ATTR_MAP, TRACE_LIST_MV_RESOURCE_MAP } from "../../traces-shared"
 
 // ---------------------------------------------------------------------------
 // Traces alert aggregate
@@ -101,12 +101,12 @@ function alertTracesWhereConditions(
   }
   if (opts.attributeFilters) {
     for (const af of opts.attributeFilters) {
-      conditions.push(CH.rawCond(buildAttrFilterSQL(af, false, "SpanAttributes", TRACE_LIST_MV_ATTR_MAP)))
+      conditions.push(buildAttrFilterCondition(af, false, "SpanAttributes", TRACE_LIST_MV_ATTR_MAP))
     }
   }
   if (opts.resourceAttributeFilters) {
     for (const rf of opts.resourceAttributeFilters) {
-      conditions.push(CH.rawCond(buildAttrFilterSQL(rf, false, "ResourceAttributes", TRACE_LIST_MV_RESOURCE_MAP)))
+      conditions.push(buildAttrFilterCondition(rf, false, "ResourceAttributes", TRACE_LIST_MV_RESOURCE_MAP))
     }
   }
 

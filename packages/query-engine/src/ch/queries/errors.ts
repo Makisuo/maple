@@ -13,9 +13,33 @@ import { escapeClickHouseString } from "../../sql/sql-fragment"
 import type { CompiledQuery } from "../compile"
 
 // ---------------------------------------------------------------------------
-// Shared: Error fingerprint SQL expression
+// Shared: Error fingerprint expression (typed DSL)
 // ---------------------------------------------------------------------------
 
+/** Extracts a short error "type" from StatusMessage for grouping. */
+export function errorFingerprint(statusMessage: CH.Expr<string>): CH.Expr<string> {
+  return CH.if_(
+    statusMessage.eq(""),
+    CH.lit("Unknown Error"),
+    CH.left_(
+      statusMessage,
+      CH.multiIf(
+        [
+          [CH.position_(statusMessage, ": ").gt(3), CH.toInt64(CH.position_(statusMessage, ": ")).sub(1)],
+          [CH.position_(statusMessage, " (").gt(3), CH.toInt64(CH.position_(statusMessage, " (")).sub(1)],
+          [CH.position_(statusMessage, "\\n").gt(3), CH.toInt64(CH.position_(statusMessage, "\\n")).sub(1)],
+          [CH.position_(statusMessage, "{").gt(10), CH.toInt64(CH.position_(statusMessage, "{")).sub(1)],
+        ],
+        CH.least_(CH.toInt64(CH.length_(statusMessage)), CH.lit(150)),
+      ),
+    ),
+  )
+}
+
+/**
+ * @deprecated Use errorFingerprint($.StatusMessage) instead.
+ * Kept for raw SQL builders (errorsSummarySQL, errorDetailTracesSQL) that can't use the DSL.
+ */
 export const ERROR_FINGERPRINT_SQL = `if(StatusMessage = '', 'Unknown Error',
   left(StatusMessage, multiIf(
     position(StatusMessage, ': ') > 3, toInt64(position(StatusMessage, ': ')) - 1,
@@ -52,7 +76,7 @@ export function errorsByTypeQuery(
 ) {
   return from(ErrorSpans)
     .select(($) => ({
-      errorType: CH.rawExpr<string>(ERROR_FINGERPRINT_SQL),
+      errorType: errorFingerprint($.StatusMessage),
       sampleMessage: CH.any_($.StatusMessage),
       count: CH.count(),
       affectedServicesCount: CH.uniq($.ServiceName),
@@ -71,7 +95,7 @@ export function errorsByTypeQuery(
         ? CH.inList($.DeploymentEnv, opts.deploymentEnvs)
         : undefined,
       opts.errorTypes?.length
-        ? CH.inList(CH.rawExpr<string>(ERROR_FINGERPRINT_SQL), opts.errorTypes)
+        ? CH.inList(errorFingerprint($.StatusMessage), opts.errorTypes)
         : undefined,
     ])
     .groupBy("errorType")
@@ -97,7 +121,6 @@ export interface ErrorsTimeseriesOutput {
 export function errorsTimeseriesQuery(
   opts: ErrorsTimeseriesOpts,
 ) {
-  const esc = escapeClickHouseString
   return from(ErrorSpans)
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
@@ -105,7 +128,7 @@ export function errorsTimeseriesQuery(
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
-      CH.rawCond(`${ERROR_FINGERPRINT_SQL} = '${esc(opts.errorType)}'`),
+      errorFingerprint($.StatusMessage).eq(opts.errorType),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
       opts.services?.length
@@ -145,42 +168,43 @@ export interface SpanHierarchyOutput {
 export function spanHierarchyQuery(
   opts: SpanHierarchyOpts,
 ) {
-  // HTTP span name rewriting: "http.server GET" + route → "GET /api/users"
-  const httpRewriteExpr = CH.if_(
-    CH.rawCond(
-      "(SpanName LIKE 'http.server %' OR SpanName IN ('GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'))" +
-      " AND (SpanAttributes['http.route'] != '' OR SpanAttributes['url.path'] != '')",
-    ),
-    CH.rawExpr<string>(
-      "concat(" +
-        "if(SpanName LIKE 'http.server %', replaceOne(SpanName, 'http.server ', ''), SpanName), " +
-        "' ', " +
-        "if(SpanAttributes['http.route'] != '', SpanAttributes['http.route'], SpanAttributes['url.path'])" +
-      ")",
-    ),
-    CH.rawExpr<string>("SpanName"),
-  )
-
-  const relationshipExpr = opts.spanId
-    ? CH.if_(CH.rawExpr<string>("SpanId").eq(opts.spanId), CH.lit("target"), CH.lit("related"))
-    : CH.lit("related")
-
   return from(Traces)
-    .select(($) => ({
-      traceId: $.TraceId,
-      spanId: $.SpanId,
-      parentSpanId: $.ParentSpanId,
-      spanName: httpRewriteExpr,
-      serviceName: $.ServiceName,
-      spanKind: $.SpanKind,
-      durationMs: $.Duration.div(1000000),
-      startTime: $.Timestamp,
-      statusCode: $.StatusCode,
-      statusMessage: $.StatusMessage,
-      spanAttributes: CH.toJSONString($.SpanAttributes),
-      resourceAttributes: CH.toJSONString($.ResourceAttributes),
-      relationship: relationshipExpr,
-    }))
+    .select(($) => {
+      // HTTP span name rewriting: "http.server GET" + route → "GET /api/users"
+      const route = $.SpanAttributes.get("http.route")
+      const urlPath = $.SpanAttributes.get("url.path")
+      const httpRewriteExpr = CH.if_(
+        $.SpanName.like("http.server %")
+          .or($.SpanName.in_("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
+          .and(route.neq("").or(urlPath.neq(""))),
+        CH.concat(
+          CH.if_($.SpanName.like("http.server %"), CH.replaceOne($.SpanName, "http.server ", ""), $.SpanName),
+          CH.lit(" "),
+          CH.if_(route.neq(""), route, urlPath),
+        ),
+        $.SpanName,
+      )
+
+      const relationshipExpr = opts.spanId
+        ? CH.if_($.SpanId.eq(opts.spanId), CH.lit("target"), CH.lit("related"))
+        : CH.lit("related")
+
+      return {
+        traceId: $.TraceId,
+        spanId: $.SpanId,
+        parentSpanId: $.ParentSpanId,
+        spanName: httpRewriteExpr,
+        serviceName: $.ServiceName,
+        spanKind: $.SpanKind,
+        durationMs: $.Duration.div(1000000),
+        startTime: $.Timestamp,
+        statusCode: $.StatusCode,
+        statusMessage: $.StatusMessage,
+        spanAttributes: CH.toJSONString($.SpanAttributes),
+        resourceAttributes: CH.toJSONString($.ResourceAttributes),
+        relationship: relationshipExpr,
+      }
+    })
     .where(($) => [
       $.TraceId.eq(opts.traceId),
       $.OrgId.eq(param.string("orgId")),
@@ -424,7 +448,7 @@ export function errorsFacetsQuery(
       ? CH.inList($.DeploymentEnv, opts.deploymentEnvs)
       : undefined,
     opts.errorTypes?.length
-      ? CH.inList(CH.rawExpr<string>(ERROR_FINGERPRINT_SQL), opts.errorTypes)
+      ? CH.inList(errorFingerprint($.StatusMessage), opts.errorTypes)
       : undefined,
   ]
 
@@ -451,8 +475,8 @@ export function errorsFacetsQuery(
     .limit(100)
 
   const errorTypeQuery = from(ErrorSpans)
-    .select(() => ({
-      name: CH.rawExpr<string>(ERROR_FINGERPRINT_SQL),
+    .select(($) => ({
+      name: errorFingerprint($.StatusMessage),
       count: CH.count(),
       facetType: CH.lit("error_type"),
     }))

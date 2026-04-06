@@ -57,6 +57,7 @@ export {
   inList,
   positionCaseInsensitive,
   mapContains,
+  mapGet,
   arrayStringConcat,
   arrayFilter,
   extract_ as extract,

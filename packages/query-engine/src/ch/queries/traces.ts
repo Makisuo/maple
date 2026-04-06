@@ -9,13 +9,12 @@ import * as CH from "../expr"
 import { param } from "../param"
 import { from, type ColumnAccessor } from "../query"
 import { Traces, TraceListMv } from "../tables"
-import { compile, str } from "../../sql/sql-fragment"
 import {
   METRIC_NEEDS,
   TRACE_LIST_MV_ATTR_MAP,
   TRACE_LIST_MV_RESOURCE_MAP,
   canUseTraceListMv,
-  buildAttrFilterSQL,
+  buildAttrFilterCondition,
 } from "../../traces-shared"
 
 // ---------------------------------------------------------------------------
@@ -88,6 +87,7 @@ function metricSelectExprs(
 // ---------------------------------------------------------------------------
 
 function buildGroupNameExpr(
+  $: ColumnAccessor<typeof Traces.columns>,
   groupBy: readonly string[] | undefined,
   groupByAttributeKeys: readonly string[] | undefined,
   useTraceListMv: boolean,
@@ -96,32 +96,39 @@ function buildGroupNameExpr(
     return CH.lit("all")
   }
 
-  const parts: string[] = []
+  const parts: CH.Expr<string>[] = []
   for (const g of groupBy) {
     switch (g) {
       case "service":
-        parts.push("toString(ServiceName)")
+        parts.push(CH.toString_($.ServiceName))
         break
       case "span_name":
-        parts.push("toString(SpanName)")
+        parts.push(CH.toString_($.SpanName))
         break
       case "status_code":
-        parts.push("toString(StatusCode)")
+        parts.push(CH.toString_($.StatusCode))
         break
       case "http_method":
         if (useTraceListMv) {
-          parts.push("toString(HttpMethod)")
+          parts.push(CH.toString_(CH.dynamicColumn<string>("HttpMethod")))
         } else {
-          parts.push("toString(SpanAttributes['http.method'])")
+          parts.push(CH.toString_($.SpanAttributes.get("http.method")))
         }
         break
       case "attribute":
         if (groupByAttributeKeys?.length) {
-          const keys = groupByAttributeKeys.map((k) => {
+          const keys: CH.Expr<string>[] = groupByAttributeKeys.map((k) => {
             const mvCol = useTraceListMv ? TRACE_LIST_MV_ATTR_MAP[k] : undefined
-            return mvCol ? `toString(${mvCol})` : `toString(SpanAttributes[${compile(str(k))}])`
+            return mvCol
+              ? CH.toString_(CH.dynamicColumn<string>(mvCol))
+              : CH.toString_($.SpanAttributes.get(k))
           })
-          parts.push(`arrayStringConcat([${keys.join(", ")}], ' \u00b7 ')`)
+          // When multiple attribute keys, join them into a single part
+          if (keys.length === 1) {
+            parts.push(keys[0])
+          } else {
+            parts.push(CH.arrayStringConcat(keys, " \u00b7 "))
+          }
         }
         break
       case "none":
@@ -134,48 +141,43 @@ function buildGroupNameExpr(
   }
 
   if (parts.length === 1) {
-    return CH.rawExpr<string>(`coalesce(nullIf(${parts[0]}, ''), 'all')`)
+    return CH.coalesce(CH.nullIf(parts[0], ""), CH.lit("all"))
   }
 
-  return CH.rawExpr<string>(
-    `coalesce(nullIf(arrayStringConcat(arrayFilter(x -> x != '', [${parts.join(", ")}]), ' \u00b7 '), ''), 'all')`,
+  // Multi-part: filter empty strings before joining with separator
+  const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
+  return CH.coalesce(
+    CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""),
+    CH.lit("all"),
   )
 }
 
 function buildBreakdownGroupExpr(
+  $: ColumnAccessor<typeof Traces.columns>,
   groupBy: string,
   groupByAttributeKey: string | undefined,
 ): CH.Expr<string> {
   switch (groupBy) {
     case "service":
-      return CH.rawExpr<string>("ServiceName")
+      return $.ServiceName
     case "span_name":
-      return CH.rawExpr<string>("SpanName")
+      return $.SpanName
     case "status_code":
-      return CH.rawExpr<string>("StatusCode")
+      return $.StatusCode
     case "http_method":
-      return CH.rawExpr<string>("SpanAttributes['http.method']")
+      return $.SpanAttributes.get("http.method")
     case "attribute":
       return groupByAttributeKey
-        ? CH.rawExpr<string>(`SpanAttributes[${compile(str(groupByAttributeKey))}]`)
-        : CH.rawExpr<string>("ServiceName")
+        ? $.SpanAttributes.get(groupByAttributeKey)
+        : $.ServiceName
     default:
-      return CH.rawExpr<string>("ServiceName")
+      return $.ServiceName
   }
 }
 
 // ---------------------------------------------------------------------------
 // WHERE clause builders
 // ---------------------------------------------------------------------------
-
-function buildAttrFilterCondition(
-  af: AttributeFilter,
-  useMv: boolean,
-  mapName: "SpanAttributes" | "ResourceAttributes",
-  mvMap: Record<string, string>,
-): CH.Condition {
-  return CH.rawCond(buildAttrFilterSQL(af, useMv, mapName, mvMap))
-}
 
 function buildWhereConditions(
   $: ColumnAccessor<typeof Traces.columns>,
@@ -189,12 +191,12 @@ function buildWhereConditions(
     $.Timestamp.lte(param.dateTime("endTime")),
     CH.when(opts.serviceName, (v: string) =>
       mm?.serviceName === "contains"
-        ? CH.rawCond(`positionCaseInsensitive(ServiceName, ${compile(str(v))}) > 0`)
+        ? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
         : $.ServiceName.eq(v),
     ),
     CH.when(opts.spanName, (v: string) =>
       mm?.spanName === "contains"
-        ? CH.rawCond(`positionCaseInsensitive(SpanName, ${compile(str(v))}) > 0`)
+        ? CH.positionCaseInsensitive($.SpanName, CH.lit(v)).gt(0)
         : $.SpanName.eq(v),
     ),
     CH.whenTrue(!!opts.rootOnly && !useTraceListMv, () =>
@@ -220,17 +222,19 @@ function buildWhereConditions(
 
   if (opts.environments?.length) {
     if (mm?.deploymentEnv === "contains" && opts.environments.length === 1) {
-      const envCol = useTraceListMv ? "DeploymentEnv" : "ResourceAttributes['deployment.environment']"
-      conditions.push(CH.rawCond(`positionCaseInsensitive(${envCol}, ${compile(str(opts.environments[0]))}) > 0`))
+      const envExpr = useTraceListMv
+        ? CH.dynamicColumn<string>("DeploymentEnv")
+        : $.ResourceAttributes.get("deployment.environment")
+      conditions.push(CH.positionCaseInsensitive(envExpr, CH.lit(opts.environments[0])).gt(0))
     } else if (useTraceListMv) {
-      conditions.push(CH.inList(CH.rawExpr<string>("DeploymentEnv"), opts.environments))
+      conditions.push(CH.inList(CH.dynamicColumn<string>("DeploymentEnv"), opts.environments))
     } else {
-      conditions.push(CH.inList(CH.rawExpr<string>("ResourceAttributes['deployment.environment']"), opts.environments))
+      conditions.push(CH.inList($.ResourceAttributes.get("deployment.environment"), opts.environments))
     }
   }
 
   if (opts.commitShas?.length) {
-    conditions.push(CH.inList(CH.rawExpr<string>("ResourceAttributes['deployment.commit_sha']"), opts.commitShas))
+    conditions.push(CH.inList($.ResourceAttributes.get("deployment.commit_sha"), opts.commitShas))
   }
 
   if (opts.attributeFilters) {
@@ -313,7 +317,7 @@ export function tracesTimeseriesQuery(
   return from(tbl as typeof Traces)
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
-      groupName: buildGroupNameExpr(opts.groupBy, opts.groupByAttributeKeys, useTraceListMv),
+      groupName: buildGroupNameExpr($, opts.groupBy, opts.groupByAttributeKeys, useTraceListMv),
       ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
     }))
     .where(($) => buildWhereConditions($, opts, useTraceListMv))
@@ -366,7 +370,7 @@ export function tracesBreakdownQuery(
       const { sampledSpanCount, unsampledSpanCount, dominantThreshold, ...metrics } =
         metricSelectExprs($, opts.metric, apdexThresholdMs, false, opts.allMetrics)
       return {
-        name: buildBreakdownGroupExpr(opts.groupBy, opts.groupByAttributeKey),
+        name: buildBreakdownGroupExpr($, opts.groupBy, opts.groupByAttributeKey),
         ...metrics,
       }
     })
@@ -466,7 +470,7 @@ export function tracesListQuery(
       spanName: $.SpanName,
       durationMs: $.Duration.div(1000000),
       statusCode: $.StatusCode,
-      spanKind: useTraceListMv ? CH.rawExpr<string>("SpanKind") : $.SpanKind,
+      spanKind: useTraceListMv ? CH.dynamicColumn<string>("SpanKind") : $.SpanKind,
       hasError: useTraceListMv
         ? CH.dynamicColumn<number>("HasError")
         : CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
@@ -530,14 +534,14 @@ export function tracesRootListQuery(
       rootSpanKind: $.SpanKind,
       rootSpanStatusCode: $.StatusCode,
       rootHttpMethod: useTraceListMv
-        ? CH.rawExpr<string>("HttpMethod")
-        : CH.rawExpr<string>("SpanAttributes['http.method']"),
+        ? CH.dynamicColumn<string>("HttpMethod")
+        : $.SpanAttributes.get("http.method"),
       rootHttpRoute: useTraceListMv
-        ? CH.rawExpr<string>("HttpRoute")
-        : CH.rawExpr<string>("SpanAttributes['http.route']"),
+        ? CH.dynamicColumn<string>("HttpRoute")
+        : $.SpanAttributes.get("http.route"),
       rootHttpStatusCode: useTraceListMv
-        ? CH.rawExpr<string>("HttpStatusCode")
-        : CH.rawExpr<string>("SpanAttributes['http.status_code']"),
+        ? CH.dynamicColumn<string>("HttpStatusCode")
+        : $.SpanAttributes.get("http.status_code"),
       hasError: useTraceListMv
         ? CH.dynamicColumn<number>("HasError")
         : CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
