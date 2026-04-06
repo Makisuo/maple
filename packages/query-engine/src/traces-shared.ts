@@ -1,6 +1,5 @@
 // ---------------------------------------------------------------------------
-// Shared constants and helpers used by both the legacy traces-sql-builder
-// and the new CH DSL queries.
+// Shared constants and helpers used by the CH DSL queries.
 // ---------------------------------------------------------------------------
 
 import type { TracesMetric, AttributeFilter } from "./query-engine"
@@ -22,7 +21,7 @@ export const METRIC_NEEDS: Record<TracesMetric, MetricNeed[]> = {
 }
 
 // ---------------------------------------------------------------------------
-// trace_list_mv column mappings
+// trace_list_mv column mappings (used by performance-hints UI)
 // ---------------------------------------------------------------------------
 
 export const TRACE_LIST_MV_ATTR_MAP: Record<string, string> = {
@@ -39,27 +38,6 @@ export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
   "deployment.environment": "DeploymentEnv",
 }
 
-export const NUMERIC_MV_COLUMNS = new Set(["HttpStatusCode"])
-
-// ---------------------------------------------------------------------------
-// trace_list_mv eligibility check
-// ---------------------------------------------------------------------------
-
-export function canUseTraceListMv(_params: {
-  rootOnly?: boolean
-  attributeFilters?: readonly AttributeFilter[]
-  resourceAttributeFilters?: readonly AttributeFilter[]
-  commitShas?: readonly string[]
-  groupBy?: readonly string[] | string
-  groupByAttributeKeys?: readonly string[]
-  groupByAttributeKey?: string
-}): boolean {
-  // The MV only contains ParentSpanId='' rows, but rootOnly means
-  // "entry point spans" (Server/Consumer OR ParentSpanId=''), which is broader.
-  // Disable MV until it is updated to include Server/Consumer spans.
-  return false
-}
-
 // ---------------------------------------------------------------------------
 // Attribute filter → typed Condition
 // ---------------------------------------------------------------------------
@@ -68,20 +46,13 @@ import * as CH from "./ch/expr"
 
 export function buildAttrFilterCondition(
   af: AttributeFilter,
-  useMv: boolean,
   mapName: "SpanAttributes" | "ResourceAttributes",
-  mvMap: Record<string, string>,
 ): CH.Condition {
-  const mvColumn = useMv ? mvMap[af.key] : undefined
-  const colExpr: CH.Expr<string> = mvColumn
-    ? CH.dynamicColumn<string>(mvColumn)
-    : CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
+  const colExpr: CH.Expr<string> = CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
   const value = af.value ?? ""
 
   if (af.mode === "exists") {
-    return mvColumn
-      ? CH.dynamicColumn<string>(mvColumn).neq("")
-      : CH.mapContains(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
+    return CH.mapContains(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
   }
 
   if (af.mode === "contains") {
@@ -89,28 +60,16 @@ export function buildAttrFilterCondition(
   }
 
   if (af.mode === "gt") {
-    const numExpr = mvColumn && NUMERIC_MV_COLUMNS.has(mvColumn)
-      ? CH.toUInt16OrZero(CH.dynamicColumn<string>(mvColumn))
-      : CH.toFloat64OrZero(colExpr)
-    return numExpr.gt(Number(value))
+    return CH.toFloat64OrZero(colExpr).gt(Number(value))
   }
   if (af.mode === "gte") {
-    const numExpr = mvColumn && NUMERIC_MV_COLUMNS.has(mvColumn)
-      ? CH.toUInt16OrZero(CH.dynamicColumn<string>(mvColumn))
-      : CH.toFloat64OrZero(colExpr)
-    return numExpr.gte(Number(value))
+    return CH.toFloat64OrZero(colExpr).gte(Number(value))
   }
   if (af.mode === "lt") {
-    const numExpr = mvColumn && NUMERIC_MV_COLUMNS.has(mvColumn)
-      ? CH.toUInt16OrZero(CH.dynamicColumn<string>(mvColumn))
-      : CH.toFloat64OrZero(colExpr)
-    return numExpr.lt(Number(value))
+    return CH.toFloat64OrZero(colExpr).lt(Number(value))
   }
   if (af.mode === "lte") {
-    const numExpr = mvColumn && NUMERIC_MV_COLUMNS.has(mvColumn)
-      ? CH.toUInt16OrZero(CH.dynamicColumn<string>(mvColumn))
-      : CH.toFloat64OrZero(colExpr)
-    return numExpr.lte(Number(value))
+    return CH.toFloat64OrZero(colExpr).lte(Number(value))
   }
 
   // equals (default)

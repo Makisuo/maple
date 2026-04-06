@@ -252,17 +252,20 @@ describe("compile edge cases", () => {
   })
 
   it("compiles INNER JOIN", () => {
+    const OtherTable = CH.table("other_table", { Id: CH.string, Score: CH.uint64 })
     const q = CH.from(TestTable)
-      .join("other_table", "o", CH.dynamicColumn("test_table.Id").eq(CH.dynamicColumn("o.Id")), "INNER")
-      .select(($) => ({ id: $.Id }))
+      .innerJoin(OtherTable, "o", (main, o) => main.Id.eq(o.Id))
+      .select(($) => ({ id: $.Id, score: $.o.Score }))
     const { sql } = compileCH(q, {})
     expect(sql).toContain("INNER JOIN other_table AS o ON test_table.Id = o.Id")
+    expect(sql).toContain("o.Score AS score")
   })
 
   it("compiles CROSS JOIN (no ON clause)", () => {
+    const OtherTable = CH.table("other_table", { Id: CH.string, Score: CH.uint64 })
     const q = CH.from(TestTable)
-      .join("other_table", "o", undefined, "CROSS")
-      .select(($) => ({ id: $.Id }))
+      .crossJoin(OtherTable, "o")
+      .select(($) => ({ id: $.Id, score: $.o.Score }))
     const { sql } = compileCH(q, {})
     expect(sql).toContain("CROSS JOIN other_table AS o")
     expect(sql).not.toContain(" ON ")

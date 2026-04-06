@@ -8,12 +8,9 @@ import type { TracesMetric, AttributeFilter } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
 import { from, type ColumnAccessor } from "../query"
-import { Traces, TraceListMv } from "../tables"
+import { Traces } from "../tables"
 import {
   METRIC_NEEDS,
-  TRACE_LIST_MV_ATTR_MAP,
-  TRACE_LIST_MV_RESOURCE_MAP,
-  canUseTraceListMv,
   buildAttrFilterCondition,
 } from "../../traces-shared"
 
@@ -80,8 +77,6 @@ function metricSelectExprs(
   }
 }
 
-// trace_list_mv constants + canUseTraceListMv imported from traces-shared.ts
-
 // ---------------------------------------------------------------------------
 // GROUP BY expression builder
 // ---------------------------------------------------------------------------
@@ -90,7 +85,6 @@ function buildGroupNameExpr(
   $: ColumnAccessor<typeof Traces.columns>,
   groupBy: readonly string[] | undefined,
   groupByAttributeKeys: readonly string[] | undefined,
-  useTraceListMv: boolean,
 ): CH.Expr<string> {
   if (!groupBy || groupBy.length === 0) {
     return CH.lit("all")
@@ -109,20 +103,13 @@ function buildGroupNameExpr(
         parts.push(CH.toString_($.StatusCode))
         break
       case "http_method":
-        if (useTraceListMv) {
-          parts.push(CH.toString_(CH.dynamicColumn<string>("HttpMethod")))
-        } else {
-          parts.push(CH.toString_($.SpanAttributes.get("http.method")))
-        }
+        parts.push(CH.toString_($.SpanAttributes.get("http.method")))
         break
       case "attribute":
         if (groupByAttributeKeys?.length) {
-          const keys: CH.Expr<string>[] = groupByAttributeKeys.map((k) => {
-            const mvCol = useTraceListMv ? TRACE_LIST_MV_ATTR_MAP[k] : undefined
-            return mvCol
-              ? CH.toString_(CH.dynamicColumn<string>(mvCol))
-              : CH.toString_($.SpanAttributes.get(k))
-          })
+          const keys: CH.Expr<string>[] = groupByAttributeKeys.map((k) =>
+            CH.toString_($.SpanAttributes.get(k)),
+          )
           // When multiple attribute keys, join them into a single part
           if (keys.length === 1) {
             parts.push(keys[0])
@@ -182,7 +169,6 @@ function buildBreakdownGroupExpr(
 function buildWhereConditions(
   $: ColumnAccessor<typeof Traces.columns>,
   opts: TracesQueryOpts,
-  useTraceListMv: boolean,
 ): Array<CH.Condition | undefined> {
   const mm = opts.matchModes
   const conditions: Array<CH.Condition | undefined> = [
@@ -199,12 +185,12 @@ function buildWhereConditions(
         ? CH.positionCaseInsensitive($.SpanName, CH.lit(v)).gt(0)
         : $.SpanName.eq(v),
     ),
-    CH.whenTrue(!!opts.rootOnly && !useTraceListMv, () =>
+    CH.whenTrue(!!opts.rootOnly, () =>
       $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq("")),
     ),
   ]
 
-  // Duration filters (Duration column is nanoseconds in both MV and raw table)
+  // Duration filters (Duration column is nanoseconds)
   if (opts.minDurationMs != null) {
     conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
   }
@@ -213,21 +199,12 @@ function buildWhereConditions(
   }
 
   if (opts.errorsOnly) {
-    if (useTraceListMv) {
-      conditions.push(CH.dynamicColumn<number>("HasError").eq(1))
-    } else {
-      conditions.push($.StatusCode.eq("Error"))
-    }
+    conditions.push($.StatusCode.eq("Error"))
   }
 
   if (opts.environments?.length) {
     if (mm?.deploymentEnv === "contains" && opts.environments.length === 1) {
-      const envExpr = useTraceListMv
-        ? CH.dynamicColumn<string>("DeploymentEnv")
-        : $.ResourceAttributes.get("deployment.environment")
-      conditions.push(CH.positionCaseInsensitive(envExpr, CH.lit(opts.environments[0])).gt(0))
-    } else if (useTraceListMv) {
-      conditions.push(CH.inList(CH.dynamicColumn<string>("DeploymentEnv"), opts.environments))
+      conditions.push(CH.positionCaseInsensitive($.ResourceAttributes.get("deployment.environment"), CH.lit(opts.environments[0])).gt(0))
     } else {
       conditions.push(CH.inList($.ResourceAttributes.get("deployment.environment"), opts.environments))
     }
@@ -239,13 +216,13 @@ function buildWhereConditions(
 
   if (opts.attributeFilters) {
     for (const af of opts.attributeFilters) {
-      conditions.push(buildAttrFilterCondition(af, useTraceListMv, "SpanAttributes", TRACE_LIST_MV_ATTR_MAP))
+      conditions.push(buildAttrFilterCondition(af, "SpanAttributes"))
     }
   }
 
   if (opts.resourceAttributeFilters) {
     for (const rf of opts.resourceAttributeFilters) {
-      conditions.push(buildAttrFilterCondition(rf, useTraceListMv, "ResourceAttributes", TRACE_LIST_MV_RESOURCE_MAP))
+      conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes"))
     }
   }
 
@@ -311,16 +288,14 @@ export function tracesTimeseriesQuery(
   opts: TracesTimeseriesOpts,
 ) {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
-  const useTraceListMv = canUseTraceListMv(opts)
-  const tbl = useTraceListMv ? TraceListMv : Traces
 
-  return from(tbl as typeof Traces)
+  return from(Traces)
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
-      groupName: buildGroupNameExpr($, opts.groupBy, opts.groupByAttributeKeys, useTraceListMv),
+      groupName: buildGroupNameExpr($, opts.groupBy, opts.groupByAttributeKeys),
       ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
     }))
-    .where(($) => buildWhereConditions($, opts, useTraceListMv))
+    .where(($) => buildWhereConditions($, opts))
     .groupBy("bucket", "groupName")
     .orderBy(["bucket", "asc"], ["groupName", "asc"])
     .format("JSON")
@@ -358,14 +333,8 @@ export function tracesBreakdownQuery(
 ) {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
   const limit = opts.limit ?? 10
-  const useTraceListMv = canUseTraceListMv({
-    ...opts,
-    groupBy: [opts.groupBy],
-    groupByAttributeKeys: opts.groupByAttributeKey ? [opts.groupByAttributeKey] : undefined,
-  })
-  const tbl = useTraceListMv ? TraceListMv : Traces
 
-  return from(tbl as typeof Traces)
+  return from(Traces)
     .select(($) => {
       const { sampledSpanCount, unsampledSpanCount, dominantThreshold, ...metrics } =
         metricSelectExprs($, opts.metric, apdexThresholdMs, false, opts.allMetrics)
@@ -374,7 +343,7 @@ export function tracesBreakdownQuery(
         ...metrics,
       }
     })
-    .where(($) => buildWhereConditions($, opts, useTraceListMv))
+    .where(($) => buildWhereConditions($, opts))
     .groupBy("name")
     .orderBy(["count", "desc"])
     .limit(limit)
@@ -406,21 +375,15 @@ export interface TracesListOutput {
 }
 
 /**
- * Build a ClickHouse map() literal that extracts only the requested attribute
- * keys, using MV columns when available and falling back to the raw Map.
+ * Build a ClickHouse map() literal that extracts only the requested attribute keys.
  */
 function buildProjectedMapExpr(
   requestedKeys: string[],
-  useMv: boolean,
   mapName: "SpanAttributes" | "ResourceAttributes",
-  mvMap: Record<string, string>,
 ): CH.Expr<Record<string, string>> {
   if (requestedKeys.length === 0) return CH.mapLiteral()
   const pairs: Array<[string, CH.Expr<string>]> = requestedKeys.map((key) => {
-    const mvCol = useMv ? mvMap[key] : undefined
-    const valueExpr: CH.Expr<string> = mvCol
-      ? CH.dynamicColumn<string>(mvCol)
-      : CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), key)
+    const valueExpr: CH.Expr<string> = CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), key)
     return [key, valueExpr]
   })
   return CH.mapLiteral(...pairs)
@@ -431,13 +394,11 @@ export function tracesListQuery(
 ) {
   const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
-  const useTraceListMv = canUseTraceListMv({ ...opts, rootOnly: opts.rootOnly })
-  const tbl = useTraceListMv ? TraceListMv : Traces
 
   // Parse requested columns to determine which attribute keys are needed
   const requestedSpanAttrKeys: string[] = []
   const requestedResourceAttrKeys: string[] = []
-  let needsFullMaps = !opts.columns // backward-compatible when columns not specified
+  let needsFullMaps = !opts.columns
 
   if (opts.columns) {
     for (const col of opts.columns) {
@@ -449,31 +410,28 @@ export function tracesListQuery(
     }
   }
 
-  // When using the raw table and no specific attr columns are requested, skip the full maps
-  const spanAttrExpr = needsFullMaps && !useTraceListMv
+  const spanAttrExpr = needsFullMaps
     ? undefined // use $.SpanAttributes directly
-    : buildProjectedMapExpr(requestedSpanAttrKeys, useTraceListMv, "SpanAttributes", TRACE_LIST_MV_ATTR_MAP)
-  const resourceAttrExpr = needsFullMaps && !useTraceListMv
+    : buildProjectedMapExpr(requestedSpanAttrKeys, "SpanAttributes")
+  const resourceAttrExpr = needsFullMaps
     ? undefined // use $.ResourceAttributes directly
-    : buildProjectedMapExpr(requestedResourceAttrKeys, useTraceListMv, "ResourceAttributes", TRACE_LIST_MV_RESOURCE_MAP)
+    : buildProjectedMapExpr(requestedResourceAttrKeys, "ResourceAttributes")
 
-  let q = from(tbl as typeof Traces)
+  let q = from(Traces)
     .select(($) => ({
       traceId: $.TraceId,
       timestamp: $.Timestamp,
-      spanId: useTraceListMv ? CH.lit("") : $.SpanId,
+      spanId: $.SpanId,
       serviceName: $.ServiceName,
       spanName: $.SpanName,
       durationMs: $.Duration.div(1000000),
       statusCode: $.StatusCode,
-      spanKind: useTraceListMv ? CH.dynamicColumn<string>("SpanKind") : $.SpanKind,
-      hasError: useTraceListMv
-        ? CH.dynamicColumn<number>("HasError")
-        : CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
+      spanKind: $.SpanKind,
+      hasError: CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
       spanAttributes: spanAttrExpr ?? $.SpanAttributes,
       resourceAttributes: resourceAttrExpr ?? $.ResourceAttributes,
     }))
-    .where(($) => buildWhereConditions($, opts, useTraceListMv))
+    .where(($) => buildWhereConditions($, opts))
     .orderBy(["timestamp", "desc"])
     .limit(limit)
     .format("JSON")
@@ -515,10 +473,8 @@ export function tracesRootListQuery(
 ) {
   const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
-  const useTraceListMv = canUseTraceListMv({ ...opts, rootOnly: true })
-  const tbl = useTraceListMv ? TraceListMv : Traces
 
-  let q = from(tbl as typeof Traces)
+  let q = from(Traces)
     .select(($) => ({
       traceId: $.TraceId,
       startTime: $.Timestamp,
@@ -529,20 +485,12 @@ export function tracesRootListQuery(
       rootSpanName: $.SpanName,
       rootSpanKind: $.SpanKind,
       rootSpanStatusCode: $.StatusCode,
-      rootHttpMethod: useTraceListMv
-        ? CH.dynamicColumn<string>("HttpMethod")
-        : $.SpanAttributes.get("http.method"),
-      rootHttpRoute: useTraceListMv
-        ? CH.dynamicColumn<string>("HttpRoute")
-        : $.SpanAttributes.get("http.route"),
-      rootHttpStatusCode: useTraceListMv
-        ? CH.dynamicColumn<string>("HttpStatusCode")
-        : $.SpanAttributes.get("http.status_code"),
-      hasError: useTraceListMv
-        ? CH.dynamicColumn<number>("HasError")
-        : CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
+      rootHttpMethod: $.SpanAttributes.get("http.method"),
+      rootHttpRoute: $.SpanAttributes.get("http.route"),
+      rootHttpStatusCode: $.SpanAttributes.get("http.status_code"),
+      hasError: CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
     }))
-    .where(($) => buildWhereConditions($, { ...opts, rootOnly: true }, useTraceListMv))
+    .where(($) => buildWhereConditions($, { ...opts, rootOnly: true }))
     .orderBy(["startTime", "desc"])
     .limit(limit)
     .format("JSON")

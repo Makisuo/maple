@@ -14,7 +14,7 @@ import type { CHQuery } from "./query"
 // ---------------------------------------------------------------------------
 
 export interface CHUnionState {
-  readonly queries: ReadonlyArray<CHQuery<any, any>>
+  readonly queries: ReadonlyArray<CHQuery<any, any, any>>
   readonly outerOrderBySpecs: Array<[string, "asc" | "desc"]>
   readonly outerLimitValue?: number
   readonly outerOffsetValue?: number
@@ -87,7 +87,7 @@ function makeUnionQuery<
 export function unionAll<
   Output extends Record<string, any>,
 >(
-  ...queries: Array<CHQuery<ColumnDefs, Output>>
+  ...queries: Array<CHQuery<ColumnDefs, Output, any>>
 ): CHUnionQuery<Output> {
   return makeUnionQuery({
     queries,

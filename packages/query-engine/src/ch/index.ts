@@ -16,6 +16,8 @@ export {
   type CHNullable,
   type InferTS,
   type ColumnDefs,
+  type OutputToColumnDefs,
+  type NullableColumnDefs,
   string,
   uint8,
   uint64,
@@ -69,7 +71,6 @@ export {
   toUInt16OrZero,
   rawExpr,
   rawCond,
-  dynamicColumn,
   when,
   whenTrue,
   arrayOf,
@@ -95,10 +96,12 @@ export { param, type ParamMarker } from "./param"
 export {
   type CHQuery,
   type ColumnAccessor,
+  type JoinedColumnAccessor,
+  type JoinOnCallback,
   type InferOutput,
   type InferQueryOutput,
   from,
-  fromSubquery,
+  fromQuery,
 } from "./query"
 
 // Compilation

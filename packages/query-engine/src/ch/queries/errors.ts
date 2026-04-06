@@ -6,7 +6,7 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, fromSubquery, type ColumnAccessor } from "../query"
+import { from, fromQuery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { compileCH } from "../compile"
 import { ErrorSpans, ServiceUsage, TraceListMv, Traces } from "../tables"
@@ -511,55 +511,44 @@ export interface ErrorsSummaryOutput {
 export function errorsSummaryQuery(
   opts: ErrorsSummaryOpts,
 ) {
-  // Build the error subquery
-  const errorSubquery = compileCH(
-    from(ErrorSpans)
-      .select(($) => ({
-        totalErrors: CH.count(),
-        affectedServicesCount: CH.uniq($.ServiceName),
-        affectedTracesCount: CH.uniq($.TraceId),
-      }))
-      .where(($) => [
-        $.OrgId.eq(param.string("orgId")),
-        $.Timestamp.gte(param.dateTime("startTime")),
-        $.Timestamp.lte(param.dateTime("endTime")),
-        CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
-        opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-        opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
-        opts.errorTypes?.length ? CH.inList(errorFingerprint($.StatusMessage), opts.errorTypes) : undefined,
-      ]),
-    {},  // params resolved later by outer compile
-    { skipFormat: true },
-  )
+  const errorSub = from(ErrorSpans)
+    .select(($) => ({
+      totalErrors: CH.count(),
+      affectedServicesCount: CH.uniq($.ServiceName),
+      affectedTracesCount: CH.uniq($.TraceId),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+      CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
+      opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+      opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+      opts.errorTypes?.length ? CH.inList(errorFingerprint($.StatusMessage), opts.errorTypes) : undefined,
+    ])
 
-  // Build the service usage subquery
-  const usageSubquery = compileCH(
-    from(ServiceUsage)
-      .select(($) => ({
-        totalSpans: CH.sum($.TraceCount),
-      }))
-      .where(($) => [
-        $.OrgId.eq(param.string("orgId")),
-        $.Hour.gte(param.dateTime("startTime")),
-        $.Hour.lte(param.dateTime("endTime")),
-      ]),
-    {},
-    { skipFormat: true },
-  )
+  const usageSub = from(ServiceUsage)
+    .select(($) => ({
+      totalSpans: CH.sum($.TraceCount),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Hour.gte(param.dateTime("startTime")),
+      $.Hour.lte(param.dateTime("endTime")),
+    ])
 
-  // Outer query: FROM error subquery, CROSS JOIN usage subquery
-  return fromSubquery(errorSubquery.sql, "e")
-    .join(`(${usageSubquery.sql})`, "s", undefined, "CROSS")
-    .select(() => ({
-      totalErrors: CH.dynamicColumn<number>("e.totalErrors"),
-      totalSpans: CH.dynamicColumn<number>("s.totalSpans"),
+  return fromQuery(errorSub, "e")
+    .crossJoinQuery(usageSub, "s")
+    .select(($) => ({
+      totalErrors: $.totalErrors,
+      totalSpans: $.s.totalSpans,
       errorRate: CH.if_(
-        CH.dynamicColumn<number>("s.totalSpans").gt(0),
-        CH.round_(CH.dynamicColumn<number>("e.totalErrors").div(CH.dynamicColumn<number>("s.totalSpans")).mul(100), 4),
+        $.s.totalSpans.gt(0),
+        CH.round_($.totalErrors.div($.s.totalSpans).mul(100), 4),
         CH.lit(0),
       ),
-      affectedServicesCount: CH.dynamicColumn<number>("e.affectedServicesCount"),
-      affectedTracesCount: CH.dynamicColumn<number>("e.affectedTracesCount"),
+      affectedServicesCount: $.affectedServicesCount,
+      affectedTracesCount: $.affectedTracesCount,
     }))
     .format("JSON")
 }
@@ -590,27 +579,24 @@ export function errorDetailTracesQuery(
 ) {
   const limit = opts.limit ?? 10
 
-  // Subquery: find matching error TraceIds
-  const errorSubquery = compileCH(
-    from(ErrorSpans)
-      .select(($) => ({ TraceId: $.TraceId }))
-      .where(($) => [
-        $.OrgId.eq(param.string("orgId")),
-        errorFingerprint($.StatusMessage).eq(opts.errorType),
-        $.Timestamp.gte(param.dateTime("startTime")),
-        $.Timestamp.lte(param.dateTime("endTime")),
-        CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
-        opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-      ])
-      .orderBy(["TraceId", "desc"])
-      .limit(limit),
-    {},
-    { skipFormat: true },
-  )
+  // Subquery: find distinct matching error TraceIds
+  const errorSub = from(ErrorSpans)
+    .select(($) => ({ TraceId: $.TraceId }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      errorFingerprint($.StatusMessage).eq(opts.errorType),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+      CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
+      opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+    ])
+    .groupBy("TraceId")
+    .orderBy(["TraceId", "desc"])
+    .limit(limit)
 
   // Outer query: join traces with error subquery
   return from(Traces)
-    .join(`(SELECT DISTINCT TraceId FROM (${errorSubquery.sql}))`, "e", CH.dynamicColumn("traces.TraceId").eq(CH.dynamicColumn("e.TraceId")), "INNER")
+    .innerJoinQuery(errorSub, "e", (main, e) => main.TraceId.eq(e.TraceId))
     .select(($) => ({
       traceId: $.TraceId,
       startTime: CH.min_($.Timestamp),

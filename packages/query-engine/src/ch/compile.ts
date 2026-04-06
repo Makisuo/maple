@@ -2,7 +2,7 @@
 // Query Compilation
 //
 // Compiles a CHQuery + params into a SQL string by:
-// 1. Creating a ColumnAccessor proxy for the table
+// 1. Creating a ColumnAccessor proxy for the table (+ joined tables)
 // 2. Evaluating the selectFn to get aliased SqlFragments
 // 3. Evaluating the whereFn (with params resolved) to get Conditions
 // 4. Assembling into SqlQuery and calling the existing compileQuery()
@@ -11,7 +11,7 @@
 import type { ColumnDefs } from "./types"
 import type { CHQuery } from "./query"
 import type { CHUnionQuery } from "./union"
-import { createColumnAccessor } from "./query"
+import { createColumnAccessor, createJoinedColumnAccessor } from "./query"
 import { aliased } from "./expr"
 import { raw, ident, escapeClickHouseString, compile as compileSqlFragment } from "../sql/sql-fragment"
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
@@ -45,14 +45,25 @@ export interface CompiledQuery<Output> {
 export function compileCH<
   Cols extends ColumnDefs,
   Output extends Record<string, any>,
+  Joins extends Record<string, ColumnDefs>,
   Params extends Record<string, any>,
 >(
-  query: CHQuery<Cols, Output>,
+  query: CHQuery<Cols, Output, Joins>,
   params: Params,
   options?: { skipFormat?: boolean },
 ): CompiledQuery<Output> {
   const state = query._state
-  const $ = createColumnAccessor(state.columns)
+
+  // Build column accessor — joined or simple depending on joins
+  const joinAliases = state.typedJoins.map((j) => j.alias)
+  const hasJoins = joinAliases.length > 0
+  const mainAlias = hasJoins
+    ? (state.tableAlias ?? state.fromQueryAlias ?? state.tableName)
+    : undefined
+
+  const $ = hasJoins
+    ? createJoinedColumnAccessor(state.columns, joinAliases, mainAlias)
+    : createColumnAccessor(state.columns)
 
   // SELECT
   const selectExprs = state.selectFn ? state.selectFn($) : {}
@@ -70,21 +81,38 @@ export function compileCH<
     .filter((c): c is NonNullable<typeof c> => c != null)
     .map((c) => c.toFragment())
 
-  // Resolve param placeholders in the compiled SQL
-  const fromFragment = state.fromSubquerySql
-    ? raw(`(${state.fromSubquerySql}) AS ${state.fromSubqueryAlias}`)
-    : state.tableAlias
-      ? raw(`${state.tableName} AS ${state.tableAlias}`)
-      : ident(state.tableName)
+  // FROM clause
+  let fromFragment
+  if (state.fromQuery) {
+    // Compile the inner query lazily
+    const innerCompiled = compileCH(state.fromQuery, params, { skipFormat: true })
+    fromFragment = raw(`(${innerCompiled.sql}) AS ${state.fromQueryAlias}`)
+  } else if (state.tableAlias) {
+    fromFragment = raw(`${state.tableName} AS ${state.tableAlias}`)
+  } else {
+    fromFragment = ident(state.tableName)
+  }
 
   // JOINs
-  const joins = state.joins.length > 0
-    ? state.joins.map((j) => ({
-        type: j.type,
-        table: j.tableSql,
-        alias: j.alias,
-        on: j.on ? compileSqlFragment(j.on.toFragment()) : undefined,
-      }))
+  const joins = state.typedJoins.length > 0
+    ? state.typedJoins.map((j) => {
+        let tableSql: string
+        if (j.innerQuery) {
+          const compiled = compileCH(j.innerQuery, params, { skipFormat: true })
+          tableSql = `(${compiled.sql})`
+        } else if (j.tableName) {
+          tableSql = j.tableName
+        } else {
+          throw new QueryBuilderError({ code: "SelectRequired", message: "TypedJoin: missing table or query" })
+        }
+
+        return {
+          type: j.type,
+          table: tableSql,
+          alias: j.alias,
+          on: j.on ? compileSqlFragment(j.on.toFragment()) : undefined,
+        }
+      })
     : undefined
 
   const sqlQuery: SqlQuery = {

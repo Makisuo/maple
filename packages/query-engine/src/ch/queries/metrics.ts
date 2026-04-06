@@ -221,10 +221,10 @@ export function metricsTimeseriesRateQuery(
         ? $.Attributes.get(opts.groupByAttributeKey)
         : CH.lit(""),
       rateValue: CH.sumIf(
-        CH.dynamicColumn<number>("delta").div(CH.dynamicColumn<number>("time_delta")),
-        CH.dynamicColumn<number>("delta").gte(0).and(CH.dynamicColumn<number>("time_delta").gt(0)),
+        $.delta.div($.time_delta),
+        $.delta.gte(0).and($.time_delta.gt(0)),
       ),
-      increaseValue: CH.sumIf(CH.dynamicColumn<number>("delta"), CH.dynamicColumn<number>("delta").gte(0)),
+      increaseValue: CH.sumIf($.delta, $.delta.gte(0)),
       dataPointCount: CH.count(),
     }))
     .where(($) => [

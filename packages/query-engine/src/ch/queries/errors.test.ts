@@ -139,10 +139,10 @@ describe("errorDetailTracesQuery", () => {
     const q = errorDetailTracesQuery({ errorType: "NullPointerException" })
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("INNER JOIN")
-    expect(sql).toContain("SELECT DISTINCT TraceId")
+    expect(sql).toContain("GROUP BY TraceId")
     expect(sql).toContain("FROM traces")
     expect(sql).toContain("GROUP BY traceId")
-    expect(sql).toContain("groupUniqArray(ServiceName)")
+    expect(sql).toContain("groupUniqArray(traces.ServiceName)")
     expect(sql).toContain("ORDER BY startTime DESC")
     expect(sql).toContain("FORMAT JSON")
     // Error subquery references error_spans
