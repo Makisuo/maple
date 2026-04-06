@@ -139,7 +139,7 @@ export {
 // Queries — Metrics
 export {
   metricsTimeseriesQuery,
-  metricsTimeseriesRateSQL,
+  metricsTimeseriesRateQuery,
   metricsBreakdownQuery,
   type MetricsTimeseriesOpts,
   type MetricsTimeseriesOutput,
@@ -194,15 +194,15 @@ export {
 
 // Queries — Errors
 export {
-  ERROR_FINGERPRINT_SQL,
+  errorFingerprint,
   errorsByTypeQuery,
   errorsTimeseriesQuery,
   spanHierarchyQuery,
   tracesDurationStatsQuery,
   tracesFacetsQuery,
   errorsFacetsQuery,
-  errorsSummarySQL,
-  errorDetailTracesSQL,
+  errorsSummaryQuery,
+  errorDetailTracesQuery,
   type ErrorsByTypeOpts,
   type ErrorsByTypeOutput,
   type ErrorsTimeseriesOpts,

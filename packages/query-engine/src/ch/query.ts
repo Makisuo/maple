@@ -43,6 +43,15 @@ export type OrderBySpec<Output> = [keyof Output & string, "asc" | "desc"]
 // Query state (runtime storage)
 // ---------------------------------------------------------------------------
 
+export interface JoinClause {
+  readonly type: "INNER" | "LEFT" | "CROSS"
+  /** Table name, or subquery SQL (without parens — compiler wraps subqueries). */
+  readonly tableSql: string
+  readonly alias: string
+  /** ON condition. Omitted for CROSS JOIN. */
+  readonly on?: Condition
+}
+
 export interface CHQueryState {
   readonly tableName: string
   readonly columns: ColumnDefs
@@ -56,6 +65,9 @@ export interface CHQueryState {
   /** When set, the FROM clause uses a subquery instead of a table name. */
   readonly fromSubquerySql?: string
   readonly fromSubqueryAlias?: string
+  readonly joins: JoinClause[]
+  /** CTE definitions prepended as WITH clauses. */
+  readonly ctes: Array<{ name: string; sql: string }>
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +106,25 @@ export interface CHQuery<
   offset(n: number): CHQuery<Cols, Output>
 
   format(fmt: "JSON" | "JSONEachRow"): CHQuery<Cols, Output>
+
+  /**
+   * Add a JOIN clause. The joined table's columns are accessed via the alias
+   * in raw expressions (e.g., `CH.dynamicColumn("e.TraceId")`).
+   *
+   * For CROSS JOIN, pass `on` as `undefined`.
+   */
+  join(
+    tableSql: string,
+    alias: string,
+    on: Condition | undefined,
+    type?: "INNER" | "LEFT" | "CROSS",
+  ): CHQuery<Cols, Output>
+
+  /**
+   * Add a CTE (WITH clause). The CTE SQL is prepended to the compiled query.
+   * The CTE name can then be used as a table name via `from()` or in raw expressions.
+   */
+  withCTE(name: string, sql: string): CHQuery<Cols, Output>
 
   /**
    * @deprecated Params are now inferred at the `compile()` call site.
@@ -183,6 +214,23 @@ function makeQuery<
       return makeQuery({ ...state, formatValue: fmt })
     },
 
+    join(tableSql, alias, on, type = "INNER") {
+      return makeQuery({
+        ...state,
+        joins: [
+          ...state.joins,
+          { type, tableSql, alias, on },
+        ],
+      })
+    },
+
+    withCTE(name, sql) {
+      return makeQuery({
+        ...state,
+        ctes: [...state.ctes, { name, sql }],
+      })
+    },
+
     withParams() {
       // Params is phantom — same runtime state, refined compile-time type
       return makeQuery(state) as any
@@ -202,6 +250,8 @@ export function from<Name extends string, Cols extends ColumnDefs>(
     columns: table.columns,
     groupByKeys: [],
     orderBySpecs: [],
+    joins: [],
+    ctes: [],
   })
 }
 
@@ -225,6 +275,8 @@ export function fromSubquery(
     columns: {},
     groupByKeys: [],
     orderBySpecs: [],
+    joins: [],
+    ctes: [],
     fromSubquerySql: sql,
     fromSubqueryAlias: alias,
   })

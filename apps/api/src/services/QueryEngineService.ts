@@ -614,13 +614,13 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
       const isRateOrIncrease = request.query.metric === "rate" || request.query.metric === "increase"
 
       if (isRateOrIncrease) {
-        const compiled = CH.metricsTimeseriesRateSQL(
-          {
+        const compiled = CH.compile(
+          CH.metricsTimeseriesRateQuery({
             serviceName: request.query.filters.serviceName,
             groupByAttributeKey,
             attributeKey: attributeFilter?.key,
             attributeValue: attributeFilter?.value,
-          },
+          }),
           {
             orgId: tenant.orgId,
             metricName: request.query.filters.metricName,

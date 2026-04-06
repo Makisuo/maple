@@ -168,17 +168,17 @@ export function compilePipeQuery(
       }), { orgId, startTime, endTime })),
     ),
     Match.when("errors_summary", () =>
-      eraseType(CH.errorsSummarySQL({
+      eraseType(CH.compile(CH.errorsSummaryQuery({
         rootOnly: bool("root_only"), services: str("services")?.split(",").filter(Boolean),
         deploymentEnvs: str("deployment_envs")?.split(",").filter(Boolean),
         errorTypes: str("error_types")?.split(",").filter(Boolean),
-      }, { orgId, startTime, endTime })),
+      }), { orgId, startTime, endTime })),
     ),
     Match.when("error_detail_traces", () =>
-      eraseType(CH.errorDetailTracesSQL({
+      eraseType(CH.compile(CH.errorDetailTracesQuery({
         errorType: String(params.error_type), rootOnly: bool("root_only"),
         services: str("services")?.split(",").filter(Boolean), limit: int("limit", 10),
-      }, { orgId, startTime, endTime })),
+      }), { orgId, startTime, endTime })),
     ),
     // ----- Metrics -----
     Match.when("list_metrics", () =>

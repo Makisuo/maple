@@ -7,8 +7,10 @@
 
 import type { MetricType } from "../../query-engine"
 import * as CH from "../expr"
+import * as T from "../types"
 import { param } from "../param"
 import { from, type CHQuery } from "../query"
+import { table } from "../table"
 import { unionAll, type CHUnionQuery } from "../union"
 import {
   MetricsSum,
@@ -16,8 +18,7 @@ import {
   MetricsHistogram,
   MetricsExpHistogram,
 } from "../tables"
-import { escapeClickHouseString } from "../../sql/sql-fragment"
-import type { CompiledQuery } from "../compile"
+import { compileCH } from "../compile"
 
 // ---------------------------------------------------------------------------
 // Table lookup
@@ -168,81 +169,74 @@ export interface MetricsRateTimeseriesOutput {
   readonly dataPointCount: number
 }
 
-export function metricsTimeseriesRateSQL(
+export function metricsTimeseriesRateQuery(
   opts: MetricsRateTimeseriesOpts,
-  params: { orgId: string; metricName: string; startTime: string; endTime: string; bucketSeconds: number },
-): CompiledQuery<MetricsRateTimeseriesOutput> {
-  const esc = escapeClickHouseString
-  const bucketSeconds = Math.round(params.bucketSeconds)
+) {
+  // CTE: compute deltas using window functions
+  const cteSql = compileCH(
+    from(MetricsSum)
+      .select(($) => ({
+        TimeUnix: $.TimeUnix,
+        ServiceName: $.ServiceName,
+        Attributes: $.Attributes,
+        Value: $.Value,
+        delta: CH.rawExpr<number>(
+          "Value - lagInFrame(Value, 1, Value) OVER (PARTITION BY ServiceName, MetricName, Attributes ORDER BY TimeUnix ASC)",
+        ),
+        time_delta: CH.rawExpr<number>(
+          "toFloat64(toUnixTimestamp64Nano(TimeUnix) - toUnixTimestamp64Nano(lagInFrame(TimeUnix, 1, TimeUnix) OVER (PARTITION BY ServiceName, MetricName, Attributes ORDER BY TimeUnix ASC))) / 1000000000.0",
+        ),
+      }))
+      .where(($) => [
+        $.MetricName.eq(param.string("metricName")),
+        $.OrgId.eq(param.string("orgId")),
+        CH.dynamicColumn<number>("IsMonotonic").eq(1),
+        CH.rawCond(`TimeUnix >= __PARAM_startTime__ - INTERVAL __PARAM_bucketSeconds__ SECOND`),
+        $.TimeUnix.lte(param.dateTime("endTime")),
+        CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+        CH.when(opts.attributeKey, (k: string) =>
+          $.Attributes.get(k).eq(opts.attributeValue ?? ""),
+        ),
+      ]),
+    {},
+    { skipFormat: true },
+  )
 
-  // CTE WHERE clauses
-  const cteWhereFragments = [
-    `MetricName = '${esc(params.metricName)}'`,
-    `OrgId = '${esc(params.orgId)}'`,
-    `IsMonotonic = 1`,
-    `TimeUnix >= '${esc(params.startTime)}' - INTERVAL ${bucketSeconds} SECOND`,
-    `TimeUnix <= '${esc(params.endTime)}'`,
-  ]
-  if (opts.serviceName) {
-    cteWhereFragments.push(`ServiceName = '${esc(opts.serviceName)}'`)
-  }
-  if (opts.attributeKey) {
-    cteWhereFragments.push(
-      `Attributes['${esc(opts.attributeKey)}'] = '${esc(opts.attributeValue ?? '')}'`,
-    )
-  }
+  // Outer query: aggregate deltas into rate/increase per bucket
+  const cteTable = table("with_deltas", {
+    TimeUnix: T.dateTime64,
+    ServiceName: T.string,
+    Attributes: T.map(T.string, T.string),
+    Value: T.float64,
+    delta: T.float64,
+    time_delta: T.float64,
+  })
 
-  // Outer SELECT attribute column
-  const attributeSelect = opts.groupByAttributeKey
-    ? `Attributes['${esc(opts.groupByAttributeKey)}'] AS attributeValue`
-    : `'' AS attributeValue`
+  const q = from(cteTable)
+    .withCTE("with_deltas", cteSql.sql)
+    .select(($) => ({
+      bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
+      serviceName: $.ServiceName,
+      attributeValue: opts.groupByAttributeKey
+        ? $.Attributes.get(opts.groupByAttributeKey)
+        : CH.lit(""),
+      rateValue: CH.sumIf(
+        CH.dynamicColumn<number>("delta").div(CH.dynamicColumn<number>("time_delta")),
+        CH.dynamicColumn<number>("delta").gte(0).and(CH.dynamicColumn<number>("time_delta").gt(0)),
+      ),
+      increaseValue: CH.sumIf(CH.dynamicColumn<number>("delta"), CH.dynamicColumn<number>("delta").gte(0)),
+      dataPointCount: CH.count(),
+    }))
+    .where(($) => [
+      $.TimeUnix.gte(param.dateTime("startTime")),
+    ])
 
-  // Outer GROUP BY
-  const groupByParts = ["bucket", "ServiceName"]
-  if (opts.groupByAttributeKey) {
-    groupByParts.push(`Attributes['${esc(opts.groupByAttributeKey)}']`)
-  }
-
-  const sql = `
-WITH with_deltas AS (
-  SELECT
-    TimeUnix,
-    ServiceName,
-    Attributes,
-    Value,
-    Value - lagInFrame(Value, 1, Value) OVER (
-      PARTITION BY ServiceName, MetricName, Attributes
-      ORDER BY TimeUnix ASC
-    ) AS delta,
-    toFloat64(
-      toUnixTimestamp64Nano(TimeUnix) - toUnixTimestamp64Nano(
-        lagInFrame(TimeUnix, 1, TimeUnix) OVER (
-          PARTITION BY ServiceName, MetricName, Attributes
-          ORDER BY TimeUnix ASC
-        )
-      )
-    ) / 1000000000.0 AS time_delta
-  FROM metrics_sum
-  WHERE ${cteWhereFragments.join("\n    AND ")}
-)
-SELECT
-  toStartOfInterval(TimeUnix, INTERVAL ${bucketSeconds} SECOND) AS bucket,
-  ServiceName AS serviceName,
-  ${attributeSelect},
-  sumIf(delta / time_delta, delta >= 0 AND time_delta > 0) AS rateValue,
-  sumIf(delta, delta >= 0) AS increaseValue,
-  count() AS dataPointCount
-FROM with_deltas
-WHERE TimeUnix >= '${esc(params.startTime)}'
-GROUP BY ${groupByParts.join(", ")}
-ORDER BY bucket ASC
-FORMAT JSON
-`.trim()
-
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<MetricsRateTimeseriesOutput>,
-  }
+  return (opts.groupByAttributeKey
+    ? q.groupBy("bucket", "serviceName", "attributeValue")
+    : q.groupBy("bucket", "serviceName")
+  )
+    .orderBy(["bucket", "asc"])
+    .format("JSON")
 }
 
 // ---------------------------------------------------------------------------

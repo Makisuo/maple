@@ -6,11 +6,11 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type ColumnAccessor } from "../query"
+import { from, fromSubquery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
-import { ErrorSpans, TraceListMv, Traces } from "../tables"
+import { compileCH } from "../compile"
+import { ErrorSpans, ServiceUsage, TraceListMv, Traces } from "../tables"
 import { escapeClickHouseString } from "../../sql/sql-fragment"
-import type { CompiledQuery } from "../compile"
 
 // ---------------------------------------------------------------------------
 // Shared: Error fingerprint expression (typed DSL)
@@ -36,19 +36,6 @@ export function errorFingerprint(statusMessage: CH.Expr<string>): CH.Expr<string
   )
 }
 
-/**
- * @deprecated Use errorFingerprint($.StatusMessage) instead.
- * Kept for raw SQL builders (errorsSummarySQL, errorDetailTracesSQL) that can't use the DSL.
- */
-export const ERROR_FINGERPRINT_SQL = `if(StatusMessage = '', 'Unknown Error',
-  left(StatusMessage, multiIf(
-    position(StatusMessage, ': ') > 3, toInt64(position(StatusMessage, ': ')) - 1,
-    position(StatusMessage, ' (') > 3, toInt64(position(StatusMessage, ' (')) - 1,
-    position(StatusMessage, '\\n') > 3, toInt64(position(StatusMessage, '\\n')) - 1,
-    position(StatusMessage, '{') > 10, toInt64(position(StatusMessage, '{')) - 1,
-    least(toInt64(length(StatusMessage)), 150)
-  ))
-)`
 
 // ---------------------------------------------------------------------------
 // Errors by type
@@ -490,7 +477,7 @@ export function errorsFacetsQuery(
 }
 
 // ---------------------------------------------------------------------------
-// Errors summary (raw SQL — CROSS JOIN between error_spans and service_usage)
+// Errors summary (CROSS JOIN between error_spans and service_usage)
 // ---------------------------------------------------------------------------
 
 export interface ErrorsSummaryOpts {
@@ -508,58 +495,64 @@ export interface ErrorsSummaryOutput {
   readonly affectedTracesCount: number
 }
 
-export function errorsSummarySQL(
+export function errorsSummaryQuery(
   opts: ErrorsSummaryOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ErrorsSummaryOutput> {
-  const esc = escapeClickHouseString
-  const errorConditions: string[] = [
-    `OrgId = '${esc(params.orgId)}'`,
-    `Timestamp >= '${esc(params.startTime)}'`,
-    `Timestamp <= '${esc(params.endTime)}'`,
-  ]
-  if (opts.rootOnly) errorConditions.push("ParentSpanId = ''")
-  if (opts.services?.length) {
-    errorConditions.push(`ServiceName IN (${opts.services.map((s) => `'${esc(s)}'`).join(", ")})`)
-  }
-  if (opts.deploymentEnvs?.length) {
-    errorConditions.push(`DeploymentEnv IN (${opts.deploymentEnvs.map((e) => `'${esc(e)}'`).join(", ")})`)
-  }
-  if (opts.errorTypes?.length) {
-    errorConditions.push(`${ERROR_FINGERPRINT_SQL} IN (${opts.errorTypes.map((t) => `'${esc(t)}'`).join(", ")})`)
-  }
+) {
+  // Build the error subquery
+  const errorSubquery = compileCH(
+    from(ErrorSpans)
+      .select(($) => ({
+        totalErrors: CH.count(),
+        affectedServicesCount: CH.uniq($.ServiceName),
+        affectedTracesCount: CH.uniq($.TraceId),
+      }))
+      .where(($) => [
+        $.OrgId.eq(param.string("orgId")),
+        $.Timestamp.gte(param.dateTime("startTime")),
+        $.Timestamp.lte(param.dateTime("endTime")),
+        CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
+        opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+        opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+        opts.errorTypes?.length ? CH.inList(errorFingerprint($.StatusMessage), opts.errorTypes) : undefined,
+      ]),
+    {},  // params resolved later by outer compile
+    { skipFormat: true },
+  )
 
-  const sql = `SELECT
-  e.totalErrors AS totalErrors,
-  s.totalSpans AS totalSpans,
-  if(s.totalSpans > 0, round(e.totalErrors / s.totalSpans * 100, 4), 0) AS errorRate,
-  e.affectedServicesCount AS affectedServicesCount,
-  e.affectedTracesCount AS affectedTracesCount
-FROM (
-  SELECT
-    count() AS totalErrors,
-    uniq(ServiceName) AS affectedServicesCount,
-    uniq(TraceId) AS affectedTracesCount
-  FROM error_spans
-  WHERE ${errorConditions.join("\n    AND ")}
-) AS e
-CROSS JOIN (
-  SELECT sum(TraceCount) AS totalSpans
-  FROM service_usage
-  WHERE OrgId = '${esc(params.orgId)}'
-    AND Hour >= '${esc(params.startTime)}'
-    AND Hour <= '${esc(params.endTime)}'
-) AS s
-FORMAT JSON`
+  // Build the service usage subquery
+  const usageSubquery = compileCH(
+    from(ServiceUsage)
+      .select(($) => ({
+        totalSpans: CH.sum($.TraceCount),
+      }))
+      .where(($) => [
+        $.OrgId.eq(param.string("orgId")),
+        $.Hour.gte(param.dateTime("startTime")),
+        $.Hour.lte(param.dateTime("endTime")),
+      ]),
+    {},
+    { skipFormat: true },
+  )
 
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<ErrorsSummaryOutput>,
-  }
+  // Outer query: FROM error subquery, CROSS JOIN usage subquery
+  return fromSubquery(errorSubquery.sql, "e")
+    .join(`(${usageSubquery.sql})`, "s", undefined, "CROSS")
+    .select(() => ({
+      totalErrors: CH.dynamicColumn<number>("e.totalErrors"),
+      totalSpans: CH.dynamicColumn<number>("s.totalSpans"),
+      errorRate: CH.if_(
+        CH.dynamicColumn<number>("s.totalSpans").gt(0),
+        CH.round_(CH.dynamicColumn<number>("e.totalErrors").div(CH.dynamicColumn<number>("s.totalSpans")).mul(100), 4),
+        CH.lit(0),
+      ),
+      affectedServicesCount: CH.dynamicColumn<number>("e.affectedServicesCount"),
+      affectedTracesCount: CH.dynamicColumn<number>("e.affectedTracesCount"),
+    }))
+    .format("JSON")
 }
 
 // ---------------------------------------------------------------------------
-// Error detail traces (raw SQL — subquery + INNER JOIN)
+// Error detail traces (INNER JOIN with error subquery)
 // ---------------------------------------------------------------------------
 
 export interface ErrorDetailTracesOpts {
@@ -574,53 +567,52 @@ export interface ErrorDetailTracesOutput {
   readonly startTime: string
   readonly durationMicros: number
   readonly spanCount: number
-  readonly services: string[]
+  readonly services: readonly string[]
   readonly rootSpanName: string
   readonly errorMessage: string
 }
 
-export function errorDetailTracesSQL(
+export function errorDetailTracesQuery(
   opts: ErrorDetailTracesOpts,
-  params: { orgId: string; startTime: string; endTime: string },
-): CompiledQuery<ErrorDetailTracesOutput> {
-  const esc = escapeClickHouseString
+) {
   const limit = opts.limit ?? 10
-  const errorConditions: string[] = [
-    `OrgId = '${esc(params.orgId)}'`,
-    `${ERROR_FINGERPRINT_SQL} = '${esc(opts.errorType)}'`,
-    `Timestamp >= '${esc(params.startTime)}'`,
-    `Timestamp <= '${esc(params.endTime)}'`,
-  ]
-  if (opts.rootOnly) errorConditions.push("ParentSpanId = ''")
-  if (opts.services?.length) {
-    errorConditions.push(`ServiceName IN (${opts.services.map((s) => `'${esc(s)}'`).join(", ")})`)
-  }
 
-  const sql = `SELECT
-  t.TraceId AS traceId,
-  min(t.Timestamp) AS startTime,
-  intDiv(max(t.Duration), 1000) AS durationMicros,
-  count() AS spanCount,
-  groupUniqArray(t.ServiceName) AS services,
-  anyIf(t.SpanName, t.ParentSpanId = '') AS rootSpanName,
-  any(t.StatusMessage) AS errorMessage
-FROM traces AS t
-INNER JOIN (
-  SELECT DISTINCT TraceId
-  FROM error_spans
-  WHERE ${errorConditions.join("\n    AND ")}
-  ORDER BY Timestamp DESC
-  LIMIT ${Math.round(limit)}
-) AS e ON t.TraceId = e.TraceId
-WHERE t.OrgId = '${esc(params.orgId)}'
-  AND t.Timestamp >= '${esc(params.startTime)}'
-  AND t.Timestamp <= '${esc(params.endTime)}'
-GROUP BY t.TraceId
-ORDER BY startTime DESC
-FORMAT JSON`
+  // Subquery: find matching error TraceIds
+  const errorSubquery = compileCH(
+    from(ErrorSpans)
+      .select(($) => ({ TraceId: $.TraceId }))
+      .where(($) => [
+        $.OrgId.eq(param.string("orgId")),
+        errorFingerprint($.StatusMessage).eq(opts.errorType),
+        $.Timestamp.gte(param.dateTime("startTime")),
+        $.Timestamp.lte(param.dateTime("endTime")),
+        CH.whenTrue(!!opts.rootOnly, () => $.ParentSpanId.eq("")),
+        opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+      ])
+      .orderBy(["TraceId", "desc"])
+      .limit(limit),
+    {},
+    { skipFormat: true },
+  )
 
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<ErrorDetailTracesOutput>,
-  }
+  // Outer query: join traces with error subquery
+  return from(Traces)
+    .join(`(SELECT DISTINCT TraceId FROM (${errorSubquery.sql}))`, "e", CH.rawCond("traces.TraceId = e.TraceId"), "INNER")
+    .select(($) => ({
+      traceId: $.TraceId,
+      startTime: CH.min_($.Timestamp),
+      durationMicros: CH.intDiv(CH.max_($.Duration), 1000),
+      spanCount: CH.count(),
+      services: CH.groupUniqArray($.ServiceName),
+      rootSpanName: CH.anyIf($.SpanName, $.ParentSpanId.eq("")),
+      errorMessage: CH.any_($.StatusMessage),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+    ])
+    .groupBy("traceId")
+    .orderBy(["startTime", "desc"])
+    .format("JSON")
 }

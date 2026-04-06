@@ -13,7 +13,7 @@ import type { CHQuery } from "./query"
 import type { CHUnionQuery } from "./union"
 import { createColumnAccessor } from "./query"
 import { aliased } from "./expr"
-import { raw, ident, escapeClickHouseString } from "../sql/sql-fragment"
+import { raw, ident, escapeClickHouseString, compile as compileSqlFragment } from "../sql/sql-fragment"
 import { compileQuery, type SqlQuery } from "../sql/sql-query"
 import { Schema } from "effect"
 
@@ -75,9 +75,20 @@ export function compileCH<
     ? raw(`(${state.fromSubquerySql}) AS ${state.fromSubqueryAlias}`)
     : ident(state.tableName)
 
+  // JOINs
+  const joins = state.joins.length > 0
+    ? state.joins.map((j) => ({
+        type: j.type,
+        table: j.tableSql,
+        alias: j.alias,
+        on: j.on ? compileSqlFragment(j.on.toFragment()) : undefined,
+      }))
+    : undefined
+
   const sqlQuery: SqlQuery = {
     select: selectFragments,
     from: fromFragment,
+    joins,
     where: whereFragments,
     groupBy: state.groupByKeys.map((k) => raw(k)),
     orderBy: state.orderBySpecs.map(([k, dir]) => raw(`${k} ${dir.toUpperCase()}`)),
@@ -87,6 +98,12 @@ export function compileCH<
   }
 
   let sql = compileQuery(sqlQuery)
+
+  // Prepend CTE definitions
+  if (state.ctes.length > 0) {
+    const cteDefs = state.ctes.map((c) => `${c.name} AS (\n${c.sql}\n)`).join(",\n")
+    sql = `WITH ${cteDefs}\n${sql}`
+  }
 
   // Replace param placeholders with resolved values
   for (const [name, value] of Object.entries(params)) {
