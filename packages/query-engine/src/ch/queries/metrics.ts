@@ -19,20 +19,7 @@ import {
   MetricsExpHistogram,
 } from "../tables"
 import { compileCH } from "../compile"
-
-// ---------------------------------------------------------------------------
-// Table lookup
-// ---------------------------------------------------------------------------
-
-const VALUE_TABLES = {
-  sum: MetricsSum,
-  gauge: MetricsGauge,
-} as const
-
-const HISTOGRAM_TABLES = {
-  histogram: MetricsHistogram,
-  exponential_histogram: MetricsExpHistogram,
-} as const
+import { resolveMetricTable, metricsSelectExprs } from "./query-helpers"
 
 // ---------------------------------------------------------------------------
 // Shared options & output types
@@ -67,18 +54,7 @@ export interface MetricsTimeseriesOutput {
 export function metricsTimeseriesQuery(
   opts: MetricsTimeseriesOpts,
 ) {
-  const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
-
-  if (isHistogram) {
-    return buildHistogramTimeseries(opts)
-  }
-  return buildValueTimeseries(opts)
-}
-
-function buildValueTimeseries(
-  opts: MetricsTimeseriesOpts,
-) {
-  const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
+  const { tbl, isHistogram } = resolveMetricTable(opts.metricType)
 
   const q = from(tbl as typeof MetricsSum)
     .select(($) => ({
@@ -87,48 +63,7 @@ function buildValueTimeseries(
       attributeValue: opts.groupByAttributeKey
         ? $.Attributes.get(opts.groupByAttributeKey)
         : CH.lit(""),
-      avgValue: CH.avg($.Value),
-      minValue: CH.min_($.Value),
-      maxValue: CH.max_($.Value),
-      sumValue: CH.sum($.Value),
-      dataPointCount: CH.count(),
-    }))
-    .where(($) => [
-      $.MetricName.eq(param.string("metricName")),
-      $.OrgId.eq(param.string("orgId")),
-      $.TimeUnix.gte(param.dateTime("startTime")),
-      $.TimeUnix.lte(param.dateTime("endTime")),
-      CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-      CH.when(opts.attributeKey, (k: string) =>
-        $.Attributes.get(k).eq(opts.attributeValue ?? ""),
-      ),
-    ])
-
-  return (opts.groupByAttributeKey
-    ? q.groupBy("bucket", "serviceName", "attributeValue")
-    : q.groupBy("bucket", "serviceName")
-  )
-    .orderBy(["bucket", "asc"])
-    .format("JSON")
-}
-
-function buildHistogramTimeseries(
-  opts: MetricsTimeseriesOpts,
-) {
-  const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
-
-  const q = from(tbl as typeof MetricsHistogram)
-    .select(($) => ({
-      bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
-      serviceName: $.ServiceName,
-      attributeValue: opts.groupByAttributeKey
-        ? $.Attributes.get(opts.groupByAttributeKey)
-        : CH.lit(""),
-      avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
-      minValue: CH.min_($.Min),
-      maxValue: CH.max_($.Max),
-      sumValue: CH.sum($.Sum),
-      dataPointCount: CH.sum($.Count),
+      ...metricsSelectExprs($, isHistogram),
     }))
     .where(($) => [
       $.MetricName.eq(param.string("metricName")),
@@ -258,53 +193,19 @@ export interface MetricsBreakdownOutput {
 export function metricsBreakdownQuery(
   opts: MetricsBreakdownOpts,
 ) {
-  const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
+  const { tbl, isHistogram } = resolveMetricTable(opts.metricType)
   const limit = opts.limit ?? 10
 
-  if (isHistogram) {
-    return buildHistogramBreakdown(opts, limit)
-  }
-  return buildValueBreakdown(opts, limit)
-}
-
-function buildValueBreakdown(
-  opts: MetricsBreakdownOpts,
-  limit: number,
-) {
-  const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
-
   return from(tbl as typeof MetricsSum)
-    .select(($) => ({
-      name: $.ServiceName,
-      avgValue: CH.avg($.Value),
-      sumValue: CH.sum($.Value),
-      count: CH.count(),
-    }))
-    .where(($) => [
-      $.MetricName.eq(param.string("metricName")),
-      $.OrgId.eq(param.string("orgId")),
-      $.TimeUnix.gte(param.dateTime("startTime")),
-      $.TimeUnix.lte(param.dateTime("endTime")),
-    ])
-    .groupBy("name")
-    .orderBy(["count", "desc"])
-    .limit(limit)
-    .format("JSON")
-}
-
-function buildHistogramBreakdown(
-  opts: MetricsBreakdownOpts,
-  limit: number,
-) {
-  const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
-
-  return from(tbl as typeof MetricsHistogram)
-    .select(($) => ({
-      name: $.ServiceName,
-      avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
-      sumValue: CH.sum($.Sum),
-      count: CH.sum($.Count),
-    }))
+    .select(($) => {
+      const exprs = metricsSelectExprs($, isHistogram)
+      return {
+        name: $.ServiceName,
+        avgValue: exprs.avgValue,
+        sumValue: exprs.sumValue,
+        count: exprs.dataPointCount,
+      }
+    })
     .where(($) => [
       $.MetricName.eq(param.string("metricName")),
       $.OrgId.eq(param.string("orgId")),

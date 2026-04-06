@@ -9,6 +9,7 @@ import { param } from "../param"
 import { from, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { ServiceOverviewSpans, ServiceUsage, Traces } from "../tables"
+import { apdexExprs } from "./query-helpers"
 
 // ---------------------------------------------------------------------------
 // Service overview
@@ -125,24 +126,13 @@ export interface ServiceApdexTimeseriesOutput {
 export function serviceApdexTimeseriesQuery(
   opts: ServiceApdexTimeseriesOpts,
 ) {
-  const t = String(opts.apdexThresholdMs ?? 500)
+  const thresholdMs = opts.apdexThresholdMs ?? 500
 
   return from(Traces)
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
       totalCount: CH.count(),
-      satisfiedCount: CH.countIf($.Duration.div(1000000).lt(Number(t))),
-      toleratingCount: CH.countIf($.Duration.div(1000000).gte(Number(t)).and($.Duration.div(1000000).lt(Number(t) * 4))),
-      apdexScore: CH.if_(
-        CH.count().gt(0),
-        CH.round_(
-          CH.countIf($.Duration.div(1000000).lt(Number(t)))
-            .add(CH.countIf($.Duration.div(1000000).gte(Number(t)).and($.Duration.div(1000000).lt(Number(t) * 4))).mul(0.5))
-            .div(CH.count()),
-          4,
-        ),
-        CH.lit(0),
-      ),
+      ...apdexExprs($.Duration.div(1000000), thresholdMs),
     }))
     .where(($) => [
       $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq("")),

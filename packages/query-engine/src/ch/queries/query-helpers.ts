@@ -5,11 +5,17 @@
 // traces, alerts, services, and metrics queries.
 // ---------------------------------------------------------------------------
 
-import type { AttributeFilter } from "../../query-engine"
+import type { AttributeFilter, MetricType } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
 import type { ColumnAccessor } from "../query"
 import type { Traces } from "../tables"
+import {
+  MetricsSum,
+  MetricsGauge,
+  MetricsHistogram,
+  MetricsExpHistogram,
+} from "../tables"
 import { buildAttrFilterCondition } from "../../traces-shared"
 
 // ---------------------------------------------------------------------------
@@ -127,4 +133,54 @@ export function tracesBaseWhereConditions(
   }
 
   return conditions
+}
+
+// ---------------------------------------------------------------------------
+// Metrics table lookup + SELECT factory
+// ---------------------------------------------------------------------------
+
+export const VALUE_TABLES = {
+  sum: MetricsSum,
+  gauge: MetricsGauge,
+} as const
+
+export const HISTOGRAM_TABLES = {
+  histogram: MetricsHistogram,
+  exponential_histogram: MetricsExpHistogram,
+} as const
+
+export function resolveMetricTable(metricType: MetricType) {
+  const isHistogram = metricType === "histogram" || metricType === "exponential_histogram"
+  const tbl = isHistogram
+    ? HISTOGRAM_TABLES[metricType as keyof typeof HISTOGRAM_TABLES]
+    : VALUE_TABLES[metricType as keyof typeof VALUE_TABLES]
+  return { tbl, isHistogram }
+}
+
+/**
+ * Build the standard metrics aggregation SELECT expressions.
+ * For value tables (sum/gauge): operates on $.Value column.
+ * For histogram tables: operates on $.Sum, $.Count, $.Min, $.Max columns.
+ */
+export function metricsSelectExprs(
+  $: ColumnAccessor<typeof MetricsSum.columns>,
+  isHistogram: boolean,
+) {
+  if (isHistogram) {
+    const $h = $ as unknown as ColumnAccessor<typeof MetricsHistogram.columns>
+    return {
+      avgValue: CH.if_(CH.sum($h.Count).gt(0), CH.sum($h.Sum).div(CH.sum($h.Count)), CH.lit(0)),
+      minValue: CH.min_($h.Min),
+      maxValue: CH.max_($h.Max),
+      sumValue: CH.sum($h.Sum),
+      dataPointCount: CH.sum($h.Count),
+    }
+  }
+  return {
+    avgValue: CH.avg($.Value),
+    minValue: CH.min_($.Value),
+    maxValue: CH.max_($.Value),
+    sumValue: CH.sum($.Value),
+    dataPointCount: CH.count(),
+  }
 }

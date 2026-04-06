@@ -1,10 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { QueryEngineExecuteRequest, QueryEngineExecuteResponse } from "../query-engine"
-import { tinybirdPipes } from "../tinybird-pipes"
 import { Authorization } from "./current-tenant"
-
-const TinybirdPipeSchema = Schema.Literals(tinybirdPipes)
 
 export class QueryEngineValidationError extends Schema.TaggedErrorClass<QueryEngineValidationError>()(
   "@maple/http/errors/QueryEngineValidationError",
@@ -20,7 +17,7 @@ export class QueryEngineExecutionError extends Schema.TaggedErrorClass<QueryEngi
   {
     message: Schema.String,
     causeTag: Schema.optional(Schema.String),
-    pipe: Schema.optional(TinybirdPipeSchema),
+    pipe: Schema.optional(Schema.String),
   },
   { httpApiStatus: 502 },
 ) {}

@@ -6,33 +6,24 @@
 // alert_logs_aggregate, and their *_by_service variants.
 // ---------------------------------------------------------------------------
 
-import type { AttributeFilter, MetricType } from "../../query-engine"
+import type { MetricType } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
 import { from, type ColumnAccessor } from "../query"
+import { Traces, Logs, MetricsSum } from "../tables"
 import {
-  Traces,
-  Logs,
-  MetricsSum,
-  MetricsGauge,
-  MetricsHistogram,
-  MetricsExpHistogram,
-} from "../tables"
-import { buildAttrFilterCondition } from "../../traces-shared"
+  apdexExprs,
+  tracesBaseWhereConditions,
+  type TracesBaseWhereOpts,
+  resolveMetricTable,
+  metricsSelectExprs,
+} from "./query-helpers"
 
 // ---------------------------------------------------------------------------
 // Traces alert aggregate
 // ---------------------------------------------------------------------------
 
-export interface AlertTracesOpts {
-  serviceName?: string
-  spanName?: string
-  rootOnly?: boolean
-  errorsOnly?: boolean
-  environments?: readonly string[]
-  commitShas?: readonly string[]
-  attributeFilters?: readonly AttributeFilter[]
-  resourceAttributeFilters?: readonly AttributeFilter[]
+export interface AlertTracesOpts extends TracesBaseWhereOpts {
   apdexThresholdMs?: number
 }
 
@@ -54,7 +45,6 @@ export interface AlertTracesAggregateByServiceOutput extends AlertTracesAggregat
 
 
 function alertTracesSelectExprs($: ColumnAccessor<typeof Traces.columns>, apdexThresholdMs: number) {
-  const t = apdexThresholdMs
   return {
     count: CH.count(),
     avgDuration: CH.avg($.Duration).div(1000000),
@@ -62,18 +52,7 @@ function alertTracesSelectExprs($: ColumnAccessor<typeof Traces.columns>, apdexT
     p95Duration: CH.quantile(0.95)($.Duration).div(1000000),
     p99Duration: CH.quantile(0.99)($.Duration).div(1000000),
     errorRate: CH.if_(CH.count().gt(0), CH.countIf($.StatusCode.eq("Error")).mul(100.0).div(CH.count()), CH.lit(0)),
-    satisfiedCount: CH.countIf($.Duration.div(1000000).lt(t)),
-    toleratingCount: CH.countIf($.Duration.div(1000000).gte(t).and($.Duration.div(1000000).lt(t * 4))),
-    apdexScore: CH.if_(
-      CH.count().gt(0),
-      CH.round_(
-        CH.countIf($.Duration.div(1000000).lt(t))
-          .add(CH.countIf($.Duration.div(1000000).gte(t).and($.Duration.div(1000000).lt(t * 4))).mul(0.5))
-          .div(CH.count()),
-        4,
-      ),
-      CH.lit(0),
-    ),
+    ...apdexExprs($.Duration.div(1000000), apdexThresholdMs),
   }
 }
 
@@ -81,36 +60,7 @@ function alertTracesWhereConditions(
   $: ColumnAccessor<typeof Traces.columns>,
   opts: AlertTracesOpts,
 ): Array<CH.Condition | undefined> {
-  const conditions: Array<CH.Condition | undefined> = [
-    $.OrgId.eq(param.string("orgId")),
-    $.Timestamp.gte(param.dateTime("startTime")),
-    $.Timestamp.lte(param.dateTime("endTime")),
-    CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-    CH.when(opts.spanName, (v: string) => $.SpanName.eq(v)),
-    CH.whenTrue(!!opts.rootOnly, () =>
-      $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq("")),
-    ),
-    CH.whenTrue(!!opts.errorsOnly, () => $.StatusCode.eq("Error")),
-  ]
-
-  if (opts.environments?.length) {
-    conditions.push(CH.inList($.ResourceAttributes.get("deployment.environment"), opts.environments))
-  }
-  if (opts.commitShas?.length) {
-    conditions.push(CH.inList($.ResourceAttributes.get("deployment.commit_sha"), opts.commitShas))
-  }
-  if (opts.attributeFilters) {
-    for (const af of opts.attributeFilters) {
-      conditions.push(buildAttrFilterCondition(af, "SpanAttributes"))
-    }
-  }
-  if (opts.resourceAttributeFilters) {
-    for (const rf of opts.resourceAttributeFilters) {
-      conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes"))
-    }
-  }
-
-  return conditions
+  return tracesBaseWhereConditions($, opts)
 }
 
 export function alertTracesAggregateQuery(
@@ -162,124 +112,46 @@ export interface AlertMetricsAggregateByServiceOutput extends AlertMetricsAggreg
 }
 
 
-const VALUE_TABLES = {
-  sum: MetricsSum,
-  gauge: MetricsGauge,
-} as const
-
-const HISTOGRAM_TABLES = {
-  histogram: MetricsHistogram,
-  exponential_histogram: MetricsExpHistogram,
-} as const
-
-function buildValueMetricsAggregate(
-  opts: AlertMetricsOpts,
-) {
-  const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
-
-  return from(tbl as typeof MetricsSum)
-    .select(($) => ({
-      avgValue: CH.avg($.Value),
-      minValue: CH.min_($.Value),
-      maxValue: CH.max_($.Value),
-      sumValue: CH.sum($.Value),
-      dataPointCount: CH.count(),
-    }))
-    .where(($) => [
-      $.MetricName.eq(param.string("metricName")),
-      $.OrgId.eq(param.string("orgId")),
-      $.TimeUnix.gte(param.dateTime("startTime")),
-      $.TimeUnix.lte(param.dateTime("endTime")),
-      CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-    ])
-    .format("JSON")
-}
-
-function buildHistogramMetricsAggregate(
-  opts: AlertMetricsOpts,
-) {
-  const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
-
-  return from(tbl as typeof MetricsHistogram)
-    .select(($) => ({
-      avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
-      minValue: CH.min_($.Min),
-      maxValue: CH.max_($.Max),
-      sumValue: CH.sum($.Sum),
-      dataPointCount: CH.sum($.Count),
-    }))
-    .where(($) => [
-      $.MetricName.eq(param.string("metricName")),
-      $.OrgId.eq(param.string("orgId")),
-      $.TimeUnix.gte(param.dateTime("startTime")),
-      $.TimeUnix.lte(param.dateTime("endTime")),
-      CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
-    ])
-    .format("JSON")
-}
-
-function buildValueMetricsAggregateByService(
-  opts: AlertMetricsOpts,
-) {
-  const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
-
-  return from(tbl as typeof MetricsSum)
-    .select(($) => ({
-      serviceName: $.ServiceName,
-      avgValue: CH.avg($.Value),
-      minValue: CH.min_($.Value),
-      maxValue: CH.max_($.Value),
-      sumValue: CH.sum($.Value),
-      dataPointCount: CH.count(),
-    }))
-    .where(($) => [
-      $.MetricName.eq(param.string("metricName")),
-      $.OrgId.eq(param.string("orgId")),
-      $.TimeUnix.gte(param.dateTime("startTime")),
-      $.TimeUnix.lte(param.dateTime("endTime")),
-    ])
-    .groupBy("serviceName")
-    .orderBy(["dataPointCount", "desc"])
-    .format("JSON")
-}
-
-function buildHistogramMetricsAggregateByService(
-  opts: AlertMetricsOpts,
-) {
-  const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
-
-  return from(tbl as typeof MetricsHistogram)
-    .select(($) => ({
-      serviceName: $.ServiceName,
-      avgValue: CH.if_(CH.sum($.Count).gt(0), CH.sum($.Sum).div(CH.sum($.Count)), CH.lit(0)),
-      minValue: CH.min_($.Min),
-      maxValue: CH.max_($.Max),
-      sumValue: CH.sum($.Sum),
-      dataPointCount: CH.sum($.Count),
-    }))
-    .where(($) => [
-      $.MetricName.eq(param.string("metricName")),
-      $.OrgId.eq(param.string("orgId")),
-      $.TimeUnix.gte(param.dateTime("startTime")),
-      $.TimeUnix.lte(param.dateTime("endTime")),
-    ])
-    .groupBy("serviceName")
-    .orderBy(["dataPointCount", "desc"])
-    .format("JSON")
+function metricsAlertWhere(opts: AlertMetricsOpts) {
+  return ($: ColumnAccessor<typeof MetricsSum.columns>) => [
+    $.MetricName.eq(param.string("metricName")),
+    $.OrgId.eq(param.string("orgId")),
+    $.TimeUnix.gte(param.dateTime("startTime")),
+    $.TimeUnix.lte(param.dateTime("endTime")),
+    CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+  ] as Array<CH.Condition | undefined>
 }
 
 export function alertMetricsAggregateQuery(
   opts: AlertMetricsOpts,
 ) {
-  const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
-  return isHistogram ? buildHistogramMetricsAggregate(opts) : buildValueMetricsAggregate(opts)
+  const { tbl, isHistogram } = resolveMetricTable(opts.metricType)
+
+  return from(tbl as typeof MetricsSum)
+    .select(($) => metricsSelectExprs($, isHistogram))
+    .where(metricsAlertWhere(opts))
+    .format("JSON")
 }
 
 export function alertMetricsAggregateByServiceQuery(
   opts: AlertMetricsOpts,
 ) {
-  const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
-  return isHistogram ? buildHistogramMetricsAggregateByService(opts) : buildValueMetricsAggregateByService(opts)
+  const { tbl, isHistogram } = resolveMetricTable(opts.metricType)
+
+  return from(tbl as typeof MetricsSum)
+    .select(($) => ({
+      serviceName: $.ServiceName,
+      ...metricsSelectExprs($, isHistogram),
+    }))
+    .where(($) => [
+      $.MetricName.eq(param.string("metricName")),
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+    ])
+    .groupBy("serviceName")
+    .orderBy(["dataPointCount", "desc"])
+    .format("JSON")
 }
 
 // ---------------------------------------------------------------------------

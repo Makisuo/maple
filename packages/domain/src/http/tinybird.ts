@@ -22,7 +22,7 @@ export class TinybirdQueryError extends Schema.TaggedErrorClass<TinybirdQueryErr
   "@maple/http/errors/TinybirdQueryError",
   {
     message: Schema.String,
-    pipe: TinybirdPipeSchema,
+    pipe: Schema.String,
   },
   { httpApiStatus: 502 },
 ) {}

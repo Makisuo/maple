@@ -49,7 +49,7 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
     const env = yield* Env
     const orgTinybirdSettings = yield* OrgTinybirdSettingsService
 
-    const toTinybirdQueryError = (pipe: TinybirdQueryRequest["pipe"], error: unknown) =>
+    const toTinybirdQueryError = (pipe: string, error: unknown) =>
       new TinybirdQueryError({
         message: error instanceof Error ? error.message : "Tinybird query failed",
         pipe,
@@ -75,7 +75,7 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
 
       const override = yield* orgTinybirdSettings
         .resolveRuntimeConfig(tenant.orgId)
-        .pipe(Effect.mapError((error) => toTinybirdQueryError(pipe as TinybirdQueryRequest["pipe"], error)))
+        .pipe(Effect.mapError((error) => toTinybirdQueryError(pipe, error)))
 
       if (Option.isSome(override)) {
         yield* Effect.annotateCurrentSpan("clientSource", "org_override")
@@ -101,7 +101,7 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       const client = yield* resolveClient(tenant, pipe)
       const result = yield* Effect.tryPromise({
         try: () => client.sql(sql),
-        catch: (error) => toTinybirdQueryError(pipe as TinybirdQueryRequest["pipe"], error),
+        catch: (error) => toTinybirdQueryError(pipe, error),
       }).pipe(
         Effect.tapError((error) =>
           Effect.logError("TinybirdService.executeSql failed", { pipe, error: String(error) }),
@@ -147,10 +147,10 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       sql: string,
     ) {
       if (!tenant.orgId || tenant.orgId.trim() === "") {
-        return yield* new TinybirdQueryError({ pipe: "list_traces", message: "org_id must not be empty (sqlQuery)" })
+        return yield* new TinybirdQueryError({ pipe: "sqlQuery", message: "org_id must not be empty (sqlQuery)" })
       }
       if (!sql.includes("OrgId")) {
-        return yield* new TinybirdQueryError({ pipe: "list_traces", message: "SQL query must contain OrgId filter (sqlQuery)" })
+        return yield* new TinybirdQueryError({ pipe: "sqlQuery", message: "SQL query must contain OrgId filter (sqlQuery)" })
       }
       return yield* executeSql(tenant, sql, "sqlQuery")
     })

@@ -4,7 +4,7 @@
 // DSL-based query definitions for traces timeseries, breakdown, and list.
 // ---------------------------------------------------------------------------
 
-import type { TracesMetric, AttributeFilter } from "../../query-engine"
+import type { TracesMetric } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
 import { from, type ColumnAccessor } from "../query"
@@ -34,7 +34,7 @@ function metricSelectExprs(
 
   return {
     count: CH.count(),
-    avgDuration: needs.has("avg_duration") ? CH.avg(durationMs) : CH.lit(0),
+    avgDuration: needs.has("avg_duration") ? CH.avg($.Duration).div(1000000) : CH.lit(0),
     p50Duration: needs.has("quantiles") ? CH.quantile(0.5)($.Duration).div(1000000) : CH.lit(0),
     p95Duration: needs.has("quantiles") ? CH.quantile(0.95)($.Duration).div(1000000) : CH.lit(0),
     p99Duration: needs.has("quantiles") ? CH.quantile(0.99)($.Duration).div(1000000) : CH.lit(0),
