@@ -73,7 +73,9 @@ export function compileCH<
   // Resolve param placeholders in the compiled SQL
   const fromFragment = state.fromSubquerySql
     ? raw(`(${state.fromSubquerySql}) AS ${state.fromSubqueryAlias}`)
-    : ident(state.tableName)
+    : state.tableAlias
+      ? raw(`${state.tableName} AS ${state.tableAlias}`)
+      : ident(state.tableName)
 
   // JOINs
   const joins = state.joins.length > 0

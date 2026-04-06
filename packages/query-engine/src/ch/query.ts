@@ -54,6 +54,7 @@ export interface JoinClause {
 
 export interface CHQueryState {
   readonly tableName: string
+  readonly tableAlias?: string
   readonly columns: ColumnDefs
   readonly selectFn?: ($: any) => SelectRecord
   readonly whereFn?: ($: any) => Array<Condition | undefined>
@@ -244,9 +245,11 @@ function makeQuery<
 
 export function from<Name extends string, Cols extends ColumnDefs>(
   table: Table<Name, Cols>,
+  alias?: string,
 ): CHQuery<Cols, {}> {
   return makeQuery({
     tableName: table.name,
+    tableAlias: alias,
     columns: table.columns,
     groupByKeys: [],
     orderBySpecs: [],

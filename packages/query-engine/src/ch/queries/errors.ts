@@ -342,7 +342,7 @@ export function tracesFacetsQuery(
         ? CH.positionCaseInsensitive(attrCol, CH.lit(opts.attributeFilterValue ?? "")).gt(0)
         : attrCol.eq(opts.attributeFilterValue ?? "")
       const innerSql = compileCH(
-        from(Traces)
+        from(Traces, "t_attr")
           .select(() => ({ _: CH.lit(1) }))
           .where(() => [
             CH.dynamicColumn("t_attr.TraceId").eq(CH.outerRef("TraceId")),
@@ -354,9 +354,7 @@ export function tracesFacetsQuery(
         {},
         { skipFormat: true },
       )
-      // Replace the FROM clause to use aliased table
-      const existsSql = innerSql.sql.replace("FROM traces", "FROM traces AS t_attr")
-      conditions.push(CH.exists(existsSql))
+      conditions.push(CH.exists(innerSql.sql))
     }
     if (opts.resourceFilterKey) {
       const resCol = CH.mapGet(CH.dynamicColumn<Record<string, string>>("t_res.ResourceAttributes"), opts.resourceFilterKey)
@@ -364,7 +362,7 @@ export function tracesFacetsQuery(
         ? CH.positionCaseInsensitive(resCol, CH.lit(opts.resourceFilterValue ?? "")).gt(0)
         : resCol.eq(opts.resourceFilterValue ?? "")
       const innerSql = compileCH(
-        from(Traces)
+        from(Traces, "t_res")
           .select(() => ({ _: CH.lit(1) }))
           .where(() => [
             CH.dynamicColumn("t_res.TraceId").eq(CH.outerRef("TraceId")),
@@ -376,8 +374,7 @@ export function tracesFacetsQuery(
         {},
         { skipFormat: true },
       )
-      const existsSql = innerSql.sql.replace("FROM traces", "FROM traces AS t_res")
-      conditions.push(CH.exists(existsSql))
+      conditions.push(CH.exists(innerSql.sql))
     }
 
     return conditions
