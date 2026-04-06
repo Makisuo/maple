@@ -1,5 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+
+const executeQueryEngineMock = vi.fn()
+const runTinybirdQueryMock = vi.fn()
+
+vi.mock("@/api/tinybird/effect-utils", () => ({
+  TinybirdDateTimeString: {},
+  TinybirdQueryError: class extends Error { _tag = "TinybirdQueryError" },
+  decodeInput: (_schema: unknown, data: unknown) => Effect.succeed(data),
+  invalidTinybirdInput: () => Effect.fail(new Error("invalid")),
+  executeQueryEngine: (...args: unknown[]) => executeQueryEngineMock(...args),
+  runTinybirdQuery: (...args: unknown[]) => runTinybirdQueryMock(...args),
+}))
+
 import {
   getCustomChartServiceDetail,
   getCustomChartServiceSparklines,
@@ -7,40 +20,37 @@ import {
 } from "@/api/tinybird/custom-charts";
 import { getServiceApdexTimeSeries } from "@/api/tinybird/services";
 
-const customTracesTimeseriesMock = vi.fn();
-const serviceApdexTimeseriesMock = vi.fn();
+function tsResponse(data: Array<{ bucket: string; series: Record<string, number> }>) {
+  return Effect.succeed({ result: { kind: "timeseries", source: "traces", data } })
+}
 
-vi.mock("@/lib/tinybird", () => ({
-  getTinybird: () => ({
-    query: {
-      custom_traces_timeseries: customTracesTimeseriesMock,
-      service_apdex_time_series: serviceApdexTimeseriesMock,
-    },
-  }),
-}));
+const emptyTs = () => tsResponse([])
 
 describe("timeseries adapters", () => {
   beforeEach(() => {
-    customTracesTimeseriesMock.mockReset();
-    serviceApdexTimeseriesMock.mockReset();
-  });
+    executeQueryEngineMock.mockReset()
+    runTinybirdQueryMock.mockReset()
+  })
 
   it("fills overview/detail buckets without flattening existing points", async () => {
-    customTracesTimeseriesMock.mockReturnValue(
-      Effect.succeed({
-        data: [
-          {
-            bucket: "2026-01-01 00:00:00",
-            groupName: "all",
+    const bucket = "2026-01-01T00:00:00.000Z"
+
+    executeQueryEngineMock.mockImplementation((operation: string) => {
+      if (operation.includes("spanMetricsCalls")) return emptyTs()
+      if (operation.includes("allMetrics")) {
+        return tsResponse([{
+          bucket,
+          series: {
             count: 10,
-            errorRate: 2,
-            p50Duration: 11,
-            p95Duration: 20,
-            p99Duration: 30,
+            error_rate: 2,
+            p50_duration: 11,
+            p95_duration: 20,
+            p99_duration: 30,
           },
-        ],
-      }),
-    );
+        }])
+      }
+      return emptyTs()
+    })
 
     const overview = await Effect.runPromise(
       getOverviewTimeSeries({
@@ -80,24 +90,22 @@ describe("timeseries adapters", () => {
   });
 
   it("fills service sparklines per service across the selected timeline", async () => {
-    customTracesTimeseriesMock.mockReturnValue(
-      Effect.succeed({
-        data: [
-          {
-            bucket: "2026-01-01 00:00:00",
-            groupName: "checkout",
-            count: 3,
-            errorRate: 1,
-          },
-          {
-            bucket: "2026-01-01 00:10:00",
-            groupName: "checkout",
-            count: 5,
-            errorRate: 0,
-          },
-        ],
-      }),
-    );
+    executeQueryEngineMock.mockImplementation((operation: string) => {
+      if (operation.includes("spanMetricsCalls")) return emptyTs()
+      if (operation.includes("count")) {
+        return tsResponse([
+          { bucket: "2026-01-01T00:00:00.000Z", series: { checkout: 3 } },
+          { bucket: "2026-01-01T00:10:00.000Z", series: { checkout: 5 } },
+        ])
+      }
+      if (operation.includes("error")) {
+        return tsResponse([
+          { bucket: "2026-01-01T00:00:00.000Z", series: { checkout: 1 } },
+          { bucket: "2026-01-01T00:10:00.000Z", series: { checkout: 0 } },
+        ])
+      }
+      return emptyTs()
+    })
 
     const response = await Effect.runPromise(
       getCustomChartServiceSparklines({
@@ -127,7 +135,7 @@ describe("timeseries adapters", () => {
   });
 
   it("fills service apdex buckets while preserving real values", async () => {
-    serviceApdexTimeseriesMock.mockReturnValue(
+    runTinybirdQueryMock.mockReturnValue(
       Effect.succeed({
         data: [
           {

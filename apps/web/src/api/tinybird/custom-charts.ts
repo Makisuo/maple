@@ -542,18 +542,57 @@ function makeTracesTimeseriesRequest(
   })
 }
 
-function extractSingleSeries(
+function makeAllMetricsTimeseriesRequest(
+  opts: {
+    startTime?: string
+    endTime?: string
+    bucketSeconds: number
+    serviceName?: string
+    rootSpansOnly?: boolean
+    environments?: string[]
+    commitShas?: string[]
+  },
+) {
+  return new QueryEngineExecuteRequest({
+    startTime: opts.startTime ?? "2020-01-01 00:00:00",
+    endTime: opts.endTime ?? "2099-12-31 23:59:59",
+    query: {
+      kind: "timeseries" as const,
+      source: "traces" as const,
+      metric: "count" as const,
+      allMetrics: true,
+      filters: {
+        serviceName: opts.serviceName,
+        rootSpansOnly: opts.rootSpansOnly ?? true,
+        environments: opts.environments,
+        commitShas: opts.commitShas,
+      },
+      bucketSeconds: opts.bucketSeconds,
+    },
+  })
+}
+
+interface AllMetricsPoint {
+  count: number
+  errorRate: number
+  p50: number
+  p95: number
+  p99: number
+}
+
+function extractAllMetricsSeries(
   response: { result: { kind: string; data: ReadonlyArray<{ bucket: string; series: Record<string, number> }> } },
-): Map<string, number> {
-  const map = new Map<string, number>()
+): Map<string, AllMetricsPoint> {
+  const map = new Map<string, AllMetricsPoint>()
   if (response.result.kind !== "timeseries") return map
-  for (const point of (response.result as any).data) {
-    // Sum across all series keys (there's typically one or "all")
-    let total = 0
-    for (const v of Object.values(point.series)) {
-      total += Number(v)
-    }
-    map.set(point.bucket, total)
+  for (const point of response.result.data) {
+    map.set(point.bucket, {
+      count: point.series.count ?? 0,
+      errorRate: point.series.error_rate ?? 0,
+      p50: point.series.p50_duration ?? 0,
+      p95: point.series.p95_duration ?? 0,
+      p99: point.series.p99_duration ?? 0,
+    })
   }
   return map
 }
@@ -579,36 +618,29 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
       rootSpansOnly: true,
     }
 
-    const [countRes, errorRateRes, p50Res, p95Res, p99Res, metricsResult] = yield* Effect.all([
-      executeQueryEngine("queryEngine.serviceDetail.count", makeTracesTimeseriesRequest("count", reqOpts)),
-      executeQueryEngine("queryEngine.serviceDetail.errorRate", makeTracesTimeseriesRequest("error_rate", reqOpts)),
-      executeQueryEngine("queryEngine.serviceDetail.p50", makeTracesTimeseriesRequest("p50_duration", reqOpts)),
-      executeQueryEngine("queryEngine.serviceDetail.p95", makeTracesTimeseriesRequest("p95_duration", reqOpts)),
-      executeQueryEngine("queryEngine.serviceDetail.p99", makeTracesTimeseriesRequest("p99_duration", reqOpts)),
+    const [allMetricsRes, metricsResult] = yield* Effect.all([
+      executeQueryEngine("queryEngine.serviceDetail.allMetrics", makeAllMetricsTimeseriesRequest(reqOpts)),
       querySpanMetricsCalls({
         service: input.serviceName,
         start_time: input.startTime,
         end_time: input.endTime,
         bucket_seconds: bucketSeconds,
       }),
-    ], { concurrency: 6 })
+    ], { concurrency: 2 })
 
-    const countMap = extractSingleSeries(countRes as any)
-    const errorRateMap = extractSingleSeries(errorRateRes as any)
-    const p50Map = extractSingleSeries(p50Res as any)
-    const p95Map = extractSingleSeries(p95Res as any)
-    const p99Map = extractSingleSeries(p99Res as any)
+    const allMetrics = extractAllMetricsSeries(allMetricsRes as any)
 
     const metricsMap = new Map(
       metricsResult.data.map((r) => [toIsoBucket(String(r.bucket)), Number(r.sumValue)]),
     )
 
     const allBuckets = new Set<string>()
-    for (const k of countMap.keys()) allBuckets.add(k)
+    for (const k of allMetrics.keys()) allBuckets.add(k)
     for (const k of metricsMap.keys()) allBuckets.add(k)
 
     const points = [...allBuckets].sort().map((bucket): ServiceDetailTimeSeriesPoint => {
-      const rawCount = countMap.get(bucket) ?? 0
+      const m = allMetrics.get(bucket)
+      const rawCount = m?.count ?? 0
       const metricsThroughput = metricsMap.get(bucket)
 
       if (metricsThroughput != null && metricsThroughput > 0) {
@@ -618,10 +650,10 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
           tracedThroughput: rawCount,
           hasSampling: true,
           samplingWeight: rawCount > 0 ? metricsThroughput / rawCount : 1,
-          errorRate: errorRateMap.get(bucket) ?? 0,
-          p50LatencyMs: p50Map.get(bucket) ?? 0,
-          p95LatencyMs: p95Map.get(bucket) ?? 0,
-          p99LatencyMs: p99Map.get(bucket) ?? 0,
+          errorRate: m?.errorRate ?? 0,
+          p50LatencyMs: m?.p50 ?? 0,
+          p95LatencyMs: m?.p95 ?? 0,
+          p99LatencyMs: m?.p99 ?? 0,
         }
       }
 
@@ -631,10 +663,10 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
         tracedThroughput: rawCount,
         hasSampling: false,
         samplingWeight: 1,
-        errorRate: errorRateMap.get(bucket) ?? 0,
-        p50LatencyMs: p50Map.get(bucket) ?? 0,
-        p95LatencyMs: p95Map.get(bucket) ?? 0,
-        p99LatencyMs: p99Map.get(bucket) ?? 0,
+        errorRate: m?.errorRate ?? 0,
+        p50LatencyMs: m?.p50 ?? 0,
+        p95LatencyMs: m?.p95 ?? 0,
+        p99LatencyMs: m?.p99 ?? 0,
       }
     })
 
@@ -680,24 +712,16 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
       environments: input.environments,
     }
 
-    const [countRes, errorRateRes, p50Res, p95Res, p99Res, metricsResult] = yield* Effect.all([
-      executeQueryEngine("queryEngine.overview.count", makeTracesTimeseriesRequest("count", reqOpts)),
-      executeQueryEngine("queryEngine.overview.errorRate", makeTracesTimeseriesRequest("error_rate", reqOpts)),
-      executeQueryEngine("queryEngine.overview.p50", makeTracesTimeseriesRequest("p50_duration", reqOpts)),
-      executeQueryEngine("queryEngine.overview.p95", makeTracesTimeseriesRequest("p95_duration", reqOpts)),
-      executeQueryEngine("queryEngine.overview.p99", makeTracesTimeseriesRequest("p99_duration", reqOpts)),
+    const [allMetricsRes, metricsResult] = yield* Effect.all([
+      executeQueryEngine("queryEngine.overview.allMetrics", makeAllMetricsTimeseriesRequest(reqOpts)),
       querySpanMetricsCalls({
         start_time: input.startTime,
         end_time: input.endTime,
         bucket_seconds: bucketSeconds,
       }),
-    ], { concurrency: 6 })
+    ], { concurrency: 2 })
 
-    const countMap = extractSingleSeries(countRes as any)
-    const errorRateMap = extractSingleSeries(errorRateRes as any)
-    const p50Map = extractSingleSeries(p50Res as any)
-    const p95Map = extractSingleSeries(p95Res as any)
-    const p99Map = extractSingleSeries(p99Res as any)
+    const allMetrics = extractAllMetricsSeries(allMetricsRes as any)
 
     // SpanMetrics: aggregate across all services per bucket
     const metricsMap = new Map<string, number>()
@@ -707,11 +731,12 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
     }
 
     const allBuckets = new Set<string>()
-    for (const k of countMap.keys()) allBuckets.add(k)
+    for (const k of allMetrics.keys()) allBuckets.add(k)
     for (const k of metricsMap.keys()) allBuckets.add(k)
 
     const points = [...allBuckets].sort().map((bucket): ServiceDetailTimeSeriesPoint => {
-      const rawCount = countMap.get(bucket) ?? 0
+      const m = allMetrics.get(bucket)
+      const rawCount = m?.count ?? 0
       const metricsThroughput = metricsMap.get(bucket)
 
       if (metricsThroughput != null && metricsThroughput > 0) {
@@ -721,10 +746,10 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
           tracedThroughput: rawCount,
           hasSampling: true,
           samplingWeight: rawCount > 0 ? metricsThroughput / rawCount : 1,
-          errorRate: errorRateMap.get(bucket) ?? 0,
-          p50LatencyMs: p50Map.get(bucket) ?? 0,
-          p95LatencyMs: p95Map.get(bucket) ?? 0,
-          p99LatencyMs: p99Map.get(bucket) ?? 0,
+          errorRate: m?.errorRate ?? 0,
+          p50LatencyMs: m?.p50 ?? 0,
+          p95LatencyMs: m?.p95 ?? 0,
+          p99LatencyMs: m?.p99 ?? 0,
         }
       }
 
@@ -734,10 +759,10 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
         tracedThroughput: rawCount,
         hasSampling: false,
         samplingWeight: 1,
-        errorRate: errorRateMap.get(bucket) ?? 0,
-        p50LatencyMs: p50Map.get(bucket) ?? 0,
-        p95LatencyMs: p95Map.get(bucket) ?? 0,
-        p99LatencyMs: p99Map.get(bucket) ?? 0,
+        errorRate: m?.errorRate ?? 0,
+        p50LatencyMs: m?.p50 ?? 0,
+        p95LatencyMs: m?.p95 ?? 0,
+        p99LatencyMs: m?.p99 ?? 0,
       }
     })
 

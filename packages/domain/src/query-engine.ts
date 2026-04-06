@@ -91,6 +91,7 @@ export const TracesTimeseriesQuery = Schema.Struct({
   kind: Schema.Literal("timeseries"),
   source: Schema.Literal("traces"),
   metric: TracesMetric,
+  allMetrics: Schema.optional(Schema.Boolean),
   apdexThresholdMs: Schema.optional(
     Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0)),
   ),

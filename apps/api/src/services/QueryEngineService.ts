@@ -306,6 +306,64 @@ function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: strin
   }))
 }
 
+function groupAllMetricsTimeSeriesRows<T extends {
+  bucket: string | Date
+  groupName: string
+  count: number
+  avgDuration: number
+  p50Duration: number
+  p95Duration: number
+  p99Duration: number
+  errorRate: number
+  apdexScore: number
+}>(
+  rows: ReadonlyArray<T>,
+  fillOptions?: BucketFillOptions,
+): Array<TimeseriesPoint> {
+  const emptyMetrics: Record<string, number> = {
+    count: 0,
+    avg_duration: 0,
+    p50_duration: 0,
+    p95_duration: 0,
+    p99_duration: 0,
+    error_rate: 0,
+    apdex: 0,
+  }
+  const bucketMap = new Map<string, Record<string, number>>()
+  const bucketOrder: string[] = fillOptions
+    ? buildBucketTimeline(fillOptions.startMs, fillOptions.endMs, fillOptions.bucketSeconds)
+    : []
+
+  for (const row of rows) {
+    const bucket = normalizeBucket(row.bucket)
+    bucketMap.set(bucket, {
+      count: Number(row.count),
+      avg_duration: Number(row.avgDuration),
+      p50_duration: Number(row.p50Duration),
+      p95_duration: Number(row.p95Duration),
+      p99_duration: Number(row.p99Duration),
+      error_rate: Number(row.errorRate),
+      apdex: Number(row.apdexScore),
+    })
+    if (!fillOptions) {
+      bucketOrder.push(bucket)
+    }
+  }
+
+  if (fillOptions) {
+    for (const bucket of bucketOrder) {
+      if (!bucketMap.has(bucket)) {
+        bucketMap.set(bucket, { ...emptyMetrics })
+      }
+    }
+  }
+
+  return bucketOrder.map((bucket) => ({
+    bucket,
+    series: bucketMap.get(bucket)!,
+  }))
+}
+
 function collapseMetricTimeseriesRows(
   rows: ReadonlyArray<MetricTimeseriesRow>,
   metric: Extract<QuerySpec, { metric: string }>["metric"],
@@ -685,6 +743,32 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 
     if (request.query.source === "traces" && request.query.kind === "timeseries") {
       const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
+
+      if (request.query.allMetrics) {
+        const rows = yield* executeCHQuery(
+          tinybird,
+          tenant,
+          CH.tracesTimeseriesQuery({
+            ...opts,
+            metric: request.query.metric,
+            allMetrics: true,
+            needsSampling: false,
+            groupBy: request.query.groupBy as string[] | undefined,
+            apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
+          }),
+          { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime, bucketSeconds: bucketSeconds! },
+          "Failed to execute traces all-metrics timeseries query",
+        )
+
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "timeseries",
+            source: "traces",
+            data: groupAllMetricsTimeSeriesRows(rows, fillOptions),
+          },
+        })
+      }
+
       const rows = yield* executeCHQuery(
         tinybird,
         tenant,

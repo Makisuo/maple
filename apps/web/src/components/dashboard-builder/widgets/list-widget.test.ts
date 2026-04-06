@@ -1,51 +1,69 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 
-// --- Mock tinybird BEFORE importing anything that uses it ---
-const tinybirdQueryMocks = {
-  list_traces: vi.fn(() =>
-    Effect.succeed({
-      data: [
-        {
-          traceId: "t1",
-          startTime: "2026-03-28 00:00:00",
-          endTime: "2026-03-28 00:00:01",
-          durationMicros: 142000,
-          spanCount: 3,
-          services: ["api-gw", "user-svc"],
-          rootSpanName: "GET /api/users",
-          rootSpanKind: "SERVER",
-          rootSpanStatusCode: "Ok",
-          rootHttpMethod: "GET",
-          rootHttpRoute: "/api/users",
-          rootHttpStatusCode: "200",
-          hasError: 0,
-        },
-      ],
-    }),
-  ),
-  list_logs: vi.fn(() =>
-    Effect.succeed({
-      data: [
-        {
-          timestamp: "2026-03-28 12:00:00",
-          severityText: "ERROR",
-          severityNumber: 17,
-          serviceName: "api-gw",
-          body: "Connection refused",
-          traceId: "t1",
-          spanId: "s1",
-          logAttributes: '{"http.method":"GET"}',
-          resourceAttributes: '{"service.version":"1.0"}',
-        },
-      ],
-    }),
-  ),
-};
+// --- Mock effect-utils BEFORE importing anything that uses it ---
+const executeQueryEngineMock = vi.fn()
+const runTinybirdQueryMock = vi.fn()
 
-vi.mock("@/lib/tinybird", () => ({
-  getTinybird: () => ({ query: tinybirdQueryMocks }),
-}));
+vi.mock("@/api/tinybird/effect-utils", async () => {
+  const actual = await vi.importActual<typeof import("@/api/tinybird/effect-utils")>(
+    "@/api/tinybird/effect-utils",
+  )
+  return {
+    ...actual,
+    executeQueryEngine: (...args: unknown[]) => executeQueryEngineMock(...args),
+    runTinybirdQuery: (...args: unknown[]) => runTinybirdQueryMock(...args),
+  }
+})
+
+// Default mock implementations
+executeQueryEngineMock.mockImplementation((operation: string) => {
+  if (operation.includes("listTraces")) {
+    return Effect.succeed({
+      result: {
+        kind: "list",
+        source: "traces",
+        data: [
+          {
+            traceId: "t1",
+            timestamp: "2026-03-28 00:00:00",
+            durationMs: 142,
+            serviceName: "api-gw",
+            spanName: "GET /api/users",
+            spanKind: "SERVER",
+            statusCode: "Ok",
+            hasError: 0,
+            spanAttributes: {
+              "http.method": "GET",
+              "http.route": "/api/users",
+              "http.status_code": "200",
+            },
+          },
+        ],
+      },
+    })
+  }
+  // Default: empty list
+  return Effect.succeed({ result: { kind: "list", source: "traces", data: [] } })
+})
+
+runTinybirdQueryMock.mockImplementation(() =>
+  Effect.succeed({
+    data: [
+      {
+        timestamp: "2026-03-28 12:00:00",
+        severityText: "ERROR",
+        severityNumber: 17,
+        serviceName: "api-gw",
+        body: "Connection refused",
+        traceId: "t1",
+        spanId: "s1",
+        logAttributes: '{"http.method":"GET"}',
+        resourceAttributes: '{"service.version":"1.0"}',
+      },
+    ],
+  }),
+)
 
 // --- Now import production code ---
 import { listTraces } from "@/api/tinybird/traces";
