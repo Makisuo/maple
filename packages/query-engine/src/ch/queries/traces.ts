@@ -9,10 +9,8 @@ import * as CH from "../expr"
 import { param } from "../param"
 import { from, type ColumnAccessor } from "../query"
 import { Traces } from "../tables"
-import {
-  METRIC_NEEDS,
-  buildAttrFilterCondition,
-} from "../../traces-shared"
+import { METRIC_NEEDS } from "../../traces-shared"
+import { apdexExprs, tracesBaseWhereConditions, type TracesBaseWhereOpts } from "./query-helpers"
 
 // ---------------------------------------------------------------------------
 // Metric SELECT expressions
@@ -28,43 +26,22 @@ function metricSelectExprs(
   const needs = allMetrics
     ? new Set<string>(["count", "avg_duration", "quantiles", "error_rate", "apdex"])
     : new Set(METRIC_NEEDS[metric])
-  const t = String(apdexThresholdMs)
+  const durationMs = $.Duration.div(1000000)
+
+  const apdex = needs.has("apdex")
+    ? apdexExprs(durationMs, apdexThresholdMs)
+    : { satisfiedCount: CH.lit(0), toleratingCount: CH.lit(0), apdexScore: CH.lit(0) }
 
   return {
     count: CH.count(),
-    avgDuration: needs.has("avg_duration")
-      ? CH.avg($.Duration).div(1000000)
-      : CH.lit(0),
-    p50Duration: needs.has("quantiles")
-      ? CH.quantile(0.5)($.Duration).div(1000000)
-      : CH.lit(0),
-    p95Duration: needs.has("quantiles")
-      ? CH.quantile(0.95)($.Duration).div(1000000)
-      : CH.lit(0),
-    p99Duration: needs.has("quantiles")
-      ? CH.quantile(0.99)($.Duration).div(1000000)
-      : CH.lit(0),
+    avgDuration: needs.has("avg_duration") ? CH.avg(durationMs) : CH.lit(0),
+    p50Duration: needs.has("quantiles") ? CH.quantile(0.5)($.Duration).div(1000000) : CH.lit(0),
+    p95Duration: needs.has("quantiles") ? CH.quantile(0.95)($.Duration).div(1000000) : CH.lit(0),
+    p99Duration: needs.has("quantiles") ? CH.quantile(0.99)($.Duration).div(1000000) : CH.lit(0),
     errorRate: needs.has("error_rate")
       ? CH.if_(CH.count().gt(0), CH.countIf($.StatusCode.eq("Error")).mul(100.0).div(CH.count()), CH.lit(0))
       : CH.lit(0),
-    satisfiedCount: needs.has("apdex")
-      ? CH.countIf($.Duration.div(1000000).lt(Number(t)))
-      : CH.lit(0),
-    toleratingCount: needs.has("apdex")
-      ? CH.countIf($.Duration.div(1000000).gte(Number(t)).and($.Duration.div(1000000).lt(Number(t) * 4)))
-      : CH.lit(0),
-    apdexScore: needs.has("apdex")
-      ? CH.if_(
-          CH.count().gt(0),
-          CH.round_(
-            CH.countIf($.Duration.div(1000000).lt(Number(t)))
-              .add(CH.countIf($.Duration.div(1000000).gte(Number(t)).and($.Duration.div(1000000).lt(Number(t) * 4))).mul(0.5))
-              .div(CH.count()),
-            4,
-          ),
-          CH.lit(0),
-        )
-      : CH.lit(0),
+    ...apdex,
     sampledSpanCount: needsSampling
       ? CH.countIf($.TraceState.like("%th:%"))
       : CH.lit(0),
@@ -170,88 +147,14 @@ function buildWhereConditions(
   $: ColumnAccessor<typeof Traces.columns>,
   opts: TracesQueryOpts,
 ): Array<CH.Condition | undefined> {
-  const mm = opts.matchModes
-  const conditions: Array<CH.Condition | undefined> = [
-    $.OrgId.eq(param.string("orgId")),
-    $.Timestamp.gte(param.dateTime("startTime")),
-    $.Timestamp.lte(param.dateTime("endTime")),
-    CH.when(opts.serviceName, (v: string) =>
-      mm?.serviceName === "contains"
-        ? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
-        : $.ServiceName.eq(v),
-    ),
-    CH.when(opts.spanName, (v: string) =>
-      mm?.spanName === "contains"
-        ? CH.positionCaseInsensitive($.SpanName, CH.lit(v)).gt(0)
-        : $.SpanName.eq(v),
-    ),
-    CH.whenTrue(!!opts.rootOnly, () =>
-      $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq("")),
-    ),
-  ]
-
-  // Duration filters (Duration column is nanoseconds)
-  if (opts.minDurationMs != null) {
-    conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
-  }
-  if (opts.maxDurationMs != null) {
-    conditions.push($.Duration.lte(opts.maxDurationMs * 1000000))
-  }
-
-  if (opts.errorsOnly) {
-    conditions.push($.StatusCode.eq("Error"))
-  }
-
-  if (opts.environments?.length) {
-    if (mm?.deploymentEnv === "contains" && opts.environments.length === 1) {
-      conditions.push(CH.positionCaseInsensitive($.ResourceAttributes.get("deployment.environment"), CH.lit(opts.environments[0])).gt(0))
-    } else {
-      conditions.push(CH.inList($.ResourceAttributes.get("deployment.environment"), opts.environments))
-    }
-  }
-
-  if (opts.commitShas?.length) {
-    conditions.push(CH.inList($.ResourceAttributes.get("deployment.commit_sha"), opts.commitShas))
-  }
-
-  if (opts.attributeFilters) {
-    for (const af of opts.attributeFilters) {
-      conditions.push(buildAttrFilterCondition(af, "SpanAttributes"))
-    }
-  }
-
-  if (opts.resourceAttributeFilters) {
-    for (const rf of opts.resourceAttributeFilters) {
-      conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes"))
-    }
-  }
-
-  return conditions
+  return tracesBaseWhereConditions($, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Shared options interface
 // ---------------------------------------------------------------------------
 
-interface TracesMatchModes {
-  serviceName?: "contains"
-  spanName?: "contains"
-  deploymentEnv?: "contains"
-}
-
-interface TracesQueryOpts {
-  serviceName?: string
-  spanName?: string
-  rootOnly?: boolean
-  errorsOnly?: boolean
-  environments?: readonly string[]
-  commitShas?: readonly string[]
-  minDurationMs?: number
-  maxDurationMs?: number
-  matchModes?: TracesMatchModes
-  attributeFilters?: readonly AttributeFilter[]
-  resourceAttributeFilters?: readonly AttributeFilter[]
-}
+interface TracesQueryOpts extends TracesBaseWhereOpts {}
 
 // ---------------------------------------------------------------------------
 // Timeseries query
