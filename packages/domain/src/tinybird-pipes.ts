@@ -27,8 +27,6 @@ export const tinybirdPipes = [
   "alert_logs_aggregate_by_service",
   "custom_traces_timeseries",
   "custom_traces_breakdown",
-  "custom_logs_timeseries",
-  "custom_logs_breakdown",
   "service_dependencies",
   "metric_attribute_keys",
   "span_attribute_keys",

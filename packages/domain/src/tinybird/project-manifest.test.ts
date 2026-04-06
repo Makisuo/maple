@@ -10,7 +10,7 @@ describe("Tinybird project manifest", () => {
     const manifest = await buildTinybirdProjectManifest()
 
     expect(manifest.datasources.some((resource) => resource.name === "logs")).toBe(true)
-    expect(manifest.pipes.some((resource) => resource.name === "list_traces")).toBe(true)
+    expect(manifest.pipes.some((resource) => resource.name === "trace_list_mv_mv")).toBe(true)
     expect(manifest.projectRevision).toBe(
       createTinybirdProjectRevision(manifest.datasources, manifest.pipes),
     )

@@ -1,6 +1,5 @@
 // ---------------------------------------------------------------------------
-// Shared constants and helpers used by both the legacy traces-sql-builder
-// and the new CH DSL queries.
+// Shared constants and helpers used by the CH DSL queries.
 // ---------------------------------------------------------------------------
 
 import type { TracesMetric, AttributeFilter } from "./query-engine"
@@ -22,7 +21,7 @@ export const METRIC_NEEDS: Record<TracesMetric, MetricNeed[]> = {
 }
 
 // ---------------------------------------------------------------------------
-// trace_list_mv column mappings
+// trace_list_mv column mappings (used by performance-hints UI)
 // ---------------------------------------------------------------------------
 
 export const TRACE_LIST_MV_ATTR_MAP: Record<string, string> = {
@@ -39,96 +38,40 @@ export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
   "deployment.environment": "DeploymentEnv",
 }
 
-export const NUMERIC_MV_COLUMNS = new Set(["HttpStatusCode"])
-
 // ---------------------------------------------------------------------------
-// trace_list_mv eligibility check
+// Attribute filter → typed Condition
 // ---------------------------------------------------------------------------
 
-export function canUseTraceListMv(params: {
-  rootOnly?: boolean
-  attributeFilters?: readonly AttributeFilter[]
-  resourceAttributeFilters?: readonly AttributeFilter[]
-  commitShas?: readonly string[]
-  groupBy?: readonly string[] | string
-  groupByAttributeKeys?: readonly string[]
-  groupByAttributeKey?: string
-}): boolean {
-  if (!params.rootOnly) return false
-  if (params.commitShas?.length) return false
+import * as CH from "./ch/expr"
 
-  if (params.attributeFilters) {
-    for (const af of params.attributeFilters) {
-      if (!TRACE_LIST_MV_ATTR_MAP[af.key]) return false
-    }
-  }
-
-  if (params.resourceAttributeFilters) {
-    for (const rf of params.resourceAttributeFilters) {
-      if (!TRACE_LIST_MV_RESOURCE_MAP[rf.key]) return false
-    }
-  }
-
-  const groupByArray = Array.isArray(params.groupBy) ? params.groupBy : params.groupBy ? [params.groupBy] : []
-  if (groupByArray.includes("attribute")) {
-    const attrKeys = params.groupByAttributeKeys ?? (params.groupByAttributeKey ? [params.groupByAttributeKey] : [])
-    for (const key of attrKeys) {
-      if (!TRACE_LIST_MV_ATTR_MAP[key]) return false
-    }
-  }
-
-  return true
-}
-
-// ---------------------------------------------------------------------------
-// Attribute filter → SQL string
-// ---------------------------------------------------------------------------
-
-const MODE_TO_OPERATOR: Record<string, string> = {
-  gt: ">",
-  gte: ">=",
-  lt: "<",
-  lte: "<=",
-}
-
-export function buildAttrFilterSQL(
+export function buildAttrFilterCondition(
   af: AttributeFilter,
-  useMv: boolean,
   mapName: "SpanAttributes" | "ResourceAttributes",
-  mvMap: Record<string, string>,
-): string {
-  const mvColumn = useMv ? mvMap[af.key] : undefined
-  const escapedKey = `'${escapeForSQL(af.key)}'`
-  const escapedValue = `'${escapeForSQL(af.value ?? "")}'`
+): CH.Condition {
+  const colExpr: CH.Expr<string> = CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
+  const value = af.value ?? ""
 
   if (af.mode === "exists") {
-    return mvColumn
-      ? `${mvColumn} != ''`
-      : `mapContains(${mapName}, ${escapedKey})`
+    return CH.mapContains(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
   }
 
   if (af.mode === "contains") {
-    const col = mvColumn ?? `${mapName}[${escapedKey}]`
-    return `positionCaseInsensitive(${col}, ${escapedValue}) > 0`
+    return CH.positionCaseInsensitive(colExpr, CH.lit(value)).gt(0)
   }
 
-  const op = MODE_TO_OPERATOR[af.mode]
-  if (op) {
-    if (mvColumn) {
-      const cast = NUMERIC_MV_COLUMNS.has(mvColumn) ? `toUInt16OrZero(${mvColumn})` : mvColumn
-      return `${cast} ${op} ${escapedValue}`
-    }
-    const rawEscaped = af.value?.replace(/\\/g, "\\\\").replace(/'/g, "\\'") ?? ""
-    return `toFloat64OrZero(${mapName}[${escapedKey}]) ${op} ${rawEscaped}`
+  if (af.mode === "gt") {
+    return CH.toFloat64OrZero(colExpr).gt(Number(value))
+  }
+  if (af.mode === "gte") {
+    return CH.toFloat64OrZero(colExpr).gte(Number(value))
+  }
+  if (af.mode === "lt") {
+    return CH.toFloat64OrZero(colExpr).lt(Number(value))
+  }
+  if (af.mode === "lte") {
+    return CH.toFloat64OrZero(colExpr).lte(Number(value))
   }
 
   // equals (default)
-  if (mvColumn) {
-    return `${mvColumn} = ${escapedValue}`
-  }
-  return `${mapName}[${escapedKey}] = ${escapedValue}`
-}
-
-function escapeForSQL(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+  return colExpr.eq(value)
 }

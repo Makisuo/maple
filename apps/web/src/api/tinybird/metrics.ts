@@ -1,16 +1,12 @@
 import { QueryEngineExecuteRequest, type MetricType } from "@maple/query-engine"
 import { Effect, Schema } from "effect"
-import {
-  getTinybird,
-  type ListMetricsOutput,
-  type MetricAttributeKeysOutput,
-  type MetricsSummaryOutput,
-} from "@/lib/tinybird"
+import { ListMetricsRequest, MetricsSummaryRequest } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
   TinybirdDateTimeString,
   TinybirdQueryError,
   decodeInput,
+  executeQueryEngine,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
@@ -52,16 +48,16 @@ export interface MetricsResponse {
   data: Metric[]
 }
 
-function transformMetric(raw: ListMetricsOutput): Metric {
+function transformMetric(raw: Record<string, unknown>): Metric {
   return {
-    metricName: raw.metricName,
-    metricType: raw.metricType,
-    serviceName: raw.serviceName,
-    metricDescription: raw.metricDescription,
-    metricUnit: raw.metricUnit,
-    dataPointCount: Number(raw.dataPointCount),
-    firstSeen: String(raw.firstSeen),
-    lastSeen: String(raw.lastSeen),
+    metricName: String(raw.metricName ?? ""),
+    metricType: String(raw.metricType ?? ""),
+    serviceName: String(raw.serviceName ?? ""),
+    metricDescription: String(raw.metricDescription ?? ""),
+    metricUnit: String(raw.metricUnit ?? ""),
+    dataPointCount: Number(raw.dataPointCount ?? 0),
+    firstSeen: String(raw.firstSeen ?? ""),
+    lastSeen: String(raw.lastSeen ?? ""),
     isMonotonic: Boolean(raw.isMonotonic),
   }
 }
@@ -74,23 +70,28 @@ export function listMetrics({
   return listMetricsEffect({ data })
 }
 
-const listMetricsEffect = Effect.fn("Tinybird.listMetrics")(function* ({
+const listMetricsEffect = Effect.fn("QueryEngine.listMetrics")(function* ({
   data,
 }: {
   data: ListMetricsInput
 }) {
     const input = yield* decodeInput(ListMetricsInputSchema, data ?? {}, "listMetrics")
-    const tinybird = getTinybird()
+    const fallback = defaultTimeRange()
 
-    const result = yield* runTinybirdQuery("list_metrics", () =>
-      tinybird.query.list_metrics({
-        limit: input.limit,
-        offset: input.offset,
-        service: input.service,
-        metric_type: input.metricType,
-        start_time: input.startTime,
-        end_time: input.endTime,
-        search: input.search,
+    const result = yield* runTinybirdQuery("listMetrics", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.listMetrics({
+          payload: new ListMetricsRequest({
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            limit: input.limit,
+            offset: input.offset,
+            service: input.service,
+            metricType: input.metricType,
+            search: input.search,
+          }),
+        })
       }),
     )
 
@@ -248,14 +249,6 @@ export interface MetricsSummaryResponse {
   data: MetricTypeSummary[]
 }
 
-function transformSummary(raw: MetricsSummaryOutput): MetricTypeSummary {
-  return {
-    metricType: raw.metricType,
-    metricCount: Number(raw.metricCount),
-    dataPointCount: Number(raw.dataPointCount),
-  }
-}
-
 export function getMetricsSummary({
   data,
 }: {
@@ -264,7 +257,7 @@ export function getMetricsSummary({
   return getMetricsSummaryEffect({ data })
 }
 
-const getMetricsSummaryEffect = Effect.fn("Tinybird.getMetricsSummary")(function* ({
+const getMetricsSummaryEffect = Effect.fn("QueryEngine.getMetricsSummary")(function* ({
   data,
 }: {
   data: GetMetricsSummaryInput
@@ -275,17 +268,26 @@ const getMetricsSummaryEffect = Effect.fn("Tinybird.getMetricsSummary")(function
       "getMetricsSummary",
     )
 
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("metrics_summary", () =>
-      tinybird.query.metrics_summary({
-        service: input.service,
-        start_time: input.startTime,
-        end_time: input.endTime,
+    const fallback = defaultTimeRange()
+    const result = yield* runTinybirdQuery("metricsSummary", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.metricsSummary({
+          payload: new MetricsSummaryRequest({
+            startTime: input.startTime ?? fallback.startTime,
+            endTime: input.endTime ?? fallback.endTime,
+            service: input.service,
+          }),
+        })
       }),
     )
 
     return {
-      data: result.data.map(transformSummary),
+      data: result.data.map((raw) => ({
+        metricType: raw.metricType,
+        metricCount: Number(raw.metricCount),
+        dataPointCount: Number(raw.dataPointCount),
+      })),
     }
 })
 
@@ -306,7 +308,14 @@ export function getMetricAttributeKeys({
   return getMetricAttributeKeysEffect({ data })
 }
 
-const getMetricAttributeKeysEffect = Effect.fn("Tinybird.getMetricAttributeKeys")(function* ({
+const defaultTimeRange = () => {
+  const now = new Date()
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
+  return { startTime: fmt(dayAgo), endTime: fmt(now) }
+}
+
+const getMetricAttributeKeysEffect = Effect.fn("QueryEngine.getMetricAttributeKeys")(function* ({
   data,
 }: {
   data: GetMetricAttributeKeysInput
@@ -316,20 +325,20 @@ const getMetricAttributeKeysEffect = Effect.fn("Tinybird.getMetricAttributeKeys"
       data ?? {},
       "getMetricAttributeKeys",
     )
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("metric_attribute_keys", () =>
-      tinybird.query.metric_attribute_keys({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        metric_name: input.metricName,
-        metric_type: input.metricType,
-      }),
-    )
+    const fallback = defaultTimeRange()
+    const request = new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "attributeKeys" as const, source: "metrics" as const },
+    })
+    const response = yield* executeQueryEngine("queryEngine.getMetricAttributeKeys", request)
+    const result = response.result
+    if (result.kind !== "attributeKeys") return { data: [] }
 
     return {
-      data: result.data.map((row: MetricAttributeKeysOutput) => ({
-        attributeKey: row.attributeKey,
-        usageCount: Number(row.usageCount),
+      data: result.data.map((row) => ({
+        attributeKey: row.key,
+        usageCount: Number(row.count),
       })),
     }
 })

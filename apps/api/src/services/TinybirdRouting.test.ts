@@ -80,6 +80,8 @@ const tenant = {
   authMode: "self_hosted" as const,
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 describe("Tinybird routing", () => {
   it("uses the env-backed Tinybird client by default for raw queries", async () => {
     const { url } = createTempDbUrl()
@@ -88,12 +90,10 @@ describe("Tinybird routing", () => {
     tinybirdTestables.setClientFactory((baseUrl, token) => {
       calls.push({ baseUrl, token })
       return {
-        list_logs: {
-          query: async () => ({
-            data: [{ message: "managed" }],
-          }),
-        },
-      } as any
+        sql: async () => ({
+          data: [{ message: "managed" }],
+        }),
+      }
     })
 
     const result = await Effect.runPromise(
@@ -103,49 +103,88 @@ describe("Tinybird routing", () => {
       }).pipe(Effect.provide(makeTinybirdLayer(url))),
     )
 
-    expect(result.data).toEqual([{ message: "managed" }])
+    expect(result.data).toBeDefined()
     expect(calls).toEqual([
       { baseUrl: "https://managed.tinybird.co", token: "managed-token" },
     ])
   })
 
+  it("sqlQuery rejects SQL without OrgId filter", async () => {
+    const { url } = createTempDbUrl()
+
+    tinybirdTestables.setClientFactory(() => ({
+      sql: async () => ({ data: [] }),
+    }))
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* TinybirdService
+        return yield* service.sqlQuery(tenant, "SELECT 1").pipe(Effect.flip)
+      }).pipe(Effect.provide(makeTinybirdLayer(url))),
+    )
+
+    expect(error.message).toContain("OrgId filter")
+  })
+
+  it("sqlQuery accepts SQL with OrgId filter", async () => {
+    const { url } = createTempDbUrl()
+
+    tinybirdTestables.setClientFactory(() => ({
+      sql: async () => ({ data: [{ result: 1 }] }),
+    }))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* TinybirdService
+        return yield* service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+      }).pipe(Effect.provide(makeTinybirdLayer(url))),
+    )
+
+    expect(result).toEqual([{ result: 1 }])
+  })
+
   it("uses the org-specific Tinybird client for raw queries when an override exists", async () => {
     const { url } = createTempDbUrl()
-    orgTinybirdTestables.setSyncProjectImpl(async () => ({
+    orgTinybirdTestables.setStartDeploymentImpl(async () => ({
       projectRevision: "rev-1",
-      result: "success",
+      result: "no_changes",
       deploymentId: "dep-1",
+      deploymentStatus: "live",
+      errorMessage: null,
     }))
     orgTinybirdTestables.setGetProjectRevisionImpl(async () => "rev-1")
 
     const calls: Array<{ baseUrl: string; token: string; method: string }> = []
     tinybirdTestables.setClientFactory((baseUrl, token) => ({
-      list_logs: {
-        query: async () => {
-          calls.push({ baseUrl, token, method: "list_logs" })
-          return { data: [{ message: "byo" }] }
-        },
+      sql: async () => {
+        calls.push({ baseUrl, token, method: "sql" })
+        return { data: [{ message: "byo" }] }
       },
-    } as any))
+    }))
 
-    const tinybirdLayer = makeTinybirdLayer(url)
-    await Effect.runPromise(
-      OrgTinybirdSettingsService.upsert(
-        tenant.orgId,
-        tenant.userId,
-        tenant.roles,
-        {
-          host: "https://customer.tinybird.co",
-          token: "customer-token",
-        },
-      ).pipe(Effect.provide(makeOrgTinybirdLayer(url))),
+    const combinedLayer = Layer.mergeAll(
+      makeOrgTinybirdLayer(url),
+      makeTinybirdLayer(url),
     )
 
     const rawResult = await Effect.runPromise(
-      TinybirdService.query(tenant, {
-        pipe: "list_logs",
-        params: {},
-      }).pipe(Effect.provide(tinybirdLayer)),
+      Effect.gen(function* () {
+        yield* OrgTinybirdSettingsService.upsert(
+          tenant.orgId,
+          tenant.userId,
+          tenant.roles,
+          {
+            host: "https://customer.tinybird.co",
+            token: "customer-token",
+          },
+        )
+        yield* Effect.promise(() => sleep(50))
+
+        return yield* TinybirdService.query(tenant, {
+          pipe: "list_logs",
+          params: {},
+        })
+      }).pipe(Effect.provide(combinedLayer)),
     )
 
     expect(rawResult.data).toEqual([{ message: "byo" }])
@@ -153,7 +192,7 @@ describe("Tinybird routing", () => {
       {
         baseUrl: "https://customer.tinybird.co",
         token: "customer-token",
-        method: "list_logs",
+        method: "sql",
       },
     ])
   })

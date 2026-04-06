@@ -65,8 +65,18 @@ export type TracesFilters = Schema.Schema.Type<typeof TracesFilters>
 export const LogsFilters = Schema.Struct({
   serviceName: Schema.optional(Schema.String),
   severity: Schema.optional(Schema.String),
+  traceId: Schema.optional(Schema.String),
+  search: Schema.optional(Schema.String),
 })
 export type LogsFilters = Schema.Schema.Type<typeof LogsFilters>
+
+export const ErrorsFilters = Schema.Struct({
+  rootOnly: Schema.optional(Schema.Boolean),
+  services: Schema.optional(Schema.Array(Schema.String)),
+  deploymentEnvs: Schema.optional(Schema.Array(Schema.String)),
+  errorTypes: Schema.optional(Schema.Array(Schema.String)),
+})
+export type ErrorsFilters = Schema.Schema.Type<typeof ErrorsFilters>
 
 export const MetricsFilters = Schema.Struct({
   metricName: Schema.String,
@@ -217,6 +227,76 @@ export const LogsListQuery = Schema.Struct({
 })
 export type LogsListQuery = Schema.Schema.Type<typeof LogsListQuery>
 
+export const AttributeKeysQuery = Schema.Struct({
+  kind: Schema.Literal("attributeKeys"),
+  source: Schema.Literals(["traces", "logs", "metrics"]),
+  scope: Schema.optional(Schema.Literals(["span", "resource"])),
+  limit: Schema.optional(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isGreaterThan(0),
+      Schema.isLessThanOrEqualTo(500),
+    ),
+  ),
+})
+export type AttributeKeysQuery = Schema.Schema.Type<typeof AttributeKeysQuery>
+
+export const TracesFacetsQuery = Schema.Struct({
+  kind: Schema.Literal("facets"),
+  source: Schema.Literal("traces"),
+  filters: Schema.optional(TracesFilters),
+})
+export type TracesFacetsQuery = Schema.Schema.Type<typeof TracesFacetsQuery>
+
+export const LogsFacetsQuery = Schema.Struct({
+  kind: Schema.Literal("facets"),
+  source: Schema.Literal("logs"),
+  filters: Schema.optional(LogsFilters),
+})
+export type LogsFacetsQuery = Schema.Schema.Type<typeof LogsFacetsQuery>
+
+export const ErrorsFacetsQuery = Schema.Struct({
+  kind: Schema.Literal("facets"),
+  source: Schema.Literal("errors"),
+  filters: Schema.optional(ErrorsFilters),
+})
+export type ErrorsFacetsQuery = Schema.Schema.Type<typeof ErrorsFacetsQuery>
+
+export const ServicesFacetsQuery = Schema.Struct({
+  kind: Schema.Literal("facets"),
+  source: Schema.Literal("services"),
+})
+export type ServicesFacetsQuery = Schema.Schema.Type<typeof ServicesFacetsQuery>
+
+export const TracesStatsQuery = Schema.Struct({
+  kind: Schema.Literal("stats"),
+  source: Schema.Literal("traces"),
+  filters: Schema.optional(TracesFilters),
+})
+export type TracesStatsQuery = Schema.Schema.Type<typeof TracesStatsQuery>
+
+export const AttributeValuesQuery = Schema.Struct({
+  kind: Schema.Literal("attributeValues"),
+  source: Schema.Literal("traces"),
+  scope: Schema.Literals(["span", "resource"]),
+  attributeKey: Schema.String,
+  limit: Schema.optional(
+    Schema.Number.check(
+      Schema.isInt(),
+      Schema.isGreaterThan(0),
+      Schema.isLessThanOrEqualTo(500),
+    ),
+  ),
+})
+export type AttributeValuesQuery = Schema.Schema.Type<typeof AttributeValuesQuery>
+
+export const LogsCountQuery = Schema.Struct({
+  kind: Schema.Literal("count"),
+  source: Schema.Literal("logs"),
+  filters: Schema.optional(LogsFilters),
+})
+export type LogsCountQuery = Schema.Schema.Type<typeof LogsCountQuery>
+
 export const QuerySpec = Schema.Union([
   TracesTimeseriesQuery,
   LogsTimeseriesQuery,
@@ -226,6 +306,14 @@ export const QuerySpec = Schema.Union([
   MetricsBreakdownQuery,
   TracesListQuery,
   LogsListQuery,
+  AttributeKeysQuery,
+  TracesFacetsQuery,
+  LogsFacetsQuery,
+  ErrorsFacetsQuery,
+  ServicesFacetsQuery,
+  TracesStatsQuery,
+  AttributeValuesQuery,
+  LogsCountQuery,
 ])
 export type QuerySpec = Schema.Schema.Type<typeof QuerySpec>
 
@@ -252,6 +340,33 @@ export type BreakdownItem = Schema.Schema.Type<typeof BreakdownItem>
 export const ListRow = Schema.Record(Schema.String, Schema.Unknown)
 export type ListRow = Schema.Schema.Type<typeof ListRow>
 
+export const AttributeKeyItem = Schema.Struct({
+  key: Schema.String,
+  count: Schema.Number,
+})
+export type AttributeKeyItem = Schema.Schema.Type<typeof AttributeKeyItem>
+
+export const FacetItem = Schema.Struct({
+  facetType: Schema.String,
+  name: Schema.String,
+  count: Schema.Number,
+})
+export type FacetItem = Schema.Schema.Type<typeof FacetItem>
+
+export const DurationStats = Schema.Struct({
+  minDurationMs: Schema.Number,
+  maxDurationMs: Schema.Number,
+  p50DurationMs: Schema.Number,
+  p95DurationMs: Schema.Number,
+})
+export type DurationStats = Schema.Schema.Type<typeof DurationStats>
+
+export const AttributeValueItem = Schema.Struct({
+  value: Schema.String,
+  count: Schema.Number,
+})
+export type AttributeValueItem = Schema.Schema.Type<typeof AttributeValueItem>
+
 export const QueryEngineResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("timeseries"),
@@ -267,6 +382,31 @@ export const QueryEngineResult = Schema.Union([
     kind: Schema.Literal("list"),
     source: Schema.Literals(["traces", "logs"]),
     data: Schema.Array(ListRow),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("attributeKeys"),
+    source: Schema.Literals(["traces", "logs", "metrics"]),
+    data: Schema.Array(AttributeKeyItem),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("facets"),
+    source: Schema.Literals(["traces", "logs", "errors", "services"]),
+    data: Schema.Array(FacetItem),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("stats"),
+    source: Schema.Literal("traces"),
+    data: DurationStats,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("attributeValues"),
+    source: Schema.Literal("traces"),
+    data: Schema.Array(AttributeValueItem),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("count"),
+    source: Schema.Literal("logs"),
+    data: Schema.Struct({ total: Schema.Number }),
   }),
 ])
 export type QueryEngineResult = Schema.Schema.Type<typeof QueryEngineResult>

@@ -2,7 +2,7 @@ import * as React from "react"
 import { Result } from "@/lib/effect-atom"
 import { Effect } from "effect"
 
-import { listTracesViaQueryEngine, type Trace, type TracesResponse } from "@/api/tinybird/traces"
+import { listTraces, type Trace, type TracesResponse } from "@/api/tinybird/traces"
 import { listTracesResultAtom, type QueryAtomError } from "@/lib/services/atoms/tinybird-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
@@ -101,7 +101,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
     const offset = allData.length
 
     Effect.runPromise(
-      listTracesViaQueryEngine({ data: { ...queryParams, limit: PAGE_SIZE, offset } }),
+      listTraces({ data: { ...queryParams, limit: PAGE_SIZE, offset } }),
     )
       .then((result) => {
         if (filterKeyRef.current !== currentKey) return

@@ -5,4 +5,5 @@ export * from "./dashboards";
 export * from "./digest";
 export * from "./org-ingest-keys";
 export * from "./org-tinybird-settings";
+export * from "./org-tinybird-sync-runs";
 export * from "./scrape-targets";

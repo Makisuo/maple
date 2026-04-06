@@ -147,6 +147,74 @@ export const MetricsHistogram = table("metrics_histogram", {
   AggregationTemporality: T.int32,
 })
 
+export const AttributeKeysHourly = table("attribute_keys_hourly", {
+  OrgId: T.string,
+  Hour: T.dateTime,
+  AttributeKey: T.string,
+  AttributeScope: T.string,
+  UsageCount: T.uint64,
+})
+
+export const ServiceUsage = table("service_usage", {
+  OrgId: T.string,
+  ServiceName: T.string,
+  Hour: T.dateTime,
+  LogCount: T.uint64,
+  LogSizeBytes: T.uint64,
+  TraceCount: T.uint64,
+  TraceSizeBytes: T.uint64,
+  SumMetricCount: T.uint64,
+  SumMetricSizeBytes: T.uint64,
+  GaugeMetricCount: T.uint64,
+  GaugeMetricSizeBytes: T.uint64,
+  HistogramMetricCount: T.uint64,
+  HistogramMetricSizeBytes: T.uint64,
+  ExpHistogramMetricCount: T.uint64,
+  ExpHistogramMetricSizeBytes: T.uint64,
+})
+
+export const ServiceMapSpans = table("service_map_spans", {
+  OrgId: T.string,
+  Timestamp: T.dateTime,
+  TraceId: T.string,
+  SpanId: T.string,
+  ParentSpanId: T.string,
+  ServiceName: T.string,
+  SpanKind: T.string,
+  Duration: T.uint64,
+  StatusCode: T.string,
+  TraceState: T.string,
+  PeerService: T.string,
+  DeploymentEnv: T.string,
+})
+
+export const ServiceMapChildren = table("service_map_children", {
+  OrgId: T.string,
+  Timestamp: T.dateTime,
+  TraceId: T.string,
+  ParentSpanId: T.string,
+  ServiceName: T.string,
+  SpanKind: T.string,
+  Duration: T.uint64,
+  StatusCode: T.string,
+  TraceState: T.string,
+  DeploymentEnv: T.string,
+})
+
+export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
+  OrgId: T.string,
+  Hour: T.dateTime,
+  SourceService: T.string,
+  TargetService: T.string,
+  DeploymentEnv: T.string,
+  CallCount: T.uint64,
+  ErrorCount: T.uint64,
+  DurationSumMs: T.float64,
+  MaxDurationMs: T.float64,
+  SampledSpanCount: T.uint64,
+  UnsampledSpanCount: T.uint64,
+})
+
 export const MetricsExpHistogram = table("metrics_exponential_histogram", {
   OrgId: T.string,
   ResourceAttributes: T.map(T.string, T.string),

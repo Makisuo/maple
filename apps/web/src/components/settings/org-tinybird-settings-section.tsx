@@ -85,6 +85,28 @@ function formatSyncDate(value: string | null): string {
   }
 }
 
+function formatDeploymentStatus(value: string | null | undefined): string {
+  if (!value) return "Unknown"
+
+  switch (value) {
+    case "pending":
+    case "deploying":
+      return "Deploying"
+    case "data_ready":
+      return "Ready"
+    case "live":
+    case "succeeded":
+      return "Live"
+    case "failed":
+    case "error":
+    case "deleted":
+    case "deleting":
+      return "Failed"
+    default:
+      return value.replace(/_/g, " ")
+  }
+}
+
 interface OrgTinybirdSettingsSectionProps {
   isAdmin: boolean
   hasEntitlement: boolean
@@ -137,9 +159,22 @@ export function OrgTinybirdSettingsSection({
     .onSuccess((value) => value)
     .orElse(() => null)
 
-  const isDeploying = deploymentStatus?.hasDeployment === true && deploymentStatus?.isTerminal === false
+  const isDeploying = deploymentStatus?.hasRun === true && deploymentStatus?.isTerminal === false
   const isBusy = isSaving || isResyncing || isDisabling || isDeploying
   const configured = settings?.configured === true
+  const hasSavedToken = configured || settings?.draftHost != null
+  const activeHost = settings?.activeHost ?? null
+  const draftHost = settings?.draftHost ?? null
+  const deploymentState = deploymentStatus?.deploymentStatus ?? deploymentStatus?.status ?? null
+  const deploymentId = deploymentStatus?.deploymentId ?? null
+  const deploymentLabel = formatDeploymentStatus(deploymentState)
+  const hasKnownDeployment = deploymentStatus?.hasRun === true
+  const deploymentFailed = deploymentStatus?.runStatus === "failed"
+    || deploymentState === "failed"
+    || deploymentState === "error"
+    || deploymentState === "deleted"
+    || deploymentState === "deleting"
+  const deploymentError = deploymentFailed ? deploymentStatus?.errorMessage ?? settings?.lastSyncError ?? null : null
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -179,12 +214,13 @@ export function OrgTinybirdSettingsSection({
   }, [host])
 
   useEffect(() => {
-    if (settings?.host) {
-      setHost(settings.host)
+    const nextHost = settings?.draftHost ?? settings?.activeHost ?? ""
+    if (nextHost.length > 0) {
+      setHost(nextHost)
     } else if (settings?.configured === false) {
       setHost("")
     }
-  }, [settings?.configured, settings?.host])
+  }, [settings?.activeHost, settings?.configured, settings?.draftHost])
 
   const statusBadge = useMemo(() => {
     if (isDeploying) {
@@ -194,6 +230,9 @@ export function OrgTinybirdSettingsSection({
           Deploying
         </Badge>
       )
+    }
+    if (settings?.syncStatus === "error") {
+      return <Badge variant="destructive">Needs attention</Badge>
     }
     if (!configured) {
       return <Badge variant="secondary">Default Maple Tinybird</Badge>
@@ -222,7 +261,7 @@ export function OrgTinybirdSettingsSection({
       setToken("")
       refreshSettings()
       refreshDeploymentStatus()
-      toast.success(configured ? "Tinybird connection updated" : "Tinybird connection saved")
+      toast.success(configured ? "Tinybird sync started" : "Tinybird connection saved and sync started")
       return
     }
 
@@ -237,7 +276,7 @@ export function OrgTinybirdSettingsSection({
     if (Exit.isSuccess(result)) {
       refreshSettings()
       refreshDeploymentStatus()
-      toast.success("Tinybird project synced")
+      toast.success("Tinybird resync started")
       return
     }
 
@@ -316,15 +355,21 @@ export function OrgTinybirdSettingsSection({
                     disabled={isBusy}
                   />
                   <p className="text-muted-foreground text-xs">
-                    The token is write-only. Maple never shows the saved token again.
+                    The token is write-only. Leave it blank to keep the saved draft or active token.
                   </p>
                 </div>
 
                 <div className="rounded-lg border px-4 py-3 text-sm">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">Current target</span>
-                    <span className="font-mono text-xs">{settings?.host ?? "Maple-managed Tinybird"}</span>
+                    <span className="text-muted-foreground">Active target</span>
+                    <span className="font-mono text-xs">{activeHost ?? "Maple-managed Tinybird"}</span>
                   </div>
+                  {draftHost ? (
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Draft target</span>
+                      <span className="font-mono text-xs">{draftHost}</span>
+                    </div>
+                  ) : null}
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Last sync</span>
                     <span>{formatSyncDate(settings?.lastSyncAt ?? null)}</span>
@@ -333,30 +378,33 @@ export function OrgTinybirdSettingsSection({
                     <span className="text-muted-foreground">Project revision</span>
                     <span className="font-mono text-xs">{settings?.projectRevision ?? "Not configured"}</span>
                   </div>
-                  {isDeploying ? (
-                    <div className="mt-2 flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground">Deployment</span>
-                      <span className="flex items-center gap-1.5 text-xs">
-                        <LoaderIcon size={12} className="animate-spin" />
-                        <span className="capitalize">{deploymentStatus?.status ?? "In progress"}</span>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Deployment</span>
+                    {hasKnownDeployment ? (
+                      <span className="flex items-center gap-2 text-xs">
+                        {isDeploying ? <LoaderIcon size={12} className="animate-spin" /> : null}
+                        {deploymentId ? <span className="font-mono">#{deploymentId}</span> : null}
+                        <span>{deploymentLabel}</span>
                       </span>
-                    </div>
-                  ) : null}
+                    ) : (
+                      <span>No deployments yet</span>
+                    )}
+                  </div>
                   {settings?.syncStatus === "out_of_sync" ? (
                     <div className="mt-3 rounded-md border border-severity-warn/30 bg-severity-warn/10 px-3 py-2 text-severity-warn">
                       Maple&apos;s Tinybird project definition changed since this org last synced. Resync the
                       project to keep BYO queries working.
                     </div>
                   ) : null}
-                  {settings?.lastSyncError ? (
+                  {deploymentError ? (
                     <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-destructive">
-                      {settings.lastSyncError}
+                      {deploymentError}
                     </div>
                   ) : null}
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => void handleSave()} disabled={isBusy || !isValidHost || (!configured && token.trim().length === 0)}>
+                  <Button onClick={() => void handleSave()} disabled={isBusy || !isValidHost || (!hasSavedToken && token.trim().length === 0)}>
                     {isSaving ? "Saving..." : configured ? "Update connection" : "Save connection"}
                   </Button>
                   <Button
@@ -404,7 +452,7 @@ export function OrgTinybirdSettingsSection({
                 </p>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border px-3 py-2">
                       <p className="text-muted-foreground text-xs">Storage</p>
                       <p className="text-lg font-semibold">{formatBytes(instanceHealth.totalBytes)}</p>
@@ -438,7 +486,7 @@ export function OrgTinybirdSettingsSection({
                     </div>
                   ) : null}
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border px-3 py-2">
                       <p className="text-muted-foreground text-xs">Errors (24h)</p>
                       <p className="text-lg font-semibold">{instanceHealth.recentErrorCount}</p>

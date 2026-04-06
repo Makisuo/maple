@@ -1,6 +1,6 @@
 import { Atom } from "@/lib/effect-atom"
 import { Effect, Schema } from "effect"
-import { snapTimestamp } from "@/lib/time-utils"
+import { encodeKey } from "@/lib/cache-key"
 import {
   getCustomChartServiceDetail,
   getCustomChartServiceSparklines,
@@ -24,7 +24,7 @@ import {
   getServiceReleasesTimeline,
   getServicesFacets,
 } from "@/api/tinybird/services"
-import { getResourceAttributeKeys, getResourceAttributeValues, getSpanAttributeKeys, getSpanAttributeValues, getSpanHierarchy, getTracesFacets, listTracesViaQueryEngine } from "@/api/tinybird/traces"
+import { getResourceAttributeKeys, getResourceAttributeValues, getSpanAttributeKeys, getSpanAttributeValues, getSpanHierarchy, getTracesFacets, listTraces } from "@/api/tinybird/traces"
 import { getQueryBuilderTimeseries } from "@/api/tinybird/query-builder-timeseries"
 
 type QueryEffect<Input, Output> = (input: Input) => Effect.Effect<Output, unknown, unknown>
@@ -51,33 +51,6 @@ const toQueryAtomError = (error: unknown): QueryAtomError => {
     message: "Tinybird query atom failed",
     cause: error,
   })
-}
-
-function normalizeForKey(value: unknown): unknown {
-  if (value === null || typeof value !== "object") {
-    if (typeof value === "string") return snapTimestamp(value)
-    return value
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(normalizeForKey)
-  }
-
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, entryValue]) => entryValue !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right))
-
-  const normalized: Record<string, unknown> = {}
-  for (const [key, entryValue] of entries) {
-    normalized[key] = normalizeForKey(entryValue)
-  }
-
-  return normalized
-}
-
-function encodeKey(value: unknown): string {
-  const normalized = normalizeForKey(value)
-  return JSON.stringify(normalized === undefined ? null : normalized)
 }
 
 function makeQueryAtomFamily<Input, Output>(
@@ -123,7 +96,7 @@ export const getCustomChartServiceSparklinesResultAtom = makeQueryAtomFamily(
   },
 )
 
-export const listTracesResultAtom = makeQueryAtomFamily(listTracesViaQueryEngine, {
+export const listTracesResultAtom = makeQueryAtomFamily(listTraces, {
   staleTime: 30_000,
 })
 

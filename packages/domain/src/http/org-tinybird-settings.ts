@@ -3,18 +3,49 @@ import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
 import { IsoDateTimeString } from "../primitives"
 
-export const OrgTinybirdSyncStatus = Schema.Literals(["active", "error", "out_of_sync"])
+export const OrgTinybirdSyncStatus = Schema.Literals(["active", "error", "out_of_sync", "syncing"])
 export type OrgTinybirdSyncStatus = Schema.Schema.Type<typeof OrgTinybirdSyncStatus>
+
+export const OrgTinybirdSyncRunStatus = Schema.Literals(["queued", "running", "failed", "succeeded"])
+export type OrgTinybirdSyncRunStatus = Schema.Schema.Type<typeof OrgTinybirdSyncRunStatus>
+
+export const OrgTinybirdSyncPhase = Schema.Literals([
+  "starting",
+  "deploying",
+  "waiting_for_data",
+  "setting_live",
+  "failed",
+  "succeeded",
+])
+export type OrgTinybirdSyncPhase = Schema.Schema.Type<typeof OrgTinybirdSyncPhase>
+
+export class OrgTinybirdCurrentRunResponse extends Schema.Class<OrgTinybirdCurrentRunResponse>(
+  "OrgTinybirdCurrentRunResponse",
+)({
+  targetHost: Schema.String,
+  targetProjectRevision: Schema.String,
+  runStatus: OrgTinybirdSyncRunStatus,
+  phase: OrgTinybirdSyncPhase,
+  deploymentId: Schema.NullOr(Schema.String),
+  deploymentStatus: Schema.NullOr(Schema.String),
+  errorMessage: Schema.NullOr(Schema.String),
+  startedAt: IsoDateTimeString,
+  updatedAt: IsoDateTimeString,
+  finishedAt: Schema.NullOr(IsoDateTimeString),
+  isTerminal: Schema.Boolean,
+}) {}
 
 export class OrgTinybirdSettingsResponse extends Schema.Class<OrgTinybirdSettingsResponse>(
   "OrgTinybirdSettingsResponse",
 )({
   configured: Schema.Boolean,
-  host: Schema.NullOr(Schema.String),
+  activeHost: Schema.NullOr(Schema.String),
+  draftHost: Schema.NullOr(Schema.String),
   syncStatus: Schema.NullOr(OrgTinybirdSyncStatus),
   lastSyncAt: Schema.NullOr(IsoDateTimeString),
   lastSyncError: Schema.NullOr(Schema.String),
   projectRevision: Schema.NullOr(Schema.String),
+  currentRun: Schema.NullOr(OrgTinybirdCurrentRunResponse),
 }) {}
 
 export class OrgTinybirdSettingsUpsertRequest extends Schema.Class<OrgTinybirdSettingsUpsertRequest>(
@@ -27,10 +58,18 @@ export class OrgTinybirdSettingsUpsertRequest extends Schema.Class<OrgTinybirdSe
 export class OrgTinybirdDeploymentStatusResponse extends Schema.Class<OrgTinybirdDeploymentStatusResponse>(
   "OrgTinybirdDeploymentStatusResponse",
 )({
+  hasRun: Schema.Boolean,
   hasDeployment: Schema.Boolean,
   deploymentId: Schema.NullOr(Schema.String),
   status: Schema.NullOr(Schema.String),
+  deploymentStatus: Schema.NullOr(Schema.String),
+  runStatus: Schema.NullOr(OrgTinybirdSyncRunStatus),
+  phase: Schema.NullOr(OrgTinybirdSyncPhase),
   isTerminal: Schema.NullOr(Schema.Boolean),
+  errorMessage: Schema.NullOr(Schema.String),
+  startedAt: Schema.NullOr(IsoDateTimeString),
+  updatedAt: Schema.NullOr(IsoDateTimeString),
+  finishedAt: Schema.NullOr(IsoDateTimeString),
 }) {}
 
 const OrgTinybirdDatasourceStats = Schema.Struct({
@@ -88,12 +127,30 @@ export class OrgTinybirdSettingsEncryptionError extends Schema.TaggedErrorClass<
   { httpApiStatus: 500 },
 ) {}
 
-export class OrgTinybirdSettingsSyncError extends Schema.TaggedErrorClass<OrgTinybirdSettingsSyncError>()(
-  "@maple/http/errors/OrgTinybirdSettingsSyncError",
+export class OrgTinybirdSettingsSyncConflictError extends Schema.TaggedErrorClass<OrgTinybirdSettingsSyncConflictError>()(
+  "@maple/http/errors/OrgTinybirdSettingsSyncConflictError",
   {
     message: Schema.String,
   },
-  { httpApiStatus: 502 },
+  { httpApiStatus: 409 },
+) {}
+
+export class OrgTinybirdSettingsUpstreamRejectedError extends Schema.TaggedErrorClass<OrgTinybirdSettingsUpstreamRejectedError>()(
+  "@maple/http/errors/OrgTinybirdSettingsUpstreamRejectedError",
+  {
+    message: Schema.String,
+    statusCode: Schema.NullOr(Schema.Number),
+  },
+  { httpApiStatus: 400 },
+) {}
+
+export class OrgTinybirdSettingsUpstreamUnavailableError extends Schema.TaggedErrorClass<OrgTinybirdSettingsUpstreamUnavailableError>()(
+  "@maple/http/errors/OrgTinybirdSettingsUpstreamUnavailableError",
+  {
+    message: Schema.String,
+    statusCode: Schema.NullOr(Schema.Number),
+  },
+  { httpApiStatus: 503 },
 ) {}
 
 export class OrgTinybirdSettingsApiGroup extends HttpApiGroup.make("orgTinybirdSettings")
@@ -112,7 +169,9 @@ export class OrgTinybirdSettingsApiGroup extends HttpApiGroup.make("orgTinybirdS
         OrgTinybirdSettingsValidationError,
         OrgTinybirdSettingsPersistenceError,
         OrgTinybirdSettingsEncryptionError,
-        OrgTinybirdSettingsSyncError,
+        OrgTinybirdSettingsSyncConflictError,
+        OrgTinybirdSettingsUpstreamRejectedError,
+        OrgTinybirdSettingsUpstreamUnavailableError,
       ],
     }),
   )
@@ -124,7 +183,9 @@ export class OrgTinybirdSettingsApiGroup extends HttpApiGroup.make("orgTinybirdS
         OrgTinybirdSettingsValidationError,
         OrgTinybirdSettingsPersistenceError,
         OrgTinybirdSettingsEncryptionError,
-        OrgTinybirdSettingsSyncError,
+        OrgTinybirdSettingsSyncConflictError,
+        OrgTinybirdSettingsUpstreamRejectedError,
+        OrgTinybirdSettingsUpstreamUnavailableError,
       ],
     }),
   )
@@ -136,7 +197,7 @@ export class OrgTinybirdSettingsApiGroup extends HttpApiGroup.make("orgTinybirdS
         OrgTinybirdSettingsValidationError,
         OrgTinybirdSettingsPersistenceError,
         OrgTinybirdSettingsEncryptionError,
-        OrgTinybirdSettingsSyncError,
+        OrgTinybirdSettingsUpstreamUnavailableError,
       ],
     }),
   )
@@ -148,7 +209,8 @@ export class OrgTinybirdSettingsApiGroup extends HttpApiGroup.make("orgTinybirdS
         OrgTinybirdSettingsValidationError,
         OrgTinybirdSettingsPersistenceError,
         OrgTinybirdSettingsEncryptionError,
-        OrgTinybirdSettingsSyncError,
+        OrgTinybirdSettingsUpstreamRejectedError,
+        OrgTinybirdSettingsUpstreamUnavailableError,
       ],
     }),
   )

@@ -34,6 +34,11 @@ export interface Expr<TSType> {
   // String operations
   like(this: Expr<string>, pattern: string): Condition
   notLike(this: Expr<string>, pattern: string): Condition
+  ilike(this: Expr<string>, pattern: string): Condition
+
+  // IN / NOT IN
+  in_(...values: TSType[]): Condition
+  notIn(...values: TSType[]): Condition
 
   // Arithmetic — only valid for number expressions
   div(this: Expr<number>, n: number | Expr<number>): Expr<number>
@@ -62,10 +67,10 @@ export interface Condition {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Core helpers (exported for define-fn.ts and consumer extensibility)
 // ---------------------------------------------------------------------------
 
-function toFragment(value: unknown): SqlFragment {
+export function toFragment(value: unknown): SqlFragment {
   if (value != null && typeof value === "object" && "_brand" in value) {
     return (value as Expr<unknown>).toFragment()
   }
@@ -79,7 +84,7 @@ function toFragment(value: unknown): SqlFragment {
 // Expr implementation
 // ---------------------------------------------------------------------------
 
-function makeExpr<T>(fragment: SqlFragment): Expr<T> {
+export function makeExpr<T>(fragment: SqlFragment): Expr<T> {
   const self: Expr<T> = {
     _brand: "Expr" as const,
     toFragment: () => fragment,
@@ -93,6 +98,16 @@ function makeExpr<T>(fragment: SqlFragment): Expr<T> {
 
     like: (pattern: string) => makeCond(raw(`${compile(fragment)} LIKE ${compile(str(pattern))}`)),
     notLike: (pattern: string) => makeCond(raw(`${compile(fragment)} NOT LIKE ${compile(str(pattern))}`)),
+    ilike: (pattern: string) => makeCond(raw(`${compile(fragment)} ILIKE ${compile(str(pattern))}`)),
+
+    in_: (...values) => {
+      const escaped = values.map((v) => compile(toFragment(v))).join(", ")
+      return makeCond(raw(`${compile(fragment)} IN (${escaped})`))
+    },
+    notIn: (...values) => {
+      const escaped = values.map((v) => compile(toFragment(v))).join(", ")
+      return makeCond(raw(`${compile(fragment)} NOT IN (${escaped})`))
+    },
 
     div: (n: number | Expr<number>) => makeExpr<number>(raw(`${compile(fragment)} / ${compile(toFragment(n))}`)),
     mul: (n: number | Expr<number>) => makeExpr<number>(raw(`${compile(fragment)} * ${compile(toFragment(n))}`)),
@@ -123,7 +138,7 @@ export function makeColumnRef<Name extends string, ColType extends CHType<string
 // Condition implementation
 // ---------------------------------------------------------------------------
 
-function makeCond(fragment: SqlFragment): Condition {
+export function makeCond(fragment: SqlFragment): Condition {
   return {
     _brand: "Condition" as const,
     toFragment: () => fragment,
@@ -144,123 +159,31 @@ export function lit(value: string | number): Expr<string> | Expr<number> {
 }
 
 // ---------------------------------------------------------------------------
-// Aggregate functions
+// Subquery expressions
 // ---------------------------------------------------------------------------
 
-export function count(): Expr<number> {
-  return makeExpr<number>(raw("count()"))
+/**
+ * EXISTS (subquery) — for correlated subqueries.
+ * The subquery must be compiled separately; this wraps its SQL as a condition.
+ */
+export function exists(subquerySql: string): Condition {
+  return makeCond(raw(`EXISTS (${subquerySql})`))
 }
 
-export function countIf(cond: Condition): Expr<number> {
-  return makeExpr<number>(raw(`countIf(${compile(cond.toFragment())})`))
+/**
+ * expr IN (subquery) — for uncorrelated subqueries.
+ * The subquery must be compiled separately; this wraps its SQL as a condition.
+ */
+export function inSubquery<T>(expr: Expr<T>, subquerySql: string): Condition {
+  return makeCond(raw(`${compile(expr.toFragment())} IN (${subquerySql})`))
 }
 
-export function avg(expr: Expr<number>): Expr<number> {
-  return makeExpr<number>(raw(`avg(${compile(expr.toFragment())})`))
-}
-
-export function sum(expr: Expr<number>): Expr<number> {
-  return makeExpr<number>(raw(`sum(${compile(expr.toFragment())})`))
-}
-
-export function min_(expr: Expr<number>): Expr<number> {
-  return makeExpr<number>(raw(`min(${compile(expr.toFragment())})`))
-}
-
-export function max_(expr: Expr<number>): Expr<number> {
-  return makeExpr<number>(raw(`max(${compile(expr.toFragment())})`))
-}
-
-export function quantile(q: number) {
-  return (expr: Expr<number>): Expr<number> =>
-    makeExpr<number>(raw(`quantile(${q})(${compile(expr.toFragment())})`))
-}
-
-export function any_(expr: Expr<string>): Expr<string> {
-  return makeExpr<string>(raw(`any(${compile(expr.toFragment())})`))
-}
-
-export function anyIf<T>(expr: Expr<T>, cond: Condition): Expr<T> {
-  return makeExpr<T>(raw(`anyIf(${compile(expr.toFragment())}, ${compile(cond.toFragment())})`))
-}
-
-// ---------------------------------------------------------------------------
-// ClickHouse functions
-// ---------------------------------------------------------------------------
-
-export function toStartOfInterval(
-  col: Expr<string>,
-  seconds: number | Expr<number>,
-): Expr<string> {
-  const secStr = typeof seconds === "number" ? String(Math.round(seconds)) : compile((seconds as Expr<number>).toFragment())
-  return makeExpr<string>(raw(`toStartOfInterval(${compile(col.toFragment())}, INTERVAL ${secStr} SECOND)`))
-}
-
-export function if_<T>(
-  cond: Condition,
-  then_: Expr<T>,
-  else_: Expr<T>,
-): Expr<T> {
-  return makeExpr<T>(
-    raw(`if(${compile(cond.toFragment())}, ${compile(then_.toFragment())}, ${compile(else_.toFragment())})`),
-  )
-}
-
-export function coalesce<T>(...exprs: Expr<T>[]): Expr<T> {
-  const args = exprs.map((e) => compile(e.toFragment())).join(", ")
-  return makeExpr<T>(raw(`coalesce(${args})`))
-}
-
-export function nullIf<T>(expr: Expr<T>, value: Expr<T> | string): Expr<T> {
-  const valFrag = typeof value === "string" ? str(value) : (value as Expr<T>).toFragment()
-  return makeExpr<T>(raw(`nullIf(${compile(expr.toFragment())}, ${compile(valFrag)})`))
-}
-
-export function toString_(expr: Expr<any>): Expr<string> {
-  return makeExpr<string>(raw(`toString(${compile(expr.toFragment())})`))
-}
-
-export function toFloat64OrZero(expr: Expr<string>): Expr<number> {
-  return makeExpr<number>(raw(`toFloat64OrZero(${compile(expr.toFragment())})`))
-}
-
-export function toUInt16OrZero(expr: Expr<string>): Expr<number> {
-  return makeExpr<number>(raw(`toUInt16OrZero(${compile(expr.toFragment())})`))
-}
-
-export function positionCaseInsensitive(
-  haystack: Expr<string>,
-  needle: Expr<string>,
-): Expr<number> {
-  return makeExpr<number>(
-    raw(`positionCaseInsensitive(${compile(haystack.toFragment())}, ${compile(needle.toFragment())})`),
-  )
-}
-
-export function mapContains(
-  mapExpr: Expr<Record<string, string>>,
-  key: string,
-): Condition {
-  return makeCond(raw(`mapContains(${compile(mapExpr.toFragment())}, ${compile(str(key))})`))
-}
-
-export function arrayStringConcat(
-  parts: Expr<string>[],
-  sep: string,
-): Expr<string> {
-  const arr = parts.map((p) => compile(p.toFragment())).join(", ")
-  return makeExpr<string>(raw(`arrayStringConcat([${arr}], ${compile(str(sep))})`))
-}
-
-export function arrayFilter(
-  fn: string,
-  arr: Expr<any>,
-): Expr<any> {
-  return makeExpr<any>(raw(`arrayFilter(${fn}, ${compile(arr.toFragment())})`))
-}
-
-export function extract_(expr: Expr<string>, pattern: string): Expr<string> {
-  return makeExpr<string>(raw(`extract(${compile(expr.toFragment())}, ${compile(str(pattern))})`))
+/**
+ * Reference an outer query's column in a correlated subquery.
+ * Usage: `outerRef("t.TraceId")` or `outerRef("TraceId")`
+ */
+export function outerRef<T = string>(name: string): Expr<T> {
+  return makeExpr<T>(raw(name))
 }
 
 export function inList(
@@ -281,6 +204,11 @@ export function rawExpr<T = unknown>(sql: string): Expr<T> {
 
 export function rawCond(sql: string): Condition {
   return makeCond(raw(sql))
+}
+
+/** Create an Expr from a runtime column name (for dynamic column access). */
+export function dynamicColumn<T = string>(name: string): Expr<T> {
+  return makeExpr<T>(raw(name))
 }
 
 // ---------------------------------------------------------------------------
@@ -310,3 +238,51 @@ export function whenTrue(
   if (!value) return undefined
   return fn()
 }
+
+// ---------------------------------------------------------------------------
+// Re-export all ClickHouse functions so `import * as CH from "./expr"` works
+// ---------------------------------------------------------------------------
+
+export {
+  count,
+  countIf,
+  avg,
+  sum,
+  min_,
+  max_,
+  quantile,
+  any_,
+  anyIf,
+  uniq,
+  sumIf,
+  groupUniqArray,
+  toString_,
+  positionCaseInsensitive,
+  position_,
+  left_,
+  length_,
+  replaceOne,
+  extract_,
+  concat,
+  round_,
+  intDiv,
+  toFloat64OrZero,
+  toUInt16OrZero,
+  toUInt64,
+  toInt64,
+  least_,
+  greatest_,
+  toStartOfInterval,
+  intervalSub,
+  if_,
+  multiIf,
+  coalesce,
+  nullIf,
+  arrayOf,
+  arrayStringConcat,
+  arrayFilter,
+  mapContains,
+  mapGet,
+  mapLiteral,
+  toJSONString,
+} from "./functions"

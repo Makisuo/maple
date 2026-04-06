@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test"
 import * as CH from "./index"
-import { compileCH } from "./compile"
+import { compileCH, compileUnion } from "./compile"
 import { tracesTimeseriesQuery, tracesBreakdownQuery, tracesListQuery } from "./queries/traces"
+import { logsFacetsQuery } from "./queries/logs"
+import { servicesFacetsQuery } from "./queries/services"
+import { metricsSummaryQuery } from "./queries/metrics"
+import { spanAttributeValuesQuery, resourceAttributeValuesQuery } from "./queries/attribute-keys"
+import { tracesDurationStatsQuery, spanHierarchyQuery } from "./queries/errors"
+import { unionAll } from "./union"
 
 // ---------------------------------------------------------------------------
 // Core DSL tests
@@ -153,6 +159,33 @@ describe("CH.from / select / where / compile", () => {
     const { sql } = compileCH(q, {})
     expect(sql).toContain("Name IN ('a', 'b', 'c')")
   })
+
+  it("compiles column shorthand select", () => {
+    const q = CH.from(TestTable).select("Id", "Name", "Value")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("Id AS Id")
+    expect(sql).toContain("Name AS Name")
+    expect(sql).toContain("Value AS Value")
+    expect(sql).toContain("FROM test_table")
+  })
+
+  it("compiles in_() on expressions", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ id: $.Id }))
+      .where(($) => [$.Name.in_("alice", "bob", "charlie")])
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("Name IN ('alice', 'bob', 'charlie')")
+  })
+
+  it("compiles arrayOf()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ names: CH.arrayOf($.Name) }))
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("[Name] AS names")
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -202,7 +235,7 @@ describe("tracesTimeseriesQuery", () => {
   it("builds error_rate timeseries", () => {
     const q = tracesTimeseriesQuery({ metric: "error_rate", needsSampling: false })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate")
+    expect(sql).toContain("countIf(StatusCode = 'Error') * 100 / count(), 0) AS errorRate")
   })
 
   it("includes sampling columns when needsSampling is true", () => {
@@ -251,11 +284,11 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("SpanAttributes['http.route']")
   })
 
-  it("uses trace_list_mv when rootOnly with mapped filters", () => {
+  it("uses traces table when rootOnly (MV disabled)", () => {
     const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, rootOnly: true })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("FROM trace_list_mv")
-    expect(sql).not.toContain("ParentSpanId")
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''")
   })
 
   it("uses traces table when not rootOnly", () => {
@@ -264,14 +297,14 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("FROM traces")
   })
 
-  it("falls back to traces table when commitShas present", () => {
+  it("includes commitShas filter with rootOnly", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       rootOnly: true, commitShas: ["abc123"],
     })
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("FROM traces")
-    expect(sql).toContain("ParentSpanId = ''")
+    expect(sql).toContain("SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''")
     expect(sql).toContain("deployment.commit_sha")
   })
 
@@ -293,10 +326,10 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("StatusCode = 'Error'")
   })
 
-  it("filters errorsOnly on MV uses HasError", () => {
+  it("filters errorsOnly with rootOnly", () => {
     const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, rootOnly: true, errorsOnly: true })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("HasError = 1")
+    expect(sql).toContain("StatusCode = 'Error'")
   })
 
   it("filters by environments", () => {
@@ -308,13 +341,13 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
   })
 
-  it("filters by environments on MV uses DeploymentEnv", () => {
+  it("filters by environments with rootOnly", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       rootOnly: true, environments: ["production"],
     })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("DeploymentEnv IN ('production')")
+    expect(sql).toContain("deployment.environment") // raw table uses ResourceAttributes
   })
 
   it("filters by attribute filters (equals)", () => {
@@ -362,15 +395,15 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("ResourceAttributes['host.name'] = 'server-1'")
   })
 
-  it("uses MV column for mapped attribute filters on MV", () => {
+  it("filters attribute with rootOnly on raw table", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       rootOnly: true,
       attributeFilters: [{ key: "http.method", value: "GET", mode: "equals" }],
     })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("FROM trace_list_mv")
-    expect(sql).toContain("HttpMethod = 'GET'")
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("SpanAttributes['http.method'] = 'GET'")
   })
 
   it("escapes special characters in filter values", () => {
@@ -490,7 +523,7 @@ describe("tracesListQuery", () => {
     expect(sql).toContain("SpanAttributes AS spanAttributes")
     expect(sql).toContain("ResourceAttributes AS resourceAttributes")
     expect(sql).toContain("ORDER BY timestamp DESC")
-    expect(sql).toContain("LIMIT 100")
+    expect(sql).toContain("LIMIT 25")
     expect(sql).toContain("FORMAT JSON")
   })
 
@@ -506,11 +539,447 @@ describe("tracesListQuery", () => {
     expect(sql).toContain("ServiceName = 'api'")
   })
 
-  it("always uses traces table (not MV)", () => {
+  it("uses traces table when rootOnly (MV disabled)", () => {
     const q = tracesListQuery({ rootOnly: true })
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("FROM traces")
-    // rootOnly should add ParentSpanId filter since we're not using MV
-    expect(sql).toContain("ParentSpanId = ''")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// UNION ALL queries
+// ---------------------------------------------------------------------------
+
+describe("unionAll", () => {
+  const TestTable = CH.table("test_table", {
+    Id: CH.string,
+    Name: CH.string,
+    Value: CH.uint64,
+  })
+
+  it("compiles two queries with UNION ALL", () => {
+    const q1 = CH.from(TestTable)
+      .select(($) => ({
+        name: $.Name,
+        count: CH.count(),
+        facet: CH.lit("a"),
+      }))
+      .where(($) => [$.Id.eq("1")])
+      .groupBy("name")
+
+    const q2 = CH.from(TestTable)
+      .select(($) => ({
+        name: $.Id,
+        count: CH.count(),
+        facet: CH.lit("b"),
+      }))
+      .where(($) => [$.Id.eq("2")])
+      .groupBy("name")
+
+    const union = unionAll(q1, q2).format("JSON")
+    const { sql } = compileUnion(union, {})
+    expect(sql).toContain("UNION ALL")
+    expect(sql).toContain("'a' AS facet")
+    expect(sql).toContain("'b' AS facet")
+    expect(sql).toContain("FORMAT JSON")
+    // Sub-queries should NOT have FORMAT
+    const parts = sql.split("UNION ALL")
+    expect(parts[0]).not.toContain("FORMAT")
+  })
+
+  it("wraps with outer ORDER BY and LIMIT", () => {
+    const q1 = CH.from(TestTable)
+      .select(($) => ({ name: $.Name, count: CH.count() }))
+      .groupBy("name")
+
+    const q2 = CH.from(TestTable)
+      .select(($) => ({ name: $.Id, count: CH.count() }))
+      .groupBy("name")
+
+    const union = unionAll(q1, q2)
+      .orderBy(["count", "desc"])
+      .limit(10)
+      .format("JSON")
+
+    const { sql } = compileUnion(union, {})
+    expect(sql).toContain("SELECT * FROM (")
+    expect(sql).toContain("UNION ALL")
+    expect(sql).toContain("ORDER BY count DESC")
+    expect(sql).toContain("LIMIT 10")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Subquery support
+// ---------------------------------------------------------------------------
+
+describe("subquery support", () => {
+  const TestTable = CH.table("test_table", {
+    Id: CH.string,
+    Name: CH.string,
+    Value: CH.uint64,
+  })
+
+  it("compiles inSubquery", () => {
+    const innerSql = compileCH(
+      CH.from(TestTable).select(($) => ({ id: $.Id })).where(($) => [$.Value.gt(100)]),
+      {},
+      { skipFormat: true },
+    ).sql
+
+    const outer = CH.from(TestTable)
+      .select(($) => ({ name: $.Name }))
+      .where(($) => [CH.inSubquery($.Id, innerSql)])
+      .format("JSON")
+
+    const { sql } = compileCH(outer, {})
+    expect(sql).toContain("Id IN (SELECT")
+    expect(sql).toContain("Value > 100")
+  })
+
+  it("compiles exists()", () => {
+    const subSql = "SELECT 1 FROM other WHERE other.Id = test_table.Id"
+    const q = CH.from(TestTable)
+      .select(($) => ({ id: $.Id }))
+      .where(() => [CH.exists(subSql)])
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("EXISTS (SELECT 1 FROM other WHERE other.Id = test_table.Id)")
+  })
+
+  it("compiles fromQuery as typed FROM source", () => {
+    const inner = CH.from(TestTable)
+      .select(($) => ({ id: $.Id, name: $.Name }))
+      .limit(10)
+
+    const outer = CH.fromQuery(inner, "sub")
+      .select(($) => ({
+        id: $.id,
+        name: $.name,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(outer, {})
+    expect(sql).toContain("FROM (SELECT")
+    expect(sql).toContain(") AS sub")
+    expect(sql).toContain("LIMIT 10")
+    expect(sql).toContain("id AS id")
+    expect(sql).toContain("name AS name")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Type-safe joins
+// ---------------------------------------------------------------------------
+
+describe("type-safe joins", () => {
+  const Users = CH.table("users", {
+    Id: CH.string,
+    Name: CH.string,
+    OrgId: CH.string,
+  })
+
+  const Orders = CH.table("orders", {
+    Id: CH.string,
+    UserId: CH.string,
+    Amount: CH.uint64,
+    Status: CH.string,
+  })
+
+  it("compiles innerJoin with Table", () => {
+    const q = CH.from(Users)
+      .innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
+      .select(($) => ({
+        userName: $.Name,
+        orderAmount: $.o.Amount,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("INNER JOIN orders AS o ON users.Id = o.UserId")
+    expect(sql).toContain("users.Name AS userName")
+    expect(sql).toContain("o.Amount AS orderAmount")
+  })
+
+  it("compiles leftJoin with Table", () => {
+    const q = CH.from(Users)
+      .leftJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
+      .select(($) => ({
+        userName: $.Name,
+        orderAmount: $.o.Amount,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("LEFT JOIN orders AS o ON users.Id = o.UserId")
+  })
+
+  it("compiles crossJoin with Table", () => {
+    const q = CH.from(Users)
+      .crossJoin(Orders, "o")
+      .select(($) => ({
+        userName: $.Name,
+        orderStatus: $.o.Status,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("CROSS JOIN orders AS o")
+    expect(sql).not.toContain(" ON ")
+  })
+
+  it("compiles innerJoinQuery with subquery", () => {
+    const ordersSub = CH.from(Orders)
+      .select(($) => ({ userId: $.UserId, total: CH.sum($.Amount) }))
+      .groupBy("userId")
+
+    const q = CH.from(Users)
+      .innerJoinQuery(ordersSub, "o", (u, o) => u.Id.eq(o.userId))
+      .select(($) => ({
+        userName: $.Name,
+        orderTotal: $.o.total,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("INNER JOIN (SELECT")
+    expect(sql).toContain(") AS o ON users.Id = o.userId")
+    expect(sql).toContain("o.total AS orderTotal")
+  })
+
+  it("compiles crossJoinQuery with subquery", () => {
+    const statsSub = CH.from(Orders)
+      .select(() => ({ totalOrders: CH.count() }))
+
+    const q = CH.from(Users)
+      .crossJoinQuery(statsSub, "s")
+      .select(($) => ({
+        userName: $.Name,
+        totalOrders: $.s.totalOrders,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("CROSS JOIN (SELECT")
+    expect(sql).toContain(") AS s")
+    expect(sql).toContain("s.totalOrders AS totalOrders")
+  })
+
+  it("compiles fromQuery + crossJoinQuery (two subqueries)", () => {
+    const sub1 = CH.from(Users)
+      .select(() => ({ userCount: CH.count() }))
+
+    const sub2 = CH.from(Orders)
+      .select(() => ({ orderCount: CH.count() }))
+
+    const q = CH.fromQuery(sub1, "u")
+      .crossJoinQuery(sub2, "o")
+      .select(($) => ({
+        users: $.userCount,
+        orders: $.o.orderCount,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("FROM (SELECT")
+    expect(sql).toContain(") AS u")
+    expect(sql).toContain("CROSS JOIN (SELECT")
+    expect(sql).toContain(") AS o")
+    expect(sql).toContain("u.userCount AS users")
+    expect(sql).toContain("o.orderCount AS orders")
+  })
+
+  it("compiles multiple chained joins", () => {
+    const Tags = CH.table("tags", { Id: CH.string, UserId: CH.string, Label: CH.string })
+
+    const q = CH.from(Users)
+      .innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
+      .innerJoin(Tags, "t", (u, t) => u.Id.eq(t.UserId))
+      .select(($) => ({
+        userName: $.Name,
+        orderAmount: $.o.Amount,
+        tag: $.t.Label,
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("INNER JOIN orders AS o ON users.Id = o.UserId")
+    expect(sql).toContain("INNER JOIN tags AS t ON users.Id = t.UserId")
+    expect(sql).toContain("users.Name AS userName")
+    expect(sql).toContain("o.Amount AS orderAmount")
+    expect(sql).toContain("t.Label AS tag")
+  })
+
+  it("qualifies main table columns in where() with joins", () => {
+    const q = CH.from(Users)
+      .innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
+      .select(($) => ({ userName: $.Name }))
+      .where(($) => [$.OrgId.eq("org_1")])
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("users.OrgId = 'org_1'")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// New expression functions
+// ---------------------------------------------------------------------------
+
+describe("new expression functions", () => {
+  const TestTable = CH.table("test_table", {
+    Id: CH.string,
+    Name: CH.string,
+    Value: CH.uint64,
+    Attrs: CH.map(CH.string, CH.string),
+  })
+
+  it("compiles uniq()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ unique: CH.uniq($.Name) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("uniq(Name) AS unique")
+  })
+
+  it("compiles sumIf()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ total: CH.sumIf($.Value, $.Name.eq("test")) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("sumIf(Value, Name = 'test') AS total")
+  })
+
+  it("compiles toJSONString()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ attrs: CH.toJSONString($.Attrs) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("toJSONString(Attrs) AS attrs")
+  })
+
+  it("compiles concat()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ full: CH.concat($.Id, CH.lit(" "), $.Name) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("concat(Id, ' ', Name) AS full")
+  })
+
+  it("compiles round_()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ rounded: CH.round_($.Value.div(100), 2) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("round(Value / 100, 2) AS rounded")
+  })
+
+  it("compiles intDiv()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ result: CH.intDiv($.Value, 1000) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("intDiv(Value, 1000) AS result")
+  })
+
+  it("compiles ilike", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ id: $.Id }))
+      .where(($) => [$.Name.ilike("%test%")])
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("Name ILIKE '%test%'")
+  })
+
+  it("compiles groupUniqArray()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ names: CH.groupUniqArray($.Name) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("groupUniqArray(Name) AS names")
+  })
+
+  it("generalized min_/max_ accepts string columns", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ first: CH.min($.Name), last: CH.max($.Name) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("min(Name) AS first")
+    expect(sql).toContain("max(Name) AS last")
+  })
+
+  it("generalized any_() accepts any column", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ sample: CH.any($.Name) }))
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("any(Name) AS sample")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Converted queries — smoke tests
+// ---------------------------------------------------------------------------
+
+describe("converted queries", () => {
+  const baseParams = { orgId: "org_1", startTime: "2024-01-01", endTime: "2024-01-02" }
+
+  it("logsFacetsQuery compiles UNION ALL", () => {
+    const q = logsFacetsQuery({})
+    const { sql } = compileUnion(q, baseParams)
+    expect(sql).toContain("UNION ALL")
+    expect(sql).toContain("'severity' AS facetType")
+    expect(sql).toContain("'service' AS facetType")
+    expect(sql).toContain("ORDER BY count DESC")
+  })
+
+  it("servicesFacetsQuery compiles UNION ALL", () => {
+    const q = servicesFacetsQuery()
+    const { sql } = compileUnion(q, baseParams)
+    expect(sql).toContain("UNION ALL")
+    expect(sql).toContain("'environment' AS facetType")
+    expect(sql).toContain("'commit_sha' AS facetType")
+  })
+
+  it("metricsSummaryQuery compiles 4 UNION ALL", () => {
+    const q = metricsSummaryQuery()
+    const { sql } = compileUnion(q, baseParams)
+    const unionCount = (sql.match(/UNION ALL/g) || []).length
+    expect(unionCount).toBe(3) // 4 queries = 3 UNION ALL
+    expect(sql).toContain("'sum' AS metricType")
+    expect(sql).toContain("'gauge' AS metricType")
+    expect(sql).toContain("uniq(MetricName)")
+  })
+
+  it("spanAttributeValuesQuery compiles with map access", () => {
+    const q = spanAttributeValuesQuery({ attributeKey: "http.method" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("SpanAttributes['http.method'] AS attributeValue")
+    expect(sql).toContain("SpanAttributes['http.method'] != ''")
+    expect(sql).toContain("ORDER BY usageCount DESC")
+  })
+
+  it("resourceAttributeValuesQuery compiles with map access", () => {
+    const q = resourceAttributeValuesQuery({ attributeKey: "host.name" })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ResourceAttributes['host.name'] AS attributeValue")
+  })
+
+  it("tracesDurationStatsQuery compiles with positionCaseInsensitive", () => {
+    const q = tracesDurationStatsQuery({
+      serviceName: "api",
+      matchModes: { serviceName: "contains" },
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("positionCaseInsensitive(ServiceName, 'api') > 0")
+    expect(sql).toContain("quantile(0.5)(Duration)")
+    expect(sql).toContain("FROM trace_list_mv") // tracesDurationStats always uses MV directly
+  })
+
+  it("spanHierarchyQuery compiles with toJSONString", () => {
+    const q = spanHierarchyQuery({ traceId: "abc123" })
+    const { sql } = compileCH(q, { orgId: "org_1" })
+    expect(sql).toContain("toJSONString(SpanAttributes) AS spanAttributes")
+    expect(sql).toContain("toJSONString(ResourceAttributes) AS resourceAttributes")
+    expect(sql).toContain("TraceId = 'abc123'")
+    expect(sql).toContain("'related' AS relationship")
+  })
+
+  it("spanHierarchyQuery with spanId marks target", () => {
+    const q = spanHierarchyQuery({ traceId: "abc", spanId: "span1" })
+    const { sql } = compileCH(q, { orgId: "org_1" })
+    expect(sql).toContain("'target'")
+    expect(sql).toContain("'related'")
   })
 })

@@ -11,8 +11,6 @@ import { OrgTinybirdSettingsApiGroup } from "./org-tinybird-settings";
 import { QueryEngineApiGroup } from "./query-engine";
 import { ScrapeTargetsApiGroup } from "./scrape-targets";
 import { ServiceDiscoveryApiGroup } from "./service-discovery";
-import { TinybirdApiGroup } from "./tinybird";
-
 export class MapleApi extends HttpApi.make("MapleApi")
   .add(AuthPublicApiGroup)
   .add(AuthApiGroup)
@@ -27,7 +25,6 @@ export class MapleApi extends HttpApi.make("MapleApi")
   .add(QueryEngineApiGroup)
   .add(ScrapeTargetsApiGroup)
   .add(ServiceDiscoveryApiGroup)
-  .add(TinybirdApiGroup)
   .annotateMerge(
     OpenApi.annotations({
       title: "Maple API",

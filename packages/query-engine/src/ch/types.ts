@@ -53,6 +53,16 @@ export type InferTS<T> = T extends CHType<string, infer TS> ? TS : never
 
 export type ColumnDefs = Record<string, CHType<string, any>>
 
+/** Convert a query's Output record to synthetic ColumnDefs for subquery-as-table usage. */
+export type OutputToColumnDefs<O extends Record<string, any>> = {
+  readonly [K in keyof O & string]: CHType<"Inferred", O[K]>
+}
+
+/** Wrap each column type with `| null` for LEFT JOIN results. */
+export type NullableColumnDefs<Cols extends ColumnDefs> = {
+  readonly [K in keyof Cols & string]: CHType<"Nullable", InferTS<Cols[K]> | null>
+}
+
 // ---------------------------------------------------------------------------
 // Constructors
 // ---------------------------------------------------------------------------

@@ -1,18 +1,16 @@
 import { Effect, Schema } from "effect"
 import { QueryEngineExecuteRequest, type AttributeFilter } from "@maple/query-engine"
 import { TraceId, SpanId } from "@maple/domain"
-import {
-  getTinybird,
-  type ListTracesOutput,
-  type SpanHierarchyOutput,
-  type TracesDurationStatsOutput,
-  type TracesFacetsOutput,
-} from "@/lib/tinybird"
+import { SpanHierarchyRequest } from "@maple/domain/http"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
   TinybirdDateTimeString,
   TinybirdTransformError,
   decodeInput,
   executeQueryEngine,
+  extractAttributeValues,
+  extractFacets,
+  extractStats,
   runTinybirdQuery,
 } from "@/api/tinybird/effect-utils"
 import { getHttpInfo, type HttpInfo } from "@maple/ui/lib/http"
@@ -82,108 +80,6 @@ export interface TracesResponse {
   }
 }
 
-function buildRootSpanAttributes(raw: ListTracesOutput): Record<string, string> {
-  const attributes: Record<string, string> = {}
-
-  if (raw.rootHttpMethod) {
-    attributes["http.method"] = raw.rootHttpMethod
-  }
-
-  if (raw.rootHttpRoute) {
-    attributes["http.route"] = raw.rootHttpRoute
-  }
-
-  if (raw.rootHttpStatusCode) {
-    attributes["http.status_code"] = raw.rootHttpStatusCode
-  }
-
-  return attributes
-}
-
-function transformTrace(raw: ListTracesOutput): Trace {
-  const rootSpanAttributes = buildRootSpanAttributes(raw)
-
-  return {
-    traceId: toTraceId(raw.traceId),
-    startTime: String(raw.startTime),
-    endTime: String(raw.endTime),
-    durationMs: Number(raw.durationMicros) / 1000,
-    spanCount: Number(raw.spanCount),
-    services: raw.services,
-    rootSpan: {
-      name: raw.rootSpanName,
-      kind: raw.rootSpanKind,
-      statusCode: raw.rootSpanStatusCode,
-      attributes: rootSpanAttributes,
-      http: getHttpInfo(raw.rootSpanName, rootSpanAttributes),
-    },
-    rootSpanName: raw.rootSpanName,
-    hasError: Number(raw.hasError) === 1,
-  }
-}
-
-export function listTraces({
-  data,
-}: {
-  data: ListTracesInput
-}) {
-  return listTracesEffect({ data })
-}
-
-const listTracesEffect = Effect.fn("Tinybird.listTraces")(function* ({
-  data,
-}: {
-  data: ListTracesInput
-}) {
-    const input = yield* decodeInput(ListTracesInputSchema, data ?? {}, "listTraces")
-    const limit = input.limit ?? DEFAULT_LIMIT
-    const offset = input.offset ?? DEFAULT_OFFSET
-
-    yield* Effect.annotateCurrentSpan("limit", limit)
-    yield* Effect.annotateCurrentSpan("offset", offset)
-    if (input.service) yield* Effect.annotateCurrentSpan("service", input.service)
-    if (input.hasError) yield* Effect.annotateCurrentSpan("hasError", input.hasError)
-
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("list_traces", () =>
-      tinybird.query.list_traces({
-        limit,
-        offset,
-        service: input.service,
-        start_time: input.startTime,
-        end_time: input.endTime,
-        span_name: input.spanName,
-        has_error: input.hasError,
-        min_duration_ms: input.minDurationMs,
-        max_duration_ms: input.maxDurationMs,
-        http_method: input.httpMethod,
-        http_status_code: input.httpStatusCode,
-        deployment_env: input.deploymentEnv,
-        service_match_mode: input.serviceMatchMode,
-        span_name_match_mode: input.spanNameMatchMode,
-        deployment_env_match_mode: input.deploymentEnvMatchMode,
-        attribute_filter_key: input.attributeKey,
-        attribute_filter_value: input.attributeValue,
-        attribute_filter_value_match_mode: input.attributeValueMatchMode,
-        resource_filter_key: input.resourceAttributeKey,
-        resource_filter_value: input.resourceAttributeValue,
-        resource_filter_value_match_mode: input.resourceAttributeValueMatchMode,
-      }),
-    )
-
-    return {
-      data: result.data.map(transformTrace),
-      meta: {
-        limit,
-        offset,
-      },
-    }
-})
-
-// ---------------------------------------------------------------------------
-// Query Engine-based trace list
-// ---------------------------------------------------------------------------
-
 function buildAttributeFilters(input: ListTracesInput): AttributeFilter[] {
   const filters: AttributeFilter[] = []
 
@@ -246,20 +142,20 @@ function transformSpanListRow(row: Record<string, unknown>): Trace {
   }
 }
 
-export function listTracesViaQueryEngine({
+export function listTraces({
   data,
 }: {
   data: ListTracesInput
 }) {
-  return listTracesViaQueryEngineEffect({ data })
+  return listTracesEffect({ data })
 }
 
-const listTracesViaQueryEngineEffect = Effect.fn("QueryEngine.listTraces")(function* ({
+const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({
   data,
 }: {
   data: ListTracesInput
 }) {
-  const input = yield* decodeInput(ListTracesInputSchema, data ?? {}, "listTracesViaQueryEngine")
+  const input = yield* decodeInput(ListTracesInputSchema, data ?? {}, "listTraces")
   const limit = input.limit ?? DEFAULT_LIMIT
   const offset = input.offset ?? DEFAULT_OFFSET
 
@@ -364,7 +260,22 @@ function parseAttributes(value: string | null | undefined): Record<string, strin
   }
 }
 
-function transformSpan(raw: SpanHierarchyOutput): Span {
+interface SpanHierarchyRow {
+  traceId: string
+  spanId: string
+  parentSpanId: string
+  spanName: string
+  serviceName: string
+  spanKind: string
+  durationMs: number
+  startTime: string
+  statusCode: string
+  statusMessage: string
+  spanAttributes: string
+  resourceAttributes: string
+}
+
+function transformSpan(raw: SpanHierarchyRow): Span {
   return {
     traceId: toTraceId(raw.traceId),
     spanId: toSpanId(raw.spanId),
@@ -463,7 +374,7 @@ export function getSpanHierarchy({
   return getSpanHierarchyEffect({ data })
 }
 
-const getSpanHierarchyEffect = Effect.fn("Tinybird.getSpanHierarchy")(function* ({
+const getSpanHierarchyEffect = Effect.fn("QueryEngine.getSpanHierarchy")(function* ({
   data,
 }: {
   data: GetSpanHierarchyInput
@@ -473,16 +384,19 @@ const getSpanHierarchyEffect = Effect.fn("Tinybird.getSpanHierarchy")(function* 
     yield* Effect.annotateCurrentSpan("traceId", input.traceId)
     if (input.spanId) yield* Effect.annotateCurrentSpan("spanId", input.spanId)
 
-    const tinybird = getTinybird()
-
-    const result = yield* runTinybirdQuery("span_hierarchy", () =>
-      tinybird.query.span_hierarchy({
-        trace_id: input.traceId,
-        span_id: input.spanId,
+    const result = yield* runTinybirdQuery("spanHierarchy", () =>
+      Effect.gen(function* () {
+        const client = yield* MapleApiAtomClient
+        return yield* client.queryEngine.spanHierarchy({
+          payload: new SpanHierarchyRequest({
+            traceId: input.traceId,
+            spanId: input.spanId,
+          }),
+        })
       }),
     )
 
-    const spans = result.data.map(transformSpan)
+    const spans = result.data.map((raw) => transformSpan(raw as SpanHierarchyRow))
     const rootSpans = buildSpanTree(spans)
     const totalDurationMs = spans.length > 0 ? Math.max(...spans.map((span) => span.durationMs)) : 0
 
@@ -551,31 +465,24 @@ const GetTracesFacetsInputSchema = Schema.Struct({
 
 export type GetTracesFacetsInput = Schema.Schema.Type<typeof GetTracesFacetsInputSchema>
 
-function transformFacets(
-  facetsData: TracesFacetsOutput[],
-  durationStatsData: TracesDurationStatsOutput[],
-): TracesFacets {
-  const toItem = (row: TracesFacetsOutput): FacetItem => ({ name: row.name, count: Number(row.count) })
-  const byType = (type: string) => facetsData.filter((r) => r.facetType === type).map(toItem)
-  const errorRow = facetsData.find((r) => r.facetType === "errorCount")
-
-  const durationStats = durationStatsData[0]
-    ? {
-        minDurationMs: Number(durationStatsData[0].minDurationMs),
-        maxDurationMs: Number(durationStatsData[0].maxDurationMs),
-        p50DurationMs: Number(durationStatsData[0].p50DurationMs),
-        p95DurationMs: Number(durationStatsData[0].p95DurationMs),
-      }
-    : { minDurationMs: 0, maxDurationMs: 0, p50DurationMs: 0, p95DurationMs: 0 }
+function buildTracesFiltersFromInput(input: GetTracesFacetsInput) {
+  const attributeFilters = buildAttributeFilters(input as ListTracesInput)
+  const resourceAttributeFilters = buildResourceAttributeFilters(input as ListTracesInput)
+  const matchModes: Record<string, string> = {}
+  if (input.serviceMatchMode === "contains") matchModes.serviceName = "contains"
+  if (input.spanNameMatchMode === "contains") matchModes.spanName = "contains"
+  if (input.deploymentEnvMatchMode === "contains") matchModes.deploymentEnv = "contains"
 
   return {
-    services: byType("service"),
-    spanNames: byType("spanName"),
-    httpMethods: byType("httpMethod"),
-    httpStatusCodes: byType("httpStatus"),
-    deploymentEnvs: byType("deploymentEnv"),
-    errorCount: errorRow ? Number(errorRow.count) : 0,
-    durationStats,
+    serviceName: input.service,
+    spanName: input.spanName,
+    errorsOnly: input.hasError,
+    minDurationMs: input.minDurationMs,
+    maxDurationMs: input.maxDurationMs,
+    environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
+    matchModes: Object.keys(matchModes).length > 0 ? matchModes : undefined,
+    attributeFilters: attributeFilters.length > 0 ? attributeFilters : undefined,
+    resourceAttributeFilters: resourceAttributeFilters.length > 0 ? resourceAttributeFilters : undefined,
   }
 }
 
@@ -587,7 +494,7 @@ export function getTracesFacets({
   return getTracesFacetsEffect({ data })
 }
 
-const getTracesFacetsEffect = Effect.fn("Tinybird.getTracesFacets")(function* ({
+const getTracesFacetsEffect = Effect.fn("QueryEngine.getTracesFacets")(function* ({
   data,
 }: {
   data: GetTracesFacetsInput
@@ -596,57 +503,39 @@ const getTracesFacetsEffect = Effect.fn("Tinybird.getTracesFacets")(function* ({
 
     if (input.service) yield* Effect.annotateCurrentSpan("service", input.service)
 
-    const tinybird = getTinybird()
+    const filters = buildTracesFiltersFromInput(input)
+    const fallback = defaultTimeRange()
+    const startTime = input.startTime ?? fallback.startTime
+    const endTime = input.endTime ?? fallback.endTime
 
-    const [facetsResult, durationStatsResult] = yield* Effect.all([
-      runTinybirdQuery("traces_facets", () =>
-        tinybird.query.traces_facets({
-          start_time: input.startTime,
-          end_time: input.endTime,
-          service: input.service,
-          span_name: input.spanName,
-          has_error: input.hasError,
-          min_duration_ms: input.minDurationMs,
-          max_duration_ms: input.maxDurationMs,
-          http_method: input.httpMethod,
-          http_status_code: input.httpStatusCode,
-          deployment_env: input.deploymentEnv,
-          service_match_mode: input.serviceMatchMode,
-          span_name_match_mode: input.spanNameMatchMode,
-          deployment_env_match_mode: input.deploymentEnvMatchMode,
-          attribute_filter_key: input.attributeKey,
-          attribute_filter_value: input.attributeValue,
-          attribute_filter_value_match_mode: input.attributeValueMatchMode,
-          resource_filter_key: input.resourceAttributeKey,
-          resource_filter_value: input.resourceAttributeValue,
-          resource_filter_value_match_mode: input.resourceAttributeValueMatchMode,
-        }),
-      ),
-      runTinybirdQuery("traces_duration_stats", () =>
-        tinybird.query.traces_duration_stats({
-          start_time: input.startTime,
-          end_time: input.endTime,
-          service: input.service,
-          span_name: input.spanName,
-          has_error: input.hasError,
-          http_method: input.httpMethod,
-          http_status_code: input.httpStatusCode,
-          deployment_env: input.deploymentEnv,
-          service_match_mode: input.serviceMatchMode,
-          span_name_match_mode: input.spanNameMatchMode,
-          deployment_env_match_mode: input.deploymentEnvMatchMode,
-          attribute_filter_key: input.attributeKey,
-          attribute_filter_value: input.attributeValue,
-          attribute_filter_value_match_mode: input.attributeValueMatchMode,
-          resource_filter_key: input.resourceAttributeKey,
-          resource_filter_value: input.resourceAttributeValue,
-          resource_filter_value_match_mode: input.resourceAttributeValueMatchMode,
-        }),
-      ),
+    const [facetsResponse, statsResponse] = yield* Effect.all([
+      executeQueryEngine("queryEngine.getTracesFacets", new QueryEngineExecuteRequest({
+        startTime, endTime,
+        query: { kind: "facets" as const, source: "traces" as const, filters },
+      })),
+      executeQueryEngine("queryEngine.getTracesDurationStats", new QueryEngineExecuteRequest({
+        startTime, endTime,
+        query: { kind: "stats" as const, source: "traces" as const, filters },
+      })),
     ])
 
+    const facetsData = extractFacets(facetsResponse)
+    const statsData = extractStats(statsResponse)
+
+    const toItem = (row: { name: string; count: number }): FacetItem => ({ name: row.name, count: Number(row.count) })
+    const byType = (type: string) => facetsData.filter((r) => r.facetType === type).map(toItem)
+    const errorRow = facetsData.find((r) => r.facetType === "errorCount")
+
     return {
-      data: transformFacets(facetsResult.data, durationStatsResult.data),
+      data: {
+        services: byType("service"),
+        spanNames: byType("spanName"),
+        httpMethods: byType("httpMethod"),
+        httpStatusCodes: byType("httpStatus"),
+        deploymentEnvs: byType("deploymentEnv"),
+        errorCount: errorRow ? Number(errorRow.count) : 0,
+        durationStats: statsData,
+      } satisfies TracesFacets,
     }
 })
 
@@ -658,7 +547,7 @@ export function getTracesDurationStats({
   return getTracesDurationStatsEffect({ data })
 }
 
-const getTracesDurationStatsEffect = Effect.fn("Tinybird.getTracesDurationStats")(function* ({
+const getTracesDurationStatsEffect = Effect.fn("QueryEngine.getTracesDurationStats")(function* ({
   data,
 }: {
   data: GetTracesFacetsInput
@@ -668,36 +557,17 @@ const getTracesDurationStatsEffect = Effect.fn("Tinybird.getTracesDurationStats"
       data ?? {},
       "getTracesDurationStats",
     )
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("traces_duration_stats", () =>
-      tinybird.query.traces_duration_stats({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        service: input.service,
-        span_name: input.spanName,
-        has_error: input.hasError,
-        http_method: input.httpMethod,
-        http_status_code: input.httpStatusCode,
-        deployment_env: input.deploymentEnv,
-        service_match_mode: input.serviceMatchMode,
-        span_name_match_mode: input.spanNameMatchMode,
-        deployment_env_match_mode: input.deploymentEnvMatchMode,
-        attribute_filter_key: input.attributeKey,
-        attribute_filter_value: input.attributeValue,
-        attribute_filter_value_match_mode: input.attributeValueMatchMode,
-        resource_filter_key: input.resourceAttributeKey,
-        resource_filter_value: input.resourceAttributeValue,
-        resource_filter_value_match_mode: input.resourceAttributeValueMatchMode,
-      }),
-    )
+    const filters = buildTracesFiltersFromInput(input)
+    const fallback = defaultTimeRange()
+
+    const response = yield* executeQueryEngine("queryEngine.getTracesDurationStats", new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "stats" as const, source: "traces" as const, filters },
+    }))
 
     return {
-      data: result.data.map((row) => ({
-        minDurationMs: Number(row.minDurationMs),
-        maxDurationMs: Number(row.maxDurationMs),
-        p50DurationMs: Number(row.p50DurationMs),
-        p95DurationMs: Number(row.p95DurationMs),
-      })),
+      data: [extractStats(response)],
     }
 })
 
@@ -720,7 +590,14 @@ export function getSpanAttributeKeys({
   return getSpanAttributeKeysEffect({ data })
 }
 
-const getSpanAttributeKeysEffect = Effect.fn("Tinybird.getSpanAttributeKeys")(function* ({
+const defaultTimeRange = () => {
+  const now = new Date()
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19)
+  return { startTime: fmt(dayAgo), endTime: fmt(now) }
+}
+
+const getSpanAttributeKeysEffect = Effect.fn("QueryEngine.getSpanAttributeKeys")(function* ({
   data,
 }: {
   data: GetSpanAttributeKeysInput
@@ -730,18 +607,20 @@ const getSpanAttributeKeysEffect = Effect.fn("Tinybird.getSpanAttributeKeys")(fu
       data ?? {},
       "getSpanAttributeKeys",
     )
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("span_attribute_keys", () =>
-      tinybird.query.span_attribute_keys({
-        start_time: input.startTime,
-        end_time: input.endTime,
-      }),
-    )
+    const fallback = defaultTimeRange()
+    const request = new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "attributeKeys" as const, source: "traces" as const, scope: "span" as const },
+    })
+    const response = yield* executeQueryEngine("queryEngine.getSpanAttributeKeys", request)
+    const result = response.result
+    if (result.kind !== "attributeKeys") return { data: [] }
 
     return {
       data: result.data.map((row) => ({
-        attributeKey: row.attributeKey,
-        usageCount: Number(row.usageCount),
+        attributeKey: row.key,
+        usageCount: Number(row.count),
       })),
     }
 })
@@ -766,7 +645,7 @@ export function getSpanAttributeValues({
   return getSpanAttributeValuesEffect({ data })
 }
 
-const getSpanAttributeValuesEffect = Effect.fn("Tinybird.getSpanAttributeValues")(
+const getSpanAttributeValuesEffect = Effect.fn("QueryEngine.getSpanAttributeValues")(
   function* ({
     data,
   }: {
@@ -784,19 +663,17 @@ const getSpanAttributeValuesEffect = Effect.fn("Tinybird.getSpanAttributeValues"
       return { data: [] }
     }
 
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("span_attribute_values", () =>
-      tinybird.query.span_attribute_values({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        attribute_key: input.attributeKey,
-      }),
-    )
+    const fallback = defaultTimeRange()
+    const response = yield* executeQueryEngine("queryEngine.getSpanAttributeValues", new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "attributeValues" as const, source: "traces" as const, scope: "span" as const, attributeKey: input.attributeKey },
+    }))
 
     return {
-      data: result.data.map((row) => ({
-        attributeValue: row.attributeValue,
-        usageCount: Number(row.usageCount),
+      data: extractAttributeValues(response).map((row) => ({
+        attributeValue: row.value,
+        usageCount: Number(row.count),
       })),
     }
   },
@@ -821,7 +698,7 @@ export function getResourceAttributeKeys({
   return getResourceAttributeKeysEffect({ data })
 }
 
-const getResourceAttributeKeysEffect = Effect.fn("Tinybird.getResourceAttributeKeys")(function* ({
+const getResourceAttributeKeysEffect = Effect.fn("QueryEngine.getResourceAttributeKeys")(function* ({
   data,
 }: {
   data: GetResourceAttributeKeysInput
@@ -831,18 +708,20 @@ const getResourceAttributeKeysEffect = Effect.fn("Tinybird.getResourceAttributeK
       data ?? {},
       "getResourceAttributeKeys",
     )
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("resource_attribute_keys", () =>
-      tinybird.query.resource_attribute_keys({
-        start_time: input.startTime,
-        end_time: input.endTime,
-      }),
-    )
+    const fallback = defaultTimeRange()
+    const request = new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "attributeKeys" as const, source: "traces" as const, scope: "resource" as const },
+    })
+    const response = yield* executeQueryEngine("queryEngine.getResourceAttributeKeys", request)
+    const result = response.result
+    if (result.kind !== "attributeKeys") return { data: [] }
 
     return {
       data: result.data.map((row) => ({
-        attributeKey: row.attributeKey,
-        usageCount: Number(row.usageCount),
+        attributeKey: row.key,
+        usageCount: Number(row.count),
       })),
     }
 })
@@ -867,7 +746,7 @@ export function getResourceAttributeValues({
   return getResourceAttributeValuesEffect({ data })
 }
 
-const getResourceAttributeValuesEffect = Effect.fn("Tinybird.getResourceAttributeValues")(
+const getResourceAttributeValuesEffect = Effect.fn("QueryEngine.getResourceAttributeValues")(
   function* ({
     data,
   }: {
@@ -885,19 +764,17 @@ const getResourceAttributeValuesEffect = Effect.fn("Tinybird.getResourceAttribut
       return { data: [] }
     }
 
-    const tinybird = getTinybird()
-    const result = yield* runTinybirdQuery("resource_attribute_values", () =>
-      tinybird.query.resource_attribute_values({
-        start_time: input.startTime,
-        end_time: input.endTime,
-        attribute_key: input.attributeKey,
-      }),
-    )
+    const fallback = defaultTimeRange()
+    const response = yield* executeQueryEngine("queryEngine.getResourceAttributeValues", new QueryEngineExecuteRequest({
+      startTime: input.startTime ?? fallback.startTime,
+      endTime: input.endTime ?? fallback.endTime,
+      query: { kind: "attributeValues" as const, source: "traces" as const, scope: "resource" as const, attributeKey: input.attributeKey },
+    }))
 
     return {
-      data: result.data.map((row) => ({
-        attributeValue: row.attributeValue,
-        usageCount: Number(row.usageCount),
+      data: extractAttributeValues(response).map((row) => ({
+        attributeValue: row.value,
+        usageCount: Number(row.count),
       })),
     }
   },

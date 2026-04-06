@@ -1,4 +1,11 @@
-import { TinybirdDateTime, QueryEngineExecuteRequest } from "@maple/query-engine"
+import {
+  TinybirdDateTime,
+  QueryEngineExecuteRequest,
+  type QueryEngineExecuteResponse,
+  type FacetItem,
+  type DurationStats,
+  type AttributeValueItem,
+} from "@maple/query-engine"
 import { Effect, Schema } from "effect"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
@@ -102,6 +109,34 @@ const executeQueryEngineEffect = Effect.fn("QueryEngine.execute")(
     return yield* client.queryEngine.execute({ payload })
   },
 )
+
+// ---------------------------------------------------------------------------
+// Typed result extractors for QueryEngineResult union
+// ---------------------------------------------------------------------------
+
+export function extractFacets(response: QueryEngineExecuteResponse): ReadonlyArray<FacetItem> {
+  const r = response.result
+  if (r.kind === "facets") return r.data
+  return []
+}
+
+export function extractStats(response: QueryEngineExecuteResponse): DurationStats {
+  const r = response.result
+  if (r.kind === "stats") return r.data
+  return { minDurationMs: 0, maxDurationMs: 0, p50DurationMs: 0, p95DurationMs: 0 }
+}
+
+export function extractAttributeValues(response: QueryEngineExecuteResponse): ReadonlyArray<AttributeValueItem> {
+  const r = response.result
+  if (r.kind === "attributeValues") return r.data
+  return []
+}
+
+export function extractCount(response: QueryEngineExecuteResponse): number {
+  const r = response.result
+  if (r.kind === "count") return r.data.total
+  return 0
+}
 
 export function executeQueryEngine(operation: string, payload: QueryEngineExecuteRequest) {
   return executeQueryEngineEffect(payload).pipe(

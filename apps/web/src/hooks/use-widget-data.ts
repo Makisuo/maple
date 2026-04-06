@@ -7,7 +7,7 @@ import { serverFunctionMap } from "@/components/dashboard-builder/data-source-re
 import type { DashboardWidget, WidgetDataSource } from "@/components/dashboard-builder/types"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
-import { snapTimestamp } from "@/lib/time-utils"
+import { encodeKey } from "@/lib/cache-key"
 
 function interpolateParams(
   params: Record<string, unknown>,
@@ -184,32 +184,6 @@ const toWidgetDataAtomError = (error: unknown): WidgetDataAtomError => {
   })
 }
 
-function normalizeForKey(value: unknown): unknown {
-  if (value === null || typeof value !== "object") {
-    if (typeof value === "string") return snapTimestamp(value)
-    return value
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(normalizeForKey)
-  }
-
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, entryValue]) => entryValue !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right))
-
-  const normalized: Record<string, unknown> = {}
-  for (const [key, entryValue] of entries) {
-    normalized[key] = normalizeForKey(entryValue)
-  }
-
-  return normalized
-}
-
-function encodeKey(value: unknown): string {
-  const normalized = normalizeForKey(value)
-  return JSON.stringify(normalized === undefined ? null : normalized)
-}
 
 const widgetFetchFamily = Atom.family((key: string) =>
   Atom.make(

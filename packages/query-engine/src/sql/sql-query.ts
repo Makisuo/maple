@@ -5,9 +5,17 @@ import { compile } from "./sql-fragment"
 // Query structure
 // ---------------------------------------------------------------------------
 
+export interface SqlJoin {
+  readonly type: "INNER" | "LEFT" | "CROSS"
+  readonly table: string
+  readonly alias: string
+  readonly on?: string
+}
+
 export interface SqlQuery {
   readonly select: ReadonlyArray<SqlFragment>
   readonly from: SqlFragment
+  readonly joins?: ReadonlyArray<SqlJoin>
   readonly where: ReadonlyArray<SqlFragment>
   readonly groupBy: ReadonlyArray<SqlFragment>
   readonly orderBy: ReadonlyArray<SqlFragment>
@@ -29,6 +37,15 @@ export function compileQuery(q: SqlQuery): string {
 
   // FROM
   parts.push(`FROM ${compile(q.from)}`)
+
+  // JOINs
+  if (q.joins?.length) {
+    for (const j of q.joins) {
+      const joinType = j.type === "CROSS" ? "CROSS JOIN" : `${j.type} JOIN`
+      const onClause = j.on ? ` ON ${j.on}` : ""
+      parts.push(`${joinType} ${j.table} AS ${j.alias}${onClause}`)
+    }
+  }
 
   // WHERE
   const whereClauses = q.where.map(compile).filter(Boolean)

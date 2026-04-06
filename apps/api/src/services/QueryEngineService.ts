@@ -16,9 +16,10 @@ import {
   QueryEngineValidationError,
   TinybirdQueryError,
 } from "@maple/domain/http"
-import { Array as Arr, Cache, Duration, Effect, Layer, Match, Option, Result, ServiceMap } from "effect"
+import { Array as Arr, Cache, Duration, Effect, Layer, Match, Metric, MutableHashMap, Option, Result, ServiceMap } from "effect"
 import type { TenantContext } from "./AuthService"
 import { TinybirdService, type TinybirdServiceShape } from "./TinybirdService"
+import * as QueryEngineMetrics from "./QueryEngineMetrics"
 
 interface TimeRangeBounds {
   readonly startMs: number
@@ -110,6 +111,14 @@ function snapSeconds(dateStr: string): string {
 
 function buildCacheKey(orgId: string, request: QueryEngineExecuteRequest): string {
   return `${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${JSON.stringify(request.query)}`
+}
+
+function buildEvaluateCacheKey(orgId: string, request: QueryEngineEvaluateRequest): string {
+  return `eval:${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${request.reducer}:${request.sampleCountStrategy}:${JSON.stringify(request.query)}`
+}
+
+function buildEvaluateGroupedCacheKey(orgId: string, request: QueryEngineEvaluateRequest, groupBy: string): string {
+  return `evalg:${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${request.reducer}:${request.sampleCountStrategy}:${groupBy}:${JSON.stringify(request.query)}`
 }
 
 const computeBucketSeconds = (startMs: number, endMs: number): number => {
@@ -212,7 +221,7 @@ const validateTraceAttributeFilters = Effect.fn("QueryEngineService.validateTrac
   query: QuerySpec,
 ): Effect.fn.Return<void, QueryEngineValidationError> {
   if (query.source !== "traces") return
-  if (query.kind === "list") return
+  if (query.kind !== "timeseries" && query.kind !== "breakdown") return
 
   const details: string[] = []
   if (query.groupBy?.includes("attribute") && !query.filters?.groupByAttributeKeys?.length) {
@@ -226,51 +235,6 @@ const validateTraceAttributeFilters = Effect.fn("QueryEngineService.validateTrac
     })
   }
 })
-
-// ---------------------------------------------------------------------------
-// Helper: map attributeFilters/resourceAttributeFilters arrays to numbered Tinybird params
-// ---------------------------------------------------------------------------
-
-const SUFFIXES = ["", "_2", "_3", "_4", "_5"] as const
-
-function buildAttributeFilterParams(
-  filters: (QuerySpec extends { filters?: infer F } ? F : never) | undefined,
-) {
-  const f = filters as Record<string, unknown> | undefined
-  const result: Record<string, string | undefined> = {}
-
-  const attrFilters = (f?.attributeFilters ?? []) as ReadonlyArray<{
-    key: string
-    value?: string
-    mode: "equals" | "exists"
-  }>
-  for (let i = 0; i < Math.min(attrFilters.length, 5); i++) {
-    const af = attrFilters[i]
-    const suffix = SUFFIXES[i]
-    result[`attribute_filter_key${suffix}`] = af.key
-    result[`attribute_filter_value${suffix}`] =
-      af.mode === "exists" ? undefined : af.value
-    result[`attribute_filter_exists${suffix}`] =
-      af.mode === "exists" ? "1" : undefined
-  }
-
-  const resFilters = (f?.resourceAttributeFilters ?? []) as ReadonlyArray<{
-    key: string
-    value?: string
-    mode: "equals" | "exists"
-  }>
-  for (let i = 0; i < Math.min(resFilters.length, 5); i++) {
-    const rf = resFilters[i]
-    const suffix = SUFFIXES[i]
-    result[`resource_filter_key${suffix}`] = rf.key
-    result[`resource_filter_value${suffix}`] =
-      rf.mode === "exists" ? undefined : rf.value
-    result[`resource_filter_exists${suffix}`] =
-      rf.mode === "exists" ? "1" : undefined
-  }
-
-  return result
-}
 
 const validatePointBudget = Effect.fn("QueryEngineService.validatePointBudget")(function* (
   request: QueryEngineExecuteRequest,
@@ -428,31 +392,54 @@ const mapTinybirdError = <A, R>(
     ),
   )
 
+const truncateSql = (s: string, maxLen = 1000) =>
+  s.length > maxLen ? s.slice(0, maxLen) + "...[truncated]" : s
+
 /** Compile a CHQuery, execute it via Tinybird SQL, and return typed rows. */
 const executeCHQuery = <Output extends Record<string, any>, Params extends Record<string, any>>(
   tinybird: Pick<TinybirdServiceShape, "sqlQuery">,
   tenant: TenantContext,
-  query: CH.CHQuery<any, Output, Params>,
+  query: CH.CHQuery<any, Output>,
   params: Params,
   context: string,
 ): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {
   const compiled = CH.compile(query, params)
   return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql), context).pipe(
     Effect.map((rows) => compiled.castRows(rows)),
+    Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
+    Effect.withSpan("QueryEngineService.executeCHQuery", {
+      attributes: {
+        "db.statement": truncateSql(compiled.sql),
+        "query.context": context,
+      },
+    }),
+  )
+}
+
+/** Compile a CHUnionQuery, execute it via Tinybird SQL, and return typed rows. */
+const executeCHUnionQuery = <Output extends Record<string, any>, Params extends Record<string, any>>(
+  tinybird: Pick<TinybirdServiceShape, "sqlQuery">,
+  tenant: TenantContext,
+  query: CH.CHUnionQuery<Output>,
+  params: Params,
+  context: string,
+): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {
+  const compiled = CH.compileUnion(query, params)
+  return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql), context).pipe(
+    Effect.map((rows) => compiled.castRows(rows)),
+    Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
+    Effect.withSpan("QueryEngineService.executeCHUnionQuery", {
+      attributes: {
+        "db.statement": truncateSql(compiled.sql),
+        "query.context": context,
+      },
+    }),
   )
 }
 
 type QueryEngineTinybird = Pick<
   TinybirdServiceShape,
   | "sqlQuery"
-  | "customLogsTimeseriesQuery"
-  | "customLogsBreakdownQuery"
-  | "alertTracesAggregateQuery"
-  | "alertMetricsAggregateQuery"
-  | "alertLogsAggregateQuery"
-  | "alertTracesAggregateByServiceQuery"
-  | "alertMetricsAggregateByServiceQuery"
-  | "alertLogsAggregateByServiceQuery"
 >
 
 const tracesMetricFieldMap = {
@@ -531,6 +518,120 @@ const sampleCountForStrategy = (
 ): number =>
   observations.reduce((sum, observation) => sum + Number(observation.sampleCount), 0)
 
+/** Map query engine source/scope to the MV's AttributeScope value. */
+function resolveAttributeScope(
+  source: "traces" | "logs" | "metrics",
+  scope?: "span" | "resource",
+): string {
+  if (source === "metrics") return "metric"
+  if (source === "logs") return scope === "resource" ? "resource" : "log"
+  return scope === "resource" ? "resource" : "span"
+}
+
+type AttrFilterArray = Array<{
+  key: string
+  value?: string
+  mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains"
+}>
+
+function extractTracesOpts(filters: Record<string, unknown> | undefined) {
+  return {
+    serviceName: filters?.serviceName as string | undefined,
+    spanName: filters?.spanName as string | undefined,
+    rootOnly: filters?.rootSpansOnly as boolean | undefined,
+    errorsOnly: filters?.errorsOnly as boolean | undefined,
+    environments: filters?.environments as string[] | undefined,
+    commitShas: filters?.commitShas as string[] | undefined,
+    minDurationMs: filters?.minDurationMs as number | undefined,
+    maxDurationMs: filters?.maxDurationMs as number | undefined,
+    matchModes: filters?.matchModes as {
+      serviceName?: "contains"
+      spanName?: "contains"
+      deploymentEnv?: "contains"
+    } | undefined,
+    attributeFilters: filters?.attributeFilters as AttrFilterArray | undefined,
+    resourceAttributeFilters: filters?.resourceAttributeFilters as AttrFilterArray | undefined,
+    groupByAttributeKeys: filters?.groupByAttributeKeys as string[] | undefined,
+  }
+}
+
+/**
+ * Map TracesFilters to the flat opts format expected by tracesFacetsQuery / tracesDurationStatsQuery.
+ * TracesFilters stores http filters as attributeFilters entries; facets opts want them as top-level fields.
+ */
+function extractTracesFacetsOpts(filters: Record<string, unknown> | undefined): CH.TracesFacetsOpts {
+  const attrFilters = (filters?.attributeFilters ?? []) as AttrFilterArray
+  const resFilters = (filters?.resourceAttributeFilters ?? []) as AttrFilterArray
+
+  const httpMethodFilter = attrFilters.find((f) => f.key === "http.method")
+  const httpStatusFilter = attrFilters.find((f) => f.key === "http.status_code")
+  const customAttr = attrFilters.find((f) => f.key !== "http.method" && f.key !== "http.status_code")
+  const customRes = resFilters[0]
+
+  const envs = filters?.environments as string[] | undefined
+
+  return {
+    serviceName: filters?.serviceName as string | undefined,
+    spanName: filters?.spanName as string | undefined,
+    hasError: filters?.errorsOnly as boolean | undefined,
+    minDurationMs: filters?.minDurationMs as number | undefined,
+    maxDurationMs: filters?.maxDurationMs as number | undefined,
+    httpMethod: httpMethodFilter?.value,
+    httpStatusCode: httpStatusFilter?.value,
+    deploymentEnv: envs?.[0],
+    matchModes: filters?.matchModes as CH.TracesFacetsOpts["matchModes"],
+    attributeFilterKey: customAttr?.key,
+    attributeFilterValue: customAttr?.value,
+    attributeFilterValueMatchMode: customAttr?.mode === "contains" ? "contains" : undefined,
+    resourceFilterKey: customRes?.key,
+    resourceFilterValue: customRes?.value,
+    resourceFilterValueMatchMode: customRes?.mode === "contains" ? "contains" : undefined,
+  }
+}
+
+function extractTracesDurationStatsOpts(filters: Record<string, unknown> | undefined): CH.TracesDurationStatsOpts {
+  const facetsOpts = extractTracesFacetsOpts(filters)
+  return {
+    serviceName: facetsOpts.serviceName,
+    spanName: facetsOpts.spanName,
+    hasError: facetsOpts.hasError,
+    minDurationMs: facetsOpts.minDurationMs,
+    maxDurationMs: facetsOpts.maxDurationMs,
+    httpMethod: facetsOpts.httpMethod,
+    httpStatusCode: facetsOpts.httpStatusCode,
+    deploymentEnv: facetsOpts.deploymentEnv,
+    matchModes: facetsOpts.matchModes,
+  }
+}
+
+function shapeMetricsGroupRows<T extends { bucket: string | Date; serviceName: string; attributeValue: string }>(
+  rows: ReadonlyArray<T>,
+  valueExtractor: (row: T) => number,
+  groupBy: readonly string[] | undefined,
+  groupByAttributeKey: string | undefined,
+  fillOptions: BucketFillOptions | undefined,
+): Array<TimeseriesPoint> {
+  if (groupBy?.includes("none") || !groupBy?.length) {
+    return groupTimeSeriesRows(
+      rows.map((row) => ({ bucket: row.bucket, groupName: "all" as const, value: valueExtractor(row) })),
+      (r) => r.value,
+      fillOptions,
+    )
+  }
+  if (groupByAttributeKey) {
+    return groupTimeSeriesRows(
+      rows.map((row) => ({ bucket: row.bucket, groupName: row.attributeValue || "(empty)", value: valueExtractor(row) })),
+      (r) => r.value,
+      fillOptions,
+    )
+  }
+  return groupTimeSeriesRows(
+    rows.map((row) => ({ bucket: row.bucket, groupName: row.serviceName, value: valueExtractor(row) })),
+    (r) => r.value,
+    fillOptions,
+  )
+}
+
 const isScalarAlertQuery = (
   query: QuerySpec,
 ): query is Extract<QuerySpec, { kind: "timeseries"; source: "traces" | "logs" | "metrics" }> => {
@@ -555,10 +656,25 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     QueryEngineExecuteResponse,
     QueryEngineValidationError | QueryEngineExecutionError
   > {
+    yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+    yield* Effect.annotateCurrentSpan("query.source", request.query.source)
+    yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
+    if ("metric" in request.query && request.query.metric) {
+      yield* Effect.annotateCurrentSpan("query.metric", request.query.metric)
+    }
+    if ("filters" in request.query && request.query.filters) {
+      const filters = request.query.filters as Record<string, unknown>
+      if (filters.serviceName) yield* Effect.annotateCurrentSpan("query.filter.serviceName", String(filters.serviceName))
+      if (filters.spanName) yield* Effect.annotateCurrentSpan("query.filter.spanName", String(filters.spanName))
+      if (filters.metricName) yield* Effect.annotateCurrentSpan("query.filter.metricName", String(filters.metricName))
+    }
+
     const range = yield* validateExecute(request)
     const bucketSeconds = request.query.kind === "timeseries"
       ? request.query.bucketSeconds ?? computeBucketSeconds(range.startMs, range.endMs)
       : undefined
+    if (bucketSeconds) yield* Effect.annotateCurrentSpan("query.bucketSeconds", bucketSeconds)
+
     const fillOptions = bucketSeconds
       ? {
           startMs: range.startMs,
@@ -568,22 +684,15 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
       : undefined
 
     if (request.query.source === "traces" && request.query.kind === "timeseries") {
+      const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
       const rows = yield* executeCHQuery(
         tinybird,
         tenant,
         CH.tracesTimeseriesQuery({
+          ...opts,
           metric: request.query.metric,
           needsSampling: false,
-          serviceName: request.query.filters?.serviceName,
-          spanName: request.query.filters?.spanName,
-          rootOnly: request.query.filters?.rootSpansOnly,
-          errorsOnly: request.query.filters?.errorsOnly,
           groupBy: request.query.groupBy as string[] | undefined,
-          groupByAttributeKeys: request.query.filters?.groupByAttributeKeys as string[] | undefined,
-          environments: request.query.filters?.environments as string[] | undefined,
-          commitShas: request.query.filters?.commitShas as string[] | undefined,
-          attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
-          resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
           apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime, bucketSeconds: bucketSeconds! },
@@ -601,16 +710,15 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "logs" && request.query.kind === "timeseries") {
-      const result = yield* mapTinybirdError(
-        tinybird.customLogsTimeseriesQuery(tenant, {
-          start_time: request.startTime,
-          end_time: request.endTime,
-          bucket_seconds: bucketSeconds,
-          service_name: request.query.filters?.serviceName,
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.logsTimeseriesQuery({
+          serviceName: request.query.filters?.serviceName,
           severity: request.query.filters?.severity,
-          group_by_service: request.query.groupBy?.includes("service") ? "1" : undefined,
-          group_by_severity: request.query.groupBy?.includes("severity") ? "1" : undefined,
+          groupBy: request.query.groupBy as string[] | undefined,
         }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime, bucketSeconds: bucketSeconds! },
         "Failed to execute logs timeseries query",
       )
 
@@ -618,7 +726,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         result: {
           kind: "timeseries",
           source: "logs",
-          data: groupTimeSeriesRows(result, (row) => Number(row.count), fillOptions),
+          data: groupTimeSeriesRows(rows, (row) => Number(row.count), fillOptions),
         },
       })
     }
@@ -633,13 +741,13 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
       const isRateOrIncrease = request.query.metric === "rate" || request.query.metric === "increase"
 
       if (isRateOrIncrease) {
-        const compiled = CH.metricsTimeseriesRateSQL(
-          {
+        const compiled = CH.compile(
+          CH.metricsTimeseriesRateQuery({
             serviceName: request.query.filters.serviceName,
             groupByAttributeKey,
             attributeKey: attributeFilter?.key,
             attributeValue: attributeFilter?.value,
-          },
+          }),
           {
             orgId: tenant.orgId,
             metricName: request.query.filters.metricName,
@@ -651,40 +759,26 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         const rawRows = yield* mapTinybirdError(
           tinybird.sqlQuery(tenant, compiled.sql),
           "Failed to execute metrics rate/increase query",
+        ).pipe(
+          Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
+          Effect.withSpan("QueryEngineService.executeCHQuery", {
+            attributes: {
+              "db.statement": truncateSql(compiled.sql),
+              "query.context": "metrics rate/increase query",
+            },
+          }),
         )
         const rateResult = compiled.castRows(rawRows)
 
         const rateValueField = request.query.metric === "rate" ? "rateValue" : "increaseValue"
 
-        const data = (request.query.groupBy?.includes("none") || !request.query.groupBy?.length)
-          ? groupTimeSeriesRows(
-              rateResult.map((row) => ({
-                bucket: row.bucket,
-                groupName: "all" as const,
-                value: Number(row[rateValueField]),
-              })),
-              (row) => row.value,
-              fillOptions,
-            )
-          : groupByAttributeKey
-            ? groupTimeSeriesRows(
-                rateResult.map((row) => ({
-                  bucket: row.bucket,
-                  groupName: row.attributeValue || "(empty)",
-                  value: Number(row[rateValueField]),
-                })),
-                (row) => row.value,
-                fillOptions,
-              )
-            : groupTimeSeriesRows(
-                rateResult.map((row) => ({
-                  bucket: row.bucket,
-                  groupName: row.serviceName,
-                  value: Number(row[rateValueField]),
-                })),
-                (row) => row.value,
-                fillOptions,
-              )
+        const data = shapeMetricsGroupRows(
+          rateResult,
+          (row) => Number(row[rateValueField]),
+          request.query.groupBy,
+          groupByAttributeKey,
+          fillOptions,
+        )
 
         return new QueryEngineExecuteResponse({
           result: {
@@ -730,25 +824,13 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
             (row) => row.value,
             fillOptions,
           )
-        : groupByAttributeKey
-          ? groupTimeSeriesRows(
-              result.map((row) => ({
-                bucket: row.bucket,
-                groupName: row.attributeValue || "(empty)",
-                value: Number(row[valueField]),
-              })),
-              (row) => row.value,
-              fillOptions,
-            )
-          : groupTimeSeriesRows(
-              result.map((row) => ({
-                bucket: row.bucket,
-                groupName: row.serviceName,
-                value: Number(row[valueField]),
-              })),
-              (row) => row.value,
-              fillOptions,
-            )
+        : shapeMetricsGroupRows(
+            result,
+            (row) => Number(row[valueField]),
+            request.query.groupBy,
+            groupByAttributeKey,
+            fillOptions,
+          )
 
       return new QueryEngineExecuteResponse({
         result: {
@@ -760,25 +842,19 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "traces" && request.query.kind === "breakdown") {
+      const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
       const rows = yield* executeCHQuery(
         tinybird,
         tenant,
         CH.tracesBreakdownQuery({
+          ...opts,
           metric: request.query.metric,
           groupBy: request.query.groupBy,
           groupByAttributeKey:
             request.query.groupBy === "attribute"
-              ? (request.query.filters?.groupByAttributeKeys as string[] | undefined)?.[0]
+              ? opts.groupByAttributeKeys?.[0]
               : undefined,
           limit: request.query.limit,
-          serviceName: request.query.filters?.serviceName,
-          spanName: request.query.filters?.spanName,
-          rootOnly: request.query.filters?.rootSpansOnly,
-          errorsOnly: request.query.filters?.errorsOnly,
-          environments: request.query.filters?.environments as string[] | undefined,
-          commitShas: request.query.filters?.commitShas as string[] | undefined,
-          attributeFilters: request.query.filters?.attributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
-          resourceAttributeFilters: request.query.filters?.resourceAttributeFilters as Array<{ key: string; value?: string; mode: "equals" | "exists" }> | undefined,
           apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
@@ -799,16 +875,16 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "logs" && request.query.kind === "breakdown") {
-      const result = yield* mapTinybirdError(
-        tinybird.customLogsBreakdownQuery(tenant, {
-          start_time: request.startTime,
-          end_time: request.endTime,
-          service_name: request.query.filters?.serviceName,
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.logsBreakdownQuery({
+          groupBy: request.query.groupBy as "service" | "severity",
+          serviceName: request.query.filters?.serviceName,
           severity: request.query.filters?.severity,
           limit: request.query.limit,
-          group_by_service: request.query.groupBy === "service" ? "1" : undefined,
-          group_by_severity: request.query.groupBy === "severity" ? "1" : undefined,
         }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         "Failed to execute logs breakdown query",
       )
 
@@ -816,7 +892,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         result: {
           kind: "breakdown",
           source: "logs",
-          data: result.map((row) => ({
+          data: rows.map((row) => ({
             name: row.name,
             value: Number(row.count),
           })),
@@ -861,38 +937,22 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     }
 
     if (request.query.source === "traces" && request.query.kind === "list") {
-      type AttrFilterArray = Array<{ key: string; value?: string; mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains" }>
-      const filters = request.query.filters
+      const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 
       // Graceful limit clamping: cap at 200, auto-reduce to 50 when no indexed filters
-      const hasIndexedFilter = !!(filters?.serviceName || filters?.spanName || filters?.errorsOnly || filters?.rootSpansOnly)
+      const hasIndexedFilter = !!(opts.serviceName || opts.spanName || opts.errorsOnly || opts.rootOnly)
       const maxLimit = hasIndexedFilter ? 200 : 50
       const clampedLimit = Math.min(request.query.limit ?? 25, maxLimit)
 
-      const sharedOpts = {
-        limit: clampedLimit,
-        offset: request.query.offset,
-        serviceName: filters?.serviceName,
-        spanName: filters?.spanName,
-        rootOnly: filters?.rootSpansOnly,
-        errorsOnly: filters?.errorsOnly,
-        environments: filters?.environments as string[] | undefined,
-        commitShas: filters?.commitShas as string[] | undefined,
-        minDurationMs: filters?.minDurationMs,
-        maxDurationMs: filters?.maxDurationMs,
-        matchModes: filters?.matchModes as { serviceName?: "contains"; spanName?: "contains"; deploymentEnv?: "contains" } | undefined,
-        attributeFilters: filters?.attributeFilters as AttrFilterArray | undefined,
-        resourceAttributeFilters: filters?.resourceAttributeFilters as AttrFilterArray | undefined,
-        columns: (request.query as { columns?: readonly string[] }).columns as string[] | undefined,
-      }
-
-      // Always use tracesListQuery — it handles MV usage when rootOnly=true
-      // and returns a consistent field shape for dashboard widgets.
-      // (tracesRootListQuery has a different output shape for the built-in trace list page)
       const rows = yield* executeCHQuery(
         tinybird,
         tenant,
-        CH.tracesListQuery(sharedOpts),
+        CH.tracesListQuery({
+          ...opts,
+          limit: clampedLimit,
+          offset: request.query.offset,
+          columns: (request.query as { columns?: readonly string[] }).columns as string[] | undefined,
+        }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         "Failed to execute traces list query",
       )
@@ -918,6 +978,176 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
       })
     }
 
+    if (request.query.kind === "attributeKeys") {
+      const scope = resolveAttributeScope(request.query.source, request.query.scope)
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.attributeKeysQuery({
+          scope,
+          limit: request.query.limit,
+        }),
+        {
+          orgId: tenant.orgId,
+          startTime: request.startTime,
+          endTime: request.endTime,
+        },
+        "Failed to execute attribute keys query",
+      )
+
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "attributeKeys",
+          source: request.query.source,
+          data: rows.map((row) => ({
+            key: row.attributeKey,
+            count: Number(row.usageCount),
+          })),
+        },
+      })
+    }
+
+    // ---- Facets ----
+    if (request.query.kind === "facets") {
+      const baseParams = { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime }
+
+      if (request.query.source === "traces") {
+        const opts = extractTracesFacetsOpts(request.query.filters as Record<string, unknown> | undefined)
+        const rows = yield* executeCHUnionQuery(
+          tinybird, tenant, CH.tracesFacetsQuery(opts), baseParams,
+          "Failed to execute traces facets query",
+        )
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "facets", source: "traces",
+            data: rows.map((row) => ({ facetType: row.facetType, name: row.name, count: Number(row.count) })),
+          },
+        })
+      }
+
+      if (request.query.source === "logs") {
+        const filters = request.query.filters as Record<string, unknown> | undefined
+        const rows = yield* executeCHUnionQuery(
+          tinybird, tenant,
+          CH.logsFacetsQuery({
+            serviceName: filters?.serviceName as string | undefined,
+            severity: filters?.severity as string | undefined,
+          }),
+          baseParams,
+          "Failed to execute logs facets query",
+        )
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "facets", source: "logs",
+            data: rows.map((row) => ({
+              facetType: row.facetType,
+              name: row.facetType === "severity" ? row.severityText : row.serviceName,
+              count: Number(row.count),
+            })),
+          },
+        })
+      }
+
+      if (request.query.source === "errors") {
+        const filters = request.query.filters as Record<string, unknown> | undefined
+        const rows = yield* executeCHUnionQuery(
+          tinybird, tenant,
+          CH.errorsFacetsQuery({
+            rootOnly: filters?.rootOnly as boolean | undefined,
+            services: filters?.services as string[] | undefined,
+            deploymentEnvs: filters?.deploymentEnvs as string[] | undefined,
+            errorTypes: filters?.errorTypes as string[] | undefined,
+          }),
+          baseParams,
+          "Failed to execute errors facets query",
+        )
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "facets", source: "errors",
+            data: rows.map((row) => ({ facetType: row.facetType, name: row.name, count: Number(row.count) })),
+          },
+        })
+      }
+
+      if (request.query.source === "services") {
+        const rows = yield* executeCHUnionQuery(
+          tinybird, tenant, CH.servicesFacetsQuery(), baseParams,
+          "Failed to execute services facets query",
+        )
+        return new QueryEngineExecuteResponse({
+          result: {
+            kind: "facets", source: "services",
+            data: rows.map((row) => ({ facetType: row.facetType, name: row.name, count: Number(row.count) })),
+          },
+        })
+      }
+    }
+
+    // ---- Stats ----
+    if (request.query.source === "traces" && request.query.kind === "stats") {
+      const opts = extractTracesDurationStatsOpts(request.query.filters as Record<string, unknown> | undefined)
+      const rows = yield* executeCHQuery(
+        tinybird, tenant, CH.tracesDurationStatsQuery(opts),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
+        "Failed to execute traces duration stats query",
+      )
+      const row = rows[0]
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "stats", source: "traces",
+          data: row
+            ? {
+                minDurationMs: Number(row.minDurationMs),
+                maxDurationMs: Number(row.maxDurationMs),
+                p50DurationMs: Number(row.p50DurationMs),
+                p95DurationMs: Number(row.p95DurationMs),
+              }
+            : { minDurationMs: 0, maxDurationMs: 0, p50DurationMs: 0, p95DurationMs: 0 },
+        },
+      })
+    }
+
+    // ---- Attribute Values ----
+    if (request.query.kind === "attributeValues") {
+      const queryFn = request.query.scope === "resource"
+        ? CH.resourceAttributeValuesQuery
+        : CH.spanAttributeValuesQuery
+      const rows = yield* executeCHQuery(
+        tinybird, tenant,
+        queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
+        `Failed to execute ${request.query.scope} attribute values query`,
+      )
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "attributeValues", source: "traces",
+          data: rows.map((row) => ({ value: row.attributeValue, count: Number(row.usageCount) })),
+        },
+      })
+    }
+
+    // ---- Count ----
+    if (request.query.source === "logs" && request.query.kind === "count") {
+      const filters = request.query.filters as Record<string, unknown> | undefined
+      const rows = yield* executeCHQuery(
+        tinybird, tenant,
+        CH.logsCountQuery({
+          serviceName: filters?.serviceName as string | undefined,
+          severity: filters?.severity as string | undefined,
+          traceId: filters?.traceId as string | undefined,
+          search: filters?.search as string | undefined,
+        }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
+        "Failed to execute logs count query",
+      )
+      return new QueryEngineExecuteResponse({
+        result: {
+          kind: "count", source: "logs",
+          data: { total: rows[0] ? Number(rows[0].total) : 0 },
+        },
+      })
+    }
+
     return yield* new QueryEngineValidationError({
       message: "Unsupported query",
       details: ["This source/kind combination is not supported"],
@@ -932,6 +1162,14 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
     QueryEngineEvaluateResponse,
     QueryEngineValidationError | QueryEngineExecutionError
   > {
+    yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+    yield* Effect.annotateCurrentSpan("query.source", request.query.source)
+    yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
+    yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
+    if ("metric" in request.query && request.query.metric) {
+      yield* Effect.annotateCurrentSpan("query.metric", request.query.metric)
+    }
+
     yield* validateEvaluate(request)
 
     if (!isScalarAlertQuery(request.query)) {
@@ -946,20 +1184,15 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
     let observations: ReadonlyArray<AlertObservation>
 
     if (request.query.source === "traces") {
-      const rows = yield* mapTinybirdError(
-        tinybird.alertTracesAggregateQuery(tenant, {
-          start_time: request.startTime,
-          end_time: request.endTime,
-          service_name: request.query.filters?.serviceName,
-          span_name: request.query.filters?.spanName,
-          root_only: request.query.filters?.rootSpansOnly ? "1" : undefined,
-          errors_only: request.query.filters?.errorsOnly ? "1" : undefined,
-          environments: request.query.filters?.environments?.join(","),
-          commit_shas: request.query.filters?.commitShas?.join(","),
-          ...buildAttributeFilterParams(request.query.filters),
-          apdex_threshold_ms:
-            request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
+      const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.alertTracesAggregateQuery({
+          ...opts,
+          apdexThresholdMs: request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
         }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         "Failed to evaluate traces alert query",
       )
 
@@ -974,13 +1207,14 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
         hasData: sampleCount > 0,
       }]
     } else if (request.query.source === "logs") {
-      const rows = yield* mapTinybirdError(
-        tinybird.alertLogsAggregateQuery(tenant, {
-          service_name: request.query.filters?.serviceName,
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.alertLogsAggregateQuery({
+          serviceName: request.query.filters?.serviceName,
           severity: request.query.filters?.severity,
-          start_time: request.startTime,
-          end_time: request.endTime,
         }),
+        { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         "Failed to evaluate logs alert query",
       )
 
@@ -992,14 +1226,19 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
         hasData: sampleCount > 0,
       }]
     } else {
-      const rows = yield* mapTinybirdError(
-        tinybird.alertMetricsAggregateQuery(tenant, {
-          metric_name: request.query.filters.metricName,
-          metric_type: request.query.filters.metricType,
-          service: request.query.filters.serviceName,
-          start_time: request.startTime,
-          end_time: request.endTime,
+      const rows = yield* executeCHQuery(
+        tinybird,
+        tenant,
+        CH.alertMetricsAggregateQuery({
+          metricType: request.query.filters.metricType,
+          serviceName: request.query.filters.serviceName,
         }),
+        {
+          orgId: tenant.orgId,
+          metricName: request.query.filters.metricName,
+          startTime: request.startTime,
+          endTime: request.endTime,
+        },
         "Failed to evaluate metrics alert query",
       )
 
@@ -1015,8 +1254,13 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
       }]
     }
 
+    const reducedValue = applyAlertReducer(observations, request.reducer)
+    yield* Effect.annotateCurrentSpan("result.value", String(reducedValue ?? "null"))
+    yield* Effect.annotateCurrentSpan("result.hasData", observations.some((o) => o.hasData))
+    yield* Effect.annotateCurrentSpan("result.observationCount", observations.length)
+
     return new QueryEngineEvaluateResponse({
-      value: applyAlertReducer(observations, request.reducer),
+      value: reducedValue,
       sampleCount: sampleCountForStrategy(request.sampleCountStrategy, observations),
       hasData: observations.some((observation) => observation.hasData),
       reason: `Reduced ${observations.length} observation(s) with ${request.reducer}`,
@@ -1034,6 +1278,14 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
     ReadonlyArray<GroupedAlertObservation>,
     QueryEngineValidationError | QueryEngineExecutionError
   > {
+    yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+    yield* Effect.annotateCurrentSpan("query.source", request.query.source)
+    yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
+    yield* Effect.annotateCurrentSpan("query.groupBy", groupBy)
+    if ("metric" in request.query && request.query.metric) {
+      yield* Effect.annotateCurrentSpan("query.metric", request.query.metric)
+    }
+
     yield* validateEvaluate(request)
 
     if (
@@ -1050,19 +1302,16 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
 
     if (groupBy === "service") {
       if (request.query.source === "traces") {
-        const rows = yield* mapTinybirdError(
-          tinybird.alertTracesAggregateByServiceQuery(tenant, {
-            start_time: request.startTime,
-            end_time: request.endTime,
-            span_name: request.query.filters?.spanName,
-            root_only: request.query.filters?.rootSpansOnly ? "1" : undefined,
-            errors_only: request.query.filters?.errorsOnly ? "1" : undefined,
-            environments: request.query.filters?.environments?.join(","),
-            commit_shas: request.query.filters?.commitShas?.join(","),
-            ...buildAttributeFilterParams(request.query.filters),
-            apdex_threshold_ms:
-              (request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).metric === "apdex" ? (request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).apdexThresholdMs : undefined,
+        const tracesQuery = request.query as Extract<QuerySpec, { source: "traces"; metric: string }>
+        const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
+        const rows = yield* executeCHQuery(
+          tinybird,
+          tenant,
+          CH.alertTracesAggregateByServiceQuery({
+            ...opts,
+            apdexThresholdMs: tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
           }),
+          { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
           "Failed to evaluate grouped traces alert query",
         )
 
@@ -1070,18 +1319,19 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
           const sampleCount = Number(row.count ?? 0)
           return {
             groupKey: row.serviceName,
-            value: sampleCount > 0 ? tracesAggregateValueForMetric((request.query as Extract<QuerySpec, { source: "traces"; metric: string }>).metric, row) : null,
+            value: sampleCount > 0 ? tracesAggregateValueForMetric(tracesQuery.metric, row) : null,
             sampleCount,
             hasData: sampleCount > 0,
           }
         })
       } else if (request.query.source === "logs") {
-        const rows = yield* mapTinybirdError(
-          tinybird.alertLogsAggregateByServiceQuery(tenant, {
+        const rows = yield* executeCHQuery(
+          tinybird,
+          tenant,
+          CH.alertLogsAggregateByServiceQuery({
             severity: request.query.filters?.severity,
-            start_time: request.startTime,
-            end_time: request.endTime,
           }),
+          { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
           "Failed to evaluate grouped logs alert query",
         )
 
@@ -1095,13 +1345,19 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
           }
         })
       } else {
-        const rows = yield* mapTinybirdError(
-          tinybird.alertMetricsAggregateByServiceQuery(tenant, {
-            metric_name: (request.query as Extract<QuerySpec, { source: "metrics" }>).filters.metricName,
-            metric_type: (request.query as Extract<QuerySpec, { source: "metrics" }>).filters.metricType,
-            start_time: request.startTime,
-            end_time: request.endTime,
+        const metricsQuery = request.query as Extract<QuerySpec, { source: "metrics" }>
+        const rows = yield* executeCHQuery(
+          tinybird,
+          tenant,
+          CH.alertMetricsAggregateByServiceQuery({
+            metricType: metricsQuery.filters.metricType,
           }),
+          {
+            orgId: tenant.orgId,
+            metricName: metricsQuery.filters.metricName,
+            startTime: request.startTime,
+            endTime: request.endTime,
+          },
           "Failed to evaluate grouped metrics alert query",
         )
 
@@ -1109,7 +1365,7 @@ export const makeQueryEngineEvaluateGrouped = (tinybird: QueryEngineTinybird) =>
           const sampleCount = Number(row.dataPointCount ?? 0)
           return {
             groupKey: row.serviceName,
-            value: sampleCount > 0 ? metricsAggregateValueForMetric((request.query as Extract<QuerySpec, { source: "metrics" }>).metric, row) : null,
+            value: sampleCount > 0 ? metricsAggregateValueForMetric(metricsQuery.metric, row) : null,
             sampleCount,
             hasData: sampleCount > 0,
           }
@@ -1127,6 +1383,8 @@ export class QueryEngineService extends ServiceMap.Service<QueryEngineService, Q
     const evaluate = makeQueryEngineEvaluate(tinybird)
     const evaluateGrouped = makeQueryEngineEvaluateGrouped(tinybird)
 
+    // --- Execute cache ---
+    const pendingExecute = MutableHashMap.empty<string, { tenant: TenantContext; request: QueryEngineExecuteRequest }>()
     const executeCache = yield* Cache.make<
       string,
       QueryEngineExecuteResponse,
@@ -1134,23 +1392,85 @@ export class QueryEngineService extends ServiceMap.Service<QueryEngineService, Q
     >({
       capacity: 256,
       timeToLive: "15 seconds",
-      lookup: () => Effect.die("unused"),
+      lookup: (key) => {
+        const ctx = MutableHashMap.get(pendingExecute, key)
+        if (Option.isNone(ctx)) return Effect.die(`No pending request context for cache key: ${key}`)
+        return executeImpl(ctx.value.tenant, ctx.value.request).pipe(
+          Effect.tap(() => Metric.update(QueryEngineMetrics.cacheMissesTotal, 1)),
+        )
+      },
+    })
+
+    // --- Evaluate cache ---
+    const pendingEvaluate = MutableHashMap.empty<string, { tenant: TenantContext; request: QueryEngineEvaluateRequest }>()
+    const evaluateCache = yield* Cache.make<
+      string,
+      QueryEngineEvaluateResponse,
+      QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError
+    >({
+      capacity: 64,
+      timeToLive: "30 seconds",
+      lookup: (key) => {
+        const ctx = MutableHashMap.get(pendingEvaluate, key)
+        if (Option.isNone(ctx)) return Effect.die(`No pending evaluate context for cache key: ${key}`)
+        return evaluate(ctx.value.tenant, ctx.value.request)
+      },
+    })
+
+    // --- EvaluateGrouped cache ---
+    const pendingEvaluateGrouped = MutableHashMap.empty<string, { tenant: TenantContext; request: QueryEngineEvaluateRequest; groupBy: "service" }>()
+    const evaluateGroupedCache = yield* Cache.make<
+      string,
+      ReadonlyArray<GroupedAlertObservation>,
+      QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError
+    >({
+      capacity: 64,
+      timeToLive: "30 seconds",
+      lookup: (key) => {
+        const ctx = MutableHashMap.get(pendingEvaluateGrouped, key)
+        if (Option.isNone(ctx)) return Effect.die(`No pending evaluateGrouped context for cache key: ${key}`)
+        return evaluateGrouped(ctx.value.tenant, ctx.value.request, ctx.value.groupBy)
+      },
     })
 
     return {
       execute: (tenant, request) =>
         withTimeout(
           Effect.gen(function* () {
+            const startMs = Date.now()
             const key = buildCacheKey(tenant.orgId, request)
-            const cached = yield* Cache.getSuccess(executeCache, key)
-            if (Option.isSome(cached)) return cached.value
-            const result = yield* executeImpl(tenant, request)
-            yield* Cache.set(executeCache, key, result)
+            const hadEntry = Option.isSome(yield* Cache.getSuccess(executeCache, key))
+            MutableHashMap.set(pendingExecute, key, { tenant, request })
+            const result = yield* Cache.get(executeCache, key)
+            if (hadEntry) {
+              yield* Metric.update(QueryEngineMetrics.cacheHitsTotal, 1)
+            }
+            yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
             return result
-          }),
+          }).pipe(Effect.withSpan("QueryEngineService.cachedExecute", {
+            attributes: { orgId: tenant.orgId },
+          })),
         ),
-      evaluate: (tenant, request) => withTimeout(evaluate(tenant, request)),
-      evaluateGrouped: (tenant, request, groupBy) => withTimeout(evaluateGrouped(tenant, request, groupBy)),
+      evaluate: (tenant, request) =>
+        withTimeout(
+          Effect.gen(function* () {
+            const key = buildEvaluateCacheKey(tenant.orgId, request)
+            MutableHashMap.set(pendingEvaluate, key, { tenant, request })
+            return yield* Cache.get(evaluateCache, key)
+          }).pipe(Effect.withSpan("QueryEngineService.cachedEvaluate", {
+            attributes: { orgId: tenant.orgId },
+          })),
+        ),
+      evaluateGrouped: (tenant, request, groupBy) =>
+        withTimeout(
+          Effect.gen(function* () {
+            const key = buildEvaluateGroupedCacheKey(tenant.orgId, request, groupBy)
+            MutableHashMap.set(pendingEvaluateGrouped, key, { tenant, request, groupBy })
+            return yield* Cache.get(evaluateGroupedCache, key)
+          }).pipe(Effect.withSpan("QueryEngineService.cachedEvaluateGrouped", {
+            attributes: { orgId: tenant.orgId },
+          })),
+        ),
     }
   }),
 }) {

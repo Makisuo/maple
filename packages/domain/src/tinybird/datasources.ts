@@ -116,6 +116,20 @@ export const traces = defineDatasource("traces", {
       { jsonPath: "$.links_attributes[:]" }
     ),
   },
+  indexes: [
+    {
+      name: "idx_trace_id",
+      expr: "TraceId",
+      type: "bloom_filter(0.01)",
+      granularity: 1,
+    },
+    {
+      name: "idx_span_attr_vals",
+      expr: "mapValues(SpanAttributes)",
+      type: "bloom_filter(0.01)",
+      granularity: 1,
+    },
+  ],
   engine: engine.mergeTree({
     partitionKey: "toDate(Timestamp)",
     sortingKey: ["OrgId", "ServiceName", "SpanName", "toDateTime(Timestamp)"],
@@ -777,3 +791,27 @@ export const metricsExponentialHistogram = defineDatasource(
 export type MetricsExponentialHistogramRow = InferRow<
   typeof metricsExponentialHistogram
 >;
+
+/**
+ * Pre-aggregated attribute keys with hourly usage counts.
+ * Fed by MVs from traces (span + resource), logs, and metrics tables.
+ */
+export const attributeKeysHourly = defineDatasource("attribute_keys_hourly", {
+  description:
+    "Pre-aggregated attribute keys with hourly usage counts from traces, logs, and metrics.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Hour: t.dateTime(),
+    AttributeKey: t.string().lowCardinality(),
+    AttributeScope: t.string().lowCardinality(),
+    UsageCount: t.simpleAggregateFunction("sum", t.uint64()),
+  },
+  engine: engine.aggregatingMergeTree({
+    partitionKey: "toDate(Hour)",
+    sortingKey: ["OrgId", "AttributeScope", "Hour", "AttributeKey"],
+    ttl: "Hour + INTERVAL 90 DAY",
+  }),
+});
+
+export type AttributeKeysHourlyRow = InferRow<typeof attributeKeysHourly>;
