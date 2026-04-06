@@ -12,9 +12,10 @@ import {
   RoleName,
 } from "@maple/domain/http"
 import type { OrgId as OrgIdType, RoleName as RoleNameType } from "@maple/domain/http"
+import { createClerkClient } from "@clerk/backend"
 import { render } from "@react-email/components"
 import { and, eq } from "drizzle-orm"
-import { Array as Arr, Cause, Effect, Layer, ServiceMap } from "effect"
+import { Array as Arr, Cause, Effect, Layer, Option, Redacted, ServiceMap } from "effect"
 import { WeeklyDigest, type WeeklyDigestProps } from "@maple/email/weekly-digest"
 import { Database } from "./DatabaseLive"
 import { EmailService } from "./EmailService"
@@ -431,11 +432,77 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
         return new DigestPreviewResponse({ html })
       })
 
+      const ensureSubscriptions = Effect.fn("DigestService.ensureSubscriptions")(
+        function* () {
+          if (env.MAPLE_AUTH_MODE.toLowerCase() !== "clerk") return
+          if (Option.isNone(env.CLERK_SECRET_KEY)) return
+
+          const clerk = createClerkClient({
+            secretKey: Redacted.value(env.CLERK_SECRET_KEY.value),
+          })
+
+          const orgs = Option.isSome(env.MAPLE_ORG_ID_OVERRIDE)
+            ? [{ id: env.MAPLE_ORG_ID_OVERRIDE.value }]
+            : (yield* Effect.tryPromise({
+                try: () => clerk.organizations.getOrganizationList({ limit: 100 }),
+                catch: () => new DigestPersistenceError({ message: "Failed to list Clerk organizations" }),
+              })).data
+
+          for (const org of orgs) {
+            const members = yield* Effect.tryPromise({
+              try: () => clerk.organizations.getOrganizationMembershipList({
+                organizationId: org.id,
+                limit: 100,
+              }),
+              catch: () => new DigestPersistenceError({ message: `Failed to list Clerk members for org ${org.id}` }),
+            })
+
+            const now = Date.now()
+            for (const member of members.data) {
+              const memberEmail = member.publicUserData?.identifier
+              const memberUserId = member.publicUserData?.userId
+              if (!memberEmail || !memberUserId) continue
+
+              yield* database
+                .execute((db) =>
+                  db
+                    .insert(digestSubscriptions)
+                    .values({
+                      id: crypto.randomUUID(),
+                      orgId: org.id,
+                      userId: memberUserId,
+                      email: memberEmail,
+                      enabled: 1,
+                      dayOfWeek: 1,
+                      timezone: "UTC",
+                      createdAt: now,
+                      updatedAt: now,
+                    })
+                    .onConflictDoNothing({
+                      target: [digestSubscriptions.orgId, digestSubscriptions.userId],
+                    }),
+                )
+                .pipe(Effect.mapError(toPersistenceError))
+            }
+          }
+
+          yield* Effect.logInfo("Digest subscriptions seeded from Clerk")
+        },
+      )
+
       const runDigestTick = Effect.fn("DigestService.runDigestTick")(
         function* () {
           if (!email.isConfigured) {
             return { sentCount: 0, errorCount: 0, skipped: true }
           }
+
+          yield* ensureSubscriptions().pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to seed digest subscriptions").pipe(
+                Effect.annotateLogs({ error: Cause.pretty(cause) }),
+              ),
+            ),
+          )
 
           const now = Date.now()
           const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000
