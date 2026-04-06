@@ -1,6 +1,6 @@
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery } from "../query"
+import { from } from "../query"
 import { AttributeKeysHourly, Traces } from "../tables"
 
 export interface AttributeKeysQueryOpts {
@@ -15,10 +15,7 @@ export interface AttributeKeysOutput {
 
 export function attributeKeysQuery(
   opts: AttributeKeysQueryOpts,
-): CHQuery<
-  typeof AttributeKeysHourly.columns,
-  AttributeKeysOutput
-> {
+) {
   return from(AttributeKeysHourly)
     .select(($) => ({
       attributeKey: $.AttributeKey,
@@ -52,7 +49,7 @@ export interface AttributeValuesOutput {
 
 export function spanAttributeValuesQuery(
   opts: AttributeValuesOpts,
-): CHQuery<any, AttributeValuesOutput> {
+) {
   return from(Traces)
     .select(($) => ({
       attributeValue: $.SpanAttributes.get(opts.attributeKey),
@@ -72,7 +69,7 @@ export function spanAttributeValuesQuery(
 
 export function resourceAttributeValuesQuery(
   opts: AttributeValuesOpts,
-): CHQuery<any, AttributeValuesOutput> {
+) {
   return from(Traces)
     .select(($) => ({
       attributeValue: $.ResourceAttributes.get(opts.attributeKey),

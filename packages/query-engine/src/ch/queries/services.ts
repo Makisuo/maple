@@ -6,7 +6,7 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery, type ColumnAccessor } from "../query"
+import { from, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { ServiceOverviewSpans, ServiceUsage, Traces } from "../tables"
 
@@ -36,7 +36,7 @@ export interface ServiceOverviewOutput {
 
 export function serviceOverviewQuery(
   opts: ServiceOverviewOpts,
-): CHQuery<any, ServiceOverviewOutput> {
+) {
   return from(ServiceOverviewSpans)
     .select(($) => ({
       serviceName: $.ServiceName,
@@ -85,7 +85,7 @@ export interface ServiceReleasesTimelineOutput {
 
 export function serviceReleasesTimelineQuery(
   opts: ServiceReleasesTimelineOpts,
-): CHQuery<any, ServiceReleasesTimelineOutput> {
+) {
   return from(ServiceOverviewSpans)
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
@@ -124,7 +124,7 @@ export interface ServiceApdexTimeseriesOutput {
 
 export function serviceApdexTimeseriesQuery(
   opts: ServiceApdexTimeseriesOpts,
-): CHQuery<any, ServiceApdexTimeseriesOutput> {
+) {
   const t = String(opts.apdexThresholdMs ?? 500)
 
   return from(Traces)
@@ -183,7 +183,7 @@ export interface ServiceUsageOutput {
 
 export function serviceUsageQuery(
   opts: ServiceUsageOpts,
-): CHQuery<any, ServiceUsageOutput> {
+) {
   return from(ServiceUsage)
     .select(($) => ({
       serviceName: $.ServiceName,

@@ -65,7 +65,7 @@ export interface MetricsTimeseriesOutput {
 
 export function metricsTimeseriesQuery(
   opts: MetricsTimeseriesOpts,
-): CHQuery<any, MetricsTimeseriesOutput> {
+) {
   const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
 
   if (isHistogram) {
@@ -76,7 +76,7 @@ export function metricsTimeseriesQuery(
 
 function buildValueTimeseries(
   opts: MetricsTimeseriesOpts,
-): CHQuery<any, MetricsTimeseriesOutput> {
+) {
   const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
 
   const q = from(tbl as typeof MetricsSum)
@@ -113,7 +113,7 @@ function buildValueTimeseries(
 
 function buildHistogramTimeseries(
   opts: MetricsTimeseriesOpts,
-): CHQuery<any, MetricsTimeseriesOutput> {
+) {
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   const q = from(tbl as typeof MetricsHistogram)
@@ -263,7 +263,7 @@ export interface MetricsBreakdownOutput {
 
 export function metricsBreakdownQuery(
   opts: MetricsBreakdownOpts,
-): CHQuery<any, MetricsBreakdownOutput> {
+) {
   const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
   const limit = opts.limit ?? 10
 
@@ -276,7 +276,7 @@ export function metricsBreakdownQuery(
 function buildValueBreakdown(
   opts: MetricsBreakdownOpts,
   limit: number,
-): CHQuery<any, MetricsBreakdownOutput> {
+) {
   const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
 
   return from(tbl as typeof MetricsSum)
@@ -301,7 +301,7 @@ function buildValueBreakdown(
 function buildHistogramBreakdown(
   opts: MetricsBreakdownOpts,
   limit: number,
-): CHQuery<any, MetricsBreakdownOutput> {
+) {
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   return from(tbl as typeof MetricsHistogram)

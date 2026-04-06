@@ -9,7 +9,7 @@
 import type { AttributeFilter, MetricType } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery, type ColumnAccessor } from "../query"
+import { from, type ColumnAccessor } from "../query"
 import {
   Traces,
   Logs,
@@ -115,7 +115,7 @@ function alertTracesWhereConditions(
 
 export function alertTracesAggregateQuery(
   opts: AlertTracesOpts,
-): CHQuery<any, AlertTracesAggregateOutput> {
+) {
   const threshold = opts.apdexThresholdMs ?? 500
 
   return from(Traces)
@@ -126,7 +126,7 @@ export function alertTracesAggregateQuery(
 
 export function alertTracesAggregateByServiceQuery(
   opts: AlertTracesOpts,
-): CHQuery<any, AlertTracesAggregateByServiceOutput> {
+) {
   const threshold = opts.apdexThresholdMs ?? 500
 
   return from(Traces)
@@ -174,7 +174,7 @@ const HISTOGRAM_TABLES = {
 
 function buildValueMetricsAggregate(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateOutput> {
+) {
   const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
 
   return from(tbl as typeof MetricsSum)
@@ -197,7 +197,7 @@ function buildValueMetricsAggregate(
 
 function buildHistogramMetricsAggregate(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateOutput> {
+) {
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   return from(tbl as typeof MetricsHistogram)
@@ -220,7 +220,7 @@ function buildHistogramMetricsAggregate(
 
 function buildValueMetricsAggregateByService(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateByServiceOutput> {
+) {
   const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
 
   return from(tbl as typeof MetricsSum)
@@ -245,7 +245,7 @@ function buildValueMetricsAggregateByService(
 
 function buildHistogramMetricsAggregateByService(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateByServiceOutput> {
+) {
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   return from(tbl as typeof MetricsHistogram)
@@ -270,14 +270,14 @@ function buildHistogramMetricsAggregateByService(
 
 export function alertMetricsAggregateQuery(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateOutput> {
+) {
   const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
   return isHistogram ? buildHistogramMetricsAggregate(opts) : buildValueMetricsAggregate(opts)
 }
 
 export function alertMetricsAggregateByServiceQuery(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateByServiceOutput> {
+) {
   const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
   return isHistogram ? buildHistogramMetricsAggregateByService(opts) : buildValueMetricsAggregateByService(opts)
 }
@@ -301,7 +301,7 @@ export interface AlertLogsAggregateByServiceOutput extends AlertLogsAggregateOut
 
 export function alertLogsAggregateQuery(
   opts: AlertLogsOpts,
-): CHQuery<any, AlertLogsAggregateOutput> {
+) {
   return from(Logs)
     .select(() => ({
       count: CH.count(),
@@ -318,7 +318,7 @@ export function alertLogsAggregateQuery(
 
 export function alertLogsAggregateByServiceQuery(
   opts: AlertLogsOpts,
-): CHQuery<any, AlertLogsAggregateByServiceOutput> {
+) {
   return from(Logs)
     .select(({ ServiceName }) => ({
       serviceName: ServiceName,

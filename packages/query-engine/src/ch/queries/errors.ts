@@ -6,7 +6,7 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery, type ColumnAccessor } from "../query"
+import { from, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { ErrorSpans, TraceListMv, Traces } from "../tables"
 import { escapeClickHouseString } from "../../sql/sql-fragment"
@@ -49,7 +49,7 @@ export interface ErrorsByTypeOutput {
 
 export function errorsByTypeQuery(
   opts: ErrorsByTypeOpts,
-): CHQuery<any, ErrorsByTypeOutput> {
+) {
   return from(ErrorSpans)
     .select(($) => ({
       errorType: CH.rawExpr<string>(ERROR_FINGERPRINT_SQL),
@@ -96,7 +96,7 @@ export interface ErrorsTimeseriesOutput {
 
 export function errorsTimeseriesQuery(
   opts: ErrorsTimeseriesOpts,
-): CHQuery<any, ErrorsTimeseriesOutput> {
+) {
   const esc = escapeClickHouseString
   return from(ErrorSpans)
     .select(($) => ({
@@ -144,7 +144,7 @@ export interface SpanHierarchyOutput {
 
 export function spanHierarchyQuery(
   opts: SpanHierarchyOpts,
-): CHQuery<any, SpanHierarchyOutput> {
+) {
   // HTTP span name rewriting: "http.server GET" + route → "GET /api/users"
   const httpRewriteExpr = CH.if_(
     CH.rawCond(
@@ -218,7 +218,7 @@ export interface TracesDurationStatsOutput {
 
 export function tracesDurationStatsQuery(
   opts: TracesDurationStatsOpts,
-): CHQuery<any, TracesDurationStatsOutput> {
+) {
   const mm = opts.matchModes
 
   return from(TraceListMv)

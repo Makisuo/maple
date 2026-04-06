@@ -6,7 +6,7 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery, type ColumnAccessor } from "../query"
+import { from, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { Logs } from "../tables"
 
@@ -37,7 +37,7 @@ export interface LogsTimeseriesOutput {
 
 export function logsTimeseriesQuery(
   opts: LogsTimeseriesOpts,
-): CHQuery<any, LogsTimeseriesOutput> {
+) {
   const groupByService = opts.groupBy?.includes("service")
   const groupBySeverity = opts.groupBy?.includes("severity")
 
@@ -100,7 +100,7 @@ export interface LogsBreakdownOutput {
 
 export function logsBreakdownQuery(
   opts: LogsBreakdownOpts,
-): CHQuery<any, LogsBreakdownOutput> {
+) {
   return from(Logs)
     .select(($) => ({
       name: opts.groupBy === "severity" ? $.SeverityText : $.ServiceName,
@@ -129,7 +129,7 @@ export interface LogsCountOutput {
 
 export function logsCountQuery(
   opts: LogsQueryOpts,
-): CHQuery<any, LogsCountOutput> {
+) {
   return from(Logs)
     .select(() => ({
       total: CH.count(),
@@ -171,7 +171,7 @@ export interface LogsListOutput {
 
 export function logsListQuery(
   opts: LogsListOpts,
-): CHQuery<any, LogsListOutput> {
+) {
   return from(Logs)
     .select(($) => ({
       timestamp: $.Timestamp,
@@ -213,7 +213,7 @@ export interface ErrorRateByServiceOutput {
 }
 
 export function errorRateByServiceQuery(
-): CHQuery<any, ErrorRateByServiceOutput> {
+) {
   return from(Logs)
     .select(($) => ({
       serviceName: $.ServiceName,

@@ -7,7 +7,7 @@
 import type { TracesMetric, AttributeFilter } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type CHQuery, type ColumnAccessor } from "../query"
+import { from, type ColumnAccessor } from "../query"
 import { Traces, TraceListMv } from "../tables"
 import { compile, str } from "../../sql/sql-fragment"
 import {
@@ -305,7 +305,7 @@ export interface TracesTimeseriesOutput {
 
 export function tracesTimeseriesQuery(
   opts: TracesTimeseriesOpts,
-): CHQuery<any, TracesTimeseriesOutput> {
+) {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
   const useTraceListMv = canUseTraceListMv(opts)
   const tbl = useTraceListMv ? TraceListMv : Traces
@@ -351,7 +351,7 @@ export interface TracesBreakdownOutput {
 
 export function tracesBreakdownQuery(
   opts: TracesBreakdownOpts,
-): CHQuery<any, TracesBreakdownOutput> {
+) {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
   const limit = opts.limit ?? 10
   const useTraceListMv = canUseTraceListMv({
@@ -424,7 +424,7 @@ function buildProjectedMapExpr(
 
 export function tracesListQuery(
   opts: TracesListOpts,
-): CHQuery<any, TracesListOutput> {
+) {
   const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
   const useTraceListMv = canUseTraceListMv({ ...opts, rootOnly: opts.rootOnly })
@@ -512,7 +512,7 @@ export interface TracesRootListOutput {
 
 export function tracesRootListQuery(
   opts: TracesRootListOpts,
-): CHQuery<any, TracesRootListOutput> {
+) {
   const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
   const useTraceListMv = canUseTraceListMv({ ...opts, rootOnly: true })
