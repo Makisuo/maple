@@ -6,6 +6,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { UpsertDigestSubscriptionRequest } from "@maple/domain/http"
 import { useUser } from "@clerk/clerk-react"
 
+import { Button } from "@maple/ui/components/ui/button"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { EnvelopeIcon } from "@/components/icons"
@@ -27,6 +28,12 @@ export function NotificationsSection() {
   const [enabled, setEnabled] = useState(true)
   const [initialized, setInitialized] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isPreviewing, setIsPreviewing] = useState(false)
+
+  const previewMutation = useAtomSet(
+    MapleApiAtomClient.mutation("digest", "preview"),
+    { mode: "promiseExit" },
+  )
 
   useEffect(() => {
     if (initialized) return
@@ -57,6 +64,21 @@ export function NotificationsSection() {
       setEnabled(!checked)
     }
     setIsSaving(false)
+  }
+
+  async function handlePreview() {
+    setIsPreviewing(true)
+    const result = await previewMutation({})
+    if (Exit.isSuccess(result)) {
+      const win = window.open("", "_blank")
+      if (win) {
+        win.document.write(result.value.html)
+        win.document.close()
+      }
+    } else {
+      toast.error("Failed to generate digest preview")
+    }
+    setIsPreviewing(false)
   }
 
   if (!initialized || !user) {
@@ -90,6 +112,16 @@ export function NotificationsSection() {
           disabled={isSaving || !email}
         />
       </div>
+      {enabled && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handlePreview}
+          disabled={isPreviewing}
+        >
+          {isPreviewing ? "Generating..." : "Preview Digest"}
+        </Button>
+      )}
     </div>
   )
 }

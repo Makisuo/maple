@@ -179,13 +179,15 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
         yield* Effect.annotateCurrentSpan("orgId", orgId)
 
         const now = new Date()
-        const currentEnd = now.toISOString()
-        const currentStart = new Date(
+        const toClickHouseDateTime = (d: Date) =>
+          d.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "")
+        const currentEnd = toClickHouseDateTime(now)
+        const currentStart = toClickHouseDateTime(new Date(
           now.getTime() - 7 * 24 * 60 * 60 * 1000,
-        ).toISOString()
-        const previousStart = new Date(
+        ))
+        const previousStart = toClickHouseDateTime(new Date(
           now.getTime() - 14 * 24 * 60 * 60 * 1000,
-        ).toISOString()
+        ))
 
         const systemTenant = {
           orgId,

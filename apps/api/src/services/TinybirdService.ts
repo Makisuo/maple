@@ -104,7 +104,7 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
         catch: (error) => toTinybirdQueryError(pipe, error),
       }).pipe(
         Effect.tapError((error) =>
-          Effect.logError("TinybirdService.executeSql failed", { pipe, error: String(error) }),
+          Effect.logError("TinybirdService.executeSql failed", { pipe, error: String(error), message: error.message, sql: truncateSql(sql) }),
         ),
       )
 
