@@ -58,13 +58,6 @@ export interface MetricsTimeseriesOutput {
   readonly dataPointCount: number
 }
 
-type MetricsTimeseriesParams = {
-  orgId: string
-  metricName: string
-  startTime: string
-  endTime: string
-  bucketSeconds: number
-}
 
 // ---------------------------------------------------------------------------
 // Timeseries query — handles all 4 metric types
@@ -72,7 +65,7 @@ type MetricsTimeseriesParams = {
 
 export function metricsTimeseriesQuery(
   opts: MetricsTimeseriesOpts,
-): CHQuery<any, MetricsTimeseriesOutput, MetricsTimeseriesParams> {
+): CHQuery<any, MetricsTimeseriesOutput> {
   const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
 
   if (isHistogram) {
@@ -83,7 +76,7 @@ export function metricsTimeseriesQuery(
 
 function buildValueTimeseries(
   opts: MetricsTimeseriesOpts,
-): CHQuery<any, MetricsTimeseriesOutput, MetricsTimeseriesParams> {
+): CHQuery<any, MetricsTimeseriesOutput> {
   const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
 
   const q = from(tbl as typeof MetricsSum)
@@ -116,12 +109,11 @@ function buildValueTimeseries(
   )
     .orderBy(["bucket", "asc"])
     .format("JSON")
-    .withParams<MetricsTimeseriesParams>()
 }
 
 function buildHistogramTimeseries(
   opts: MetricsTimeseriesOpts,
-): CHQuery<any, MetricsTimeseriesOutput, MetricsTimeseriesParams> {
+): CHQuery<any, MetricsTimeseriesOutput> {
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   const q = from(tbl as typeof MetricsHistogram)
@@ -154,7 +146,6 @@ function buildHistogramTimeseries(
   )
     .orderBy(["bucket", "asc"])
     .format("JSON")
-    .withParams<MetricsTimeseriesParams>()
 }
 
 // ---------------------------------------------------------------------------
@@ -177,17 +168,9 @@ export interface MetricsRateTimeseriesOutput {
   readonly dataPointCount: number
 }
 
-type MetricsRateTimeseriesParams = {
-  orgId: string
-  metricName: string
-  startTime: string
-  endTime: string
-  bucketSeconds: number
-}
-
 export function metricsTimeseriesRateSQL(
   opts: MetricsRateTimeseriesOpts,
-  params: MetricsRateTimeseriesParams,
+  params: { orgId: string; metricName: string; startTime: string; endTime: string; bucketSeconds: number },
 ): CompiledQuery<MetricsRateTimeseriesOutput> {
   const esc = escapeClickHouseString
   const bucketSeconds = Math.round(params.bucketSeconds)
@@ -278,16 +261,9 @@ export interface MetricsBreakdownOutput {
   readonly count: number
 }
 
-type MetricsBreakdownParams = {
-  orgId: string
-  metricName: string
-  startTime: string
-  endTime: string
-}
-
 export function metricsBreakdownQuery(
   opts: MetricsBreakdownOpts,
-): CHQuery<any, MetricsBreakdownOutput, MetricsBreakdownParams> {
+): CHQuery<any, MetricsBreakdownOutput> {
   const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
   const limit = opts.limit ?? 10
 
@@ -300,7 +276,7 @@ export function metricsBreakdownQuery(
 function buildValueBreakdown(
   opts: MetricsBreakdownOpts,
   limit: number,
-): CHQuery<any, MetricsBreakdownOutput, MetricsBreakdownParams> {
+): CHQuery<any, MetricsBreakdownOutput> {
   const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
 
   return from(tbl as typeof MetricsSum)
@@ -320,13 +296,12 @@ function buildValueBreakdown(
     .orderBy(["count", "desc"])
     .limit(limit)
     .format("JSON")
-    .withParams<MetricsBreakdownParams>()
 }
 
 function buildHistogramBreakdown(
   opts: MetricsBreakdownOpts,
   limit: number,
-): CHQuery<any, MetricsBreakdownOutput, MetricsBreakdownParams> {
+): CHQuery<any, MetricsBreakdownOutput> {
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   return from(tbl as typeof MetricsHistogram)
@@ -346,7 +321,6 @@ function buildHistogramBreakdown(
     .orderBy(["count", "desc"])
     .limit(limit)
     .format("JSON")
-    .withParams<MetricsBreakdownParams>()
 }
 
 // ---------------------------------------------------------------------------
@@ -373,11 +347,9 @@ export interface ListMetricsOutput {
   readonly isMonotonic: boolean | number
 }
 
-type ListMetricsParams = { orgId: string; startTime: string; endTime: string }
-
 export function listMetricsQuery(
   opts: ListMetricsOpts,
-): CHUnionQuery<ListMetricsOutput, ListMetricsParams> {
+): CHUnionQuery<ListMetricsOutput> {
   function buildSubquery(
     tbl: typeof MetricsSum | typeof MetricsGauge | typeof MetricsHistogram | typeof MetricsExpHistogram,
     metricType: string,
@@ -405,10 +377,9 @@ export function listMetricsQuery(
         CH.when(opts.search, (v: string) => $.MetricName.ilike(`%${v}%`)),
       ])
       .groupBy("metricName", "serviceName")
-      .withParams<ListMetricsParams>()
   }
 
-  const queries: Array<CHQuery<any, ListMetricsOutput, ListMetricsParams>> = []
+  const queries: Array<CHQuery<any, ListMetricsOutput>> = []
   const showSum = !opts.metricType || opts.metricType === "sum"
   const showGauge = !opts.metricType || opts.metricType === "gauge"
   const showHist = !opts.metricType || opts.metricType === "histogram"
@@ -440,11 +411,9 @@ export interface MetricsSummaryOpts {
   serviceName?: string
 }
 
-type MetricsSummaryParams = { orgId: string; startTime: string; endTime: string }
-
 export function metricsSummaryQuery(
   opts?: MetricsSummaryOpts,
-): CHUnionQuery<MetricsSummaryOutput, MetricsSummaryParams> {
+): CHUnionQuery<MetricsSummaryOutput> {
   function buildSubquery(
     tbl: typeof MetricsSum | typeof MetricsGauge | typeof MetricsHistogram | typeof MetricsExpHistogram,
     metricType: string,
@@ -461,7 +430,6 @@ export function metricsSummaryQuery(
         $.TimeUnix.lte(param.dateTime("endTime")),
         CH.when(opts?.serviceName, (v: string) => $.ServiceName.eq(v)),
       ])
-      .withParams<MetricsSummaryParams>()
   }
 
   return unionAll(

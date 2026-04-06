@@ -38,6 +38,8 @@ function makeParamMarker<N extends string, T>(name: N, fragment: SqlFragment): P
     mul: () => { throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` }) },
     add: () => { throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` }) },
     sub: () => { throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` }) },
+    in_: () => { throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` }) },
+    notIn: () => { throw new QueryBuilderError({ code: "UnresolvedParam", message: `Param '${name}' not resolved` }) },
   } as ParamMarker<N, T>
 }
 

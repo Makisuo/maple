@@ -18,7 +18,7 @@
 //     .format("JSON")
 // ---------------------------------------------------------------------------
 
-import type { ColumnDefs, CHType } from "./types"
+import type { ColumnDefs, CHType, InferTS } from "./types"
 import type { Table } from "./table"
 import type { Expr, Condition, ColumnRef } from "./expr"
 import { makeColumnRef } from "./expr"
@@ -53,6 +53,9 @@ export interface CHQueryState {
   readonly limitValue?: number
   readonly offsetValue?: number
   readonly formatValue?: string
+  /** When set, the FROM clause uses a subquery instead of a table name. */
+  readonly fromSubquerySql?: string
+  readonly fromSubqueryAlias?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -62,35 +65,49 @@ export interface CHQueryState {
 export interface CHQuery<
   Cols extends ColumnDefs = ColumnDefs,
   Output extends Record<string, any> = {},
-  Params extends Record<string, any> = {},
 > {
   /** @internal — runtime query state */
   readonly _state: CHQueryState
   /** phantom */
-  readonly _phantom?: { cols: Cols; output: Output; params: Params }
+  readonly _phantom?: { cols: Cols; output: Output }
 
+  /** Select specific columns by name. Output keys match column names. */
+  select<K extends keyof Cols & string>(
+    ...columns: K[]
+  ): CHQuery<Cols, { readonly [P in K]: InferTS<Cols[P]> }>
+
+  /** Select computed expressions via callback. */
   select<S extends SelectRecord>(
     fn: ($: ColumnAccessor<Cols>) => S,
-  ): CHQuery<Cols, InferOutput<S>, Params>
+  ): CHQuery<Cols, InferOutput<S>>
 
   where(
     fn: ($: ColumnAccessor<Cols>) => Array<Condition | undefined>,
-  ): CHQuery<Cols, Output, Params>
+  ): CHQuery<Cols, Output>
 
-  groupBy(...keys: Array<keyof Output & string>): CHQuery<Cols, Output, Params>
+  groupBy(...keys: Array<keyof Output & string>): CHQuery<Cols, Output>
 
-  orderBy(...specs: Array<OrderBySpec<Output>>): CHQuery<Cols, Output, Params>
+  orderBy(...specs: Array<OrderBySpec<Output>>): CHQuery<Cols, Output>
 
-  limit(n: number): CHQuery<Cols, Output, Params>
+  limit(n: number): CHQuery<Cols, Output>
 
-  offset(n: number): CHQuery<Cols, Output, Params>
+  offset(n: number): CHQuery<Cols, Output>
 
-  format(fmt: "JSON" | "JSONEachRow"): CHQuery<Cols, Output, Params>
+  format(fmt: "JSON" | "JSONEachRow"): CHQuery<Cols, Output>
 
-  /** Declare the required compile-time params type. No-op at runtime —
-   *  Params is phantom and only constrains what `compile()` accepts. */
-  withParams<P extends Record<string, any>>(): CHQuery<Cols, Output, P>
+  /**
+   * @deprecated Params are now inferred at the `compile()` call site.
+   * This method is a no-op and can be safely removed.
+   */
+  withParams<_P extends Record<string, any>>(): CHQuery<Cols, Output>
 }
+
+// ---------------------------------------------------------------------------
+// Type utilities for extracting output types from queries
+// ---------------------------------------------------------------------------
+
+/** Extract the Output type from a CHQuery. */
+export type InferQueryOutput<Q> = Q extends CHQuery<any, infer O> ? O : never
 
 // ---------------------------------------------------------------------------
 // ColumnAccessor factory (Proxy-based)
@@ -121,13 +138,25 @@ export function createColumnAccessor<Cols extends ColumnDefs>(
 function makeQuery<
   Cols extends ColumnDefs,
   Output extends Record<string, any>,
-  Params extends Record<string, any>,
->(state: CHQueryState): CHQuery<Cols, Output, Params> {
+>(state: CHQueryState): CHQuery<Cols, Output> {
   return {
     _state: state,
 
-    select(fn) {
-      return makeQuery({ ...state, selectFn: fn })
+    select(...args: any[]): any {
+      // String overload: select("Col1", "Col2") → select($ => ({ Col1: $.Col1, Col2: $.Col2 }))
+      if (typeof args[0] === "string") {
+        const columns = args as string[]
+        return makeQuery({
+          ...state,
+          selectFn: ($: any) => {
+            const result: Record<string, any> = {}
+            for (const col of columns) result[col] = $[col]
+            return result
+          },
+        })
+      }
+      // Callback overload: select($ => ({ ... }))
+      return makeQuery({ ...state, selectFn: args[0] })
     },
 
     where(fn) {
@@ -167,11 +196,36 @@ function makeQuery<
 
 export function from<Name extends string, Cols extends ColumnDefs>(
   table: Table<Name, Cols>,
-): CHQuery<Cols, {}, {}> {
+): CHQuery<Cols, {}> {
   return makeQuery({
     tableName: table.name,
     columns: table.columns,
     groupByKeys: [],
     orderBySpecs: [],
+  })
+}
+
+/**
+ * Start a query from a subquery instead of a table.
+ *
+ * Usage:
+ *   const inner = CH.compile(
+ *     CH.from(ErrorSpans).select(...).where(...).limit(10),
+ *     params,
+ *     { skipFormat: true },
+ *   )
+ *   const outer = CH.fromSubquery(inner.sql, "e").select($ => ({ ... }))
+ */
+export function fromSubquery(
+  sql: string,
+  alias: string,
+): CHQuery<ColumnDefs, {}> {
+  return makeQuery({
+    tableName: alias,
+    columns: {},
+    groupByKeys: [],
+    orderBySpecs: [],
+    fromSubquerySql: sql,
+    fromSubqueryAlias: alias,
   })
 }

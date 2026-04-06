@@ -47,7 +47,7 @@ export function compileCH<
   Output extends Record<string, any>,
   Params extends Record<string, any>,
 >(
-  query: CHQuery<Cols, Output, Params>,
+  query: CHQuery<Cols, Output>,
   params: Params,
   options?: { skipFormat?: boolean },
 ): CompiledQuery<Output> {
@@ -71,9 +71,13 @@ export function compileCH<
     .map((c) => c.toFragment())
 
   // Resolve param placeholders in the compiled SQL
+  const fromFragment = state.fromSubquerySql
+    ? raw(`(${state.fromSubquerySql}) AS ${state.fromSubqueryAlias}`)
+    : ident(state.tableName)
+
   const sqlQuery: SqlQuery = {
     select: selectFragments,
-    from: ident(state.tableName),
+    from: fromFragment,
     where: whereFragments,
     groupBy: state.groupByKeys.map((k) => raw(k)),
     orderBy: state.orderBySpecs.map(([k, dir]) => raw(`${k} ${dir.toUpperCase()}`)),
@@ -105,7 +109,7 @@ export function compileUnion<
   Output extends Record<string, any>,
   Params extends Record<string, any>,
 >(
-  union: CHUnionQuery<Output, Params>,
+  union: CHUnionQuery<Output>,
   params: Params,
 ): CompiledQuery<Output> {
   const state = union._state

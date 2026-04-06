@@ -159,6 +159,33 @@ describe("CH.from / select / where / compile", () => {
     const { sql } = compileCH(q, {})
     expect(sql).toContain("Name IN ('a', 'b', 'c')")
   })
+
+  it("compiles column shorthand select", () => {
+    const q = CH.from(TestTable).select("Id", "Name", "Value")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("Id AS Id")
+    expect(sql).toContain("Name AS Name")
+    expect(sql).toContain("Value AS Value")
+    expect(sql).toContain("FROM test_table")
+  })
+
+  it("compiles in_() on expressions", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ id: $.Id }))
+      .where(($) => [$.Name.in_("alice", "bob", "charlie")])
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("Name IN ('alice', 'bob', 'charlie')")
+  })
+
+  it("compiles arrayOf()", () => {
+    const q = CH.from(TestTable)
+      .select(($) => ({ names: CH.arrayOf($.Name) }))
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("[Name] AS names")
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -208,7 +235,7 @@ describe("tracesTimeseriesQuery", () => {
   it("builds error_rate timeseries", () => {
     const q = tracesTimeseriesQuery({ metric: "error_rate", needsSampling: false })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("countIf(StatusCode = 'Error') * 100.0 / count(), 0) AS errorRate")
+    expect(sql).toContain("countIf(StatusCode = 'Error') * 100 / count(), 0) AS errorRate")
   })
 
   it("includes sampling columns when needsSampling is true", () => {
@@ -539,7 +566,6 @@ describe("unionAll", () => {
       }))
       .where(($) => [$.Id.eq("1")])
       .groupBy("name")
-      .withParams<{}>()
 
     const q2 = CH.from(TestTable)
       .select(($) => ({
@@ -549,7 +575,6 @@ describe("unionAll", () => {
       }))
       .where(($) => [$.Id.eq("2")])
       .groupBy("name")
-      .withParams<{}>()
 
     const union = unionAll(q1, q2).format("JSON")
     const { sql } = compileUnion(union, {})
@@ -566,12 +591,10 @@ describe("unionAll", () => {
     const q1 = CH.from(TestTable)
       .select(($) => ({ name: $.Name, count: CH.count() }))
       .groupBy("name")
-      .withParams<{}>()
 
     const q2 = CH.from(TestTable)
       .select(($) => ({ name: $.Id, count: CH.count() }))
       .groupBy("name")
-      .withParams<{}>()
 
     const union = unionAll(q1, q2)
       .orderBy(["count", "desc"])
@@ -582,6 +605,66 @@ describe("unionAll", () => {
     expect(sql).toContain("SELECT * FROM (")
     expect(sql).toContain("UNION ALL")
     expect(sql).toContain("ORDER BY count DESC")
+    expect(sql).toContain("LIMIT 10")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Subquery support
+// ---------------------------------------------------------------------------
+
+describe("subquery support", () => {
+  const TestTable = CH.table("test_table", {
+    Id: CH.string,
+    Name: CH.string,
+    Value: CH.uint64,
+  })
+
+  it("compiles fromSubquery", () => {
+    const innerSql = compileCH(
+      CH.from(TestTable).select(($) => ({ id: $.Id })).where(($) => [$.Value.gt(100)]),
+      {},
+      { skipFormat: true },
+    ).sql
+
+    const outer = CH.from(TestTable)
+      .select(($) => ({ name: $.Name }))
+      .where(($) => [CH.inSubquery($.Id, innerSql)])
+      .format("JSON")
+
+    const { sql } = compileCH(outer, {})
+    expect(sql).toContain("Id IN (SELECT")
+    expect(sql).toContain("Value > 100")
+  })
+
+  it("compiles exists()", () => {
+    const subSql = "SELECT 1 FROM other WHERE other.Id = test_table.Id"
+    const q = CH.from(TestTable)
+      .select(($) => ({ id: $.Id }))
+      .where(() => [CH.exists(subSql)])
+      .format("JSON")
+
+    const { sql } = compileCH(q, {})
+    expect(sql).toContain("EXISTS (SELECT 1 FROM other WHERE other.Id = test_table.Id)")
+  })
+
+  it("compiles fromSubquery as FROM source", () => {
+    const innerSql = compileCH(
+      CH.from(TestTable).select(($) => ({ id: $.Id, name: $.Name })).limit(10),
+      {},
+      { skipFormat: true },
+    ).sql
+
+    const outer = CH.fromSubquery(innerSql, "sub")
+      .select(() => ({
+        id: CH.dynamicColumn<string>("id"),
+        name: CH.dynamicColumn<string>("name"),
+      }))
+      .format("JSON")
+
+    const { sql } = compileCH(outer, {})
+    expect(sql).toContain("FROM (SELECT")
+    expect(sql).toContain(") AS sub")
     expect(sql).toContain("LIMIT 10")
   })
 })

@@ -390,7 +390,7 @@ const truncateSql = (s: string, maxLen = 1000) =>
 const executeCHQuery = <Output extends Record<string, any>, Params extends Record<string, any>>(
   tinybird: Pick<TinybirdServiceShape, "sqlQuery">,
   tenant: TenantContext,
-  query: CH.CHQuery<any, Output, Params>,
+  query: CH.CHQuery<any, Output>,
   params: Params,
   context: string,
 ): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {

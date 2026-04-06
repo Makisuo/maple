@@ -14,7 +14,7 @@ import type { CHQuery } from "./query"
 // ---------------------------------------------------------------------------
 
 export interface CHUnionState {
-  readonly queries: ReadonlyArray<CHQuery<any, any, any>>
+  readonly queries: ReadonlyArray<CHQuery<any, any>>
   readonly outerOrderBySpecs: Array<[string, "asc" | "desc"]>
   readonly outerLimitValue?: number
   readonly outerOffsetValue?: number
@@ -27,24 +27,26 @@ export interface CHUnionState {
 
 export interface CHUnionQuery<
   Output extends Record<string, any> = {},
-  Params extends Record<string, any> = {},
 > {
   readonly _tag: "CHUnionQuery"
   /** @internal — runtime union state */
   readonly _state: CHUnionState
   /** phantom */
-  readonly _phantom?: { output: Output; params: Params }
+  readonly _phantom?: { output: Output }
 
   orderBy(
     ...specs: Array<[keyof Output & string, "asc" | "desc"]>
-  ): CHUnionQuery<Output, Params>
+  ): CHUnionQuery<Output>
 
-  limit(n: number): CHUnionQuery<Output, Params>
+  limit(n: number): CHUnionQuery<Output>
 
-  offset(n: number): CHUnionQuery<Output, Params>
+  offset(n: number): CHUnionQuery<Output>
 
-  format(fmt: "JSON" | "JSONEachRow"): CHUnionQuery<Output, Params>
+  format(fmt: "JSON" | "JSONEachRow"): CHUnionQuery<Output>
 }
+
+/** Extract the Output type from a CHUnionQuery. */
+export type InferUnionOutput<Q> = Q extends CHUnionQuery<infer O> ? O : never
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -52,8 +54,7 @@ export interface CHUnionQuery<
 
 function makeUnionQuery<
   Output extends Record<string, any>,
-  Params extends Record<string, any>,
->(state: CHUnionState): CHUnionQuery<Output, Params> {
+>(state: CHUnionState): CHUnionQuery<Output> {
   return {
     _tag: "CHUnionQuery" as const,
     _state: state,
@@ -85,10 +86,9 @@ function makeUnionQuery<
 
 export function unionAll<
   Output extends Record<string, any>,
-  Params extends Record<string, any>,
 >(
-  ...queries: Array<CHQuery<ColumnDefs, Output, Params>>
-): CHUnionQuery<Output, Params> {
+  ...queries: Array<CHQuery<ColumnDefs, Output>>
+): CHUnionQuery<Output> {
   return makeUnionQuery({
     queries,
     outerOrderBySpecs: [],

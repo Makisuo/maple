@@ -49,7 +49,7 @@ export interface ErrorsByTypeOutput {
 
 export function errorsByTypeQuery(
   opts: ErrorsByTypeOpts,
-): CHQuery<any, ErrorsByTypeOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, ErrorsByTypeOutput> {
   return from(ErrorSpans)
     .select(($) => ({
       errorType: CH.rawExpr<string>(ERROR_FINGERPRINT_SQL),
@@ -78,7 +78,6 @@ export function errorsByTypeQuery(
     .orderBy(["count", "desc"])
     .limit(opts.limit ?? 50)
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +96,7 @@ export interface ErrorsTimeseriesOutput {
 
 export function errorsTimeseriesQuery(
   opts: ErrorsTimeseriesOpts,
-): CHQuery<any, ErrorsTimeseriesOutput, { orgId: string; startTime: string; endTime: string; bucketSeconds: number }> {
+): CHQuery<any, ErrorsTimeseriesOutput> {
   const esc = escapeClickHouseString
   return from(ErrorSpans)
     .select(($) => ({
@@ -116,7 +115,6 @@ export function errorsTimeseriesQuery(
     .groupBy("bucket")
     .orderBy(["bucket", "asc"])
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string; bucketSeconds: number }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -144,11 +142,9 @@ export interface SpanHierarchyOutput {
   readonly relationship: string
 }
 
-type SpanHierarchyParams = { orgId: string }
-
 export function spanHierarchyQuery(
   opts: SpanHierarchyOpts,
-): CHQuery<any, SpanHierarchyOutput, SpanHierarchyParams> {
+): CHQuery<any, SpanHierarchyOutput> {
   // HTTP span name rewriting: "http.server GET" + route → "GET /api/users"
   const httpRewriteExpr = CH.if_(
     CH.rawCond(
@@ -191,7 +187,6 @@ export function spanHierarchyQuery(
     ])
     .orderBy(["startTime", "asc"])
     .format("JSON")
-    .withParams<SpanHierarchyParams>()
 }
 
 // ---------------------------------------------------------------------------
@@ -221,11 +216,9 @@ export interface TracesDurationStatsOutput {
   readonly p95DurationMs: number
 }
 
-type TracesDurationStatsParams = { orgId: string; startTime: string; endTime: string }
-
 export function tracesDurationStatsQuery(
   opts: TracesDurationStatsOpts,
-): CHQuery<any, TracesDurationStatsOutput, TracesDurationStatsParams> {
+): CHQuery<any, TracesDurationStatsOutput> {
   const mm = opts.matchModes
 
   return from(TraceListMv)
@@ -261,7 +254,6 @@ export function tracesDurationStatsQuery(
       ),
     ])
     .format("JSON")
-    .withParams<TracesDurationStatsParams>()
 }
 
 // ---------------------------------------------------------------------------
@@ -296,11 +288,9 @@ export interface TracesFacetsOutput {
   readonly facetType: string
 }
 
-type TracesFacetsParams = { orgId: string; startTime: string; endTime: string }
-
 export function tracesFacetsQuery(
   opts: TracesFacetsOpts,
-): CHUnionQuery<TracesFacetsOutput, TracesFacetsParams> {
+): CHUnionQuery<TracesFacetsOutput> {
   const esc = escapeClickHouseString
 
   const baseWhere = ($: ColumnAccessor<typeof TraceListMv.columns>): Array<CH.Condition | undefined> => {
@@ -385,7 +375,6 @@ export function tracesFacetsQuery(
       .groupBy("name")
       .orderBy(["count", "desc"])
       .limit(limit)
-      .withParams<TracesFacetsParams>()
 
   return unionAll(
     makeFacetQuery("ServiceName", "service"),
@@ -399,8 +388,7 @@ export function tracesFacetsQuery(
         count: CH.count(),
         facetType: CH.lit("errorCount"),
       }))
-      .where(($) => [...baseWhere($), $.HasError.eq(1)])
-      .withParams<TracesFacetsParams>(),
+      .where(($) => [...baseWhere($), $.HasError.eq(1)]),
   ).format("JSON")
 }
 
@@ -421,11 +409,9 @@ export interface ErrorsFacetsOutput {
   readonly facetType: string
 }
 
-type ErrorsFacetsParams = { orgId: string; startTime: string; endTime: string }
-
 export function errorsFacetsQuery(
   opts: ErrorsFacetsOpts,
-): CHUnionQuery<ErrorsFacetsOutput, ErrorsFacetsParams> {
+): CHUnionQuery<ErrorsFacetsOutput> {
   const baseWhere = ($: ColumnAccessor<typeof ErrorSpans.columns>): Array<CH.Condition | undefined> => [
     $.OrgId.eq(param.string("orgId")),
     $.Timestamp.gte(param.dateTime("startTime")),
@@ -452,7 +438,6 @@ export function errorsFacetsQuery(
     .groupBy("name")
     .orderBy(["count", "desc"])
     .limit(100)
-    .withParams<ErrorsFacetsParams>()
 
   const envQuery = from(ErrorSpans)
     .select(($) => ({
@@ -464,7 +449,6 @@ export function errorsFacetsQuery(
     .groupBy("name")
     .orderBy(["count", "desc"])
     .limit(100)
-    .withParams<ErrorsFacetsParams>()
 
   const errorTypeQuery = from(ErrorSpans)
     .select(() => ({
@@ -476,7 +460,6 @@ export function errorsFacetsQuery(
     .groupBy("name")
     .orderBy(["count", "desc"])
     .limit(50)
-    .withParams<ErrorsFacetsParams>()
 
   return unionAll(serviceQuery, envQuery, errorTypeQuery)
     .format("JSON")

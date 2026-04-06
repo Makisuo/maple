@@ -49,26 +49,35 @@ function metricSelectExprs(
       ? CH.quantile(0.99)($.Duration).div(1000000)
       : CH.lit(0),
     errorRate: needs.has("error_rate")
-      ? CH.rawExpr<number>(`if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0)`)
+      ? CH.if_(CH.count().gt(0), CH.countIf($.StatusCode.eq("Error")).mul(100.0).div(CH.count()), CH.lit(0))
       : CH.lit(0),
     satisfiedCount: needs.has("apdex")
-      ? CH.rawExpr<number>(`countIf(Duration / 1000000 < ${t})`)
+      ? CH.countIf($.Duration.div(1000000).lt(Number(t)))
       : CH.lit(0),
     toleratingCount: needs.has("apdex")
-      ? CH.rawExpr<number>(`countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4)`)
+      ? CH.countIf($.Duration.div(1000000).gte(Number(t)).and($.Duration.div(1000000).lt(Number(t) * 4)))
       : CH.lit(0),
     apdexScore: needs.has("apdex")
-      ? CH.rawExpr<number>(`if(count() > 0, round((countIf(Duration / 1000000 < ${t}) + countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4) * 0.5) / count(), 4), 0)`)
+      ? CH.if_(
+          CH.count().gt(0),
+          CH.round_(
+            CH.countIf($.Duration.div(1000000).lt(Number(t)))
+              .add(CH.countIf($.Duration.div(1000000).gte(Number(t)).and($.Duration.div(1000000).lt(Number(t) * 4))).mul(0.5))
+              .div(CH.count()),
+            4,
+          ),
+          CH.lit(0),
+        )
       : CH.lit(0),
     sampledSpanCount: needsSampling
-      ? CH.rawExpr<number>("countIf(TraceState LIKE '%th:%')")
+      ? CH.countIf($.TraceState.like("%th:%"))
       : CH.lit(0),
     unsampledSpanCount: needsSampling
-      ? CH.rawExpr<number>("countIf(TraceState = '' OR TraceState NOT LIKE '%th:%')")
+      ? CH.countIf($.TraceState.eq("").or($.TraceState.notLike("%th:%")))
       : CH.lit(0),
     dominantThreshold: needsSampling
-      ? CH.rawExpr<string>("anyIf(extract(TraceState, 'th:([0-9a-f]+)'), TraceState LIKE '%th:%')")
-      : CH.rawExpr<string>("''"),
+      ? CH.anyIf(CH.extract_($.TraceState, "th:([0-9a-f]+)"), $.TraceState.like("%th:%"))
+      : CH.lit(""),
   }
 }
 
@@ -189,23 +198,23 @@ function buildWhereConditions(
         : $.SpanName.eq(v),
     ),
     CH.whenTrue(!!opts.rootOnly && !useTraceListMv, () =>
-      CH.rawCond("(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '')"),
+      $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq("")),
     ),
   ]
 
   // Duration filters (Duration column is nanoseconds in both MV and raw table)
   if (opts.minDurationMs != null) {
-    conditions.push(CH.rawCond(`Duration >= ${opts.minDurationMs} * 1000000`))
+    conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
   }
   if (opts.maxDurationMs != null) {
-    conditions.push(CH.rawCond(`Duration <= ${opts.maxDurationMs} * 1000000`))
+    conditions.push($.Duration.lte(opts.maxDurationMs * 1000000))
   }
 
   if (opts.errorsOnly) {
     if (useTraceListMv) {
-      conditions.push(CH.rawCond("HasError = 1"))
+      conditions.push(CH.dynamicColumn<number>("HasError").eq(1))
     } else {
-      conditions.push(CH.rawCond("StatusCode = 'Error'"))
+      conditions.push($.StatusCode.eq("Error"))
     }
   }
 
@@ -296,7 +305,7 @@ export interface TracesTimeseriesOutput {
 
 export function tracesTimeseriesQuery(
   opts: TracesTimeseriesOpts,
-): CHQuery<any, TracesTimeseriesOutput, { orgId: string; startTime: string; endTime: string; bucketSeconds: number }> {
+): CHQuery<any, TracesTimeseriesOutput> {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
   const useTraceListMv = canUseTraceListMv(opts)
   const tbl = useTraceListMv ? TraceListMv : Traces
@@ -311,7 +320,6 @@ export function tracesTimeseriesQuery(
     .groupBy("bucket", "groupName")
     .orderBy(["bucket", "asc"], ["groupName", "asc"])
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string; bucketSeconds: number }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +351,7 @@ export interface TracesBreakdownOutput {
 
 export function tracesBreakdownQuery(
   opts: TracesBreakdownOpts,
-): CHQuery<any, TracesBreakdownOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, TracesBreakdownOutput> {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
   const limit = opts.limit ?? 10
   const useTraceListMv = canUseTraceListMv({
@@ -367,7 +375,6 @@ export function tracesBreakdownQuery(
     .orderBy(["count", "desc"])
     .limit(limit)
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -417,7 +424,7 @@ function buildProjectedMapExpr(
 
 export function tracesListQuery(
   opts: TracesListOpts,
-): CHQuery<any, TracesListOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, TracesListOutput> {
   const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
   const useTraceListMv = canUseTraceListMv({ ...opts, rootOnly: opts.rootOnly })
@@ -454,15 +461,15 @@ export function tracesListQuery(
     .select(($) => ({
       traceId: $.TraceId,
       timestamp: $.Timestamp,
-      spanId: useTraceListMv ? CH.rawExpr<string>("''") : $.SpanId,
+      spanId: useTraceListMv ? CH.lit("") : $.SpanId,
       serviceName: $.ServiceName,
       spanName: $.SpanName,
-      durationMs: CH.rawExpr<number>("Duration / 1000000"),
+      durationMs: $.Duration.div(1000000),
       statusCode: $.StatusCode,
       spanKind: useTraceListMv ? CH.rawExpr<string>("SpanKind") : $.SpanKind,
       hasError: useTraceListMv
-        ? CH.rawExpr<number>("HasError")
-        : CH.rawExpr<number>("if(StatusCode = 'Error', 1, 0)"),
+        ? CH.dynamicColumn<number>("HasError")
+        : CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
       spanAttributes: spanAttrExpr ?? $.SpanAttributes,
       resourceAttributes: resourceAttrExpr ?? $.ResourceAttributes,
     }))
@@ -470,7 +477,6 @@ export function tracesListQuery(
     .orderBy(["timestamp", "desc"])
     .limit(limit)
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 
   if (offset > 0) {
     q = q.offset(offset)
@@ -494,7 +500,7 @@ export interface TracesRootListOutput {
   readonly endTime: string
   readonly durationMicros: number
   readonly spanCount: number
-  readonly services: string[]
+  readonly services: readonly string[]
   readonly rootSpanName: string
   readonly rootSpanKind: string
   readonly rootSpanStatusCode: string
@@ -506,7 +512,7 @@ export interface TracesRootListOutput {
 
 export function tracesRootListQuery(
   opts: TracesRootListOpts,
-): CHQuery<any, TracesRootListOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, TracesRootListOutput> {
   const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
   const useTraceListMv = canUseTraceListMv({ ...opts, rootOnly: true })
@@ -517,9 +523,9 @@ export function tracesRootListQuery(
       traceId: $.TraceId,
       startTime: $.Timestamp,
       endTime: $.Timestamp,
-      durationMicros: CH.rawExpr<number>("intDiv(Duration, 1000)"),
-      spanCount: CH.rawExpr<number>("toUInt64(1)"),
-      services: CH.rawExpr<string[]>("[ServiceName]"),
+      durationMicros: CH.intDiv($.Duration, 1000),
+      spanCount: CH.toUInt64(CH.lit(1)),
+      services: CH.arrayOf($.ServiceName),
       rootSpanName: $.SpanName,
       rootSpanKind: $.SpanKind,
       rootSpanStatusCode: $.StatusCode,
@@ -533,14 +539,13 @@ export function tracesRootListQuery(
         ? CH.rawExpr<string>("HttpStatusCode")
         : CH.rawExpr<string>("SpanAttributes['http.status_code']"),
       hasError: useTraceListMv
-        ? CH.rawExpr<number>("HasError")
-        : CH.rawExpr<number>("if(StatusCode = 'Error', 1, 0)"),
+        ? CH.dynamicColumn<number>("HasError")
+        : CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
     }))
     .where(($) => buildWhereConditions($, { ...opts, rootOnly: true }, useTraceListMv))
     .orderBy(["startTime", "desc"])
     .limit(limit)
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 
   if (offset > 0) {
     q = q.offset(offset)

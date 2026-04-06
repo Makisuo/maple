@@ -70,6 +70,20 @@ export {
   dynamicColumn,
   when,
   whenTrue,
+  arrayOf,
+  mapLiteral,
+  toUInt64,
+  toInt64,
+  multiIf,
+  position_ as position,
+  left_ as left,
+  length_ as length,
+  replaceOne,
+  least_ as least,
+  greatest_ as greatest,
+  exists,
+  inSubquery,
+  outerRef,
 } from "./expr"
 
 // Params
@@ -80,14 +94,16 @@ export {
   type CHQuery,
   type ColumnAccessor,
   type InferOutput,
+  type InferQueryOutput,
   from,
+  fromSubquery,
 } from "./query"
 
 // Compilation
 export { compileCH as compile, compileUnion, type CompiledQuery, QueryBuilderError } from "./compile"
 
 // Union
-export { unionAll, type CHUnionQuery } from "./union"
+export { unionAll, type CHUnionQuery, type InferUnionOutput } from "./union"
 
 // Tables
 export * as tables from "./tables"

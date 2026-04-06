@@ -37,16 +37,14 @@ export interface LogsTimeseriesOutput {
 
 export function logsTimeseriesQuery(
   opts: LogsTimeseriesOpts,
-): CHQuery<any, LogsTimeseriesOutput, { orgId: string; startTime: string; endTime: string; bucketSeconds: number }> {
+): CHQuery<any, LogsTimeseriesOutput> {
   const groupByService = opts.groupBy?.includes("service")
   const groupBySeverity = opts.groupBy?.includes("severity")
-
-  const groupNameExpr = buildLogsGroupNameExpr(groupByService, groupBySeverity)
 
   return from(Logs)
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
-      groupName: groupNameExpr,
+      groupName: buildLogsGroupNameExpr($, groupByService, groupBySeverity),
       count: CH.count(),
     }))
     .where(($) => [
@@ -59,10 +57,10 @@ export function logsTimeseriesQuery(
     .groupBy("bucket", "groupName")
     .orderBy(["bucket", "asc"], ["groupName", "asc"])
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string; bucketSeconds: number }>()
 }
 
 function buildLogsGroupNameExpr(
+  $: { ServiceName: CH.Expr<string>; SeverityText: CH.Expr<string> },
   groupByService?: boolean,
   groupBySeverity?: boolean,
 ): CH.Expr<string> {
@@ -70,16 +68,19 @@ function buildLogsGroupNameExpr(
     return CH.lit("all")
   }
 
-  const parts: string[] = []
-  if (groupByService) parts.push("toString(ServiceName)")
-  if (groupBySeverity) parts.push("toString(SeverityText)")
+  const parts: CH.Expr<string>[] = []
+  if (groupByService) parts.push(CH.toString_($.ServiceName))
+  if (groupBySeverity) parts.push(CH.toString_($.SeverityText))
 
   if (parts.length === 1) {
-    return CH.rawExpr<string>(`coalesce(nullIf(${parts[0]}, ''), 'all')`)
+    return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
   }
 
-  return CH.rawExpr<string>(
-    `coalesce(nullIf(arrayStringConcat(arrayFilter(x -> x != '', [${parts.join(", ")}]), ' \u00b7 '), ''), 'all')`,
+  // Multi-part: filter empty strings before joining with separator
+  const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
+  return CH.coalesce(
+    CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""),
+    CH.lit("all"),
   )
 }
 
@@ -99,7 +100,7 @@ export interface LogsBreakdownOutput {
 
 export function logsBreakdownQuery(
   opts: LogsBreakdownOpts,
-): CHQuery<any, LogsBreakdownOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, LogsBreakdownOutput> {
   return from(Logs)
     .select(($) => ({
       name: opts.groupBy === "severity" ? $.SeverityText : $.ServiceName,
@@ -116,7 +117,6 @@ export function logsBreakdownQuery(
     .orderBy(["count", "desc"])
     .limit(opts.limit ?? 10)
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ export interface LogsCountOutput {
 
 export function logsCountQuery(
   opts: LogsQueryOpts,
-): CHQuery<any, LogsCountOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, LogsCountOutput> {
   return from(Logs)
     .select(() => ({
       total: CH.count(),
@@ -144,7 +144,6 @@ export function logsCountQuery(
       CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
     ])
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -170,11 +169,9 @@ export interface LogsListOutput {
   readonly resourceAttributes: string
 }
 
-type LogsListParams = { orgId: string; startTime: string; endTime: string }
-
 export function logsListQuery(
   opts: LogsListOpts,
-): CHQuery<any, LogsListOutput, LogsListParams> {
+): CHQuery<any, LogsListOutput> {
   return from(Logs)
     .select(($) => ({
       timestamp: $.Timestamp,
@@ -202,7 +199,6 @@ export function logsListQuery(
     .orderBy(["timestamp", "desc"])
     .limit(opts.limit ?? 50)
     .format("JSON")
-    .withParams<LogsListParams>()
 }
 
 // ---------------------------------------------------------------------------
@@ -217,13 +213,13 @@ export interface ErrorRateByServiceOutput {
 }
 
 export function errorRateByServiceQuery(
-): CHQuery<any, ErrorRateByServiceOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, ErrorRateByServiceOutput> {
   return from(Logs)
     .select(($) => ({
       serviceName: $.ServiceName,
       totalLogs: CH.count(),
       errorLogs: CH.countIf(CH.inList($.SeverityText, ["ERROR", "FATAL"])),
-      errorRatePercent: CH.rawExpr<number>("round(countIf(SeverityText IN ('ERROR', 'FATAL')) / count() * 100, 2)"),
+      errorRatePercent: CH.round_(CH.countIf(CH.inList($.SeverityText, ["ERROR", "FATAL"])).div(CH.count()).mul(100), 2),
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
@@ -233,7 +229,6 @@ export function errorRateByServiceQuery(
     .groupBy("serviceName")
     .orderBy(["errorRatePercent", "desc"])
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
 // ---------------------------------------------------------------------------
@@ -247,11 +242,9 @@ export interface LogsFacetsOutput {
   readonly facetType: string
 }
 
-type LogsFacetsParams = { orgId: string; startTime: string; endTime: string }
-
 export function logsFacetsQuery(
   opts: LogsQueryOpts,
-): CHUnionQuery<LogsFacetsOutput, LogsFacetsParams> {
+): CHUnionQuery<LogsFacetsOutput> {
   const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
     $.OrgId.eq(param.string("orgId")),
     $.Timestamp.gte(param.dateTime("startTime")),
@@ -269,7 +262,6 @@ export function logsFacetsQuery(
     }))
     .where(baseWhere)
     .groupBy("severityText")
-    .withParams<LogsFacetsParams>()
 
   const serviceQuery = from(Logs)
     .select(($) => ({
@@ -280,7 +272,6 @@ export function logsFacetsQuery(
     }))
     .where(baseWhere)
     .groupBy("serviceName")
-    .withParams<LogsFacetsParams>()
 
   return unionAll(severityQuery, serviceQuery)
     .orderBy(["count", "desc"])

@@ -36,6 +36,10 @@ export interface Expr<TSType> {
   notLike(this: Expr<string>, pattern: string): Condition
   ilike(this: Expr<string>, pattern: string): Condition
 
+  // IN / NOT IN
+  in_(...values: TSType[]): Condition
+  notIn(...values: TSType[]): Condition
+
   // Arithmetic — only valid for number expressions
   div(this: Expr<number>, n: number | Expr<number>): Expr<number>
   mul(this: Expr<number>, n: number | Expr<number>): Expr<number>
@@ -95,6 +99,15 @@ function makeExpr<T>(fragment: SqlFragment): Expr<T> {
     like: (pattern: string) => makeCond(raw(`${compile(fragment)} LIKE ${compile(str(pattern))}`)),
     notLike: (pattern: string) => makeCond(raw(`${compile(fragment)} NOT LIKE ${compile(str(pattern))}`)),
     ilike: (pattern: string) => makeCond(raw(`${compile(fragment)} ILIKE ${compile(str(pattern))}`)),
+
+    in_: (...values) => {
+      const escaped = values.map((v) => compile(toFragment(v))).join(", ")
+      return makeCond(raw(`${compile(fragment)} IN (${escaped})`))
+    },
+    notIn: (...values) => {
+      const escaped = values.map((v) => compile(toFragment(v))).join(", ")
+      return makeCond(raw(`${compile(fragment)} NOT IN (${escaped})`))
+    },
 
     div: (n: number | Expr<number>) => makeExpr<number>(raw(`${compile(fragment)} / ${compile(toFragment(n))}`)),
     mul: (n: number | Expr<number>) => makeExpr<number>(raw(`${compile(fragment)} * ${compile(toFragment(n))}`)),
@@ -247,11 +260,14 @@ export function mapContains(
 }
 
 export function arrayStringConcat(
-  parts: Expr<string>[],
+  parts: Expr<string>[] | Expr<ReadonlyArray<string>>,
   sep: string,
 ): Expr<string> {
-  const arr = parts.map((p) => compile(p.toFragment())).join(", ")
-  return makeExpr<string>(raw(`arrayStringConcat([${arr}], ${compile(str(sep))})`))
+  if (Array.isArray(parts)) {
+    const arr = parts.map((p: Expr<string>) => compile(p.toFragment())).join(", ")
+    return makeExpr<string>(raw(`arrayStringConcat([${arr}], ${compile(str(sep))})`))
+  }
+  return makeExpr<string>(raw(`arrayStringConcat(${compile(parts.toFragment())}, ${compile(str(sep))})`))
 }
 
 export function arrayFilter(
@@ -317,6 +333,34 @@ export function intDiv(a: Expr<number>, b: number | Expr<number>): Expr<number> 
 }
 
 // ---------------------------------------------------------------------------
+// Subquery expressions
+// ---------------------------------------------------------------------------
+
+/**
+ * EXISTS (subquery) — for correlated subqueries.
+ * The subquery must be compiled separately; this wraps its SQL as a condition.
+ */
+export function exists(subquerySql: string): Condition {
+  return makeCond(raw(`EXISTS (${subquerySql})`))
+}
+
+/**
+ * expr IN (subquery) — for uncorrelated subqueries.
+ * The subquery must be compiled separately; this wraps its SQL as a condition.
+ */
+export function inSubquery<T>(expr: Expr<T>, subquerySql: string): Condition {
+  return makeCond(raw(`${compile(expr.toFragment())} IN (${subquerySql})`))
+}
+
+/**
+ * Reference an outer query's column in a correlated subquery.
+ * Usage: `outerRef("t.TraceId")` or `outerRef("TraceId")`
+ */
+export function outerRef<T = string>(name: string): Expr<T> {
+  return makeExpr<T>(raw(name))
+}
+
+// ---------------------------------------------------------------------------
 // Raw expression (escape hatch)
 // ---------------------------------------------------------------------------
 
@@ -359,4 +403,92 @@ export function whenTrue(
 ): Condition | undefined {
   if (!value) return undefined
   return fn()
+}
+
+// ---------------------------------------------------------------------------
+// Array & Map constructors
+// ---------------------------------------------------------------------------
+
+/** Build an array literal: `[expr1, expr2, ...]` */
+export function arrayOf<T>(...exprs: Expr<T>[]): Expr<ReadonlyArray<T>> {
+  const args = exprs.map((e) => compile(e.toFragment())).join(", ")
+  return makeExpr<ReadonlyArray<T>>(raw(`[${args}]`))
+}
+
+/** Build a map literal: `map('k1', v1, 'k2', v2, ...)` */
+export function mapLiteral(
+  ...pairs: Array<[string, Expr<string>]>
+): Expr<Record<string, string>> {
+  if (pairs.length === 0) return makeExpr<Record<string, string>>(raw("map()"))
+  const args = pairs
+    .map(([k, v]) => `${compile(str(k))}, ${compile(v.toFragment())}`)
+    .join(", ")
+  return makeExpr<Record<string, string>>(raw(`map(${args})`))
+}
+
+// ---------------------------------------------------------------------------
+// Cast functions
+// ---------------------------------------------------------------------------
+
+export function toUInt64(expr: Expr<number>): Expr<number> {
+  return makeExpr<number>(raw(`toUInt64(${compile(expr.toFragment())})`))
+}
+
+export function toInt64(expr: Expr<number>): Expr<number> {
+  return makeExpr<number>(raw(`toInt64(${compile(expr.toFragment())})`))
+}
+
+// ---------------------------------------------------------------------------
+// Multi-branch conditional
+// ---------------------------------------------------------------------------
+
+/** multiIf(cond1, val1, cond2, val2, ..., else) */
+export function multiIf<T>(
+  cases: Array<[Condition, Expr<T>]>,
+  else_: Expr<T>,
+): Expr<T> {
+  const parts = cases
+    .map(([cond, val]) => `${compile(cond.toFragment())}, ${compile(val.toFragment())}`)
+    .join(", ")
+  return makeExpr<T>(raw(`multiIf(${parts}, ${compile(else_.toFragment())})`))
+}
+
+// ---------------------------------------------------------------------------
+// String functions
+// ---------------------------------------------------------------------------
+
+export function position_(haystack: Expr<string>, needle: string): Expr<number> {
+  return makeExpr<number>(raw(`position(${compile(haystack.toFragment())}, ${compile(str(needle))})`))
+}
+
+export function left_(s: Expr<string>, len: Expr<number>): Expr<string> {
+  return makeExpr<string>(raw(`left(${compile(s.toFragment())}, ${compile(len.toFragment())})`))
+}
+
+export function length_(s: Expr<string>): Expr<number> {
+  return makeExpr<number>(raw(`length(${compile(s.toFragment())})`))
+}
+
+export function replaceOne(
+  haystack: Expr<string>,
+  pattern: string,
+  replacement: string,
+): Expr<string> {
+  return makeExpr<string>(
+    raw(`replaceOne(${compile(haystack.toFragment())}, ${compile(str(pattern))}, ${compile(str(replacement))})`),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Numeric functions
+// ---------------------------------------------------------------------------
+
+export function least_(...exprs: Expr<number>[]): Expr<number> {
+  const args = exprs.map((e) => compile(e.toFragment())).join(", ")
+  return makeExpr<number>(raw(`least(${args})`))
+}
+
+export function greatest_(...exprs: Expr<number>[]): Expr<number> {
+  const args = exprs.map((e) => compile(e.toFragment())).join(", ")
+  return makeExpr<number>(raw(`greatest(${args})`))
 }

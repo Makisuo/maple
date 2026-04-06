@@ -52,7 +52,6 @@ export interface AlertTracesAggregateByServiceOutput extends AlertTracesAggregat
   readonly serviceName: string
 }
 
-type AlertTracesParams = { orgId: string; startTime: string; endTime: string }
 
 function alertTracesSelectExprs($: ColumnAccessor<typeof Traces.columns>, apdexThresholdMs: number) {
   const t = apdexThresholdMs
@@ -62,11 +61,18 @@ function alertTracesSelectExprs($: ColumnAccessor<typeof Traces.columns>, apdexT
     p50Duration: CH.quantile(0.5)($.Duration).div(1000000),
     p95Duration: CH.quantile(0.95)($.Duration).div(1000000),
     p99Duration: CH.quantile(0.99)($.Duration).div(1000000),
-    errorRate: CH.rawExpr<number>(`if(count() > 0, countIf(StatusCode = 'Error') * 100.0 / count(), 0)`),
+    errorRate: CH.if_(CH.count().gt(0), CH.countIf($.StatusCode.eq("Error")).mul(100.0).div(CH.count()), CH.lit(0)),
     satisfiedCount: CH.countIf($.Duration.div(1000000).lt(t)),
     toleratingCount: CH.countIf($.Duration.div(1000000).gte(t).and($.Duration.div(1000000).lt(t * 4))),
-    apdexScore: CH.rawExpr<number>(
-      `if(count() > 0, round((countIf(Duration / 1000000 < ${t}) + countIf(Duration / 1000000 >= ${t} AND Duration / 1000000 < ${t} * 4) * 0.5) / count(), 4), 0)`,
+    apdexScore: CH.if_(
+      CH.count().gt(0),
+      CH.round_(
+        CH.countIf($.Duration.div(1000000).lt(t))
+          .add(CH.countIf($.Duration.div(1000000).gte(t).and($.Duration.div(1000000).lt(t * 4))).mul(0.5))
+          .div(CH.count()),
+        4,
+      ),
+      CH.lit(0),
     ),
   }
 }
@@ -82,7 +88,7 @@ function alertTracesWhereConditions(
     CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
     CH.when(opts.spanName, (v: string) => $.SpanName.eq(v)),
     CH.whenTrue(!!opts.rootOnly, () =>
-      CH.rawCond("(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '')"),
+      $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq("")),
     ),
     CH.whenTrue(!!opts.errorsOnly, () => $.StatusCode.eq("Error")),
   ]
@@ -109,19 +115,18 @@ function alertTracesWhereConditions(
 
 export function alertTracesAggregateQuery(
   opts: AlertTracesOpts,
-): CHQuery<any, AlertTracesAggregateOutput, AlertTracesParams> {
+): CHQuery<any, AlertTracesAggregateOutput> {
   const threshold = opts.apdexThresholdMs ?? 500
 
   return from(Traces)
     .select(($) => alertTracesSelectExprs($, threshold))
     .where(($) => alertTracesWhereConditions($, opts))
     .format("JSON")
-    .withParams<AlertTracesParams>()
 }
 
 export function alertTracesAggregateByServiceQuery(
   opts: AlertTracesOpts,
-): CHQuery<any, AlertTracesAggregateByServiceOutput, AlertTracesParams> {
+): CHQuery<any, AlertTracesAggregateByServiceOutput> {
   const threshold = opts.apdexThresholdMs ?? 500
 
   return from(Traces)
@@ -133,7 +138,6 @@ export function alertTracesAggregateByServiceQuery(
     .groupBy("serviceName")
     .orderBy(["count", "desc"])
     .format("JSON")
-    .withParams<AlertTracesParams>()
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +161,6 @@ export interface AlertMetricsAggregateByServiceOutput extends AlertMetricsAggreg
   readonly serviceName: string
 }
 
-type AlertMetricsParams = { orgId: string; metricName: string; startTime: string; endTime: string }
 
 const VALUE_TABLES = {
   sum: MetricsSum,
@@ -171,7 +174,7 @@ const HISTOGRAM_TABLES = {
 
 function buildValueMetricsAggregate(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateOutput, AlertMetricsParams> {
+): CHQuery<any, AlertMetricsAggregateOutput> {
   const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
 
   return from(tbl as typeof MetricsSum)
@@ -190,12 +193,11 @@ function buildValueMetricsAggregate(
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
     ])
     .format("JSON")
-    .withParams<AlertMetricsParams>()
 }
 
 function buildHistogramMetricsAggregate(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateOutput, AlertMetricsParams> {
+): CHQuery<any, AlertMetricsAggregateOutput> {
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   return from(tbl as typeof MetricsHistogram)
@@ -214,12 +216,11 @@ function buildHistogramMetricsAggregate(
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
     ])
     .format("JSON")
-    .withParams<AlertMetricsParams>()
 }
 
 function buildValueMetricsAggregateByService(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateByServiceOutput, AlertMetricsParams> {
+): CHQuery<any, AlertMetricsAggregateByServiceOutput> {
   const tbl = VALUE_TABLES[opts.metricType as keyof typeof VALUE_TABLES]
 
   return from(tbl as typeof MetricsSum)
@@ -240,12 +241,11 @@ function buildValueMetricsAggregateByService(
     .groupBy("serviceName")
     .orderBy(["dataPointCount", "desc"])
     .format("JSON")
-    .withParams<AlertMetricsParams>()
 }
 
 function buildHistogramMetricsAggregateByService(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateByServiceOutput, AlertMetricsParams> {
+): CHQuery<any, AlertMetricsAggregateByServiceOutput> {
   const tbl = HISTOGRAM_TABLES[opts.metricType as keyof typeof HISTOGRAM_TABLES]
 
   return from(tbl as typeof MetricsHistogram)
@@ -266,19 +266,18 @@ function buildHistogramMetricsAggregateByService(
     .groupBy("serviceName")
     .orderBy(["dataPointCount", "desc"])
     .format("JSON")
-    .withParams<AlertMetricsParams>()
 }
 
 export function alertMetricsAggregateQuery(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateOutput, AlertMetricsParams> {
+): CHQuery<any, AlertMetricsAggregateOutput> {
   const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
   return isHistogram ? buildHistogramMetricsAggregate(opts) : buildValueMetricsAggregate(opts)
 }
 
 export function alertMetricsAggregateByServiceQuery(
   opts: AlertMetricsOpts,
-): CHQuery<any, AlertMetricsAggregateByServiceOutput, AlertMetricsParams> {
+): CHQuery<any, AlertMetricsAggregateByServiceOutput> {
   const isHistogram = opts.metricType === "histogram" || opts.metricType === "exponential_histogram"
   return isHistogram ? buildHistogramMetricsAggregateByService(opts) : buildValueMetricsAggregateByService(opts)
 }
@@ -302,7 +301,7 @@ export interface AlertLogsAggregateByServiceOutput extends AlertLogsAggregateOut
 
 export function alertLogsAggregateQuery(
   opts: AlertLogsOpts,
-): CHQuery<any, AlertLogsAggregateOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, AlertLogsAggregateOutput> {
   return from(Logs)
     .select(() => ({
       count: CH.count(),
@@ -315,12 +314,11 @@ export function alertLogsAggregateQuery(
       CH.when(opts.severity, (v: string) => SeverityText.eq(v)),
     ])
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
 
 export function alertLogsAggregateByServiceQuery(
   opts: AlertLogsOpts,
-): CHQuery<any, AlertLogsAggregateByServiceOutput, { orgId: string; startTime: string; endTime: string }> {
+): CHQuery<any, AlertLogsAggregateByServiceOutput> {
   return from(Logs)
     .select(({ ServiceName }) => ({
       serviceName: ServiceName,
@@ -335,5 +333,4 @@ export function alertLogsAggregateByServiceQuery(
     .groupBy("serviceName")
     .orderBy(["count", "desc"])
     .format("JSON")
-    .withParams<{ orgId: string; startTime: string; endTime: string }>()
 }
