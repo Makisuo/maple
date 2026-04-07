@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 
 const executeQueryEngineMock = vi.fn()
 const runTinybirdQueryMock = vi.fn()
 
 vi.mock("@/api/tinybird/effect-utils", () => ({
-  TinybirdDateTimeString: {},
+  TinybirdDateTimeString: Schema.String,
   TinybirdQueryError: class extends Error { _tag = "TinybirdQueryError" },
   decodeInput: (_schema: unknown, data: unknown) => Effect.succeed(data),
   invalidTinybirdInput: () => Effect.fail(new Error("invalid")),
