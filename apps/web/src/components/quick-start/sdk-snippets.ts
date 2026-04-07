@@ -141,7 +141,7 @@ func main() {
   {
     language: "effect",
     label: "Effect",
-    description: "TypeScript toolkit",
+    description: "TypeScript toolkit (Effect 3: use @effect-v3 tag)",
     iconKey: "effect",
     install: { packages: ["@maple-dev/effect-sdk", "effect"] },
     instrument: `// telemetry.ts

@@ -9,14 +9,24 @@ The `@maple-dev/effect-sdk` provides a pre-configured Effect Layer that sets up 
 
 ## Prerequisites
 
-- Effect 4+
+- Effect 4+ (or Effect 3 — see below)
 - A Maple project with an API key
 
 ## Install Dependencies
 
+**Effect 4+**
+
 ```bash
 npm install @maple-dev/effect-sdk effect
 ```
+
+**Effect 3**
+
+```bash
+npm install @maple-dev/effect-sdk@effect-v3 effect @effect/platform @effect/opentelemetry
+```
+
+> The API and import paths are identical between versions. The only differences are the install command and that duration config types use `Duration.DurationInput` instead of `Duration.Input` in Effect 3.
 
 ## Server Setup
 
@@ -103,6 +113,8 @@ All options for `Maple.layer()`:
 | `metricsExportInterval` | `Duration.Input` | No | Export interval for metrics |
 | `tracerExportInterval` | `Duration.Input` | No | Export interval for traces |
 | `shutdownTimeout` | `Duration.Input` | No | Graceful shutdown timeout |
+
+> In Effect 3, duration fields use the `Duration.DurationInput` type instead of `Duration.Input`.
 
 ## Environment Variable Auto-Detection
 
