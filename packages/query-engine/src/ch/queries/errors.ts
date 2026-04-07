@@ -9,7 +9,7 @@ import { param } from "../param"
 import { from, fromQuery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { compileCH } from "../compile"
-import { ErrorSpans, ServiceUsage, TraceListMv, Traces } from "../tables"
+import { ErrorSpans, ServiceUsage, TraceDetailSpans, TraceListMv, Traces } from "../tables"
 
 // ---------------------------------------------------------------------------
 // Shared: Error fingerprint expression (typed DSL)
@@ -154,7 +154,7 @@ export interface SpanHierarchyOutput {
 export function spanHierarchyQuery(
   opts: SpanHierarchyOpts,
 ) {
-  return from(Traces)
+  return from(TraceDetailSpans)
     .select(($) => {
       // HTTP span name rewriting: "http.server GET" + route → "GET /api/users"
       const route = $.SpanAttributes.get("http.route")

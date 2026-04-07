@@ -377,6 +377,43 @@ export const traceListMv = defineDatasource("trace_list_mv", {
 export type TraceListMvRow = InferRow<typeof traceListMv>;
 
 /**
+ * All spans for a given trace, re-sorted by TraceId for fast detail lookups.
+ * Populated by materialized view, not direct ingestion.
+ * Sorting key (OrgId, TraceId, SpanId) enables O(log N) primary-key lookup
+ * instead of bloom-filter scanning across all partitions.
+ */
+export const traceDetailSpans = defineDatasource("trace_detail_spans", {
+  description:
+    "All spans for a trace, sorted by TraceId for fast detail lookups. Populated by materialized view.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Timestamp: t.dateTime64(9),
+    TraceId: t.string(),
+    SpanId: t.string(),
+    ParentSpanId: t.string(),
+    SpanName: t.string().lowCardinality(),
+    SpanKind: t.string().lowCardinality(),
+    ServiceName: t.string().lowCardinality(),
+    Duration: t.uint64().default(0),
+    StatusCode: t.string().lowCardinality(),
+    StatusMessage: t.string(),
+    SpanAttributes: t.map(t.string().lowCardinality(), t.string()),
+    ResourceAttributes: t.map(t.string().lowCardinality(), t.string()),
+    EventsTimestamp: t.array(t.dateTime64(9)),
+    EventsName: t.array(t.string().lowCardinality()),
+    EventsAttributes: t.array(t.map(t.string().lowCardinality(), t.string())),
+  },
+  engine: engine.mergeTree({
+    partitionKey: "toDate(Timestamp)",
+    sortingKey: ["OrgId", "TraceId", "SpanId"],
+    ttl: "toDate(Timestamp) + INTERVAL 90 DAY",
+  }),
+});
+
+export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>;
+
+/**
  * OpenTelemetry sum/counter metrics datasource
  */
 export const metricsSum = defineDatasource("metrics_sum", {

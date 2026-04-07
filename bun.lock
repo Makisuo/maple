@@ -26,6 +26,25 @@
         "typescript": "catalog:tooling",
       },
     },
+    "apps/alerting-worker": {
+      "name": "@maple/alerting-worker",
+      "dependencies": {
+        "@libsql/client": "0.15.15",
+        "@maple/api": "workspace:*",
+        "@maple/db": "workspace:*",
+        "@maple/domain": "workspace:*",
+        "drizzle-orm": "^0.45.1",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "^4.20250214.0",
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848",
+        "typescript": "catalog:tooling",
+        "wrangler": "^4.14.4",
+      },
+    },
     "apps/api": {
       "name": "@maple/api",
       "dependencies": {
@@ -887,6 +906,8 @@
     "@maple-dev/effect-sdk": ["@maple-dev/effect-sdk@workspace:lib/effect-sdk"],
 
     "@maple/alerting": ["@maple/alerting@workspace:apps/alerting"],
+
+    "@maple/alerting-worker": ["@maple/alerting-worker@workspace:apps/alerting-worker"],
 
     "@maple/api": ["@maple/api@workspace:apps/api"],
 

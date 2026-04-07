@@ -5,10 +5,8 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { MapleDbConfig } from "./config"
 
-const currentDir = dirname(fileURLToPath(import.meta.url))
-const migrationsFolder = resolve(currentDir, "../drizzle")
-
 export const runMigrations = async (config: MapleDbConfig): Promise<void> => {
+  const migrationsFolder = resolve(dirname(fileURLToPath(import.meta.url)), "../drizzle")
   const client = createClient({
     url: config.url,
     authToken: config.authToken,

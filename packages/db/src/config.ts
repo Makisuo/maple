@@ -8,10 +8,10 @@ export interface MapleDbConfig {
   readonly localPath?: string
 }
 
-const currentDir = dirname(fileURLToPath(import.meta.url))
-
-const defaultLocalDbPath = () =>
-  resolve(currentDir, "../../../apps/api/.data/maple.db")
+const defaultLocalDbPath = () => {
+  const currentDir = dirname(fileURLToPath(import.meta.url))
+  return resolve(currentDir, "../../../apps/api/.data/maple.db")
+}
 
 const toLocalPath = (url: string): string | undefined => {
   if (!url.startsWith("file:")) {
