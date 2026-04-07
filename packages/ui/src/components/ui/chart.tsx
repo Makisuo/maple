@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import * as RechartsPrimitive from "recharts"
 
 import { cn } from "../../lib/utils"
@@ -20,6 +21,8 @@ export type ChartConfig = {
 
 type ChartContextProps = {
   config: ChartConfig
+  containerRef: React.RefObject<HTMLDivElement | null>
+  chartId: string
 }
 
 const ChartContext = React.createContext<ChartContextProps | null>(null)
@@ -48,10 +51,12 @@ function ChartContainer({
 }) {
   const uniqueId = React.useId()
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`
+  const containerRef = React.useRef<HTMLDivElement>(null)
 
   return (
-    <ChartContext.Provider value={{ config }}>
+    <ChartContext.Provider value={{ config, containerRef, chartId }}>
       <div
+        ref={containerRef}
         data-slot="chart"
         data-chart={chartId}
         className={cn(
@@ -118,6 +123,7 @@ function ChartTooltipContent({
   color,
   nameKey,
   labelKey,
+  coordinate,
 }: React.ComponentProps<typeof RechartsPrimitive.Tooltip> &
   React.ComponentProps<"div"> & {
     hideLabel?: boolean
@@ -126,7 +132,7 @@ function ChartTooltipContent({
     nameKey?: string
     labelKey?: string
   }) {
-  const { config } = useChart()
+  const { config, containerRef, chartId } = useChart()
 
   const tooltipLabel = React.useMemo(() => {
     if (hideLabel || !payload?.length) {
@@ -170,7 +176,7 @@ function ChartTooltipContent({
 
   const nestLabel = payload.length === 1 && indicator !== "dot"
 
-  return (
+  const content = (
     <div
       className={cn(
         "border-border/50 bg-background gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs shadow-xl grid min-w-[8rem] items-start",
@@ -263,6 +269,24 @@ function ChartTooltipContent({
       </div>
     </div>
   )
+
+  if (containerRef.current && coordinate?.x != null && coordinate?.y != null) {
+    const rect = containerRef.current.getBoundingClientRect()
+    return createPortal(
+      <div
+        data-chart={chartId}
+        className="pointer-events-none fixed left-0 top-0 z-50 transition-transform duration-200 ease-out"
+        style={{
+          transform: `translate3d(${rect.left + coordinate.x + 12}px, ${rect.top + coordinate.y}px, 0) translateY(-50%)`,
+        }}
+      >
+        {content}
+      </div>,
+      document.body
+    )
+  }
+
+  return content
 }
 
 const ChartLegend = RechartsPrimitive.Legend
