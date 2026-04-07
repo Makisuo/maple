@@ -208,6 +208,11 @@ function ChartTooltipContent({
                 <div className="grid gap-1.5">
                   {payload
                     .filter((item) => item.type !== "none" || !!formatter)
+                    .filter((item) => {
+                      if (typeof item.value !== "number" || item.value !== 0) return true
+                      const hasNegative = payload.some((p) => typeof p.value === "number" && p.value < 0)
+                      return hasNegative
+                    })
                     .sort((a, b) => {
                       const aVal = typeof a.value === "number" ? a.value : 0
                       const bVal = typeof b.value === "number" ? b.value : 0
