@@ -20,6 +20,12 @@ const toSpanId = Schema.decodeSync(SpanId)
 
 const ContainsMatchMode = Schema.optional(Schema.Literals(["contains"]))
 
+const AttributeFilterInput = Schema.Struct({
+  key: Schema.String,
+  value: Schema.String,
+  matchMode: Schema.optional(Schema.String),
+})
+
 const ListTracesInputSchema = Schema.Struct({
   limit: Schema.optional(
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(1000)),
@@ -35,16 +41,12 @@ const ListTracesInputSchema = Schema.Struct({
   httpMethod: Schema.optional(Schema.String),
   httpStatusCode: Schema.optional(Schema.String),
   deploymentEnv: Schema.optional(Schema.String),
-  attributeKey: Schema.optional(Schema.String),
-  attributeValue: Schema.optional(Schema.String),
-  resourceAttributeKey: Schema.optional(Schema.String),
-  resourceAttributeValue: Schema.optional(Schema.String),
+  attributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
+  resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
   rootOnly: Schema.optional(Schema.Boolean),
   serviceMatchMode: ContainsMatchMode,
   spanNameMatchMode: ContainsMatchMode,
   deploymentEnvMatchMode: ContainsMatchMode,
-  attributeValueMatchMode: ContainsMatchMode,
-  resourceAttributeValueMatchMode: ContainsMatchMode,
 })
 
 export type ListTracesInput = Schema.Schema.Type<typeof ListTracesInputSchema>
@@ -89,12 +91,14 @@ function buildAttributeFilters(input: ListTracesInput): AttributeFilter[] {
   if (input.httpStatusCode) {
     filters.push({ key: "http.status_code", value: input.httpStatusCode, mode: "equals" })
   }
-  if (input.attributeKey && input.attributeValue) {
-    filters.push({
-      key: input.attributeKey,
-      value: input.attributeValue,
-      mode: input.attributeValueMatchMode === "contains" ? "contains" : "equals",
-    })
+  if (input.attributeFilters) {
+    for (const af of input.attributeFilters) {
+      filters.push({
+        key: af.key,
+        value: af.value,
+        mode: af.matchMode === "contains" ? "contains" : "equals",
+      })
+    }
   }
 
   return filters
@@ -103,12 +107,14 @@ function buildAttributeFilters(input: ListTracesInput): AttributeFilter[] {
 function buildResourceAttributeFilters(input: ListTracesInput): AttributeFilter[] {
   const filters: AttributeFilter[] = []
 
-  if (input.resourceAttributeKey && input.resourceAttributeValue) {
-    filters.push({
-      key: input.resourceAttributeKey,
-      value: input.resourceAttributeValue,
-      mode: input.resourceAttributeValueMatchMode === "contains" ? "contains" : "equals",
-    })
+  if (input.resourceAttributeFilters) {
+    for (const rf of input.resourceAttributeFilters) {
+      filters.push({
+        key: rf.key,
+        value: rf.value,
+        mode: rf.matchMode === "contains" ? "contains" : "equals",
+      })
+    }
   }
 
   return filters
@@ -452,15 +458,11 @@ const GetTracesFacetsInputSchema = Schema.Struct({
   httpMethod: Schema.optional(Schema.String),
   httpStatusCode: Schema.optional(Schema.String),
   deploymentEnv: Schema.optional(Schema.String),
-  attributeKey: Schema.optional(Schema.String),
-  attributeValue: Schema.optional(Schema.String),
-  resourceAttributeKey: Schema.optional(Schema.String),
-  resourceAttributeValue: Schema.optional(Schema.String),
+  attributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
+  resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilterInput)),
   serviceMatchMode: ContainsMatchMode,
   spanNameMatchMode: ContainsMatchMode,
   deploymentEnvMatchMode: ContainsMatchMode,
-  attributeValueMatchMode: ContainsMatchMode,
-  resourceAttributeValueMatchMode: ContainsMatchMode,
 })
 
 export type GetTracesFacetsInput = Schema.Schema.Type<typeof GetTracesFacetsInputSchema>

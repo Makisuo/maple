@@ -64,24 +64,56 @@ describe("parseWhereClause", () => {
 
   it("parses attr.* keys", () => {
     const { filters } = parseWhereClause('attr.http.route = "/orders/:id"');
-    expect(filters.attributeKey).toBe("http.route");
-    expect(filters.attributeValue).toBe("/orders/:id");
+    expect(filters.attributeFilters).toEqual([
+      { key: "http.route", value: "/orders/:id", matchMode: undefined },
+    ]);
   });
 
   it("parses resource.* keys", () => {
     const { filters } = parseWhereClause('resource.service.version = "1.2.3"');
-    expect(filters.resourceAttributeKey).toBe("service.version");
-    expect(filters.resourceAttributeValue).toBe("1.2.3");
+    expect(filters.resourceAttributeFilters).toEqual([
+      { key: "service.version", value: "1.2.3", matchMode: undefined },
+    ]);
   });
 
   it("parses combined attr.* and resource.* keys", () => {
     const { filters } = parseWhereClause(
       'attr.http.route = "/orders/:id" AND resource.telemetry.sdk.name = "opentelemetry"',
     );
-    expect(filters.attributeKey).toBe("http.route");
-    expect(filters.attributeValue).toBe("/orders/:id");
-    expect(filters.resourceAttributeKey).toBe("telemetry.sdk.name");
-    expect(filters.resourceAttributeValue).toBe("opentelemetry");
+    expect(filters.attributeFilters).toEqual([
+      { key: "http.route", value: "/orders/:id", matchMode: undefined },
+    ]);
+    expect(filters.resourceAttributeFilters).toEqual([
+      { key: "telemetry.sdk.name", value: "opentelemetry", matchMode: undefined },
+    ]);
+  });
+
+  it("parses multiple attr.* filters", () => {
+    const { filters } = parseWhereClause(
+      'attr.http.route = "/api" AND attr.db.system = "postgresql" AND attr.http.method = "POST"',
+    );
+    expect(filters.attributeFilters).toEqual([
+      { key: "http.route", value: "/api", matchMode: undefined },
+      { key: "db.system", value: "postgresql", matchMode: undefined },
+      { key: "http.method", value: "POST", matchMode: undefined },
+    ]);
+  });
+
+  it("parses multiple resource.* filters", () => {
+    const { filters } = parseWhereClause(
+      'resource.service.version = "1.0" AND resource.deployment.environment = "prod"',
+    );
+    expect(filters.resourceAttributeFilters).toEqual([
+      { key: "service.version", value: "1.0", matchMode: undefined },
+      { key: "deployment.environment", value: "prod", matchMode: undefined },
+    ]);
+  });
+
+  it("caps attr.* filters at 5", () => {
+    const clause = Array.from({ length: 7 }, (_, i) => `attr.key${i} = "val${i}"`).join(" AND ");
+    const { filters } = parseWhereClause(clause);
+    expect(filters.attributeFilters).toHaveLength(5);
+    expect(filters.attributeFilters[4].key).toBe("key4");
   });
 
   it("marks incomplete clauses for unclosed quotes", () => {
@@ -97,7 +129,8 @@ describe("parseWhereClause", () => {
 
   it("returns empty for empty input", () => {
     const result = parseWhereClause("");
-    expect(result.filters).toEqual({});
+    expect(result.filters.attributeFilters).toEqual([]);
+    expect(result.filters.resourceAttributeFilters).toEqual([]);
     expect(result.hasIncompleteClauses).toBe(false);
   });
 
@@ -115,8 +148,8 @@ describe("parseWhereClause", () => {
     expect(filters.rootOnly).toBe(false);
     expect(filters.minDurationMs).toBe(12.5);
     expect(filters.maxDurationMs).toBe(88);
-    expect(filters.attributeKey).toBe("http.route");
-    expect(filters.attributeValue).toBe("/api/orders");
+    expect(filters.attributeFilters[0].key).toBe("http.route");
+    expect(filters.attributeFilters[0].value).toBe("/api/orders");
   });
 
   it("parses contains operator for service.name", () => {
@@ -148,16 +181,16 @@ describe("parseWhereClause", () => {
 
   it("parses contains for attr.* keys", () => {
     const { filters } = parseWhereClause('attr.http.route contains "/api"');
-    expect(filters.attributeKey).toBe("http.route");
-    expect(filters.attributeValue).toBe("/api");
-    expect(filters.matchModes).toEqual({ attributeValue: "contains" });
+    expect(filters.attributeFilters).toEqual([
+      { key: "http.route", value: "/api", matchMode: "contains" },
+    ]);
   });
 
   it("parses contains for resource.* keys", () => {
     const { filters } = parseWhereClause('resource.service.version contains "1.2"');
-    expect(filters.resourceAttributeKey).toBe("service.version");
-    expect(filters.resourceAttributeValue).toBe("1.2");
-    expect(filters.matchModes).toEqual({ resourceAttributeValue: "contains" });
+    expect(filters.resourceAttributeFilters).toEqual([
+      { key: "service.version", value: "1.2", matchMode: "contains" },
+    ]);
   });
 
   it("does not set matchModes for = operator", () => {
@@ -174,6 +207,8 @@ describe("toWhereClause", () => {
       spanName: "GET /orders",
       hasError: true,
       minDurationMs: 25,
+      attributeFilters: [],
+      resourceAttributeFilters: [],
     });
     expect(clause).toBe(
       'service.name = "checkout" AND span.name = "GET /orders" AND has_error = true AND min_duration_ms = 25',
@@ -181,39 +216,50 @@ describe("toWhereClause", () => {
   });
 
   it("returns undefined for empty filters", () => {
-    expect(toWhereClause({})).toBeUndefined();
+    expect(toWhereClause({ attributeFilters: [], resourceAttributeFilters: [] })).toBeUndefined();
   });
 
   it("includes attr.* clauses", () => {
     const clause = toWhereClause({
-      attributeKey: "http.route",
-      attributeValue: "/orders/:id",
+      attributeFilters: [{ key: "http.route", value: "/orders/:id" }],
+      resourceAttributeFilters: [],
     });
     expect(clause).toBe('attr.http.route = "/orders/:id"');
   });
 
   it("includes resource.* clauses", () => {
     const clause = toWhereClause({
-      resourceAttributeKey: "service.version",
-      resourceAttributeValue: "1.2.3",
+      attributeFilters: [],
+      resourceAttributeFilters: [{ key: "service.version", value: "1.2.3" }],
     });
     expect(clause).toBe('resource.service.version = "1.2.3"');
   });
 
   it("includes both attr.* and resource.* clauses", () => {
     const clause = toWhereClause({
-      attributeKey: "http.route",
-      attributeValue: "/orders/:id",
-      resourceAttributeKey: "service.version",
-      resourceAttributeValue: "1.2.3",
+      attributeFilters: [{ key: "http.route", value: "/orders/:id" }],
+      resourceAttributeFilters: [{ key: "service.version", value: "1.2.3" }],
     });
     expect(clause).toBe('attr.http.route = "/orders/:id" AND resource.service.version = "1.2.3"');
+  });
+
+  it("includes multiple attr.* clauses", () => {
+    const clause = toWhereClause({
+      attributeFilters: [
+        { key: "http.route", value: "/api" },
+        { key: "db.system", value: "postgresql" },
+      ],
+      resourceAttributeFilters: [],
+    });
+    expect(clause).toBe('attr.http.route = "/api" AND attr.db.system = "postgresql"');
   });
 
   it("uses contains operator when matchModes is set", () => {
     const clause = toWhereClause({
       service: "check",
       matchModes: { service: "contains" },
+      attributeFilters: [],
+      resourceAttributeFilters: [],
     });
     expect(clause).toBe('service.name contains "check"');
   });
@@ -223,17 +269,25 @@ describe("toWhereClause", () => {
       service: "check",
       spanName: "GET /orders",
       matchModes: { service: "contains" },
+      attributeFilters: [],
+      resourceAttributeFilters: [],
     });
     expect(clause).toBe('service.name contains "check" AND span.name = "GET /orders"');
   });
 
-  it("uses contains for attr.* when matchModes is set", () => {
+  it("uses contains for attr.* when matchMode is set per-filter", () => {
     const clause = toWhereClause({
-      attributeKey: "http.route",
-      attributeValue: "/api",
-      matchModes: { attributeValue: "contains" },
+      attributeFilters: [{ key: "http.route", value: "/api", matchMode: "contains" }],
+      resourceAttributeFilters: [],
     });
     expect(clause).toBe('attr.http.route contains "/api"');
+  });
+
+  it("round-trips multiple attr.* filters", () => {
+    const original = 'attr.http.route = "/api" AND attr.db.system contains "postgres"';
+    const { filters } = parseWhereClause(original);
+    const clause = toWhereClause(filters);
+    expect(clause).toBe('attr.http.route = "/api" AND attr.db.system contains "postgres"');
   });
 });
 
@@ -310,18 +364,18 @@ describe("applyWhereClause", () => {
       'resource.service.version = "1.2.3"',
     );
 
-    expect(result.resourceAttributeKey).toBe("service.version");
-    expect(result.resourceAttributeValue).toBe("1.2.3");
+    expect(result.resourceAttributeFilters).toEqual([
+      { key: "service.version", value: "1.2.3", matchMode: undefined },
+    ]);
   });
 
   it("clears resource attribute filters when clause is empty", () => {
     const result = applyWhereClause(
-      { resourceAttributeKey: "service.version", resourceAttributeValue: "1.2.3" },
+      { resourceAttributeFilters: [{ key: "service.version", value: "1.2.3" }] },
       "",
     );
 
-    expect(result.resourceAttributeKey).toBeUndefined();
-    expect(result.resourceAttributeValue).toBeUndefined();
+    expect(result.resourceAttributeFilters).toBeUndefined();
   });
 
   it("sets serviceMatchMode when contains is used", () => {
@@ -344,11 +398,23 @@ describe("applyWhereClause", () => {
     expect(result.serviceMatchMode).toBeUndefined();
   });
 
-  it("sets attributeValueMatchMode when contains is used", () => {
+  it("sets matchMode per attribute filter when contains is used", () => {
     const result = applyWhereClause({}, 'attr.http.route contains "/api"');
 
-    expect(result.attributeKey).toBe("http.route");
-    expect(result.attributeValue).toBe("/api");
-    expect(result.attributeValueMatchMode).toBe("contains");
+    expect(result.attributeFilters).toEqual([
+      { key: "http.route", value: "/api", matchMode: "contains" },
+    ]);
+  });
+
+  it("merges multiple attribute filters into search params", () => {
+    const result = applyWhereClause(
+      {},
+      'attr.http.route = "/api" AND attr.db.system = "postgresql"',
+    );
+
+    expect(result.attributeFilters).toEqual([
+      { key: "http.route", value: "/api", matchMode: undefined },
+      { key: "db.system", value: "postgresql", matchMode: undefined },
+    ]);
   });
 });

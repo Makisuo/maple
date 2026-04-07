@@ -29,18 +29,14 @@ function buildQueryParams(filters: TracesSearchParams | undefined, refreshedRang
     httpMethod: filters?.httpMethods?.[0],
     httpStatusCode: filters?.httpStatusCodes?.[0],
     deploymentEnv: filters?.deploymentEnvs?.[0],
-    attributeKey: filters?.attributeKey,
-    attributeValue: filters?.attributeValue,
-    resourceAttributeKey: filters?.resourceAttributeKey,
-    resourceAttributeValue: filters?.resourceAttributeValue,
+    attributeFilters: filters?.attributeFilters,
+    resourceAttributeFilters: filters?.resourceAttributeFilters,
     startTime: refreshedRange.startTime,
     endTime: refreshedRange.endTime,
     rootOnly: filters?.rootOnly,
     serviceMatchMode: filters?.serviceMatchMode,
     spanNameMatchMode: filters?.spanNameMatchMode,
     deploymentEnvMatchMode: filters?.deploymentEnvMatchMode,
-    attributeValueMatchMode: filters?.attributeValueMatchMode,
-    resourceAttributeValueMatchMode: filters?.resourceAttributeValueMatchMode,
   }
 }
 

@@ -245,6 +245,9 @@ function buildListEndpointParams(
   const params: Record<string, unknown> = { limit }
 
   if (dataSource === "traces") {
+    const attributeFilters: Array<{ key: string; value: string; matchMode?: string }> = []
+    const resourceAttributeFilters: Array<{ key: string; value: string; matchMode?: string }> = []
+
     for (const clause of clauses) {
       const key = normalizeKey(clause.key)
       if (key === "service.name") params.service = clause.value
@@ -257,13 +260,22 @@ function buildListEndpointParams(
         if (b != null) params.rootOnly = b
       } else if (key === "deployment.environment") params.deploymentEnv = clause.value
       else if (key.startsWith("attr.")) {
-        params.attributeKey = key.slice(5)
-        if (clause.operator !== "exists") params.attributeValue = clause.value
+        attributeFilters.push({
+          key: key.slice(5),
+          value: clause.operator !== "exists" ? clause.value : "",
+          matchMode: clause.operator === "contains" ? "contains" : undefined,
+        })
       } else if (key.startsWith("resource.")) {
-        params.resourceAttributeKey = key.slice(9)
-        if (clause.operator !== "exists") params.resourceAttributeValue = clause.value
+        resourceAttributeFilters.push({
+          key: key.slice(9),
+          value: clause.operator !== "exists" ? clause.value : "",
+          matchMode: clause.operator === "contains" ? "contains" : undefined,
+        })
       }
     }
+
+    if (attributeFilters.length > 0) params.attributeFilters = attributeFilters
+    if (resourceAttributeFilters.length > 0) params.resourceAttributeFilters = resourceAttributeFilters
   } else {
     for (const clause of clauses) {
       const key = normalizeKey(clause.key)

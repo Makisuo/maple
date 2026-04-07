@@ -21,6 +21,12 @@ import { AutocompleteValuesProvider } from "@/hooks/use-autocomplete-values"
 
 const ContainsMatchMode = Schema.optional(Schema.Literals(["contains"]))
 
+const AttributeFilterParam = Schema.Struct({
+  key: Schema.String,
+  value: Schema.String,
+  matchMode: Schema.optional(Schema.Literals(["contains"])),
+})
+
 const tracesSearchSchema = Schema.Struct({
   services: OptionalStringArrayParam,
   spanNames: OptionalStringArrayParam,
@@ -35,15 +41,11 @@ const tracesSearchSchema = Schema.Struct({
   timePreset: Schema.optional(Schema.String),
   rootOnly: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
   whereClause: Schema.optional(Schema.String),
-  attributeKey: Schema.optional(Schema.String),
-  attributeValue: Schema.optional(Schema.String),
-  resourceAttributeKey: Schema.optional(Schema.String),
-  resourceAttributeValue: Schema.optional(Schema.String),
+  attributeFilters: Schema.optional(Schema.Array(AttributeFilterParam)),
+  resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilterParam)),
   serviceMatchMode: ContainsMatchMode,
   spanNameMatchMode: ContainsMatchMode,
   deploymentEnvMatchMode: ContainsMatchMode,
-  attributeValueMatchMode: ContainsMatchMode,
-  resourceAttributeValueMatchMode: ContainsMatchMode,
 })
 
 export type TracesSearchParams = Schema.Schema.Type<typeof tracesSearchSchema>

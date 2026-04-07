@@ -6,6 +6,12 @@ import {
 } from "@maple/query-engine/where-clause"
 import { Match } from "effect"
 
+export interface AttributeFilterEntry {
+  key: string
+  value: string
+  matchMode?: FilterMatchMode
+}
+
 export interface TracesSearchLike {
   services?: string[]
   spanNames?: string[]
@@ -19,15 +25,11 @@ export interface TracesSearchLike {
   endTime?: string
   rootOnly?: boolean
   whereClause?: string
-  attributeKey?: string
-  attributeValue?: string
-  resourceAttributeKey?: string
-  resourceAttributeValue?: string
+  attributeFilters?: readonly AttributeFilterEntry[]
+  resourceAttributeFilters?: readonly AttributeFilterEntry[]
   serviceMatchMode?: FilterMatchMode
   spanNameMatchMode?: FilterMatchMode
   deploymentEnvMatchMode?: FilterMatchMode
-  attributeValueMatchMode?: FilterMatchMode
-  resourceAttributeValueMatchMode?: FilterMatchMode
 }
 
 export type FilterMatchMode = "contains"
@@ -42,10 +44,8 @@ export interface ParsedWhereClauseFilters {
   rootOnly?: false
   minDurationMs?: number
   maxDurationMs?: number
-  attributeKey?: string
-  attributeValue?: string
-  resourceAttributeKey?: string
-  resourceAttributeValue?: string
+  attributeFilters: AttributeFilterEntry[]
+  resourceAttributeFilters: AttributeFilterEntry[]
   matchModes?: Partial<Record<string, FilterMatchMode>>
 }
 
@@ -59,14 +59,14 @@ export function parseWhereClause(whereClause: string | undefined): {
 } {
   if (!whereClause || !whereClause.trim()) {
     return {
-      filters: {},
+      filters: { attributeFilters: [], resourceAttributeFilters: [] },
       hasIncompleteClauses: false,
     }
   }
 
   const { clauses, warnings } = parseWhereClauses(whereClause.trim())
 
-  let parsed: ParsedWhereClauseFilters = {}
+  let parsed: ParsedWhereClauseFilters = { attributeFilters: [], resourceAttributeFilters: [] }
   let hasIncompleteClauses = warnings.length > 0
 
   for (const clause of clauses) {
@@ -83,21 +83,23 @@ export function parseWhereClause(whereClause: string | undefined): {
     // Handle attr.* and resource.* prefixes before Match
     if (key.startsWith("attr.")) {
       const attributeKey = key.slice(5).trim()
-      if (!attributeKey || parsed.attributeKey) continue
-      parsed = { ...parsed, attributeKey, attributeValue: clause.value }
-      setMatchMode("attributeValue")
+      if (!attributeKey || parsed.attributeFilters.length >= 5) continue
+      parsed.attributeFilters.push({
+        key: attributeKey,
+        value: clause.value,
+        matchMode: isContains ? "contains" : undefined,
+      })
       continue
     }
 
     if (key.startsWith("resource.")) {
       const resourceKey = key.slice(9).trim()
-      if (!resourceKey || parsed.resourceAttributeKey) continue
-      parsed = {
-        ...parsed,
-        resourceAttributeKey: resourceKey,
-        resourceAttributeValue: clause.value,
-      }
-      setMatchMode("resourceAttributeValue")
+      if (!resourceKey || parsed.resourceAttributeFilters.length >= 5) continue
+      parsed.resourceAttributeFilters.push({
+        key: resourceKey,
+        value: clause.value,
+        matchMode: isContains ? "contains" : undefined,
+      })
       continue
     }
 
@@ -208,16 +210,14 @@ export function toWhereClause(filters: ParsedWhereClauseFilters): string | undef
     clauses.push(`max_duration_ms = ${String(filters.maxDurationMs)}`)
   }
 
-  if (filters.attributeKey && filters.attributeValue) {
-    clauses.push(
-      `attr.${filters.attributeKey} ${op("attributeValue")} ${quoteValue(filters.attributeValue)}`,
-    )
+  for (const af of filters.attributeFilters) {
+    const afOp = af.matchMode === "contains" ? "contains" : "="
+    clauses.push(`attr.${af.key} ${afOp} ${quoteValue(af.value)}`)
   }
 
-  if (filters.resourceAttributeKey && filters.resourceAttributeValue) {
-    clauses.push(
-      `resource.${filters.resourceAttributeKey} ${op("resourceAttributeValue")} ${quoteValue(filters.resourceAttributeValue)}`,
-    )
+  for (const rf of filters.resourceAttributeFilters) {
+    const rfOp = rf.matchMode === "contains" ? "contains" : "="
+    clauses.push(`resource.${rf.key} ${rfOp} ${quoteValue(rf.value)}`)
   }
 
   if (clauses.length === 0) {
@@ -251,15 +251,11 @@ export function applyWhereClause(
       httpStatusCodes: undefined,
       deploymentEnvs: undefined,
       rootOnly: undefined,
-      attributeKey: undefined,
-      attributeValue: undefined,
-      resourceAttributeKey: undefined,
-      resourceAttributeValue: undefined,
+      attributeFilters: undefined,
+      resourceAttributeFilters: undefined,
       serviceMatchMode: undefined,
       spanNameMatchMode: undefined,
       deploymentEnvMatchMode: undefined,
-      attributeValueMatchMode: undefined,
-      resourceAttributeValueMatchMode: undefined,
     }
   }
 
@@ -278,14 +274,10 @@ export function applyWhereClause(
     httpStatusCodes: filters.httpStatusCode ? [filters.httpStatusCode] : search.httpStatusCodes,
     deploymentEnvs: filters.deploymentEnv ? [filters.deploymentEnv] : search.deploymentEnvs,
     rootOnly: filters.rootOnly ?? search.rootOnly,
-    attributeKey: filters.attributeKey ?? search.attributeKey,
-    attributeValue: filters.attributeValue ?? search.attributeValue,
-    resourceAttributeKey: filters.resourceAttributeKey ?? search.resourceAttributeKey,
-    resourceAttributeValue: filters.resourceAttributeValue ?? search.resourceAttributeValue,
+    attributeFilters: filters.attributeFilters.length > 0 ? filters.attributeFilters : search.attributeFilters,
+    resourceAttributeFilters: filters.resourceAttributeFilters.length > 0 ? filters.resourceAttributeFilters : search.resourceAttributeFilters,
     serviceMatchMode: filters.service ? modes.service : search.serviceMatchMode,
     spanNameMatchMode: filters.spanName ? modes.spanName : search.spanNameMatchMode,
     deploymentEnvMatchMode: filters.deploymentEnv ? modes.deploymentEnv : search.deploymentEnvMatchMode,
-    attributeValueMatchMode: filters.attributeValue ? modes.attributeValue : search.attributeValueMatchMode,
-    resourceAttributeValueMatchMode: filters.resourceAttributeValue ? modes.resourceAttributeValue : search.resourceAttributeValueMatchMode,
   }
 }

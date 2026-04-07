@@ -178,15 +178,11 @@ describe("TracesPage timePreset search updates", () => {
       timePreset: undefined,
       rootOnly: undefined,
       whereClause: undefined,
-      attributeKey: undefined,
-      attributeValue: undefined,
-      resourceAttributeKey: undefined,
-      resourceAttributeValue: undefined,
+      attributeFilters: undefined,
+      resourceAttributeFilters: undefined,
       serviceMatchMode: undefined,
       spanNameMatchMode: undefined,
       deploymentEnvMatchMode: undefined,
-      attributeValueMatchMode: undefined,
-      resourceAttributeValueMatchMode: undefined,
     });
   });
 
@@ -235,15 +231,11 @@ describe("TracesPage timePreset search updates", () => {
       timePreset: "1h",
       rootOnly: undefined,
       whereClause: undefined,
-      attributeKey: undefined,
-      attributeValue: undefined,
-      resourceAttributeKey: undefined,
-      resourceAttributeValue: undefined,
+      attributeFilters: undefined,
+      resourceAttributeFilters: undefined,
       serviceMatchMode: undefined,
       spanNameMatchMode: undefined,
       deploymentEnvMatchMode: undefined,
-      attributeValueMatchMode: undefined,
-      resourceAttributeValueMatchMode: undefined,
     });
 
     render(<TracesRoute.TracesPage />);

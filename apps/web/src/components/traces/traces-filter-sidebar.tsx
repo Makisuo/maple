@@ -45,7 +45,8 @@ export function TracesFilterSidebarView({
     filters.hasError !== undefined ||
     filters.minDurationMs !== undefined ||
     filters.maxDurationMs !== undefined ||
-    filters.attributeKey !== undefined
+    (filters.attributeFilters?.length ?? 0) > 0 ||
+    (filters.resourceAttributeFilters?.length ?? 0) > 0
 
   return Result.builder(facetsResult)
     .onInitial(() => <LoadingState />)
