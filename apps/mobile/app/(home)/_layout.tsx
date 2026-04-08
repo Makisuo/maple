@@ -16,8 +16,8 @@ export default function HomeLayout() {
 	return (
 		<NativeTabs>
 			<NativeTabs.Trigger name="index">
-				<NativeTabs.Trigger.Label>Dashboard</NativeTabs.Trigger.Label>
-				<NativeTabs.Trigger.Icon sf="square.grid.2x2" />
+				<NativeTabs.Trigger.Label>Overview</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Icon sf="house" />
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="traces">
 				<NativeTabs.Trigger.Label>Traces</NativeTabs.Trigger.Label>

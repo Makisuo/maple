@@ -12,6 +12,8 @@
     "@clerk/expo": "^3.1.8",
     "@expo-google-fonts/geist-mono": "^0.4.1",
     "@expo/metro-runtime": "^55.0.9",
+    "@expo/ui": "~55.0.10",
+
     "expo": "~55.0.12",
     "expo-auth-session": "~55.0.12",
     "expo-constants": "~55.0.12",

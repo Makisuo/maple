@@ -1,15 +1,17 @@
 import "../global.css";
 
 import { useCallback } from "react";
-import { ClerkProvider } from "@clerk/expo";
+import { ClerkProvider, useAuth } from "@clerk/expo";
 import { tokenCache } from "@clerk/expo/token-cache";
 import { useFonts } from "@expo-google-fonts/geist-mono/useFonts";
 import { GeistMono_400Regular } from "@expo-google-fonts/geist-mono/400Regular";
 import { GeistMono_700Bold } from "@expo-google-fonts/geist-mono/700Bold";
 import * as SplashScreen from "expo-splash-screen";
+import { useEffect } from "react";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Slot } from "expo-router";
+import { setAuthTokenProvider } from "../lib/api";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -17,6 +19,18 @@ const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 
 if (!publishableKey) {
 	throw new Error("EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY is required");
+}
+
+function AuthBridge({ children }: { children: React.ReactNode }) {
+	const { getToken, isSignedIn } = useAuth();
+
+	useEffect(() => {
+		if (isSignedIn) {
+			setAuthTokenProvider(() => getToken());
+		}
+	}, [getToken, isSignedIn]);
+
+	return <>{children}</>;
 }
 
 export default function RootLayout() {
@@ -42,7 +56,9 @@ export default function RootLayout() {
 					publishableKey={publishableKey}
 					tokenCache={tokenCache}
 				>
-					<Slot />
+					<AuthBridge>
+						<Slot />
+					</AuthBridge>
 				</ClerkProvider>
 			</View>
 		</SafeAreaProvider>
