@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   fetchServiceUsage,
   fetchOverviewTimeSeries,
+  fetchLogsTimeSeries,
   type ServiceUsage,
   type TimeSeriesPoint,
+  type LogsTimeSeriesPoint,
 } from "../lib/api"
 import {
   getTimeRange,
@@ -36,6 +38,7 @@ export interface DashboardData {
   prevUsage: UsageTotals
   usagePerService: ServiceUsage[]
   timeseries: TimeSeriesPoint[]
+  logsTimeseries: LogsTimeSeriesPoint[]
 }
 
 type DashboardState =
@@ -59,10 +62,11 @@ export function useDashboardData(timeKey: TimeRangeKey) {
       const { startTime: prevStart, endTime: prevEnd } = getPreviousTimeRange(timeKey)
       const bucketSeconds = computeBucketSeconds(startTime, endTime)
 
-      const [usage, prevUsageData, timeseries] = await Promise.all([
+      const [usage, prevUsageData, timeseries, logsTimeseries] = await Promise.all([
         fetchServiceUsage(startTime, endTime),
         fetchServiceUsage(prevStart, prevEnd),
         fetchOverviewTimeSeries(startTime, endTime, bucketSeconds),
+        fetchLogsTimeSeries(startTime, endTime, bucketSeconds),
       ])
 
       if (controller.signal.aborted) return
@@ -74,6 +78,7 @@ export function useDashboardData(timeKey: TimeRangeKey) {
           prevUsage: sumUsage(prevUsageData),
           usagePerService: usage,
           timeseries,
+          logsTimeseries,
         },
       })
     } catch (err) {

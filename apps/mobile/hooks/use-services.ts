@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchTraces, type Trace, type TraceFilters } from "../lib/api"
+import { fetchServiceOverview, type ServiceOverview } from "../lib/api"
 import { getTimeRange, type TimeRangeKey } from "../lib/time-utils"
 
-type TracesState =
+type ServicesState =
 	| { status: "loading" }
 	| { status: "error"; error: string }
-	| { status: "success"; data: Trace[] }
+	| { status: "success"; data: ServiceOverview[] }
 
-export function useTraces(timeKey: TimeRangeKey = "24h", filters?: TraceFilters) {
-	const [state, setState] = useState<TracesState>({ status: "loading" })
+export function useServices(timeKey: TimeRangeKey = "24h") {
+	const [state, setState] = useState<ServicesState>({ status: "loading" })
 	const abortRef = useRef<AbortController | null>(null)
-	const filterKey = JSON.stringify(filters ?? {})
 
 	const load = useCallback(async () => {
 		abortRef.current?.abort()
@@ -21,11 +20,11 @@ export function useTraces(timeKey: TimeRangeKey = "24h", filters?: TraceFilters)
 
 		try {
 			const { startTime, endTime } = getTimeRange(timeKey)
-			const traces = await fetchTraces(startTime, endTime, { limit: 50, filters })
+			const services = await fetchServiceOverview(startTime, endTime)
 
 			if (controller.signal.aborted) return
 
-			setState({ status: "success", data: traces })
+			setState({ status: "success", data: services })
 		} catch (err) {
 			if (controller.signal.aborted) return
 			setState({
@@ -33,8 +32,7 @@ export function useTraces(timeKey: TimeRangeKey = "24h", filters?: TraceFilters)
 				error: err instanceof Error ? err.message : "Unknown error",
 			})
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [timeKey, filterKey])
+	}, [timeKey])
 
 	useEffect(() => {
 		load()

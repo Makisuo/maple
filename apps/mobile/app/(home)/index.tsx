@@ -49,7 +49,7 @@ function TelemetryRow({
   label: string
   value: string
   change: string | null
-  sparklineData: number[]
+  sparklineData?: number[]
   isLast?: boolean
 }) {
   return (
@@ -67,7 +67,9 @@ function TelemetryRow({
           )}
         </View>
       </View>
-      <SparklineBars data={sparklineData} height={22} barWidth={4} gap={2} />
+      {sparklineData && sparklineData.length > 0 && (
+        <SparklineBars data={sparklineData} height={22} barWidth={4} gap={2} />
+      )}
     </View>
   )
 }
@@ -202,13 +204,10 @@ export default function DashboardScreen() {
 }
 
 function DashboardContent({ data }: { data: import("../../hooks/use-dashboard-data").DashboardData }) {
-  const { usage, prevUsage, usagePerService, timeseries } = data
+  const { usage, prevUsage, timeseries, logsTimeseries } = data
 
-  const makeSparkline = (getter: (s: import("../../lib/api").ServiceUsage) => number) => {
-    const values = usagePerService.map(getter)
-    while (values.length < 6) values.push(0)
-    return values.slice(0, 6)
-  }
+  const logsSparkline = logsTimeseries.map((p) => p.count)
+  const tracesSparkline = timeseries.map((p) => p.throughput)
 
   const totalRequests = timeseries.reduce((sum, p) => sum + p.throughput, 0)
   const chartData = timeseries.map((p) => ({
@@ -239,25 +238,23 @@ function DashboardContent({ data }: { data: import("../../hooks/use-dashboard-da
             label="Logs"
             value={formatNumber(usage.logs)}
             change={computeChange(usage.logs, prevUsage.logs)}
-            sparklineData={makeSparkline((s) => s.totalLogs)}
+            sparklineData={logsSparkline}
           />
           <TelemetryRow
             label="Traces"
             value={formatNumber(usage.traces)}
             change={computeChange(usage.traces, prevUsage.traces)}
-            sparklineData={makeSparkline((s) => s.totalTraces)}
+            sparklineData={tracesSparkline}
           />
           <TelemetryRow
             label="Metrics"
             value={formatNumber(usage.metrics)}
             change={computeChange(usage.metrics, prevUsage.metrics)}
-            sparklineData={makeSparkline((s) => s.totalMetrics)}
           />
           <TelemetryRow
             label="Data Size"
             value={formatBytes(usage.dataSize)}
             change={computeChange(usage.dataSize, prevUsage.dataSize)}
-            sparklineData={makeSparkline((s) => s.dataSizeBytes)}
             isLast
           />
         </View>

@@ -1,10 +1,41 @@
-import { ActivityIndicator, FlatList, RefreshControl, Text, TextInput, View } from "react-native"
+import { useMemo, useState } from "react"
+import { ActivityIndicator, FlatList, RefreshControl, Text, View } from "react-native"
 import { useTraces } from "../../hooks/use-traces"
+import { useTracesFacets } from "../../hooks/use-traces-facets"
 import { TraceRow } from "../../components/traces/trace-row"
+import { FilterBar, DEFAULT_FILTER_STATE, type TracesFilterState } from "../../components/traces/filter-bar"
+import { FilterModal } from "../../components/traces/filter-modal"
+import type { TraceFilters } from "../../lib/api"
+
+const TIME_LABELS: Record<string, string> = {
+	"1h": "1h",
+	"24h": "24h",
+	"7d": "7d",
+	"30d": "30d",
+}
 
 export default function TracesScreen() {
-	const { state, refresh } = useTraces("24h")
+	const [filterState, setFilterState] = useState<TracesFilterState>(DEFAULT_FILTER_STATE)
+	const [modalVisible, setModalVisible] = useState(false)
+
+	const apiFilters = useMemo<TraceFilters | undefined>(() => {
+		const f: TraceFilters = {}
+		if (filterState.serviceName) f.serviceName = filterState.serviceName
+		if (filterState.spanName) f.spanName = filterState.spanName
+		if (filterState.errorsOnly) f.errorsOnly = true
+		return Object.keys(f).length > 0 ? f : undefined
+	}, [filterState.serviceName, filterState.spanName, filterState.errorsOnly])
+
+	const { state, refresh } = useTraces(filterState.timeKey, apiFilters)
+	const { state: facetsState } = useTracesFacets(filterState.timeKey)
 	const isRefreshing = state.status === "loading"
+
+	const handleRemoveFilter = (key: keyof TracesFilterState) => {
+		setFilterState((prev) => ({
+			...prev,
+			[key]: key === "errorsOnly" ? false : key === "timeKey" ? "24h" : "",
+		}))
+	}
 
 	return (
 		<View className="flex-1 bg-background">
@@ -17,30 +48,19 @@ export default function TracesScreen() {
 						</Text>
 						<Text className="text-xs text-muted-foreground font-mono mt-0.5">
 							{state.status === "success"
-								? `${state.data.length} traces in last 24h`
+								? `${state.data.length} traces in last ${TIME_LABELS[filterState.timeKey]}`
 								: "Loading traces..."}
 						</Text>
-					</View>
-					<View className="flex-row items-center gap-2">
-						<View className="rounded-lg border border-border px-3 py-1.5">
-							<Text className="text-xs text-foreground font-mono">Last 24h</Text>
-						</View>
 					</View>
 				</View>
 			</View>
 
-			{/* Search Bar */}
-			<View className="px-5 pb-3">
-				<View className="flex-row items-center bg-card rounded-lg px-3 py-2.5 border border-border">
-					<Text className="text-muted-foreground mr-2">🔍</Text>
-					<TextInput
-						className="flex-1 text-sm text-foreground font-mono"
-						placeholder="Search traces..."
-						placeholderTextColor="#8a8078"
-						editable={false}
-					/>
-				</View>
-			</View>
+			{/* Filter Bar */}
+			<FilterBar
+				filterState={filterState}
+				onRemoveFilter={handleRemoveFilter}
+				onOpenFilters={() => setModalVisible(true)}
+			/>
 
 			{/* Content */}
 			{state.status === "error" ? (
@@ -62,7 +82,7 @@ export default function TracesScreen() {
 			) : (
 				<FlatList
 					data={state.data}
-					keyExtractor={(item) => item.traceId}
+					keyExtractor={(item, index) => `${item.traceId}-${index}`}
 					contentContainerStyle={{ paddingBottom: 100 }}
 					refreshControl={
 						<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />
@@ -80,6 +100,15 @@ export default function TracesScreen() {
 					}
 				/>
 			)}
+
+			{/* Filter Modal */}
+			<FilterModal
+				visible={modalVisible}
+				onClose={() => setModalVisible(false)}
+				currentFilters={filterState}
+				onApply={setFilterState}
+				facets={facetsState.status === "success" ? facetsState.data : null}
+			/>
 		</View>
 	)
 }

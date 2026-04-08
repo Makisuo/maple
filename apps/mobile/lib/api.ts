@@ -94,6 +94,126 @@ export async function fetchOverviewTimeSeries(
   }))
 }
 
+export interface LogsTimeSeriesPoint {
+  bucket: string
+  count: number
+}
+
+export async function fetchLogsTimeSeries(
+  startTime: string,
+  endTime: string,
+  bucketSeconds: number,
+): Promise<LogsTimeSeriesPoint[]> {
+  const res = await apiRequest<{
+    result: { kind: string; data: Array<{ bucket: string; series: Record<string, number> }> }
+  }>("/api/query-engine/execute", {
+    startTime,
+    endTime,
+    query: {
+      kind: "timeseries",
+      source: "logs",
+      metric: "count",
+      bucketSeconds,
+    },
+  })
+
+  if (res.result.kind !== "timeseries") return []
+
+  return res.result.data.map((p) => ({
+    bucket: p.bucket,
+    count: p.series.all ?? p.series.count ?? 0,
+  }))
+}
+
+// ── Services ──
+
+export interface ServiceOverview {
+  serviceName: string
+  environment: string
+  p50LatencyMs: number
+  p95LatencyMs: number
+  p99LatencyMs: number
+  errorRate: number // percentage 0-100
+  throughput: number // req/s
+}
+
+export async function fetchServiceOverview(startTime: string, endTime: string): Promise<ServiceOverview[]> {
+  const res = await apiRequest<{ data: Array<Record<string, unknown>> }>(
+    "/api/query-engine/service-overview",
+    { startTime, endTime },
+  )
+
+  const startMs = new Date(startTime.replace(" ", "T") + "Z").getTime()
+  const endMs = new Date(endTime.replace(" ", "T") + "Z").getTime()
+  const durationSeconds = Math.max((endMs - startMs) / 1000, 1)
+
+  // Group raw rows by service+environment and aggregate
+  const groups = new Map<string, Array<{
+    spanCount: number
+    errorCount: number
+    p50LatencyMs: number
+    p95LatencyMs: number
+    p99LatencyMs: number
+    serviceName: string
+    environment: string
+  }>>()
+
+  for (const raw of res.data ?? []) {
+    const serviceName = String(raw.serviceName ?? "")
+    const environment = String(raw.environment ?? "unknown")
+    const key = `${serviceName}::${environment}`
+
+    const row = {
+      serviceName,
+      environment,
+      spanCount: Number(raw.spanCount ?? 0),
+      errorCount: Number(raw.errorCount ?? 0),
+      p50LatencyMs: Number(raw.p50LatencyMs ?? 0),
+      p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
+      p99LatencyMs: Number(raw.p99LatencyMs ?? 0),
+    }
+
+    const group = groups.get(key)
+    if (group) {
+      group.push(row)
+    } else {
+      groups.set(key, [row])
+    }
+  }
+
+  const results: ServiceOverview[] = []
+
+  for (const group of groups.values()) {
+    const totalSpans = group.reduce((sum, r) => sum + r.spanCount, 0)
+    const totalErrors = group.reduce((sum, r) => sum + r.errorCount, 0)
+
+    let p50 = 0
+    let p95 = 0
+    let p99 = 0
+    if (totalSpans > 0) {
+      for (const r of group) {
+        const weight = r.spanCount / totalSpans
+        p50 += r.p50LatencyMs * weight
+        p95 += r.p95LatencyMs * weight
+        p99 += r.p99LatencyMs * weight
+      }
+    }
+
+    results.push({
+      serviceName: group[0].serviceName,
+      environment: group[0].environment,
+      p50LatencyMs: p50,
+      p95LatencyMs: p95,
+      p99LatencyMs: p99,
+      errorRate: totalSpans > 0 ? (totalErrors / totalSpans) * 100 : 0,
+      throughput: totalSpans / durationSeconds,
+    })
+  }
+
+  results.sort((a, b) => b.throughput - a.throughput)
+  return results
+}
+
 // ── Traces ──
 
 export interface HttpInfo {
@@ -169,7 +289,22 @@ function transformTraceRow(row: Record<string, unknown>): Trace {
   }
 }
 
-export async function fetchTraces(startTime: string, endTime: string, opts?: { limit?: number }): Promise<Trace[]> {
+export interface TraceFilters {
+  serviceName?: string
+  spanName?: string
+  errorsOnly?: boolean
+}
+
+export async function fetchTraces(
+  startTime: string,
+  endTime: string,
+  opts?: { limit?: number; filters?: TraceFilters },
+): Promise<Trace[]> {
+  const f = opts?.filters
+  const matchModes: Record<string, string> = {}
+  if (f?.serviceName) matchModes.serviceName = "contains"
+  if (f?.spanName) matchModes.spanName = "contains"
+
   const res = await apiRequest<{
     result: { kind: string; data: Array<Record<string, unknown>> }
   }>("/api/query-engine/execute", {
@@ -182,6 +317,10 @@ export async function fetchTraces(startTime: string, endTime: string, opts?: { l
       offset: 0,
       filters: {
         rootSpansOnly: true,
+        serviceName: f?.serviceName,
+        spanName: f?.spanName,
+        errorsOnly: f?.errorsOnly,
+        matchModes: Object.keys(matchModes).length > 0 ? matchModes : undefined,
       },
     },
   })
@@ -189,4 +328,37 @@ export async function fetchTraces(startTime: string, endTime: string, opts?: { l
   if (res.result.kind !== "list") return []
 
   return res.result.data.map(transformTraceRow)
+}
+
+export interface TracesFacets {
+  services: Array<{ name: string; count: number }>
+  spanNames: Array<{ name: string; count: number }>
+}
+
+export async function fetchTracesFacets(startTime: string, endTime: string): Promise<TracesFacets> {
+  const res = await apiRequest<{
+    result: { kind: string; data: Array<Record<string, unknown>> }
+  }>("/api/query-engine/execute", {
+    startTime,
+    endTime,
+    query: {
+      kind: "facets",
+      source: "traces",
+      filters: { rootSpansOnly: true },
+    },
+  })
+
+  if (res.result.kind !== "facets") return { services: [], spanNames: [] }
+
+  const toItem = (row: Record<string, unknown>) => ({
+    name: String(row.name ?? ""),
+    count: Number(row.count ?? 0),
+  })
+  const byType = (type: string) =>
+    res.result.data.filter((r) => String(r.facetType) === type).map(toItem)
+
+  return {
+    services: byType("service"),
+    spanNames: byType("spanName"),
+  }
 }
