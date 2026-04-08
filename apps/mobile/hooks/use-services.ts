@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchServiceOverview, type ServiceOverview } from "../lib/api"
-import { getTimeRange, type TimeRangeKey } from "../lib/time-utils"
+import { fetchServiceOverview, fetchServiceSparklines, type ServiceOverview } from "../lib/api"
+import { computeBucketSeconds, getTimeRange, type TimeRangeKey } from "../lib/time-utils"
+
+export interface ServicesData {
+	services: ServiceOverview[]
+	sparklines: Record<string, number[]>
+}
 
 type ServicesState =
 	| { status: "loading" }
 	| { status: "error"; error: string }
-	| { status: "success"; data: ServiceOverview[] }
+	| { status: "success"; data: ServicesData }
 
 export function useServices(timeKey: TimeRangeKey = "24h") {
 	const [state, setState] = useState<ServicesState>({ status: "loading" })
@@ -20,11 +25,16 @@ export function useServices(timeKey: TimeRangeKey = "24h") {
 
 		try {
 			const { startTime, endTime } = getTimeRange(timeKey)
-			const services = await fetchServiceOverview(startTime, endTime)
+			const bucketSeconds = computeBucketSeconds(startTime, endTime)
+
+			const [services, sparklines] = await Promise.all([
+				fetchServiceOverview(startTime, endTime),
+				fetchServiceSparklines(startTime, endTime, bucketSeconds),
+			])
 
 			if (controller.signal.aborted) return
 
-			setState({ status: "success", data: services })
+			setState({ status: "success", data: { services, sparklines } })
 		} catch (err) {
 			if (controller.signal.aborted) return
 			setState({

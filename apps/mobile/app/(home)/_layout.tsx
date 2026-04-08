@@ -31,10 +31,6 @@ export default function HomeLayout() {
 				<NativeTabs.Trigger.Label>Logs</NativeTabs.Trigger.Label>
 				<NativeTabs.Trigger.Icon sf="terminal" />
 			</NativeTabs.Trigger>
-			<NativeTabs.Trigger name="search">
-				<NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
-				<NativeTabs.Trigger.Icon sf="magnifyingglass" />
-			</NativeTabs.Trigger>
 		</NativeTabs>
 	);
 }

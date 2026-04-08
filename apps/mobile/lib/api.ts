@@ -214,6 +214,40 @@ export async function fetchServiceOverview(startTime: string, endTime: string): 
   return results
 }
 
+/** Fetch per-service error rate timeseries for sparklines. Returns a map of serviceName → error rate values. */
+export async function fetchServiceSparklines(
+  startTime: string,
+  endTime: string,
+  bucketSeconds: number,
+): Promise<Record<string, number[]>> {
+  const res = await apiRequest<{
+    result: { kind: string; data: Array<{ bucket: string; series: Record<string, number> }> }
+  }>("/api/query-engine/execute", {
+    startTime,
+    endTime,
+    query: {
+      kind: "timeseries",
+      source: "traces",
+      metric: "error_rate",
+      filters: { rootSpansOnly: true },
+      groupBy: ["service"],
+      bucketSeconds,
+    },
+  })
+
+  if (res.result.kind !== "timeseries") return {}
+
+  // series keys are service names, values are error rates per bucket
+  const byService: Record<string, number[]> = {}
+  for (const point of res.result.data) {
+    for (const [service, value] of Object.entries(point.series)) {
+      if (!byService[service]) byService[service] = []
+      byService[service].push(value)
+    }
+  }
+  return byService
+}
+
 // ── Traces ──
 
 export interface HttpInfo {

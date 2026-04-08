@@ -1,5 +1,5 @@
 import { ActivityIndicator, ScrollView, Text, View } from "react-native"
-import { useServices } from "../../hooks/use-services"
+import { useServices, type ServicesData } from "../../hooks/use-services"
 import { ServiceRow } from "../../components/services/service-row"
 import type { ServiceOverview } from "../../lib/api"
 
@@ -52,7 +52,7 @@ export default function ServicesScreen() {
 						</Text>
 						<Text className="text-xs text-muted-foreground font-mono mt-0.5">
 							{state.status === "success"
-								? `${state.data.length} services`
+								? `${state.data.services.length} services`
 								: "Loading services..."}
 						</Text>
 					</View>
@@ -82,13 +82,14 @@ export default function ServicesScreen() {
 					<ActivityIndicator size="small" />
 				</View>
 			) : (
-				<ServicesContent services={state.data} />
+				<ServicesContent data={state.data} />
 			)}
 		</View>
 	)
 }
 
-function ServicesContent({ services }: { services: ServiceOverview[] }) {
+function ServicesContent({ data }: { data: ServicesData }) {
+	const { services, sparklines } = data
 	const groups = groupByEnvironment(services)
 
 	const avgErrorRate =
@@ -147,7 +148,7 @@ function ServicesContent({ services }: { services: ServiceOverview[] }) {
 					{/* Service Rows */}
 					{envServices.map((service, i) => (
 						<View key={`${service.serviceName}::${service.environment}`}>
-							<ServiceRow service={service} />
+							<ServiceRow service={service} sparklineData={sparklines[service.serviceName]} />
 							{i < envServices.length - 1 && (
 								<View className="h-px bg-border mx-5" />
 							)}

@@ -2,22 +2,6 @@ import { Text, View } from "react-native"
 import type { ServiceOverview } from "../../lib/api"
 import { SparklineBars } from "../SparklineBars"
 
-// Generate a deterministic pseudo-random sparkline from the service name + error rate
-function generateSparkline(serviceName: string, errorRate: number): number[] {
-	let hash = 0
-	for (let i = 0; i < serviceName.length; i++) {
-		hash = serviceName.charCodeAt(i) + ((hash << 5) - hash)
-	}
-	const base = Math.max(errorRate, 0.1)
-	const points: number[] = []
-	for (let i = 0; i < 8; i++) {
-		hash = (hash * 16807 + 1) & 0x7fffffff
-		const noise = (hash % 100) / 100 // 0-1
-		points.push(base * (0.3 + noise * 0.7))
-	}
-	return points
-}
-
 function formatLatency(ms: number): string {
 	if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
 	return `${Math.round(ms)}ms`
@@ -45,7 +29,13 @@ function getErrorBgColor(errorRate: number): string {
 	return "rgba(92, 184, 138, 0.2)"
 }
 
-export function ServiceRow({ service }: { service: ServiceOverview }) {
+export function ServiceRow({
+	service,
+	sparklineData,
+}: {
+	service: ServiceOverview
+	sparklineData?: number[]
+}) {
 	const errorColor = getErrorColor(service.errorRate)
 	const errorBgColor = getErrorBgColor(service.errorRate)
 
@@ -83,15 +73,17 @@ export function ServiceRow({ service }: { service: ServiceOverview }) {
 			</View>
 
 			{/* Row 3: Sparkline */}
-			<View className="mt-2">
-				<SparklineBars
-					data={generateSparkline(service.serviceName, service.errorRate)}
-					color={errorColor}
-					height={6}
-					barWidth={6}
-					gap={2}
-				/>
-			</View>
+			{sparklineData && sparklineData.length > 0 && (
+				<View className="mt-2">
+					<SparklineBars
+						data={sparklineData}
+						color={errorColor}
+						height={6}
+						barWidth={6}
+						gap={2}
+					/>
+				</View>
+			)}
 		</View>
 	)
 }
