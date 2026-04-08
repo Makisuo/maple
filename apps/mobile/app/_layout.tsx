@@ -8,6 +8,7 @@ import { GeistMono_400Regular } from "@expo-google-fonts/geist-mono/400Regular";
 import { GeistMono_700Bold } from "@expo-google-fonts/geist-mono/700Bold";
 import * as SplashScreen from "expo-splash-screen";
 import { View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Slot } from "expo-router";
 
 SplashScreen.preventAutoHideAsync();
@@ -35,13 +36,15 @@ export default function RootLayout() {
 	}
 
 	return (
-		<View className="flex-1 bg-background" onLayout={onLayoutRootView}>
-			<ClerkProvider
-				publishableKey={publishableKey}
-				tokenCache={tokenCache}
-			>
-				<Slot />
-			</ClerkProvider>
-		</View>
+		<SafeAreaProvider>
+			<View className="flex-1 bg-background" onLayout={onLayoutRootView}>
+				<ClerkProvider
+					publishableKey={publishableKey}
+					tokenCache={tokenCache}
+				>
+					<Slot />
+				</ClerkProvider>
+			</View>
+		</SafeAreaProvider>
 	);
 }
