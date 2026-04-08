@@ -19,6 +19,10 @@ export default function HomeLayout() {
 				<NativeTabs.Trigger.Label>Overview</NativeTabs.Trigger.Label>
 				<NativeTabs.Trigger.Icon sf="house" />
 			</NativeTabs.Trigger>
+			<NativeTabs.Trigger name="services">
+				<NativeTabs.Trigger.Label>Services</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Icon sf="square.grid.2x2" />
+			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="traces">
 				<NativeTabs.Trigger.Label>Traces</NativeTabs.Trigger.Label>
 				<NativeTabs.Trigger.Icon sf="point.3.connected.trianglepath.dotted" />
@@ -27,9 +31,9 @@ export default function HomeLayout() {
 				<NativeTabs.Trigger.Label>Logs</NativeTabs.Trigger.Label>
 				<NativeTabs.Trigger.Icon sf="terminal" />
 			</NativeTabs.Trigger>
-			<NativeTabs.Trigger name="settings">
-				<NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
-				<NativeTabs.Trigger.Icon sf="gearshape" />
+			<NativeTabs.Trigger name="search">
+				<NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Icon sf="magnifyingglass" />
 			</NativeTabs.Trigger>
 		</NativeTabs>
 	);
