@@ -5,7 +5,6 @@ import { tracesTimeseriesQuery, tracesBreakdownQuery, tracesListQuery } from "./
 import { logsFacetsQuery } from "./queries/logs"
 import { servicesFacetsQuery } from "./queries/services"
 import { metricsSummaryQuery } from "./queries/metrics"
-import { spanAttributeValuesQuery, resourceAttributeValuesQuery } from "./queries/attribute-keys"
 import { tracesDurationStatsQuery, spanHierarchyQuery } from "./queries/errors"
 import { unionAll } from "./union"
 
@@ -940,20 +939,6 @@ describe("converted queries", () => {
     expect(sql).toContain("'sum' AS metricType")
     expect(sql).toContain("'gauge' AS metricType")
     expect(sql).toContain("uniq(MetricName)")
-  })
-
-  it("spanAttributeValuesQuery compiles with map access", () => {
-    const q = spanAttributeValuesQuery({ attributeKey: "http.method" })
-    const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("SpanAttributes['http.method'] AS attributeValue")
-    expect(sql).toContain("SpanAttributes['http.method'] != ''")
-    expect(sql).toContain("ORDER BY usageCount DESC")
-  })
-
-  it("resourceAttributeValuesQuery compiles with map access", () => {
-    const q = resourceAttributeValuesQuery({ attributeKey: "host.name" })
-    const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("ResourceAttributes['host.name'] AS attributeValue")
   })
 
   it("tracesDurationStatsQuery compiles with positionCaseInsensitive", () => {

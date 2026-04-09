@@ -6,7 +6,8 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, fromQuery, type ColumnAccessor } from "../query"
+import { from, fromQuery, type CHQuery, type ColumnAccessor } from "../query"
+import type { ColumnDefs } from "../types"
 import { unionAll, type CHUnionQuery } from "../union"
 import { compileCH } from "../compile"
 import { ErrorSpans, ServiceUsage, TraceDetailSpans, TraceListMv, Traces } from "../tables"
@@ -527,20 +528,30 @@ export function errorsSummaryQuery(
       opts.errorTypes?.length ? CH.inList(errorFingerprint($.StatusMessage), opts.errorTypes) : undefined,
     ])
 
-  const usageSub = opts.rootOnly
-    ? from(TraceListMv)
-      .select(() => ({
-        totalSpans: CH.count(),
+  const buildResult = <
+    JCols extends ColumnDefs,
+    JJoins extends Record<string, ColumnDefs>,
+  >(
+    usageSub: CHQuery<JCols, { totalSpans: number }, JJoins>,
+  ) =>
+    fromQuery(errorSub, "e")
+      .crossJoinQuery(usageSub, "s")
+      .select(($) => ({
+        totalErrors: $.totalErrors,
+        totalSpans: $.s.totalSpans,
+        errorRate: CH.if_(
+          $.s.totalSpans.gt(0),
+          CH.round_($.totalErrors.div($.s.totalSpans).mul(100), 4),
+          CH.lit(0),
+        ),
+        affectedServicesCount: $.affectedServicesCount,
+        affectedTracesCount: $.affectedTracesCount,
       }))
-      .where(($) => [
-        $.OrgId.eq(param.string("orgId")),
-        $.Timestamp.gte(param.dateTime("startTime")),
-        $.Timestamp.lte(param.dateTime("endTime")),
-        opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-        opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
-      ])
-    : opts.deploymentEnvs?.length
-      ? from(Traces)
+      .format("JSON")
+
+  if (opts.rootOnly) {
+    return buildResult(
+      from(TraceListMv)
         .select(() => ({
           totalSpans: CH.count(),
         }))
@@ -549,33 +560,40 @@ export function errorsSummaryQuery(
           $.Timestamp.gte(param.dateTime("startTime")),
           $.Timestamp.lte(param.dateTime("endTime")),
           opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-          CH.inList($.ResourceAttributes.get("deployment.environment"), opts.deploymentEnvs),
-        ])
-      : from(ServiceUsage)
-        .select(($) => ({
-          totalSpans: CH.sum($.TraceCount),
+          opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+        ]),
+    )
+  }
+
+  if (opts.deploymentEnvs?.length) {
+    const deploymentEnvs = opts.deploymentEnvs
+    return buildResult(
+      from(Traces)
+        .select(() => ({
+          totalSpans: CH.count(),
         }))
         .where(($) => [
           $.OrgId.eq(param.string("orgId")),
-          $.Hour.gte(param.dateTime("startTime")),
-          $.Hour.lte(param.dateTime("endTime")),
+          $.Timestamp.gte(param.dateTime("startTime")),
+          $.Timestamp.lte(param.dateTime("endTime")),
           opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
-        ])
+          CH.inList($.ResourceAttributes.get("deployment.environment"), deploymentEnvs),
+        ]),
+    )
+  }
 
-  return fromQuery(errorSub, "e")
-    .crossJoinQuery(usageSub, "s")
-    .select(($) => ({
-      totalErrors: $.totalErrors,
-      totalSpans: $.s.totalSpans,
-      errorRate: CH.if_(
-        $.s.totalSpans.gt(0),
-        CH.round_($.totalErrors.div($.s.totalSpans).mul(100), 4),
-        CH.lit(0),
-      ),
-      affectedServicesCount: $.affectedServicesCount,
-      affectedTracesCount: $.affectedTracesCount,
-    }))
-    .format("JSON")
+  return buildResult(
+    from(ServiceUsage)
+      .select(($) => ({
+        totalSpans: CH.sum($.TraceCount),
+      }))
+      .where(($) => [
+        $.OrgId.eq(param.string("orgId")),
+        $.Hour.gte(param.dateTime("startTime")),
+        $.Hour.lte(param.dateTime("endTime")),
+        opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+      ]),
+  )
 }
 
 // ---------------------------------------------------------------------------
