@@ -2,7 +2,6 @@ import { useSignIn, useSSO, useAuth } from "@clerk/expo";
 import { Link, useRouter, type Href } from "expo-router";
 import { useState } from "react";
 import {
-	ActivityIndicator,
 	KeyboardAvoidingView,
 	Platform,
 	Pressable,
@@ -11,6 +10,10 @@ import {
 	TextInput,
 	View,
 } from "react-native";
+import {
+	PrimaryButton,
+	SecondaryButton,
+} from "../../components/ui/button";
 
 export default function SignInScreen() {
 	const { isSignedIn } = useAuth();
@@ -124,20 +127,9 @@ function SignInForm() {
 							</Text>
 						)}
 
-						<Pressable
-							className="h-12 rounded-lg bg-primary items-center justify-center"
-							onPress={handleVerify}
-							disabled={loading}
-							style={loading ? { opacity: 0.5 } : undefined}
-						>
-							{loading ? (
-								<ActivityIndicator size="small" color="#1a1714" />
-							) : (
-								<Text className="text-sm font-medium text-primary-foreground font-mono">
-									Verify
-								</Text>
-							)}
-						</Pressable>
+						<PrimaryButton onPress={handleVerify} loading={loading}>
+							Verify
+						</PrimaryButton>
 					</View>
 
 					<View className="flex-row items-center gap-1 mt-6">
@@ -176,20 +168,11 @@ function SignInForm() {
 				</View>
 
 				{/* Google OAuth */}
-				<Pressable
-					className="h-12 rounded-lg border border-border bg-transparent items-center justify-center mb-5"
-					onPress={handleGoogleSignIn}
-					disabled={ssoLoading}
-					style={ssoLoading ? { opacity: 0.5 } : undefined}
-				>
-					{ssoLoading ? (
-						<ActivityIndicator size="small" color="#e8e0d6" />
-					) : (
-						<Text className="text-sm font-medium text-foreground font-mono">
-							Continue with Google
-						</Text>
-					)}
-				</Pressable>
+				<View className="mb-5">
+					<SecondaryButton onPress={handleGoogleSignIn} loading={ssoLoading}>
+						Continue with Google
+					</SecondaryButton>
+				</View>
 
 				{/* Divider */}
 				<View className="flex-row items-center gap-4 mb-5">
@@ -240,24 +223,13 @@ function SignInForm() {
 						)}
 					</View>
 
-					<Pressable
-						className="h-12 rounded-lg bg-primary items-center justify-center"
+					<PrimaryButton
 						onPress={handleSubmit}
-						disabled={!emailAddress || !password || loading}
-						style={
-							!emailAddress || !password || loading
-								? { opacity: 0.5 }
-								: undefined
-						}
+						loading={loading}
+						disabled={!emailAddress || !password}
 					>
-						{loading ? (
-							<ActivityIndicator size="small" color="#1a1714" />
-						) : (
-							<Text className="text-sm font-medium text-primary-foreground font-mono">
-								Sign in
-							</Text>
-						)}
-					</Pressable>
+						Sign in
+					</PrimaryButton>
 				</View>
 
 				<View className="flex-row items-center gap-1 mt-6">

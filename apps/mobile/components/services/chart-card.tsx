@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Text, View } from "react-native"
+import { Card } from "../ui/card"
 
 interface ChartCardProps {
 	title: string
@@ -9,14 +10,14 @@ interface ChartCardProps {
 
 export function ChartCard({ title, summary, children }: ChartCardProps) {
 	return (
-		<View className="bg-card rounded-xl border border-border p-4">
+		<Card padding="md">
 			<View className="flex-row items-center justify-between mb-3">
-				<Text className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+				<Text className="text-xs text-muted-foreground font-mono uppercase tracking-widest">
 					{title}
 				</Text>
 				{summary}
 			</View>
 			{children}
-		</View>
+		</Card>
 	)
 }

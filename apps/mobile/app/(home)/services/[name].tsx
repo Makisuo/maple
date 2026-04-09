@@ -1,14 +1,20 @@
 import { useState } from "react"
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native"
+import { ScrollView, Text, View } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
-import { Host, Picker, Text as ExpoText } from "@expo/ui/swift-ui"
-import { pickerStyle, tag } from "@expo/ui/swift-ui/modifiers"
-import { segmentedTint } from "expo-ui-ext"
-import { useServiceDetail, type ServiceDetailData } from "../../../hooks/use-service-detail"
+import {
+	useServiceDetail,
+	type ServiceDetailData,
+} from "../../../hooks/use-service-detail"
 import type { TimeRangeKey } from "../../../lib/time-utils"
+import { colors } from "../../../lib/theme"
 import { ChartCard } from "../../../components/services/chart-card"
 import { SingleBarChart } from "../../../components/services/single-bar-chart"
 import { PercentileBarChart } from "../../../components/services/percentile-bar-chart"
+import { Screen, useScreenBottomPadding } from "../../../components/ui/screen"
+import { ScreenHeader } from "../../../components/ui/screen-header"
+import { TimeRangePicker } from "../../../components/ui/time-range-picker"
+import { ErrorView } from "../../../components/ui/state-view"
+import { ChartSkeleton } from "../../../components/ui/skeleton"
 
 const TIME_OPTIONS: TimeRangeKey[] = ["1h", "24h", "7d", "30d"]
 
@@ -27,26 +33,6 @@ function formatPercent(rate: number): string {
 	return `${rate.toFixed(1)}%`
 }
 
-function SkeletonBlock({ height = 20 }: { height?: number }) {
-	return (
-		<View
-			className="bg-muted rounded-md"
-			style={{ height, opacity: 0.4 }}
-		/>
-	)
-}
-
-function ChartSkeleton() {
-	return (
-		<View className="bg-card rounded-xl border border-border p-4">
-			<View className="flex-row justify-between mb-3">
-				<SkeletonBlock height={12} />
-			</View>
-			<SkeletonBlock height={100} />
-		</View>
-	)
-}
-
 export default function ServiceDetailScreen() {
 	const { name } = useLocalSearchParams<{ name: string }>()
 	const router = useRouter()
@@ -56,50 +42,29 @@ export default function ServiceDetailScreen() {
 	const timeKey = TIME_OPTIONS[selectedIndex]
 	const { state, refresh } = useServiceDetail(serviceName, timeKey)
 
+	const bottomPadding = useScreenBottomPadding()
+
 	return (
-		<View className="flex-1 bg-background">
-			{/* Header */}
-			<View className="px-5 pt-16 pb-3">
-				<Pressable onPress={() => router.back()} className="flex-row items-center mb-2">
-					<Text className="text-sm text-primary font-mono">← Services</Text>
-				</Pressable>
-				<Text className="text-2xl font-bold text-foreground font-mono" numberOfLines={1}>
-					{serviceName}
-				</Text>
-			</View>
+		<Screen>
+			<ScreenHeader
+				title={serviceName}
+				backLabel="Services"
+				onBack={() => router.back()}
+			/>
 
-			{/* Time Range Picker */}
-			<View className="px-5 pb-4">
-				<Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
-					<Picker
-						selection={selectedIndex}
-						onSelectionChange={(value) => setSelectedIndex(value as number)}
-						modifiers={[pickerStyle("segmented"), segmentedTint("#d4873b")]}
-					>
-						{TIME_OPTIONS.map((option, i) => (
-							<ExpoText key={option} modifiers={[tag(i)]}>
-								{option}
-							</ExpoText>
-						))}
-					</Picker>
-				</Host>
-			</View>
+			<TimeRangePicker
+				selectedIndex={selectedIndex}
+				onChange={setSelectedIndex}
+				options={TIME_OPTIONS}
+			/>
 
-			{/* Content */}
 			{state.status === "error" ? (
-				<View className="flex-1 items-center justify-center px-5">
-					<Text className="text-sm text-destructive font-mono text-center">
-						{state.error}
-					</Text>
-					<Text
-						className="text-sm text-primary font-mono mt-3"
-						onPress={refresh}
-					>
-						Tap to retry
-					</Text>
-				</View>
+				<ErrorView message={state.error} onRetry={refresh} />
 			) : state.status === "loading" ? (
-				<ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
+				<ScrollView
+					className="flex-1"
+					contentContainerStyle={{ paddingBottom: bottomPadding }}
+				>
 					<View className="px-5 gap-4">
 						<ChartSkeleton />
 						<ChartSkeleton />
@@ -110,12 +75,13 @@ export default function ServiceDetailScreen() {
 			) : (
 				<ServiceDetailContent data={state.data} />
 			)}
-		</View>
+		</Screen>
 	)
 }
 
 function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 	const { timeseries, apdex } = data
+	const bottomPadding = useScreenBottomPadding()
 
 	const avgP95 =
 		timeseries.length > 0
@@ -157,13 +123,18 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 	}))
 
 	return (
-		<ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
+		<ScrollView
+			className="flex-1"
+			contentContainerStyle={{ paddingBottom: bottomPadding }}
+		>
 			<View className="px-5 gap-4">
-				{/* Latency Chart */}
 				<ChartCard
 					title="Latency"
 					summary={
-						<Text className="text-sm font-bold font-mono" style={{ color: "#d4873b" }}>
+						<Text
+							className="text-sm font-bold font-mono"
+							style={{ color: colors.primary }}
+						>
 							p95: {formatLatency(avgP95)}
 						</Text>
 					}
@@ -175,7 +146,6 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 					)}
 				</ChartCard>
 
-				{/* Throughput Chart */}
 				<ChartCard
 					title="Throughput"
 					summary={
@@ -185,39 +155,43 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 					}
 				>
 					{throughputData.length > 0 ? (
-						<SingleBarChart data={throughputData} color="#d4873b" height={120} />
+						<SingleBarChart data={throughputData} color={colors.primary} height={120} />
 					) : (
 						<EmptyChart />
 					)}
 				</ChartCard>
 
-				{/* Error Rate Chart */}
 				<ChartCard
 					title="Error Rate"
 					summary={
-						<Text className="text-sm font-bold font-mono" style={{ color: "#c45a3c" }}>
+						<Text
+							className="text-sm font-bold font-mono"
+							style={{ color: colors.error }}
+						>
 							{formatPercent(avgErrorRate * 100)}
 						</Text>
 					}
 				>
 					{errorRateData.length > 0 ? (
-						<SingleBarChart data={errorRateData} color="#c45a3c" height={120} />
+						<SingleBarChart data={errorRateData} color={colors.error} height={120} />
 					) : (
 						<EmptyChart />
 					)}
 				</ChartCard>
 
-				{/* Apdex Chart */}
 				<ChartCard
 					title="Apdex"
 					summary={
-						<Text className="text-sm font-bold font-mono" style={{ color: "#5cb88a" }}>
+						<Text
+							className="text-sm font-bold font-mono"
+							style={{ color: colors.success }}
+						>
 							{avgApdex.toFixed(2)}
 						</Text>
 					}
 				>
 					{apdexData.length > 0 ? (
-						<SingleBarChart data={apdexData} color="#5cb88a" height={120} />
+						<SingleBarChart data={apdexData} color={colors.success} height={120} />
 					) : (
 						<EmptyChart />
 					)}

@@ -2,20 +2,19 @@ import { ActivityIndicator, RefreshControl, Text, View } from "react-native"
 import { LegendList } from "@legendapp/list"
 import { useInfiniteLogs } from "../../hooks/use-infinite-logs"
 import { formatLogTimestamp } from "../../lib/format"
+import { severityColors } from "../../lib/theme"
+import { Screen, useScreenBottomPadding } from "../../components/ui/screen"
+import { ScreenHeader } from "../../components/ui/screen-header"
+import {
+	EmptyView,
+	ErrorView,
+	LoadingView,
+} from "../../components/ui/state-view"
 import type { Log } from "../../lib/api"
-
-const SEVERITY_COLORS: Record<string, string> = {
-	TRACE: "#8a8078",
-	DEBUG: "#6b9ff0",
-	INFO: "#5cb88a",
-	WARN: "#c89b48",
-	ERROR: "#c45a3c",
-	FATAL: "#a03a20",
-}
 
 function LogRow({ item }: { item: Log }) {
 	const severity = item.severityText.toUpperCase()
-	const color = SEVERITY_COLORS[severity] ?? "#8a8078"
+	const color = severityColors[severity] ?? severityColors.TRACE
 
 	return (
 		<View className="flex-row px-5 py-2.5 border-b border-border">
@@ -51,43 +50,26 @@ function LogRow({ item }: { item: Log }) {
 
 export default function LogsScreen() {
 	const { state, fetchNextPage, refresh } = useInfiniteLogs("24h")
+	const bottomPadding = useScreenBottomPadding()
+
+	const subtitle =
+		state.status === "success"
+			? `${state.data.length} logs`
+			: "Loading logs..."
 
 	return (
-		<View className="flex-1 bg-background">
-			{/* Header */}
-			<View className="px-5 pt-16 pb-3">
-				<Text className="text-2xl font-bold text-foreground font-mono">
-					Logs
-				</Text>
-				<Text className="text-xs text-muted-foreground font-mono mt-0.5">
-					{state.status === "success"
-						? `${state.data.length} logs`
-						: "Loading logs..."}
-				</Text>
-			</View>
+		<Screen>
+			<ScreenHeader title="Logs" subtitle={subtitle} />
 
-			{/* Content */}
 			{state.status === "error" ? (
-				<View className="flex-1 items-center justify-center px-5">
-					<Text className="text-sm text-destructive font-mono text-center">
-						{state.error}
-					</Text>
-					<Text
-						className="text-sm text-primary font-mono mt-3"
-						onPress={refresh}
-					>
-						Tap to retry
-					</Text>
-				</View>
+				<ErrorView message={state.error} onRetry={refresh} />
 			) : state.status === "loading" ? (
-				<View className="flex-1 items-center justify-center">
-					<ActivityIndicator size="small" />
-				</View>
+				<LoadingView />
 			) : (
 				<LegendList
 					data={state.data}
 					keyExtractor={(item, index) => `${item.timestamp}-${item.spanId}-${index}`}
-					contentContainerStyle={{ paddingBottom: 100 }}
+					contentContainerStyle={{ paddingBottom: bottomPadding }}
 					estimatedItemSize={65}
 					recycleItems
 					refreshControl={
@@ -103,15 +85,9 @@ export default function LogsScreen() {
 							</View>
 						) : null
 					}
-					ListEmptyComponent={
-						<View className="flex-1 items-center justify-center py-20">
-							<Text className="text-sm text-muted-foreground font-mono">
-								No logs found
-							</Text>
-						</View>
-					}
+					ListEmptyComponent={<EmptyView title="No logs found" />}
 				/>
 			)}
-		</View>
+		</Screen>
 	)
 }

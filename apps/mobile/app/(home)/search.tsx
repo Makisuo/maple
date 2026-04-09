@@ -1,11 +1,12 @@
-import { Text, View } from "react-native"
+import { Screen } from "../../components/ui/screen"
+import { ScreenHeader } from "../../components/ui/screen-header"
+import { EmptyView } from "../../components/ui/state-view"
 
 export default function SearchScreen() {
 	return (
-		<View className="flex-1 bg-background items-center justify-center">
-			<Text className="text-lg text-muted-foreground font-mono">
-				Search coming soon
-			</Text>
-		</View>
+		<Screen>
+			<ScreenHeader title="Search" />
+			<EmptyView title="Search" description="Coming soon" />
+		</Screen>
 	)
 }
