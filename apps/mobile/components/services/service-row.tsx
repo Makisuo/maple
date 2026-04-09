@@ -62,6 +62,7 @@ export function ServiceRow({
 					</Text>
 					<Text className="text-xs text-muted-foreground font-mono mx-1">·</Text>
 					<Text className="text-xs text-muted-foreground font-mono">
+						{service.hasSampling ? "~" : ""}
 						{formatThroughput(service.throughput)}
 					</Text>
 					<Text className="text-xs text-muted-foreground font-mono mx-1">·</Text>

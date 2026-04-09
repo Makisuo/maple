@@ -77,7 +77,7 @@ function TelemetryRow({
 				</View>
 			</View>
 			{sparklineData && sparklineData.length > 0 && (
-				<SparklineBars data={sparklineData} height={22} barWidth={4} gap={2} />
+				<SparklineBars data={sparklineData} height={22} width={88} gap={2} />
 			)}
 		</View>
 	)

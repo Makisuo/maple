@@ -151,7 +151,50 @@ export interface ServiceOverview {
   p95LatencyMs: number
   p99LatencyMs: number
   errorRate: number // percentage 0-100
-  throughput: number // req/s
+  /** req/s. Sampling-extrapolated value when `hasSampling` is true, else raw root-span count/sec. */
+  throughput: number
+  /** req/s of actually-traced spans. Equals `throughput` when `hasSampling` is false. */
+  tracedThroughput: number
+  hasSampling: boolean
+  /** Extrapolation weight (1 / acceptanceProbability) derived from the OTel TraceState `th:` value. */
+  samplingWeight: number
+}
+
+/**
+ * Parse the OTel probability sampling threshold (hex) into a weight.
+ * Mirrors apps/web/src/lib/sampling.ts:parseSamplingThreshold.
+ *
+ * Example: `"e668"` → ~90% rejection → ~10% acceptance → weight ~10.
+ */
+function parseSamplingThreshold(thresholdHex: string): { weight: number } {
+  if (!thresholdHex || thresholdHex === "0") return { weight: 1 }
+  const thresholdInt = parseInt(thresholdHex, 16)
+  const maxInt = Math.pow(16, thresholdHex.length)
+  const rejectionRate = thresholdInt / maxInt
+  const acceptanceProbability = Math.max(1 - rejectionRate, 0.0001)
+  return { weight: 1 / acceptanceProbability }
+}
+
+/**
+ * Estimate actual (extrapolated) throughput from sampled + unsampled span counts.
+ * Mirrors apps/web/src/lib/sampling.ts:estimateThroughput.
+ */
+function estimateThroughput(
+  sampledCount: number,
+  unsampledCount: number,
+  thresholdHex: string,
+  durationSeconds: number,
+): { traced: number; estimated: number; hasSampling: boolean; weight: number } {
+  const { weight } = parseSamplingThreshold(thresholdHex)
+  const hasSampling = sampledCount > 0 && weight > 1.01
+  const estimatedTotal = sampledCount * weight + unsampledCount
+  const tracedTotal = sampledCount + unsampledCount
+  return {
+    traced: durationSeconds > 0 ? tracedTotal / durationSeconds : 0,
+    estimated: durationSeconds > 0 ? estimatedTotal / durationSeconds : 0,
+    hasSampling,
+    weight,
+  }
 }
 
 export async function fetchServiceOverview(startTime: string, endTime: string): Promise<ServiceOverview[]> {
@@ -164,23 +207,30 @@ export async function fetchServiceOverview(startTime: string, endTime: string): 
   const endMs = new Date(endTime.replace(" ", "T") + "Z").getTime()
   const durationSeconds = Math.max((endMs - startMs) / 1000, 1)
 
-  // Group raw rows by service+environment and aggregate
-  const groups = new Map<string, Array<{
+  // Group raw rows by service+environment and aggregate. The service-overview
+  // SQL groups by (service, environment, commitSha), so multiple rows can map
+  // to the same service+environment when there are multiple commits in flight.
+  interface RawRow {
+    serviceName: string
+    environment: string
     spanCount: number
     errorCount: number
     p50LatencyMs: number
     p95LatencyMs: number
     p99LatencyMs: number
-    serviceName: string
-    environment: string
-  }>>()
+    sampledSpanCount: number
+    unsampledSpanCount: number
+    dominantThreshold: string
+  }
+
+  const groups = new Map<string, RawRow[]>()
 
   for (const raw of res.data ?? []) {
     const serviceName = String(raw.serviceName ?? "")
     const environment = String(raw.environment ?? "unknown")
     const key = `${serviceName}::${environment}`
 
-    const row = {
+    const row: RawRow = {
       serviceName,
       environment,
       spanCount: Number(raw.spanCount ?? 0),
@@ -188,6 +238,9 @@ export async function fetchServiceOverview(startTime: string, endTime: string): 
       p50LatencyMs: Number(raw.p50LatencyMs ?? 0),
       p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
       p99LatencyMs: Number(raw.p99LatencyMs ?? 0),
+      sampledSpanCount: Number(raw.sampledSpanCount ?? 0),
+      unsampledSpanCount: Number(raw.unsampledSpanCount ?? 0),
+      dominantThreshold: String(raw.dominantThreshold ?? ""),
     }
 
     const group = groups.get(key)
@@ -203,6 +256,19 @@ export async function fetchServiceOverview(startTime: string, endTime: string): 
   for (const group of groups.values()) {
     const totalSpans = group.reduce((sum, r) => sum + r.spanCount, 0)
     const totalErrors = group.reduce((sum, r) => sum + r.errorCount, 0)
+    const totalSampled = group.reduce((sum, r) => sum + r.sampledSpanCount, 0)
+    const totalUnsampled = group.reduce((sum, r) => sum + r.unsampledSpanCount, 0)
+
+    // Use the first non-empty threshold across the commit groups (matches web).
+    let threshold = ""
+    for (const r of group) {
+      if (r.dominantThreshold) {
+        threshold = r.dominantThreshold
+        break
+      }
+    }
+
+    const sampling = estimateThroughput(totalSampled, totalUnsampled, threshold, durationSeconds)
 
     let p50 = 0
     let p95 = 0
@@ -223,7 +289,10 @@ export async function fetchServiceOverview(startTime: string, endTime: string): 
       p95LatencyMs: p95,
       p99LatencyMs: p99,
       errorRate: totalSpans > 0 ? (totalErrors / totalSpans) * 100 : 0,
-      throughput: totalSpans / durationSeconds,
+      throughput: sampling.hasSampling ? sampling.estimated : sampling.traced,
+      tracedThroughput: sampling.traced,
+      hasSampling: sampling.hasSampling,
+      samplingWeight: sampling.weight,
     })
   }
 
@@ -269,11 +338,117 @@ export async function fetchServiceSparklines(
 
 export interface ServiceDetailPoint {
   bucket: string
+  /**
+   * Requests per second. Sampling-extrapolated value when `hasSampling` is true,
+   * otherwise raw root-span count divided by bucket seconds. Already divided by
+   * bucketSeconds — unlike `fetchOverviewTimeSeries`, which returns raw bucket counts.
+   */
   throughput: number
+  /** req/s of actually-traced spans. Equals `throughput` when `hasSampling` is false. */
+  tracedThroughput: number
+  /** True when SpanMetrics-derived throughput was used (sampling detected/extrapolation applied). */
+  hasSampling: boolean
+  /** `metricsCount / rawCount` when sampling detected, else 1. */
+  samplingWeight: number
+  /** Error rate as a percentage 0–100 (the query engine already multiplies by 100). */
   errorRate: number
   p50LatencyMs: number
   p95LatencyMs: number
   p99LatencyMs: number
+}
+
+// SpanMetrics connector metric names — try namespaced first, then default.
+// Mirrors apps/web/src/api/tinybird/custom-charts.ts:22.
+const SPANMETRICS_CALLS_CANDIDATES = ["span.metrics.calls", "calls"] as const
+
+/**
+ * Normalize Tinybird-style bucket strings (`"YYYY-MM-DD HH:MM:SS"`) to ISO so that
+ * keys from two different query-engine responses align in a Map. Defensive: both
+ * queries hit the same endpoint and should already match, but normalizing makes
+ * the merge robust to any future drift.
+ */
+function normalizeBucket(bucket: string): string {
+  let out = bucket.includes(" ") ? bucket.replace(" ", "T") : bucket
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(out)) out = `${out}Z`
+  return out
+}
+
+/**
+ * Query the OpenTelemetry SpanMetrics Connector for unsampled call counts per bucket.
+ * Returns an empty Map if the metric is not present or the query fails — callers
+ * should treat that as "no sampling extrapolation available".
+ *
+ * Mirrors apps/web/src/api/tinybird/custom-charts.ts:24-74 (querySpanMetricsCalls).
+ */
+async function fetchSpanMetricsCalls(
+  serviceName: string,
+  startTime: string,
+  endTime: string,
+  bucketSeconds: number,
+): Promise<Map<string, number>> {
+  try {
+    for (const metricName of SPANMETRICS_CALLS_CANDIDATES) {
+      const res = await apiRequest<{
+        result: { kind: string; data: Array<{ bucket: string; series: Record<string, number> }> }
+      }>("/api/query-engine/execute", {
+        startTime,
+        endTime,
+        query: {
+          kind: "timeseries",
+          source: "metrics",
+          metric: "sum",
+          groupBy: ["service"],
+          filters: {
+            metricName,
+            metricType: "sum",
+            serviceName,
+            attributeFilters: [
+              { key: "span.kind", value: "SPAN_KIND_SERVER", mode: "equals" },
+            ],
+          },
+          bucketSeconds,
+        },
+      })
+
+      if (res.result.kind !== "timeseries" || res.result.data.length === 0) continue
+
+      const map = new Map<string, number>()
+      for (const point of res.result.data) {
+        // Sum all numeric series entries — there's only one because we filter by
+        // serviceName, but summing protects against minor name normalization
+        // differences in how the collector reports the service.
+        let total = 0
+        for (const value of Object.values(point.series)) {
+          if (typeof value === "number") total += value
+        }
+        if (total > 0) map.set(normalizeBucket(point.bucket), total)
+      }
+      if (map.size > 0) return map
+    }
+  } catch {
+    // Swallow — if span metrics are unavailable we fall back to traced throughput.
+  }
+  return new Map()
+}
+
+/**
+ * Fetch the dominant sampling threshold for a service via the service-overview
+ * endpoint. Returns the parsed weight (1 if no sampling). Used as a fallback for
+ * the detail-page throughput chart when the SpanMetrics Connector is not deployed.
+ */
+async function fetchServiceSamplingWeight(
+  serviceName: string,
+  startTime: string,
+  endTime: string,
+): Promise<{ weight: number; hasSampling: boolean }> {
+  try {
+    const overview = await fetchServiceOverview(startTime, endTime)
+    const match = overview.find((s) => s.serviceName === serviceName)
+    if (!match) return { weight: 1, hasSampling: false }
+    return { weight: match.samplingWeight, hasSampling: match.hasSampling }
+  } catch {
+    return { weight: 1, hasSampling: false }
+  }
 }
 
 export async function fetchServiceDetailTimeSeries(
@@ -282,7 +457,7 @@ export async function fetchServiceDetailTimeSeries(
   endTime: string,
   bucketSeconds: number,
 ): Promise<ServiceDetailPoint[]> {
-  const res = await apiRequest<{
+  const tracesPromise = apiRequest<{
     result: { kind: string; data: Array<{ bucket: string; series: Record<string, number> }> }
   }>("/api/query-engine/execute", {
     startTime,
@@ -297,16 +472,101 @@ export async function fetchServiceDetailTimeSeries(
     },
   })
 
-  if (res.result.kind !== "timeseries") return []
+  // Three parallel requests:
+  //  1. The trace-count timeseries (always required for the chart shape).
+  //  2. The SpanMetrics-based throughput (preferred — works when the OTel
+  //     Collector SpanMetrics Connector is deployed).
+  //  3. The service overview, used to derive the dominant TraceState `th:`
+  //     threshold as a fallback when SpanMetrics returns nothing. This matches
+  //     what the web services list does for sampling-aware throughput.
+  const [tracesRes, metricsByBucket, samplingFallback] = await Promise.all([
+    tracesPromise,
+    fetchSpanMetricsCalls(serviceName, startTime, endTime, bucketSeconds),
+    fetchServiceSamplingWeight(serviceName, startTime, endTime),
+  ])
 
-  return res.result.data.map((p) => ({
-    bucket: p.bucket,
-    throughput: p.series.count ?? 0,
-    errorRate: p.series.error_rate ?? 0,
-    p50LatencyMs: p.series.p50_duration ?? 0,
-    p95LatencyMs: p.series.p95_duration ?? 0,
-    p99LatencyMs: p.series.p99_duration ?? 0,
-  }))
+  const divisor = bucketSeconds > 0 ? bucketSeconds : 1
+
+  interface TracesEntry {
+    count: number
+    errorRate: number
+    p50: number
+    p95: number
+    p99: number
+  }
+
+  const tracesByBucket = new Map<string, TracesEntry>()
+  if (tracesRes.result.kind === "timeseries") {
+    for (const p of tracesRes.result.data) {
+      tracesByBucket.set(normalizeBucket(p.bucket), {
+        count: p.series.count ?? 0,
+        errorRate: p.series.error_rate ?? 0,
+        p50: p.series.p50_duration ?? 0,
+        p95: p.series.p95_duration ?? 0,
+        p99: p.series.p99_duration ?? 0,
+      })
+    }
+  }
+
+  const allBuckets = new Set<string>()
+  for (const k of tracesByBucket.keys()) allBuckets.add(k)
+  for (const k of metricsByBucket.keys()) allBuckets.add(k)
+
+  const sortedBuckets = [...allBuckets].sort()
+
+  return sortedBuckets.map((bucket): ServiceDetailPoint => {
+    const t = tracesByBucket.get(bucket)
+    const rawCount = t?.count ?? 0
+    const metricsCount = metricsByBucket.get(bucket) ?? 0
+    const rawPerSec = rawCount / divisor
+    const metricsPerSec = metricsCount / divisor
+
+    // Preferred: SpanMetrics-based throughput (most accurate when present).
+    if (metricsCount > 0) {
+      return {
+        bucket,
+        throughput: metricsPerSec,
+        tracedThroughput: rawPerSec,
+        hasSampling: true,
+        samplingWeight: rawCount > 0 ? metricsCount / rawCount : 1,
+        errorRate: t?.errorRate ?? 0,
+        p50LatencyMs: t?.p50 ?? 0,
+        p95LatencyMs: t?.p95 ?? 0,
+        p99LatencyMs: t?.p99 ?? 0,
+      }
+    }
+
+    // Fallback: TraceState `th:` threshold extrapolation. Uses the global weight
+    // from the service overview to scale every bucket uniformly. Approximate
+    // (assumes the sampling rate is stable across the time range), but matches
+    // how the services list page reports throughput when only trace sampling is
+    // configured.
+    if (samplingFallback.hasSampling && samplingFallback.weight > 1.01 && rawCount > 0) {
+      return {
+        bucket,
+        throughput: rawPerSec * samplingFallback.weight,
+        tracedThroughput: rawPerSec,
+        hasSampling: true,
+        samplingWeight: samplingFallback.weight,
+        errorRate: t?.errorRate ?? 0,
+        p50LatencyMs: t?.p50 ?? 0,
+        p95LatencyMs: t?.p95 ?? 0,
+        p99LatencyMs: t?.p99 ?? 0,
+      }
+    }
+
+    return {
+      bucket,
+      throughput: rawPerSec,
+      tracedThroughput: rawPerSec,
+      hasSampling: false,
+      samplingWeight: 1,
+      errorRate: t?.errorRate ?? 0,
+      p50LatencyMs: t?.p50 ?? 0,
+      p95LatencyMs: t?.p95 ?? 0,
+      p99LatencyMs: t?.p99 ?? 0,
+    }
+  })
 }
 
 export interface ApdexPoint {

@@ -91,6 +91,9 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 		timeseries.length > 0
 			? timeseries.reduce((sum, p) => sum + p.throughput, 0) / timeseries.length
 			: 0
+	const hasSamplingData = timeseries.some((p) => p.hasSampling)
+	// errorRate from the query engine is already a percentage (0–100), so we
+	// average the per-bucket values directly without further scaling.
 	const avgErrorRate =
 		timeseries.length > 0
 			? timeseries.reduce((sum, p) => sum + p.errorRate, 0) / timeseries.length
@@ -114,7 +117,7 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 
 	const errorRateData = timeseries.map((p) => ({
 		bucket: p.bucket,
-		value: p.errorRate * 100,
+		value: p.errorRate,
 	}))
 
 	const apdexData = apdex.map((p) => ({
@@ -150,6 +153,7 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 					title="Throughput"
 					summary={
 						<Text className="text-sm font-bold text-foreground font-mono">
+							{hasSamplingData ? "~" : ""}
 							{formatThroughput(avgThroughput)}
 						</Text>
 					}
@@ -168,7 +172,7 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 							className="text-sm font-bold font-mono"
 							style={{ color: colors.error }}
 						>
-							{formatPercent(avgErrorRate * 100)}
+							{formatPercent(avgErrorRate)}
 						</Text>
 					}
 				>
