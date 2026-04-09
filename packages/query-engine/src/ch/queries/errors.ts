@@ -9,7 +9,7 @@ import { param } from "../param"
 import { from, fromQuery, type ColumnAccessor } from "../query"
 import { unionAll, type CHUnionQuery } from "../union"
 import { compileCH } from "../compile"
-import { ErrorSpans, ServiceUsage, TraceListMv, Traces } from "../tables"
+import { ErrorSpans, ServiceUsage, TraceDetailSpans, TraceListMv, Traces } from "../tables"
 
 // ---------------------------------------------------------------------------
 // Shared: Error fingerprint expression (typed DSL)
@@ -154,7 +154,7 @@ export interface SpanHierarchyOutput {
 export function spanHierarchyQuery(
   opts: SpanHierarchyOpts,
 ) {
-  return from(Traces)
+  return from(TraceDetailSpans)
     .select(($) => {
       // HTTP span name rewriting: "http.server GET" + route → "GET /api/users"
       const route = $.SpanAttributes.get("http.route")
@@ -527,15 +527,40 @@ export function errorsSummaryQuery(
       opts.errorTypes?.length ? CH.inList(errorFingerprint($.StatusMessage), opts.errorTypes) : undefined,
     ])
 
-  const usageSub = from(ServiceUsage)
-    .select(($) => ({
-      totalSpans: CH.sum($.TraceCount),
-    }))
-    .where(($) => [
-      $.OrgId.eq(param.string("orgId")),
-      $.Hour.gte(param.dateTime("startTime")),
-      $.Hour.lte(param.dateTime("endTime")),
-    ])
+  const usageSub = opts.rootOnly
+    ? from(TraceListMv)
+      .select(() => ({
+        totalSpans: CH.count(),
+      }))
+      .where(($) => [
+        $.OrgId.eq(param.string("orgId")),
+        $.Timestamp.gte(param.dateTime("startTime")),
+        $.Timestamp.lte(param.dateTime("endTime")),
+        opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+        opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+      ])
+    : opts.deploymentEnvs?.length
+      ? from(Traces)
+        .select(() => ({
+          totalSpans: CH.count(),
+        }))
+        .where(($) => [
+          $.OrgId.eq(param.string("orgId")),
+          $.Timestamp.gte(param.dateTime("startTime")),
+          $.Timestamp.lte(param.dateTime("endTime")),
+          opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+          CH.inList($.ResourceAttributes.get("deployment.environment"), opts.deploymentEnvs),
+        ])
+      : from(ServiceUsage)
+        .select(($) => ({
+          totalSpans: CH.sum($.TraceCount),
+        }))
+        .where(($) => [
+          $.OrgId.eq(param.string("orgId")),
+          $.Hour.gte(param.dateTime("startTime")),
+          $.Hour.lte(param.dateTime("endTime")),
+          opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+        ])
 
   return fromQuery(errorSub, "e")
     .crossJoinQuery(usageSub, "s")

@@ -1,7 +1,7 @@
 import * as CH from "../expr"
 import { param } from "../param"
 import { from } from "../query"
-import { AttributeKeysHourly, Traces } from "../tables"
+import { AttributeKeysHourly, AttributeValuesHourly } from "../tables"
 
 export interface AttributeKeysQueryOpts {
   scope: string
@@ -23,8 +23,8 @@ export function attributeKeysQuery(
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
-      $.Hour.gte(param.string("startTime")),
-      $.Hour.lte(param.string("endTime")),
+      $.Hour.gte(param.dateTime("startTime")),
+      $.Hour.lte(param.dateTime("endTime")),
       $.AttributeScope.eq(opts.scope),
     ])
     .groupBy("attributeKey")
@@ -50,16 +50,17 @@ export interface AttributeValuesOutput {
 export function spanAttributeValuesQuery(
   opts: AttributeValuesOpts,
 ) {
-  return from(Traces)
+  return from(AttributeValuesHourly)
     .select(($) => ({
-      attributeValue: $.SpanAttributes.get(opts.attributeKey),
-      usageCount: CH.count(),
+      attributeValue: $.AttributeValue,
+      usageCount: CH.sum($.UsageCount),
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
-      $.Timestamp.gte(param.dateTime("startTime")),
-      $.Timestamp.lte(param.dateTime("endTime")),
-      $.SpanAttributes.get(opts.attributeKey).neq(""),
+      $.Hour.gte(param.dateTime("startTime")),
+      $.Hour.lte(param.dateTime("endTime")),
+      $.AttributeScope.eq("span"),
+      $.AttributeKey.eq(opts.attributeKey),
     ])
     .groupBy("attributeValue")
     .orderBy(["usageCount", "desc"])
@@ -70,16 +71,17 @@ export function spanAttributeValuesQuery(
 export function resourceAttributeValuesQuery(
   opts: AttributeValuesOpts,
 ) {
-  return from(Traces)
+  return from(AttributeValuesHourly)
     .select(($) => ({
-      attributeValue: $.ResourceAttributes.get(opts.attributeKey),
-      usageCount: CH.count(),
+      attributeValue: $.AttributeValue,
+      usageCount: CH.sum($.UsageCount),
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
-      $.Timestamp.gte(param.dateTime("startTime")),
-      $.Timestamp.lte(param.dateTime("endTime")),
-      $.ResourceAttributes.get(opts.attributeKey).neq(""),
+      $.Hour.gte(param.dateTime("startTime")),
+      $.Hour.lte(param.dateTime("endTime")),
+      $.AttributeScope.eq("resource"),
+      $.AttributeKey.eq(opts.attributeKey),
     ])
     .groupBy("attributeValue")
     .orderBy(["usageCount", "desc"])

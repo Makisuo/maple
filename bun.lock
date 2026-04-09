@@ -1158,6 +1158,8 @@
 
     "@maple/alerting": ["@maple/alerting@workspace:apps/alerting"],
 
+    "@maple/alerting-worker": ["@maple/alerting-worker@workspace:apps/alerting-worker"],
+
     "@maple/api": ["@maple/api@workspace:apps/api"],
 
     "@maple/chat-agent": ["@maple/chat-agent@workspace:apps/chat-agent"],

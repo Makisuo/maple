@@ -37,6 +37,25 @@ export const Traces = table("traces", {
   LinksAttributes: T.array(T.map(T.string, T.string)),
 })
 
+export const TraceDetailSpans = table("trace_detail_spans", {
+  OrgId: T.string,
+  Timestamp: T.dateTime64,
+  TraceId: T.string,
+  SpanId: T.string,
+  ParentSpanId: T.string,
+  SpanName: T.string,
+  SpanKind: T.string,
+  ServiceName: T.string,
+  Duration: T.uint64,
+  StatusCode: T.string,
+  StatusMessage: T.string,
+  SpanAttributes: T.map(T.string, T.string),
+  ResourceAttributes: T.map(T.string, T.string),
+  EventsTimestamp: T.array(T.dateTime64),
+  EventsName: T.array(T.string),
+  EventsAttributes: T.array(T.map(T.string, T.string)),
+})
+
 export const TraceListMv = table("trace_list_mv", {
   OrgId: T.string,
   TraceId: T.string,
@@ -151,6 +170,15 @@ export const AttributeKeysHourly = table("attribute_keys_hourly", {
   OrgId: T.string,
   Hour: T.dateTime,
   AttributeKey: T.string,
+  AttributeScope: T.string,
+  UsageCount: T.uint64,
+})
+
+export const AttributeValuesHourly = table("attribute_values_hourly", {
+  OrgId: T.string,
+  Hour: T.dateTime,
+  AttributeKey: T.string,
+  AttributeValue: T.string,
   AttributeScope: T.string,
   UsageCount: T.uint64,
 })

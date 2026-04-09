@@ -102,7 +102,7 @@ describe("errorsTimeseriesQuery", () => {
 // ---------------------------------------------------------------------------
 
 describe("errorsSummaryQuery", () => {
-  it("compiles CROSS JOIN between error_spans and service_usage", () => {
+  it("compiles CROSS JOIN between filtered totals", () => {
     const q = errorsSummaryQuery({})
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("CROSS JOIN")
@@ -121,12 +121,14 @@ describe("errorsSummaryQuery", () => {
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("ParentSpanId = ''")
     expect(sql).toContain("ServiceName IN ('api')")
+    expect(sql).toContain("FROM trace_list_mv")
   })
 
   it("applies deploymentEnvs filter", () => {
     const q = errorsSummaryQuery({ deploymentEnvs: ["production"] })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("DeploymentEnv IN ('production')")
+    expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+    expect(sql).toContain("FROM traces")
   })
 })
 

@@ -6,8 +6,10 @@ import {
   serviceMapEdgesHourly,
   serviceOverviewSpans,
   errorSpans,
+  traceDetailSpans,
   traceListMv,
   attributeKeysHourly,
+  attributeValuesHourly,
 } from "./datasources";
 
 /**
@@ -409,6 +411,40 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
   ],
 });
 
+export const traceDetailSpansMv = defineMaterializedView(
+  "trace_detail_spans_mv",
+  {
+    description:
+      "Populates trace_detail_spans with all spans re-sorted by TraceId for fast detail lookups",
+    datasource: traceDetailSpans,
+    nodes: [
+      node({
+        name: "trace_detail_spans_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          Timestamp,
+          TraceId,
+          SpanId,
+          ParentSpanId,
+          SpanName,
+          SpanKind,
+          ServiceName,
+          Duration,
+          StatusCode,
+          StatusMessage,
+          SpanAttributes,
+          ResourceAttributes,
+          EventsTimestamp,
+          EventsName,
+          EventsAttributes
+        FROM traces
+      `,
+      }),
+    ],
+  }
+);
+
 export const traceListMvMv = defineMaterializedView("trace_list_mv_mv", {
   description:
     "Populates trace_list_mv from root spans with pre-extracted HTTP attributes and normalized span names.",
@@ -546,6 +582,62 @@ export const metricAttributeKeysMv = defineMaterializedView(
         FROM metrics_sum
         WHERE Attributes != map()
         GROUP BY OrgId, Hour, AttributeKey, AttributeScope
+      `,
+      }),
+    ],
+  },
+);
+
+export const traceSpanAttributeValuesMv = defineMaterializedView(
+  "trace_span_attribute_values_mv",
+  {
+    description: "Aggregates span attribute values from traces hourly.",
+    datasource: attributeValuesHourly,
+    nodes: [
+      node({
+        name: "trace_span_attribute_values_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          AttributeKey,
+          AttributeValue,
+          'span' AS AttributeScope,
+          count() AS UsageCount
+        FROM traces
+        ARRAY JOIN
+          mapKeys(SpanAttributes) AS AttributeKey,
+          mapValues(SpanAttributes) AS AttributeValue
+        WHERE AttributeValue != ''
+        GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
+      `,
+      }),
+    ],
+  },
+);
+
+export const traceResourceAttributeValuesMv = defineMaterializedView(
+  "trace_resource_attribute_values_mv",
+  {
+    description: "Aggregates resource attribute values from traces hourly.",
+    datasource: attributeValuesHourly,
+    nodes: [
+      node({
+        name: "trace_resource_attribute_values_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          AttributeKey,
+          AttributeValue,
+          'resource' AS AttributeScope,
+          count() AS UsageCount
+        FROM traces
+        ARRAY JOIN
+          mapKeys(ResourceAttributes) AS AttributeKey,
+          mapValues(ResourceAttributes) AS AttributeValue
+        WHERE AttributeValue != ''
+        GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
       }),
     ],

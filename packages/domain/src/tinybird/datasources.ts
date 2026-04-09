@@ -124,8 +124,26 @@ export const traces = defineDatasource("traces", {
       granularity: 1,
     },
     {
+      name: "idx_span_attr_keys",
+      expr: "mapKeys(SpanAttributes)",
+      type: "bloom_filter(0.01)",
+      granularity: 1,
+    },
+    {
       name: "idx_span_attr_vals",
       expr: "mapValues(SpanAttributes)",
+      type: "bloom_filter(0.01)",
+      granularity: 1,
+    },
+    {
+      name: "idx_resource_attr_keys",
+      expr: "mapKeys(ResourceAttributes)",
+      type: "bloom_filter(0.01)",
+      granularity: 1,
+    },
+    {
+      name: "idx_resource_attr_vals",
+      expr: "mapValues(ResourceAttributes)",
       type: "bloom_filter(0.01)",
       granularity: 1,
     },
@@ -268,8 +286,8 @@ export const serviceMapEdgesHourly = defineDatasource(
       partitionKey: "toDate(Hour)",
       sortingKey: [
         "OrgId",
-        "DeploymentEnv",
         "Hour",
+        "DeploymentEnv",
         "SourceService",
         "TargetService",
       ],
@@ -375,6 +393,43 @@ export const traceListMv = defineDatasource("trace_list_mv", {
 });
 
 export type TraceListMvRow = InferRow<typeof traceListMv>;
+
+/**
+ * All spans for a given trace, re-sorted by TraceId for fast detail lookups.
+ * Populated by materialized view, not direct ingestion.
+ * Sorting key (OrgId, TraceId, SpanId) enables O(log N) primary-key lookup
+ * instead of bloom-filter scanning across all partitions.
+ */
+export const traceDetailSpans = defineDatasource("trace_detail_spans", {
+  description:
+    "All spans for a trace, sorted by TraceId for fast detail lookups. Populated by materialized view.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Timestamp: t.dateTime64(9),
+    TraceId: t.string(),
+    SpanId: t.string(),
+    ParentSpanId: t.string(),
+    SpanName: t.string().lowCardinality(),
+    SpanKind: t.string().lowCardinality(),
+    ServiceName: t.string().lowCardinality(),
+    Duration: t.uint64().default(0),
+    StatusCode: t.string().lowCardinality(),
+    StatusMessage: t.string(),
+    SpanAttributes: t.map(t.string().lowCardinality(), t.string()),
+    ResourceAttributes: t.map(t.string().lowCardinality(), t.string()),
+    EventsTimestamp: t.array(t.dateTime64(9)),
+    EventsName: t.array(t.string().lowCardinality()),
+    EventsAttributes: t.array(t.map(t.string().lowCardinality(), t.string())),
+  },
+  engine: engine.mergeTree({
+    partitionKey: "toDate(Timestamp)",
+    sortingKey: ["OrgId", "TraceId", "SpanId"],
+    ttl: "toDate(Timestamp) + INTERVAL 90 DAY",
+  }),
+});
+
+export type TraceDetailSpansRow = InferRow<typeof traceDetailSpans>;
 
 /**
  * OpenTelemetry sum/counter metrics datasource
@@ -815,3 +870,28 @@ export const attributeKeysHourly = defineDatasource("attribute_keys_hourly", {
 });
 
 export type AttributeKeysHourlyRow = InferRow<typeof attributeKeysHourly>;
+
+/**
+ * Pre-aggregated attribute values with hourly usage counts.
+ * Fed by MVs from traces for span and resource attribute values.
+ */
+export const attributeValuesHourly = defineDatasource("attribute_values_hourly", {
+  description:
+    "Pre-aggregated attribute values with hourly usage counts from trace span and resource attributes.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Hour: t.dateTime(),
+    AttributeKey: t.string().lowCardinality(),
+    AttributeValue: t.string(),
+    AttributeScope: t.string().lowCardinality(),
+    UsageCount: t.simpleAggregateFunction("sum", t.uint64()),
+  },
+  engine: engine.aggregatingMergeTree({
+    partitionKey: "toDate(Hour)",
+    sortingKey: ["OrgId", "AttributeScope", "AttributeKey", "Hour", "AttributeValue"],
+    ttl: "Hour + INTERVAL 90 DAY",
+  }),
+});
+
+export type AttributeValuesHourlyRow = InferRow<typeof attributeValuesHourly>;
