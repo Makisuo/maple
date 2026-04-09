@@ -6,6 +6,7 @@ import {
   serviceMapEdgesHourly,
   serviceOverviewSpans,
   errorSpans,
+  traceDetailSpans,
   traceListMv,
   attributeKeysHourly,
   attributeValuesHourly,
@@ -409,6 +410,40 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
     }),
   ],
 });
+
+export const traceDetailSpansMv = defineMaterializedView(
+  "trace_detail_spans_mv",
+  {
+    description:
+      "Populates trace_detail_spans with all spans re-sorted by TraceId for fast detail lookups",
+    datasource: traceDetailSpans,
+    nodes: [
+      node({
+        name: "trace_detail_spans_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          Timestamp,
+          TraceId,
+          SpanId,
+          ParentSpanId,
+          SpanName,
+          SpanKind,
+          ServiceName,
+          Duration,
+          StatusCode,
+          StatusMessage,
+          SpanAttributes,
+          ResourceAttributes,
+          EventsTimestamp,
+          EventsName,
+          EventsAttributes
+        FROM traces
+      `,
+      }),
+    ],
+  }
+);
 
 export const traceListMvMv = defineMaterializedView("trace_list_mv_mv", {
   description:
