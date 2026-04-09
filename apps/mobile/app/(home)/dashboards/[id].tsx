@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
-import { ActivityIndicator, ScrollView, Text, View } from "react-native"
-import { useLocalSearchParams } from "expo-router"
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native"
+import { useLocalSearchParams, useRouter } from "expo-router"
 import { Host, Picker, Text as ExpoText } from "@expo/ui/swift-ui"
 import { pickerStyle, tag } from "@expo/ui/swift-ui/modifiers"
 import { useDashboards } from "../../../hooks/use-dashboards"
@@ -70,6 +70,7 @@ export default function DashboardDetailScreen() {
 }
 
 function DashboardDetailContent({ dashboard }: { dashboard: DashboardDocument }) {
+	const router = useRouter()
 	const widgets = sortWidgets(dashboard.widgets)
 
 	const [selectedIndex, setSelectedIndex] = useState(() =>
@@ -86,6 +87,13 @@ function DashboardDetailContent({ dashboard }: { dashboard: DashboardDocument })
 		<View className="flex-1 bg-background">
 			{/* Header */}
 			<View className="px-5 pt-16 pb-3">
+				<Pressable
+					onPress={() => router.back()}
+					className="flex-row items-center mb-2"
+					hitSlop={8}
+				>
+					<Text className="text-sm text-primary font-mono">← Dashboards</Text>
+				</Pressable>
 				<Text
 					className="text-2xl font-bold text-foreground font-mono"
 					numberOfLines={2}
