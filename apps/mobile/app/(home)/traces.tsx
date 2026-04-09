@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
-import { ActivityIndicator, FlatList, RefreshControl, Text, View } from "react-native"
-import { useTraces } from "../../hooks/use-traces"
+import { ActivityIndicator, RefreshControl, Text, View } from "react-native"
+import { LegendList } from "@legendapp/list"
+import { useInfiniteTraces } from "../../hooks/use-infinite-traces"
 import { useTracesFacets } from "../../hooks/use-traces-facets"
 import { TraceRow } from "../../components/traces/trace-row"
 import { FilterBar, DEFAULT_FILTER_STATE, type TracesFilterState } from "../../components/traces/filter-bar"
@@ -26,9 +27,8 @@ export default function TracesScreen() {
 		return Object.keys(f).length > 0 ? f : undefined
 	}, [filterState.serviceName, filterState.spanName, filterState.errorsOnly])
 
-	const { state, refresh } = useTraces(filterState.timeKey, apiFilters)
+	const { state, fetchNextPage, refresh } = useInfiniteTraces(filterState.timeKey, apiFilters)
 	const { state: facetsState } = useTracesFacets(filterState.timeKey)
-	const isRefreshing = state.status === "loading"
 
 	const handleRemoveFilter = (key: keyof TracesFilterState) => {
 		setFilterState((prev) => ({
@@ -80,17 +80,28 @@ export default function TracesScreen() {
 					<ActivityIndicator size="small" />
 				</View>
 			) : (
-				<FlatList
+				<LegendList
 					data={state.data}
 					keyExtractor={(item, index) => `${item.traceId}-${index}`}
 					contentContainerStyle={{ paddingBottom: 100 }}
+					estimatedItemSize={85}
+					recycleItems
 					refreshControl={
-						<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />
+						<RefreshControl refreshing={false} onRefresh={refresh} />
 					}
 					ItemSeparatorComponent={() => (
 						<View className="h-px bg-border mx-5" />
 					)}
 					renderItem={({ item }) => <TraceRow trace={item} />}
+					onEndReached={fetchNextPage}
+					onEndReachedThreshold={0.5}
+					ListFooterComponent={
+						state.isFetchingNextPage ? (
+							<View className="py-4 items-center">
+								<ActivityIndicator size="small" />
+							</View>
+						) : null
+					}
 					ListEmptyComponent={
 						<View className="flex-1 items-center justify-center py-20">
 							<Text className="text-sm text-muted-foreground font-mono">

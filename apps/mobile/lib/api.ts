@@ -248,6 +248,74 @@ export async function fetchServiceSparklines(
   return byService
 }
 
+// ── Service Detail ──
+
+export interface ServiceDetailPoint {
+  bucket: string
+  throughput: number
+  errorRate: number
+  p50LatencyMs: number
+  p95LatencyMs: number
+  p99LatencyMs: number
+}
+
+export async function fetchServiceDetailTimeSeries(
+  serviceName: string,
+  startTime: string,
+  endTime: string,
+  bucketSeconds: number,
+): Promise<ServiceDetailPoint[]> {
+  const res = await apiRequest<{
+    result: { kind: string; data: Array<{ bucket: string; series: Record<string, number> }> }
+  }>("/api/query-engine/execute", {
+    startTime,
+    endTime,
+    query: {
+      kind: "timeseries",
+      source: "traces",
+      metric: "count",
+      allMetrics: true,
+      filters: { rootSpansOnly: true, serviceName },
+      bucketSeconds,
+    },
+  })
+
+  if (res.result.kind !== "timeseries") return []
+
+  return res.result.data.map((p) => ({
+    bucket: p.bucket,
+    throughput: p.series.count ?? 0,
+    errorRate: p.series.error_rate ?? 0,
+    p50LatencyMs: p.series.p50_duration ?? 0,
+    p95LatencyMs: p.series.p95_duration ?? 0,
+    p99LatencyMs: p.series.p99_duration ?? 0,
+  }))
+}
+
+export interface ApdexPoint {
+  bucket: string
+  apdexScore: number
+  totalCount: number
+}
+
+export async function fetchServiceApdex(
+  serviceName: string,
+  startTime: string,
+  endTime: string,
+  bucketSeconds: number,
+): Promise<ApdexPoint[]> {
+  const res = await apiRequest<{ data: Array<Record<string, unknown>> }>(
+    "/api/query-engine/service-apdex",
+    { serviceName, startTime, endTime, bucketSeconds },
+  )
+
+  return (res.data ?? []).map((row) => ({
+    bucket: String(row.bucket ?? ""),
+    apdexScore: Number(row.apdexScore ?? 0),
+    totalCount: Number(row.totalCount ?? 0),
+  }))
+}
+
 // ── Traces ──
 
 export interface HttpInfo {
@@ -332,7 +400,7 @@ export interface TraceFilters {
 export async function fetchTraces(
   startTime: string,
   endTime: string,
-  opts?: { limit?: number; filters?: TraceFilters },
+  opts?: { limit?: number; offset?: number; filters?: TraceFilters },
 ): Promise<Trace[]> {
   const f = opts?.filters
   const matchModes: Record<string, string> = {}
@@ -348,7 +416,7 @@ export async function fetchTraces(
       kind: "list",
       source: "traces",
       limit: opts?.limit ?? 50,
-      offset: 0,
+      offset: opts?.offset ?? 0,
       filters: {
         rootSpansOnly: true,
         serviceName: f?.serviceName,
@@ -395,4 +463,80 @@ export async function fetchTracesFacets(startTime: string, endTime: string): Pro
     services: byType("service"),
     spanNames: byType("spanName"),
   }
+}
+
+// ── Logs ──
+
+export interface Log {
+  timestamp: string
+  severityText: string
+  severityNumber: number
+  serviceName: string
+  body: string
+  traceId: string
+  spanId: string
+  logAttributes: Record<string, string>
+  resourceAttributes: Record<string, string>
+}
+
+export interface LogsPage {
+  data: Log[]
+  cursor: string | null
+}
+
+function parseAttributes(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "string") return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === "object" ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function transformLogRow(row: Record<string, unknown>): Log {
+  return {
+    timestamp: String(row.timestamp ?? ""),
+    severityText: String(row.severityText ?? ""),
+    severityNumber: Number(row.severityNumber ?? 0),
+    serviceName: String(row.serviceName ?? ""),
+    body: String(row.body ?? ""),
+    traceId: String(row.traceId ?? ""),
+    spanId: String(row.spanId ?? ""),
+    logAttributes: parseAttributes(row.logAttributes),
+    resourceAttributes: parseAttributes(row.resourceAttributes),
+  }
+}
+
+export interface LogsFilters {
+  service?: string
+  severity?: string
+  search?: string
+}
+
+export async function fetchLogs(
+  startTime: string,
+  endTime: string,
+  opts?: { limit?: number; cursor?: string; filters?: LogsFilters },
+): Promise<LogsPage> {
+  const limit = opts?.limit ?? 50
+  const f = opts?.filters
+
+  const res = await apiRequest<{ data: Array<Record<string, unknown>> }>(
+    "/api/query-engine/list-logs",
+    {
+      startTime,
+      endTime,
+      limit,
+      cursor: opts?.cursor,
+      service: f?.service,
+      severity: f?.severity,
+      search: f?.search,
+    },
+  )
+
+  const logs = (res.data ?? []).map(transformLogRow)
+  const cursor = logs.length === limit && logs.length > 0 ? logs[logs.length - 1].timestamp : null
+
+  return { data: logs, cursor }
 }

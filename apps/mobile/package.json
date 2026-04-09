@@ -13,7 +13,7 @@
     "@expo-google-fonts/geist-mono": "^0.4.1",
     "@expo/metro-runtime": "^55.0.9",
     "@expo/ui": "~55.0.10",
-
+    "@legendapp/list": "^2.0.19",
     "expo": "~55.0.12",
     "expo-auth-session": "~55.0.12",
     "expo-constants": "~55.0.12",

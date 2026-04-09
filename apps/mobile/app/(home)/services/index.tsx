@@ -1,7 +1,7 @@
 import { ActivityIndicator, ScrollView, Text, View } from "react-native"
-import { useServices, type ServicesData } from "../../hooks/use-services"
-import { ServiceRow } from "../../components/services/service-row"
-import type { ServiceOverview } from "../../lib/api"
+import { useServices, type ServicesData } from "../../../hooks/use-services"
+import { ServiceRow } from "../../../components/services/service-row"
+import type { ServiceOverview } from "../../../lib/api"
 
 const ENV_ORDER = ["production", "staging", "development"]
 
