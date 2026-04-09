@@ -10,11 +10,14 @@ import {
 	TextInput,
 	View,
 } from "react-native";
+import { GithubIcon } from "../../components/icons/github-icon";
 import { GoogleIcon } from "../../components/icons/google-icon";
 import {
 	PrimaryButton,
 	SecondaryButton,
 } from "../../components/ui/button";
+
+type SsoProvider = "google" | "github";
 
 export default function SignInScreen() {
 	const { isSignedIn } = useAuth();
@@ -39,9 +42,10 @@ function SignInForm() {
 	const [emailAddress, setEmailAddress] = useState("");
 	const [password, setPassword] = useState("");
 	const [code, setCode] = useState("");
-	const [ssoLoading, setSsoLoading] = useState(false);
+	const [ssoLoading, setSsoLoading] = useState<SsoProvider | null>(null);
 
 	const loading = fetchStatus === "fetching";
+	const ssoBusy = ssoLoading !== null;
 
 	const finalize = async () => {
 		await signIn.finalize({
@@ -76,19 +80,19 @@ function SignInForm() {
 		}
 	};
 
-	const handleGoogleSignIn = async () => {
-		setSsoLoading(true);
+	const handleSsoSignIn = async (provider: SsoProvider) => {
+		setSsoLoading(provider);
 		try {
 			const { createdSessionId, setActive } = await startSSOFlow({
-				strategy: "oauth_google",
+				strategy: provider === "google" ? "oauth_google" : "oauth_github",
 			});
 			if (createdSessionId && setActive) {
 				await setActive({ session: createdSessionId });
 			}
 		} catch (err) {
-			console.error("Google sign-in error:", err);
+			console.error(`${provider} sign-in error:`, err);
 		} finally {
-			setSsoLoading(false);
+			setSsoLoading(null);
 		}
 	};
 
@@ -168,14 +172,23 @@ function SignInForm() {
 					</Text>
 				</View>
 
-				{/* Google OAuth */}
-				<View className="mb-5">
+				{/* SSO providers */}
+				<View className="gap-3 mb-5">
 					<SecondaryButton
-						onPress={handleGoogleSignIn}
-						loading={ssoLoading}
+						onPress={() => handleSsoSignIn("google")}
+						loading={ssoLoading === "google"}
+						disabled={ssoBusy && ssoLoading !== "google"}
 						icon={<GoogleIcon />}
 					>
 						Continue with Google
+					</SecondaryButton>
+					<SecondaryButton
+						onPress={() => handleSsoSignIn("github")}
+						loading={ssoLoading === "github"}
+						disabled={ssoBusy && ssoLoading !== "github"}
+						icon={<GithubIcon />}
+					>
+						Continue with GitHub
 					</SecondaryButton>
 				</View>
 
@@ -231,7 +244,7 @@ function SignInForm() {
 					<PrimaryButton
 						onPress={handleSubmit}
 						loading={loading}
-						disabled={!emailAddress || !password}
+						disabled={!emailAddress || !password || ssoBusy}
 					>
 						Sign in
 					</PrimaryButton>

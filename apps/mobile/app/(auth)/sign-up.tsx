@@ -11,11 +11,14 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { GithubIcon } from "../../components/icons/github-icon";
 import { GoogleIcon } from "../../components/icons/google-icon";
 import {
 	PrimaryButton,
 	SecondaryButton,
 } from "../../components/ui/button";
+
+type SsoProvider = "google" | "github";
 
 export default function SignUpScreen() {
 	const { signUp, errors, fetchStatus } = useSignUp();
@@ -26,9 +29,10 @@ export default function SignUpScreen() {
 	const [emailAddress, setEmailAddress] = useState("");
 	const [password, setPassword] = useState("");
 	const [code, setCode] = useState("");
-	const [ssoLoading, setSsoLoading] = useState(false);
+	const [ssoLoading, setSsoLoading] = useState<SsoProvider | null>(null);
 
 	const loading = fetchStatus === "fetching";
+	const ssoBusy = ssoLoading !== null;
 
 	const handleSubmit = async () => {
 		const { error } = await signUp.password({ emailAddress, password });
@@ -51,19 +55,19 @@ export default function SignUpScreen() {
 		}
 	};
 
-	const handleGoogleSignUp = async () => {
-		setSsoLoading(true);
+	const handleSsoSignUp = async (provider: SsoProvider) => {
+		setSsoLoading(provider);
 		try {
 			const { createdSessionId, setActive } = await startSSOFlow({
-				strategy: "oauth_google",
+				strategy: provider === "google" ? "oauth_google" : "oauth_github",
 			});
 			if (createdSessionId && setActive) {
 				await setActive({ session: createdSessionId });
 			}
 		} catch (err) {
-			console.error("Google sign-up error:", err);
+			console.error(`${provider} sign-up error:`, err);
 		} finally {
-			setSsoLoading(false);
+			setSsoLoading(null);
 		}
 	};
 
@@ -161,14 +165,23 @@ export default function SignUpScreen() {
 						</Text>
 					</View>
 
-					{/* Google OAuth */}
-					<View className="mb-5">
+					{/* SSO providers */}
+					<View className="gap-3 mb-5">
 						<SecondaryButton
-							onPress={handleGoogleSignUp}
-							loading={ssoLoading}
+							onPress={() => handleSsoSignUp("google")}
+							loading={ssoLoading === "google"}
+							disabled={ssoBusy && ssoLoading !== "google"}
 							icon={<GoogleIcon />}
 						>
 							Continue with Google
+						</SecondaryButton>
+						<SecondaryButton
+							onPress={() => handleSsoSignUp("github")}
+							loading={ssoLoading === "github"}
+							disabled={ssoBusy && ssoLoading !== "github"}
+							icon={<GithubIcon />}
+						>
+							Continue with GitHub
 						</SecondaryButton>
 					</View>
 
@@ -224,7 +237,7 @@ export default function SignUpScreen() {
 						<PrimaryButton
 							onPress={handleSubmit}
 							loading={loading}
-							disabled={!emailAddress || !password}
+							disabled={!emailAddress || !password || ssoBusy}
 						>
 							Sign up
 						</PrimaryButton>
