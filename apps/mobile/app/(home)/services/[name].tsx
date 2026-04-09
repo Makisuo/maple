@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-nati
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { Host, Picker, Text as ExpoText } from "@expo/ui/swift-ui"
 import { pickerStyle, tag } from "@expo/ui/swift-ui/modifiers"
+import { segmentedTint } from "expo-ui-ext"
 import { useServiceDetail, type ServiceDetailData } from "../../../hooks/use-service-detail"
 import type { TimeRangeKey } from "../../../lib/time-utils"
 import { ChartCard } from "../../../components/services/chart-card"
@@ -73,7 +74,7 @@ export default function ServiceDetailScreen() {
 					<Picker
 						selection={selectedIndex}
 						onSelectionChange={(value) => setSelectedIndex(value as number)}
-						modifiers={[pickerStyle("segmented")]}
+						modifiers={[pickerStyle("segmented"), segmentedTint("#d4873b")]}
 					>
 						{TIME_OPTIONS.map((option, i) => (
 							<ExpoText key={option} modifiers={[tag(i)]}>

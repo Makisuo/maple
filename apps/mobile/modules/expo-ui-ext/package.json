@@ -1,0 +1,8 @@
+{
+  "name": "expo-ui-ext",
+  "version": "0.1.0",
+  "description": "Local extensions to @expo/ui for the Maple mobile app",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true
+}
