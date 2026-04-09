@@ -230,6 +230,71 @@ export class MetricsSummaryResponse extends Schema.Class<MetricsSummaryResponse>
   })),
 }) {}
 
+// ---------------------------------------------------------------------------
+// Query Builder execute (used by dashboards' custom_query_builder_* widgets)
+// ---------------------------------------------------------------------------
+
+const QueryBuilderAddOnsSchema = Schema.Struct({
+  groupBy: Schema.Boolean,
+  having: Schema.Boolean,
+  orderBy: Schema.Boolean,
+  limit: Schema.Boolean,
+  legend: Schema.Boolean,
+})
+
+export const QueryBuilderQueryDraftSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  enabled: Schema.Boolean,
+  dataSource: Schema.Literals(["traces", "logs", "metrics"]),
+  signalSource: Schema.optional(Schema.Literals(["default", "meter"])),
+  metricName: Schema.String,
+  metricType: Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"]),
+  isMonotonic: Schema.optional(Schema.Boolean),
+  whereClause: Schema.String,
+  aggregation: Schema.String,
+  stepInterval: Schema.String,
+  orderByDirection: Schema.optional(Schema.Literals(["desc", "asc"])),
+  addOns: QueryBuilderAddOnsSchema,
+  groupBy: Schema.mutable(Schema.Array(Schema.String)),
+  having: Schema.optional(Schema.String),
+  orderBy: Schema.optional(Schema.String),
+  limit: Schema.optional(Schema.String),
+  legend: Schema.optional(Schema.String),
+})
+export type QueryBuilderQueryDraftPayload = Schema.Schema.Type<typeof QueryBuilderQueryDraftSchema>
+
+export class ExecuteQueryBuilderRequest extends Schema.Class<ExecuteQueryBuilderRequest>("ExecuteQueryBuilderRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  kind: Schema.Literals(["timeseries", "breakdown"]),
+  queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
+}) {}
+
+const QueryBuilderTimeseriesPoint = Schema.Struct({
+  bucket: Schema.String,
+  series: Schema.Record(Schema.String, Schema.Number),
+})
+
+const QueryBuilderBreakdownItem = Schema.Struct({
+  name: Schema.String,
+  value: Schema.Number,
+})
+
+export class ExecuteQueryBuilderResponse extends Schema.Class<ExecuteQueryBuilderResponse>("ExecuteQueryBuilderResponse")({
+  result: Schema.Union([
+    Schema.Struct({
+      kind: Schema.Literal("timeseries"),
+      data: Schema.Array(QueryBuilderTimeseriesPoint),
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("breakdown"),
+      data: Schema.Array(QueryBuilderBreakdownItem),
+    }),
+  ]),
+  warnings: Schema.optional(Schema.Array(Schema.String)),
+}) {}
+
 export class QueryEngineValidationError extends Schema.TaggedErrorClass<QueryEngineValidationError>()(
   "@maple/http/errors/QueryEngineValidationError",
   {
@@ -320,6 +385,11 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
   .add(HttpApiEndpoint.post("metricsSummary", "/metrics-summary", {
     payload: MetricsSummaryRequest, success: MetricsSummaryResponse,
     error: [QueryEngineExecutionError],
+  }))
+  .add(HttpApiEndpoint.post("executeQueryBuilder", "/execute-query-builder", {
+    payload: ExecuteQueryBuilderRequest,
+    success: ExecuteQueryBuilderResponse,
+    error: [QueryEngineValidationError, QueryEngineExecutionError, QueryEngineTimeoutError],
   }))
   .prefix("/api/query-engine")
   .middleware(Authorization) {}

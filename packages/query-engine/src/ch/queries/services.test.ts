@@ -107,6 +107,23 @@ describe("serviceApdexTimeseriesQuery", () => {
     // Tolerating = 4x threshold
     expect(sql).toContain("Duration / 1000000 < 1000")
   })
+
+  it("apdex SQL has correct operator precedence", () => {
+    // Regression: writing the formula as
+    // `satisfied.add(tolerating.mul(0.5)).div(count())` compiled to
+    // `satisfied + tolerating * 0.5 / count()`, which under SQL precedence
+    // evaluates as `satisfied + ((tolerating*0.5)/count())` ≈ satisfied,
+    // producing 6-digit "Apdex" values instead of a 0–1 ratio.
+    // The split-term form below is unambiguous left-to-right.
+    const q = serviceApdexTimeseriesQuery({ serviceName: "api" })
+    const { sql } = compileCH(q, baseParams)
+    // The Apdex SELECT must contain the split-term form: each countIf is
+    // divided by count() before being summed, instead of summed first.
+    expect(sql).toContain(") / count() + countIf(")
+    expect(sql).toContain(") * 0.5 / count()")
+    // And it must NOT contain the buggy summed-then-divided form.
+    expect(sql).not.toMatch(/countIf\([^)]*\) \+ countIf/)
+  })
 })
 
 // ---------------------------------------------------------------------------

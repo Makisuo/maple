@@ -24,8 +24,8 @@
     "@maple/db": "workspace:*",
     "@maple/domain": "workspace:*",
     "@maple/email": "workspace:*",
-    "@react-email/components": "^1.0.11",
     "@maple/query-engine": "workspace:*",
+    "@react-email/components": "^1.0.11",
     "@tinybirdco/sdk": "catalog:tinybird",
     "autumn-js": "^1.2.5",
     "date-fns": "^4.1.0",
@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:effect",
-    "@types/bun": "^1.3.8",
+    "@types/bun": "^1.3.11",
     "@types/node": "catalog:tooling",
     "atmn": "^1.0.1",
     "typescript": "catalog:tooling"

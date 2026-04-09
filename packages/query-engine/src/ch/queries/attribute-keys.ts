@@ -25,7 +25,7 @@ export function attributeKeysQuery(
       $.OrgId.eq(param.string("orgId")),
       $.Hour.gte(param.dateTime("startTime")),
       $.Hour.lte(param.dateTime("endTime")),
-      $.AttributeScope.eq(param.string("scope")),
+      $.AttributeScope.eq(opts.scope),
     ])
     .groupBy("attributeKey")
     .orderBy(["usageCount", "desc"])

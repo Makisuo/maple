@@ -33,15 +33,21 @@ import { buildAttrFilterCondition } from "../../traces-shared"
 export function apdexExprs(durationMs: CH.Expr<number>, thresholdMs: number) {
   const satisfied = CH.countIf(durationMs.lt(thresholdMs))
   const tolerating = CH.countIf(durationMs.gte(thresholdMs).and(durationMs.lt(thresholdMs * 4)))
+  const total = CH.count()
+  // Split the formula so SQL operator precedence stays correct.
+  // (s + t*0.5) / n  ≡  s/n + (t*0.5)/n
+  // Writing it as `satisfied.add(tolerating.mul(0.5)).div(count())` would
+  // compile to `satisfied + tolerating * 0.5 / count()`, which by SQL
+  // precedence evaluates as `satisfied + ((tolerating*0.5)/count())` — i.e.
+  // returns ~`satisfied`, not a 0–1 ratio.
+  const satisfiedRatio = satisfied.div(total)
+  const toleratingRatio = tolerating.mul(0.5).div(total)
   return {
     satisfiedCount: satisfied,
     toleratingCount: tolerating,
     apdexScore: CH.if_(
-      CH.count().gt(0),
-      CH.round_(
-        satisfied.add(tolerating.mul(0.5)).div(CH.count()),
-        4,
-      ),
+      total.gt(0),
+      CH.round_(satisfiedRatio.add(toleratingRatio), 4),
       CH.lit(0),
     ),
   }
