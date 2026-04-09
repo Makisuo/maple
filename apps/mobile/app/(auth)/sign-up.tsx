@@ -11,6 +11,7 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { GoogleIcon } from "../../components/icons/google-icon";
 import {
 	PrimaryButton,
 	SecondaryButton,
@@ -162,7 +163,11 @@ export default function SignUpScreen() {
 
 					{/* Google OAuth */}
 					<View className="mb-5">
-						<SecondaryButton onPress={handleGoogleSignUp} loading={ssoLoading}>
+						<SecondaryButton
+							onPress={handleGoogleSignUp}
+							loading={ssoLoading}
+							icon={<GoogleIcon />}
+						>
 							Continue with Google
 						</SecondaryButton>
 					</View>

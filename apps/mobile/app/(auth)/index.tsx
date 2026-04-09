@@ -10,6 +10,7 @@ import {
 	TextInput,
 	View,
 } from "react-native";
+import { GoogleIcon } from "../../components/icons/google-icon";
 import {
 	PrimaryButton,
 	SecondaryButton,
@@ -169,7 +170,11 @@ function SignInForm() {
 
 				{/* Google OAuth */}
 				<View className="mb-5">
-					<SecondaryButton onPress={handleGoogleSignIn} loading={ssoLoading}>
+					<SecondaryButton
+						onPress={handleGoogleSignIn}
+						loading={ssoLoading}
+						icon={<GoogleIcon />}
+					>
 						Continue with Google
 					</SecondaryButton>
 				</View>

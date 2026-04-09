@@ -15,7 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.maple.mobile"
+      "bundleIdentifier": "com.maple.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -34,6 +37,13 @@
       "@clerk/expo",
       "expo-secure-store",
       "expo-web-browser"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7df081bd-dbf0-41dc-981b-eaf4428d7996"
+      }
+    },
+    "owner": "makisuo"
   }
 }

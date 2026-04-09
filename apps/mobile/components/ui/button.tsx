@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { ActivityIndicator, Pressable, Text } from "react-native"
+import { ActivityIndicator, Pressable, Text, View } from "react-native"
 import { colors } from "../../lib/theme"
 
 type ButtonVariant = "primary" | "secondary" | "destructive"
@@ -10,6 +10,7 @@ interface ButtonProps {
 	disabled?: boolean
 	loading?: boolean
 	variant?: ButtonVariant
+	icon?: ReactNode
 }
 
 const CONTAINER_CLASS: Record<ButtonVariant, string> = {
@@ -36,6 +37,7 @@ export function Button({
 	disabled,
 	loading,
 	variant = "primary",
+	icon,
 }: ButtonProps) {
 	const isInactive = disabled || loading
 	return (
@@ -47,6 +49,15 @@ export function Button({
 		>
 			{loading ? (
 				<ActivityIndicator size="small" color={SPINNER_COLOR[variant]} />
+			) : icon ? (
+				<View className="flex-row items-center gap-2">
+					{icon}
+					<Text
+						className={`text-sm font-medium font-mono ${TEXT_CLASS[variant]}`}
+					>
+						{children}
+					</Text>
+				</View>
 			) : (
 				<Text
 					className={`text-sm font-medium font-mono ${TEXT_CLASS[variant]}`}
