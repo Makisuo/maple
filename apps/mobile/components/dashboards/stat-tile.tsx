@@ -40,6 +40,13 @@ export function StatTile({ value, display, compact = false }: StatTileProps) {
 	const prefixSize = compact ? 13 : 16
 	const suffixSize = compact ? 11 : 13
 
+	const prefixStyle = color
+		? { fontSize: prefixSize, marginRight: 4, color }
+		: { fontSize: prefixSize, marginRight: 4 }
+	const valueStyle = color
+		? { fontSize: valueSize, color }
+		: { fontSize: valueSize }
+
 	return (
 		<View
 			style={{
@@ -51,14 +58,14 @@ export function StatTile({ value, display, compact = false }: StatTileProps) {
 			{display.prefix ? (
 				<Text
 					className="text-foreground font-mono"
-					style={{ fontSize: prefixSize, marginRight: 4, color }}
+					style={prefixStyle}
 				>
 					{display.prefix}
 				</Text>
 			) : null}
 			<Text
 				className="text-foreground font-mono font-bold"
-				style={{ fontSize: valueSize, color }}
+				style={valueStyle}
 				numberOfLines={1}
 				adjustsFontSizeToFit
 			>
