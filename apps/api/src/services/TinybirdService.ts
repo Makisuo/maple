@@ -98,6 +98,14 @@ export class TinybirdService extends ServiceMap.Service<TinybirdService, Tinybir
       yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
       yield* Effect.annotateCurrentSpan("db.statement", truncateSql(sql))
 
+      const leftoverParam = sql.match(/__PARAM_(\w+)__/)
+      if (leftoverParam) {
+        return yield* new TinybirdQueryError({
+          pipe,
+          message: `Compiled SQL contains unresolved param '${leftoverParam[1]}' — query was built with param.${leftoverParam[1]}() but '${leftoverParam[1]}' was not provided in the runtime params object`,
+        })
+      }
+
       const client = yield* resolveClient(tenant, pipe)
       const result = yield* Effect.tryPromise({
         try: () => client.sql(sql),
