@@ -1,16 +1,23 @@
+import { useMemo, useState } from "react"
 import { ActivityIndicator, ScrollView, Text, View } from "react-native"
 import { useLocalSearchParams } from "expo-router"
+import { Host, Picker, Text as ExpoText } from "@expo/ui/swift-ui"
+import { pickerStyle, tag } from "@expo/ui/swift-ui/modifiers"
 import { useDashboards } from "../../../hooks/use-dashboards"
 import { DashboardWidgetView } from "../../../components/dashboards/dashboard-widget-view"
+import type { TimeRangeKey } from "../../../lib/time-utils"
 import type {
 	DashboardDocument,
 	DashboardWidget,
 	WidgetTimeRange,
 } from "../../../lib/api"
 
-function timeRangeLabel(timeRange: WidgetTimeRange): string {
-	if (timeRange.type === "relative") return `Last ${timeRange.value}`
-	return "Custom range"
+const TIME_OPTIONS: TimeRangeKey[] = ["1h", "24h", "7d", "30d"]
+
+function defaultTimeIndex(timeRange: WidgetTimeRange): number {
+	if (timeRange.type !== "relative") return 1
+	const idx = TIME_OPTIONS.indexOf(timeRange.value as TimeRangeKey)
+	return idx >= 0 ? idx : 1
 }
 
 function sortWidgets(widgets: readonly DashboardWidget[]): DashboardWidget[] {
@@ -65,6 +72,16 @@ export default function DashboardDetailScreen() {
 function DashboardDetailContent({ dashboard }: { dashboard: DashboardDocument }) {
 	const widgets = sortWidgets(dashboard.widgets)
 
+	const [selectedIndex, setSelectedIndex] = useState(() =>
+		defaultTimeIndex(dashboard.timeRange),
+	)
+	const timeKey = TIME_OPTIONS[selectedIndex]
+
+	const effectiveTimeRange = useMemo<WidgetTimeRange>(
+		() => ({ type: "relative", value: timeKey }),
+		[timeKey],
+	)
+
 	return (
 		<View className="flex-1 bg-background">
 			{/* Header */}
@@ -83,16 +100,26 @@ function DashboardDetailContent({ dashboard }: { dashboard: DashboardDocument })
 						{dashboard.description}
 					</Text>
 				) : null}
-				<View className="flex-row items-center mt-2 gap-2">
-					<View className="rounded-lg border border-border px-2.5 py-1">
-						<Text className="text-[10px] text-foreground font-mono">
-							{timeRangeLabel(dashboard.timeRange)}
-						</Text>
-					</View>
-					<Text className="text-[10px] text-muted-foreground font-mono">
-						{widgets.length} widget{widgets.length === 1 ? "" : "s"}
-					</Text>
-				</View>
+				<Text className="text-[10px] text-muted-foreground font-mono mt-2">
+					{widgets.length} widget{widgets.length === 1 ? "" : "s"}
+				</Text>
+			</View>
+
+			{/* Time Range Picker */}
+			<View className="px-5 pb-4">
+				<Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
+					<Picker
+						selection={selectedIndex}
+						onSelectionChange={(value) => setSelectedIndex(value as number)}
+						modifiers={[pickerStyle("segmented")]}
+					>
+						{TIME_OPTIONS.map((option, i) => (
+							<ExpoText key={option} modifiers={[tag(i)]}>
+								{option}
+							</ExpoText>
+						))}
+					</Picker>
+				</Host>
 			</View>
 
 			{widgets.length === 0 ? (
@@ -110,7 +137,7 @@ function DashboardDetailContent({ dashboard }: { dashboard: DashboardDocument })
 						<DashboardWidgetView
 							key={widget.id}
 							widget={widget}
-							timeRange={dashboard.timeRange}
+							timeRange={effectiveTimeRange}
 						/>
 					))}
 				</ScrollView>
