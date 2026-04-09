@@ -34,8 +34,11 @@ function formatDuration(ms: number): string {
 	return `${Math.round(ms)}ms`
 }
 
-function formatPercent(rate: number): string {
-	return `${(rate * 100).toFixed(1)}%`
+function formatErrorRate(pct: number): string {
+	if (pct < 0.01) return "0%"
+	if (pct < 1) return `${pct.toFixed(2)}%`
+	if (pct >= 10) return `${Math.round(pct)}%`
+	return `${pct.toFixed(1)}%`
 }
 
 function computeChange(current: number, previous: number): string | null {
@@ -175,13 +178,17 @@ function DashboardContent({
 	}))
 
 	const points = timeseries
-	const avgErrorRate =
-		points.length > 0
-			? points.reduce((sum, p) => sum + p.errorRate, 0) / points.length
+	// error_rate from the query engine is already a percentage (0–100); weight
+	// per-bucket values by throughput so the displayed value reflects the true
+	// overall error rate across the selected time range.
+	const totalCount = points.reduce((sum, p) => sum + p.throughput, 0)
+	const overallErrorRate =
+		totalCount > 0
+			? points.reduce((sum, p) => sum + p.errorRate * p.throughput, 0) / totalCount
 			: 0
-	const avgP95 =
-		points.length > 0
-			? points.reduce((sum, p) => sum + p.p95LatencyMs, 0) / points.length
+	const weightedP95 =
+		totalCount > 0
+			? points.reduce((sum, p) => sum + p.p95LatencyMs * p.throughput, 0) / totalCount
 			: 0
 	const errorSparkline = points.slice(-10).map((p) => p.errorRate)
 	const latencySparkline = points.slice(-10).map((p) => p.p95LatencyMs)
@@ -280,7 +287,7 @@ function DashboardContent({
 									className="text-lg font-bold font-mono"
 									style={{ color: colors.error }}
 								>
-									{formatPercent(avgErrorRate)}
+									{formatErrorRate(overallErrorRate)}
 								</Text>
 							</View>
 							<SparklineBars
@@ -302,7 +309,7 @@ function DashboardContent({
 									className="text-lg font-bold font-mono"
 									style={{ color: colors.primary }}
 								>
-									{formatDuration(avgP95)}
+									{formatDuration(weightedP95)}
 								</Text>
 							</View>
 							<SparklineBars
