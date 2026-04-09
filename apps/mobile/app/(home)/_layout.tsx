@@ -27,6 +27,10 @@ export default function HomeLayout() {
 				<NativeTabs.Trigger.Label>Traces</NativeTabs.Trigger.Label>
 				<NativeTabs.Trigger.Icon sf="point.3.connected.trianglepath.dotted" />
 			</NativeTabs.Trigger>
+			<NativeTabs.Trigger name="dashboards">
+				<NativeTabs.Trigger.Label>Dashboards</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Icon sf="chart.bar.xaxis" />
+			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="logs">
 				<NativeTabs.Trigger.Label>Logs</NativeTabs.Trigger.Label>
 				<NativeTabs.Trigger.Icon sf="terminal" />

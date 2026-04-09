@@ -24,6 +24,23 @@ async function apiRequest<T>(path: string, body: unknown): Promise<T> {
   return res.json()
 }
 
+async function apiGet<T>(path: string): Promise<T> {
+  const token = getToken ? await getToken() : null
+  const headers: Record<string, string> = { accept: "application/json" }
+  if (token) headers.authorization = `Bearer ${token}`
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "GET",
+    headers,
+  })
+
+  if (!res.ok) {
+    throw new Error(`API ${path} failed: ${res.status}`)
+  }
+
+  return res.json()
+}
+
 // ── Queries ──
 
 export interface ServiceUsage {
@@ -585,4 +602,275 @@ export async function fetchLogs(
   const cursor = logs.length === limit && logs.length > 0 ? logs[logs.length - 1].timestamp : null
 
   return { data: logs, cursor }
+}
+
+// ── Dashboards ──
+//
+// Narrow TS mirrors of the Effect schema in packages/domain/src/http/dashboards.ts.
+// We deliberately don't import the Effect schema — the mobile app stays Effect-free.
+
+export type WidgetTimeRange =
+  | { type: "relative"; value: string }
+  | { type: "absolute"; startTime: string; endTime: string }
+
+export interface WidgetAttributeFilter {
+  key: string
+  value?: string
+  mode: "equals" | "exists"
+}
+
+export interface WidgetFilters {
+  serviceName?: string
+  spanName?: string
+  severity?: string
+  metricName?: string
+  metricType?: "sum" | "gauge" | "histogram" | "exponential_histogram"
+  rootSpansOnly?: boolean
+  environments?: string[]
+  commitShas?: string[]
+  attributeFilters?: WidgetAttributeFilter[]
+  resourceAttributeFilters?: WidgetAttributeFilter[]
+}
+
+export interface WidgetTimeseriesParams {
+  source: "traces" | "logs" | "metrics"
+  metric: string
+  groupBy?: "service" | "span_name" | "status_code" | "severity" | "attribute" | "none"
+  filters?: WidgetFilters
+  bucketSeconds?: number
+  apdexThresholdMs?: number
+}
+
+export interface WidgetBreakdownParams {
+  source: "traces" | "logs" | "metrics"
+  metric: string
+  groupBy: "service" | "span_name" | "status_code" | "http_method" | "severity" | "attribute"
+  filters?: WidgetFilters
+  limit?: number
+}
+
+export interface WidgetDataSource {
+  endpoint: string
+  params?: Record<string, unknown>
+  transform?: {
+    fieldMap?: Record<string, string>
+    flattenSeries?: { valueField: string }
+    reduceToValue?: { field: string; aggregate?: string }
+    computeRatio?: { numeratorName: string; denominatorNames: string[] }
+    limit?: number
+    sortBy?: { field: string; direction: string }
+  }
+}
+
+export interface WidgetThreshold {
+  value: number
+  color: string
+  label?: string
+}
+
+export interface WidgetDisplayConfig {
+  title?: string
+  description?: string
+  chartId?: string
+  unit?: string
+  prefix?: string
+  suffix?: string
+  stacked?: boolean
+  thresholds?: WidgetThreshold[]
+  colorOverrides?: Record<string, string>
+  seriesMapping?: Record<string, string>
+}
+
+export interface WidgetLayout {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface DashboardWidget {
+  id: string
+  visualization: string // "chart" | "stat" | "table" | "list"
+  dataSource: WidgetDataSource
+  display: WidgetDisplayConfig
+  layout: WidgetLayout
+}
+
+export interface DashboardDocument {
+  id: string
+  name: string
+  description?: string
+  tags?: string[]
+  timeRange: WidgetTimeRange
+  widgets: DashboardWidget[]
+  createdAt: string
+  updatedAt: string
+}
+
+export async function fetchDashboards(): Promise<DashboardDocument[]> {
+  const res = await apiGet<{ dashboards: DashboardDocument[] }>("/api/dashboards/")
+  return res.dashboards ?? []
+}
+
+/** Map a `WidgetTimeseriesParams` shape into the query-engine `kind: "timeseries"` body. */
+function buildTimeseriesQuery(params: WidgetTimeseriesParams, bucketSeconds: number) {
+  const filters: Record<string, unknown> = {
+    serviceName: params.filters?.serviceName,
+    spanName: params.filters?.spanName,
+    severity: params.filters?.severity,
+    metricName: params.filters?.metricName,
+    metricType: params.filters?.metricType,
+    rootSpansOnly: params.filters?.rootSpansOnly,
+    environments: params.filters?.environments,
+    commitShas: params.filters?.commitShas,
+    attributeFilters: params.filters?.attributeFilters,
+    resourceAttributeFilters: params.filters?.resourceAttributeFilters,
+  }
+
+  return {
+    kind: "timeseries" as const,
+    source: params.source,
+    metric: params.metric,
+    groupBy: params.groupBy && params.groupBy !== "none" ? [params.groupBy] : undefined,
+    apdexThresholdMs: params.apdexThresholdMs,
+    filters,
+    bucketSeconds,
+  }
+}
+
+export interface CustomTimeseriesPoint {
+  bucket: string
+  series: Record<string, number>
+}
+
+export async function fetchCustomTimeseries(
+  startTime: string,
+  endTime: string,
+  bucketSeconds: number,
+  params: WidgetTimeseriesParams,
+): Promise<CustomTimeseriesPoint[]> {
+  const res = await apiRequest<{
+    result: { kind: string; data: Array<{ bucket: string; series: Record<string, number> }> }
+  }>("/api/query-engine/execute", {
+    startTime,
+    endTime,
+    query: buildTimeseriesQuery(params, bucketSeconds),
+  })
+
+  if (res.result.kind !== "timeseries") return []
+  return res.result.data.map((p) => ({ bucket: p.bucket, series: { ...p.series } }))
+}
+
+function buildBreakdownQuery(params: WidgetBreakdownParams) {
+  const filters: Record<string, unknown> = {
+    serviceName: params.filters?.serviceName,
+    spanName: params.filters?.spanName,
+    severity: params.filters?.severity,
+    metricName: params.filters?.metricName,
+    metricType: params.filters?.metricType,
+    rootSpansOnly: params.filters?.rootSpansOnly,
+    environments: params.filters?.environments,
+    commitShas: params.filters?.commitShas,
+    attributeFilters: params.filters?.attributeFilters,
+    resourceAttributeFilters: params.filters?.resourceAttributeFilters,
+  }
+
+  return {
+    kind: "breakdown" as const,
+    source: params.source,
+    metric: params.metric,
+    groupBy: params.groupBy,
+    filters,
+    limit: params.limit,
+  }
+}
+
+export interface CustomBreakdownItem {
+  name: string
+  value: number
+}
+
+// ── Query-builder widgets (custom_query_builder_*) ──
+//
+// The dashboard builder's "query builder" widgets store an array of
+// QueryBuilderQueryDraft objects in `dataSource.params.queries`. Mobile sends
+// them as-is to the new /api/query-engine/execute-query-builder endpoint, which
+// translates each draft into a QuerySpec and merges results.
+
+export interface QueryBuilderQueryDraft {
+  id: string
+  name: string
+  enabled: boolean
+  dataSource: "traces" | "logs" | "metrics"
+  metricName: string
+  metricType: "sum" | "gauge" | "histogram" | "exponential_histogram"
+  whereClause: string
+  aggregation: string
+  stepInterval: string
+  addOns: { groupBy: boolean; having: boolean; orderBy: boolean; limit: boolean; legend: boolean }
+  groupBy: string[]
+  // Optional fields — included if present in the saved widget params
+  signalSource?: "default" | "meter"
+  isMonotonic?: boolean
+  orderByDirection?: "desc" | "asc"
+  having?: string
+  orderBy?: string
+  limit?: string
+  legend?: string
+}
+
+export async function fetchQueryBuilderTimeseries(
+  startTime: string,
+  endTime: string,
+  queries: QueryBuilderQueryDraft[],
+): Promise<CustomTimeseriesPoint[]> {
+  const res = await apiRequest<{
+    result: { kind: string; data: Array<{ bucket: string; series: Record<string, number> }> }
+  }>("/api/query-engine/execute-query-builder", {
+    startTime,
+    endTime,
+    kind: "timeseries",
+    queries,
+  })
+
+  if (res.result.kind !== "timeseries") return []
+  return res.result.data.map((p) => ({ bucket: p.bucket, series: { ...p.series } }))
+}
+
+export async function fetchQueryBuilderBreakdown(
+  startTime: string,
+  endTime: string,
+  queries: QueryBuilderQueryDraft[],
+): Promise<CustomBreakdownItem[]> {
+  const res = await apiRequest<{
+    result: { kind: string; data: Array<{ name: string; value: number }> }
+  }>("/api/query-engine/execute-query-builder", {
+    startTime,
+    endTime,
+    kind: "breakdown",
+    queries,
+  })
+
+  if (res.result.kind !== "breakdown") return []
+  return res.result.data.map((item) => ({ name: item.name, value: item.value }))
+}
+
+export async function fetchCustomBreakdown(
+  startTime: string,
+  endTime: string,
+  params: WidgetBreakdownParams,
+): Promise<CustomBreakdownItem[]> {
+  const res = await apiRequest<{
+    result: { kind: string; data: Array<Record<string, unknown>> }
+  }>("/api/query-engine/execute", {
+    startTime,
+    endTime,
+    query: buildBreakdownQuery(params),
+  })
+
+  if (res.result.kind !== "breakdown") return []
+  return res.result.data.map((row) => ({
+    name: String(row.name ?? row.label ?? ""),
+    value: Number(row.value ?? 0),
+  }))
 }

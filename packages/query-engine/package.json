@@ -7,6 +7,7 @@
     "./query-engine": "./src/query-engine.ts",
     "./where-clause": "./src/where-clause.ts",
     "./traces-shared": "./src/traces-shared.ts",
+    "./query-builder": "./src/query-builder/model.ts",
     "./sql": "./src/sql/index.ts",
     "./ch": "./src/ch/index.ts",
     "./observability": "./src/observability/index.ts"
