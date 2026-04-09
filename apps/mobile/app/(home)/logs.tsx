@@ -1,12 +1,8 @@
-import { useState } from "react"
 import { ActivityIndicator, RefreshControl, Text, View } from "react-native"
 import { LegendList } from "@legendapp/list"
-import { Host, Picker, Text as ExpoText } from "@expo/ui/swift-ui"
-import { pickerStyle, tag } from "@expo/ui/swift-ui/modifiers"
 import { useInfiniteLogs } from "../../hooks/use-infinite-logs"
 import { formatLogTimestamp } from "../../lib/format"
 import type { Log } from "../../lib/api"
-import type { TimeRangeKey } from "../../lib/time-utils"
 
 const SEVERITY_COLORS: Record<string, string> = {
 	TRACE: "#8a8078",
@@ -16,8 +12,6 @@ const SEVERITY_COLORS: Record<string, string> = {
 	ERROR: "#c45a3c",
 	FATAL: "#a03a20",
 }
-
-const TIME_OPTIONS: TimeRangeKey[] = ["1h", "24h", "7d", "30d"]
 
 function LogRow({ item }: { item: Log }) {
 	const severity = item.severityText.toUpperCase()
@@ -56,9 +50,7 @@ function LogRow({ item }: { item: Log }) {
 }
 
 export default function LogsScreen() {
-	const [selectedIndex, setSelectedIndex] = useState(1)
-	const timeKey = TIME_OPTIONS[selectedIndex]
-	const { state, fetchNextPage, refresh } = useInfiniteLogs(timeKey)
+	const { state, fetchNextPage, refresh } = useInfiniteLogs("24h")
 
 	return (
 		<View className="flex-1 bg-background">
@@ -69,26 +61,9 @@ export default function LogsScreen() {
 				</Text>
 				<Text className="text-xs text-muted-foreground font-mono mt-0.5">
 					{state.status === "success"
-						? `${state.data.length} logs in last ${timeKey}`
+						? `${state.data.length} logs`
 						: "Loading logs..."}
 				</Text>
-			</View>
-
-			{/* Time Range Segment Control */}
-			<View className="px-5 pb-5">
-				<Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
-					<Picker
-						selection={selectedIndex}
-						onSelectionChange={(value) => setSelectedIndex(value as number)}
-						modifiers={[pickerStyle("segmented")]}
-					>
-						{TIME_OPTIONS.map((option, i) => (
-							<ExpoText key={option} modifiers={[tag(i)]}>
-								{option}
-							</ExpoText>
-						))}
-					</Picker>
-				</Host>
 			</View>
 
 			{/* Content */}

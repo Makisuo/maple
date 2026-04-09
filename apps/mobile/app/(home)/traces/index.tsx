@@ -1,17 +1,12 @@
 import { useMemo, useState } from "react"
 import { ActivityIndicator, RefreshControl, Text, View } from "react-native"
 import { LegendList } from "@legendapp/list"
-import { Host, Picker, Text as ExpoText } from "@expo/ui/swift-ui"
-import { pickerStyle, tag } from "@expo/ui/swift-ui/modifiers"
 import { useInfiniteTraces } from "../../../hooks/use-infinite-traces"
 import { useTracesFacets } from "../../../hooks/use-traces-facets"
 import { TraceRow } from "../../../components/traces/trace-row"
 import { FilterBar, DEFAULT_FILTER_STATE, type TracesFilterState } from "../../../components/traces/filter-bar"
 import { FilterModal } from "../../../components/traces/filter-modal"
 import type { TraceFilters } from "../../../lib/api"
-import type { TimeRangeKey } from "../../../lib/time-utils"
-
-const TIME_OPTIONS: TimeRangeKey[] = ["1h", "24h", "7d", "30d"]
 
 export default function TracesScreen() {
 	const [filterState, setFilterState] = useState<TracesFilterState>(DEFAULT_FILTER_STATE)
@@ -46,33 +41,11 @@ export default function TracesScreen() {
 						</Text>
 						<Text className="text-xs text-muted-foreground font-mono mt-0.5">
 							{state.status === "success"
-								? `${state.data.length} traces in last ${filterState.timeKey}`
+								? `${state.data.length} traces`
 								: "Loading traces..."}
 						</Text>
 					</View>
 				</View>
-			</View>
-
-			{/* Time Range Segment Control */}
-			<View className="px-5 pb-5">
-				<Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
-					<Picker
-						selection={TIME_OPTIONS.indexOf(filterState.timeKey)}
-						onSelectionChange={(value) => {
-							const idx = value as number
-							if (TIME_OPTIONS[idx]) {
-								setFilterState((prev) => ({ ...prev, timeKey: TIME_OPTIONS[idx] }))
-							}
-						}}
-						modifiers={[pickerStyle("segmented")]}
-					>
-						{TIME_OPTIONS.map((option, i) => (
-							<ExpoText key={option} modifiers={[tag(i)]}>
-								{option}
-							</ExpoText>
-						))}
-					</Picker>
-				</Host>
 			</View>
 
 			{/* Filter Bar */}
