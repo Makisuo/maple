@@ -578,6 +578,9 @@ interface AllMetricsPoint {
   p50: number
   p95: number
   p99: number
+  sampledSpanCount: number
+  unsampledSpanCount: number
+  samplingWeight: number
 }
 
 function extractAllMetricsSeries(
@@ -592,6 +595,9 @@ function extractAllMetricsSeries(
       p50: point.series.p50_duration ?? 0,
       p95: point.series.p95_duration ?? 0,
       p99: point.series.p99_duration ?? 0,
+      sampledSpanCount: point.series.sampled_span_count ?? 0,
+      unsampledSpanCount: point.series.unsampled_span_count ?? 0,
+      samplingWeight: point.series.sampling_weight ?? 1,
     })
   }
   return map
@@ -657,12 +663,20 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
         }
       }
 
+      const sampledCount = m?.sampledSpanCount ?? 0
+      const weight = m?.samplingWeight ?? 1
+      const unsampledCount = m?.unsampledSpanCount ?? 0
+      const hasSampling = sampledCount > 0 && weight > 1.01
+      const estimatedCount = hasSampling
+        ? sampledCount * weight + unsampledCount
+        : rawCount
+
       return {
         bucket,
-        throughput: rawCount,
+        throughput: estimatedCount,
         tracedThroughput: rawCount,
-        hasSampling: false,
-        samplingWeight: 1,
+        hasSampling,
+        samplingWeight: hasSampling ? weight : 1,
         errorRate: m?.errorRate ?? 0,
         p50LatencyMs: m?.p50 ?? 0,
         p95LatencyMs: m?.p95 ?? 0,
@@ -753,12 +767,20 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
         }
       }
 
+      const sampledCount = m?.sampledSpanCount ?? 0
+      const weight = m?.samplingWeight ?? 1
+      const unsampledCount = m?.unsampledSpanCount ?? 0
+      const hasSampling = sampledCount > 0 && weight > 1.01
+      const estimatedCount = hasSampling
+        ? sampledCount * weight + unsampledCount
+        : rawCount
+
       return {
         bucket,
-        throughput: rawCount,
+        throughput: estimatedCount,
         tracedThroughput: rawCount,
-        hasSampling: false,
-        samplingWeight: 1,
+        hasSampling,
+        samplingWeight: hasSampling ? weight : 1,
         errorRate: m?.errorRate ?? 0,
         p50LatencyMs: m?.p50 ?? 0,
         p95LatencyMs: m?.p95 ?? 0,

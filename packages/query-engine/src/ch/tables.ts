@@ -174,6 +174,15 @@ export const AttributeKeysHourly = table("attribute_keys_hourly", {
   UsageCount: T.uint64,
 })
 
+export const AttributeValuesHourly = table("attribute_values_hourly", {
+  OrgId: T.string,
+  Hour: T.dateTime,
+  AttributeKey: T.string,
+  AttributeValue: T.string,
+  AttributeScope: T.string,
+  UsageCount: T.uint64,
+})
+
 export const ServiceUsage = table("service_usage", {
   OrgId: T.string,
   ServiceName: T.string,

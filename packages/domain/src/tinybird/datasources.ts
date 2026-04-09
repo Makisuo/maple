@@ -124,8 +124,26 @@ export const traces = defineDatasource("traces", {
       granularity: 1,
     },
     {
+      name: "idx_span_attr_keys",
+      expr: "mapKeys(SpanAttributes)",
+      type: "bloom_filter(0.01)",
+      granularity: 1,
+    },
+    {
       name: "idx_span_attr_vals",
       expr: "mapValues(SpanAttributes)",
+      type: "bloom_filter(0.01)",
+      granularity: 1,
+    },
+    {
+      name: "idx_resource_attr_keys",
+      expr: "mapKeys(ResourceAttributes)",
+      type: "bloom_filter(0.01)",
+      granularity: 1,
+    },
+    {
+      name: "idx_resource_attr_vals",
+      expr: "mapValues(ResourceAttributes)",
       type: "bloom_filter(0.01)",
       granularity: 1,
     },
@@ -268,8 +286,8 @@ export const serviceMapEdgesHourly = defineDatasource(
       partitionKey: "toDate(Hour)",
       sortingKey: [
         "OrgId",
-        "DeploymentEnv",
         "Hour",
+        "DeploymentEnv",
         "SourceService",
         "TargetService",
       ],
@@ -852,3 +870,28 @@ export const attributeKeysHourly = defineDatasource("attribute_keys_hourly", {
 });
 
 export type AttributeKeysHourlyRow = InferRow<typeof attributeKeysHourly>;
+
+/**
+ * Pre-aggregated attribute values with hourly usage counts.
+ * Fed by MVs from traces for span and resource attribute values.
+ */
+export const attributeValuesHourly = defineDatasource("attribute_values_hourly", {
+  description:
+    "Pre-aggregated attribute values with hourly usage counts from trace span and resource attributes.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Hour: t.dateTime(),
+    AttributeKey: t.string().lowCardinality(),
+    AttributeValue: t.string(),
+    AttributeScope: t.string().lowCardinality(),
+    UsageCount: t.simpleAggregateFunction("sum", t.uint64()),
+  },
+  engine: engine.aggregatingMergeTree({
+    partitionKey: "toDate(Hour)",
+    sortingKey: ["OrgId", "AttributeScope", "AttributeKey", "Hour", "AttributeValue"],
+    ttl: "Hour + INTERVAL 90 DAY",
+  }),
+});
+
+export type AttributeValuesHourlyRow = InferRow<typeof attributeValuesHourly>;

@@ -627,6 +627,16 @@ export class DigestService extends ServiceMap.Service<DigestService>()(
               Effect.gen(function* () {
                 const orgId = OrgId.makeUnsafe(rawOrgId)
                 const props = yield* generateDigestData(orgId)
+                if (!hasDigestContent(props)) {
+                  yield* Effect.logInfo("Skipping digest for org with no data").pipe(
+                    Effect.annotateLogs({
+                      orgId: rawOrgId,
+                      subscriptionCount: orgSubs.length,
+                    }),
+                  )
+
+                  return []
+                }
                 const html = yield* renderDigestHtml(props)
 
                 const sendResults = yield* Effect.forEach(
@@ -710,4 +720,20 @@ function rowToResponse(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   })
+}
+
+function hasDigestContent(props: WeeklyDigestProps): boolean {
+  return (
+    props.summary.requests.value > 0 ||
+    props.summary.errors.value > 0 ||
+    props.summary.dataVolume.valueBytes > 0 ||
+    props.ingestion.logs > 0 ||
+    props.ingestion.traces > 0 ||
+    props.ingestion.metrics > 0 ||
+    props.ingestion.totalBytes > 0 ||
+    props.services.some((service) =>
+      service.requests > 0 || service.errorRate > 0 || service.p95Ms > 0
+    ) ||
+    props.topErrors.some((error) => error.count > 0)
+  )
 }

@@ -527,15 +527,40 @@ export function errorsSummaryQuery(
       opts.errorTypes?.length ? CH.inList(errorFingerprint($.StatusMessage), opts.errorTypes) : undefined,
     ])
 
-  const usageSub = from(ServiceUsage)
-    .select(($) => ({
-      totalSpans: CH.sum($.TraceCount),
-    }))
-    .where(($) => [
-      $.OrgId.eq(param.string("orgId")),
-      $.Hour.gte(param.dateTime("startTime")),
-      $.Hour.lte(param.dateTime("endTime")),
-    ])
+  const usageSub = opts.rootOnly
+    ? from(TraceListMv)
+      .select(() => ({
+        totalSpans: CH.count(),
+      }))
+      .where(($) => [
+        $.OrgId.eq(param.string("orgId")),
+        $.Timestamp.gte(param.dateTime("startTime")),
+        $.Timestamp.lte(param.dateTime("endTime")),
+        opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+        opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+      ])
+    : opts.deploymentEnvs?.length
+      ? from(Traces)
+        .select(() => ({
+          totalSpans: CH.count(),
+        }))
+        .where(($) => [
+          $.OrgId.eq(param.string("orgId")),
+          $.Timestamp.gte(param.dateTime("startTime")),
+          $.Timestamp.lte(param.dateTime("endTime")),
+          opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+          CH.inList($.ResourceAttributes.get("deployment.environment"), opts.deploymentEnvs),
+        ])
+      : from(ServiceUsage)
+        .select(($) => ({
+          totalSpans: CH.sum($.TraceCount),
+        }))
+        .where(($) => [
+          $.OrgId.eq(param.string("orgId")),
+          $.Hour.gte(param.dateTime("startTime")),
+          $.Hour.lte(param.dateTime("endTime")),
+          opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+        ])
 
   return fromQuery(errorSub, "e")
     .crossJoinQuery(usageSub, "s")

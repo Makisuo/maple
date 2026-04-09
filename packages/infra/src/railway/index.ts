@@ -207,6 +207,9 @@ export async function provisionRailwayStack(
           : reqEnv("MAPLE_ROOT_PASSWORD"),
       TINYBIRD_HOST: reqEnv("TINYBIRD_HOST"),
       TINYBIRD_TOKEN: reqEnv("TINYBIRD_TOKEN"),
+      RESEND_API_KEY: reqEnv("RESEND_API_KEY"),
+      RESEND_FROM_EMAIL:
+        env.RESEND_FROM_EMAIL?.trim() || "Maple <notifications@maple.dev>",
       MAPLE_DB_URL: reqEnv("MAPLE_DB_URL"),
       MAPLE_DB_AUTH_TOKEN: reqEnv("MAPLE_DB_AUTH_TOKEN"),
       MAPLE_INGEST_KEY_ENCRYPTION_KEY: reqEnv(
@@ -268,6 +271,9 @@ export async function provisionRailwayStack(
     variables: {
       TINYBIRD_HOST: reqEnv("TINYBIRD_HOST"),
       TINYBIRD_TOKEN: reqEnv("TINYBIRD_TOKEN"),
+      RESEND_API_KEY: reqEnv("RESEND_API_KEY"),
+      RESEND_FROM_EMAIL:
+        env.RESEND_FROM_EMAIL?.trim() || "Maple <notifications@maple.dev>",
       MAPLE_DB_URL: reqEnv("MAPLE_DB_URL"),
       MAPLE_DB_AUTH_TOKEN: reqEnv("MAPLE_DB_AUTH_TOKEN"),
       MAPLE_AUTH_MODE: authMode,
