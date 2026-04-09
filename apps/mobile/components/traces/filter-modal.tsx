@@ -10,13 +10,8 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native"
-import { Host, Picker, Text as ExpoText } from "@expo/ui/swift-ui"
-import { pickerStyle, tag } from "@expo/ui/swift-ui/modifiers"
-import type { TimeRangeKey } from "../../lib/time-utils"
 import type { TracesFacets } from "../../lib/api"
 import type { TracesFilterState } from "./filter-bar"
-
-const TIME_OPTIONS: TimeRangeKey[] = ["1h", "24h", "7d", "30d"]
 
 interface FilterModalProps {
 	visible: boolean
@@ -48,9 +43,7 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 	}
 
 	const hasActiveFilters =
-		draft.serviceName !== "" || draft.spanName !== "" || draft.errorsOnly || draft.timeKey !== "24h"
-
-	const timeIndex = TIME_OPTIONS.indexOf(draft.timeKey)
+		draft.serviceName !== "" || draft.spanName !== "" || draft.errorsOnly
 
 	return (
 		<Modal
@@ -86,29 +79,6 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 										<Text className="text-xs text-destructive font-mono">Reset all filters</Text>
 									</TouchableOpacity>
 								)}
-
-								{/* Time Range */}
-								<SectionLabel>Time Range</SectionLabel>
-								<View className="mb-6">
-									<Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
-										<Picker
-											selection={timeIndex}
-											onSelectionChange={(value) => {
-												const idx = value as number
-												if (TIME_OPTIONS[idx]) {
-													setDraft((d) => ({ ...d, timeKey: TIME_OPTIONS[idx] }))
-												}
-											}}
-											modifiers={[pickerStyle("segmented")]}
-										>
-											{TIME_OPTIONS.map((opt, i) => (
-												<ExpoText key={opt} modifiers={[tag(i)]}>
-													{opt}
-												</ExpoText>
-											))}
-										</Picker>
-									</Host>
-								</View>
 
 								{/* Errors Only */}
 								<SectionLabel>Status</SectionLabel>

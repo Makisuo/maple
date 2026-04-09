@@ -15,13 +15,6 @@ export const DEFAULT_FILTER_STATE: TracesFilterState = {
 	errorsOnly: false,
 }
 
-const TIME_LABELS: Record<TimeRangeKey, string> = {
-	"1h": "Last 1h",
-	"24h": "Last 24h",
-	"7d": "Last 7d",
-	"30d": "Last 30d",
-}
-
 interface FilterBarProps {
 	filterState: TracesFilterState
 	onRemoveFilter: (key: keyof TracesFilterState) => void
@@ -51,16 +44,6 @@ export function FilterBar({ filterState, onRemoveFilter, onOpenFilters }: Filter
 							</Text>
 						</View>
 					)}
-				</TouchableOpacity>
-
-				{/* Time range pill */}
-				<TouchableOpacity
-					onPress={onOpenFilters}
-					className="rounded-lg border border-border bg-card px-3 py-1.5"
-				>
-					<Text className="text-xs text-foreground font-mono">
-						{TIME_LABELS[filterState.timeKey]}
-					</Text>
 				</TouchableOpacity>
 
 				{/* Active filter chips */}

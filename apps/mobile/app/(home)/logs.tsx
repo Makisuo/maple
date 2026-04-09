@@ -1,6 +1,8 @@
 import { useState } from "react"
 import { ActivityIndicator, RefreshControl, Text, View } from "react-native"
 import { LegendList } from "@legendapp/list"
+import { Host, Picker, Text as ExpoText } from "@expo/ui/swift-ui"
+import { pickerStyle, tag } from "@expo/ui/swift-ui/modifiers"
 import { useInfiniteLogs } from "../../hooks/use-infinite-logs"
 import { formatLogTimestamp } from "../../lib/format"
 import type { Log } from "../../lib/api"
@@ -54,7 +56,8 @@ function LogRow({ item }: { item: Log }) {
 }
 
 export default function LogsScreen() {
-	const [timeKey, setTimeKey] = useState<TimeRangeKey>("24h")
+	const [selectedIndex, setSelectedIndex] = useState(1)
+	const timeKey = TIME_OPTIONS[selectedIndex]
 	const { state, fetchNextPage, refresh } = useInfiniteLogs(timeKey)
 
 	return (
@@ -71,21 +74,21 @@ export default function LogsScreen() {
 				</Text>
 			</View>
 
-			{/* Time Range Selector */}
-			<View className="flex-row px-5 pb-3 gap-2">
-				{TIME_OPTIONS.map((key) => (
-					<Text
-						key={key}
-						className={`text-xs font-mono px-3 py-1.5 rounded-full ${
-							key === timeKey
-								? "bg-foreground text-background"
-								: "bg-muted text-muted-foreground"
-						}`}
-						onPress={() => setTimeKey(key)}
+			{/* Time Range Segment Control */}
+			<View className="px-5 pb-5">
+				<Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
+					<Picker
+						selection={selectedIndex}
+						onSelectionChange={(value) => setSelectedIndex(value as number)}
+						modifiers={[pickerStyle("segmented")]}
 					>
-						{key}
-					</Text>
-				))}
+						{TIME_OPTIONS.map((option, i) => (
+							<ExpoText key={option} modifiers={[tag(i)]}>
+								{option}
+							</ExpoText>
+						))}
+					</Picker>
+				</Host>
 			</View>
 
 			{/* Content */}

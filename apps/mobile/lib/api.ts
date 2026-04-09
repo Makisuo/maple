@@ -316,6 +316,52 @@ export async function fetchServiceApdex(
   }))
 }
 
+// ── Span Hierarchy ──
+
+export interface SpanHierarchyRow {
+  traceId: string
+  spanId: string
+  parentSpanId: string
+  spanName: string
+  serviceName: string
+  spanKind: string
+  durationMs: number
+  startTime: string
+  statusCode: string
+  statusMessage: string
+  spanAttributes: string
+  resourceAttributes: string
+}
+
+export interface Span {
+  traceId: string
+  spanId: string
+  parentSpanId: string
+  spanName: string
+  serviceName: string
+  spanKind: string
+  durationMs: number
+  startTime: string
+  statusCode: string
+  statusMessage: string
+  spanAttributes: Record<string, string>
+  resourceAttributes: Record<string, string>
+}
+
+export interface SpanNode extends Span {
+  children: SpanNode[]
+  depth: number
+  isMissing?: boolean
+}
+
+export async function fetchSpanHierarchy(traceId: string): Promise<SpanHierarchyRow[]> {
+  const res = await apiRequest<{ data: SpanHierarchyRow[] }>(
+    "/api/query-engine/span-hierarchy",
+    { traceId },
+  )
+  return res.data ?? []
+}
+
 // ── Traces ──
 
 export interface HttpInfo {
@@ -337,7 +383,7 @@ export interface Trace {
   statusCode: string
 }
 
-function getHttpInfo(spanName: string, attrs: Record<string, string>): HttpInfo | null {
+export function getHttpInfo(spanName: string, attrs: Record<string, string>): HttpInfo | null {
   const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const
   let method = attrs["http.method"] || attrs["http.request.method"]
   let route: string | null = attrs["http.route"] || attrs["http.target"] || attrs["url.path"] || null
