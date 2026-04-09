@@ -27,6 +27,27 @@ function sortWidgets(widgets: readonly DashboardWidget[]): DashboardWidget[] {
 	})
 }
 
+type WidgetRow =
+	| { kind: "single"; widget: DashboardWidget }
+	| { kind: "stat-pair"; widgets: [DashboardWidget, DashboardWidget] }
+
+function buildRows(widgets: DashboardWidget[]): WidgetRow[] {
+	const rows: WidgetRow[] = []
+	let i = 0
+	while (i < widgets.length) {
+		const w = widgets[i]
+		const next = widgets[i + 1]
+		if (w.visualization === "stat" && next?.visualization === "stat") {
+			rows.push({ kind: "stat-pair", widgets: [w, next] })
+			i += 2
+		} else {
+			rows.push({ kind: "single", widget: w })
+			i += 1
+		}
+	}
+	return rows
+}
+
 export default function DashboardDetailScreen() {
 	const { id } = useLocalSearchParams<{ id: string }>()
 	const { state, refresh } = useDashboards()
@@ -72,6 +93,7 @@ export default function DashboardDetailScreen() {
 function DashboardDetailContent({ dashboard }: { dashboard: DashboardDocument }) {
 	const router = useRouter()
 	const widgets = sortWidgets(dashboard.widgets)
+	const rows = useMemo(() => buildRows(widgets), [widgets])
 
 	const [selectedIndex, setSelectedIndex] = useState(() =>
 		defaultTimeIndex(dashboard.timeRange),
@@ -141,13 +163,41 @@ function DashboardDetailContent({ dashboard }: { dashboard: DashboardDocument })
 					className="flex-1"
 					contentContainerStyle={{ paddingTop: 4, paddingBottom: 100 }}
 				>
-					{widgets.map((widget) => (
-						<DashboardWidgetView
-							key={widget.id}
-							widget={widget}
-							timeRange={effectiveTimeRange}
-						/>
-					))}
+					{rows.map((row, idx) => {
+						if (row.kind === "stat-pair") {
+							const [a, b] = row.widgets
+							return (
+								<View
+									key={`row-${idx}`}
+									className="px-5 pb-3 flex-row"
+									style={{ gap: 12 }}
+								>
+									<View style={{ flex: 1 }}>
+										<DashboardWidgetView
+											widget={a}
+											timeRange={effectiveTimeRange}
+											compact
+										/>
+									</View>
+									<View style={{ flex: 1 }}>
+										<DashboardWidgetView
+											widget={b}
+											timeRange={effectiveTimeRange}
+											compact
+										/>
+									</View>
+								</View>
+							)
+						}
+						return (
+							<View key={row.widget.id} className="px-5 pb-3">
+								<DashboardWidgetView
+									widget={row.widget}
+									timeRange={effectiveTimeRange}
+								/>
+							</View>
+						)
+					})}
 				</ScrollView>
 			)}
 		</View>

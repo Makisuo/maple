@@ -5,6 +5,7 @@ import { formatDuration } from "../../lib/format"
 interface StatTileProps {
 	value: number
 	display: WidgetDisplayConfig
+	compact?: boolean
 }
 
 function formatNumber(n: number, unit?: string): string {
@@ -31,9 +32,13 @@ function thresholdColor(value: number, display: WidgetDisplayConfig): string | u
 	return chosen
 }
 
-export function StatTile({ value, display }: StatTileProps) {
+export function StatTile({ value, display, compact = false }: StatTileProps) {
 	const formatted = formatNumber(value, display.unit)
 	const color = thresholdColor(value, display)
+
+	const valueSize = compact ? 22 : 28
+	const prefixSize = compact ? 13 : 16
+	const suffixSize = compact ? 11 : 13
 
 	return (
 		<View
@@ -41,27 +46,29 @@ export function StatTile({ value, display }: StatTileProps) {
 				flexDirection: "row",
 				alignItems: "baseline",
 				justifyContent: "flex-start",
-				paddingVertical: 4,
 			}}
 		>
 			{display.prefix ? (
 				<Text
 					className="text-foreground font-mono"
-					style={{ fontSize: 18, marginRight: 4, color }}
+					style={{ fontSize: prefixSize, marginRight: 4, color }}
 				>
 					{display.prefix}
 				</Text>
 			) : null}
 			<Text
 				className="text-foreground font-mono font-bold"
-				style={{ fontSize: 32, color }}
+				style={{ fontSize: valueSize, color }}
+				numberOfLines={1}
+				adjustsFontSizeToFit
 			>
 				{formatted}
 			</Text>
 			{display.suffix ? (
 				<Text
 					className="text-muted-foreground font-mono"
-					style={{ fontSize: 14, marginLeft: 6 }}
+					style={{ fontSize: suffixSize, marginLeft: 6 }}
+					numberOfLines={1}
 				>
 					{display.suffix}
 				</Text>
