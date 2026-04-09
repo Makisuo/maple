@@ -148,6 +148,7 @@ export function alertMetricsAggregateByServiceQuery(
       $.OrgId.eq(param.string("orgId")),
       $.TimeUnix.gte(param.dateTime("startTime")),
       $.TimeUnix.lte(param.dateTime("endTime")),
+      CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
     ])
     .groupBy("serviceName")
     .orderBy(["dataPointCount", "desc"])

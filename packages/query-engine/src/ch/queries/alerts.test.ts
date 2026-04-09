@@ -165,6 +165,12 @@ describe("alertMetricsAggregateByServiceQuery", () => {
     expect(sql).toContain("FROM metrics_histogram")
     expect(sql).toContain("GROUP BY serviceName")
   })
+
+  it("applies serviceName filter", () => {
+    const q = alertMetricsAggregateByServiceQuery({ metricType: "sum", serviceName: "api" })
+    const { sql } = compileCH(q, metricsParams)
+    expect(sql).toContain("ServiceName = 'api'")
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import {
   errorSpans,
   traceListMv,
   attributeKeysHourly,
+  attributeValuesHourly,
 } from "./datasources";
 
 /**
@@ -546,6 +547,62 @@ export const metricAttributeKeysMv = defineMaterializedView(
         FROM metrics_sum
         WHERE Attributes != map()
         GROUP BY OrgId, Hour, AttributeKey, AttributeScope
+      `,
+      }),
+    ],
+  },
+);
+
+export const traceSpanAttributeValuesMv = defineMaterializedView(
+  "trace_span_attribute_values_mv",
+  {
+    description: "Aggregates span attribute values from traces hourly.",
+    datasource: attributeValuesHourly,
+    nodes: [
+      node({
+        name: "trace_span_attribute_values_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          AttributeKey,
+          AttributeValue,
+          'span' AS AttributeScope,
+          count() AS UsageCount
+        FROM traces
+        ARRAY JOIN
+          mapKeys(SpanAttributes) AS AttributeKey,
+          mapValues(SpanAttributes) AS AttributeValue
+        WHERE AttributeValue != ''
+        GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
+      `,
+      }),
+    ],
+  },
+);
+
+export const traceResourceAttributeValuesMv = defineMaterializedView(
+  "trace_resource_attribute_values_mv",
+  {
+    description: "Aggregates resource attribute values from traces hourly.",
+    datasource: attributeValuesHourly,
+    nodes: [
+      node({
+        name: "trace_resource_attribute_values_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          AttributeKey,
+          AttributeValue,
+          'resource' AS AttributeScope,
+          count() AS UsageCount
+        FROM traces
+        ARRAY JOIN
+          mapKeys(ResourceAttributes) AS AttributeKey,
+          mapValues(ResourceAttributes) AS AttributeValue
+        WHERE AttributeValue != ''
+        GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
       }),
     ],
