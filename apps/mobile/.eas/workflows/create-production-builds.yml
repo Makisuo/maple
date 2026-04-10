@@ -3,19 +3,12 @@ name: Create Production Builds
 on:
   push:
     branches: [main]
-    paths:
-      - apps/mobile/**
-      - packages/**
-      - lib/**
 
   workflow_dispatch: {}
 
 jobs:
   build_ios:
     type: build
-    defaults:
-      run:
-        working_directory: ./apps/mobile
     params:
       platform: ios
       profile: production
