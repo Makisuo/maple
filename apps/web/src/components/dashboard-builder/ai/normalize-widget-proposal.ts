@@ -451,6 +451,10 @@ function inferTitle(
   return endpointFallbacks[input.dataSource.endpoint]
 }
 
+function titlePrefersIncrease(title: unknown): boolean {
+  return isNonEmptyString(title) && /\b(increase|delta|change|added|new|increment|growth)\b/i.test(title)
+}
+
 function normalizeQueryEntry(
   raw: unknown,
   index: number,
@@ -647,6 +651,17 @@ export function normalizeAiWidgetProposal(
     }
   }
 
+  const titleDrivenQueries = titlePrefersIncrease(input.display.title)
+    ? normalizedQueries.map((query) =>
+        query.dataSource === "metrics" &&
+        query.metricType === "sum" &&
+        query.isMonotonic &&
+        query.aggregation === "rate"
+          ? { ...query, aggregation: "increase" }
+          : query,
+      )
+    : normalizedQueries
+
   const formulasInput = Array.isArray(params.formulas) ? params.formulas : []
   const normalizedFormulas = formulasInput
     .map((formula, index) => normalizeFormulaEntry(formula, index))
@@ -669,7 +684,7 @@ export function normalizeAiWidgetProposal(
     ...input.dataSource,
     params: {
       ...restParams,
-      queries: normalizedQueries.map(rewriteFriendlyQueryLegend),
+      queries: titleDrivenQueries.map(rewriteFriendlyQueryLegend),
       formulas: normalizedFormulas,
       comparison: normalizedComparison,
       debug: params.debug === true,
@@ -682,14 +697,14 @@ export function normalizeAiWidgetProposal(
       ...input,
       display: {
         ...input.display,
-        title: inferTitle(input, normalizedQueries, normalizedFormulas),
+        title: inferTitle(input, titleDrivenQueries, normalizedFormulas),
         chartId:
           input.visualization === "chart"
-            ? inferChartId(normalizedQueries, input.display.chartId)
+            ? inferChartId(titleDrivenQueries, input.display.chartId)
             : input.display.chartId,
         unit:
           input.visualization === "chart" || input.visualization === "stat"
-            ? inferDisplayUnit(normalizedQueries, input.display.unit)
+            ? inferDisplayUnit(titleDrivenQueries, input.display.unit)
             : input.display.unit,
       },
       dataSource: normalizedDataSource,

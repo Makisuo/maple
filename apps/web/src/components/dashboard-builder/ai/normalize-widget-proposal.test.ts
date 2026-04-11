@@ -322,7 +322,7 @@ describe("normalizeAiWidgetProposal", () => {
     const queries = params.queries as Array<Record<string, unknown>>;
     expect(queries[0]?.aggregation).toBe("rate");
     expect(queries[0]?.isMonotonic).toBe(true);
-    expect(result.proposal.display.title).toBe("Http Server Request Count Rate");
+    expect(result.proposal.display.title).toBe("HTTP Server Request Count Rate");
     expect(result.proposal.display.chartId).toBe("query-builder-area");
   });
 

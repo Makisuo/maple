@@ -25,28 +25,114 @@ type WidgetDef = {
   layout: { x: number; y: number; w: number; h: number }
 }
 
+// ---------------------------------------------------------------------------
+// Query builder helpers — produce the full queries format expected by
+// custom_query_builder_timeseries / custom_query_builder_breakdown
+// ---------------------------------------------------------------------------
+
+function makeQueryDraft(opts: {
+  id: string
+  name: string
+  dataSource: "traces" | "logs" | "metrics"
+  aggregation: string
+  whereClause?: string
+  groupBy?: string[]
+  metricName?: string
+  metricType?: string
+  isMonotonic?: boolean
+}): Record<string, unknown> {
+  return {
+    id: opts.id,
+    name: opts.name,
+    enabled: true,
+    dataSource: opts.dataSource,
+    signalSource: "default",
+    metricName: opts.metricName ?? "",
+    metricType: opts.metricType ?? "sum",
+    ...(opts.isMonotonic != null && { isMonotonic: opts.isMonotonic }),
+    whereClause: opts.whereClause ?? "",
+    aggregation: opts.aggregation,
+    stepInterval: "",
+    orderByDirection: "desc",
+    addOns: {
+      groupBy: (opts.groupBy?.length ?? 0) > 0,
+      having: false,
+      orderBy: false,
+      limit: false,
+      legend: false,
+    },
+    groupBy: opts.groupBy ?? [],
+    having: "",
+    orderBy: "",
+    limit: "",
+    legend: "",
+  }
+}
+
+function makeQueryBuilderTimeseriesDataSource(
+  queries: Record<string, unknown>[],
+): { endpoint: string; params: Record<string, unknown> } {
+  return {
+    endpoint: "custom_query_builder_timeseries",
+    params: {
+      queries,
+      formulas: [],
+      comparison: { mode: "none", includePercentChange: true },
+      debug: false,
+    },
+  }
+}
+
+function makeQueryBuilderBreakdownDataSource(
+  queries: Record<string, unknown>[],
+): { endpoint: string; params: Record<string, unknown> } {
+  return {
+    endpoint: "custom_query_builder_breakdown",
+    params: { queries },
+  }
+}
+
+const QUERY_BUILDER_CHART_DISPLAY = {
+  chartId: "query-builder-bar",
+  chartPresentation: { legend: "visible" },
+  stacked: true,
+  curveType: "linear",
+}
+
+function serviceWhereClause(serviceName?: string): string {
+  return serviceName ? `service.name = "${serviceName}"` : ""
+}
+
 function serviceHealthWidgets(serviceName?: string): WidgetDef[] {
-  const svcParams = serviceName ? { service_name: serviceName } : {}
-  const tracesFilters = serviceName ? { serviceName } : undefined
+  const where = serviceWhereClause(serviceName)
+  const groupBy = ["service.name"]
   return [
     {
       id: "throughput",
       visualization: "stat",
       dataSource: {
         endpoint: "service_overview",
-        params: svcParams,
+        params: serviceName ? { service_name: serviceName } : {},
         transform: { reduceToValue: { field: "throughput", aggregate: "sum" } },
       },
-      display: { title: "Throughput" },
+      display: { title: "Throughput", unit: "short" },
       layout: { x: 0, y: 0, w: 3, h: 2 },
     },
     {
       id: "error-rate",
       visualization: "stat",
       dataSource: {
-        endpoint: "error_rate_by_service",
-        params: svcParams,
-        transform: { reduceToValue: { field: "errorRate", aggregate: "avg" } },
+        ...makeQueryBuilderTimeseriesDataSource([
+          makeQueryDraft({
+            id: "error-rate-stat",
+            name: "Error Rate",
+            dataSource: "traces",
+            aggregation: "error_rate",
+            whereClause: where,
+            groupBy: [],
+          }),
+        ]),
+        transform: { reduceToValue: { field: "Error Rate", aggregate: "avg" } },
       },
       display: { title: "Error Rate", suffix: "%" },
       layout: { x: 3, y: 0, w: 3, h: 2 },
@@ -56,7 +142,7 @@ function serviceHealthWidgets(serviceName?: string): WidgetDef[] {
       visualization: "stat",
       dataSource: {
         endpoint: "service_overview",
-        params: svcParams,
+        params: serviceName ? { service_name: serviceName } : {},
         transform: { reduceToValue: { field: "p50LatencyMs", aggregate: "avg" } },
       },
       display: { title: "P50 Latency", unit: "ms" },
@@ -67,7 +153,7 @@ function serviceHealthWidgets(serviceName?: string): WidgetDef[] {
       visualization: "stat",
       dataSource: {
         endpoint: "service_overview",
-        params: svcParams,
+        params: serviceName ? { service_name: serviceName } : {},
         transform: { reduceToValue: { field: "p95LatencyMs", aggregate: "avg" } },
       },
       display: { title: "P95 Latency", unit: "ms" },
@@ -76,72 +162,72 @@ function serviceHealthWidgets(serviceName?: string): WidgetDef[] {
     {
       id: "throughput-chart",
       visualization: "chart",
-      dataSource: {
-        endpoint: "custom_timeseries",
-        params: {
-          source: "traces",
-          metric: "count",
-          groupBy: "service",
-          ...(tracesFilters && { filters: tracesFilters }),
-        },
-        transform: { flattenSeries: { valueField: "value" } },
-      },
-      display: { title: "Throughput Over Time" },
+      dataSource: makeQueryBuilderTimeseriesDataSource([
+        makeQueryDraft({
+          id: "throughput",
+          name: "Throughput",
+          dataSource: "traces",
+          aggregation: "count",
+          whereClause: where,
+          groupBy,
+        }),
+      ]),
+      display: { title: "Throughput Over Time", ...QUERY_BUILDER_CHART_DISPLAY, unit: "short" },
       layout: { x: 0, y: 2, w: 6, h: 4 },
     },
     {
       id: "error-rate-chart",
       visualization: "chart",
-      dataSource: {
-        endpoint: "custom_timeseries",
-        params: {
-          source: "traces",
-          metric: "error_rate",
-          groupBy: "service",
-          ...(tracesFilters && { filters: tracesFilters }),
-        },
-        transform: { flattenSeries: { valueField: "value" } },
-      },
-      display: { title: "Error Rate Over Time", unit: "%" },
+      dataSource: makeQueryBuilderTimeseriesDataSource([
+        makeQueryDraft({
+          id: "error-rate",
+          name: "Error Rate",
+          dataSource: "traces",
+          aggregation: "error_rate",
+          whereClause: where,
+          groupBy,
+        }),
+      ]),
+      display: { title: "Error Rate Over Time", ...QUERY_BUILDER_CHART_DISPLAY },
       layout: { x: 6, y: 2, w: 6, h: 4 },
     },
     {
       id: "latency-chart",
       visualization: "chart",
-      dataSource: {
-        endpoint: "custom_timeseries",
-        params: {
-          source: "traces",
-          metric: "p95_duration",
-          groupBy: "service",
-          ...(tracesFilters && { filters: tracesFilters }),
-        },
-        transform: { flattenSeries: { valueField: "value" } },
-      },
-      display: { title: "P95 Latency Over Time", unit: "ms" },
+      dataSource: makeQueryBuilderTimeseriesDataSource([
+        makeQueryDraft({
+          id: "p95-latency",
+          name: "P95 Latency",
+          dataSource: "traces",
+          aggregation: "p95_duration",
+          whereClause: where,
+          groupBy,
+        }),
+      ]),
+      display: { title: "P95 Latency Over Time", ...QUERY_BUILDER_CHART_DISPLAY, unit: "ms" },
       layout: { x: 0, y: 6, w: 12, h: 4 },
     },
   ]
 }
 
 function errorTrackingWidgets(serviceName?: string): WidgetDef[] {
-  const svcParams = serviceName ? { service_name: serviceName } : {}
-  const tracesFilters = serviceName ? { serviceName } : undefined
+  const where = serviceWhereClause(serviceName)
+  const groupBy = ["service.name"]
   return [
     {
       id: "error-rate-ts",
       visualization: "chart",
-      dataSource: {
-        endpoint: "custom_timeseries",
-        params: {
-          source: "traces",
-          metric: "error_rate",
-          groupBy: "service",
-          ...(tracesFilters && { filters: tracesFilters }),
-        },
-        transform: { flattenSeries: { valueField: "value" } },
-      },
-      display: { title: "Error Rate Over Time", unit: "%" },
+      dataSource: makeQueryBuilderTimeseriesDataSource([
+        makeQueryDraft({
+          id: "error-rate",
+          name: "Error Rate",
+          dataSource: "traces",
+          aggregation: "error_rate",
+          whereClause: where,
+          groupBy,
+        }),
+      ]),
+      display: { title: "Error Rate Over Time", ...QUERY_BUILDER_CHART_DISPLAY },
       layout: { x: 0, y: 0, w: 12, h: 4 },
     },
     {
@@ -149,14 +235,17 @@ function errorTrackingWidgets(serviceName?: string): WidgetDef[] {
       visualization: "table",
       dataSource: {
         endpoint: "errors_by_type",
-        params: { ...svcParams, limit: 20 },
+        params: {
+          ...(serviceName && { services: [serviceName] }),
+          limit: 20,
+        },
       },
       display: {
         title: "Errors by Type",
         columns: [
           { field: "errorType", header: "Error Type" },
           { field: "count", header: "Count" },
-          { field: "affectedServices", header: "Services" },
+          { field: "affectedServicesCount", header: "Services" },
         ],
       },
       layout: { x: 0, y: 4, w: 12, h: 5 },
@@ -166,7 +255,11 @@ function errorTrackingWidgets(serviceName?: string): WidgetDef[] {
       visualization: "list",
       dataSource: {
         endpoint: "list_traces",
-        params: { ...svcParams, has_error: true, limit: 10 },
+        params: {
+          ...(serviceName && { service: serviceName }),
+          hasError: true,
+          limit: 10,
+        },
       },
       display: {
         title: "Recent Error Traces",
@@ -190,6 +283,7 @@ function metricOverviewWidgets(opts: {
     metricType: opts.metricType,
     ...(opts.serviceName && { serviceName: opts.serviceName }),
   }
+  const where = opts.serviceName ? `service.name = "${opts.serviceName}"` : ""
   return [
     {
       id: "metric-current",
@@ -230,27 +324,42 @@ function metricOverviewWidgets(opts: {
           reduceToValue: { field: "value", aggregate: "sum" },
         },
       },
-      display: { title: "Data Points" },
+      display: { title: "Data Points", unit: "short" },
       layout: { x: 8, y: 0, w: 4, h: 2 },
     },
     {
       id: "metric-timeseries",
       visualization: "chart",
-      dataSource: {
-        endpoint: "custom_timeseries",
-        params: { source: "metrics", metric: agg, groupBy: "service", filters: metricsFilters },
-        transform: { flattenSeries: { valueField: "value" } },
-      },
-      display: { title: `${opts.metricName} Over Time` },
+      dataSource: makeQueryBuilderTimeseriesDataSource([
+        makeQueryDraft({
+          id: "metric-ts",
+          name: opts.metricName,
+          dataSource: "metrics",
+          aggregation: agg,
+          whereClause: where,
+          groupBy: ["service.name"],
+          metricName: opts.metricName,
+          metricType: opts.metricType,
+        }),
+      ]),
+      display: { title: `${opts.metricName} Over Time`, ...QUERY_BUILDER_CHART_DISPLAY },
       layout: { x: 0, y: 2, w: 12, h: 4 },
     },
     {
       id: "metric-breakdown",
       visualization: "table",
-      dataSource: {
-        endpoint: "custom_breakdown",
-        params: { source: "metrics", metric: agg, groupBy: "service", filters: metricsFilters },
-      },
+      dataSource: makeQueryBuilderBreakdownDataSource([
+        makeQueryDraft({
+          id: "metric-bd",
+          name: opts.metricName,
+          dataSource: "metrics",
+          aggregation: agg,
+          whereClause: where,
+          groupBy: ["service.name"],
+          metricName: opts.metricName,
+          metricType: opts.metricType,
+        }),
+      ]),
       display: {
         title: "By Service",
         columns: [
@@ -313,59 +422,83 @@ function simpleSpecToWidget(
   }
 
   const metric = spec.metric ?? (source === "metrics" ? "avg" : "count")
+  const where = spec.service_name ? `service.name = "${spec.service_name}"` : ""
+  const groupBy = spec.group_by
+    ? [spec.group_by === "service" ? "service.name" : spec.group_by]
+    : viz === "stat" ? [] : ["service.name"]
 
-  const params: Record<string, unknown> = { source, metric }
-
-  if (viz === "table") {
-    params.groupBy = spec.group_by ?? "service"
-  } else {
-    params.groupBy = spec.group_by ?? (viz === "stat" ? "none" : "service")
-  }
-
-  if (source === "metrics") {
-    params.filters = {
-      metricName: spec.metric_name,
-      metricType: spec.metric_type,
-      ...(spec.service_name && { serviceName: spec.service_name }),
-    }
-  } else if (spec.service_name) {
-    params.filters = { serviceName: spec.service_name }
-  }
-
-  let endpoint: string
-  let transform: Record<string, unknown> | undefined
-
-  if (viz === "table") {
-    endpoint = "custom_breakdown"
-  } else {
-    endpoint = "custom_timeseries"
-    if (viz === "stat") {
-      transform = {
-        flattenSeries: { valueField: "value" },
-        reduceToValue: { field: "value", aggregate: "avg" },
-      }
-    } else {
-      transform = { flattenSeries: { valueField: "value" } }
-    }
-  }
+  const queryDraft = makeQueryDraft({
+    id: `q-${id}`,
+    name: spec.title,
+    dataSource: source as "traces" | "logs" | "metrics",
+    aggregation: metric,
+    whereClause: where,
+    groupBy,
+    metricName: spec.metric_name,
+    metricType: spec.metric_type,
+  })
 
   const display: Record<string, unknown> = { title: spec.title }
   if (spec.unit) display.unit = spec.unit
+
   if (viz === "table") {
+    const ds = makeQueryBuilderBreakdownDataSource([queryDraft])
     display.columns = [
       { field: "name", header: spec.group_by === "severity" ? "Severity" : "Service" },
       { field: "value", header: metric.charAt(0).toUpperCase() + metric.slice(1) },
     ]
+
+    return {
+      id,
+      visualization: viz,
+      dataSource: ds,
+      display,
+      layout,
+    }
   }
+
+  if (viz === "stat") {
+    // Stats still use custom_timeseries + flattenSeries for simplicity
+    const metricsFilters: Record<string, unknown> | undefined =
+      source === "metrics"
+        ? {
+            metricName: spec.metric_name,
+            metricType: spec.metric_type,
+            ...(spec.service_name && { serviceName: spec.service_name }),
+          }
+        : spec.service_name
+          ? { serviceName: spec.service_name }
+          : undefined
+
+    return {
+      id,
+      visualization: viz,
+      dataSource: {
+        endpoint: "custom_timeseries",
+        params: {
+          source,
+          metric,
+          groupBy: "none",
+          ...(metricsFilters && { filters: metricsFilters }),
+        },
+        transform: {
+          flattenSeries: { valueField: "value" },
+          reduceToValue: { field: "value", aggregate: "avg" },
+        },
+      },
+      display,
+      layout,
+    }
+  }
+
+  // Chart — use query builder
+  const ds = makeQueryBuilderTimeseriesDataSource([queryDraft])
+  Object.assign(display, QUERY_BUILDER_CHART_DISPLAY)
 
   return {
     id,
     visualization: viz,
-    dataSource: {
-      endpoint,
-      params,
-      ...(transform && { transform }),
-    },
+    dataSource: ds,
     display,
     layout,
   }

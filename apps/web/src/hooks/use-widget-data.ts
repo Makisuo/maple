@@ -79,8 +79,9 @@ function applyTransform(
     for (const row of rows as Array<Record<string, unknown>>) {
       const series = row.series as Record<string, number> | undefined
       if (series) {
-        for (const [, val] of Object.entries(series)) {
-          flatRows.push({ ...row, [valueField]: val })
+        for (const [key, val] of Object.entries(series)) {
+          const { series: _discardSeries, ...rest } = row
+          flatRows.push({ ...rest, name: key, [valueField]: val })
         }
       }
     }
