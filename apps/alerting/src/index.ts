@@ -125,7 +125,7 @@ const program = Effect.gen(function* () {
 }).pipe(
   Effect.provide(
     Layer.mergeAll(AlertsServiceLive, DigestServiceLive).pipe(
-      Layer.provide(TelemetryLive),
+      Layer.provideMerge(TelemetryLive),
     ),
   ),
 )

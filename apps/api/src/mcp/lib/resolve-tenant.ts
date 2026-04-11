@@ -93,7 +93,10 @@ export const resolveMcpTenantContext = (
     const apiKeys = yield* ApiKeysService
     const resolved = yield* apiKeys.resolveByKey(token).pipe(
       Effect.mapError(
-        (error) => new McpAuthInvalidError({ message: error.message }),
+        (error) => new McpAuthInvalidError({
+          message: error.message || "API key validation failed",
+          reason: "api_key_lookup",
+        }),
       ),
     )
 
@@ -124,7 +127,10 @@ export const resolveMcpTenantContext = (
   const auth = yield* AuthService
   const tenant = yield* auth.resolveMcpTenant(toHeaderRecord(request.headers)).pipe(
     Effect.mapError(
-      (error) => new McpAuthInvalidError({ message: error.message }),
+      (error) => new McpAuthInvalidError({
+        message: error.message || "Authentication failed (no details available)",
+        reason: "session_auth_fallback",
+      }),
     ),
   )
 
