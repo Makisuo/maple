@@ -15,6 +15,7 @@ import {
   type QueryBuilderMetricType,
   type QueryBuilderQueryDraft,
 } from "@/lib/query-builder/model"
+import { Match } from "effect"
 
 export interface AiWidgetProposal {
   visualization: VisualizationType
@@ -48,28 +49,30 @@ function isQueryBuilderDataSource(value: unknown): value is QueryBuilderDataSour
   return value === "traces" || value === "logs" || value === "metrics"
 }
 
+function isQueryBuilderMetricType(value: unknown): value is QueryBuilderMetricType {
+  return QUERY_BUILDER_METRIC_TYPES.includes(value as never)
+}
+
 function toMetricType(
   value: unknown,
   fallback: QueryBuilderMetricType,
 ): QueryBuilderMetricType {
-  return QUERY_BUILDER_METRIC_TYPES.includes(value as QueryBuilderMetricType)
-    ? (value as QueryBuilderMetricType)
-    : fallback
+  return isQueryBuilderMetricType(value) ? value : fallback
 }
 
 function isExplicitInvalidMetricType(value: unknown): boolean {
-  return value !== undefined && !QUERY_BUILDER_METRIC_TYPES.includes(value as QueryBuilderMetricType)
+  return value !== undefined && !isQueryBuilderMetricType(value)
 }
 
 function normalizeGroupByToken(token: string): string {
-  switch (token) {
-    case "service": return "service.name"
-    case "span_name": return "span.name"
-    case "status_code": return "status.code"
-    case "http_method": return "http.method"
-    case "none": return "none"
-    default: return token
-  }
+  return Match.value(token).pipe(
+    Match.when("service", () => "service.name"),
+    Match.when("span_name", () => "span.name"),
+    Match.when("status_code", () => "status.code"),
+    Match.when("http_method", () => "http.method"),
+    Match.when("none", () => "none"),
+    Match.orElse(() => token),
+  )
 }
 
 function toQueryGroupByArray(value: unknown): string[] {
@@ -157,30 +160,15 @@ function normalizeTraceAggregation(value: string): string {
     .replace(/[_\s-]+/g, "")
     .replace(/[()]/g, "")
 
-  switch (normalized) {
-    case "count":
-      return "count"
-    case "avg":
-    case "avgduration":
-    case "avglatency":
-      return "avg_duration"
-    case "p50":
-    case "p50duration":
-    case "p50latency":
-      return "p50_duration"
-    case "p95":
-    case "p95duration":
-    case "p95latency":
-      return "p95_duration"
-    case "p99":
-    case "p99duration":
-    case "p99latency":
-      return "p99_duration"
-    case "errorrate":
-      return "error_rate"
-    default:
-      return trimmed
-  }
+  return Match.value(normalized).pipe(
+    Match.when("count", () => "count"),
+    Match.whenOr("avg", "avgduration", "avglatency", () => "avg_duration"),
+    Match.whenOr("p50", "p50duration", "p50latency", () => "p50_duration"),
+    Match.whenOr("p95", "p95duration", "p95latency", () => "p95_duration"),
+    Match.whenOr("p99", "p99duration", "p99latency", () => "p99_duration"),
+    Match.when("errorrate", () => "error_rate"),
+    Match.orElse(() => trimmed),
+  )
 }
 
 function normalizeAggregation(
@@ -297,24 +285,19 @@ function humanizeMetricName(metricName: string): string {
 }
 
 function describeGroupBy(field: string): string {
-  switch (field) {
-    case "service.name":
-      return "Service"
-    case "span.name":
-      return "Span"
-    case "status.code":
-      return "Status Code"
-    case "http.method":
-      return "HTTP Method"
-    case "severity":
-      return "Severity"
-    case "none":
-      return ""
-    default:
-      return field.startsWith("attr.")
+  return Match.value(field).pipe(
+    Match.when("service.name", () => "Service"),
+    Match.when("span.name", () => "Span"),
+    Match.when("status.code", () => "Status Code"),
+    Match.when("http.method", () => "HTTP Method"),
+    Match.when("severity", () => "Severity"),
+    Match.when("none", () => ""),
+    Match.orElse(() =>
+      field.startsWith("attr.")
         ? humanizeMetricName(field.slice(5))
-        : humanizeMetricName(field)
-  }
+        : humanizeMetricName(field),
+    ),
+  )
 }
 
 function firstGroupByField(groupBy: string[]): string | null {
@@ -326,22 +309,15 @@ function deriveQueryTitle(query: QueryBuilderQueryDraft): string {
   const suffix = groupByLabel ? ` by ${describeGroupBy(groupByLabel)}` : ""
 
   if (query.dataSource === "traces") {
-    switch (query.aggregation) {
-      case "count":
-        return `Requests${suffix}`
-      case "avg_duration":
-        return `Avg Latency${suffix}`
-      case "p50_duration":
-        return `P50 Latency${suffix}`
-      case "p95_duration":
-        return `P95 Latency${suffix}`
-      case "p99_duration":
-        return `P99 Latency${suffix}`
-      case "error_rate":
-        return `Error Rate${suffix}`
-      default:
-        return `${rewriteFriendlyTraceMetricText(query.aggregation)}${suffix}`
-    }
+    return Match.value(query.aggregation).pipe(
+      Match.when("count", () => `Requests${suffix}`),
+      Match.when("avg_duration", () => `Avg Latency${suffix}`),
+      Match.when("p50_duration", () => `P50 Latency${suffix}`),
+      Match.when("p95_duration", () => `P95 Latency${suffix}`),
+      Match.when("p99_duration", () => `P99 Latency${suffix}`),
+      Match.when("error_rate", () => `Error Rate${suffix}`),
+      Match.orElse(() => `${rewriteFriendlyTraceMetricText(query.aggregation)}${suffix}`),
+    )
   }
 
   if (query.dataSource === "logs") {
@@ -349,24 +325,16 @@ function deriveQueryTitle(query: QueryBuilderQueryDraft): string {
   }
 
   const baseMetric = humanizeMetricName(query.metricName || "Metric")
-  switch (query.aggregation) {
-    case "rate":
-      return `${baseMetric} Rate${suffix}`
-    case "increase":
-      return `${baseMetric} Increase${suffix}`
-    case "avg":
-      return `${baseMetric}${suffix}`
-    case "min":
-      return `Min ${baseMetric}${suffix}`
-    case "max":
-      return `Max ${baseMetric}${suffix}`
-    case "count":
-      return `${baseMetric} Samples${suffix}`
-    case "sum":
-      return `Total ${baseMetric}${suffix}`
-    default:
-      return `${baseMetric}${suffix}`
-  }
+  return Match.value(query.aggregation).pipe(
+    Match.when("rate", () => `${baseMetric} Rate${suffix}`),
+    Match.when("increase", () => `${baseMetric} Increase${suffix}`),
+    Match.when("avg", () => `${baseMetric}${suffix}`),
+    Match.when("min", () => `Min ${baseMetric}${suffix}`),
+    Match.when("max", () => `Max ${baseMetric}${suffix}`),
+    Match.when("count", () => `${baseMetric} Samples${suffix}`),
+    Match.when("sum", () => `Total ${baseMetric}${suffix}`),
+    Match.orElse(() => `${baseMetric}${suffix}`),
+  )
 }
 
 function inferChartId(queries: QueryBuilderQueryDraft[], currentChartId: unknown): string {
@@ -392,7 +360,7 @@ function inferDisplayUnit(
   currentUnit: unknown,
 ): WidgetDisplayConfig["unit"] {
   if (typeof currentUnit === "string" && currentUnit.trim().length > 0) {
-    return currentUnit as WidgetDisplayConfig["unit"]
+    return currentUnit
   }
 
   const firstQuery = queries[0]
@@ -414,7 +382,7 @@ function inferDisplayUnit(
     return "number"
   }
 
-  return currentUnit as WidgetDisplayConfig["unit"] | undefined
+  return typeof currentUnit === "string" ? currentUnit : undefined
 }
 
 function inferTitle(
@@ -572,7 +540,7 @@ function validateMetricsQueries(
     }
 
     const metricType = query.metricType
-    if (!QUERY_BUILDER_METRIC_TYPES.includes(metricType as QueryBuilderMetricType)) {
+    if (!isQueryBuilderMetricType(metricType)) {
       return "Metrics chart needs metric name and metric type."
     }
   }

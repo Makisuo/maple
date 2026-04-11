@@ -381,4 +381,149 @@ describe("normalizeAiWidgetProposal", () => {
     expect(result.proposal.display.unit).toBe("duration_ms");
     expect(result.proposal.display.chartId).toBe("query-builder-line");
   });
+
+  it("normalizes group-by token aliases", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            {
+              dataSource: "traces",
+              aggregation: "count",
+              groupBy: ["status_code", "http_method"],
+            },
+          ],
+        },
+      },
+      display: { title: "By Status" },
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.groupBy).toEqual(["status.code", "http.method"]);
+  });
+
+  it("normalizes trace p99 and error_rate aggregations", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            { dataSource: "traces", aggregation: "p99 latency" },
+            { dataSource: "traces", aggregation: "error_rate" },
+          ],
+        },
+      },
+      display: {},
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.aggregation).toBe("p99_duration");
+    expect(queries[1]?.aggregation).toBe("error_rate");
+  });
+
+  it("resolves metrics aggregation aliases like 'average' and 'persecond'", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            {
+              dataSource: "metrics",
+              metricName: "http.server.duration",
+              metricType: "gauge",
+              aggregation: "average",
+            },
+          ],
+        },
+      },
+      display: { title: "Average" },
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.aggregation).toBe("avg");
+  });
+
+  it("derives title for logs data source", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            {
+              dataSource: "logs",
+              aggregation: "count",
+            },
+          ],
+        },
+      },
+      display: {},
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    expect(result.proposal.display.title).toBe("Logs");
+    expect(result.proposal.display.unit).toBe("number");
+  });
+
+  it("infers title from formula legend when no explicit title", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            { dataSource: "traces", aggregation: "count" },
+          ],
+          formulas: [
+            { expression: "a / 100", legend: "Error Percentage" },
+          ],
+        },
+      },
+      display: {},
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    expect(result.proposal.display.title).toBe("Error Percentage");
+  });
+
+  it("infers error_rate chart as area with percent unit", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            { dataSource: "traces", aggregation: "error_rate" },
+          ],
+        },
+      },
+      display: {},
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    expect(result.proposal.display.chartId).toBe("query-builder-area");
+    expect(result.proposal.display.unit).toBe("percent");
+  });
 });
