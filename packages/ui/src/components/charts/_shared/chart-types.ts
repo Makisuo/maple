@@ -22,7 +22,7 @@ export interface BaseChartProps {
   unit?: string
 }
 
-export type ChartCategory = "bar" | "area" | "line" | "radar"
+export type ChartCategory = "bar" | "area" | "line"
 
 export interface ChartRegistryEntry {
   id: string

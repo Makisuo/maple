@@ -7,15 +7,6 @@ export const defaultBarData = [
   { name: "Jun", value: 214 },
 ]
 
-export const multiBarData = [
-  { name: "Jan", desktop: 186, mobile: 80 },
-  { name: "Feb", desktop: 305, mobile: 200 },
-  { name: "Mar", desktop: 237, mobile: 120 },
-  { name: "Apr", desktop: 173, mobile: 190 },
-  { name: "May", desktop: 209, mobile: 130 },
-  { name: "Jun", desktop: 214, mobile: 140 },
-]
-
 export const areaTimeSeriesData = [
   { month: "Jan", desktop: 186, mobile: 80 },
   { month: "Feb", desktop: 305, mobile: 200 },
@@ -32,48 +23,6 @@ export const lineTimeSeriesData = [
   { date: "Apr", value: 73 },
   { date: "May", value: 209 },
   { date: "Jun", value: 214 },
-]
-
-export const multiLineData = [
-  { date: "Jan", desktop: 186, mobile: 80 },
-  { date: "Feb", desktop: 305, mobile: 200 },
-  { date: "Mar", desktop: 237, mobile: 120 },
-  { date: "Apr", desktop: 73, mobile: 190 },
-  { date: "May", desktop: 209, mobile: 130 },
-  { date: "Jun", desktop: 214, mobile: 140 },
-]
-
-export const partialLineData = [
-  { date: "Jan", value: 186, forecast: false },
-  { date: "Feb", value: 305, forecast: false },
-  { date: "Mar", value: 237, forecast: false },
-  { date: "Apr", value: 173, forecast: true },
-  { date: "May", value: 209, forecast: true },
-  { date: "Jun", value: 244, forecast: true },
-]
-
-export const pieData = [
-  { name: "Chrome", value: 275, fill: "var(--color-chrome)" },
-  { name: "Safari", value: 200, fill: "var(--color-safari)" },
-  { name: "Firefox", value: 187, fill: "var(--color-firefox)" },
-  { name: "Edge", value: 173, fill: "var(--color-edge)" },
-  { name: "Other", value: 90, fill: "var(--color-other)" },
-]
-
-export const radialData = [
-  { name: "Chrome", value: 275, fill: "var(--color-chrome)" },
-  { name: "Safari", value: 200, fill: "var(--color-safari)" },
-  { name: "Firefox", value: 187, fill: "var(--color-firefox)" },
-  { name: "Edge", value: 173, fill: "var(--color-edge)" },
-]
-
-export const radarData = [
-  { subject: "Math", a: 120, b: 110 },
-  { subject: "Chinese", a: 98, b: 130 },
-  { subject: "English", a: 86, b: 130 },
-  { subject: "Geography", a: 99, b: 100 },
-  { subject: "Physics", a: 85, b: 90 },
-  { subject: "History", a: 65, b: 85 },
 ]
 
 export const latencyTimeSeriesData = [

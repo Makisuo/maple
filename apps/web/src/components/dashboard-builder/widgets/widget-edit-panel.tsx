@@ -35,7 +35,9 @@ export function WidgetEditPanel({
   const isChart = widget.visualization === "chart"
   const chartId = widget.display.chartId
   const currentChart = isChart && chartId ? getChartById(chartId) : null
-  const variants = currentChart ? getChartsByCategory(currentChart.category) : []
+  const variants = currentChart
+    ? getChartsByCategory(currentChart.category).filter((c) => c.tags.includes("query-builder"))
+    : []
 
   const placeholder = currentChart?.name ?? widget.display.title ?? "Widget"
 
