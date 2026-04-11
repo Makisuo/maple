@@ -36,7 +36,7 @@ const queryDataSchema = Schema.Struct({
   metric: optionalStringParam(
     "Metric to compute. Traces: count (request volume), avg_duration, p50_duration, p95_duration, p99_duration (latency), " +
     "error_rate (0-1 ratio), apdex (user satisfaction, requires apdex_threshold_ms). Logs: count only. " +
-    "Metrics: avg, sum, min, max, count. Default: 'count' for traces/logs, 'avg' for metrics.",
+    "Metrics: avg, sum, min, max, count, rate, increase. For monotonic counters (typically metric_type=sum with isMonotonic=true from list_metrics), prefer rate or increase over raw sum. Default: 'count' for traces/logs, 'avg' for metrics.",
   ),
   group_by: optionalStringParam(
     "Grouping dimension. Traces: service, span_name, status_code, http_method, attribute, none. " +
@@ -216,7 +216,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           }
 
           const metricsMetric = params.metric ?? "avg"
-          if (!params.metric) decisions.push(`metric: defaulted to "avg" (available: avg, sum, min, max, count)`)
+          if (!params.metric) decisions.push(`metric: defaulted to "avg" (available: avg, sum, min, max, count, rate, increase)`)
 
           if (params.kind === "timeseries") {
             const groupBy = params.group_by ? [params.group_by] : ["none"]

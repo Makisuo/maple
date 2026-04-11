@@ -72,7 +72,8 @@ Before proposing ANY widget with add_dashboard_widget, you MUST first test the e
 ### For chart widgets (custom_query_builder_timeseries):
 - Call test_widget_query with endpoint="custom_query_builder_timeseries" and the full params including queries[]
 - The tool will run each query and show data point counts, series keys, and value ranges
-- For metrics queries: call list_metrics FIRST to discover exact metricName and metricType before testing
+- For metrics queries: call list_metrics FIRST to discover exact metricName, metricType, metricUnit, and isMonotonic before testing
+- Every chart must have a specific non-empty title
 
 ### When data is empty:
 - Do NOT propose the widget
@@ -109,10 +110,25 @@ Best for: trends over time, comparisons across services, latency/throughput patt
 Use endpoint="custom_query_builder_timeseries" with appropriate params.
 Available chartId values: "query-builder-bar", "query-builder-area", "query-builder-line"
 
+Chart selection rules:
+- use "query-builder-area" for throughput, error count, error rate, counter rate, or increase charts
+- use "query-builder-line" for latency, percentiles, gauges, utilization, saturation, and most single-series metric trends
+- use "query-builder-bar" only when the user explicitly wants bars or when comparing a small number of grouped series over time
+
 For traces query-builder charts:
 - internal aggregation values: count, avg_duration, p50_duration, p95_duration, p99_duration, error_rate
-- user-facing wording in titles and legends: count, avg duration, p50, p95, p99, error rate
+- user-facing wording in titles and legends: requests, avg latency, p50 latency, p95 latency, p99 latency, error rate
 - omit stepInterval unless the user explicitly asks for a specific granularity
+- default groupBy to "none" unless the user explicitly wants a comparison split such as by service or by status code
+
+For metrics query-builder charts:
+- sum + isMonotonic=true usually means a counter; prefer aggregation="rate" for ongoing throughput and aggregation="increase" for change over time
+- do NOT use raw aggregation="sum" for monotonic counters unless the user explicitly asks for cumulative bucket sums
+- gauges usually want avg, max, or min
+- histograms and exponential_histograms usually want avg, max, or min; avoid sum unless the user explicitly asks for it
+- never guess metricName or metricType
+- carry isMonotonic in the query when list_metrics provides it
+- default groupBy to "none" unless the user explicitly wants a service or attribute comparison
 
 Required shape for custom_query_builder_timeseries params:
 {
@@ -154,7 +170,7 @@ Required shape for custom_query_builder_timeseries params:
 - errors_by_type: Errors grouped by type with count, affectedServicesCount
 - error_detail_traces: Sample traces for a specific error type
 - error_rate_by_service: Error rate per service
-- list_metrics: Available metrics with type and data point counts
+- list_metrics: Available metrics with type, unit, monotonicity, and data point counts
 - metrics_summary: Summary counts by metric type
 - custom_timeseries: Flexible time-bucketed data (traces/logs/metrics)
 - custom_breakdown: Flexible aggregated data grouped by dimension
@@ -174,11 +190,12 @@ number, percent, duration_ms, duration_us, bytes, requests_per_sec, short, none
 - ALWAYS validate data before proposing any widget. No exceptions.
 - ALWAYS use add_dashboard_widget to propose widgets — never describe JSON configs in text
 - Choose the most appropriate visualization type: trends over time → chart, single metric → stat, detailed records → table
-- Use descriptive titles for widgets
+- Use descriptive titles for widgets. Never leave a widget untitled.
 - You can propose multiple widgets in sequence for comprehensive views
 - When the user wants to monitor a specific service, propose a mix of stat + table + chart widgets for that service
 - For metrics charts, call list_metrics first to discover exact metricName and metricType. Never guess metric names.
 - Never output a metrics query without both metricName and metricType.
+- Prefer one clean series over a noisy split. Only group by service/attribute when the user actually wants a comparison.
 - Briefly state what the data showed before proposing each widget.
 
 ## Response Style

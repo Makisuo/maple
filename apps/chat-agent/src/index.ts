@@ -16,6 +16,25 @@ const METRIC_TYPES = ["sum", "gauge", "histogram", "exponential_histogram"] as c
 const METRIC_TYPES_SET = new Set<string>(METRIC_TYPES)
 const QUERY_SOURCES = ["traces", "logs", "metrics"] as const
 const QUERY_SOURCES_SET = new Set<string>(QUERY_SOURCES)
+const QUERY_BUILDER_CHART_IDS = ["query-builder-bar", "query-builder-area", "query-builder-line"] as const
+
+const widgetDisplaySchema = z.object({
+  title: z.string().trim().min(1).describe("Widget title shown in the dashboard header"),
+  unit: z
+    .enum(["none", "number", "percent", "duration_ms", "duration_us", "bytes", "requests_per_sec", "short"])
+    .optional(),
+  chartId: z.enum(QUERY_BUILDER_CHART_IDS).optional(),
+  columns: z
+    .array(
+      z.object({
+        field: z.string(),
+        header: z.string(),
+        unit: z.string().optional(),
+        align: z.enum(["left", "center", "right"]).optional(),
+      }),
+    )
+    .optional(),
+})
 
 const dashboardWidgetDataSourceSchema = z.object({
   endpoint: z.string().describe("One of the available DataSourceEndpoint values"),
@@ -201,7 +220,11 @@ function mapQueryDraftToQueryDataParams(
   query: Record<string, unknown>,
 ): Record<string, unknown> {
   const source = (query.dataSource ?? query.source) as string
-  const rawGroupBy = (query.groupBy ?? "none") as string
+  const rawGroupBy = Array.isArray(query.groupBy)
+    ? query.groupBy.find((value): value is string => typeof value === "string" && value.trim().length > 0) ?? "none"
+    : typeof query.groupBy === "string" && query.groupBy.trim().length > 0
+      ? query.groupBy
+      : "none"
   const groupBy = GROUP_BY_TOKEN_MAP[rawGroupBy] ?? rawGroupBy
 
   const params: Record<string, unknown> = {
@@ -370,27 +393,11 @@ function createDashboardBuilderTools(mcpTools: McpToolSet) {
     }),
     add_dashboard_widget: tool({
       description:
-        "Add a widget to the user's dashboard. IMPORTANT: You must first call test_widget_query with the same endpoint/params/transform to verify the data exists BEFORE calling this tool. The widget will be previewed and the user can confirm adding it.",
+        "Add a widget to the user's dashboard. IMPORTANT: You must first call test_widget_query with the same endpoint/params/transform to verify the data exists BEFORE calling this tool. Titles must be specific and non-empty. For charts, use chartId from query-builder-area|query-builder-line|query-builder-bar.",
       inputSchema: z.object({
         visualization: z.enum(["stat", "chart", "table"]),
         dataSource: dashboardWidgetDataSourceSchema,
-        display: z.object({
-          title: z.string(),
-          unit: z
-            .enum(["none", "number", "percent", "duration_ms", "duration_us", "bytes", "requests_per_sec", "short"])
-            .optional(),
-          chartId: z.string().optional(),
-          columns: z
-            .array(
-              z.object({
-                field: z.string(),
-                header: z.string(),
-                unit: z.string().optional(),
-                align: z.enum(["left", "center", "right"]).optional(),
-              }),
-            )
-            .optional(),
-        }),
+        display: widgetDisplaySchema,
       }),
       execute: async () => ({
         status: "proposed",

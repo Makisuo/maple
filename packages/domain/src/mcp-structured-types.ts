@@ -178,6 +178,7 @@ export interface MetricRow {
   metricType: string
   serviceName: string
   metricUnit: string
+  isMonotonic: boolean
   dataPointCount: number
 }
 

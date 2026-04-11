@@ -34,10 +34,11 @@ describe("normalizeAiWidgetProposal", () => {
     expect(Array.isArray(queries)).toBe(true);
     expect(queries).toHaveLength(1);
     expect(queries[0]?.dataSource).toBe("metrics");
-    expect(queries[0]?.aggregation).toBe("sum");
+    expect(queries[0]?.aggregation).toBe("avg");
     expect(queries[0]?.metricName).toBe("http.server.duration");
     expect(queries[0]?.metricType).toBe("histogram");
     expect(queries[0]?.stepInterval).toBe("300");
+    expect(queries[0]?.groupBy).toEqual(["service.name"]);
   });
 
   it("blocks metrics query without metric name/type", () => {
@@ -165,6 +166,7 @@ describe("normalizeAiWidgetProposal", () => {
     expect(typeof queries[0]?.whereClause).toBe("string");
     expect(queries[0]?.stepInterval).toBe("");
     expect(typeof queries[0]?.addOns).toBe("object");
+    expect(queries[0]?.aggregation).toBe("avg");
   });
 
   it("converts spec-like query entries inside queries[]", () => {
@@ -231,6 +233,7 @@ describe("normalizeAiWidgetProposal", () => {
     const params = result.proposal.dataSource.params as Record<string, unknown>;
     const queries = params.queries as Array<Record<string, unknown>>;
     expect(queries[0]?.stepInterval).toBe("");
+    expect(queries[0]?.groupBy).toEqual(["none"]);
   });
 
   it("normalizes friendly trace percentile aliases and rewrites visible labels", () => {
@@ -290,5 +293,92 @@ describe("normalizeAiWidgetProposal", () => {
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
     expect(result.reason).toContain("missing queries[]");
+  });
+
+  it("rewrites monotonic sum metrics to rate by default and fills chart metadata", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            {
+              dataSource: "metrics",
+              metricName: "http.server.request.count",
+              metricType: "sum",
+            },
+          ],
+        },
+      },
+      display: {
+        title: "   ",
+      },
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.aggregation).toBe("rate");
+    expect(queries[0]?.isMonotonic).toBe(true);
+    expect(result.proposal.display.title).toBe("Http Server Request Count Rate");
+    expect(result.proposal.display.chartId).toBe("query-builder-area");
+  });
+
+  it("uses increase for monotonic sum metrics when the title asks for change", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            {
+              dataSource: "metrics",
+              metricName: "messaging.kafka.messages",
+              metricType: "sum",
+              aggregation: "sum",
+            },
+          ],
+        },
+      },
+      display: {
+        title: "Message increase",
+        chartId: "query-builder-line",
+      },
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    const params = result.proposal.dataSource.params as Record<string, unknown>;
+    const queries = params.queries as Array<Record<string, unknown>>;
+    expect(queries[0]?.aggregation).toBe("increase");
+    expect(result.proposal.display.chartId).toBe("query-builder-line");
+  });
+
+  it("fills a missing trace chart title and unit from the query semantics", () => {
+    const result = normalizeAiWidgetProposal({
+      visualization: "chart",
+      dataSource: {
+        endpoint: "custom_query_builder_timeseries",
+        params: {
+          queries: [
+            {
+              dataSource: "traces",
+              aggregation: "p95",
+            },
+          ],
+        },
+      },
+      display: {},
+    });
+
+    expect(result.kind).toBe("valid");
+    if (result.kind !== "valid") return;
+
+    expect(result.proposal.display.title).toBe("P95 Latency");
+    expect(result.proposal.display.unit).toBe("duration_ms");
+    expect(result.proposal.display.chartId).toBe("query-builder-line");
   });
 });

@@ -13,7 +13,7 @@ import { createDualContent } from "../lib/structured-output"
 export function registerListMetricsTool(server: McpToolRegistrar) {
   server.tool(
     "list_metrics",
-    "Discover available custom metrics with their types and data volume. Supports pagination — check hasMore in the response. Use query_data source=metrics with a discovered metric_name and metric_type.",
+    "Discover available custom metrics with their types, units, monotonicity, and data volume. Supports pagination — check hasMore in the response. Use query_data source=metrics with a discovered metric_name and metric_type. For monotonic sum metrics, prefer metric=rate or metric=increase instead of raw sum.",
     Schema.Struct({
       start_time: optionalStringParam("Start of time range (YYYY-MM-DD HH:mm:ss)"),
       end_time: optionalStringParam("End of time range (YYYY-MM-DD HH:mm:ss)"),
@@ -73,10 +73,11 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
 
         lines.push(``, `Metrics (${metrics.length}):`, ``)
 
-        const headers = ["Name", "Type", "Service", "Unit", "Data Points"]
+        const headers = ["Name", "Type", "Monotonic", "Service", "Unit", "Data Points"]
         const rows = Arr.map(metrics, (m) => [
           m.metricName.length > 40 ? m.metricName.slice(0, 37) + "..." : m.metricName,
           m.metricType,
+          m.isMonotonic ? "yes" : "-",
           m.serviceName,
           m.metricUnit || "-",
           formatNumber(m.dataPointCount),
@@ -90,9 +91,10 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
           lines.push(``, `More metrics available. Call again with offset=${nextOffset} for the next page.`)
         }
 
-        const nextSteps = Arr.map(Arr.take(metrics, 3), (m) =>
-          `\`query_data source="metrics" kind="timeseries" metric_name="${m.metricName}" metric_type="${m.metricType}"\` — chart this metric`
-        )
+        const nextSteps = Arr.map(Arr.take(metrics, 3), (m) => {
+          const suggestedMetric = m.metricType === "sum" && Boolean(m.isMonotonic) ? "rate" : "avg"
+          return `\`query_data source="metrics" kind="timeseries" metric_name="${m.metricName}" metric_type="${m.metricType}" metric="${suggestedMetric}"\` — chart this metric`
+        })
         lines.push(formatNextSteps(nextSteps))
 
         return {
@@ -116,6 +118,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
                 metricType: m.metricType,
                 serviceName: m.serviceName,
                 metricUnit: m.metricUnit || "",
+                isMonotonic: Boolean(m.isMonotonic),
                 dataPointCount: Number(m.dataPointCount),
               })),
             },

@@ -26,9 +26,22 @@ export type NormalizeAiWidgetProposalResult =
   | { kind: "valid"; proposal: AiWidgetProposal }
   | { kind: "blocked"; reason: string; proposal: AiWidgetProposal }
 
+const QUERY_BUILDER_CHART_IDS = new Set([
+  "query-builder-bar",
+  "query-builder-area",
+  "query-builder-line",
+])
+
+const MONOTONIC_METRIC_AGGREGATIONS = new Set(["rate", "increase"])
+const GAUGE_LIKE_METRIC_AGGREGATIONS = new Set(["avg", "sum", "min", "max", "count"])
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null
   return value as Record<string, unknown>
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0
 }
 
 function isQueryBuilderDataSource(value: unknown): value is QueryBuilderDataSource {
@@ -61,14 +74,15 @@ function normalizeGroupByToken(token: string): string {
 
 function toQueryGroupByArray(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value
+    const normalized = value
       .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
       .map(normalizeGroupByToken)
+    return normalized.length > 0 ? normalized : ["none"]
   }
   if (typeof value === "string" && value.trim()) {
     return [normalizeGroupByToken(value)]
   }
-  return ["service.name"]
+  return ["none"]
 }
 
 function hasAnyKnownQueryFields(raw: Record<string, unknown>): boolean {
@@ -185,6 +199,57 @@ function normalizeAggregation(
   return value.trim()
 }
 
+function normalizeMetricsAggregation(
+  value: string,
+  metricType: QueryBuilderMetricType,
+  isMonotonic: boolean,
+  hints: string[],
+): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s-]+/g, "")
+
+  const hintText = hints.join(" ").toLowerCase()
+  const preferIncrease = /\b(increase|delta|change|added|new|increment|growth)\b/.test(hintText)
+
+  const aliasMap: Record<string, string> = {
+    average: "avg",
+    mean: "avg",
+    total: "sum",
+    minimum: "min",
+    maximum: "max",
+    persecond: "rate",
+    ratepersecond: "rate",
+    delta: "increase",
+  }
+
+  const candidate = aliasMap[normalized] ?? value.trim()
+
+  if (metricType === "sum" && isMonotonic) {
+    if (
+      candidate === "rate" ||
+      candidate === "increase" ||
+      candidate === "sum" ||
+      candidate === "avg" ||
+      candidate === "count"
+    ) {
+      return preferIncrease ? "increase" : "rate"
+    }
+    return MONOTONIC_METRIC_AGGREGATIONS.has(candidate)
+      ? candidate
+      : (preferIncrease ? "increase" : "rate")
+  }
+
+  if (metricType === "gauge") {
+    return GAUGE_LIKE_METRIC_AGGREGATIONS.has(candidate) ? candidate : "avg"
+  }
+
+  return candidate === "avg" || candidate === "min" || candidate === "max" || candidate === "count"
+    ? candidate
+    : "avg"
+}
+
 function rewriteFriendlyTraceMetricText(value: string): string {
   return value
     .replace(/\bp50_duration\b/gi, "p50")
@@ -212,6 +277,180 @@ function rewriteFriendlyFormulaLegend(formula: QueryBuilderFormulaDraft): QueryB
   }
 }
 
+function humanizeToken(token: string): string {
+  const lower = token.toLowerCase()
+  if (lower === "http") return "HTTP"
+  if (lower === "cpu") return "CPU"
+  if (lower === "jvm") return "JVM"
+  if (lower === "db") return "DB"
+  if (lower === "io") return "IO"
+  if (lower === "id") return "ID"
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
+}
+
+function humanizeMetricName(metricName: string): string {
+  return metricName
+    .split(/[^a-zA-Z0-9]+/)
+    .filter((part) => part.length > 0)
+    .map(humanizeToken)
+    .join(" ")
+}
+
+function describeGroupBy(field: string): string {
+  switch (field) {
+    case "service.name":
+      return "Service"
+    case "span.name":
+      return "Span"
+    case "status.code":
+      return "Status Code"
+    case "http.method":
+      return "HTTP Method"
+    case "severity":
+      return "Severity"
+    case "none":
+      return ""
+    default:
+      return field.startsWith("attr.")
+        ? humanizeMetricName(field.slice(5))
+        : humanizeMetricName(field)
+  }
+}
+
+function firstGroupByField(groupBy: string[]): string | null {
+  return groupBy.find((field) => field.trim().length > 0 && field !== "none") ?? null
+}
+
+function deriveQueryTitle(query: QueryBuilderQueryDraft): string {
+  const groupByLabel = firstGroupByField(query.groupBy)
+  const suffix = groupByLabel ? ` by ${describeGroupBy(groupByLabel)}` : ""
+
+  if (query.dataSource === "traces") {
+    switch (query.aggregation) {
+      case "count":
+        return `Requests${suffix}`
+      case "avg_duration":
+        return `Avg Latency${suffix}`
+      case "p50_duration":
+        return `P50 Latency${suffix}`
+      case "p95_duration":
+        return `P95 Latency${suffix}`
+      case "p99_duration":
+        return `P99 Latency${suffix}`
+      case "error_rate":
+        return `Error Rate${suffix}`
+      default:
+        return `${rewriteFriendlyTraceMetricText(query.aggregation)}${suffix}`
+    }
+  }
+
+  if (query.dataSource === "logs") {
+    return `Logs${suffix}`
+  }
+
+  const baseMetric = humanizeMetricName(query.metricName || "Metric")
+  switch (query.aggregation) {
+    case "rate":
+      return `${baseMetric} Rate${suffix}`
+    case "increase":
+      return `${baseMetric} Increase${suffix}`
+    case "avg":
+      return `${baseMetric}${suffix}`
+    case "min":
+      return `Min ${baseMetric}${suffix}`
+    case "max":
+      return `Max ${baseMetric}${suffix}`
+    case "count":
+      return `${baseMetric} Samples${suffix}`
+    case "sum":
+      return `Total ${baseMetric}${suffix}`
+    default:
+      return `${baseMetric}${suffix}`
+  }
+}
+
+function inferChartId(queries: QueryBuilderQueryDraft[], currentChartId: unknown): string {
+  if (typeof currentChartId === "string" && QUERY_BUILDER_CHART_IDS.has(currentChartId)) {
+    return currentChartId
+  }
+
+  const aggregations = new Set(queries.map((query) => query.aggregation))
+  if (
+    aggregations.has("error_rate") ||
+    aggregations.has("count") ||
+    aggregations.has("rate") ||
+    aggregations.has("increase")
+  ) {
+    return "query-builder-area"
+  }
+
+  return "query-builder-line"
+}
+
+function inferDisplayUnit(
+  queries: QueryBuilderQueryDraft[],
+  currentUnit: unknown,
+): WidgetDisplayConfig["unit"] {
+  if (typeof currentUnit === "string" && currentUnit.trim().length > 0) {
+    return currentUnit as WidgetDisplayConfig["unit"]
+  }
+
+  const firstQuery = queries[0]
+  if (!firstQuery) return undefined
+
+  if (firstQuery.dataSource === "traces") {
+    if (firstQuery.aggregation === "error_rate") return "percent"
+    if (
+      firstQuery.aggregation === "avg_duration" ||
+      firstQuery.aggregation === "p50_duration" ||
+      firstQuery.aggregation === "p95_duration" ||
+      firstQuery.aggregation === "p99_duration"
+    ) {
+      return "duration_ms"
+    }
+  }
+
+  if (firstQuery.dataSource === "logs") {
+    return "number"
+  }
+
+  return currentUnit as WidgetDisplayConfig["unit"] | undefined
+}
+
+function inferTitle(
+  input: AiWidgetProposal,
+  normalizedQueries: QueryBuilderQueryDraft[],
+  normalizedFormulas: QueryBuilderFormulaDraft[],
+): string | undefined {
+  if (isNonEmptyString(input.display.title)) {
+    return rewriteFriendlyTraceMetricText(input.display.title.trim())
+  }
+
+  if (normalizedFormulas.length > 0) {
+    const formulaLegend = normalizedFormulas[0]?.legend.trim()
+    if (formulaLegend) {
+      return rewriteFriendlyTraceMetricText(formulaLegend)
+    }
+  }
+
+  if (normalizedQueries.length > 0) {
+    const baseTitle = deriveQueryTitle(normalizedQueries[0]!)
+    return normalizedQueries.length > 1 ? `${baseTitle} Comparison` : baseTitle
+  }
+
+  const endpointFallbacks: Partial<Record<string, string>> = {
+    service_overview: "Service Overview",
+    service_usage: "Service Usage",
+    errors_summary: "Error Summary",
+    errors_by_type: "Errors by Type",
+    list_traces: "Recent Traces",
+    list_logs: "Recent Logs",
+    error_rate_by_service: "Error Rate by Service",
+  }
+
+  return endpointFallbacks[input.dataSource.endpoint]
+}
+
 function normalizeQueryEntry(
   raw: unknown,
   index: number,
@@ -229,6 +468,10 @@ function normalizeQueryEntry(
   const metricTypeInput = queryRecord.metricType ?? fallbackFilters?.metricType
   const hasInvalidMetricType =
     dataSource === "metrics" && isExplicitInvalidMetricType(metricTypeInput)
+  const metricType = toMetricType(
+    metricTypeInput,
+    queryBase.metricType,
+  )
   const defaultWhereClause = formatFiltersAsWhereClause({ filters: fallbackFilters })
   const groupBy = toQueryGroupByArray(queryRecord.groupBy)
   const addOns = asRecord(queryRecord.addOns)
@@ -238,6 +481,24 @@ function normalizeQueryEntry(
       : typeof queryRecord.metric === "string" && queryRecord.metric.trim().length > 0
         ? queryRecord.metric
         : undefined
+  const metricName = toMetricName(queryRecord, dataSource, queryBase.metricName)
+  const isMonotonic =
+    typeof queryRecord.isMonotonic === "boolean"
+      ? queryRecord.isMonotonic
+      : metricType === "sum"
+  const aggregation =
+    dataSource === "metrics"
+      ? normalizeMetricsAggregation(
+          normalizeAggregation(dataSource, rawAggregation, queryBase.aggregation),
+          metricType,
+          isMonotonic,
+          [
+            metricName,
+            typeof queryRecord.name === "string" ? queryRecord.name : "",
+            typeof queryRecord.legend === "string" ? queryRecord.legend : "",
+          ],
+        )
+      : normalizeAggregation(dataSource, rawAggregation, queryBase.aggregation)
 
   return {
     hasInvalidMetricType,
@@ -254,17 +515,14 @@ function normalizeQueryEntry(
       queryRecord.signalSource === "default" || queryRecord.signalSource === "meter"
         ? queryRecord.signalSource
         : "default",
-    metricName: toMetricName(queryRecord, dataSource, queryBase.metricName),
-    metricType: toMetricType(
-      metricTypeInput,
-      queryBase.metricType,
-    ),
-    isMonotonic: typeof queryRecord.isMonotonic === "boolean" ? queryRecord.isMonotonic : queryBase.isMonotonic,
+    metricName,
+    metricType,
+    isMonotonic,
     whereClause:
       typeof queryRecord.whereClause === "string"
         ? queryRecord.whereClause
         : defaultWhereClause,
-    aggregation: normalizeAggregation(dataSource, rawAggregation, queryBase.aggregation),
+    aggregation,
     stepInterval: toStepInterval(queryRecord),
     orderByDirection:
       queryRecord.orderByDirection === "asc" || queryRecord.orderByDirection === "desc"
@@ -424,10 +682,15 @@ export function normalizeAiWidgetProposal(
       ...input,
       display: {
         ...input.display,
-        title:
-          typeof input.display.title === "string"
-            ? rewriteFriendlyTraceMetricText(input.display.title)
-            : input.display.title,
+        title: inferTitle(input, normalizedQueries, normalizedFormulas),
+        chartId:
+          input.visualization === "chart"
+            ? inferChartId(normalizedQueries, input.display.chartId)
+            : input.display.chartId,
+        unit:
+          input.visualization === "chart" || input.visualization === "stat"
+            ? inferDisplayUnit(normalizedQueries, input.display.unit)
+            : input.display.unit,
       },
       dataSource: normalizedDataSource,
     },
