@@ -253,8 +253,10 @@ export default function SignUpScreen() {
 						<Text className="text-sm text-muted-foreground font-mono">
 							Already have an account?
 						</Text>
-						<Link href="/(auth)/" hitSlop={8}>
-							<Text className="text-sm text-primary font-mono">Sign in</Text>
+						<Link href="/(auth)/" asChild>
+							<Pressable hitSlop={8}>
+								<Text className="text-sm text-primary font-mono">Sign in</Text>
+							</Pressable>
 						</Link>
 					</View>
 				</ScrollView>

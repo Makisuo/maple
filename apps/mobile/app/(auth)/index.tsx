@@ -266,8 +266,10 @@ function SignInForm() {
 					<Text className="text-sm text-muted-foreground font-mono">
 						Don't have an account?
 					</Text>
-					<Link href="/(auth)/sign-up" hitSlop={8}>
-						<Text className="text-sm text-primary font-mono">Sign up</Text>
+					<Link href="/(auth)/sign-up" asChild>
+						<Pressable hitSlop={8}>
+							<Text className="text-sm text-primary font-mono">Sign up</Text>
+						</Pressable>
 					</Link>
 				</View>
 			</ScrollView>
