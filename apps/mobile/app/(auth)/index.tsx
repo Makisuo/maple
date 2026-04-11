@@ -2,6 +2,7 @@ import { useSignIn, useSSO, useAuth } from "@clerk/expo";
 import { Link, useRouter, type Href } from "expo-router";
 import { useState } from "react";
 import {
+	Alert,
 	KeyboardAvoidingView,
 	Platform,
 	Pressable,
@@ -58,18 +59,22 @@ function SignInForm() {
 	};
 
 	const handleSubmit = async () => {
-		const { error } = await signIn.password({ emailAddress, password });
-		if (error) return;
+		try {
+			const { error } = await signIn.password({ emailAddress, password });
+			if (error) return;
 
-		if (signIn.status === "complete") {
-			await finalize();
-		} else if (signIn.status === "needs_client_trust") {
-			const emailCodeFactor = signIn.supportedSecondFactors?.find(
-				(f) => f.strategy === "email_code",
-			);
-			if (emailCodeFactor) {
-				await signIn.mfa.sendEmailCode();
+			if (signIn.status === "complete") {
+				await finalize();
+			} else if (signIn.status === "needs_client_trust") {
+				const emailCodeFactor = signIn.supportedSecondFactors?.find(
+					(f) => f.strategy === "email_code",
+				);
+				if (emailCodeFactor) {
+					await signIn.mfa.sendEmailCode();
+				}
 			}
+		} catch (err) {
+			Alert.alert("Sign in failed", err instanceof Error ? err.message : "An unexpected error occurred");
 		}
 	};
 
@@ -91,6 +96,7 @@ function SignInForm() {
 			}
 		} catch (err) {
 			console.error(`${provider} sign-in error:`, err);
+			Alert.alert("Sign in failed", err instanceof Error ? err.message : "An unexpected error occurred");
 		} finally {
 			setSsoLoading(null);
 		}

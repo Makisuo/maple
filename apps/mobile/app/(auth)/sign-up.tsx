@@ -2,6 +2,7 @@ import { useSignUp, useSSO, useAuth } from "@clerk/expo";
 import { Link, useRouter, type Href } from "expo-router";
 import { useState } from "react";
 import {
+	Alert,
 	KeyboardAvoidingView,
 	Platform,
 	Pressable,
@@ -35,10 +36,14 @@ export default function SignUpScreen() {
 	const ssoBusy = ssoLoading !== null;
 
 	const handleSubmit = async () => {
-		const { error } = await signUp.password({ emailAddress, password });
-		if (error) return;
+		try {
+			const { error } = await signUp.password({ emailAddress, password });
+			if (error) return;
 
-		if (!error) await signUp.verifications.sendEmailCode();
+			await signUp.verifications.sendEmailCode();
+		} catch (err) {
+			Alert.alert("Sign up failed", err instanceof Error ? err.message : "An unexpected error occurred");
+		}
 	};
 
 	const handleVerify = async () => {
@@ -66,6 +71,7 @@ export default function SignUpScreen() {
 			}
 		} catch (err) {
 			console.error(`${provider} sign-up error:`, err);
+			Alert.alert("Sign up failed", err instanceof Error ? err.message : "An unexpected error occurred");
 		} finally {
 			setSsoLoading(null);
 		}
