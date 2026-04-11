@@ -48,7 +48,7 @@ export const StatWidget = memo(function StatWidget({
   onClone,
   onConfigure,
 }: StatWidgetProps) {
-  const displayName = display.title || "Stat"
+  const displayName = display.title || "Untitled"
   const value = dataState.status === "ready" ? dataState.data : undefined
   const formattedValue = formatValue(value, display.unit, display.prefix, display.suffix)
   const thresholdColor = getThresholdColor(value, display.thresholds)

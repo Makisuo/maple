@@ -54,7 +54,7 @@ export const TableWidget = memo(function TableWidget({
   onClone,
   onConfigure,
 }: TableWidgetProps) {
-  const displayName = display.title || "Table"
+  const displayName = display.title || "Untitled"
   const rows =
     dataState.status === "ready" && Array.isArray(dataState.data)
       ? (dataState.data as Record<string, unknown>[])

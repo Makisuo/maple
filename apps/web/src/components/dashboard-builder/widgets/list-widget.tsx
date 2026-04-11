@@ -43,7 +43,7 @@ export const ListWidget = memo(function ListWidget({
   onClone,
   onConfigure,
 }: ListWidgetProps) {
-  const title = display.title || "List"
+  const title = display.title || "Untitled"
   const rows =
     dataState.status === "ready" && Array.isArray(dataState.data)
       ? (dataState.data as Record<string, unknown>[])

@@ -40,7 +40,7 @@ export const ChartWidget = memo(function ChartWidget({
 
   return (
     <WidgetFrame
-      title={display.title || entry.name}
+      title={display.title || "Untitled"}
       dataState={dataState}
       mode={mode}
       onRemove={onRemove}
