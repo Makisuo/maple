@@ -12,9 +12,3 @@ jobs:
     params:
       platform: ios
       profile: production
-
-  submit_to_testflight:
-    needs: [build_ios]
-    type: submit
-    params:
-      build_id: ${{ needs.build_ios.outputs.build_id }}
