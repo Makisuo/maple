@@ -136,6 +136,41 @@ function normalizeUnit(unit: string): string {
   return UNIT_ALIASES[unit] ?? unit
 }
 
+function inferUnit(metric: string): string {
+  if (["avg_duration", "p50_duration", "p95_duration", "p99_duration"].includes(metric)) return "duration_ms"
+  if (metric === "error_rate") return "percent"
+  return "number"
+}
+
+const VALID_GROUP_BY: Record<string, readonly string[]> = {
+  traces: ["service.name", "span.name", "status.code", "http.method", "none"],
+  logs: ["service.name", "severity", "none"],
+  metrics: ["service.name", "none"],
+}
+
+const GROUP_BY_ALIASES: Record<string, string> = {
+  service: "service.name",
+  span_name: "span.name",
+  status_code: "status.code",
+  http_method: "http.method",
+}
+
+function validateGroupBy(
+  rawGroupBy: string,
+  source: string,
+  widgetTitle: string,
+): string | null {
+  const resolved = GROUP_BY_ALIASES[rawGroupBy] ?? rawGroupBy
+  const validOptions = VALID_GROUP_BY[source] ?? []
+
+  if (validOptions.includes(resolved)) return null
+  // metrics also allows attr.<key> pattern
+  if (source === "metrics" && resolved.startsWith("attr.") && resolved.length > 5) return null
+
+  const optsList = [...validOptions, ...(source === "metrics" ? ["attr.<key>"] : [])]
+  return `Widget "${widgetTitle}": invalid group_by "${rawGroupBy}" for source=${source}. Valid: ${optsList.join(", ")}. ${source === "metrics" ? "Example: attr.signal" : ""}`
+}
+
 function serviceWhereClause(serviceName?: string): string {
   return serviceName ? `service.name = "${serviceName}"` : ""
 }
@@ -765,9 +800,16 @@ function simpleSpecToWidget(
 
   const metric = spec.metric ?? (source === "metrics" ? "avg" : "count")
   const where = spec.service_name ? `service.name = "${spec.service_name}"` : ""
-  const groupBy = spec.group_by
-    ? [spec.group_by === "service" ? "service.name" : spec.group_by]
-    : viz === "stat" ? [] : ["service.name"]
+
+  let groupBy: string[]
+  if (spec.group_by) {
+    const resolved = GROUP_BY_ALIASES[spec.group_by] ?? spec.group_by
+    const validationError = validateGroupBy(spec.group_by, source, spec.title)
+    if (validationError) return validationError
+    groupBy = [resolved]
+  } else {
+    groupBy = viz === "stat" ? [] : ["service.name"]
+  }
 
   const queryDraft = makeQueryDraft({
     id: `q-${id}`,
@@ -781,7 +823,7 @@ function simpleSpecToWidget(
   })
 
   const display: Record<string, unknown> = { title: spec.title }
-  if (spec.unit) display.unit = normalizeUnit(spec.unit)
+  display.unit = spec.unit ? normalizeUnit(spec.unit) : inferUnit(metric)
 
   if (viz === "table") {
     const ds = makeQueryBuilderBreakdownDataSource([queryDraft])
@@ -958,8 +1000,14 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
       "  blank — empty dashboard\n\n" +
       "Simplified widgets (provide name + widgets JSON array, same params as query_data):\n" +
       '  Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }\n' +
+      "  group_by values (use exact format):\n" +
+      "    traces: service.name, span.name, status.code, http.method, none\n" +
+      "    logs: service.name, severity, none\n" +
+      "    metrics: service.name, attr.<key> (e.g. attr.signal, attr.status), none\n" +
+      "    Aliases accepted: service, span_name, status_code, http_method\n" +
+      "  unit: auto-inferred from metric if omitted (duration_ms for latency, percent for error_rate, number otherwise). Override with: ms, %, number, duration_us.\n" +
       "  Layouts auto-computed. Example:\n" +
-      '  widgets=\'[{"title":"HTTP Duration","source":"metrics","metric":"avg","metric_name":"http.server.duration","metric_type":"histogram"}]\'\n\n' +
+      '  widgets=\'[{"title":"HTTP Duration","source":"metrics","metric":"avg","metric_name":"http.server.duration","metric_type":"histogram","group_by":"attr.method"}]\'\n\n' +
       "Custom JSON: provide dashboard_json with full widget definitions (use get_dashboard to see schema).",
     Schema.Struct({
       name: requiredStringParam("Dashboard name"),
@@ -981,7 +1029,8 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
         "JSON array of simplified widget specs (alternative to templates and dashboard_json). " +
           'Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", ' +
           "metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }. " +
-          "Uses same params as query_data. Layouts auto-computed.",
+          "group_by must use dotted format: service.name, span.name, status.code, http.method, severity, attr.<key>, none. " +
+          "Unit auto-inferred from metric if omitted. Layouts auto-computed.",
       ),
       dashboard_json: optionalStringParam(
         "Full dashboard JSON string for complete control over widget configuration. " +
