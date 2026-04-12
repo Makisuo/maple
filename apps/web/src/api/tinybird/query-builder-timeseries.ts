@@ -216,6 +216,15 @@ function shiftResultPoints(points: TimeseriesPoint[], offsetMs: number): Timeser
   }))
 }
 
+function normalizeErrorRatePoints(points: TimeseriesPoint[]): TimeseriesPoint[] {
+  return points.map((point) => ({
+    ...point,
+    series: Object.fromEntries(
+      Object.entries(point.series).map(([key, value]) => [key, value / 100]),
+    ),
+  }))
+}
+
 function resolveStrategy(
   input: QueryBuilderTimeseriesInput,
 ): {
@@ -686,7 +695,10 @@ async function runQueryWindow(
           status: "success",
           error: null,
           warnings,
-          data: execution.points,
+          data:
+            query.aggregation === "error_rate"
+              ? normalizeErrorRatePoints(execution.points)
+              : execution.points,
         }
       } catch (error) {
         debug.push({
@@ -740,6 +752,7 @@ export const __testables = {
   countSuccessfulQuerySeries,
   mergeQueryRunResults,
   appendPercentChangeSeries,
+  normalizeErrorRatePoints,
 }
 
 async function getQueryBuilderTimeseriesInternal(

@@ -72,6 +72,15 @@ export interface QueryBuilderBreakdownResponse {
 
 const decodeQueryEngineRequest = Schema.decodeUnknownSync(QueryEngineExecuteRequest)
 
+function normalizeErrorRateBreakdownData(
+  data: BreakdownQueryResult["data"],
+): BreakdownQueryResult["data"] {
+  return data.map((item) => ({
+    ...item,
+    value: item.value / 100,
+  }))
+}
+
 const executeBreakdownQueryEffect = Effect.fn("Tinybird.executeBreakdownQuery")(
   function* (payload: QueryEngineExecuteRequest) {
     const client = yield* MapleApiAtomClient
@@ -129,10 +138,18 @@ async function executeBreakdownQuery(
       queryName: query.name,
       status: "success",
       error: null,
-      data: response.result.data.map((item) => ({
-        name: item.name,
-        value: item.value,
-      })),
+      data:
+        query.aggregation === "error_rate"
+          ? normalizeErrorRateBreakdownData(
+              response.result.data.map((item) => ({
+                name: item.name,
+                value: item.value,
+              })),
+            )
+          : response.result.data.map((item) => ({
+              name: item.name,
+              value: item.value,
+            })),
     }
   } catch (error) {
     return {
@@ -230,6 +247,10 @@ export function getQueryBuilderBreakdown({
   data: QueryBuilderBreakdownInput
 }) {
   return getQueryBuilderBreakdownEffect({ data })
+}
+
+export const __testables = {
+  normalizeErrorRateBreakdownData,
 }
 
 const getQueryBuilderBreakdownEffect = Effect.fn("Tinybird.getQueryBuilderBreakdown")(

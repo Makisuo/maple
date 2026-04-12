@@ -360,4 +360,20 @@ describe("query-builder timeseries strategy", () => {
 
     expect(rows[0]["Errors: checkout (%Δ)"]).toBe(100);
   });
+
+  it("normalizes error rate series from percent points to ratios", () => {
+    const points = __testables.normalizeErrorRatePoints([
+      {
+        bucket: "2026-01-01T00:00:00.000Z",
+        series: { all: 2.1, checkout: 5 },
+      },
+    ]);
+
+    expect(points).toEqual([
+      {
+        bucket: "2026-01-01T00:00:00.000Z",
+        series: { all: 0.021, checkout: 0.05 },
+      },
+    ]);
+  });
 });
