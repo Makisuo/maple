@@ -33,6 +33,7 @@ export function WidgetBuilderProvider({
         createElement(AutocompleteValuesProvider, {
           startTime: resolvedTime?.startTime,
           endTime: resolvedTime?.endTime,
+          lazy: true,
           children,
         }),
       ),

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useMemo } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 
@@ -6,6 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { DashboardList } from "@/components/dashboard-builder/list/dashboard-list";
 import { parsePortableDashboardJson } from "@/components/dashboard-builder/portable-dashboard";
 import { useDashboardStore } from "@/hooks/use-dashboard-store";
+import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences";
 import { PlusIcon, UploadIcon } from "@/components/icons";
 import { Button } from "@maple/ui/components/ui/button";
 
@@ -25,6 +26,24 @@ function DashboardListPage() {
     importDashboard,
     deleteDashboard,
   } = useDashboardStore();
+
+  const {
+    favorites,
+    sortOption,
+    tagFilter,
+    toggleFavorite,
+    setSortOption,
+    setTagFilter,
+    sortAndFilter,
+    allTags,
+  } = useDashboardPreferences();
+
+  const sortedDashboards = useMemo(
+    () => sortAndFilter(dashboards),
+    [sortAndFilter, dashboards],
+  );
+
+  const tags = useMemo(() => allTags(dashboards), [allTags, dashboards]);
 
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -108,11 +127,18 @@ function DashboardListPage() {
         <div className="py-12 text-sm text-muted-foreground">Loading dashboards...</div>
       ) : null}
       <DashboardList
-        dashboards={dashboards}
+        dashboards={sortedDashboards}
         readOnly={readOnly}
+        sortOption={sortOption}
+        tagFilter={tagFilter}
+        allTags={tags}
+        favorites={favorites}
         onSelect={handleSelect}
         onCreate={handleCreate}
         onDelete={deleteDashboard}
+        onToggleFavorite={toggleFavorite}
+        onSortChange={setSortOption}
+        onTagFilterChange={setTagFilter}
       />
     </DashboardLayout>
   );

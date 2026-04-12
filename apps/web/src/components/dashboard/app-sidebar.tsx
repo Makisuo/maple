@@ -53,6 +53,7 @@ import {
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode";
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth";
 import { useDashboardStore } from "@/hooks/use-dashboard-store";
+import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences";
 import { Badge } from "@maple/ui/components/ui/badge";
 
 const mainNavItems = [
@@ -238,9 +239,13 @@ export function AppSidebar() {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
   const { dashboards, isLoading } = useDashboardStore();
+  const { favorites } = useDashboardPreferences();
 
   const dashboardMatch = currentPath.match(/^\/dashboards\/([^/]+)/);
   const activeDashboardId = dashboardMatch?.[1];
+
+  const favoriteDashboards = dashboards.filter((d) => favorites.has(d.id));
+  const otherDashboards = dashboards.filter((d) => !favorites.has(d.id));
 
   return (
     <Sidebar collapsible="icon">
@@ -332,7 +337,23 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                   {!isLoading && dashboards.length > 0 && (
                     <SidebarMenuSub className="min-h-0 flex-1 overflow-y-auto">
-                      {dashboards.map((dashboard) => (
+                      {favoriteDashboards.map((dashboard) => (
+                        <SidebarMenuSubItem key={dashboard.id}>
+                          <SidebarMenuSubButton
+                            render={
+                              <Link
+                                to="/dashboards/$dashboardId"
+                                params={{ dashboardId: dashboard.id }}
+                              />
+                            }
+                            isActive={activeDashboardId === dashboard.id}
+                          >
+                            <span className="text-amber-500 mr-1">&#9733;</span>
+                            <span>{dashboard.name}</span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                      {otherDashboards.map((dashboard) => (
                         <SidebarMenuSubItem key={dashboard.id}>
                           <SidebarMenuSubButton
                             render={

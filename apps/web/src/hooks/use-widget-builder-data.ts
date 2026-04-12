@@ -4,6 +4,7 @@ import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 import { type QueryBuilderMetricType } from "@/lib/query-builder/model"
 import { resetAggregationForMetricType } from "@/lib/query-builder/model"
 import { listMetricsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { useWidgetBuilder } from "@/hooks/use-widget-builder"
 import { toNames } from "@/lib/query-builder/autocomplete-utils"
 
@@ -20,14 +21,20 @@ export function useWidgetBuilderData() {
   const [metricSearch, setMetricSearch] = React.useState("")
   const deferredMetricSearch = React.useDeferredValue(metricSearch)
 
+  const hasMetricsQuery = state.queries.some((q) => q.dataSource === "metrics")
+
   const metricsResult = useAtomValue(
-    listMetricsResultAtom({ data: { limit: 100, search: deferredMetricSearch || undefined } }),
+    hasMetricsQuery
+      ? listMetricsResultAtom({ data: { limit: 100, search: deferredMetricSearch || undefined } })
+      : disabledResultAtom(),
   )
 
+  type MetricRow = { metricName: string; metricType: string; serviceName: string; isMonotonic: boolean }
+
   const metricRows = React.useMemo(
-    () =>
+    (): MetricRow[] =>
       Result.builder(metricsResult)
-        .onSuccess((response) => response.data)
+        .onSuccess((response) => (response as { data: MetricRow[] }).data)
         .orElse(() => []),
     [metricsResult],
   )
@@ -99,6 +106,7 @@ export function useWidgetBuilderData() {
 
   return {
     autocompleteValues,
+    activateAutocomplete: baseAutocompleteValues.activate,
     metricSelectionOptions,
     metricSearch,
     setMetricSearch,

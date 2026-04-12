@@ -103,6 +103,7 @@ export function WhereClauseEditor({
         className={textareaClassName}
         aria-label={ariaLabel}
         onFocus={(event) => {
+          autocompleteValuesCtx?.activate?.()
           onFocus()
           syncCursor(event.currentTarget.selectionStart ?? event.currentTarget.value.length)
         }}

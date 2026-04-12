@@ -252,7 +252,8 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
   }
 
   if (
-    widget.dataSource.endpoint === "custom_query_builder_timeseries" &&
+    (widget.dataSource.endpoint === "custom_query_builder_timeseries" ||
+      widget.dataSource.endpoint === "custom_query_builder_breakdown") &&
     Array.isArray(params.queries)
   ) {
     const loadedQueries = params.queries

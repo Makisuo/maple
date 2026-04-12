@@ -29,6 +29,8 @@ export interface AutocompleteValuesContextType {
   attributeKeys: string[]
   resourceAttributeKeys: string[]
   metricAttributeKeys: string[]
+  /** When lazy, call this to trigger fetching autocomplete data */
+  activate?: () => void
 }
 
 const AutocompleteValuesCtx = React.createContext<AutocompleteValuesContextType | null>(null)
@@ -204,15 +206,39 @@ function AutocompleteValuesInner({
 // Public provider
 // ---------------------------------------------------------------------------
 
+const emptyAutocompleteValues: AutocompleteValuesContextType = {
+  traces: { services: [], spanNames: [], environments: [], httpMethods: [], httpStatusCodes: [], attributeKeys: [], attributeValues: [], resourceAttributeKeys: [], resourceAttributeValues: [] },
+  logs: { services: [], severities: [], attributeKeys: [], attributeValues: [], resourceAttributeKeys: [], resourceAttributeValues: [] },
+  metrics: { metricTypes: [...QUERY_BUILDER_METRIC_TYPES], attributeKeys: [] },
+  attributeKeys: [],
+  resourceAttributeKeys: [],
+  metricAttributeKeys: [],
+}
+
 export function AutocompleteValuesProvider({
   startTime,
   endTime,
+  lazy = false,
   children,
 }: {
   startTime?: string
   endTime?: string
+  /** When true, defer all fetches until `activate()` is called */
+  lazy?: boolean
   children: React.ReactNode
 }) {
+  const [activated, setActivated] = React.useState(!lazy)
+  const activate = React.useCallback(() => setActivated(true), [])
+
+  if (!activated) {
+    const value = { ...emptyAutocompleteValues, activate }
+    return (
+      <AutocompleteValuesCtx value={value}>
+        {children}
+      </AutocompleteValuesCtx>
+    )
+  }
+
   return (
     <AutocompleteKeysProvider>
       <AutocompleteValuesInner startTime={startTime} endTime={endTime}>

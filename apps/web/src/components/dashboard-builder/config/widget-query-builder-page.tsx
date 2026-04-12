@@ -89,6 +89,7 @@ export function WidgetQueryBuilderPage({
 
   const {
     autocompleteValues: autocompleteValuesBySource,
+    activateAutocomplete,
     metricSelectionOptions,
     setMetricSearch,
   } = useWidgetBuilderData()
@@ -214,7 +215,7 @@ export function WidgetQueryBuilderPage({
         </div>
 
         {/* Query configuration */}
-        <div className="px-6 py-6 space-y-6">
+        <div className="px-6 py-6 space-y-6" onFocusCapture={activateAutocomplete}>
           {validationError && (
             <p className="text-xs text-destructive font-medium">{validationError}</p>
           )}
