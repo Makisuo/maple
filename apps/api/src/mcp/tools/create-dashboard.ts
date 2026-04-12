@@ -825,46 +825,8 @@ function simpleSpecToWidget(
   const display: Record<string, unknown> = { title: spec.title }
   display.unit = spec.unit ? normalizeUnit(spec.unit) : inferUnit(metric)
 
-  if (viz === "table") {
-    const ds = makeQueryBuilderBreakdownDataSource([queryDraft])
-    display.columns = [
-      { field: "name", header: spec.group_by === "severity" ? "Severity" : "Service" },
-      { field: "value", header: metric.charAt(0).toUpperCase() + metric.slice(1) },
-    ]
-
-    return {
-      id,
-      visualization: viz,
-      dataSource: ds,
-      display,
-      layout,
-    }
-  }
-
-  if (viz === "list") {
-    const listSource = source === "logs" ? "logs" : "traces"
-    const listEndpoint = listSource === "logs" ? "list_logs" : "list_traces"
-    const listParams: Record<string, unknown> = { limit: 10 }
-    if (spec.service_name) listParams.service = spec.service_name
-    if (listSource === "traces" && metric === "error_rate") {
-      listParams.hasError = true
-      display.listWhereClause = "has_error = true"
-    }
-
-    return {
-      id,
-      visualization: viz,
-      dataSource: {
-        endpoint: listEndpoint,
-        params: listParams,
-      },
-      display: {
-        ...display,
-        listDataSource: listSource,
-        listLimit: 10,
-      },
-      layout,
-    }
+  if (viz === "table" || viz === "list") {
+    return `Widget "${spec.title}": "${viz}" visualization is not supported in simplified specs. Use a template (e.g. error_tracking, platform_overview) or provide full dashboard_json.`
   }
 
   if (viz === "stat") {
@@ -930,13 +892,6 @@ function computeAutoLayout(
       }
       layouts.push({ x, y, w: 4, h: 2 })
       x += 4
-    } else if (viz === "table" || viz === "list") {
-      if (x > 0) {
-        y += 2
-        x = 0
-      }
-      layouts.push({ x: 0, y, w: 12, h: 5 })
-      y += 5
     } else {
       if (x > 0) {
         y += 2
@@ -999,13 +954,14 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
       "  metric_overview — requires metric_name + metric_type: current value stats + timeseries chart + service breakdown\n" +
       "  blank — empty dashboard\n\n" +
       "Simplified widgets (provide name + widgets JSON array, same params as query_data):\n" +
-      '  Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }\n' +
+      '  Each: { title, visualization?: "chart"|"stat", source: "traces"|"logs"|"metrics", metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }\n' +
       "  group_by values (use exact format):\n" +
       "    traces: service.name, span.name, status.code, http.method, none\n" +
       "    logs: service.name, severity, none\n" +
       "    metrics: service.name, attr.<key> (e.g. attr.signal, attr.status), none\n" +
       "    Aliases accepted: service, span_name, status_code, http_method\n" +
       "  unit: auto-inferred from metric if omitted (duration_ms for latency, percent for error_rate, number otherwise). Override with: ms, %, number, duration_us.\n" +
+      "  Note: table and list visualizations require templates or full dashboard_json.\n" +
       "  Layouts auto-computed. Example:\n" +
       '  widgets=\'[{"title":"HTTP Duration","source":"metrics","metric":"avg","metric_name":"http.server.duration","metric_type":"histogram","group_by":"attr.method"}]\'\n\n' +
       "Custom JSON: provide dashboard_json with full widget definitions (use get_dashboard to see schema).",
@@ -1027,7 +983,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
       ),
       widgets: optionalStringParam(
         "JSON array of simplified widget specs (alternative to templates and dashboard_json). " +
-          'Each: { title, visualization?: "chart"|"stat"|"table"|"list", source: "traces"|"logs"|"metrics", ' +
+          'Each: { title, visualization?: "chart"|"stat", source: "traces"|"logs"|"metrics", ' +
           "metric?, metric_name?, metric_type?, service_name?, group_by?, unit? }. " +
           "group_by must use dotted format: service.name, span.name, status.code, http.method, severity, attr.<key>, none. " +
           "Unit auto-inferred from metric if omitted. Layouts auto-computed.",
