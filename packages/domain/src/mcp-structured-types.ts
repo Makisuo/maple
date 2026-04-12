@@ -193,12 +193,32 @@ export interface ListMetricsData {
   metrics: MetricRow[]
 }
 
+export interface QueryDataQueryContext {
+  source: "traces" | "logs" | "metrics"
+  serviceName?: string
+  spanName?: string
+  rootSpansOnly?: boolean
+  environments?: string[]
+  commitShas?: string[]
+  severity?: string
+  metricName?: string
+  metricType?: string
+  attributeFilters?: Array<{ key: string; value?: string; mode: string }>
+  apdexThresholdMs?: number
+  bucketSeconds?: number
+  limit?: number
+}
+
+export type QueryDataUnit = "duration_ms" | "percent" | "number" | "bytes" | "requests_per_sec"
+
 export interface QueryDataData {
   timeRange: { start: string; end: string }
   kind: string
   metric: string
   groupBy?: string
   decisions?: string[]
+  queryContext: QueryDataQueryContext
+  unit: QueryDataUnit
   result:
     | { kind: "timeseries"; data: Array<{ bucket: string; series: Record<string, number> }> }
     | { kind: "breakdown"; data: Array<{ name: string; value: number }> }

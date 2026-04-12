@@ -3,6 +3,7 @@ import { formatNextSteps } from "./next-steps"
 import { createDualContent } from "./structured-output"
 import type { McpToolResult } from "../tools/types"
 import type { QueryEngineExecuteResponse } from "@maple/query-engine"
+import type { QueryDataQueryContext, QueryDataUnit } from "@maple/domain"
 
 export function formatBucket(bucket: string): string {
   const match = bucket.match(/T(\d{2}:\d{2}:\d{2})/)
@@ -17,6 +18,24 @@ export function formatMetricValue(metric: string, value: number): string {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+export function inferUnit(source: string, metric: string, metricName?: string): QueryDataUnit {
+  if (source === "traces") {
+    if (metric === "error_rate") return "percent"
+    if (metric.includes("duration")) return "duration_ms"
+    return "number"
+  }
+  if (source === "logs") return "number"
+  // metrics
+  if (metricName) {
+    const lower = metricName.toLowerCase()
+    if (/\b(error[._-]?rate|percentage|percent)\b/.test(lower)) return "percent"
+    if (/\b(duration|latency|response[._]time)\b/.test(lower)) return "duration_ms"
+    if (/\b(bytes|memory|size)\b/.test(lower)) return "bytes"
+  }
+  if (metric === "rate") return "requests_per_sec"
+  return "number"
 }
 
 function getNextSteps(
@@ -46,10 +65,12 @@ export function formatQueryResult(
   startTime: string,
   endTime: string,
   groupBy: string | undefined,
-  decisions?: string[],
+  decisions: string[] | undefined,
+  queryContext: QueryDataQueryContext,
 ): McpToolResult {
   const result = response.result
   const metricLabel = metric ?? (source === "metrics" ? "avg" : "count")
+  const unit = inferUnit(source, metricLabel, queryContext.metricName)
 
   const lines: string[] = [
     `## ${capitalize(source)} ${capitalize(kind)}: ${metricLabel}`,
@@ -71,6 +92,8 @@ export function formatQueryResult(
         kind,
         metric: metricLabel,
         groupBy,
+        queryContext,
+        unit,
         ...(decisions && decisions.length > 0 && { decisions }),
         result: {
           kind: "timeseries" as const,
@@ -114,6 +137,8 @@ export function formatQueryResult(
         kind,
         metric: metricLabel,
         groupBy,
+        queryContext,
+        unit,
         ...(decisions && decisions.length > 0 && { decisions }),
         result: {
           kind: "breakdown" as const,

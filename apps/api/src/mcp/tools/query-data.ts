@@ -19,6 +19,7 @@ import {
   type QuerySpec as QuerySpecType,
 } from "@maple/query-engine"
 import { formatQueryResult } from "../lib/format-query-result"
+import type { QueryDataQueryContext } from "@maple/domain"
 
 const queryDataSchema = Schema.Struct({
   source: Schema.Literals(["traces", "logs", "metrics"]).annotate({
@@ -272,6 +273,29 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           }
         }
 
+        const queryContext: QueryDataQueryContext = {
+          source: params.source,
+          ...(params.service_name && { serviceName: params.service_name }),
+          ...(params.span_name && { spanName: params.span_name }),
+          ...(params.root_spans_only && { rootSpansOnly: params.root_spans_only }),
+          ...(params.environments && { environments: splitCsv(params.environments) }),
+          ...(params.commit_shas && { commitShas: splitCsv(params.commit_shas) }),
+          ...(params.severity && { severity: params.severity }),
+          ...(params.metric_name && { metricName: params.metric_name }),
+          ...(params.metric_type && { metricType: params.metric_type }),
+          ...(params.apdex_threshold_ms && { apdexThresholdMs: params.apdex_threshold_ms }),
+          ...(params.bucket_seconds && { bucketSeconds: params.bucket_seconds }),
+          ...(params.limit && { limit: params.limit }),
+          ...(params.attribute_key && {
+            attributeFilters: [{
+              key: params.attribute_key,
+              ...(params.attribute_value
+                ? { value: params.attribute_value, mode: "equals" as const }
+                : { mode: "exists" as const }),
+            }],
+          }),
+        }
+
         return formatQueryResult(
           "query_data",
           exit.value,
@@ -282,6 +306,7 @@ export function registerQueryDataTool(server: McpToolRegistrar) {
           et,
           params.group_by,
           decisions,
+          queryContext,
         )
       }),
   )
