@@ -1,7 +1,9 @@
+import { useRef } from "react"
 import { useAgent } from "agents/react"
 import { useAgentChat } from "@cloudflare/ai-chat/react"
 import { useAuth } from "@clerk/clerk-react"
 import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
+import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import {
   Conversation,
   ConversationContent,
@@ -52,11 +54,14 @@ const PROMPT_SUGGESTIONS = [
 
 interface ChatConversationProps {
   tabId: string
+  isActive: boolean
   onFirstMessage?: (tabId: string, text: string) => void
 }
 
-export function ChatConversation({ tabId, onFirstMessage }: ChatConversationProps) {
+export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConversationProps) {
   const { orgId } = useAuth()
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  useTypeAnywhereFocus(textareaRef, isActive)
 
   const agent = useAgent({
     agent: "ChatAgent",
@@ -181,6 +186,7 @@ export function ChatConversation({ tabId, onFirstMessage }: ChatConversationProp
           className="rounded-lg border shadow-sm"
         >
           <PromptInputTextarea
+            ref={textareaRef}
             placeholder="Ask about your system..."
             disabled={isLoading}
           />

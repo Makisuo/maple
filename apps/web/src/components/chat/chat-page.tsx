@@ -38,6 +38,7 @@ export function ChatPage({ initialTabId }: ChatPageProps) {
             >
               <ChatConversation
                 tabId={tab.id}
+                isActive={tab.id === activeTabId}
                 onFirstMessage={(id, text) => renameTab(id, text)}
               />
             </div>
