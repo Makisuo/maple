@@ -24,6 +24,11 @@ const WidgetDataSourceSchema = Schema.Struct({
   transform: Schema.optional(
     Schema.Struct({
       fieldMap: Schema.optional(StringRecord),
+      hideSeries: Schema.optional(
+        Schema.Struct({
+          baseNames: Schema.Array(Schema.String),
+        }),
+      ),
       flattenSeries: Schema.optional(
         Schema.Struct({
           valueField: Schema.String,
