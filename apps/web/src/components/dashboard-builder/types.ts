@@ -69,6 +69,8 @@ export type ValueUnit =
   | "percent"
   | "duration_ms"
   | "duration_us"
+  | "duration_s"
+  | "duration_ns"
   | "bytes"
   | "requests_per_sec"
   | "short"

@@ -35,6 +35,10 @@ export function formatCellValue(value: unknown, unit?: string): string {
       return formatDuration(num)
     case "duration_us":
       return formatDuration(num / 1000)
+    case "duration_s":
+      return formatDuration(num * 1000)
+    case "duration_ns":
+      return formatDuration(num / 1_000_000)
     case "percent":
       return `${num.toFixed(1)}%`
     case "number":

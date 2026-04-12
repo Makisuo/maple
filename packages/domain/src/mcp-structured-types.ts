@@ -209,7 +209,7 @@ export interface QueryDataQueryContext {
   limit?: number
 }
 
-export type QueryDataUnit = "duration_ms" | "percent" | "number" | "bytes" | "requests_per_sec"
+export type QueryDataUnit = "duration_ms" | "duration_us" | "duration_s" | "duration_ns" | "percent" | "number" | "bytes" | "requests_per_sec"
 
 export interface QueryDataData {
   timeRange: { start: string; end: string }

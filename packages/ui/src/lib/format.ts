@@ -177,6 +177,8 @@ export const formatValueByUnit: (num: number, unit?: string) => string = (num, u
     Match.when("percent", () => `${(num * 100).toFixed(1)}%`),
     Match.when("duration_ms", () => formatDuration(num)),
     Match.when("duration_us", () => formatDuration(num / 1000)),
+    Match.when("duration_s", () => formatDuration(num * 1000)),
+    Match.when("duration_ns", () => formatDuration(num / 1_000_000)),
     Match.when("requests_per_sec", () => `${formatNumber(num)}/s`),
     Match.when("bytes", () => {
       if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(1)} GB`

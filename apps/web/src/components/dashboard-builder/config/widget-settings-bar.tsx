@@ -15,16 +15,26 @@ import type { StatAggregate } from "@/lib/query-builder/widget-builder-utils"
 
 export type LegendPosition = "bottom" | "right" | "hidden"
 
-const UNIT_OPTIONS: Array<{ value: ValueUnit; label: string }> = [
+const UNIT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "none", label: "None" },
   { value: "number", label: "Number" },
   { value: "percent", label: "Percent" },
-  { value: "duration_ms", label: "Duration (ms)" },
-  { value: "duration_us", label: "Duration (us)" },
+  { value: "duration", label: "Duration" },
   { value: "bytes", label: "Bytes" },
   { value: "requests_per_sec", label: "Requests/sec" },
   { value: "short", label: "Short" },
 ]
+
+const DURATION_SCALE_OPTIONS: Array<{ value: ValueUnit; label: string }> = [
+  { value: "duration_ns", label: "ns" },
+  { value: "duration_us", label: "us" },
+  { value: "duration_ms", label: "ms" },
+  { value: "duration_s", label: "s" },
+]
+
+function isDurationUnit(value: string): boolean {
+  return value.startsWith("duration_")
+}
 
 const VISUALIZATION_OPTIONS: Array<{ value: VisualizationType; label: string }> = [
   { value: "chart", label: "Chart" },
@@ -245,9 +255,9 @@ export function WidgetSettingsBar() {
           </p>
           <Select
             items={UNIT_OPTIONS}
-            value={unit}
+            value={isDurationUnit(unit) ? "duration" : unit}
             onValueChange={(value) =>
-              onChange({ unit: value as ValueUnit })
+              onChange({ unit: value === "duration" ? "duration_ms" : value as ValueUnit })
             }
           >
             <SelectTrigger className="w-full">
@@ -261,6 +271,25 @@ export function WidgetSettingsBar() {
               ))}
             </SelectContent>
           </Select>
+          {isDurationUnit(unit) && (
+            <div className="flex h-9 rounded-md border bg-muted/40 p-0.5">
+              {DURATION_SCALE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => onChange({ unit: opt.value })}
+                  className={cn(
+                    "flex-1 text-xs rounded-sm transition-colors",
+                    unit === opt.value
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

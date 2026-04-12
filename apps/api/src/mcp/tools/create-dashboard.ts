@@ -128,6 +128,10 @@ const UNIT_ALIASES: Record<string, string> = {
   milliseconds: "duration_ms",
   us: "duration_us",
   microseconds: "duration_us",
+  s: "duration_s",
+  seconds: "duration_s",
+  ns: "duration_ns",
+  nanoseconds: "duration_ns",
   "%": "percent",
   short: "number",
 }
@@ -1017,7 +1021,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
       "    logs: service.name, severity, none\n" +
       "    metrics: service.name, attr.<key> (e.g. attr.signal, attr.status), none\n" +
       "    Aliases accepted: service, span_name, status_code, http_method\n" +
-      "  unit: auto-inferred from metric if omitted (duration_ms for latency, percent for error_rate, number otherwise). Override with: ms, %, number, duration_us.\n" +
+      "  unit: auto-inferred from metric if omitted (duration_ms for latency, percent for error_rate, number otherwise). Override with: ms, us, s, ns, %, number.\n" +
       "  Note: table requires a group_by field. list shows recent traces or logs.\n" +
       "  Layouts auto-computed. Example:\n" +
       '  widgets=\'[{"title":"HTTP Duration","source":"metrics","metric":"avg","metric_name":"http.server.duration","metric_type":"histogram","group_by":"attr.method"}]\'\n\n' +

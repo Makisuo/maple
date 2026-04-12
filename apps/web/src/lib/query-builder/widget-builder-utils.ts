@@ -80,6 +80,7 @@ export function inferDisplayUnitForQuery(
   if (query.dataSource === "metrics") {
     const lower = query.metricName.toLowerCase()
     if (/\b(error[._ -]?rate|percentage|percent)\b/.test(lower)) return "percent"
+    if (/[._](seconds|s)$/.test(lower) || /\b(duration[._]seconds)\b/.test(lower)) return "duration_s"
     if (/\b(duration|latency|response[._]time)\b/.test(lower)) return "duration_ms"
     if (/\b(bytes|memory|size)\b/.test(lower)) return "bytes"
     if (query.aggregation === "rate") return "requests_per_sec"

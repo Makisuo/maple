@@ -21,7 +21,7 @@ const QUERY_BUILDER_CHART_IDS = ["query-builder-bar", "query-builder-area", "que
 const widgetDisplaySchema = z.object({
   title: z.string().trim().min(1).describe("Widget title shown in the dashboard header"),
   unit: z
-    .enum(["none", "number", "percent", "duration_ms", "duration_us", "bytes", "requests_per_sec", "short"])
+    .enum(["none", "number", "percent", "duration_ms", "duration_us", "duration_s", "duration_ns", "bytes", "requests_per_sec", "short"])
     .optional(),
   chartId: z.enum(QUERY_BUILDER_CHART_IDS).optional(),
   columns: z

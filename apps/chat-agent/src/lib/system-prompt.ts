@@ -184,7 +184,7 @@ RIGHT: unit="duration_ms" for latency, unit="percent" for error rate, unit="byte
 
 ## Metric Units
 When list_metrics returns a metricUnit, map it to display units:
-- "ms" → duration_ms, "s" → duration_ms, "us" → duration_us
+- "ms" → duration_ms, "s" → duration_s, "us" → duration_us, "ns" → duration_ns
 - "By" → bytes, "%" → percent, "1" → number
 For trace charts: latency aggregations → duration_ms, error_rate → percent, count → number
 
@@ -216,7 +216,7 @@ NOTE: Do NOT use custom_timeseries or custom_breakdown endpoints. Always use cus
 - flattenSeries: {valueField} — Flatten time series with multiple series keys
 
 ## Units
-number, percent, duration_ms, duration_us, bytes, requests_per_sec, short, none
+number, percent, duration_ms, duration_us, duration_s, duration_ns, bytes, requests_per_sec, short, none
 
 ## Guidelines
 - ALWAYS validate data before proposing any widget. No exceptions.

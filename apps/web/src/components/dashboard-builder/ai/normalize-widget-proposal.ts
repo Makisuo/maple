@@ -595,6 +595,7 @@ function inferMetricDisplayUnit(
   aggregation: string,
 ): WidgetDisplayConfig["unit"] | undefined {
   const lower = metricName.toLowerCase()
+  if (/[._](seconds|s)$/.test(lower) || /\b(duration[._]seconds)\b/.test(lower)) return "duration_s"
   if (/\b(duration|latency|response[._]time)\b/.test(lower)) return "duration_ms"
   if (/\b(bytes|memory|size)\b/.test(lower)) return "bytes"
   if (aggregation === "rate") return "requests_per_sec"

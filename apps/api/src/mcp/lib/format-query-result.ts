@@ -31,6 +31,7 @@ export function inferUnit(source: string, metric: string, metricName?: string): 
   if (metricName) {
     const lower = metricName.toLowerCase()
     if (/\b(error[._-]?rate|percentage|percent)\b/.test(lower)) return "percent"
+    if (/[._](seconds|s)$/.test(lower) || /\b(duration[._]seconds)\b/.test(lower)) return "duration_s"
     if (/\b(duration|latency|response[._]time)\b/.test(lower)) return "duration_ms"
     if (/\b(bytes|memory|size)\b/.test(lower)) return "bytes"
   }
