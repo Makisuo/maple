@@ -1,5 +1,18 @@
-import { PlusIcon, TrashIcon } from "@/components/icons"
+import { useState } from "react"
 
+import { AlertWarningIcon, PlusIcon, TrashIcon } from "@/components/icons"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@maple/ui/components/ui/alert-dialog"
 import { Button } from "@maple/ui/components/ui/button"
 import type { Dashboard, DashboardWidget } from "@/components/dashboard-builder/types"
 
@@ -82,8 +95,11 @@ export function DashboardList({
   onCreate,
   onDelete,
 }: DashboardListProps) {
+  const [pendingDelete, setPendingDelete] = useState<Dashboard | null>(null)
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {dashboards.map((dashboard) => (
         <div
           key={dashboard.id}
@@ -115,7 +131,7 @@ export function DashboardList({
                 className="opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={(e) => {
                   e.stopPropagation()
-                  onDelete(dashboard.id)
+                  setPendingDelete(dashboard)
                 }}
               >
                 <TrashIcon size={14} />
@@ -142,6 +158,38 @@ export function DashboardList({
         <PlusIcon size={24} />
         <span className="text-xs font-medium">Create Dashboard</span>
       </button>
-    </div>
+      </div>
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-destructive/10">
+              <AlertWarningIcon className="text-destructive" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Delete dashboard?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{pendingDelete?.name}" will be permanently deleted. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (pendingDelete) onDelete(pendingDelete.id)
+                setPendingDelete(null)
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
