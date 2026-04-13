@@ -1,5 +1,5 @@
-import type { ReactNode } from "react"
 import { Text, View } from "react-native"
+import type { ReactNode } from "react"
 import { Card } from "../ui/card"
 
 interface ChartCardProps {

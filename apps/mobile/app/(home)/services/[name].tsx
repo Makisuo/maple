@@ -41,7 +41,7 @@ export default function ServiceDetailScreen() {
 
 	const [selectedIndex, setSelectedIndex] = useState(1)
 	const timeKey = TIME_OPTIONS[selectedIndex]
-	const { state, refresh } = useServiceDetail(serviceName, timeKey)
+	const { state, refresh, isRefreshing } = useServiceDetail(serviceName, timeKey)
 
 	const bottomPadding = useScreenBottomPadding()
 
@@ -51,6 +51,7 @@ export default function ServiceDetailScreen() {
 				title={serviceName}
 				backLabel="Services"
 				onBack={() => router.back()}
+				isRefreshing={isRefreshing}
 			/>
 
 			<TimeRangePicker

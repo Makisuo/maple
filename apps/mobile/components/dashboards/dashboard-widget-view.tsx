@@ -17,7 +17,7 @@ export function DashboardWidgetView({
 	timeRange,
 	compact = false,
 }: DashboardWidgetViewProps) {
-	const state = useWidgetData(widget, timeRange)
+	const { state } = useWidgetData(widget, timeRange)
 	const title = widget.display.title ?? widget.id
 
 	let body: React.ReactNode

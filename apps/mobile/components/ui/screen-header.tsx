@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Pressable, Text, View } from "react-native"
+import { RefreshIndicator } from "./refresh-indicator"
 
 interface ScreenHeaderProps {
 	title: string
@@ -7,6 +8,7 @@ interface ScreenHeaderProps {
 	backLabel?: string
 	onBack?: () => void
 	right?: ReactNode
+	isRefreshing?: boolean
 }
 
 export function ScreenHeader({
@@ -15,6 +17,7 @@ export function ScreenHeader({
 	backLabel,
 	onBack,
 	right,
+	isRefreshing = false,
 }: ScreenHeaderProps) {
 	return (
 		<View className="px-5 pt-2 pb-3">
@@ -44,9 +47,10 @@ export function ScreenHeader({
 						</Text>
 					) : null}
 				</View>
-				{right ? (
-					<View className="flex-row items-center gap-2">{right}</View>
-				) : null}
+				<View className="flex-row items-center gap-2 pt-2">
+					{right}
+					<RefreshIndicator active={isRefreshing} />
+				</View>
 			</View>
 		</View>
 	)

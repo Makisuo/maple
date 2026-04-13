@@ -132,7 +132,7 @@ function reduceBreakdownToValue(
 export function useWidgetData(
 	widget: DashboardWidget,
 	timeRange: WidgetTimeRange,
-): WidgetDataState {
+): { state: WidgetDataState; isRefreshing: boolean } {
 	const query = useQuery<WidgetQueryData>({
 		queryKey: mobileQueryKeys.widgetData(widget, timeRange),
 		queryFn: async () => {
@@ -245,16 +245,25 @@ export function useWidgetData(
 	})
 
 	if (query.data?.kind === "unsupported") {
-		return { status: "unsupported", reason: query.data.reason }
+		return {
+			state: { status: "unsupported", reason: query.data.reason },
+			isRefreshing: query.isFetching && query.isPlaceholderData,
+		}
 	}
 
 	if (query.data?.kind === "success") {
-		return { status: "success", data: query.data.data }
+		return {
+			state: { status: "success", data: query.data.data },
+			isRefreshing: query.isFetching && query.isPlaceholderData,
+		}
 	}
 
 	if (query.isError) {
-		return { status: "error", error: getQueryErrorMessage(query.error) }
+		return {
+			state: { status: "error", error: getQueryErrorMessage(query.error) },
+			isRefreshing: false,
+		}
 	}
 
-	return { status: "loading" }
+	return { state: { status: "loading" }, isRefreshing: false }
 }

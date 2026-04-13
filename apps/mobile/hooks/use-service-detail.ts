@@ -57,5 +57,9 @@ export function useServiceDetail(serviceName: string, timeKey: TimeRangeKey = "2
       ? { status: "error", error: getQueryErrorMessage(query.error) }
       : { status: "loading" }
 
-  return { state, refresh }
+  return {
+    state,
+    refresh,
+    isRefreshing: query.isFetching && query.isPlaceholderData,
+  }
 }

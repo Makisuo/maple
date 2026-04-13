@@ -90,7 +90,7 @@ export default function DashboardScreen() {
 	const [selectedIndex, setSelectedIndex] = useState(1)
 	const [orgModalVisible, setOrgModalVisible] = useState(false)
 	const timeKey = TIME_OPTIONS[selectedIndex]
-	const { state, refresh } = useDashboardData(timeKey)
+	const { state, refresh, isRefreshing } = useDashboardData(timeKey)
 	const { organization } = useOrganization()
 
 	return (
@@ -122,7 +122,7 @@ export default function DashboardScreen() {
 				</View>
 			</View>
 
-			<ScreenHeader title="Overview" />
+			<ScreenHeader title="Overview" isRefreshing={isRefreshing} />
 
 			<TimeRangePicker
 				selectedIndex={selectedIndex}

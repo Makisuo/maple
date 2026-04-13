@@ -92,5 +92,9 @@ export function useDashboardData(timeKey: TimeRangeKey) {
       ? { status: "error", error: getQueryErrorMessage(query.error) }
       : { status: "loading" }
 
-  return { state, refresh }
+  return {
+    state,
+    refresh,
+    isRefreshing: query.isFetching && query.isPlaceholderData,
+  }
 }
