@@ -23,6 +23,7 @@ import { AuthorizationLive } from "./services/AuthorizationLive"
 import { CloudflareLogpushService } from "./services/CloudflareLogpushService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
 import { DigestService } from "./services/DigestService"
+import { EdgeCacheService } from "./services/EdgeCacheService"
 import { EmailService } from "./services/EmailService"
 import { Env } from "./services/Env"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
@@ -64,6 +65,7 @@ export const TinybirdServiceLive = TinybirdService.layer.pipe(
 
 export const QueryEngineServiceLive = QueryEngineService.layer.pipe(
   Layer.provideMerge(TinybirdServiceLive),
+  Layer.provideMerge(EdgeCacheService.layer),
 )
 
 export const AlertsServiceLive = AlertsService.layer.pipe(
