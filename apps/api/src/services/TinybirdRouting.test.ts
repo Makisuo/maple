@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Database } from "bun:sqlite"
-import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import {
   OrgId,
   OrgTinybirdSettingsEncryptionError,
@@ -14,6 +14,7 @@ import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService, __testables as orgTinybirdTestables } from "./OrgTinybirdSettingsService"
 import { TinybirdService, __testables as tinybirdTestables } from "./TinybirdService"
+import { WorkerBindings } from "./WorkerBindings"
 
 const createdTempDirs: string[] = []
 
@@ -36,37 +37,35 @@ const createTempDbUrl = () => {
   return { url: `file:${dbPath}` }
 }
 
-const makeConfigProvider = (url: string) =>
-  ConfigProvider.layer(
-    ConfigProvider.fromUnknown({
-      PORT: "3472",
-      TINYBIRD_HOST: "https://managed.tinybird.co",
-      TINYBIRD_TOKEN: "managed-token",
-      MAPLE_DB_URL: url,
-      MAPLE_DB_AUTH_TOKEN: "",
-      MAPLE_AUTH_MODE: "self_hosted",
-      MAPLE_ROOT_PASSWORD: "test-root-password",
-      MAPLE_DEFAULT_ORG_ID: "default",
-      MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
-      MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
-      CLERK_SECRET_KEY: "",
-      CLERK_PUBLISHABLE_KEY: "",
-      CLERK_JWT_KEY: "",
-    }),
-  )
+const makeBindings = (url: string) =>
+  WorkerBindings.layer({
+    PORT: "3472",
+    TINYBIRD_HOST: "https://managed.tinybird.co",
+    TINYBIRD_TOKEN: "managed-token",
+    MAPLE_DB_URL: url,
+    MAPLE_DB_AUTH_TOKEN: "",
+    MAPLE_AUTH_MODE: "self_hosted",
+    MAPLE_ROOT_PASSWORD: "test-root-password",
+    MAPLE_DEFAULT_ORG_ID: "default",
+    MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+    CLERK_SECRET_KEY: "",
+    CLERK_PUBLISHABLE_KEY: "",
+    CLERK_JWT_KEY: "",
+  })
 
 const makeTinybirdLayer = (url: string) =>
   TinybirdService.Default.pipe(
     Layer.provide(OrgTinybirdSettingsService.Live.pipe(Layer.provide(DatabaseLibsqlLive))),
     Layer.provide(Env.Default),
-    Layer.provide(makeConfigProvider(url)),
+    Layer.provide(makeBindings(url)),
   )
 
 const makeOrgTinybirdLayer = (url: string) =>
   OrgTinybirdSettingsService.Live.pipe(
     Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
-    Layer.provide(makeConfigProvider(url)),
+    Layer.provide(makeBindings(url)),
   )
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)

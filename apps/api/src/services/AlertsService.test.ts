@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
+import { WorkerBindings } from "./WorkerBindings"
 import {
   AlertDestinationInUseError,
   AlertForbiddenError,
@@ -48,26 +49,24 @@ const createTempDbUrl = () => {
   return { url: `file:${dbPath}`, dbPath }
 }
 
-const makeConfigProvider = (url: string) =>
-  ConfigProvider.layer(
-    ConfigProvider.fromUnknown({
-      PORT: "3472",
-      TINYBIRD_HOST: "https://maple-managed.tinybird.co",
-      TINYBIRD_TOKEN: "managed-token",
-      MAPLE_DB_URL: url,
-      MAPLE_DB_AUTH_TOKEN: "",
-      MAPLE_AUTH_MODE: "self_hosted",
-      MAPLE_ROOT_PASSWORD: "test-root-password",
-      MAPLE_DEFAULT_ORG_ID: "default",
-      MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString("base64"),
-      MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "lookup-key",
-      MAPLE_INGEST_PUBLIC_URL: "http://127.0.0.1:3474",
-      MAPLE_APP_BASE_URL: "http://127.0.0.1:3471",
-      CLERK_SECRET_KEY: "",
-      CLERK_PUBLISHABLE_KEY: "",
-      CLERK_JWT_KEY: "",
-    }),
-  )
+const makeBindings = (url: string) =>
+  WorkerBindings.layer({
+    PORT: "3472",
+    TINYBIRD_HOST: "https://maple-managed.tinybird.co",
+    TINYBIRD_TOKEN: "managed-token",
+    MAPLE_DB_URL: url,
+    MAPLE_DB_AUTH_TOKEN: "",
+    MAPLE_AUTH_MODE: "self_hosted",
+    MAPLE_ROOT_PASSWORD: "test-root-password",
+    MAPLE_DEFAULT_ORG_ID: "default",
+    MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString("base64"),
+    MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "lookup-key",
+    MAPLE_INGEST_PUBLIC_URL: "http://127.0.0.1:3474",
+    MAPLE_APP_BASE_URL: "http://127.0.0.1:3471",
+    CLERK_SECRET_KEY: "",
+    CLERK_PUBLISHABLE_KEY: "",
+    CLERK_JWT_KEY: "",
+  })
 
 const emptyTinybirdRows = [] as ReadonlyArray<Record<string, unknown>>
 
@@ -106,8 +105,8 @@ const defaultTestRuntime: AlertRuntimeShape = {
 }
 
 const makeLayer = (url: string, tinybirdStub: TinybirdServiceShape, runtimeOverrides?: Partial<AlertRuntimeShape>) => {
-  const configProvider = makeConfigProvider(url)
-  const envLive = Env.Default.pipe(Layer.provide(configProvider))
+  const bindingsLive = makeBindings(url)
+  const envLive = Env.Default.pipe(Layer.provide(bindingsLive))
   const databaseLive = DatabaseLibsqlLive.pipe(Layer.provide(envLive))
   const tinybirdLive = Layer.succeed(TinybirdService, tinybirdStub)
   const queryEngineLive = QueryEngineService.layer.pipe(Layer.provide(tinybirdLive))
