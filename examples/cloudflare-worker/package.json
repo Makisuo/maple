@@ -1,0 +1,26 @@
+{
+  "name": "cloudflare-worker",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alchemy-run/alchemy-effect"
+  },
+  "type": "module",
+  "scripts": {
+    "deploy": "alchemy-effect deploy",
+    "dev": "alchemy-effect dev",
+    "destroy": "alchemy-effect destroy",
+    "logs": "alchemy-effect logs",
+    "tail": "alchemy-effect tail"
+  },
+  "dependencies": {
+    "@alchemy.run/better-auth": "workspace:*",
+    "@effect/platform-bun": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "alchemy-effect": "workspace:*",
+    "better-auth": "catalog:",
+    "effect": "catalog:"
+  }
+}

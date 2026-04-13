@@ -1,0 +1,38 @@
+{
+  "name": "alchemy-effect-website",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alchemy-run/alchemy-effect"
+  },
+  "type": "module",
+  "scripts": {
+    "build:reference": "bun ../scripts/generate-api-reference.ts",
+    "build:static": "cp -r ./src/static/ ./static/",
+    "build:assets:css": "mkdir -p ./static/assets && tailwindcss -i ./src/styles/app.css -o ./static/assets/app.css --minify",
+    "build:assets:js": "mkdir -p ./static/assets && bun build ./src/app.ts --outfile ./static/assets/app.js --target browser --format esm --minify",
+    "build:assets": "bun run build:assets:css && bun run build:assets:js",
+    "build:site": "zola build --force",
+    "build:search": "pagefind --site public",
+    "build": "bun run build:reference && bun run build:static && bun run build:assets && bun run build:site && bun run build:search",
+    "dev:site": "bun run build:reference && bun run build:static && bun run build:assets && zola serve --interface 127.0.0.1 --port 1111",
+    "deploy": "alchemy-effect deploy",
+    "dev": "alchemy dev",
+    "destroy": "alchemy destroy",
+    "logs": "alchemy logs",
+    "tail": "alchemy tail"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "alchemy-effect": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.2",
+    "pagefind": "^1.4.0",
+    "tailwindcss": "^4.2.2",
+    "typescript": "catalog:"
+  }
+}

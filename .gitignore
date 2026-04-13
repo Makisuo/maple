@@ -1,0 +1,40 @@
+node_modules/
+dist/
+/lib/
+/alchemy-effect/lib/
+.out/
+.test/
+.DS_Store
+.env
+*.tsbuildinfo
+
+.alchemy/
+# !.alchemy/github:alchemy/
+# examples/*/.alchemy
+
+.repomix-output.txt
+wrangler.jsonc
+
+# Husky - ignore generated files but keep hooks
+.husky/_
+!.husky/pre-commit
+
+.smoke
+.smoke.logs
+smoke
+.svelte-kit
+.claude/*.local.json
+.astro
+.wrangler
+
+*.tgz
+*.js
+*.d.ts
+*.map
+
+.attest
+.cache
+.external
+.bundle-benchmark
+alchemy-effect/docs
+.sonda

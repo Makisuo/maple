@@ -1,0 +1,208 @@
+name: Release NPM Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+      version-override:
+        description: "Exact version override (e.g. 0.7.0-alpha). Leave empty to use bump type."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  # ── Step 1: Bump version, commit, tag, create GitHub release ──
+  bump:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - name: Generate bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ALCHEMY_VERSION_BOT_ID }}
+          private-key: ${{ secrets.ALCHEMY_VERSION_BOT_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          fetch-depth: 0
+          token: ${{ steps.bot-token.outputs.token }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Configure git
+        run: |
+          git config --local user.email "alchemy-version-bot[bot]@users.noreply.github.com"
+          git config --local user.name "alchemy-version-bot[bot]"
+
+      - name: Bump version
+        id: bump
+        run: |
+          if [ -n "${{ inputs.version-override }}" ]; then
+            bun ./scripts/bump.ts "${{ inputs.version-override }}"
+          else
+            bun ./scripts/bump.ts "${{ inputs.bump }}"
+          fi
+          VERSION=$(node -p "require('./alchemy-effect/package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Push version bump
+        run: git push
+
+      - name: Capture commit SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        if: ${{ !contains(steps.bump.outputs.version, '-') }}
+        run: |
+          git tag -a "v${{ steps.bump.outputs.version }}" -m "Release v${{ steps.bump.outputs.version }}"
+          git push --tags
+
+      - name: Create GitHub Release
+        if: ${{ !contains(steps.bump.outputs.version, '-') }}
+        run: |
+          if ! gh release view "v${{ steps.bump.outputs.version }}" >/dev/null 2>&1; then
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+            if [ -n "$PREV_TAG" ]; then
+              bunx changelogithub --from "$PREV_TAG"
+            else
+              bunx changelogithub --from "v${{ steps.bump.outputs.version }}"
+            fi
+          else
+            echo "Release v${{ steps.bump.outputs.version }} already exists, skipping"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Step 2: Build & publish alchemy-effect to npm ──
+  publish-alchemy-effect:
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          registry-url: https://registry.npmjs.org/
+          node-version: 24
+
+      - name: Upgrade npm for OIDC trusted publishing
+        run: |
+          npm install -g npm@latest && npm --version
+          sed -i '/always-auth/d' ~/.npmrc 2>/dev/null || true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+        working-directory: alchemy-effect
+
+      - name: Publish
+        run: |
+          VERSION="${{ needs.bump.outputs.version }}"
+          PKG_NAME=$(node -p "require('./alchemy-effect/package.json').name")
+          echo "--- Publishing ${PKG_NAME}@${VERSION} ---"
+
+          if npm view "${PKG_NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${PKG_NAME}@${VERSION} already published, skipping"
+            exit 0
+          fi
+
+          cd alchemy-effect
+          bun pm pack --destination .
+          TARBALL=$(ls *.tgz 2>/dev/null | head -1)
+          echo "Publishing tarball: ${TARBALL}"
+          TAG="latest"
+          if echo "${VERSION}" | grep -q '-'; then
+            TAG="next"
+          fi
+          npm publish "${TARBALL}" --access public --tag "${TAG}"
+          rm -f *.tgz
+          echo "--- Published ${PKG_NAME}@${VERSION} ---"
+
+  # ── Step 3: Build & publish @alchemy.run/better-auth to npm ──
+  publish-better-auth:
+    needs: [bump, publish-alchemy-effect]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          registry-url: https://registry.npmjs.org/
+          node-version: 24
+
+      - name: Upgrade npm for OIDC trusted publishing
+        run: |
+          npm install -g npm@latest && npm --version
+          sed -i '/always-auth/d' ~/.npmrc 2>/dev/null || true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build alchemy-effect
+        run: bun run build
+        working-directory: alchemy-effect
+
+      - name: Build better-auth
+        run: bun run build
+        working-directory: packages/better-auth
+
+      - name: Publish
+        run: |
+          VERSION="${{ needs.bump.outputs.version }}"
+          PKG_NAME=$(node -p "require('./packages/better-auth/package.json').name")
+          echo "--- Publishing ${PKG_NAME}@${VERSION} ---"
+
+          if npm view "${PKG_NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${PKG_NAME}@${VERSION} already published, skipping"
+            exit 0
+          fi
+
+          cd packages/better-auth
+          bun pm pack --destination .
+          TARBALL=$(ls *.tgz 2>/dev/null | head -1)
+          echo "Publishing tarball: ${TARBALL}"
+          TAG="latest"
+          if echo "${VERSION}" | grep -q '-'; then
+            TAG="next"
+          fi
+          npm publish "${TARBALL}" --access public --tag "${TAG}"
+          rm -f *.tgz
+          echo "--- Published ${PKG_NAME}@${VERSION} ---"
