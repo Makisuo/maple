@@ -15,9 +15,7 @@
     "deploy:stack": "alchemy-effect deploy",
     "destroy:stack": "alchemy-effect destroy",
     "dev": "bun run db:d1:prepare:local && wrangler dev --env-file ../../.env.local",
-    "dev:bun": "bun run --env-file ../../.env.local --watch src/index.ts",
     "logs": "alchemy-effect logs",
-    "start": "bun run --env-file ../../.env.local src/index.ts",
     "test": "bun test",
     "tail": "alchemy-effect tail",
     "typecheck": "tsc --noEmit",
@@ -28,7 +26,6 @@
   "dependencies": {
     "@clerk/backend": "^2.30.1",
     "@effect/opentelemetry": "catalog:effect",
-    "@effect/platform-bun": "catalog:effect",
     "@libsql/client": "0.15.15",
     "@maple/db": "workspace:*",
     "@maple/domain": "workspace:*",

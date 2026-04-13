@@ -1,25 +1,22 @@
 import { createMapleD1Client, type CloudflareD1Database } from "@maple/db/client"
-import { Effect, Layer, Option } from "effect"
+import { WorkerEnvironment } from "alchemy-effect/Cloudflare/Workers"
+import { Effect, Layer } from "effect"
 import {
   Database,
   type DatabaseClient,
   type DatabaseShape,
   toDatabaseError,
 } from "./DatabaseLive"
-import { WorkerBindings, getWorkerBinding } from "./WorkerBindings"
 
 const makeD1Database = Effect.gen(function* () {
-  const bindings = yield* WorkerBindings
+  const env = yield* WorkerEnvironment
 
-  const binding = yield* Option.match(getWorkerBinding(bindings, "MAPLE_DB"), {
-    onNone: () =>
-      Effect.die(new Error("Missing worker D1 binding: MAPLE_DB")),
-    onSome: Effect.succeed,
-  })
+  const binding = env.MAPLE_DB as CloudflareD1Database | undefined
+  if (!binding) {
+    return yield* Effect.die(new Error("Missing worker D1 binding: MAPLE_DB"))
+  }
 
-  const client = createMapleD1Client(
-    binding as CloudflareD1Database,
-  ) as unknown as DatabaseClient
+  const client = createMapleD1Client(binding) as unknown as DatabaseClient
 
   return {
     client,

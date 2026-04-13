@@ -1,11 +1,11 @@
-import { FileSystem, Layer, Path } from "effect"
+import { WorkerEnvironment } from "alchemy-effect/Cloudflare/Workers"
+import { ConfigProvider, FileSystem, Layer, Path } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
-import { WorkerBindings } from "./services/WorkerBindings"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
 
@@ -43,14 +43,16 @@ const buildHandler = (env: Record<string, unknown>) =>
       Layer.provideMerge(ApiObservabilityLive),
       Layer.provideMerge(WorkerPlatformLive),
       Layer.provideMerge(DatabaseD1Live),
-      Layer.provideMerge(WorkerBindings.layer(env)),
+      Layer.provideMerge(
+        Layer.succeed(WorkerEnvironment, env as Record<string, any>),
+      ),
+      Layer.provideMerge(
+        ConfigProvider.layer(ConfigProvider.fromUnknown(env)),
+      ),
     ),
   )
 
-const handlerCache = new WeakMap<
-  object,
-  ReturnType<typeof buildHandler>
->()
+const handlerCache = new WeakMap<object, ReturnType<typeof buildHandler>>()
 
 const getHandler = (env: Record<string, unknown>) => {
   const key = env as object

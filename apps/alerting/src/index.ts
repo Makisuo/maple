@@ -1,10 +1,10 @@
 import { BunRuntime } from "@effect/platform-bun"
-import { AlertRuntime, AlertsService, DatabaseLibsqlLive, DigestService, EmailService, Env, makeTelemetryLayer, OrgTinybirdSettingsService, QueryEngineService, TinybirdService, WorkerBindings } from "@maple/api/alerting"
-import { Cause, Duration, Effect, Layer, Schedule } from "effect"
+import { AlertRuntime, AlertsService, DatabaseLibsqlLive, DigestService, EdgeCacheService, EmailService, Env, makeTelemetryLayer, OrgTinybirdSettingsService, QueryEngineService, TinybirdService } from "@maple/api/alerting"
+import { Cause, ConfigProvider, Duration, Effect, Layer, Schedule } from "effect"
 
-const BindingsLive = WorkerBindings.layer(process.env as Record<string, unknown>)
+const ConfigProviderLive = ConfigProvider.layer(ConfigProvider.fromEnv())
 
-const EnvLive = Env.Default.pipe(Layer.provide(BindingsLive))
+const EnvLive = Env.Default.pipe(Layer.provide(ConfigProviderLive))
 
 const DatabaseLive = DatabaseLibsqlLive.pipe(
   Layer.provide(EnvLive),
@@ -30,6 +30,7 @@ const TinybirdServiceLive = TinybirdService.Live.pipe(
 
 const QueryEngineServiceLive = QueryEngineService.layer.pipe(
   Layer.provide(TinybirdServiceLive),
+  Layer.provide(EdgeCacheService.layer),
 )
 
 const AlertsDependenciesLive = Layer.mergeAll(

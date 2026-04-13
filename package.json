@@ -33,10 +33,10 @@
   },
   "catalogs": {
     "effect": {
-      "effect": "4.0.0-beta.47",
-      "@effect/atom-react": "4.0.0-beta.47",
-      "@effect/opentelemetry": "4.0.0-beta.47",
-      "@effect/platform-bun": "4.0.0-beta.47",
+      "effect": "4.0.0-beta.48",
+      "@effect/atom-react": "4.0.0-beta.48",
+      "@effect/opentelemetry": "4.0.0-beta.48",
+      "@effect/platform-bun": "4.0.0-beta.48",
       "@effect/language-service": "^0.85.1"
     },
     "react": {

@@ -7,6 +7,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["bun", "node", "@cloudflare/workers-types"],
     "moduleResolution": "bundler",
+    "customConditions": ["bun"],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,

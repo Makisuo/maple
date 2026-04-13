@@ -2,6 +2,7 @@ export { AlertRuntime, AlertsService } from "./services/AlertsService";
 export { Database } from "./services/DatabaseLive";
 export { DatabaseLibsqlLive } from "./services/DatabaseLibsqlLive";
 export { DigestService } from "./services/DigestService";
+export { EdgeCacheService } from "./services/EdgeCacheService";
 export { EmailService } from "./services/EmailService";
 export { Env } from "./services/Env";
 export { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService";
