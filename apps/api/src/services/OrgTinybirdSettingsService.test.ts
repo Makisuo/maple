@@ -13,7 +13,7 @@ import {
 } from "@maple/domain/http"
 import { TinybirdSyncRejectedError } from "@maple/domain/tinybird-project-sync"
 import { encryptAes256Gcm } from "./Crypto"
-import { Database as DatabaseService } from "./DatabaseLive"
+import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService, __testables } from "./OrgTinybirdSettingsService"
 
@@ -82,7 +82,7 @@ const makeConfigProvider = (url: string) =>
 
 const makeLayer = (url: string) =>
   OrgTinybirdSettingsService.Live.pipe(
-    Layer.provide(DatabaseService.Default),
+    Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
     Layer.provide(makeConfigProvider(url)),
   )

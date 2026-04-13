@@ -1,5 +1,6 @@
 import * as Config from "effect/Config";
 import { Effect, Layer, Option, Redacted, Context } from "effect";
+import { WorkerBindings, getWorkerBindingString } from "./WorkerBindings";
 
 export interface EnvShape {
   readonly PORT: number
@@ -25,8 +26,7 @@ export interface EnvShape {
   readonly RESEND_FROM_EMAIL: string
 }
 
-export class Env extends Context.Service<Env, EnvShape>()("Env", {
-  make: Effect.gen(function* () {
+const makeEnv = Effect.gen(function* () {
     const normalizeOptionalString = (value: Option.Option<string>) =>
       Option.filter(value, (entry) => entry.trim().length > 0)
 
@@ -35,57 +35,171 @@ export class Env extends Context.Service<Env, EnvShape>()("Env", {
     ) =>
       Option.filter(value, (entry) => Redacted.value(entry).trim().length > 0)
 
-    const env = {
-      PORT: yield* Config.number("PORT").pipe(Config.withDefault(3472)),
-      TINYBIRD_HOST: yield* Config.string("TINYBIRD_HOST"),
-      TINYBIRD_TOKEN: yield* Config.redacted("TINYBIRD_TOKEN"),
-      MAPLE_DB_URL: yield* Config.string("MAPLE_DB_URL").pipe(
-        Config.withDefault(""),
-      ),
-      MAPLE_DB_AUTH_TOKEN: yield* Config.option(
-        Config.redacted("MAPLE_DB_AUTH_TOKEN"),
-      ),
-      MAPLE_AUTH_MODE: yield* Config.string("MAPLE_AUTH_MODE").pipe(
-        Config.withDefault("self_hosted"),
-      ),
-      MAPLE_ROOT_PASSWORD: yield* Config.option(
-        Config.redacted("MAPLE_ROOT_PASSWORD"),
-      ),
-      MAPLE_DEFAULT_ORG_ID: yield* Config.string("MAPLE_DEFAULT_ORG_ID").pipe(
-        Config.withDefault("default"),
-      ),
-      MAPLE_INGEST_KEY_ENCRYPTION_KEY: yield* Config.redacted(
-        "MAPLE_INGEST_KEY_ENCRYPTION_KEY",
-      ),
-      MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: yield* Config.redacted(
-        "MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY",
-      ),
-      MAPLE_INGEST_PUBLIC_URL: yield* Config.string(
-        "MAPLE_INGEST_PUBLIC_URL",
-      ).pipe(Config.withDefault("http://127.0.0.1:3474")),
-      MAPLE_APP_BASE_URL: yield* Config.string("MAPLE_APP_BASE_URL").pipe(
-        Config.withDefault("http://127.0.0.1:3471"),
-      ),
-      CLERK_SECRET_KEY: yield* Config.option(Config.redacted("CLERK_SECRET_KEY")),
-      CLERK_PUBLISHABLE_KEY: yield* Config.option(
-        Config.string("CLERK_PUBLISHABLE_KEY"),
-      ),
-      CLERK_JWT_KEY: yield* Config.option(Config.redacted("CLERK_JWT_KEY")),
-      MAPLE_ORG_ID_OVERRIDE: yield* Config.option(
-        Config.string("MAPLE_ORG_ID_OVERRIDE"),
-      ),
-      AUTUMN_SECRET_KEY: yield* Config.option(Config.redacted("AUTUMN_SECRET_KEY")),
-      SD_INTERNAL_TOKEN: yield* Config.option(Config.redacted("SD_INTERNAL_TOKEN")),
-      INTERNAL_SERVICE_TOKEN: yield* Config.option(
-        Config.redacted("INTERNAL_SERVICE_TOKEN"),
-      ),
-      RESEND_API_KEY: yield* Config.option(
-        Config.redacted("RESEND_API_KEY"),
-      ),
-      RESEND_FROM_EMAIL: yield* Config.string("RESEND_FROM_EMAIL").pipe(
-        Config.withDefault("Maple <notifications@maple.dev>"),
-      ),
-    } as const;
+    const workerBindings = yield* Effect.serviceOption(WorkerBindings)
+
+    const requireWorkerString = (
+      bindings: WorkerBindings["Service"],
+      key: string,
+    ) =>
+      Option.match(getWorkerBindingString(bindings, key), {
+        onNone: () =>
+          Effect.die(new Error(`Missing required worker binding: ${key}`)),
+        onSome: Effect.succeed,
+      })
+
+    const optionalWorkerString = (
+      bindings: WorkerBindings["Service"],
+      key: string,
+    ) => getWorkerBindingString(bindings, key)
+
+    const env = yield* Option.match(workerBindings, {
+      onNone: () =>
+        Effect.gen(function* () {
+          return {
+            PORT: yield* Config.number("PORT").pipe(Config.withDefault(3472)),
+            TINYBIRD_HOST: yield* Config.string("TINYBIRD_HOST"),
+            TINYBIRD_TOKEN: yield* Config.redacted("TINYBIRD_TOKEN"),
+            MAPLE_DB_URL: yield* Config.string("MAPLE_DB_URL").pipe(
+              Config.withDefault(""),
+            ),
+            MAPLE_DB_AUTH_TOKEN: yield* Config.option(
+              Config.redacted("MAPLE_DB_AUTH_TOKEN"),
+            ),
+            MAPLE_AUTH_MODE: yield* Config.string("MAPLE_AUTH_MODE").pipe(
+              Config.withDefault("self_hosted"),
+            ),
+            MAPLE_ROOT_PASSWORD: yield* Config.option(
+              Config.redacted("MAPLE_ROOT_PASSWORD"),
+            ),
+            MAPLE_DEFAULT_ORG_ID: yield* Config.string(
+              "MAPLE_DEFAULT_ORG_ID",
+            ).pipe(Config.withDefault("default")),
+            MAPLE_INGEST_KEY_ENCRYPTION_KEY: yield* Config.redacted(
+              "MAPLE_INGEST_KEY_ENCRYPTION_KEY",
+            ),
+            MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: yield* Config.redacted(
+              "MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY",
+            ),
+            MAPLE_INGEST_PUBLIC_URL: yield* Config.string(
+              "MAPLE_INGEST_PUBLIC_URL",
+            ).pipe(Config.withDefault("http://127.0.0.1:3474")),
+            MAPLE_APP_BASE_URL: yield* Config.string("MAPLE_APP_BASE_URL").pipe(
+              Config.withDefault("http://127.0.0.1:3471"),
+            ),
+            CLERK_SECRET_KEY: yield* Config.option(
+              Config.redacted("CLERK_SECRET_KEY"),
+            ),
+            CLERK_PUBLISHABLE_KEY: yield* Config.option(
+              Config.string("CLERK_PUBLISHABLE_KEY"),
+            ),
+            CLERK_JWT_KEY: yield* Config.option(Config.redacted("CLERK_JWT_KEY")),
+            MAPLE_ORG_ID_OVERRIDE: yield* Config.option(
+              Config.string("MAPLE_ORG_ID_OVERRIDE"),
+            ),
+            AUTUMN_SECRET_KEY: yield* Config.option(
+              Config.redacted("AUTUMN_SECRET_KEY"),
+            ),
+            SD_INTERNAL_TOKEN: yield* Config.option(
+              Config.redacted("SD_INTERNAL_TOKEN"),
+            ),
+            INTERNAL_SERVICE_TOKEN: yield* Config.option(
+              Config.redacted("INTERNAL_SERVICE_TOKEN"),
+            ),
+            RESEND_API_KEY: yield* Config.option(
+              Config.redacted("RESEND_API_KEY"),
+            ),
+            RESEND_FROM_EMAIL: yield* Config.string("RESEND_FROM_EMAIL").pipe(
+              Config.withDefault("Maple <notifications@maple.dev>"),
+            ),
+          } as const
+        }),
+      onSome: (bindings) =>
+        Effect.gen(function* () {
+          return {
+            PORT: 3472,
+            TINYBIRD_HOST: yield* requireWorkerString(bindings, "TINYBIRD_HOST"),
+            TINYBIRD_TOKEN: Redacted.make(
+              yield* requireWorkerString(bindings, "TINYBIRD_TOKEN"),
+            ),
+            MAPLE_DB_URL: Option.getOrElse(
+              optionalWorkerString(bindings, "MAPLE_DB_URL"),
+              () => "",
+            ),
+            MAPLE_DB_AUTH_TOKEN: Option.map(
+              optionalWorkerString(bindings, "MAPLE_DB_AUTH_TOKEN"),
+              Redacted.make,
+            ),
+            MAPLE_AUTH_MODE: Option.getOrElse(
+              optionalWorkerString(bindings, "MAPLE_AUTH_MODE"),
+              () => "self_hosted",
+            ),
+            MAPLE_ROOT_PASSWORD: Option.map(
+              optionalWorkerString(bindings, "MAPLE_ROOT_PASSWORD"),
+              Redacted.make,
+            ),
+            MAPLE_DEFAULT_ORG_ID: Option.getOrElse(
+              optionalWorkerString(bindings, "MAPLE_DEFAULT_ORG_ID"),
+              () => "default",
+            ),
+            MAPLE_INGEST_KEY_ENCRYPTION_KEY: Redacted.make(
+              yield* requireWorkerString(
+                bindings,
+                "MAPLE_INGEST_KEY_ENCRYPTION_KEY",
+              ),
+            ),
+            MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: Redacted.make(
+              yield* requireWorkerString(
+                bindings,
+                "MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY",
+              ),
+            ),
+            MAPLE_INGEST_PUBLIC_URL: Option.getOrElse(
+              optionalWorkerString(bindings, "MAPLE_INGEST_PUBLIC_URL"),
+              () => "http://127.0.0.1:3474",
+            ),
+            MAPLE_APP_BASE_URL: Option.getOrElse(
+              optionalWorkerString(bindings, "MAPLE_APP_BASE_URL"),
+              () => "http://127.0.0.1:3471",
+            ),
+            CLERK_SECRET_KEY: Option.map(
+              optionalWorkerString(bindings, "CLERK_SECRET_KEY"),
+              Redacted.make,
+            ),
+            CLERK_PUBLISHABLE_KEY: optionalWorkerString(
+              bindings,
+              "CLERK_PUBLISHABLE_KEY",
+            ),
+            CLERK_JWT_KEY: Option.map(
+              optionalWorkerString(bindings, "CLERK_JWT_KEY"),
+              Redacted.make,
+            ),
+            MAPLE_ORG_ID_OVERRIDE: optionalWorkerString(
+              bindings,
+              "MAPLE_ORG_ID_OVERRIDE",
+            ),
+            AUTUMN_SECRET_KEY: Option.map(
+              optionalWorkerString(bindings, "AUTUMN_SECRET_KEY"),
+              Redacted.make,
+            ),
+            SD_INTERNAL_TOKEN: Option.map(
+              optionalWorkerString(bindings, "SD_INTERNAL_TOKEN"),
+              Redacted.make,
+            ),
+            INTERNAL_SERVICE_TOKEN: Option.map(
+              optionalWorkerString(bindings, "INTERNAL_SERVICE_TOKEN"),
+              Redacted.make,
+            ),
+            RESEND_API_KEY: Option.map(
+              optionalWorkerString(bindings, "RESEND_API_KEY"),
+              Redacted.make,
+            ),
+            RESEND_FROM_EMAIL: Option.getOrElse(
+              optionalWorkerString(bindings, "RESEND_FROM_EMAIL"),
+              () => "Maple <notifications@maple.dev>",
+            ),
+          } as const
+        }),
+    })
 
     const normalizedEnv = {
       ...env,
@@ -133,7 +247,10 @@ export class Env extends Context.Service<Env, EnvShape>()("Env", {
     }
 
     return normalizedEnv;
-  }),
+})
+
+export class Env extends Context.Service<Env, EnvShape>()("Env", {
+  make: makeEnv,
 }) {
-  static readonly Default = Layer.effect(this, this.make)
+  static readonly Default = Layer.effect(this, makeEnv)
 }

@@ -1,5 +1,6 @@
 export { AlertRuntime, AlertsService } from "./services/AlertsService";
 export { Database } from "./services/DatabaseLive";
+export { DatabaseLibsqlLive } from "./services/DatabaseLibsqlLive";
 export { DigestService } from "./services/DigestService";
 export { EmailService } from "./services/EmailService";
 export { Env } from "./services/Env";

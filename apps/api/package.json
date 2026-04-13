@@ -8,9 +8,18 @@
   },
   "scripts": {
     "db:migrate": "mkdir -p .data && bun run --cwd ../../packages/db db:migrate",
-    "dev": "bun run --env-file ../../.env.local --watch src/index.ts",
+    "db:d1:migrations:sql": "bun run --cwd ../../packages/db db:d1:migrations:sql",
+    "db:d1:export": "bun run --cwd ../../packages/db db:d1:export",
+    "db:d1:import:sql": "bun run --cwd ../../packages/db db:d1:import:sql",
+    "db:d1:prepare:local": "bun ./scripts/prepare-local-d1.ts",
+    "deploy:stack": "alchemy-effect deploy",
+    "destroy:stack": "alchemy-effect destroy",
+    "dev": "bun run db:d1:prepare:local && wrangler dev --env-file ../../.env.local",
+    "dev:bun": "bun run --env-file ../../.env.local --watch src/index.ts",
+    "logs": "alchemy-effect logs",
     "start": "bun run --env-file ../../.env.local src/index.ts",
     "test": "bun test",
+    "tail": "alchemy-effect tail",
     "typecheck": "tsc --noEmit",
     "tinybird:dev": "tinybird dev",
     "tinybird:build": "tinybird build",
@@ -27,6 +36,7 @@
     "@maple/query-engine": "workspace:*",
     "@react-email/components": "^1.0.11",
     "@tinybirdco/sdk": "catalog:tinybird",
+    "alchemy-effect": "^0.12.0",
     "autumn-js": "^1.2.5",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.1",
@@ -34,9 +44,12 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:effect",
+    "@effect/platform-node": "4.0.0-beta.47",
+    "@cloudflare/workers-types": "^4.20260405.0",
     "@types/bun": "^1.3.11",
     "@types/node": "catalog:tooling",
     "atmn": "^1.0.1",
-    "typescript": "catalog:tooling"
+    "typescript": "catalog:tooling",
+    "wrangler": "^4.41.0"
   }
 }

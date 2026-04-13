@@ -4,7 +4,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./client": "./src/client.ts",
     "./config": "./src/config.ts",
+    "./migrate": "./src/migrate.ts",
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
@@ -12,7 +14,10 @@
     "db:generate": "drizzle-kit generate --config ./drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config ./drizzle.config.ts",
     "db:push": "drizzle-kit push --config ./drizzle.config.ts",
-    "db:studio": "drizzle-kit studio --config ./drizzle.config.ts"
+    "db:studio": "drizzle-kit studio --config ./drizzle.config.ts",
+    "db:d1:migrations:sql": "bun ./scripts/create-d1-migration-bundle.ts",
+    "db:d1:export": "bun ./scripts/export-app-state.ts",
+    "db:d1:import:sql": "bun ./scripts/render-d1-import-sql.ts"
   },
   "dependencies": {
     "@libsql/client": "0.15.15",

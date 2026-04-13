@@ -22,7 +22,7 @@ import {
   PortableDashboardDocument,
   UserId,
 } from "@maple/domain/http"
-import { Database as DatabaseService } from "./DatabaseLive"
+import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { DashboardPersistenceService } from "./DashboardPersistenceService"
 import { Env } from "./Env"
 
@@ -76,7 +76,7 @@ const testConfigProvider = (url: string) =>
 
 const makeLayer = (url: string) =>
   DashboardPersistenceService.Live.pipe(
-    Layer.provide(DatabaseService.Default),
+    Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
     Layer.provide(testConfigProvider(url)),
   )

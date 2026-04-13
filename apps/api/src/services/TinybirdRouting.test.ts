@@ -10,7 +10,7 @@ import {
   RoleName,
   UserId,
 } from "@maple/domain/http"
-import { Database as DatabaseService } from "./DatabaseLive"
+import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService, __testables as orgTinybirdTestables } from "./OrgTinybirdSettingsService"
 import { TinybirdService, __testables as tinybirdTestables } from "./TinybirdService"
@@ -57,14 +57,14 @@ const makeConfigProvider = (url: string) =>
 
 const makeTinybirdLayer = (url: string) =>
   TinybirdService.Default.pipe(
-    Layer.provide(OrgTinybirdSettingsService.Live.pipe(Layer.provide(DatabaseService.Default))),
+    Layer.provide(OrgTinybirdSettingsService.Live.pipe(Layer.provide(DatabaseLibsqlLive))),
     Layer.provide(Env.Default),
     Layer.provide(makeConfigProvider(url)),
   )
 
 const makeOrgTinybirdLayer = (url: string) =>
   OrgTinybirdSettingsService.Live.pipe(
-    Layer.provide(DatabaseService.Default),
+    Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
     Layer.provide(makeConfigProvider(url)),
   )

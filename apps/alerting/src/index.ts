@@ -1,8 +1,8 @@
 import { BunRuntime } from "@effect/platform-bun"
-import { AlertRuntime, AlertsService, Database, DigestService, EmailService, Env, makeTelemetryLayer, OrgTinybirdSettingsService, QueryEngineService, TinybirdService } from "@maple/api/alerting"
+import { AlertRuntime, AlertsService, DatabaseLibsqlLive, DigestService, EmailService, Env, makeTelemetryLayer, OrgTinybirdSettingsService, QueryEngineService, TinybirdService } from "@maple/api/alerting"
 import { Cause, Duration, Effect, Layer, Schedule } from "effect"
 
-const DatabaseLive = Database.Default.pipe(
+const DatabaseLive = DatabaseLibsqlLive.pipe(
   Layer.provide(Env.Default),
 )
 
