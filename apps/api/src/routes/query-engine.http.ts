@@ -52,7 +52,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
         Effect.gen(function* () {
           const tenant = yield* CurrentTenant.Context
           const compiled = CH.compile(CH.spanHierarchyQuery({ traceId: payload.traceId, spanId: payload.spanId }), { orgId: tenant.orgId })
-          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "spanHierarchy query failed")
+          const rows = yield* queryEngine.cachedDirect(
+            tenant,
+            "spanHierarchy",
+            payload,
+            mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "spanHierarchy query failed"),
+          )
           const typedRows = compiled.castRows(rows)
           return new SpanHierarchyResponse({ data: typedRows })
         }),
@@ -145,7 +150,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
         Effect.gen(function* () {
           const tenant = yield* CurrentTenant.Context
           const compiled = CH.compile(CH.serviceOverviewQuery({ environments: payload.environments, commitShas: payload.commitShas }), { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime })
-          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "serviceOverview query failed")
+          const rows = yield* queryEngine.cachedDirect(
+            tenant,
+            "serviceOverview",
+            payload,
+            mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "serviceOverview query failed"),
+          )
           return new ServiceOverviewResponse({ data: rows as any[] })
         }),
       )
@@ -153,7 +163,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
         Effect.gen(function* () {
           const tenant = yield* CurrentTenant.Context
           const compiled = CH.compile(CH.serviceApdexTimeseriesQuery({ serviceName: payload.serviceName, apdexThresholdMs: payload.apdexThresholdMs }), { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime, bucketSeconds: payload.bucketSeconds ?? 60 })
-          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "serviceApdex query failed")
+          const rows = yield* queryEngine.cachedDirect(
+            tenant,
+            "serviceApdex",
+            payload,
+            mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "serviceApdex query failed"),
+          )
           const typedRows = compiled.castRows(rows)
           return new ServiceApdexResponse({
             data: typedRows.map((row) => ({
@@ -193,7 +208,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
         Effect.gen(function* () {
           const tenant = yield* CurrentTenant.Context
           const compiled = CH.compile(CH.serviceUsageQuery({ serviceName: payload.service }), { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime })
-          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "serviceUsage query failed")
+          const rows = yield* queryEngine.cachedDirect(
+            tenant,
+            "serviceUsage",
+            payload,
+            mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "serviceUsage query failed"),
+          )
           return new ServiceUsageResponse({ data: rows as any[] })
         }),
       )
@@ -201,7 +221,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
         Effect.gen(function* () {
           const tenant = yield* CurrentTenant.Context
           const compiled = CH.compile(CH.logsListQuery({ serviceName: payload.service, severity: payload.severity, minSeverity: payload.minSeverity, traceId: payload.traceId, spanId: payload.spanId, cursor: payload.cursor, search: payload.search, limit: payload.limit }), { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime })
-          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "listLogs query failed")
+          const rows = yield* queryEngine.cachedDirect(
+            tenant,
+            "listLogs",
+            payload,
+            mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "listLogs query failed"),
+          )
           return new ListLogsResponse({ data: rows as any[] })
         }),
       )

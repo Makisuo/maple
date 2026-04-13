@@ -72,6 +72,12 @@ export interface QueryEngineServiceShape {
     ReadonlyArray<GroupedAlertObservation>,
     QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError
   >
+  readonly cachedDirect: <A>(
+    tenant: TenantContext,
+    routeName: string,
+    payload: unknown,
+    effect: Effect.Effect<A, QueryEngineExecutionError>,
+  ) => Effect.Effect<A, QueryEngineExecutionError>
 }
 
 const MAX_RANGE_SECONDS = 60 * 60 * 24 * 31
@@ -111,6 +117,41 @@ function buildCacheKey(orgId: string, request: QueryEngineExecuteRequest): strin
 
 function buildEvaluateCacheKey(orgId: string, request: QueryEngineEvaluateRequest): string {
   return `eval:${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${request.reducer}:${request.sampleCountStrategy}:${JSON.stringify(request.query)}`
+}
+
+const DIRECT_CACHE_SNAP_KEYS = new Set(["startTime", "endTime"])
+
+function normalizeDirectCacheValue(value: unknown, parentKey?: string): unknown {
+  if (value == null) return value
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    if (parentKey && DIRECT_CACHE_SNAP_KEYS.has(parentKey) && typeof value === "string") {
+      return snapSeconds(value)
+    }
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeDirectCacheValue(item))
+  }
+
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, nestedValue]) => nestedValue !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [key, normalizeDirectCacheValue(nestedValue, key)]),
+    )
+  }
+
+  return String(value)
+}
+
+function buildDirectRouteCacheKey(orgId: string, routeName: string, payload: unknown): string {
+  return `direct:${orgId}:${routeName}:${JSON.stringify(normalizeDirectCacheValue(payload))}`
 }
 
 const computeBucketSeconds = (startMs: number, endMs: number): number => {
@@ -1460,8 +1501,25 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
       },
     })
 
-    return {
-      execute: (tenant, request) =>
+    // --- Direct route cache ---
+    const pendingDirect = MutableHashMap.empty<string, Effect.Effect<unknown, QueryEngineExecutionError>>()
+    const directCache = yield* Cache.make<
+      string,
+      unknown,
+      QueryEngineExecutionError | QueryEngineTimeoutError
+    >({
+      capacity: 256,
+      timeToLive: "15 seconds",
+      lookup: (key) => {
+        const ctx = MutableHashMap.get(pendingDirect, key)
+        if (Option.isNone(ctx)) return Effect.die(`No pending direct request context for cache key: ${key}`)
+        return ctx.value.pipe(
+          Effect.tap(() => Metric.update(QueryEngineMetrics.cacheMissesTotal, 1)),
+        )
+      },
+    })
+
+    const execute = (tenant: TenantContext, request: QueryEngineExecuteRequest) =>
         withTimeout(
           Effect.gen(function* () {
             const startMs = Date.now()
@@ -1477,8 +1535,9 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
           }).pipe(Effect.withSpan("QueryEngineService.cachedExecute", {
             attributes: { orgId: tenant.orgId },
           })),
-        ),
-      evaluate: (tenant, request) =>
+        )
+
+    const cachedEvaluate = (tenant: TenantContext, request: QueryEngineEvaluateRequest) =>
         withTimeout(
           Effect.gen(function* () {
             const key = buildEvaluateCacheKey(tenant.orgId, request)
@@ -1487,7 +1546,42 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
           }).pipe(Effect.withSpan("QueryEngineService.cachedEvaluate", {
             attributes: { orgId: tenant.orgId },
           })),
-        ),
+        )
+
+    const cachedDirect = <A>(
+      tenant: TenantContext,
+      routeName: string,
+      payload: unknown,
+      effect: Effect.Effect<A, QueryEngineExecutionError>,
+    ): Effect.Effect<A, QueryEngineExecutionError> =>
+        withTimeout(
+          Effect.gen(function* () {
+            const startMs = Date.now()
+            const key = buildDirectRouteCacheKey(tenant.orgId, routeName, payload)
+            const hadEntry = Option.isSome(yield* Cache.getSuccess(directCache, key))
+            MutableHashMap.set(pendingDirect, key, effect)
+            const result = yield* Cache.get(directCache, key)
+            if (hadEntry) {
+              yield* Metric.update(QueryEngineMetrics.cacheHitsTotal, 1)
+            }
+            yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
+            return result as A
+          }).pipe(Effect.withSpan("QueryEngineService.cachedDirect", {
+            attributes: { orgId: tenant.orgId, routeName },
+          })),
+        ).pipe(
+          Effect.catchTag("@maple/http/errors/QueryEngineTimeoutError", (error) =>
+            Effect.fail(new QueryEngineExecutionError({
+              message: error.message,
+              causeTag: error._tag,
+            })),
+          ),
+        )
+
+    return {
+      execute,
+      evaluate: cachedEvaluate,
+      cachedDirect,
     }
   }),
 }) {
