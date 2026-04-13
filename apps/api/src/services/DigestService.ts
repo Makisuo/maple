@@ -14,7 +14,7 @@ import {
 import type { OrgId as OrgIdType, RoleName as RoleNameType } from "@maple/domain/http"
 import { createClerkClient } from "@clerk/backend"
 import { render } from "@react-email/components"
-import { and, eq, inArray } from "drizzle-orm"
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
 import { Array as Arr, Cause, Effect, Layer, Option, Redacted, Context } from "effect"
 import { WeeklyDigest, type WeeklyDigestProps } from "@maple/email/weekly-digest"
 import { Database } from "./DatabaseLive"
@@ -435,10 +435,6 @@ export class DigestService extends Context.Service<DigestService>()(
       const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
       let lastSyncAt: number | null = null
 
-      const lastDigestAttemptByOrg = new Map<string, string>()
-      const utcDayKey = (timestamp: number) =>
-        new Date(timestamp).toISOString().slice(0, 10)
-
       const paginateClerk = <T>(
         fetchPage: (params: { limit: number; offset: number }) => Promise<{ data: T[]; totalCount: number }>,
         errorMessage: string,
@@ -600,6 +596,7 @@ export class DigestService extends Context.Service<DigestService>()(
 
           const now = Date.now()
           const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000
+          const todayStartMs = now - (now % 86_400_000)
           const currentDayOfWeek = new Date().getUTCDay()
 
           // Find subscriptions due for sending
@@ -625,15 +622,31 @@ export class DigestService extends Context.Service<DigestService>()(
           // Group by org to avoid duplicate Tinybird queries
           const byOrg = Arr.groupBy(dueSubs, (s) => s.orgId)
 
-          const todayUtc = utcDayKey(now)
-
           const results = yield* Effect.forEach(
             Object.entries(byOrg),
             ([rawOrgId, orgSubs]) =>
               Effect.gen(function* () {
                 const orgId = OrgId.make(rawOrgId)
+                const orgSubIds = orgSubs.map((s) => s.id)
 
-                if (lastDigestAttemptByOrg.get(rawOrgId) === todayUtc) {
+                const claim = yield* database
+                  .execute((db) =>
+                    db
+                      .update(digestSubscriptions)
+                      .set({ lastAttemptedAt: now })
+                      .where(
+                        and(
+                          inArray(digestSubscriptions.id, orgSubIds),
+                          or(
+                            isNull(digestSubscriptions.lastAttemptedAt),
+                            lt(digestSubscriptions.lastAttemptedAt, todayStartMs),
+                          ),
+                        ),
+                      ),
+                  )
+                  .pipe(Effect.mapError(toPersistenceError))
+
+                if (claim.rowsAffected === 0) {
                   yield* Effect.logInfo("Skipping digest org already attempted today").pipe(
                     Effect.annotateLogs({
                       orgId: rawOrgId,
@@ -642,7 +655,6 @@ export class DigestService extends Context.Service<DigestService>()(
                   )
                   return []
                 }
-                lastDigestAttemptByOrg.set(rawOrgId, todayUtc)
 
                 const props = yield* generateDigestData(orgId)
                 if (!hasDigestContent(props)) {

@@ -17,6 +17,7 @@ export const digestSubscriptions = sqliteTable(
 		dayOfWeek: integer("day_of_week", { mode: "number" }).notNull().default(1),
 		timezone: text("timezone").notNull().default("UTC"),
 		lastSentAt: integer("last_sent_at", { mode: "number" }),
+		lastAttemptedAt: integer("last_attempted_at", { mode: "number" }),
 		createdAt: integer("created_at", { mode: "number" }).notNull(),
 		updatedAt: integer("updated_at", { mode: "number" }).notNull(),
 	},
