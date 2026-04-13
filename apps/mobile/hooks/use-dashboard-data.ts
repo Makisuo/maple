@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
   fetchServiceUsage,
   fetchOverviewTimeSeries,
@@ -13,6 +14,12 @@ import {
   computeBucketSeconds,
   type TimeRangeKey,
 } from "../lib/time-utils"
+import {
+  getQueryErrorMessage,
+  mobileQueryKeys,
+  mobileQueryStaleTimes,
+  preservePreviousData,
+} from "../lib/query"
 
 interface UsageTotals {
   logs: number
@@ -46,54 +53,44 @@ type DashboardState =
   | { status: "error"; error: string }
   | { status: "success"; data: DashboardData }
 
+async function fetchDashboardData(timeKey: TimeRangeKey): Promise<DashboardData> {
+  const { startTime, endTime } = getTimeRange(timeKey)
+  const { startTime: prevStart, endTime: prevEnd } = getPreviousTimeRange(timeKey)
+  const bucketSeconds = computeBucketSeconds(startTime, endTime)
+
+  const [usage, prevUsageData, timeseries, logsTimeseries] = await Promise.all([
+    fetchServiceUsage(startTime, endTime),
+    fetchServiceUsage(prevStart, prevEnd),
+    fetchOverviewTimeSeries(startTime, endTime, bucketSeconds),
+    fetchLogsTimeSeries(startTime, endTime, bucketSeconds),
+  ])
+
+  return {
+    usage: sumUsage(usage),
+    prevUsage: sumUsage(prevUsageData),
+    usagePerService: usage,
+    timeseries,
+    logsTimeseries,
+  }
+}
+
 export function useDashboardData(timeKey: TimeRangeKey) {
-  const [state, setState] = useState<DashboardState>({ status: "loading" })
-  const abortRef = useRef<AbortController | null>(null)
+  const query = useQuery({
+    queryKey: mobileQueryKeys.dashboardData(timeKey),
+    queryFn: () => fetchDashboardData(timeKey),
+    staleTime: mobileQueryStaleTimes.dashboardData,
+    placeholderData: preservePreviousData,
+  })
 
-  const load = useCallback(async () => {
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
+  const refresh = useCallback(async () => {
+    await query.refetch()
+  }, [query])
 
-    setState({ status: "loading" })
+  const state: DashboardState = query.data
+    ? { status: "success", data: query.data }
+    : query.isError
+      ? { status: "error", error: getQueryErrorMessage(query.error) }
+      : { status: "loading" }
 
-    try {
-      const { startTime, endTime } = getTimeRange(timeKey)
-      const { startTime: prevStart, endTime: prevEnd } = getPreviousTimeRange(timeKey)
-      const bucketSeconds = computeBucketSeconds(startTime, endTime)
-
-      const [usage, prevUsageData, timeseries, logsTimeseries] = await Promise.all([
-        fetchServiceUsage(startTime, endTime),
-        fetchServiceUsage(prevStart, prevEnd),
-        fetchOverviewTimeSeries(startTime, endTime, bucketSeconds),
-        fetchLogsTimeSeries(startTime, endTime, bucketSeconds),
-      ])
-
-      if (controller.signal.aborted) return
-
-      setState({
-        status: "success",
-        data: {
-          usage: sumUsage(usage),
-          prevUsage: sumUsage(prevUsageData),
-          usagePerService: usage,
-          timeseries,
-          logsTimeseries,
-        },
-      })
-    } catch (err) {
-      if (controller.signal.aborted) return
-      setState({
-        status: "error",
-        error: err instanceof Error ? err.message : "Unknown error",
-      })
-    }
-  }, [timeKey])
-
-  useEffect(() => {
-    load()
-    return () => abortRef.current?.abort()
-  }, [load])
-
-  return { state, refresh: load }
+  return { state, refresh }
 }

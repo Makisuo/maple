@@ -1,43 +1,42 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { fetchDashboards, type DashboardDocument } from "../lib/api"
+import {
+  getQueryErrorMessage,
+  mobileQueryKeys,
+  mobileQueryStaleTimes,
+  preservePreviousData,
+} from "../lib/query"
 
 type DashboardsState =
 	| { status: "loading" }
 	| { status: "error"; error: string }
 	| { status: "success"; data: DashboardDocument[] }
 
+async function fetchSortedDashboards(): Promise<DashboardDocument[]> {
+	const dashboards = await fetchDashboards()
+	return [...dashboards].sort((a, b) =>
+		b.updatedAt.localeCompare(a.updatedAt),
+	)
+}
+
 export function useDashboards() {
-	const [state, setState] = useState<DashboardsState>({ status: "loading" })
-	const abortRef = useRef<AbortController | null>(null)
+	const query = useQuery({
+		queryKey: mobileQueryKeys.dashboards(),
+		queryFn: fetchSortedDashboards,
+		staleTime: mobileQueryStaleTimes.dashboards,
+		placeholderData: preservePreviousData,
+	})
 
-	const load = useCallback(async () => {
-		abortRef.current?.abort()
-		const controller = new AbortController()
-		abortRef.current = controller
+	const refresh = useCallback(async () => {
+		await query.refetch()
+	}, [query])
 
-		setState({ status: "loading" })
+	const state: DashboardsState = query.data
+		? { status: "success", data: query.data }
+		: query.isError
+			? { status: "error", error: getQueryErrorMessage(query.error) }
+			: { status: "loading" }
 
-		try {
-			const dashboards = await fetchDashboards()
-			if (controller.signal.aborted) return
-
-			const sorted = [...dashboards].sort((a, b) =>
-				b.updatedAt.localeCompare(a.updatedAt),
-			)
-			setState({ status: "success", data: sorted })
-		} catch (err) {
-			if (controller.signal.aborted) return
-			setState({
-				status: "error",
-				error: err instanceof Error ? err.message : "Unknown error",
-			})
-		}
-	}, [])
-
-	useEffect(() => {
-		load()
-		return () => abortRef.current?.abort()
-	}, [load])
-
-	return { state, refresh: load }
+	return { state, refresh }
 }

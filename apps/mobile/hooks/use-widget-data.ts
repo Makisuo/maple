@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
 	fetchCustomBreakdown,
 	fetchCustomTimeseries,
@@ -17,6 +17,12 @@ import {
 	getTimeRange,
 	type TimeRangeKey,
 } from "../lib/time-utils"
+import {
+	getQueryErrorMessage,
+	mobileQueryKeys,
+	mobileQueryStaleTimes,
+	preservePreviousData,
+} from "../lib/query"
 
 export type WidgetData =
 	| { kind: "timeseries"; points: CustomTimeseriesPoint[] }
@@ -28,6 +34,10 @@ export type WidgetDataState =
 	| { status: "error"; error: string }
 	| { status: "unsupported"; reason: string }
 	| { status: "success"; data: WidgetData }
+
+type WidgetQueryData =
+	| { kind: "unsupported"; reason: string }
+	| { kind: "success"; data: WidgetData }
 
 const SUPPORTED_TIMESERIES_ENDPOINTS = new Set([
 	"custom_timeseries",
@@ -123,144 +133,128 @@ export function useWidgetData(
 	widget: DashboardWidget,
 	timeRange: WidgetTimeRange,
 ): WidgetDataState {
-	const [state, setState] = useState<WidgetDataState>({ status: "loading" })
-	const abortRef = useRef<AbortController | null>(null)
-
-	const load = useCallback(async () => {
-		abortRef.current?.abort()
-		const controller = new AbortController()
-		abortRef.current = controller
-
-		setState({ status: "loading" })
-
+	const query = useQuery<WidgetQueryData>({
+		queryKey: mobileQueryKeys.widgetData(widget, timeRange),
+		queryFn: async () => {
 		const range = resolveTimeRange(timeRange)
 		if (!range) {
-			setState({ status: "error", error: "Invalid time range" })
-			return
+			throw new Error("Invalid time range")
 		}
 
 		const endpoint = widget.dataSource.endpoint
 		const params = (widget.dataSource.params ?? {}) as Record<string, unknown>
 		const isStat = widget.visualization === "stat"
 
-		try {
-			if (SUPPORTED_TIMESERIES_ENDPOINTS.has(endpoint)) {
-				const bucketSeconds = computeBucketSeconds(range.startTime, range.endTime)
-				const points = await fetchCustomTimeseries(
-					range.startTime,
-					range.endTime,
-					bucketSeconds,
-					params as unknown as WidgetTimeseriesParams,
-				)
-				if (controller.signal.aborted) return
+		if (SUPPORTED_TIMESERIES_ENDPOINTS.has(endpoint)) {
+			const bucketSeconds = computeBucketSeconds(range.startTime, range.endTime)
+			const points = await fetchCustomTimeseries(
+				range.startTime,
+				range.endTime,
+				bucketSeconds,
+				params as unknown as WidgetTimeseriesParams,
+			)
 
-				if (isStat) {
-					const reducer = widget.dataSource.transform?.reduceToValue
-					const field = reducer?.field ?? "value"
-					const value = reduceTimeseriesToValue(points, field, reducer?.aggregate)
-					setState({ status: "success", data: { kind: "stat", value } })
-				} else {
-					setState({ status: "success", data: { kind: "timeseries", points } })
-				}
-				return
+			if (isStat) {
+				const reducer = widget.dataSource.transform?.reduceToValue
+				const field = reducer?.field ?? "value"
+				const value = reduceTimeseriesToValue(points, field, reducer?.aggregate)
+				return { kind: "success", data: { kind: "stat", value } }
 			}
 
-			if (SUPPORTED_BREAKDOWN_ENDPOINTS.has(endpoint)) {
-				const items = await fetchCustomBreakdown(
-					range.startTime,
-					range.endTime,
-					params as unknown as WidgetBreakdownParams,
-				)
-				if (controller.signal.aborted) return
-
-				if (isStat) {
-					const reducer = widget.dataSource.transform?.reduceToValue
-					const value = reduceBreakdownToValue(items, reducer?.aggregate)
-					setState({ status: "success", data: { kind: "stat", value } })
-				} else {
-					setState({ status: "success", data: { kind: "breakdown", items } })
-				}
-				return
-			}
-
-			if (QUERY_BUILDER_TIMESERIES_ENDPOINTS.has(endpoint)) {
-				const queries = Array.isArray(params.queries)
-					? (params.queries as QueryBuilderQueryDraft[])
-					: []
-
-				if (queries.length === 0) {
-					setState({
-						status: "unsupported",
-						reason: "Widget has no queries configured",
-					})
-					return
-				}
-
-				const points = await fetchQueryBuilderTimeseries(
-					range.startTime,
-					range.endTime,
-					queries,
-				)
-				if (controller.signal.aborted) return
-
-				if (isStat) {
-					const reducer = widget.dataSource.transform?.reduceToValue
-					const field = reducer?.field ?? "value"
-					const value = reduceTimeseriesToValue(points, field, reducer?.aggregate)
-					setState({ status: "success", data: { kind: "stat", value } })
-				} else {
-					setState({ status: "success", data: { kind: "timeseries", points } })
-				}
-				return
-			}
-
-			if (QUERY_BUILDER_BREAKDOWN_ENDPOINTS.has(endpoint)) {
-				const queries = Array.isArray(params.queries)
-					? (params.queries as QueryBuilderQueryDraft[])
-					: []
-
-				if (queries.length === 0) {
-					setState({
-						status: "unsupported",
-						reason: "Widget has no queries configured",
-					})
-					return
-				}
-
-				const items = await fetchQueryBuilderBreakdown(
-					range.startTime,
-					range.endTime,
-					queries,
-				)
-				if (controller.signal.aborted) return
-
-				if (isStat) {
-					const reducer = widget.dataSource.transform?.reduceToValue
-					const value = reduceBreakdownToValue(items, reducer?.aggregate)
-					setState({ status: "success", data: { kind: "stat", value } })
-				} else {
-					setState({ status: "success", data: { kind: "breakdown", items } })
-				}
-				return
-			}
-
-			setState({
-				status: "unsupported",
-				reason: `Endpoint "${endpoint}" not supported on mobile yet`,
-			})
-		} catch (err) {
-			if (controller.signal.aborted) return
-			setState({
-				status: "error",
-				error: err instanceof Error ? err.message : "Unknown error",
-			})
+			return { kind: "success", data: { kind: "timeseries", points } }
 		}
-	}, [widget, timeRange])
 
-	useEffect(() => {
-		load()
-		return () => abortRef.current?.abort()
-	}, [load])
+		if (SUPPORTED_BREAKDOWN_ENDPOINTS.has(endpoint)) {
+			const items = await fetchCustomBreakdown(
+				range.startTime,
+				range.endTime,
+				params as unknown as WidgetBreakdownParams,
+			)
 
-	return state
+			if (isStat) {
+				const reducer = widget.dataSource.transform?.reduceToValue
+				const value = reduceBreakdownToValue(items, reducer?.aggregate)
+				return { kind: "success", data: { kind: "stat", value } }
+			}
+
+			return { kind: "success", data: { kind: "breakdown", items } }
+		}
+
+		if (QUERY_BUILDER_TIMESERIES_ENDPOINTS.has(endpoint)) {
+			const queries = Array.isArray(params.queries)
+				? (params.queries as QueryBuilderQueryDraft[])
+				: []
+
+			if (queries.length === 0) {
+				return {
+					kind: "unsupported",
+					reason: "Widget has no queries configured",
+				}
+			}
+
+			const points = await fetchQueryBuilderTimeseries(
+				range.startTime,
+				range.endTime,
+				queries,
+			)
+
+			if (isStat) {
+				const reducer = widget.dataSource.transform?.reduceToValue
+				const field = reducer?.field ?? "value"
+				const value = reduceTimeseriesToValue(points, field, reducer?.aggregate)
+				return { kind: "success", data: { kind: "stat", value } }
+			}
+
+			return { kind: "success", data: { kind: "timeseries", points } }
+		}
+
+		if (QUERY_BUILDER_BREAKDOWN_ENDPOINTS.has(endpoint)) {
+			const queries = Array.isArray(params.queries)
+				? (params.queries as QueryBuilderQueryDraft[])
+				: []
+
+			if (queries.length === 0) {
+				return {
+					kind: "unsupported",
+					reason: "Widget has no queries configured",
+				}
+			}
+
+			const items = await fetchQueryBuilderBreakdown(
+				range.startTime,
+				range.endTime,
+				queries,
+			)
+
+			if (isStat) {
+				const reducer = widget.dataSource.transform?.reduceToValue
+				const value = reduceBreakdownToValue(items, reducer?.aggregate)
+				return { kind: "success", data: { kind: "stat", value } }
+			}
+
+			return { kind: "success", data: { kind: "breakdown", items } }
+		}
+
+		return {
+			kind: "unsupported",
+			reason: `Endpoint "${endpoint}" not supported on mobile yet`,
+		}
+		},
+		staleTime: mobileQueryStaleTimes.widgetData,
+		placeholderData: preservePreviousData,
+	})
+
+	if (query.data?.kind === "unsupported") {
+		return { status: "unsupported", reason: query.data.reason }
+	}
+
+	if (query.data?.kind === "success") {
+		return { status: "success", data: query.data.data }
+	}
+
+	if (query.isError) {
+		return { status: "error", error: getQueryErrorMessage(query.error) }
+	}
+
+	return { status: "loading" }
 }

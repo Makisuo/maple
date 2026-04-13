@@ -134,6 +134,7 @@
         "@expo/metro-runtime": "^55.0.9",
         "@expo/ui": "~55.0.10",
         "@legendapp/list": "^2.0.19",
+        "@tanstack/react-query": "^5.95.2",
         "expo": "~55.0.12",
         "expo-auth-session": "~55.0.12",
         "expo-constants": "~55.0.12",

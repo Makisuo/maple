@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { fetchTraces, type Trace, type TraceFilters } from "../lib/api"
 import { getTimeRange, type TimeRangeKey } from "../lib/time-utils"
+import {
+	getQueryErrorMessage,
+	mobileQueryKeys,
+	mobileQueryStaleTimes,
+	preservePreviousData,
+} from "../lib/query"
 
 type TracesState =
 	| { status: "loading" }
@@ -8,38 +15,25 @@ type TracesState =
 	| { status: "success"; data: Trace[] }
 
 export function useTraces(timeKey: TimeRangeKey = "24h", filters?: TraceFilters) {
-	const [state, setState] = useState<TracesState>({ status: "loading" })
-	const abortRef = useRef<AbortController | null>(null)
-	const filterKey = JSON.stringify(filters ?? {})
-
-	const load = useCallback(async () => {
-		abortRef.current?.abort()
-		const controller = new AbortController()
-		abortRef.current = controller
-
-		setState({ status: "loading" })
-
-		try {
+	const query = useQuery({
+		queryKey: mobileQueryKeys.traces(timeKey, filters),
+		queryFn: async () => {
 			const { startTime, endTime } = getTimeRange(timeKey)
-			const traces = await fetchTraces(startTime, endTime, { limit: 50, filters })
+			return fetchTraces(startTime, endTime, { limit: 50, filters })
+		},
+		staleTime: mobileQueryStaleTimes.traces,
+		placeholderData: preservePreviousData,
+	})
 
-			if (controller.signal.aborted) return
+	const refresh = useCallback(async () => {
+		await query.refetch()
+	}, [query])
 
-			setState({ status: "success", data: traces })
-		} catch (err) {
-			if (controller.signal.aborted) return
-			setState({
-				status: "error",
-				error: err instanceof Error ? err.message : "Unknown error",
-			})
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [timeKey, filterKey])
+	const state: TracesState = query.data
+		? { status: "success", data: query.data }
+		: query.isError
+			? { status: "error", error: getQueryErrorMessage(query.error) }
+			: { status: "loading" }
 
-	useEffect(() => {
-		load()
-		return () => abortRef.current?.abort()
-	}, [load])
-
-	return { state, refresh: load }
+	return { state, refresh }
 }

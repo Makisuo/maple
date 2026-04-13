@@ -11,7 +11,9 @@ import { useEffect } from "react";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Slot } from "expo-router";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { setAuthTokenProvider } from "../lib/api";
+import { mobileQueryClient } from "../lib/query";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -56,9 +58,11 @@ export default function RootLayout() {
 					publishableKey={publishableKey}
 					tokenCache={tokenCache}
 				>
-					<AuthBridge>
-						<Slot />
-					</AuthBridge>
+					<QueryClientProvider client={mobileQueryClient}>
+						<AuthBridge>
+							<Slot />
+						</AuthBridge>
+					</QueryClientProvider>
 				</ClerkProvider>
 			</View>
 		</SafeAreaProvider>
