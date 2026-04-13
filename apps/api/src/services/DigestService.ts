@@ -435,6 +435,10 @@ export class DigestService extends Context.Service<DigestService>()(
       const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
       let lastSyncAt: number | null = null
 
+      const lastDigestAttemptByOrg = new Map<string, string>()
+      const utcDayKey = (timestamp: number) =>
+        new Date(timestamp).toISOString().slice(0, 10)
+
       const paginateClerk = <T>(
         fetchPage: (params: { limit: number; offset: number }) => Promise<{ data: T[]; totalCount: number }>,
         errorMessage: string,
@@ -621,11 +625,25 @@ export class DigestService extends Context.Service<DigestService>()(
           // Group by org to avoid duplicate Tinybird queries
           const byOrg = Arr.groupBy(dueSubs, (s) => s.orgId)
 
+          const todayUtc = utcDayKey(now)
+
           const results = yield* Effect.forEach(
             Object.entries(byOrg),
             ([rawOrgId, orgSubs]) =>
               Effect.gen(function* () {
                 const orgId = OrgId.make(rawOrgId)
+
+                if (lastDigestAttemptByOrg.get(rawOrgId) === todayUtc) {
+                  yield* Effect.logInfo("Skipping digest org already attempted today").pipe(
+                    Effect.annotateLogs({
+                      orgId: rawOrgId,
+                      subscriptionCount: orgSubs.length,
+                    }),
+                  )
+                  return []
+                }
+                lastDigestAttemptByOrg.set(rawOrgId, todayUtc)
+
                 const props = yield* generateDigestData(orgId)
                 if (!hasDigestContent(props)) {
                   yield* Effect.logInfo("Skipping digest for org with no data").pipe(
