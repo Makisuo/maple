@@ -38,7 +38,13 @@ interface SqlClient {
 }
 
 const createClient = (baseUrl: string, token: string): SqlClient => {
-  const tb = new Tinybird({ baseUrl, token, datasources: {}, pipes: {} })
+  const tb = new Tinybird({
+    baseUrl,
+    token,
+    datasources: {},
+    pipes: {},
+    devMode: false,
+  })
   return { sql: (sql: string) => tb.sql(sql) }
 }
 

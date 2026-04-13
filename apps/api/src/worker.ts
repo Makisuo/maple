@@ -1,10 +1,9 @@
-import { Effect, FileSystem, Layer, ManagedRuntime, Path } from "effect"
+import { FileSystem, Layer, Path } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
-import { serveWorkerRequest } from "./lib/serve-worker-request"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
 import { WorkerBindings } from "./services/WorkerBindings"
 
@@ -36,55 +35,34 @@ const WorkerPlatformLive = Layer.mergeAll(
   WorkerHttpPlatformLive,
 )
 
-const ApiHttpApp = HttpRouter.toHttpEffect(AllRoutes)
-
-const buildRuntime = (env: Record<string, unknown>) =>
-  ManagedRuntime.make(
-    Layer.mergeAll(
-      WorkerPlatformLive,
-      ApiObservabilityLive,
-      MainLive,
-      ApiAuthLive,
-    ).pipe(
-      Layer.provide(DatabaseD1Live),
-      Layer.provide(WorkerBindings.layer(env)),
+const buildHandler = (env: Record<string, unknown>) =>
+  HttpRouter.toWebHandler(
+    AllRoutes.pipe(
+      Layer.provideMerge(MainLive),
+      Layer.provideMerge(ApiAuthLive),
+      Layer.provideMerge(ApiObservabilityLive),
+      Layer.provideMerge(WorkerPlatformLive),
+      Layer.provideMerge(DatabaseD1Live),
+      Layer.provideMerge(WorkerBindings.layer(env)),
     ),
   )
 
-const runtimeCache = new WeakMap<
+const handlerCache = new WeakMap<
   object,
-  ReturnType<typeof buildRuntime>
+  ReturnType<typeof buildHandler>
 >()
 
-const getRuntime = (env: Record<string, unknown>) => {
+const getHandler = (env: Record<string, unknown>) => {
   const key = env as object
-  const existing = runtimeCache.get(key)
+  const existing = handlerCache.get(key)
   if (existing) return existing
-  const rt = buildRuntime(env)
-  runtimeCache.set(key, rt)
-  return rt
-}
-
-const handleRequest = (
-  request: Request,
-  env: Record<string, unknown>,
-) => {
-  const runtime = getRuntime(env)
-  return runtime.runPromise(
-    ApiHttpApp.pipe(
-      Effect.flatMap((httpApp) =>
-        serveWorkerRequest(request, httpApp, {
-          remoteAddress:
-            request.headers.get("cf-connecting-ip") ?? undefined,
-        }),
-      ),
-      Effect.scoped,
-    ),
-  )
+  const built = buildHandler(env)
+  handlerCache.set(key, built)
+  return built
 }
 
 export default {
   fetch(request: Request, env: Record<string, unknown>) {
-    return handleRequest(request, env)
+    return getHandler(env).handler(request as unknown as globalThis.Request)
   },
 }
