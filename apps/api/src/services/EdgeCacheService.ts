@@ -123,31 +123,36 @@ const makeService = (backend: EdgeCacheBackend): EdgeCacheServiceShape => {
 
       const existing = inFlight.get(composite)
       if (existing) {
-        const value = (yield* Deferred.await(
-          existing as Deferred.Deferred<A, E>,
-        )) as A
+        const awaited = Deferred.await(existing) as Effect.Effect<A, E>
+        const value = yield* awaited
         return { value, hit: true }
       }
 
       const deferred = yield* Deferred.make<A, E>()
       inFlight.set(composite, deferred as Deferred.Deferred<unknown, unknown>)
 
-      return yield* compute.pipe(
-        Effect.tap((value) =>
+      const writeAndPublish = (value: A) =>
+        Effect.andThen(
           Effect.promise(() =>
             backend.put(options.bucket, hash, value, options.ttlSeconds),
-          ).pipe(
-            Effect.zipRight(Deferred.succeed(deferred, value)),
           ),
-        ),
-        Effect.tapError((error) => Deferred.fail(deferred, error)),
-        Effect.ensuring(
-          Effect.sync(() => {
-            inFlight.delete(composite)
-          }),
-        ),
-        Effect.map((value) => ({ value, hit: false }) as EdgeCacheResult<A>),
+          Deferred.succeed(deferred, value),
+        )
+
+      const tapped: Effect.Effect<A, E, R> = Effect.tap(compute, writeAndPublish)
+      const tappedError: Effect.Effect<A, E, R> = Effect.tapError(
+        tapped,
+        (error: E) => Deferred.fail(deferred, error),
       )
+      const cleanup: Effect.Effect<A, E, R> = Effect.ensuring(
+        tappedError,
+        Effect.sync(() => {
+          inFlight.delete(composite)
+        }),
+      )
+
+      const value = yield* cleanup
+      return { value, hit: false }
     })
 
   return { getOrCompute }

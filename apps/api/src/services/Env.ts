@@ -45,7 +45,7 @@ const optionalRedacted = (key: string) =>
     ),
   )
 
-const portConfig = Config.integer("PORT").pipe(Config.withDefault(3472))
+const portConfig = Config.number("PORT").pipe(Config.withDefault(3472))
 
 const envConfig = Config.all({
   PORT: portConfig,

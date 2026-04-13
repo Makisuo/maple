@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
+import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import {
   OrgId,
   OrgTinybirdSettingsForbiddenError,
@@ -16,7 +16,6 @@ import { encryptAes256Gcm } from "./Crypto"
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService, __testables } from "./OrgTinybirdSettingsService"
-import { WorkerBindings } from "./WorkerBindings"
 
 const createdTempDirs: string[] = []
 const encryptionKey = Buffer.alloc(32, 7)
@@ -62,28 +61,26 @@ const createTempDbUrl = () => {
   return { url: `file:${dbPath}`, dbPath }
 }
 
-const makeBindings = (url: string) =>
-  WorkerBindings.layer({
-    PORT: "3472",
-    TINYBIRD_HOST: "https://maple-managed.tinybird.co",
-    TINYBIRD_TOKEN: "managed-token",
-    MAPLE_DB_URL: url,
-    MAPLE_DB_AUTH_TOKEN: "",
-    MAPLE_AUTH_MODE: "self_hosted",
-    MAPLE_ROOT_PASSWORD: "test-root-password",
-    MAPLE_DEFAULT_ORG_ID: "default",
-    MAPLE_INGEST_KEY_ENCRYPTION_KEY: encryptionKey.toString("base64"),
-    MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
-    CLERK_SECRET_KEY: "",
-    CLERK_PUBLISHABLE_KEY: "",
-    CLERK_JWT_KEY: "",
-  })
+const makeConfig = (url: string) =>
+  ConfigProvider.layer(
+    ConfigProvider.fromUnknown({
+      PORT: "3472",
+      TINYBIRD_HOST: "https://maple-managed.tinybird.co",
+      TINYBIRD_TOKEN: "managed-token",
+      MAPLE_DB_URL: url,
+      MAPLE_AUTH_MODE: "self_hosted",
+      MAPLE_ROOT_PASSWORD: "test-root-password",
+      MAPLE_DEFAULT_ORG_ID: "default",
+      MAPLE_INGEST_KEY_ENCRYPTION_KEY: encryptionKey.toString("base64"),
+      MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+    }),
+  )
 
 const makeLayer = (url: string) =>
   OrgTinybirdSettingsService.Live.pipe(
     Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
-    Layer.provide(makeBindings(url)),
+    Layer.provide(makeConfig(url)),
   )
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)

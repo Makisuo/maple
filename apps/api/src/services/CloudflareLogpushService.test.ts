@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Effect, Layer, Schema } from "effect";
+import { ConfigProvider, Effect, Layer, Schema } from "effect";
 import { hashCloudflareLogpushSecret } from "@maple/db";
 import {
   CloudflareLogpushEncryptionError,
@@ -15,7 +15,6 @@ import {
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive";
 import { Env } from "./Env";
 import { CloudflareLogpushService } from "./CloudflareLogpushService";
-import { WorkerBindings } from "./WorkerBindings";
 
 const createdTempDirs: string[] = [];
 
@@ -36,32 +35,30 @@ const createTempDbUrl = () => {
   return { url: `file:${dbPath}`, dbPath };
 };
 
-const makeBindings = (
+const makeConfig = (
   url: string,
   ingestPublicUrl = "https://ingest.example.com",
 ) =>
-  WorkerBindings.layer({
-    PORT: "3472",
-    TINYBIRD_HOST: "https://api.tinybird.co",
-    TINYBIRD_TOKEN: "test-token",
-    MAPLE_DB_URL: url,
-    MAPLE_DB_AUTH_TOKEN: "",
-    MAPLE_AUTH_MODE: "self_hosted",
-    MAPLE_ROOT_PASSWORD: "test-root-password",
-    MAPLE_DEFAULT_ORG_ID: "default",
-    MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
-    MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
-    MAPLE_INGEST_PUBLIC_URL: ingestPublicUrl,
-    CLERK_SECRET_KEY: "",
-    CLERK_PUBLISHABLE_KEY: "",
-    CLERK_JWT_KEY: "",
-  });
+  ConfigProvider.layer(
+    ConfigProvider.fromUnknown({
+      PORT: "3472",
+      TINYBIRD_HOST: "https://api.tinybird.co",
+      TINYBIRD_TOKEN: "test-token",
+      MAPLE_DB_URL: url,
+      MAPLE_AUTH_MODE: "self_hosted",
+      MAPLE_ROOT_PASSWORD: "test-root-password",
+      MAPLE_DEFAULT_ORG_ID: "default",
+      MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+      MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+      MAPLE_INGEST_PUBLIC_URL: ingestPublicUrl,
+    }),
+  );
 
 const makeLayer = (url: string, ingestPublicUrl?: string) =>
   CloudflareLogpushService.Live.pipe(
     Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
-    Layer.provide(makeBindings(url, ingestPublicUrl)),
+    Layer.provide(makeConfig(url, ingestPublicUrl)),
   );
 
 const asOrgId = Schema.decodeUnknownSync(OrgId);
