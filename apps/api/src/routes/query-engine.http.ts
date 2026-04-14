@@ -220,7 +220,18 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
       .handle("listLogs", ({ payload }) =>
         Effect.gen(function* () {
           const tenant = yield* CurrentTenant.Context
-          const compiled = CH.compile(CH.logsListQuery({ serviceName: payload.service, severity: payload.severity, minSeverity: payload.minSeverity, traceId: payload.traceId, spanId: payload.spanId, cursor: payload.cursor, search: payload.search, limit: payload.limit }), { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime })
+          const compiled = CH.compile(CH.logsListQuery({
+            serviceName: payload.service,
+            severity: payload.severity,
+            minSeverity: payload.minSeverity,
+            traceId: payload.traceId,
+            spanId: payload.spanId,
+            cursor: payload.cursor,
+            search: payload.search,
+            environments: payload.deploymentEnv ? [payload.deploymentEnv] : undefined,
+            matchModes: payload.deploymentEnvMatchMode ? { deploymentEnv: payload.deploymentEnvMatchMode } : undefined,
+            limit: payload.limit,
+          }), { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime })
           const rows = yield* queryEngine.cachedDirect(
             tenant,
             "listLogs",

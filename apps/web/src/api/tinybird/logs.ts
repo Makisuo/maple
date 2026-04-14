@@ -30,6 +30,8 @@ const ListLogsInputSchema = Schema.Struct({
   spanId: Schema.optional(Schema.String),
   cursor: Schema.optional(Schema.String),
   search: Schema.optional(Schema.String),
+  deploymentEnv: Schema.optional(Schema.String),
+  deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
 })
 
 export type ListLogsInput = Schema.Schema.Type<typeof ListLogsInputSchema>
@@ -112,6 +114,8 @@ const listLogsEffect = Effect.fn("QueryEngine.listLogs")(function* ({
             spanId: input.spanId,
             cursor: input.cursor,
             search: input.search,
+            deploymentEnv: input.deploymentEnv,
+            deploymentEnvMatchMode: input.deploymentEnvMatchMode,
           }),
         })
       }),
@@ -163,6 +167,8 @@ const getLogsCountEffect = Effect.fn("QueryEngine.getLogsCount")(function* ({
           severity: input.severity,
           traceId: input.traceId,
           search: input.search,
+          environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
+          deploymentEnvMatchMode: input.deploymentEnvMatchMode,
         },
       },
     }))
@@ -180,6 +186,7 @@ export interface FacetItem {
 export interface LogsFacets {
   services: FacetItem[]
   severities: FacetItem[]
+  deploymentEnvs: FacetItem[]
 }
 
 export interface LogsFacetsResponse {
@@ -189,6 +196,8 @@ export interface LogsFacetsResponse {
 const GetLogsFacetsInputSchema = Schema.Struct({
   service: Schema.optional(Schema.String),
   severity: Schema.optional(Schema.String),
+  deploymentEnv: Schema.optional(Schema.String),
+  deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
   startTime: Schema.optional(TinybirdDateTimeString),
   endTime: Schema.optional(TinybirdDateTimeString),
 })
@@ -220,6 +229,8 @@ const getLogsFacetsEffect = Effect.fn("QueryEngine.getLogsFacets")(function* ({
         filters: {
           serviceName: input.service,
           severity: input.severity,
+          environments: input.deploymentEnv ? [input.deploymentEnv] : undefined,
+          deploymentEnvMatchMode: input.deploymentEnvMatchMode,
         },
       },
     }))
@@ -227,6 +238,7 @@ const getLogsFacetsEffect = Effect.fn("QueryEngine.getLogsFacets")(function* ({
     const facetsData = extractFacets(response)
     const services: FacetItem[] = []
     const severities: FacetItem[] = []
+    const deploymentEnvs: FacetItem[] = []
 
     for (const row of facetsData) {
       const count = Number(row.count)
@@ -234,10 +246,12 @@ const getLogsFacetsEffect = Effect.fn("QueryEngine.getLogsFacets")(function* ({
         services.push({ name: row.name, count })
       } else if (row.facetType === "severity" && row.name) {
         severities.push({ name: row.name, count })
+      } else if (row.facetType === "deploymentEnv" && row.name) {
+        deploymentEnvs.push({ name: row.name, count })
       }
     }
 
     return {
-      data: { services, severities },
+      data: { services, severities, deploymentEnvs },
     }
 })

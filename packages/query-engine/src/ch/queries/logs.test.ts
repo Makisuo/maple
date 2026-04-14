@@ -225,13 +225,15 @@ describe("errorRateByServiceQuery", () => {
 // ---------------------------------------------------------------------------
 
 describe("logsFacetsQuery", () => {
-  it("compiles UNION ALL with severity and service facets", () => {
+  it("compiles UNION ALL with severity, service, and deploymentEnv facets", () => {
     const q = logsFacetsQuery({})
     const { sql } = compileUnion(q, baseParams)
     const unionCount = (sql.match(/UNION ALL/g) || []).length
-    expect(unionCount).toBe(1)
+    expect(unionCount).toBe(2)
     expect(sql).toContain("'severity' AS facetType")
     expect(sql).toContain("'service' AS facetType")
+    expect(sql).toContain("'deploymentEnv' AS facetType")
+    expect(sql).toContain("ResourceAttributes['deployment.environment']")
     expect(sql).toContain("ORDER BY count DESC")
   })
 
@@ -240,5 +242,48 @@ describe("logsFacetsQuery", () => {
     const { sql } = compileUnion(q, baseParams)
     expect(sql).toContain("ServiceName = 'api'")
     expect(sql).toContain("SeverityText = 'ERROR'")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// environments filter (applies to all logs queries via ResourceAttributes)
+// ---------------------------------------------------------------------------
+
+describe("environments filter", () => {
+  it("logsListQuery filters by a single environment", () => {
+    const q = logsListQuery({ environments: ["production"] })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+  })
+
+  it("logsListQuery filters by multiple environments", () => {
+    const q = logsListQuery({ environments: ["production", "staging"] })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
+  })
+
+  it("logsListQuery uses positionCaseInsensitive for single-value contains mode", () => {
+    const q = logsListQuery({ environments: ["prod"], matchModes: { deploymentEnv: "contains" } })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("positionCaseInsensitive(ResourceAttributes['deployment.environment'], 'prod')")
+  })
+
+  it("logsCountQuery applies environments filter", () => {
+    const q = logsCountQuery({ environments: ["production"] })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+  })
+
+  it("logsTimeseriesQuery applies environments filter", () => {
+    const q = logsTimeseriesQuery({ environments: ["production"] })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production')")
+  })
+
+  it("logsFacetsQuery applies environments filter to all branches", () => {
+    const q = logsFacetsQuery({ environments: ["production"] })
+    const { sql } = compileUnion(q, baseParams)
+    const matches = sql.match(/ResourceAttributes\['deployment\.environment'\] IN \('production'\)/g) || []
+    expect(matches.length).toBe(3)
   })
 })

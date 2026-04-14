@@ -195,6 +195,8 @@ export class ListLogsRequest extends Schema.Class<ListLogsRequest>("ListLogsRequ
   spanId: Schema.optional(Schema.String),
   cursor: Schema.optional(Schema.String),
   search: Schema.optional(Schema.String),
+  deploymentEnv: Schema.optional(Schema.String),
+  deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
   limit: Schema.optional(Schema.Number),
 }) {}
 

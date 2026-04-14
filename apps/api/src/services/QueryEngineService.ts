@@ -829,6 +829,10 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         CH.logsTimeseriesQuery({
           serviceName: request.query.filters?.serviceName,
           severity: request.query.filters?.severity,
+          environments: request.query.filters?.environments,
+          matchModes: request.query.filters?.deploymentEnvMatchMode
+            ? { deploymentEnv: request.query.filters.deploymentEnvMatchMode }
+            : undefined,
           groupBy: request.query.groupBy as string[] | undefined,
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime, bucketSeconds: bucketSeconds! },
@@ -995,6 +999,10 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           groupBy: request.query.groupBy as "service" | "severity",
           serviceName: request.query.filters?.serviceName,
           severity: request.query.filters?.severity,
+          environments: request.query.filters?.environments,
+          matchModes: request.query.filters?.deploymentEnvMatchMode
+            ? { deploymentEnv: request.query.filters.deploymentEnvMatchMode }
+            : undefined,
           limit: request.query.limit,
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
@@ -1140,11 +1148,14 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 
       if (request.query.source === "logs") {
         const filters = request.query.filters as Record<string, unknown> | undefined
+        const envMatchMode = filters?.deploymentEnvMatchMode as "contains" | undefined
         const rows = yield* executeCHUnionQuery(
           tinybird, tenant,
           CH.logsFacetsQuery({
             serviceName: filters?.serviceName as string | undefined,
             severity: filters?.severity as string | undefined,
+            environments: filters?.environments as readonly string[] | undefined,
+            matchModes: envMatchMode ? { deploymentEnv: envMatchMode } : undefined,
           }),
           baseParams,
           "Failed to execute logs facets query",
@@ -1154,7 +1165,12 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
             kind: "facets", source: "logs",
             data: rows.map((row) => ({
               facetType: row.facetType,
-              name: row.facetType === "severity" ? row.severityText : row.serviceName,
+              name:
+                row.facetType === "severity"
+                  ? row.severityText
+                  : row.facetType === "deploymentEnv"
+                  ? row.deploymentEnv
+                  : row.serviceName,
               count: Number(row.count),
             })),
           },
@@ -1242,6 +1258,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
     // ---- Count ----
     if (request.query.source === "logs" && request.query.kind === "count") {
       const filters = request.query.filters as Record<string, unknown> | undefined
+      const envMatchMode = filters?.deploymentEnvMatchMode as "contains" | undefined
       const rows = yield* executeCHQuery(
         tinybird, tenant,
         CH.logsCountQuery({
@@ -1249,6 +1266,8 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           severity: filters?.severity as string | undefined,
           traceId: filters?.traceId as string | undefined,
           search: filters?.search as string | undefined,
+          environments: filters?.environments as readonly string[] | undefined,
+          matchModes: envMatchMode ? { deploymentEnv: envMatchMode } : undefined,
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         "Failed to execute logs count query",
@@ -1395,6 +1414,10 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
         CH.logsTimeseriesQuery({
           serviceName: request.query.filters?.serviceName,
           severity: request.query.filters?.severity,
+          environments: request.query.filters?.environments,
+          matchModes: request.query.filters?.deploymentEnvMatchMode
+            ? { deploymentEnv: request.query.filters.deploymentEnvMatchMode }
+            : undefined,
           groupBy: logsQuery.groupBy as readonly string[] | undefined,
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime, bucketSeconds },

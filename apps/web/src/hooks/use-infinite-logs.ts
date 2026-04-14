@@ -25,6 +25,8 @@ function buildQueryParams(filters: LogsSearchParams | undefined, range: { startT
     endTime: range.endTime,
     service: filters?.services?.[0],
     severity: filters?.severities?.[0],
+    deploymentEnv: filters?.deploymentEnvs?.[0],
+    deploymentEnvMatchMode: filters?.deploymentEnvMatchMode,
     search: filters?.search,
   }
 }

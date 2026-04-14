@@ -14,6 +14,8 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 const logsSearchSchema = Schema.Struct({
   services: OptionalStringArrayParam,
   severities: OptionalStringArrayParam,
+  deploymentEnvs: OptionalStringArrayParam,
+  deploymentEnvMatchMode: Schema.optional(Schema.Literals(["contains"])),
   search: Schema.optional(Schema.String),
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),

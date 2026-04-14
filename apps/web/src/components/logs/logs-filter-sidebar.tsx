@@ -85,6 +85,7 @@ export function LogsFilterSidebar() {
   const hasActiveFilters =
     (search.services?.length ?? 0) > 0 ||
     (search.severities?.length ?? 0) > 0 ||
+    (search.deploymentEnvs?.length ?? 0) > 0 ||
     !!search.search
 
   return Result.builder(facetsResult)
@@ -94,7 +95,8 @@ export function LogsFilterSidebar() {
       const facets = facetsResponse.data
       const hasFacets =
         (facets.services?.length ?? 0) > 0 ||
-        (facets.severities?.length ?? 0) > 0
+        (facets.severities?.length ?? 0) > 0 ||
+        (facets.deploymentEnvs?.length ?? 0) > 0
 
       return (
         <FilterSidebarFrame sticky waiting={result.waiting}>
@@ -135,6 +137,18 @@ export function LogsFilterSidebar() {
                   selected={search.severities ?? []}
                   onChange={(val) => updateFilter("severities", val)}
                   colorMap={SEVERITY_COLORS}
+                />
+                <Separator className="my-2" />
+              </>
+            )}
+
+            {(facets.deploymentEnvs?.length ?? 0) > 0 && (
+              <>
+                <FilterSection
+                  title="Environment"
+                  options={facets.deploymentEnvs}
+                  selected={search.deploymentEnvs ?? []}
+                  onChange={(val) => updateFilter("deploymentEnvs", val)}
                 />
                 <Separator className="my-2" />
               </>

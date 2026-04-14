@@ -136,15 +136,23 @@ export function compilePipeQuery(
       eraseType(CH.compile(CH.logsListQuery({
         serviceName: str("service"), severity: str("severity"), minSeverity: int("min_severity"),
         traceId: str("trace_id"), spanId: str("span_id"), cursor: str("cursor"), search: str("search"), limit: int("limit", 50),
+        environments: str("deployment_env") ? [str("deployment_env")!] : undefined,
+        matchModes: str("deployment_env_match_mode") === "contains" ? { deploymentEnv: "contains" } : undefined,
       }), { orgId, startTime, endTime })),
     ),
     Match.when("logs_count", () =>
       eraseType(CH.compile(CH.logsCountQuery({
         serviceName: str("service"), severity: str("severity"), traceId: str("trace_id"), search: str("search"),
+        environments: str("deployment_env") ? [str("deployment_env")!] : undefined,
+        matchModes: str("deployment_env_match_mode") === "contains" ? { deploymentEnv: "contains" } : undefined,
       }), { orgId, startTime, endTime })),
     ),
     Match.when("logs_facets", () =>
-      eraseType(CH.compileUnion(CH.logsFacetsQuery({ serviceName: str("service"), severity: str("severity") }), { orgId, startTime, endTime })),
+      eraseType(CH.compileUnion(CH.logsFacetsQuery({
+        serviceName: str("service"), severity: str("severity"),
+        environments: str("deployment_env") ? [str("deployment_env")!] : undefined,
+        matchModes: str("deployment_env_match_mode") === "contains" ? { deploymentEnv: "contains" } : undefined,
+      }), { orgId, startTime, endTime })),
     ),
     Match.when("error_rate_by_service", () =>
       eraseType(CH.compile(CH.errorRateByServiceQuery(), { orgId, startTime, endTime })),

@@ -19,6 +19,22 @@ interface LogsQueryOpts {
   severity?: string
   traceId?: string
   search?: string
+  environments?: readonly string[]
+  matchModes?: {
+    deploymentEnv?: "contains"
+  }
+}
+
+function environmentCondition(
+  $: ColumnAccessor<typeof Logs.columns>,
+  opts: LogsQueryOpts,
+): CH.Condition | undefined {
+  if (!opts.environments?.length) return undefined
+  const envAttr = $.ResourceAttributes.get("deployment.environment")
+  if (opts.matchModes?.deploymentEnv === "contains" && opts.environments.length === 1) {
+    return CH.positionCaseInsensitive(envAttr, CH.lit(opts.environments[0]!)).gt(0)
+  }
+  return CH.inList(envAttr, opts.environments)
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +69,7 @@ export function logsTimeseriesQuery(
       $.Timestamp.lte(param.dateTime("endTime")),
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
       CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+      environmentCondition($, opts),
     ])
     .groupBy("bucket", "groupName")
     .orderBy(["bucket", "asc"], ["groupName", "asc"])
@@ -106,12 +123,13 @@ export function logsBreakdownQuery(
       name: opts.groupBy === "severity" ? $.SeverityText : $.ServiceName,
       count: CH.count(),
     }))
-    .where(({ OrgId, Timestamp, ServiceName, SeverityText }) => [
-      OrgId.eq(param.string("orgId")),
-      Timestamp.gte(param.dateTime("startTime")),
-      Timestamp.lte(param.dateTime("endTime")),
-      CH.when(opts.serviceName, (v: string) => ServiceName.eq(v)),
-      CH.when(opts.severity, (v: string) => SeverityText.eq(v)),
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+      CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
+      CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+      environmentCondition($, opts),
     ])
     .groupBy("name")
     .orderBy(["count", "desc"])
@@ -142,6 +160,7 @@ export function logsCountQuery(
       CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
       CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
       CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+      environmentCondition($, opts),
     ])
     .format("JSON")
 }
@@ -195,6 +214,7 @@ export function logsListQuery(
       CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
       CH.when(opts.cursor, (v: string) => $.Timestamp.lt(v)),
       CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+      environmentCondition($, opts),
     ])
     .orderBy(["timestamp", "desc"])
     .limit(opts.limit ?? 50)
@@ -238,6 +258,7 @@ export function errorRateByServiceQuery(
 export interface LogsFacetsOutput {
   readonly severityText: string
   readonly serviceName: string
+  readonly deploymentEnv: string
   readonly count: number
   readonly facetType: string
 }
@@ -251,12 +272,14 @@ export function logsFacetsQuery(
     $.Timestamp.lte(param.dateTime("endTime")),
     CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
     CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+    environmentCondition($, opts),
   ]
 
   const severityQuery = from(Logs)
     .select(($) => ({
       severityText: $.SeverityText,
       serviceName: CH.lit(""),
+      deploymentEnv: CH.lit(""),
       count: CH.count(),
       facetType: CH.lit("severity"),
     }))
@@ -267,13 +290,28 @@ export function logsFacetsQuery(
     .select(($) => ({
       severityText: CH.lit(""),
       serviceName: $.ServiceName,
+      deploymentEnv: CH.lit(""),
       count: CH.count(),
       facetType: CH.lit("service"),
     }))
     .where(baseWhere)
     .groupBy("serviceName")
 
-  return unionAll(severityQuery, serviceQuery)
+  const envQuery = from(Logs)
+    .select(($) => ({
+      severityText: CH.lit(""),
+      serviceName: CH.lit(""),
+      deploymentEnv: $.ResourceAttributes.get("deployment.environment"),
+      count: CH.count(),
+      facetType: CH.lit("deploymentEnv"),
+    }))
+    .where(($) => [
+      ...baseWhere($),
+      $.ResourceAttributes.get("deployment.environment").neq(""),
+    ])
+    .groupBy("deploymentEnv")
+
+  return unionAll(severityQuery, serviceQuery, envQuery)
     .orderBy(["count", "desc"])
     .format("JSON")
 }

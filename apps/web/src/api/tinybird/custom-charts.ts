@@ -255,6 +255,7 @@ function buildTimeseriesQuerySpec(data: CustomChartTimeSeriesInput): QuerySpec |
       filters: {
         serviceName: data.filters?.serviceName,
         severity: data.filters?.severity,
+        environments: data.filters?.environments,
       },
       bucketSeconds: data.bucketSeconds,
     }
@@ -413,6 +414,7 @@ function buildBreakdownQuerySpec(data: CustomChartBreakdownInput): QuerySpec | s
       filters: {
         serviceName: data.filters?.serviceName,
         severity: data.filters?.severity,
+        environments: data.filters?.environments,
       },
       limit: data.limit,
     }

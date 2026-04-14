@@ -67,6 +67,8 @@ export const LogsFilters = Schema.Struct({
   severity: Schema.optional(Schema.String),
   traceId: Schema.optional(Schema.String),
   search: Schema.optional(Schema.String),
+  environments: Schema.optional(Schema.Array(Schema.String)),
+  deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
 })
 export type LogsFilters = Schema.Schema.Type<typeof LogsFilters>
 
