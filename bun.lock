@@ -38,6 +38,7 @@
         "@maple/query-engine": "workspace:*",
         "@react-email/components": "^1.0.11",
         "@tinybirdco/sdk": "catalog:tinybird",
+        "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848",
         "autumn-js": "^1.2.5",
         "date-fns": "^4.1.0",
         "drizzle-orm": "^0.45.1",
