@@ -49,20 +49,30 @@ export function GroupByMultiSelect({
 }: GroupByMultiSelectProps) {
   const anchor = useComboboxAnchor()
 
-  const options = React.useMemo(() => {
-    const staticOptions = GROUP_BY_OPTIONS[dataSource]
-      .filter((opt) => opt.value !== "none")
-      .map((opt) => ({ label: opt.label, value: opt.value }))
-    const attrOptions = (attributeKeys ?? []).map((key) => ({
-      label: `attr.${key}`,
-      value: `attr.${key}`,
-    }))
-    return [...staticOptions, ...attrOptions]
+  const { items, labelFor } = React.useMemo(() => {
+    const labelMap = new Map<string, string>()
+    for (const opt of GROUP_BY_OPTIONS[dataSource]) {
+      if (opt.value === "none") continue
+      labelMap.set(opt.value, opt.label)
+    }
+    for (const key of attributeKeys ?? []) {
+      labelMap.set(`attr.${key}`, `attr.${key}`)
+    }
+    return {
+      items: Array.from(labelMap.keys()),
+      labelFor: (v: string) => labelMap.get(v) ?? v,
+    }
   }, [dataSource, attributeKeys])
 
   return (
     <div className={className ?? "flex-1 min-w-[140px]"}>
-      <Combobox multiple value={value} onValueChange={disabled ? () => {} : onChange}>
+      <Combobox
+        multiple
+        items={items}
+        itemToStringLabel={labelFor}
+        value={value}
+        onValueChange={disabled ? () => {} : onChange}
+      >
         <ComboboxChips ref={anchor} className="text-xs font-mono">
           {value.map((key) => (
             <ComboboxChip key={key}>{key}</ComboboxChip>
@@ -72,11 +82,11 @@ export function GroupByMultiSelect({
         <ComboboxContent anchor={anchor}>
           <ComboboxEmpty>No fields found.</ComboboxEmpty>
           <ComboboxList>
-            {options.map((opt) => (
-              <ComboboxItem key={opt.value} value={opt.value} className="font-mono">
-                {opt.label}
+            {(item: string) => (
+              <ComboboxItem key={item} value={item} className="font-mono">
+                {labelFor(item)}
               </ComboboxItem>
-            ))}
+            )}
           </ComboboxList>
         </ComboboxContent>
       </Combobox>
