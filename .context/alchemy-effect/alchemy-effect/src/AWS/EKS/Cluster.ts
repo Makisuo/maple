@@ -16,6 +16,7 @@ import {
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource, type ResourceBinding } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags, hasAlchemyTags } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import type { RegionID } from "../Region.ts";
@@ -100,7 +101,8 @@ export interface Cluster extends Resource<
     tags: Record<string, string>;
     kubernetesObjects: KubernetesObjectRef[];
   },
-  KubernetesObjectBinding
+  KubernetesObjectBinding,
+  Providers
 > {}
 
 /**

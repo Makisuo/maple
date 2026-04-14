@@ -83,42 +83,38 @@ const alchemyPackageJson = JSON.parse(
 
 let newVersion = "";
 
-// Check if it's a semantic version bump or a specific version
-if (["major", "minor", "patch"].includes(versionInput)) {
-  // Parse current version
-  const currentVersion = alchemyPackageJson.version;
-  const versionMatch = currentVersion.match(/^(\d+)\.(\d+)\.(\d+)$/);
-
-  if (!versionMatch) {
-    console.error(`Invalid current version format: ${currentVersion}`);
-    process.exit(1);
+// Check if it's a beta bump or a specific version
+if (versionInput === "beta") {
+  // Query npm for the latest 2.0.0-beta.N and increment N
+  const packageName = alchemyPackageJson.name;
+  let betaN = 1;
+  try {
+    const response = await fetch(`https://registry.npmjs.org/${packageName}`);
+    if (response.ok) {
+      const data = (await response.json()) as {
+        versions?: Record<string, unknown>;
+      };
+      const versions = Object.keys(data.versions ?? {});
+      const betaNumbers = versions
+        .map((v) => {
+          const m = v.match(/^2\.0\.0-beta\.(\d+)$/);
+          return m ? parseInt(m[1]!, 10) : NaN;
+        })
+        .filter((n) => !isNaN(n));
+      if (betaNumbers.length > 0) {
+        betaN = Math.max(...betaNumbers) + 1;
+      }
+    }
+  } catch {
+    // npm registry unreachable — start at 1
   }
-
-  const [, major, minor, patch] = versionMatch.map(Number);
-
-  // Calculate new version based on bump type
-  switch (versionInput) {
-    case "major":
-      newVersion = `${major + 1}.0.0`;
-      break;
-    case "minor":
-      newVersion = `${major}.${minor + 1}.0`;
-      break;
-    case "patch":
-      newVersion = `${major}.${minor}.${patch + 1}`;
-      break;
-    default:
-      throw new Error(`Invalid bump type: ${versionInput}`);
-  }
-
-  console.log(
-    `Bumping ${versionInput} version: ${currentVersion} → ${newVersion}`,
-  );
+  newVersion = `2.0.0-beta.${betaN}`;
+  console.log(`Bumping to next beta version: ${newVersion}`);
 } else {
-  // Validate specific version format
-  if (!/^\d+\.\d+\.\d+$/.test(versionInput)) {
+  // Validate specific version format (x.y.z or x.y.z-pre.N)
+  if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(versionInput)) {
     console.error(
-      "Version must be in format x.y.z or use 'major', 'minor', 'patch'",
+      "Version must be in format x.y.z or x.y.z-pre.N, or use 'beta'",
     );
     process.exit(1);
   }

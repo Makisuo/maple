@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export interface SigningCertificateProps {
   /**
@@ -29,7 +30,9 @@ export interface SigningCertificate extends Resource<
     certificateBody: string;
     status: iam.StatusType;
     uploadDate: Date | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

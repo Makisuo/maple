@@ -1,0 +1,88 @@
+---
+/**
+ * Renders styled terminal output matching Alchemy CLI colors.
+ *
+ * Pass content as a `content` prop (string) to avoid MDX processing.
+ * Use simple markup tags for styling:
+ *   [g]...[/g]  green    [r]...[/r]  red
+ *   [y]...[/y]  yellow   [c]...[/c]  cyan
+ *   [b]...[/b]  bold     [d]...[/d]  dim
+ *   [u]...[/u]  underline
+ */
+
+interface Props {
+  title?: string;
+  content: string;
+}
+
+const { title, content } = Astro.props;
+
+const html = content
+  .replace(/^\n/, '')
+  .replace(/\[g\]([\s\S]*?)\[\/g\]/g, '<span class="t-g">$1</span>')
+  .replace(/\[r\]([\s\S]*?)\[\/r\]/g, '<span class="t-r">$1</span>')
+  .replace(/\[y\]([\s\S]*?)\[\/y\]/g, '<span class="t-y">$1</span>')
+  .replace(/\[c\]([\s\S]*?)\[\/c\]/g, '<span class="t-c">$1</span>')
+  .replace(/\[b\]([\s\S]*?)\[\/b\]/g, '<span class="t-b">$1</span>')
+  .replace(/\[d\]([\s\S]*?)\[\/d\]/g, '<span class="t-d">$1</span>')
+  .replace(/\[u\]([\s\S]*?)\[\/u\]/g, '<span class="t-u">$1</span>')
+  .replace(/\[s2\]/g, '  ')
+  .replace(/\[s4\]/g, '    ');
+---
+
+<div class="terminal not-content">
+  <div class="terminal-header">
+    <span class="terminal-dot" style="background:#ff5f57"></span>
+    <span class="terminal-dot" style="background:#febc2e"></span>
+    <span class="terminal-dot" style="background:#28c840"></span>
+    {title && <span class="terminal-title">{title}</span>}
+  </div>
+  <pre class="terminal-body" set:html={html} />
+</div>
+
+<style>
+  .terminal {
+    background: #111111;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 1rem 0;
+    font-family: var(--sl-font-mono, 'JetBrains Mono', monospace);
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px;
+    background: #1a1a1a;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .terminal-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+  .terminal-title {
+    margin-left: 8px;
+    color: #a1a1aa;
+    font-size: 0.8rem;
+  }
+  .terminal-body {
+    padding: 16px 20px;
+    margin: 0;
+    color: #d4d4d8;
+    overflow-x: auto;
+    white-space: pre;
+    background: transparent;
+    border: none;
+  }
+  .terminal-body :global(.t-g) { color: #4ade80; }
+  .terminal-body :global(.t-r) { color: #f87171; }
+  .terminal-body :global(.t-y) { color: #fbbf24; }
+  .terminal-body :global(.t-c) { color: #22d3ee; }
+  .terminal-body :global(.t-b) { font-weight: 700; color: #f4f4f5; }
+  .terminal-body :global(.t-d) { color: #71717a; }
+  .terminal-body :global(.t-u) { text-decoration: underline; }
+</style>

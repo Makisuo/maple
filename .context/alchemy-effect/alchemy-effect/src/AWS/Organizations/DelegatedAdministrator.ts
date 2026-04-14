@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { collectPages, retryOrganizations } from "./common.ts";
 
 export interface DelegatedAdministratorProps {
@@ -26,7 +27,9 @@ export interface DelegatedAdministrator extends Resource<
     accountEmail: organizations.DelegatedAdministrator["Email"] | undefined;
     servicePrincipal: string;
     delegationEnabledDate: Date | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

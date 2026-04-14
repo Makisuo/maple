@@ -1,8 +1,10 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import type * as Stream from "effect/Stream";
 import type { Artifacts } from "./Artifacts.ts";
+import type { Policy } from "./Binding.ts";
 import type { ScopedPlanStatusSession } from "./Cli/index.ts";
 import type { Diff } from "./Diff.ts";
 import type { Input } from "./Input.ts";
@@ -27,16 +29,19 @@ export interface Provider<R extends ResourceLike = ResourceLike> {
     TailReq = never,
     LogsReq = never,
   >(
-    service: ProviderService<
-      R,
-      ReadReq,
-      DiffReq,
-      PrecreateReq,
-      CreateReq,
-      UpdateReq,
-      DeleteReq,
-      TailReq,
-      LogsReq
+    service: Omit<
+      ProviderService<
+        R,
+        ReadReq,
+        DiffReq,
+        PrecreateReq,
+        CreateReq,
+        UpdateReq,
+        DeleteReq,
+        TailReq,
+        LogsReq
+      >,
+      "Type"
     >,
   ) => ProviderService<
     R,
@@ -178,19 +183,6 @@ export interface ProviderService<
   }): Effect.Effect<void, any, DeleteReq>;
 }
 
-export const getProviderByType = Effect.fnUntraced(function* <
-  R extends ResourceLike,
->(resourceType: string) {
-  const context = yield* Effect.context<never>();
-  const provider: ProviderService<R> = context.mapUnsafe.get(resourceType);
-  if (!provider) {
-    return yield* Effect.die(
-      new Error(`Provider not found for ${resourceType}`),
-    );
-  }
-  return provider;
-});
-
 export const effect = <
   R extends ResourceLike,
   Req = never,
@@ -263,3 +255,133 @@ export const succeed = <
 > =>
   // @ts-expect-error
   Layer.succeed(Provider(cls.Type), service);
+
+export interface ProviderCollectionLike {
+  kind: "ProviderCollection";
+}
+
+export interface ProviderCollectionShape<Identifier extends string>
+  extends
+    Context.ServiceClass.Shape<Identifier, ProviderCollectionService>,
+    ProviderCollectionLike {}
+
+export interface ProviderCollection<Self, Identifier extends string>
+  extends
+    Context.Service<Self, ProviderCollectionService>,
+    ProviderCollectionLike {
+  readonly key: Identifier;
+  new (_: never): ProviderCollectionShape<Identifier>;
+}
+
+export const ProviderCollection =
+  <Self>() =>
+  <const ProviderId extends string>(id: ProviderId) =>
+    Context.Service<Self, ProviderCollectionService>()(
+      id,
+    ) as ProviderCollection<Self, ProviderId>;
+
+export interface ProviderCollectionService {
+  kind: "ProviderCollection";
+  get<Resource extends ResourceLike>(
+    service: string,
+  ): ProviderService<Resource> | undefined;
+}
+
+export const collection = <
+  R extends
+    | ResourceClass<any>
+    | Platform<any, any, any, any, any>
+    | Policy<any, any, any>,
+>(
+  resources: R[],
+): Effect.Effect<
+  ProviderCollectionService,
+  never,
+  R extends ResourceClass<infer R> | Platform<infer R, any, any, any, any>
+    ? Provider<R>
+    : R extends Policy<infer Self, infer _I, infer _S>
+      ? Self
+      : never
+> =>
+  Effect.gen(function* () {
+    const context = yield* Effect.context();
+
+    const providers = Object.fromEntries(
+      yield* Effect.all(
+        resources.map((resource) =>
+          "Provider" in resource
+            ? resource.Provider.asEffect().pipe(
+                Effect.map((provider) => [resource.Type, provider] as const),
+              )
+            : Effect.succeed([
+                resource.key,
+                context.mapUnsafe.get(resource.key),
+              ] as const),
+        ),
+        { concurrency: "unbounded" },
+      ),
+    );
+
+    return {
+      kind: "ProviderCollection" as const,
+      get: (service: string) => providers[service],
+    };
+  }) as any;
+
+const isProviderCollectionService = (
+  value: unknown,
+): value is ProviderCollectionService => {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "ProviderCollection"
+  );
+};
+
+export const findProviderByType: {
+  <R extends ResourceLike>(
+    resourceType: R["Type"],
+  ): Effect.Effect<ProviderService<R>>;
+  <P extends Policy<any, any, any>>(
+    policyType: P["key"],
+  ): Effect.Effect<Effect.Success<P>>;
+} = (type: string) =>
+  tryFindProviderByType(type).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.die(`Provider not found for ${type}`),
+        onSome: (provider) => Effect.succeed(provider),
+      }),
+    ),
+  );
+
+export const tryFindProviderByType: {
+  <R extends ResourceLike>(
+    resourceType: R["Type"],
+  ): Effect.Effect<Option.Option<ProviderService<R>>>;
+  <P extends Policy<any, any, any>>(
+    policyType: P["key"],
+  ): Effect.Effect<Option.Option<Effect.Success<P>>>;
+} = Effect.fnUntraced(function* <R extends ResourceLike>(
+  resourceType: R["Type"],
+) {
+  const Tag = Provider<R>(resourceType) as Context.Service<Provider<R>, any>;
+  const direct = yield* Effect.serviceOption(Tag);
+  if (Option.isSome(direct)) {
+    return direct;
+  }
+
+  const context = yield* Effect.context<never>();
+  for (const value of context.mapUnsafe.values()) {
+    if (isProviderCollectionService(value)) {
+      const provider = value.get(resourceType);
+      if (provider) {
+        return Option.some(provider);
+      }
+    }
+  }
+
+  console.log(context.mapUnsafe.keys());
+  return Option.none();
+}) as any;

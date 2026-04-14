@@ -4,6 +4,7 @@ import { isResolved } from "../../Diff.ts";
 import type { Input } from "../../Input.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export type SubscriptionArn = string;
 
@@ -42,7 +43,9 @@ export interface Subscription extends Resource<
     owner: string | undefined;
     pendingConfirmation: boolean;
     attributes: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

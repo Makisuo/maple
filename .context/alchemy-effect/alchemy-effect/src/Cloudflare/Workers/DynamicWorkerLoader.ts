@@ -70,16 +70,40 @@ export type DynamicWorkerLoader = {
 };
 
 /**
- * Declare a Dynamic Worker loader binding inside a Worker program.
+ * Load and run ephemeral Workers at runtime from inline JavaScript
+ * modules.
  *
- * At deploy time this registers a `worker_loader` binding on the parent
- * Worker. At runtime it exposes an Effect-wrapped interface for loading
- * and calling into dynamic workers.
+ * `DynamicWorkerLoader` registers a `worker_loader` binding on the
+ * parent Worker at deploy time. At runtime you call `.load()` with
+ * inline module source code and get back a fully typed Worker
+ * instance you can `fetch` or call RPC methods on. Each loaded
+ * Worker runs in its own isolate with full sandboxing.
  *
- * @example
+ * This is useful for evaluating user-provided code, running
+ * untrusted plugins, or dynamically generating Workers from
+ * templates.
+ *
+ * @resource
+ *
+ * @section Creating a Loader
+ * Yield `Cloudflare.DynamicWorkerLoader` in your Worker's init
+ * phase to register the binding. The string argument becomes the
+ * binding name on the deployed Worker.
+ *
+ * @example Registering a loader
  * ```typescript
- * const loader = yield* DynamicWorker("LOADER");
+ * // init
+ * const loader = yield* Cloudflare.DynamicWorkerLoader("Loader");
+ * ```
  *
+ * @section Loading a Worker
+ * Call `loader.load()` with a compatibility date, a main module
+ * name, and a map of module names to source code strings. The
+ * returned instance exposes `.fetch()` for HTTP and RPC methods
+ * for named entrypoints.
+ *
+ * @example Loading and calling a dynamic Worker
+ * ```typescript
  * const worker = loader.load({
  *   compatibilityDate: "2026-01-28",
  *   mainModule: "worker.js",
@@ -90,10 +114,45 @@ export type DynamicWorkerLoader = {
  *       }
  *     }`,
  *   },
- *   globalOutbound: null,
  * });
  *
- * const response = yield* worker.fetch(request);
+ * const response = yield* worker.fetch(
+ *   HttpClientRequest.get("https://worker/"),
+ * );
+ * ```
+ *
+ * @section Sandboxing
+ * Set `globalOutbound` to `null` to block all outbound network
+ * access from the dynamic Worker, or pass an RPC stub to intercept
+ * and proxy outbound requests.
+ *
+ * @example Blocking outbound access
+ * ```typescript
+ * const worker = loader.load({
+ *   compatibilityDate: "2026-01-28",
+ *   mainModule: "worker.js",
+ *   modules: {
+ *     "worker.js": `export default {
+ *       async fetch(req) {
+ *         // fetch() calls from here will fail
+ *         return new Response("sandboxed");
+ *       }
+ *     }`,
+ *   },
+ *   globalOutbound: null,
+ * });
+ * ```
+ *
+ * @section Named Entrypoints
+ * If the dynamic Worker exports named entrypoints, use
+ * `.getEntrypoint(name)` to get a typed stub for calling its
+ * methods.
+ *
+ * @example Calling a named entrypoint
+ * ```typescript
+ * const worker = loader.load({ ... });
+ * const api = worker.getEntrypoint<{ greet: (name: string) => Effect.Effect<string> }>("api");
+ * const greeting = yield* api.greet("world");
  * ```
  */
 export const DynamicWorkerLoader = Effect.fnUntraced(function* (name: string) {

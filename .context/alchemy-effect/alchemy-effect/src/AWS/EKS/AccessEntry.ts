@@ -4,6 +4,7 @@ import { isResolved } from "../../Diff.ts";
 import type { Input } from "../../Input.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags, hasAlchemyTags } from "../../Tags.ts";
 
 export interface AccessPolicyAssociation {
@@ -60,7 +61,9 @@ export interface AccessEntry extends Resource<
     type: string | undefined;
     accessPolicies: AccessPolicyAssociation[];
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

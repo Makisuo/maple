@@ -6,6 +6,7 @@ import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
 import { Account } from "../Account.ts";
+import type { Providers } from "../Providers.ts";
 
 export type Jurisdiction = "default" | "eu" | "fedramp";
 export type PrimaryLocationHint =
@@ -48,23 +49,44 @@ export type D1Database = Resource<
     jurisdiction: Jurisdiction;
     readReplication: { mode: "auto" | "disabled" } | undefined;
     accountId: string;
-  }
+  },
+  never,
+  Providers
 >;
 
 /**
  * A Cloudflare D1 serverless SQL database built on SQLite.
  *
+ * D1 is a serverless relational database that runs at the edge. Create a
+ * database as a resource, then bind it to a Worker to run SQL queries.
+ *
  * @section Creating a Database
- * @example Basic Database
+ * @example Basic database
  * ```typescript
- * const db = yield* Database("my-db", {});
+ * const db = yield* Cloudflare.D1Database("my-db");
  * ```
  *
- * @example Database with Location Hint
+ * @example Database with location hint
  * ```typescript
- * const db = yield* Database("my-db", {
+ * const db = yield* Cloudflare.D1Database("my-db", {
  *   primaryLocationHint: "wnam",
  * });
+ * ```
+ *
+ * @section Binding to a Worker
+ * @example Using D1 inside a Worker
+ * ```typescript
+ * const db = yield* Cloudflare.D1Connection.bind(MyDB);
+ *
+ * // Run a query
+ * const results = yield* db.prepare("SELECT * FROM users WHERE id = ?")
+ *   .bind(userId)
+ *   .all();
+ *
+ * // Execute a mutation
+ * yield* db.prepare("INSERT INTO users (id, name) VALUES (?, ?)")
+ *   .bind(newId, name)
+ *   .run();
  * ```
  */
 export const D1Database = Resource<D1Database>("Cloudflare.D1Database");

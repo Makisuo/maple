@@ -5,6 +5,7 @@ import * as Schedule from "effect/Schedule";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList, diffTags } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import { Account } from "../Account.ts";
@@ -61,7 +62,9 @@ export interface EgressOnlyInternetGateway extends Resource<
        */
       vpcId: VpcId;
     }>;
-  }
+  },
+  never,
+  Providers
 > {}
 export const EgressOnlyInternetGateway = Resource<EgressOnlyInternetGateway>(
   "AWS.EC2.EgressOnlyInternetGateway",

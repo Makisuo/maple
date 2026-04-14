@@ -40,7 +40,10 @@ export type ResourceConstructor<R extends ResourceLike, Req = never> = {
 export type ResourceClassWithMethods<
   R extends ResourceLike,
   Methods extends { [key: string]: any },
-> = ResourceConstructor<R, Provider<R>> &
+> = ResourceConstructor<
+  R,
+  R["Providers"] extends undefined ? Provider<R> : R["Providers"]
+> &
   Effect.Effect<ResourceConstructor<R>> & {
     Self: Self<R>;
     Provider: Provider<R>;
@@ -48,7 +51,7 @@ export type ResourceClassWithMethods<
 
 export type ResourceClass<R extends ResourceLike> = ResourceConstructor<
   R,
-  Provider<R>
+  R["Providers"] extends undefined ? Provider<R> : R["Providers"]
 > &
   Effect.Effect<ResourceConstructor<R>> & {
     Self: Self<R>;
@@ -67,6 +70,7 @@ export interface ResourceLike<
   Props extends object | undefined = any,
   Attributes extends object = object,
   Binding = any,
+  Providers = any,
 > {
   /**
    * Namespace containing this Resource.
@@ -97,6 +101,8 @@ export interface ResourceLike<
   Attributes: Attributes;
   /** @internal phantom */
   Binding: Binding;
+  /** @internal phantom */
+  Providers: Providers;
 }
 
 export const isResource = (value: any): value is ResourceLike => {
@@ -108,8 +114,9 @@ export type Resource<
   Props extends object | undefined = any,
   Attributes extends object = any,
   Binding = never,
+  Providers = undefined,
 > = Pipeable &
-  ResourceLike<Type, Props, Attributes, Binding> & {
+  ResourceLike<Type, Props, Attributes, Binding, Providers> & {
     bind(sid: string, binding: Input<Binding>): Effect.Effect<void>;
     bind(
       template: TemplateStringsArray,

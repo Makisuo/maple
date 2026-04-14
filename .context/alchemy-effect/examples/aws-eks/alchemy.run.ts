@@ -1,11 +1,11 @@
 import * as STS from "@distilled.cloud/aws/sts";
+import * as Alchemy from "alchemy-effect";
 import * as AWS from "alchemy-effect/AWS";
 import * as EC2 from "alchemy-effect/AWS/EC2";
 import * as EKS from "alchemy-effect/AWS/EKS";
 import { DefaultStageConfig } from "alchemy-effect/AWS/StageConfig";
 import * as Kubernetes from "alchemy-effect/Kubernetes";
 import * as Output from "alchemy-effect/Output";
-import * as Stack from "alchemy-effect/Stack";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -60,132 +60,86 @@ const resolveClusterAdminPrincipalArn = Effect.gen(function* () {
   return principalArn;
 });
 
-const stack = Effect.gen(function* () {
-  const tags = {
-    Example: "aws-eks",
-    Surface: "eks",
-    Mode: "auto",
-  };
+export default Alchemy.Stack(
+  "AwsEksExample",
+  {
+    providers: aws,
+  },
+  Effect.gen(function* () {
+    const tags = {
+      Example: "aws-eks",
+      Surface: "eks",
+      Mode: "auto",
+    };
 
-  const clusterAdminPrincipalArn = yield* resolveClusterAdminPrincipalArn;
+    const clusterAdminPrincipalArn = yield* resolveClusterAdminPrincipalArn;
 
-  const network = yield* EC2.Network("Network", {
-    cidrBlock: "10.42.0.0/16",
-    availabilityZones: 2,
-    nat: "single",
-    tags,
-  });
+    const network = yield* EC2.Network("Network", {
+      cidrBlock: "10.42.0.0/16",
+      availabilityZones: 2,
+      nat: "single",
+      tags,
+    });
 
-  const cluster = yield* EKS.AutoCluster("Cluster", {
-    clusterName,
-    network,
-    tags,
-  });
+    const cluster = yield* EKS.AutoCluster("Cluster", {
+      clusterName,
+      network,
+      tags,
+    });
 
-  const clusterAdmin = yield* EKS.AccessEntry("ClusterAdmin", {
-    clusterName: cluster.cluster.clusterName,
-    principalArn: clusterAdminPrincipalArn,
-    accessPolicies: [
-      {
-        policyArn:
-          "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy",
-        accessScope: {
-          type: "cluster",
-        },
-      },
-    ],
-    tags,
-  });
-
-  const metricsServer = yield* EKS.Addon("MetricsServer", {
-    clusterName: cluster.cluster.clusterName,
-    addonName: "metrics-server",
-    tags,
-  });
-
-  const snapshotController = yield* EKS.Addon("SnapshotController", {
-    clusterName: cluster.cluster.clusterName,
-    addonName: "snapshot-controller",
-    tags,
-  });
-
-  const demoNamespace = yield* Kubernetes.Namespace("DemoNamespace", {
-    cluster: cluster.cluster,
-    name: namespace,
-    labels: {
-      "app.kubernetes.io/part-of": "aws-eks-example",
-    },
-  });
-
-  const echoServer = yield* EKS.LoadBalancedWorkload("EchoServer", {
-    cluster: cluster.cluster,
-    namespace: demoNamespace,
-    name: "echo-server",
-    labels: {
-      "app.kubernetes.io/name": "echo-server",
-      "app.kubernetes.io/part-of": "aws-eks-example",
-    },
-    replicas: 2,
-    containers: [
-      {
-        name: "echo-server",
-        image: "registry.k8s.io/echoserver:1.10",
-        ports: [
-          {
-            containerPort: 8080,
-            name: "http",
-          },
-        ],
-        resources: {
-          requests: {
-            cpu: "50m",
-            memory: "64Mi",
-          },
-          limits: {
-            cpu: "250m",
-            memory: "128Mi",
+    const clusterAdmin = yield* EKS.AccessEntry("ClusterAdmin", {
+      clusterName: cluster.cluster.clusterName,
+      principalArn: clusterAdminPrincipalArn,
+      accessPolicies: [
+        {
+          policyArn:
+            "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy",
+          accessScope: {
+            type: "cluster",
           },
         },
-      },
-    ],
-    ports: [
-      {
-        name: "http",
-        port: 80,
-        targetPort: 8080,
-      },
-    ],
-  });
+      ],
+      tags,
+    });
 
-  const podIdentityWorkload = yield* EKS.PodIdentityWorkload(
-    "PodIdentityDemo",
-    {
+    const metricsServer = yield* EKS.Addon("MetricsServer", {
+      clusterName: cluster.cluster.clusterName,
+      addonName: "metrics-server",
+      tags,
+    });
+
+    const snapshotController = yield* EKS.Addon("SnapshotController", {
+      clusterName: cluster.cluster.clusterName,
+      addonName: "snapshot-controller",
+      tags,
+    });
+
+    const demoNamespace = yield* Kubernetes.Namespace("DemoNamespace", {
+      cluster: cluster.cluster,
+      name: namespace,
+      labels: {
+        "app.kubernetes.io/part-of": "aws-eks-example",
+      },
+    });
+
+    const echoServer = yield* EKS.LoadBalancedWorkload("EchoServer", {
       cluster: cluster.cluster,
       namespace: demoNamespace,
-      name: "pod-identity-demo",
-      serviceAccountName: serviceAccount,
-      tags,
-      serviceAccountLabels: {
-        "app.kubernetes.io/name": serviceAccount,
-        "app.kubernetes.io/part-of": "aws-eks-example",
-      },
+      name: "echo-server",
       labels: {
-        "app.kubernetes.io/name": "pod-identity-demo",
+        "app.kubernetes.io/name": "echo-server",
         "app.kubernetes.io/part-of": "aws-eks-example",
       },
+      replicas: 2,
       containers: [
         {
-          name: "aws-cli",
-          image: "public.ecr.aws/aws-cli/aws-cli:2.17.37",
-          command: ["/bin/sh", "-lc"],
-          args: [
-            [
-              "while true; do",
-              "  date;",
-              "  aws sts get-caller-identity;",
-              "  sleep 60;",
-              "done",
-            ].join(" "),
+          name: "echo-server",
+          image: "registry.k8s.io/echoserver:1.10",
+          ports: [
+            {
+              containerPort: 8080,
+              name: "http",
+            },
           ],
           resources: {
             requests: {
@@ -199,51 +153,101 @@ const stack = Effect.gen(function* () {
           },
         },
       ],
-    },
-  );
+      ports: [
+        {
+          name: "http",
+          port: 80,
+          targetPort: 8080,
+        },
+      ],
+    });
 
-  const clusterInfoJob = yield* Kubernetes.Job("ClusterInfoJob", {
-    cluster: cluster.cluster,
-    namespace: demoNamespace,
-    name: "cluster-info",
-    labels: {
-      "app.kubernetes.io/name": "cluster-info",
-      "app.kubernetes.io/part-of": "aws-eks-example",
-    },
-    containers: [
+    const podIdentityWorkload = yield* EKS.PodIdentityWorkload(
+      "PodIdentityDemo",
       {
-        name: "cluster-info",
-        image: "public.ecr.aws/docker/library/busybox:1.36",
-        command: ["/bin/sh", "-lc"],
-        args: [
-          [
-            'echo "demo workload is running on EKS Auto Mode";',
-            "nslookup echo-server.demo.svc.cluster.local || true;",
-          ].join(" "),
+        cluster: cluster.cluster,
+        namespace: demoNamespace,
+        name: "pod-identity-demo",
+        serviceAccountName: serviceAccount,
+        tags,
+        serviceAccountLabels: {
+          "app.kubernetes.io/name": serviceAccount,
+          "app.kubernetes.io/part-of": "aws-eks-example",
+        },
+        labels: {
+          "app.kubernetes.io/name": "pod-identity-demo",
+          "app.kubernetes.io/part-of": "aws-eks-example",
+        },
+        containers: [
+          {
+            name: "aws-cli",
+            image: "public.ecr.aws/aws-cli/aws-cli:2.17.37",
+            command: ["/bin/sh", "-lc"],
+            args: [
+              [
+                "while true; do",
+                "  date;",
+                "  aws sts get-caller-identity;",
+                "  sleep 60;",
+                "done",
+              ].join(" "),
+            ],
+            resources: {
+              requests: {
+                cpu: "50m",
+                memory: "64Mi",
+              },
+              limits: {
+                cpu: "250m",
+                memory: "128Mi",
+              },
+            },
+          },
         ],
       },
-    ],
-  });
+    );
 
-  return {
-    clusterName: cluster.cluster.clusterName,
-    clusterArn: cluster.cluster.clusterArn,
-    endpoint: cluster.cluster.endpoint,
-    adminPrincipalArn: clusterAdmin.principalArn,
-    namespace: demoNamespace.name,
-    serviceAccount: podIdentityWorkload.serviceAccount.name,
-    podIdentityAssociationArn:
-      podIdentityWorkload.podIdentityAssociation.associationArn,
-    workloadRoleArn: podIdentityWorkload.roleArn,
-    metricsServerAddonArn: metricsServer.addonArn,
-    snapshotControllerAddonArn: snapshotController.addonArn,
-    echoDeploymentName: echoServer.deployment.name,
-    echoServiceName: echoServer.service?.name,
-    podIdentityDeploymentName: podIdentityWorkload.deployment.name,
-    clusterInfoJobName: clusterInfoJob.name,
-    accessSummary: Output.interpolate`Granted cluster-admin access on ${cluster.cluster.clusterName} to ${clusterAdmin.principalArn}.`,
-    workloadSummary: Output.interpolate`Demo workloads are declared in TypeScript and reconciled into namespace ${demoNamespace.name} on ${cluster.cluster.clusterName}.`,
-  };
-}).pipe(Stack.make("AwsEksExample", aws) as any);
+    const clusterInfoJob = yield* Kubernetes.Job("ClusterInfoJob", {
+      cluster: cluster.cluster,
+      namespace: demoNamespace,
+      name: "cluster-info",
+      labels: {
+        "app.kubernetes.io/name": "cluster-info",
+        "app.kubernetes.io/part-of": "aws-eks-example",
+      },
+      containers: [
+        {
+          name: "cluster-info",
+          image: "public.ecr.aws/docker/library/busybox:1.36",
+          command: ["/bin/sh", "-lc"],
+          args: [
+            [
+              'echo "demo workload is running on EKS Auto Mode";',
+              "nslookup echo-server.demo.svc.cluster.local || true;",
+            ].join(" "),
+          ],
+        },
+      ],
+    });
 
-export default stack;
+    return {
+      clusterName: cluster.cluster.clusterName,
+      clusterArn: cluster.cluster.clusterArn,
+      endpoint: cluster.cluster.endpoint,
+      adminPrincipalArn: clusterAdmin.principalArn,
+      namespace: demoNamespace.name,
+      serviceAccount: podIdentityWorkload.serviceAccount.name,
+      podIdentityAssociationArn:
+        podIdentityWorkload.podIdentityAssociation.associationArn,
+      workloadRoleArn: podIdentityWorkload.roleArn,
+      metricsServerAddonArn: metricsServer.addonArn,
+      snapshotControllerAddonArn: snapshotController.addonArn,
+      echoDeploymentName: echoServer.deployment.name,
+      echoServiceName: echoServer.service?.name,
+      podIdentityDeploymentName: podIdentityWorkload.deployment.name,
+      clusterInfoJobName: clusterInfoJob.name,
+      accessSummary: Output.interpolate`Granted cluster-admin access on ${cluster.cluster.clusterName} to ${clusterAdmin.principalArn}.`,
+      workloadSummary: Output.interpolate`Demo workloads are declared in TypeScript and reconciled into namespace ${demoNamespace.name} on ${cluster.cluster.clusterName}.`,
+    };
+  }).pipe(Effect.orDie),
+);

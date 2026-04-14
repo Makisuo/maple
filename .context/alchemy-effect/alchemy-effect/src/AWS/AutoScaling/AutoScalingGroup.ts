@@ -6,6 +6,7 @@ import type { Input } from "../../Input.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags } from "../../Tags.ts";
 import type { SubnetId } from "../EC2/Subnet.ts";
 import type {
@@ -94,7 +95,9 @@ export interface AutoScalingGroup extends Resource<
     defaultCooldown?: number;
     terminationPolicies?: string[];
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

@@ -19,7 +19,7 @@
     "@alchemy.run/better-auth": "workspace:*",
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
-    "alchemy-effect": "workspace:*",
+    "alchemy": "workspace:*",
     "better-auth": "catalog:",
     "effect": "catalog:"
   }

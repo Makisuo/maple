@@ -19,7 +19,7 @@
   "dependencies": {
     "@distilled.cloud/cloudflare": "catalog:",
     "@effect/platform-node": "catalog:",
-    "alchemy-effect": "workspace:*",
+    "alchemy": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

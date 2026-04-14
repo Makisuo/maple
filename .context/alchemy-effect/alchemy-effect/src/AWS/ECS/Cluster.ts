@@ -5,6 +5,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags } from "../../Tags.ts";
 import { Account, type AccountID } from "../Account.ts";
 import type { RegionID } from "../Region.ts";
@@ -57,7 +58,9 @@ export interface Cluster extends Resource<
     defaultCapacityProviderStrategy: ecs.CapacityProviderStrategyItem[];
     serviceConnectDefaults?: ecs.ClusterServiceConnectDefaultsRequest;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

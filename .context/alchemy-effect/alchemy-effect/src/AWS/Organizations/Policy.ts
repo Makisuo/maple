@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { PolicyDocument } from "../IAM/Policy.ts";
 import {
   collectPages,
@@ -52,7 +53,9 @@ export interface Policy extends Resource<
     awsManaged: boolean | undefined;
     document: PolicyDocument;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

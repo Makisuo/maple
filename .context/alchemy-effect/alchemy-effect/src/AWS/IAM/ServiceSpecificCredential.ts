@@ -4,6 +4,7 @@ import * as Redacted from "effect/Redacted";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { toRedactedString } from "./common.ts";
 
 export interface ServiceSpecificCredentialProps {
@@ -40,7 +41,9 @@ export interface ServiceSpecificCredential extends Resource<
     serviceCredentialAlias: string | undefined;
     servicePassword: Redacted.Redacted<string> | undefined;
     serviceCredentialSecret: Redacted.Redacted<string> | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

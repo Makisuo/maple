@@ -5,6 +5,7 @@ import type { Input } from "../../Input.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { AutoScalingGroup as AutoScalingGroupResource } from "./AutoScalingGroup.ts";
 
 export type ScalingPolicyName = string;
@@ -56,7 +57,9 @@ export interface ScalingPolicy extends Resource<
     targetValue: number;
     predefinedMetricType: string;
     alarms: string[];
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

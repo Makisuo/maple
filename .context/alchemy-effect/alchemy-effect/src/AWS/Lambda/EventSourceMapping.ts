@@ -7,6 +7,7 @@ import * as Stream from "effect/Stream";
 import { deepEqual, isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags, hasTags } from "../../Tags.ts";
 import { Account } from "../Account.ts";
 
@@ -165,7 +166,9 @@ export interface EventSourceMapping extends Resource<
      * The current state of the event source mapping.
      */
     state: string;
-  }
+  },
+  never,
+  Providers
 > {}
 
 export const EventSourceMapping = Resource<EventSourceMapping>(

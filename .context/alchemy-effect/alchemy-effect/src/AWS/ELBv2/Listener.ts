@@ -4,6 +4,7 @@ import { isResolved } from "../../Diff.ts";
 import type { Input } from "../../Input.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { AccountID } from "../Account.ts";
 import type { RegionID } from "../Region.ts";
 import type { LoadBalancer, LoadBalancerArn } from "./LoadBalancer.ts";
@@ -30,7 +31,9 @@ export interface Listener extends Resource<
     targetGroupArn: TargetGroupArn;
     port: number;
     protocol: string;
-  }
+  },
+  never,
+  Providers
 > {}
 
 export const Listener = Resource<Listener>("AWS.ELBv2.Listener");

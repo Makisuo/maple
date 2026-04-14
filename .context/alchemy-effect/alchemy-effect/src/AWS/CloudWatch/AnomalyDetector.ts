@@ -5,6 +5,7 @@ import * as Schedule from "effect/Schedule";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   detectorIdentity,
   matchesDetectorIdentity,
@@ -26,7 +27,9 @@ export interface AnomalyDetector extends Resource<
   {
     detectorId: string;
     anomalyDetector: cloudwatch.AnomalyDetector;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

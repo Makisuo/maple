@@ -2,6 +2,7 @@ import * as organizations from "@distilled.cloud/aws/organizations";
 import * as Effect from "effect/Effect";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { retryOrganizations } from "./common.ts";
 
 export type OrganizationId = string;
@@ -29,7 +30,9 @@ export interface Organization extends Resource<
       | organizations.Organization["MasterAccountEmail"]
       | undefined;
     availablePolicyTypes: organizations.PolicyTypeSummary[];
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

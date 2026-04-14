@@ -1,4 +1,4 @@
-import * as Cloudflare from "alchemy-effect/Cloudflare";
+import * as Cloudflare from "@/Cloudflare";
 import * as Effect from "effect/Effect";
 import * as HttpBody from "effect/unstable/http/HttpBody";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";

@@ -23,6 +23,7 @@ import { Platform, type Main, type PlatformProps } from "../../Platform.ts";
 import type { LogLine, LogsInput } from "../../Provider.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource, type ResourceBinding } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import * as Serverless from "../../Serverless/index.ts";
 import { Stack } from "../../Stack.ts";
 import { createInternalTags, createTagsList, hasTags } from "../../Tags.ts";
@@ -103,7 +104,8 @@ export interface Function extends Resource<
   {
     env?: Record<string, any>;
     policyStatements?: PolicyStatement[];
-  }
+  },
+  Providers
 > {}
 
 export type FunctionServices = Credentials | Region;

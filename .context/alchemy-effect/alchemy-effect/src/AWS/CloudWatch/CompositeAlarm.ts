@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { Account } from "../Account.ts";
 import type { AlarmArn } from "./Alarm.ts";
 import {
@@ -40,7 +41,9 @@ export interface CompositeAlarm extends Resource<
     stateReason: string | undefined;
     compositeAlarm: cloudwatch.CompositeAlarm;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

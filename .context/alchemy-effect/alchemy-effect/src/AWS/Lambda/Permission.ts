@@ -5,6 +5,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export type { FunctionUrlAuthType } from "@distilled.cloud/aws/lambda";
 
@@ -72,7 +73,9 @@ export interface Permission extends Resource<
     statementId: string;
     /** The function name or ARN the permission is attached to. */
     functionName: string;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

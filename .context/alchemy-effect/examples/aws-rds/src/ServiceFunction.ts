@@ -1,4 +1,4 @@
-import { AWS } from "alchemy-effect";
+import * as AWS from "alchemy-effect/AWS";
 import { Stack } from "alchemy-effect/Stack";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

@@ -1,0 +1,130 @@
+---
+title: Vite
+description: Deploy Vite-based SSR frameworks (TanStack Start, SolidStart, Nuxt, etc.) to Cloudflare.
+sidebar:
+  order: 3
+---
+
+import { Steps } from "@astrojs/starlight/components";
+import Terminal from "../../../components/Terminal.astro";
+
+export const deployOutput = `[u]Plan[/u]: [g]1 to create[/g]
+
+[g]+[/g] [b]App[/b] [d](Cloudflare.Worker)[/d]
+
+Proceed?
+◉ Yes ○ No
+[g]✓[/g] [b]App[/b] [d](Cloudflare.Worker)[/d] [g]created[/g]
+[s2][d]• vite build ...[/d]
+[s2][d]• Uploading worker (85.30 KB) ...[/d]
+[s2][d]• Enabling workers.dev subdomain...[/d]
+{
+[s2]url: "https://myapp-app-dev-you-abc123.workers.dev",
+}`;
+
+This guide walks you through deploying a Vite-based project to
+Cloudflare — whether it's a static site, an SSR framework, or a
+single-page application.
+
+<Steps>
+
+1. **Set up your Vite project**
+
+   Create a project with your framework of choice (TanStack Start,
+   SolidStart, Nuxt, vanilla Vite, etc.).
+
+   :::tip
+   You don't need to install or configure the Cloudflare Vite plugin
+   yourself. Alchemy automatically injects the plugin at build time
+   so your `vite.config.ts` stays framework-standard — no Cloudflare-
+   specific config needed.
+   :::
+
+2. **Create the Stack**
+
+   Create an `alchemy.run.ts` with `Cloudflare.Vite`. No build
+   command, output directory, or Wrangler config needed — Alchemy
+   handles it all via the Vite plugin.
+
+   ```typescript twoslash
+   // alchemy.run.ts
+   import * as Alchemy from "alchemy-effect";
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+
+   export default Alchemy.Stack(
+     "MyApp",
+     { providers: Cloudflare.providers() },
+     Effect.gen(function* () {
+       const app = yield* Cloudflare.Vite("App", {
+         //    ^?
+         compatibility: { flags: ["nodejs_compat"] },
+       });
+       return { url: app.url };
+     }),
+   );
+   ```
+
+   Most SSR frameworks need `nodejs_compat` for Node.js API access.
+   Pure static sites can omit it.
+
+3. **Configure framework-specific options (optional)**
+
+   SolidStart benefits from `runWorkerFirst` so the server handles
+   routing before falling back to static assets:
+
+   ```typescript
+   yield *
+     Cloudflare.Vite("SolidStart", {
+       compatibility: { flags: ["nodejs_compat"] },
+       assets: {
+         config: { runWorkerFirst: true },
+       },
+     });
+   ```
+
+   For SPAs (Vue, React, etc.), configure client-side routing:
+
+   ```typescript
+   yield *
+     Cloudflare.Vite("Vue", {
+       compatibility: { flags: ["nodejs_compat"] },
+       assets: {
+         config: {
+           htmlHandling: "auto-trailing-slash",
+           notFoundHandling: "single-page-application",
+         },
+       },
+     });
+   ```
+
+4. **Configure memoization (optional)**
+
+   Alchemy content-hashes your input files to decide whether
+   `vite build` needs to re-run. By default it hashes every
+   non-gitignored file plus the nearest lockfile.
+
+   For large projects, narrow the scope with `memo.include` so only
+   relevant files trigger rebuilds:
+
+   ```typescript
+   yield *
+     Cloudflare.Vite("Docs", {
+       memo: {
+         include: ["src/**", "content/**", "package.json"],
+       },
+     });
+   ```
+
+   Set `lockfile: false` if your build output doesn't depend on
+   installed packages.
+
+5. **Deploy**
+
+   ```sh
+   alchemy deploy
+   ```
+
+   <Terminal content={deployOutput} />
+
+</Steps>

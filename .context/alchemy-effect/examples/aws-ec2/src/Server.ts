@@ -1,4 +1,4 @@
-import { AWS } from "alchemy-effect";
+import * as AWS from "alchemy-effect/AWS";
 import { SQSQueueEventSource } from "alchemy-effect/Server/SQSQueueEventSource";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

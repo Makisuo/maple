@@ -6,6 +6,7 @@ import type { Input } from "../../Input.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   createInternalTags,
   diffTags,
@@ -46,7 +47,9 @@ export interface StreamConsumer extends Resource<
     streamArn: StreamArn;
     consumerCreationTimestamp: Date;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

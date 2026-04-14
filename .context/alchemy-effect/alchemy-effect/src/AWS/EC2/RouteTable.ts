@@ -8,6 +8,7 @@ import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import { Account } from "../Account.ts";
@@ -166,7 +167,9 @@ export interface RouteTable extends Resource<
     propagatingVgws?: Array<{
       gatewayId: string;
     }>;
-  }
+  },
+  never,
+  Providers
 > {}
 export const RouteTable = Resource<RouteTable>("AWS.EC2.RouteTable");
 

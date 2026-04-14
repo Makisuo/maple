@@ -1,0 +1,173 @@
+---
+title: Testing
+description: Write integration tests for deployed stacks using Effect's HttpClient and alchemy-effect's test harness.
+sidebar:
+  order: 7
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+This guide shows how to write integration tests that deploy your stack,
+make HTTP requests against your live Worker, and tear everything down
+when finished.
+
+<Steps>
+
+1. **Define the Worker under test**
+
+   Create a Worker with an R2 bucket binding and two routes — `PUT`
+   to store an object and `GET` to retrieve it.
+
+   ```typescript
+   // src/Bucket.ts
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+
+   export const Bucket = Cloudflare.R2Bucket("Bucket");
+   ```
+
+   ```typescript
+   // src/Api.ts
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+   import * as Layer from "effect/Layer";
+   import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+   import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+   import { Bucket } from "./Bucket.ts";
+
+   export default class Api extends Cloudflare.Worker<Api>()(
+     "Api",
+     { main: import.meta.path },
+     Effect.gen(function* () {
+       const bucket = yield* Cloudflare.R2Bucket.bind(Bucket);
+
+       return {
+         fetch: Effect.gen(function* () {
+           const request = yield* HttpServerRequest;
+           const key = request.url.slice(1); // strip leading "/"
+
+           if (request.method === "PUT") {
+             yield* bucket.put(key, yield* request.text);
+             return HttpServerResponse.empty({ status: 201 });
+           }
+           const obj = yield* bucket.get(key);
+           if (!obj) return HttpServerResponse.empty({ status: 404 });
+           return HttpServerResponse.text(yield* obj.text());
+         }),
+       };
+     }).pipe(Effect.provide(Layer.mergeAll(Cloudflare.R2BucketBindingLive))),
+   ) {}
+   ```
+
+2. **Create the Stack**
+
+   Wire the Worker into your `alchemy.run.ts` and expose its URL as a
+   stack output.
+
+   ```typescript
+   // alchemy.run.ts
+   import * as Alchemy from "alchemy-effect";
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+   import Api from "./src/Api.ts";
+
+   export default Alchemy.Stack(
+     "MyApp",
+     { providers: Cloudflare.providers() },
+     Effect.gen(function* () {
+       const api = yield* Api;
+       return { url: api.url };
+     }),
+   );
+   ```
+
+3. **Set up deploy and destroy lifecycle**
+
+   Import the test utilities from `alchemy-effect/Test/Bun`. These wrap
+   `bun:test` hooks so your Effects run automatically with all required
+   platform layers, state management, and config.
+
+   ```typescript
+   import {
+     afterAll,
+     beforeAll,
+     deploy,
+     destroy,
+     expect,
+     test,
+   } from "alchemy-effect/Test/Bun";
+   import Stack from "../alchemy.run.ts";
+
+   const stack = beforeAll(deploy(Stack));
+   afterAll.skipIf(!process.env.CI)(destroy(Stack));
+   ```
+
+   Three things are happening here:
+   - `deploy(Stack)` returns an Effect that plans and applies the stack,
+     resolving to its outputs.
+   - `beforeAll(effect)` runs that Effect once before all tests, stores
+     the result, and returns `Effect.sync(() => result)` — a lazy
+     accessor you `yield*` inside each test to get the stack outputs.
+   - `afterAll.skipIf(!process.env.CI)` skips the destroy when running
+     locally so you can iterate quickly against an already-deployed
+     stack. On CI, the destroy always runs.
+
+4. **Write tests with HttpClient**
+
+   Each `test(name, effect)` wraps `bun.test` and provides an Effect
+   context with `HttpClient` available. Use `HttpClient.get` and
+   `HttpClient.post` directly — no need to resolve a service first.
+
+   ```typescript
+   // test/integ.test.ts
+   import {
+     afterAll,
+     beforeAll,
+     deploy,
+     destroy,
+     expect,
+     test,
+   } from "alchemy-effect/Test/Bun";
+   import * as Effect from "effect/Effect";
+   import * as HttpClient from "effect/unstable/http/HttpClient";
+   import * as HttpBody from "effect/unstable/http/HttpBody";
+   import Stack from "../alchemy.run.ts";
+
+   const stack = beforeAll(deploy(Stack));
+   afterAll.skipIf(!process.env.CI)(destroy(Stack));
+
+   test(
+     "PUT and GET round-trip an object",
+     Effect.gen(function* () {
+       const { url } = yield* stack;
+
+       const put = yield* HttpClient.put(`${url}/hello.txt`, {
+         body: HttpBody.text("Hello, World!"),
+       });
+       expect(put.status).toBe(201);
+
+       const get = yield* HttpClient.get(`${url}/hello.txt`);
+       expect(yield* get.text).toBe("Hello, World!");
+     }),
+   );
+
+   test(
+     "GET missing key returns 404",
+     Effect.gen(function* () {
+       const { url } = yield* stack;
+       const response = yield* HttpClient.get(`${url}/no-such-key`);
+       expect(response.status).toBe(404);
+     }),
+   );
+   ```
+
+5. **Run the tests**
+
+   ```sh
+   bun test test/integ.test.ts
+   ```
+
+   On CI, set `CI=true` so `afterAll` tears down the stack. Locally,
+   the destroy is skipped so you can re-run tests against the
+   already-deployed stack for fast iteration.
+
+</Steps>

@@ -1,6 +1,6 @@
 {
   "name": "@alchemy.run/better-auth",
-  "version": "0.11.0",
+  "version": "2.0.0-beta.3",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
@@ -12,7 +12,7 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -b"
+    "build": "bun pm pack"
   },
   "exports": {
     ".": {
@@ -22,7 +22,7 @@
     }
   },
   "dependencies": {
-    "alchemy-effect": "workspace:*",
+    "alchemy": "workspace:*",
     "better-auth": "catalog:",
     "effect": "catalog:"
   },

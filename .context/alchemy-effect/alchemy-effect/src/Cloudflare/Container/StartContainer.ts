@@ -6,7 +6,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { type Fetcher } from "../Fetcher.ts";
-import { DurableObjectState } from "../Workers/DurableObject.ts";
+import { DurableObjectState } from "../Workers/DurableObjectNamespace.ts";
 import { type Container, ContainerError } from "./Container.ts";
 
 /**

@@ -5,6 +5,7 @@ import * as Schedule from "effect/Schedule";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export interface InvalidationProps {
   /**
@@ -38,7 +39,9 @@ export interface Invalidation extends Resource<
     status: string;
     paths: string[];
     createTime: Date | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

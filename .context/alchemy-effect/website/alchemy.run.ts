@@ -8,28 +8,16 @@ export default Alchemy.Stack(
     providers: Cloudflare.providers(),
   },
   Effect.gen(function* () {
-    const Website = yield* Cloudflare.StaticSite("Website", {
-      main: "./src/worker.ts",
-      command: "bun run build",
-      dev: {
-        command: "bun run dev:site",
-      },
-      outdir: "./public",
+    const Website = yield* Cloudflare.Vite("Website", {
       memo: {
         include: [
-          "./config.toml",
-          "./content/**",
-          "./src/**",
-          "./static/**",
-          "./templates/**",
-          "./package.json",
+          "src/**",
+          "astro.config.mjs",
+          "package.json",
           "../scripts/generate-api-reference.ts",
           "../alchemy-effect/src/**",
           "../bun.lock",
         ],
-      },
-      assetsConfig: {
-        runWorkerFirst: true,
       },
       compatibility: {
         date: "2026-04-02",
@@ -38,7 +26,7 @@ export default Alchemy.Stack(
     });
 
     return {
-      urk: Website.url,
+      url: Website.url,
     };
   }),
 );

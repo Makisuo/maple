@@ -1,3 +1,7 @@
-/public
-/static
-/content/reference
+.wrangler
+.astro
+node_modules
+.DS_Store
+static/
+public/
+src/content/docs/providers/

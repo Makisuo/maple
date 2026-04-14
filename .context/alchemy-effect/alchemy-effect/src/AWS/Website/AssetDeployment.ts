@@ -7,6 +7,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { WebsiteTextEncoding } from "./shared.ts";
 
 export interface AssetFileOption {
@@ -67,7 +68,9 @@ export interface AssetDeployment extends Resource<
     prefix: string;
     version: string;
     fileCount: number;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

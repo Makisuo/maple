@@ -1,0 +1,46 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+:root {
+  --sl-font: "Inter", sans-serif;
+  --sl-font-mono: "JetBrains Mono", monospace;
+  --sl-font-headings: "Inter", sans-serif;
+}
+
+[data-theme="dark"] {
+  --sl-color-text-invert: black;
+  --sl-color-text-accent: white;
+  --sl-color-accent: #00e599;
+  --sl-color-accent-high: #00e599;
+  --sl-color-accent-low: color-mix(in srgb, #00e599 40%, transparent);
+  --sl-color-accent-light: color-mix(in srgb, #00e599 60%, transparent);
+
+  --sl-color-bg-nav: #111111;
+  --sl-color-bg-sidebar: #111111;
+  --sl-color-bg: #0a0a0a;
+  --sl-color-black: #0a0a0a;
+  --sl-color-gray-1: #f4f4f5;
+  --sl-color-gray-2: #d4d4d8;
+  --sl-color-gray-3: #a1a1aa;
+  --sl-color-gray-4: #71717a;
+  --sl-color-gray-5: #27272a;
+  --sl-color-gray-6: #18181b;
+  --sl-color-gray-7: #111111;
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.06);
+  --sl-color-hairline: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="light"] {
+  --sl-color-text-invert: white;
+  --sl-color-text-accent: black;
+  --sl-color-accent: #059669;
+  --sl-color-accent-high: #059669;
+  --sl-color-accent-low: color-mix(in srgb, #059669 20%, transparent);
+  --sl-color-accent-light: color-mix(in srgb, #059669 40%, white);
+}
+
+.text-gradient {
+  background: linear-gradient(to right, white, #00e599);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

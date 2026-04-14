@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { NetworkAclId } from "./NetworkAcl.ts";
 
 export interface NetworkAclEntryProps {
@@ -90,7 +91,9 @@ export interface NetworkAclEntry extends Resource<
       from?: number;
       to?: number;
     };
-  }
+  },
+  never,
+  Providers
 > {}
 export const NetworkAclEntry = Resource<NetworkAclEntry>(
   "AWS.EC2.NetworkAclEntry",

@@ -7,6 +7,7 @@ import type { Input } from "../../Input.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags, hasAlchemyTags } from "../../Tags.ts";
 
 export interface AddonProps {
@@ -69,7 +70,9 @@ export interface Addon extends Resource<
     owner: string | undefined;
     tags: Record<string, string>;
     healthIssues: eks.AddonIssue[];
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

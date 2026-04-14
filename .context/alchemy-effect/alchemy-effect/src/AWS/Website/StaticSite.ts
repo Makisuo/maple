@@ -171,17 +171,13 @@ export const StaticSite = Construct.fn(function* (
       : { paths: "all" as const, wait: false };
 
   if (props.router && props.domain) {
-    return yield* Effect.fail(
-      new Error(
-        `Cannot provide both "domain" and "router". Use the "domain" prop on the Router component.`,
-      ),
+    return yield* Effect.die(
+      `Cannot provide both "domain" and "router". Use the "domain" prop on the Router component.`,
     );
   }
   if (props.router && props.edge) {
-    return yield* Effect.fail(
-      new Error(
-        `Cannot provide both "edge" and "router". Use the "edge" prop on the Router component.`,
-      ),
+    return yield* Effect.die(
+      `Cannot provide both "edge" and "router". Use the "edge" prop on the Router component.`,
     );
   }
 
@@ -277,10 +273,8 @@ export const StaticSite = Construct.fn(function* (
       !domain.hostedZoneId &&
       domain.dns === false
     ) {
-      return yield* Effect.fail(
-        new Error(
-          "StaticSite domain configuration with `dns: false` requires `cert`.",
-        ),
+      return yield* Effect.die(
+        "StaticSite domain configuration with `dns: false` requires `cert`.",
       );
     }
 

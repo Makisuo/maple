@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   collectPages,
   createName,
@@ -39,7 +40,9 @@ export interface OrganizationalUnit extends Resource<
     name: string;
     parentId: string | undefined;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

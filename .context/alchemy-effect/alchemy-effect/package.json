@@ -1,6 +1,6 @@
 {
-  "name": "alchemy-effect",
-  "version": "0.11.0",
+  "name": "alchemy",
+  "version": "2.0.0-beta.3",
   "homepage": "https://alchemy.run",
   "license": "Apache-2.0",
   "author": "Sam Goodwin <sam@alchemy.run>",
@@ -20,6 +20,14 @@
   ],
   "type": "module",
   "sideEffects": false,
+  "scripts": {
+    "dev": "tsdown --watch",
+    "build": "bun bundle && bun pm pack",
+    "bundle": "tsdown",
+    "bundle:watch": "tsdown --watch",
+    "publish:npm": "cp ../README.md . && bun publish && rm README.md",
+    "test:benchmark": "tsx --tsconfig tsconfig.test.json test/types.benchmark.ts"
+  },
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
@@ -123,6 +131,12 @@
       "worker": "./src/Cloudflare/*/index.ts",
       "import": "./lib/Cloudflare/*/index.js"
     },
+    "./GitHub": {
+      "types": "./src/GitHub/index.d.ts",
+      "bun": "./src/GitHub/index.ts",
+      "worker": "./src/GitHub/index.ts",
+      "import": "./lib/GitHub/index.js"
+    },
     "./Endpoint": {
       "types": "./src/Endpoint/index.d.ts",
       "bun": "./src/Endpoint/index.ts",
@@ -187,14 +201,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "dev": "tsdown --watch",
-    "build": "bun bundle && bun pm pack",
-    "bundle": "tsdown",
-    "bundle:watch": "tsdown --watch",
-    "publish:npm": "cp ../README.md . && bun publish && rm README.md",
-    "test:benchmark": "tsx --tsconfig tsconfig.test.json test/types.benchmark.ts"
-  },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.31",
     "@ai-sdk/openai": "^3.0.23",
@@ -207,10 +213,12 @@
     "@distilled.cloud/core": "catalog:",
     "@effect/vitest": "catalog:",
     "@libsql/client": "catalog:",
+    "@octokit/rest": "^22.0.1",
     "@smithy/node-config-provider": "catalog:",
     "@smithy/shared-ini-file-loader": "catalog:",
     "@smithy/types": "catalog:",
     "@types/aws-lambda": "catalog:",
+    "@types/libsodium-wrappers": "^0.8.2",
     "ai": "catalog:",
     "aws4fetch": "catalog:",
     "capnp-es": "catalog:",
@@ -219,6 +227,7 @@
     "fast-xml-parser": "catalog:",
     "ignore": "^7.0.5",
     "jszip": "^3.10.1",
+    "libsodium-wrappers": "^0.8.3",
     "rolldown": "catalog:",
     "solid-js": "catalog:",
     "sonda": "catalog:",

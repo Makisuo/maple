@@ -13,7 +13,7 @@ import {
 } from "./ExecutionContext.ts";
 import type { HttpEffect } from "./Http.ts";
 import type { InputProps } from "./Input.ts";
-import type { Provider } from "./Provider.ts";
+import type { Provider, ProviderCollectionLike } from "./Provider.ts";
 import { Resource, type ResourceLike } from "./Resource.ts";
 import { Self } from "./Self.ts";
 import type { Stack, StackServices } from "./Stack.ts";
@@ -42,6 +42,7 @@ export type PlatformServices =
   | HttpClient
   | PolicyLike
   | Provider<any>
+  | ProviderCollectionLike
   | Scope
   | Stack
   | StackServices
@@ -70,14 +71,14 @@ export interface Platform<
     ): Effect.Effect<
       Resource & Rpc<Self>,
       never,
-      Self | Provider<Resource> | PropsReq
+      Self | Resource["Providers"] | PropsReq
     > & {
       make<InitReq = never>(
         impl: Effect.Effect<Shape, never, InitReq>,
       ): Layer.Layer<
         Self,
         never,
-        | Provider<Resource>
+        | Resource["Providers"]
         | Exclude<PropsReq | InitReq, Services | PlatformServices>
       >;
       new (_: never): MakeShape<Shape, BaseShape>;
@@ -98,7 +99,7 @@ export interface Platform<
     ): Effect.Effect<
       Resource & Rpc<Self>,
       never,
-      | Provider<Resource>
+      | Resource["Providers"]
       | PropsReq
       | Exclude<InitReq, Services | PlatformServices>
     > & {
@@ -112,14 +113,14 @@ export interface Platform<
     ): Effect.Effect<
       Resource & Rpc<Self>,
       never,
-      Provider<Resource> | PropsReq
+      Resource["Providers"] | PropsReq
     > & {
       make<InitReq extends Services | PlatformServices = never>(
         impl: Effect.Effect<Shape, never, InitReq>,
       ): Layer.Layer<
         Self,
         never,
-        | Provider<Resource>
+        | Resource["Providers"]
         | Exclude<PropsReq | InitReq, Services | PlatformServices>
       >;
       new (_: never): MakeShape<Shape, BaseShape>;
@@ -128,7 +129,7 @@ export interface Platform<
       ) => Effect.Effect<
         Resource & Rpc<Self>,
         never,
-        | Provider<Resource>
+        | Resource["Providers"]
         | PropsReq
         | Exclude<InitReq, Services | PlatformServices>
       >);
@@ -141,7 +142,7 @@ export interface Platform<
   // ): Effect.Effect<
   //   Resource,
   //   never,
-  //   | Provider<Resource>
+  //   | Resource["Providers"]
   //   | PropsReq
   //   | Exclude<InitReq, Services | PlatformServices>
   // >;

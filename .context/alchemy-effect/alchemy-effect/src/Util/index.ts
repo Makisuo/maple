@@ -3,6 +3,7 @@ export * from "./base32.ts";
 export * from "./camel.ts";
 export * from "./class.ts";
 export * from "./data.ts";
+export * from "./dedent.ts";
 export * from "./instance.ts";
 export * from "./pointer.ts";
 export * from "./schema-to-type.ts";

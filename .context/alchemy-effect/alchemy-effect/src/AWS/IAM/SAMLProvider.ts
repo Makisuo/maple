@@ -4,6 +4,7 @@ import * as Redacted from "effect/Redacted";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { diffTags } from "../../Tags.ts";
 import { toTagRecord, unwrapRedactedString } from "./common.ts";
 
@@ -40,7 +41,9 @@ export interface SAMLProvider extends Resource<
     samlMetadataDocument: string | undefined;
     assertionEncryptionMode: iam.AssertionEncryptionModeType | undefined;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

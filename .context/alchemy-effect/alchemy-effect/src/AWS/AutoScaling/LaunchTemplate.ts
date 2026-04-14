@@ -12,6 +12,7 @@ import { createPhysicalName } from "../../PhysicalName.ts";
 import { Platform, type Main, type PlatformProps } from "../../Platform.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { Stack } from "../../Stack.ts";
 import { Stage } from "../../Stage.ts";
 import { createInternalTags, diffTags, hasTags } from "../../Tags.ts";
@@ -125,7 +126,8 @@ export interface LaunchTemplate extends Resource<
   {
     env?: Record<string, any>;
     policyStatements?: PolicyStatement[];
-  }
+  },
+  Providers
 > {}
 
 export type LaunchTemplateServices = Credentials | Region;

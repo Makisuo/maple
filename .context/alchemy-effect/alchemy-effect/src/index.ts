@@ -1,22 +1,23 @@
 export * as AdoptPolicy from "./AdoptPolicy.ts";
 export * from "./Apply.ts";
-export * as AWS from "./AWS/index.ts";
-export * as Binding from "./Binding.ts";
-export * as Build from "./Build/index.ts";
-export * as Bundle from "./Bundle/index.ts";
-export * as Cloudflare from "./Cloudflare/index.ts";
+export {
+  Service as BindingService,
+  Policy,
+  type ServiceLike as BindingServiceLike,
+  type ServiceShape as BindingServiceShape,
+  type PolicyLike,
+  type PolicyShape,
+} from "./Binding.ts";
 export * from "./Config.ts";
 export * from "./Destroy.ts";
 export * from "./Diff.ts";
-export * as Http from "./Http.ts";
 export * from "./Input.ts";
 export * from "./InstanceId.ts";
-export * as Kubernetes from "./Kubernetes/index.ts";
 export * from "./Namespace.ts";
-export * as Output from "./Output.ts";
+export type { Output } from "./Output.ts";
 export * from "./PhysicalName.ts";
 export * as Plan from "./Plan.ts";
-export * as Provider from "./Provider.ts";
+export { Provider, ProviderCollection } from "./Provider.ts";
 export * from "./Random.ts";
 export * from "./Ref.ts";
 export * as RemovalPolicy from "./RemovalPolicy.ts";
@@ -24,7 +25,7 @@ export * from "./Resource.ts";
 export * as Schema from "./Schema.ts";
 export * as Server from "./Server/index.ts";
 export * as Serverless from "./Serverless/index.ts";
-export * as Stack from "./Stack.ts";
+export { Stack } from "./Stack.ts";
 export * from "./Stage.ts";
 export * from "./Trait.ts";
 

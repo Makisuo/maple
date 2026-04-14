@@ -1,7 +1,7 @@
 {
   "diffEditor.renderSideBySide": false,
-  "js/ts.experimental.useTsgo": false,
-  "typescript.experimental.useTsgo": false,
+  "js/ts.experimental.useTsgo": true,
+  "typescript.experimental.useTsgo": true,
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "typescript.preferences.importModuleSpecifier": "relative",

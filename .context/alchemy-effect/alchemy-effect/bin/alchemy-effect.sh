@@ -6,9 +6,8 @@ if [ -n "$link" ]; then
 else
   dir="$(cd "$(dirname "$0")" && pwd)"
 fi
-script="$dir/alchemy-effect.js"
 if command -v bun >/dev/null 2>&1; then
-  exec bun "$script" "$@"
+  exec bun "$dir/alchemy-effect.ts" "$@"
 else
-  exec node "$script" "$@"
+  exec node "$dir/alchemy-effect.js" "$@"
 fi

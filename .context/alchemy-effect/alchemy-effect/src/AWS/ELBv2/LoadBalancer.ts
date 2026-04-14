@@ -5,6 +5,7 @@ import type { Input } from "../../Input.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import type { SecurityGroupId } from "../EC2/SecurityGroup.ts";
@@ -40,7 +41,9 @@ export interface LoadBalancer extends Resource<
     securityGroups: string[];
     subnets: string[];
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 export const LoadBalancer = Resource<LoadBalancer>("AWS.ELBv2.LoadBalancer");

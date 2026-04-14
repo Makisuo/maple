@@ -8,7 +8,7 @@ import {
 import {
   DurableObjectNamespace,
   DurableObjectState,
-} from "../Workers/DurableObject.ts";
+} from "../Workers/DurableObjectNamespace.ts";
 import { Worker } from "../Workers/Worker.ts";
 import type { Container } from "./Container.ts";
 import type { ContainerApplication } from "./ContainerApplication.ts";

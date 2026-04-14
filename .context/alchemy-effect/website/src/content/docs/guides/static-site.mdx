@@ -1,0 +1,122 @@
+---
+title: Static Site
+description: Deploy a static site built by a shell command (Hugo, Zola, Eleventy, etc.) to Cloudflare.
+sidebar:
+  order: 2
+---
+
+import { Steps } from "@astrojs/starlight/components";
+import Terminal from "../../../components/Terminal.astro";
+
+export const deployOutput = `[u]Plan[/u]: [g]1 to create[/g]
+
+[g]+[/g] [b]Blog[/b] [d](Cloudflare.Worker)[/d]
+
+Proceed?
+◉ Yes ○ No
+[g]✓[/g] [b]Blog[/b] [d](Cloudflare.Worker)[/d] [g]created[/g]
+[s2][d]• Running: zola build[/d]
+[s2][d]• Uploading assets (2.1 MB) ...[/d]
+{
+[s2]url: "https://myblog-blog-dev-you-abc123.workers.dev",
+}`;
+
+This guide walks you through deploying a static site that is built by a
+shell command — [Zola](https://www.getzola.org/), Hugo, Eleventy, or any
+tool that produces a directory of files.
+
+For Vite-based projects, see the [Vite guide](/guides/vite) instead.
+
+<Steps>
+
+1. **Set up your static site generator**
+
+   For this example we'll use [Zola](https://www.getzola.org/), a
+   Rust-based SSG. Initialize a project and verify it builds locally:
+
+   ```sh
+   zola init myblog
+   cd myblog
+   zola build
+   # output is written to public/
+   ```
+
+2. **Create the Stack**
+
+   Create an `alchemy.run.ts` that uses `Cloudflare.StaticSite`. Point
+   `command` at your build script and `outdir` at where it writes
+   output.
+
+   ```typescript twoslash
+   // @noErrors
+   // alchemy.run.ts
+   import * as Alchemy from "alchemy-effect";
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+
+   export default Alchemy.Stack(
+     "MyBlog",
+     { providers: Cloudflare.providers() },
+     Effect.gen(function* () {
+       const site = yield* Cloudflare.StaticSite("Blog", {
+       //    ^?
+         command: "zola build",
+         outdir: "public",
+       });
+       return { url: site.url };
+     }),
+   );
+   ```
+
+   The same pattern works for Hugo (`hugo --minify`), Eleventy
+   (`npx eleventy`), or any command that produces a directory.
+
+3. **Configure SPA routing (optional)**
+
+   For single-page applications, configure asset handling so all routes
+   fall back to `index.html`:
+
+   ```typescript
+   yield *
+     Cloudflare.StaticSite("App", {
+       command: "npm run build",
+       outdir: "dist",
+       assetsConfig: {
+         htmlHandling: "auto-trailing-slash",
+         notFoundHandling: "single-page-application",
+       },
+     });
+   ```
+
+4. **Configure memoization (optional)**
+
+   Alchemy content-hashes your input files to decide whether the build
+   needs to re-run. By default it hashes every non-gitignored file
+   plus the nearest lockfile.
+
+   For large projects, narrow the scope with `memo.include` so only
+   relevant files trigger rebuilds:
+
+   ```typescript
+   yield *
+     Cloudflare.StaticSite("Docs", {
+       command: "zola build",
+       outdir: "public",
+       memo: {
+         include: ["content/**", "templates/**", "config.toml"],
+       },
+     });
+   ```
+
+   Set `lockfile: false` if your build output doesn't depend on
+   installed packages.
+
+5. **Deploy**
+
+   ```sh
+   alchemy deploy
+   ```
+
+   <Terminal content={deployOutput} />
+
+</Steps>

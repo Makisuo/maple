@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { NetworkAclId } from "./NetworkAcl.ts";
 import type { SubnetId } from "./Subnet.ts";
 
@@ -33,7 +34,9 @@ export interface NetworkAclAssociation extends Resource<
     associationId: NetworkAclAssociationId;
     networkAclId: NetworkAclId;
     subnetId: SubnetId;
-  }
+  },
+  never,
+  Providers
 > {}
 export const NetworkAclAssociation = Resource<NetworkAclAssociation>(
   "AWS.EC2.NetworkAclAssociation",

@@ -6,6 +6,7 @@ import * as Schedule from "effect/Schedule";
 import { deepEqual, isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   createInternalTags,
   createTagsList,
@@ -96,7 +97,9 @@ export interface Certificate extends Resource<
      * Certificate expiration timestamp, when issued.
      */
     notAfter: Date | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**
@@ -126,51 +129,6 @@ export interface Certificate extends Resource<
  * ```
  */
 export const Certificate = Resource<Certificate>("AWS.ACM.Certificate");
-
-const ACM_REGION = "us-east-1" as const;
-const defaultValidationMethod = "DNS" as const;
-
-const withAcmRegion = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.provideService(AwsRegion, ACM_REGION as any));
-
-const normalizeHostedZoneId = (hostedZoneId: string) =>
-  hostedZoneId.replace(/^\/hostedzone\//, "");
-
-const normalizeSanList = (names: string[] | undefined) =>
-  [...(names ?? [])].sort((a, b) => a.localeCompare(b));
-
-const toTagRecord = (tags: acm.Tag[] | undefined) =>
-  Object.fromEntries(
-    (tags ?? [])
-      .filter(
-        (tag): tag is { Key: string; Value: string } =>
-          typeof tag.Key === "string" && typeof tag.Value === "string",
-      )
-      .map((tag) => [tag.Key, tag.Value]),
-  );
-
-const toAttrs = (
-  props: CertificateProps,
-  detail: acm.CertificateDetail,
-  tags: Record<string, string>,
-) => ({
-  certificateArn: detail.CertificateArn!,
-  domainName: detail.DomainName ?? props.domainName,
-  subjectAlternativeNames: detail.SubjectAlternativeNames ?? [],
-  status: detail.Status,
-  domainValidationOptions: detail.DomainValidationOptions ?? [],
-  validationMethod: props.validationMethod ?? defaultValidationMethod,
-  keyAlgorithm: detail.KeyAlgorithm ?? props.keyAlgorithm,
-  hostedZoneId: props.hostedZoneId
-    ? normalizeHostedZoneId(props.hostedZoneId)
-    : undefined,
-  tags,
-  issuedAt: detail.IssuedAt,
-  notAfter: detail.NotAfter,
-});
-
-const isTerminalFailure = (status: acm.CertificateStatus | undefined) =>
-  status === "FAILED" || status === "VALIDATION_TIMED_OUT";
 
 export const CertificateProvider = () =>
   Provider.effect(
@@ -502,3 +460,48 @@ export const CertificateProvider = () =>
       };
     }),
   );
+
+const ACM_REGION = "us-east-1" as const;
+const defaultValidationMethod = "DNS" as const;
+
+const withAcmRegion = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.provideService(AwsRegion, ACM_REGION as any));
+
+const normalizeHostedZoneId = (hostedZoneId: string) =>
+  hostedZoneId.replace(/^\/hostedzone\//, "");
+
+const normalizeSanList = (names: string[] | undefined) =>
+  [...(names ?? [])].sort((a, b) => a.localeCompare(b));
+
+const toTagRecord = (tags: acm.Tag[] | undefined) =>
+  Object.fromEntries(
+    (tags ?? [])
+      .filter(
+        (tag): tag is { Key: string; Value: string } =>
+          typeof tag.Key === "string" && typeof tag.Value === "string",
+      )
+      .map((tag) => [tag.Key, tag.Value]),
+  );
+
+const toAttrs = (
+  props: CertificateProps,
+  detail: acm.CertificateDetail,
+  tags: Record<string, string>,
+) => ({
+  certificateArn: detail.CertificateArn!,
+  domainName: detail.DomainName ?? props.domainName,
+  subjectAlternativeNames: detail.SubjectAlternativeNames ?? [],
+  status: detail.Status,
+  domainValidationOptions: detail.DomainValidationOptions ?? [],
+  validationMethod: props.validationMethod ?? defaultValidationMethod,
+  keyAlgorithm: detail.KeyAlgorithm ?? props.keyAlgorithm,
+  hostedZoneId: props.hostedZoneId
+    ? normalizeHostedZoneId(props.hostedZoneId)
+    : undefined,
+  tags,
+  issuedAt: detail.IssuedAt,
+  notAfter: detail.NotAfter,
+});
+
+const isTerminalFailure = (status: acm.CertificateStatus | undefined) =>
+  status === "FAILED" || status === "VALIDATION_TIMED_OUT";

@@ -8,6 +8,7 @@ import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
 import { isResolved, somePropsAreDifferent } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList, diffTags } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import { Account } from "../Account.ts";
@@ -158,7 +159,9 @@ export interface Vpc extends Resource<
     }>;
 
     tags?: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 export const Vpc = Resource<Vpc>("AWS.EC2.VPC");
 

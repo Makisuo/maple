@@ -1,0 +1,180 @@
+---
+title: Durable Object
+description: Build stateful, globally unique objects with RPC methods and WebSocket hibernation.
+sidebar:
+  order: 5
+---
+
+import { Steps } from "@astrojs/starlight/components";
+import Terminal from "../../../components/Terminal.astro";
+
+export const deployOutput = `[u]Plan[/u]: [g]1 to create[/g]
+
+[g]+[/g] [b]Api[/b] [d](Cloudflare.Worker)[/d] [c](1 bindings)[/c]
+[s2][g]+[/g] [c]Counter[/c]
+
+Proceed?
+◉ Yes ○ No
+[g]✓[/g] [b]Api[/b] [d](Cloudflare.Worker)[/d] [g]created[/g]
+[s2][d]• Uploading worker (14.20 KB) ...[/d]
+[s2][d]• Enabling workers.dev subdomain...[/d]
+{
+[s2]url: "https://myapp-api-dev-you-abc123.workers.dev",
+}`;
+
+This guide walks you through creating a Durable Object, exposing RPC
+methods, and using it from a Worker.
+
+:::note
+For the full API reference, see the [DurableObjectNamespace provider](/providers/cloudflare/durableobjectnamespace).
+For effect and layer patterns, see the [Platform concept](/concepts/platform).
+:::
+
+<Steps>
+
+1. **Define the Durable Object**
+
+   Create a class that extends `Cloudflare.DurableObjectNamespace`. The
+   outer `Effect.gen` resolves shared dependencies. The inner
+   `Effect.gen` runs once per instance and returns the object's RPC
+   methods.
+
+   ```typescript
+   // src/Counter.ts
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+
+   export default class Counter extends Cloudflare.DurableObjectNamespace<Counter>()(
+     "Counter",
+     Effect.gen(function* () {
+       return Effect.gen(function* () {
+         const state = yield* Cloudflare.DurableObjectState;
+         return {
+           increment: () =>
+             Effect.gen(function* () {
+               const count = (yield* state.storage.get<number>("count")) ?? 0;
+               yield* state.storage.put("count", count + 1);
+               return count + 1;
+             }),
+           get: () => state.storage.get<number>("count"),
+         };
+       });
+     }),
+   ) {}
+   ```
+
+2. **Use it from a Worker**
+
+   Yield the DO class in the Worker's init phase to get a namespace
+   handle. Call `getByName` to get a typed stub.
+
+   ```typescript
+   // src/Api.ts
+   import Counter from "./Counter.ts";
+
+   export default class Api extends Cloudflare.Worker<Api>()(
+     "Api",
+     { main: import.meta.path },
+     Effect.gen(function* () {
+       const counters = yield* Counter;
+
+       return {
+         fetch: Effect.gen(function* () {
+           const counter = counters.getByName("default");
+           const value = yield* counter.increment();
+           return HttpServerResponse.text(String(value));
+         }),
+       };
+     }),
+   ) {}
+   ```
+
+3. **Deploy the Stack**
+
+   Both the Worker and the Durable Object are deployed together.
+
+   ```typescript
+   // alchemy.run.ts
+   import Api from "./src/Api.ts";
+
+   export default Alchemy.Stack(
+     "MyApp",
+     { providers: Cloudflare.providers() },
+     Effect.gen(function* () {
+       const api = yield* Api;
+       return { url: api.url };
+     }),
+   );
+   ```
+
+4. **Deploy**
+
+   ```sh
+   alchemy deploy
+   ```
+
+   <Terminal content={deployOutput} />
+
+</Steps>
+
+## Adding WebSocket support
+
+Once your DO is deployed, you can add WebSocket hibernation support.
+Return a `fetch` handler that upgrades connections, and
+`webSocketMessage` / `webSocketClose` handlers for events.
+
+<Steps>
+
+1. **Accept connections**
+
+   ```typescript
+   return {
+     fetch: Effect.gen(function* () {
+       const [response, socket] = yield* Cloudflare.upgrade();
+       socket.serializeAttachment({ id: crypto.randomUUID() });
+       return response;
+     }),
+   };
+   ```
+
+2. **Handle events**
+
+   ```typescript
+   return {
+     webSocketMessage: Effect.fnUntraced(function* (
+       socket: Cloudflare.DurableWebSocket,
+       message: string | Uint8Array,
+     ) {
+       const text =
+         typeof message === "string"
+           ? message
+           : new TextDecoder().decode(message);
+       // process the message
+     }),
+     webSocketClose: Effect.fnUntraced(function* (
+       ws: Cloudflare.DurableWebSocket,
+       code: number,
+       reason: string,
+     ) {
+       yield* ws.close(code, reason);
+     }),
+   };
+   ```
+
+3. **Forward from the Worker**
+
+   In your Worker, forward the upgrade request to the DO:
+
+   ```typescript
+   const rooms = yield * Room;
+
+   return {
+     fetch: Effect.gen(function* () {
+       const request = yield* HttpServerRequest;
+       const room = rooms.getByName("lobby");
+       return yield* room.fetch(request);
+     }),
+   };
+   ```
+
+</Steps>

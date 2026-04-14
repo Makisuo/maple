@@ -4,6 +4,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   createInternalTags,
   createTagsList,
@@ -77,7 +78,9 @@ export interface Role extends Resource<
     maxSessionDuration: number | undefined;
     permissionsBoundary: string | undefined;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

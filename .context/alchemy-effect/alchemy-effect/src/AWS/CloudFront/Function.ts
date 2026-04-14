@@ -1,5 +1,4 @@
 import * as cloudfront from "@distilled.cloud/aws/cloudfront";
-import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
@@ -7,6 +6,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export interface FunctionProps {
   /**
@@ -72,7 +72,9 @@ export interface Function extends Resource<
      * Associated KeyValueStore ARNs.
      */
     keyValueStoreArns: string[];
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**
@@ -97,62 +99,6 @@ export interface Function extends Resource<
  * ```
  */
 export const Function = Resource<Function>("AWS.CloudFront.Function");
-
-class FunctionKeyValueStorePending extends Data.TaggedError(
-  "FunctionKeyValueStorePending",
-)<{
-  message: string;
-}> {}
-
-const isFunctionDeletePending = (error: {
-  _tag?: string;
-}): error is cloudfront.FunctionInUse | cloudfront.PreconditionFailed =>
-  error._tag === "FunctionInUse" || error._tag === "PreconditionFailed";
-
-const isKeyValueStoreAssociationPending = (error: { Message?: string }) => {
-  const message = error.Message ?? "";
-  return (
-    message.includes("KeyValueStoreAssociationArn") &&
-    message.includes("cannot be associated before the resource is provisioned")
-  );
-};
-
-const cappedCloudFrontRetrySchedule = Schedule.exponential("100 millis").pipe(
-  Schedule.both(Schedule.recurs(24)),
-  Schedule.map(([duration]) =>
-    Duration.isGreaterThan(duration, Duration.seconds(2))
-      ? Duration.seconds(2)
-      : duration,
-  ),
-);
-
-const retryForKvAssociationReadiness = (
-  operation: string,
-  effect: Effect.Effect<any, any, any>,
-) =>
-  effect.pipe(
-    Effect.catch((error) =>
-      (error as { _tag?: string })._tag === "InvalidArgument" &&
-      isKeyValueStoreAssociationPending(error as { Message?: string })
-        ? Effect.logInfo(
-            `CloudFront Function ${operation}: key value store association not yet ready, retrying`,
-          ).pipe(
-            Effect.andThen(
-              Effect.fail(
-                new FunctionKeyValueStorePending({
-                  message:
-                    "CloudFront function key value store association not yet ready",
-                }),
-              ),
-            ),
-          )
-        : Effect.fail(error),
-    ),
-    Effect.retry({
-      while: (error) => error._tag === "FunctionKeyValueStorePending",
-      schedule: cappedCloudFrontRetrySchedule,
-    }),
-  );
 
 export const FunctionProvider = () =>
   Provider.effect(
@@ -228,34 +174,39 @@ export const FunctionProvider = () =>
         }),
         create: Effect.fn(function* ({ id, news, session }) {
           const name = yield* createName(id, news);
-          const created = yield* retryForKvAssociationReadiness(
-            "create",
-            cloudfront
-              .createFunction({
-                Name: name,
-                FunctionConfig: {
-                  Comment: news.comment ?? "",
-                  Runtime: news.runtime ?? "cloudfront-js-2.0",
-                  KeyValueStoreAssociations: toKvAssociations(
-                    news.keyValueStoreArns,
-                  ),
-                },
-                FunctionCode: new TextEncoder().encode(news.code),
-              })
-              .pipe(
-                Effect.catchTag("FunctionAlreadyExists", () =>
-                  describe(name, "DEVELOPMENT").pipe(
-                    Effect.flatMap((existing) =>
-                      existing
-                        ? Effect.succeed(existing)
-                        : Effect.die(
-                            `CloudFront Function '${name}' already exists but could not be recovered`,
-                          ),
-                    ),
+          const created = yield* cloudfront
+            .createFunction({
+              Name: name,
+              FunctionConfig: {
+                Comment: news.comment ?? "",
+                Runtime: news.runtime ?? "cloudfront-js-2.0",
+                KeyValueStoreAssociations: toKvAssociations(
+                  news.keyValueStoreArns,
+                ),
+              },
+              FunctionCode: new TextEncoder().encode(news.code),
+            })
+            .pipe(
+              Effect.catchTag("FunctionAlreadyExists", () =>
+                describe(name, "DEVELOPMENT").pipe(
+                  Effect.flatMap((existing) =>
+                    existing
+                      ? Effect.succeed(existing)
+                      : Effect.die(
+                          `CloudFront Function '${name}' already exists but could not be recovered`,
+                        ),
                   ),
                 ),
               ),
-          );
+              Effect.retry({
+                while: (error) =>
+                  error._tag === "InvalidArgument" &&
+                  isKeyValueStoreAssociationPending(
+                    error as { Message?: string },
+                  ),
+                schedule: cappedCloudFrontRetrySchedule,
+              }),
+            );
 
           const live = yield* publish(name, created.ETag);
           if (!live?.FunctionSummary) {
@@ -268,9 +219,8 @@ export const FunctionProvider = () =>
           return toAttrs(live.FunctionSummary, live.ETag, name);
         }),
         update: Effect.fn(function* ({ news, output, session }) {
-          yield* retryForKvAssociationReadiness(
-            "update",
-            cloudfront.updateFunction({
+          yield* cloudfront
+            .updateFunction({
               Name: output.functionName,
               IfMatch: output.etag!,
               FunctionConfig: {
@@ -281,8 +231,17 @@ export const FunctionProvider = () =>
                 ),
               },
               FunctionCode: new TextEncoder().encode(news.code),
-            }),
-          );
+            })
+            .pipe(
+              Effect.retry({
+                while: (error) =>
+                  error._tag === "InvalidArgument" &&
+                  isKeyValueStoreAssociationPending(
+                    error as { Message?: string },
+                  ),
+                schedule: cappedCloudFrontRetrySchedule,
+              }),
+            );
 
           const developmentEtag = yield* getDevelopmentEtag(
             output.functionName,
@@ -336,6 +295,28 @@ export const FunctionProvider = () =>
       };
     }),
   );
+
+const isFunctionDeletePending = (error: {
+  _tag?: string;
+}): error is cloudfront.FunctionInUse | cloudfront.PreconditionFailed =>
+  error._tag === "FunctionInUse" || error._tag === "PreconditionFailed";
+
+const isKeyValueStoreAssociationPending = (error: { Message?: string }) => {
+  const message = error.Message ?? "";
+  return (
+    message.includes("KeyValueStoreAssociationArn") &&
+    message.includes("cannot be associated before the resource is provisioned")
+  );
+};
+
+const cappedCloudFrontRetrySchedule = Schedule.exponential("100 millis").pipe(
+  Schedule.both(Schedule.recurs(24)),
+  Schedule.map(([duration]) =>
+    Duration.isGreaterThan(duration, Duration.seconds(2))
+      ? Duration.seconds(2)
+      : duration,
+  ),
+);
 
 const createName = (id: string, props: FunctionProps) =>
   props.name
