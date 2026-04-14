@@ -45,11 +45,12 @@ import { Account } from "../Account.ts";
 import { D1Database } from "../D1/D1Database.ts";
 import { fromCloudflareFetcher } from "../Fetcher.ts";
 import { CloudflareLogs } from "../Logs.ts";
+import type { Providers } from "../Providers.ts";
 import type { R2Bucket } from "../R2/R2Bucket.ts";
 import type { AssetsConfig, AssetsProps } from "./Assets.ts";
 import * as Assets from "./Assets.ts";
 import cloudflare_workers from "./cloudflare_workers.ts";
-import { isDurableObjectExport } from "./DurableObject.ts";
+import { isDurableObjectExport } from "./DurableObjectNamespace.ts";
 import { workersHttpHandler } from "./HttpServer.ts";
 import { Request } from "./Request.ts";
 import { makeRpcStub } from "./Rpc.ts";
@@ -247,23 +248,329 @@ export type Worker<Bindings extends WorkerBindings = any> = Resource<
   {
     bindings?: WorkerBinding[];
     containers?: { className: string }[];
-  }
+  },
+  Providers
 >;
 
 /**
  * A Cloudflare Worker host with deploy-time binding support and runtime export
  * collection.
  *
- * `Worker` behaves like a resource during deploy, but it also carries a runtime
- * execution context so KV, R2, Durable Objects, assets, and service bindings
- * can be inferred from the worker program itself.
+ * A Worker follows a two-phase pattern. The outer `Effect.gen` runs at
+ * deploy time to bind resources (KV, R2, Durable Objects, etc.). It returns
+ * an object whose properties are the Worker's runtime handlers — `fetch` for
+ * HTTP requests and any additional RPC methods.
  *
- * @section Creating Workers
- * @example Basic Worker
  * ```typescript
- * const worker = yield* Worker("ApiWorker", {
+ * Effect.gen(function* () {
+ *   // Phase 1: bind resources (runs at deploy time)
+ *   const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ *
+ *   return {
+ *     // Phase 2: runtime handlers (runs on each request)
+ *     fetch: Effect.gen(function* () {
+ *       const value = yield* kv.get("key");
+ *       return HttpServerResponse.text(value ?? "not found");
+ *     }),
+ *   };
+ * })
+ * ```
+ *
+ * There are three ways to define a Worker, from simplest to most
+ * flexible. See the {@link https://alchemy.run/concepts/platform | Platform concept}
+ * page for the full explanation.
+ *
+ * - **Async** — plain `async fetch` handler, no Effect runtime in the bundle.
+ * - **Effect** — Effect implementation passed directly, single file.
+ * - **Layer** — class and `.make()` in a single file; Rolldown tree-shakes `.make()` from consumers.
+ *
+ * @section Async Workers
+ * You don't have to use Effect for your runtime code. If you create
+ * a Worker resource with `main` pointing at a file but provide no
+ * `Effect.gen` implementation, Alchemy bundles and deploys that file
+ * as-is. Your handler is a plain `async fetch` — no Effect runtime
+ * is included in the bundle.
+ *
+ * Use the `bindings` prop to declare which resources are available
+ * at runtime, and `Cloudflare.InferEnv` to extract a fully typed
+ * `env` object from those bindings.
+ *
+ * @example Defining an async Worker in your stack
+ * ```typescript
+ * // alchemy.run.ts
+ * const db = yield* Cloudflare.D1Database("DB");
+ * const bucket = yield* Cloudflare.R2Bucket("Bucket");
+ *
+ * export type WorkerEnv = Cloudflare.InferEnv<typeof Worker>;
+ *
+ * export const Worker = Cloudflare.Worker("Worker", {
  *   main: "./src/worker.ts",
+ *   bindings: { db, bucket },
  * });
+ * ```
+ *
+ * @example Writing the async handler
+ * ```typescript
+ * // src/worker.ts
+ * import type { WorkerEnv } from "../alchemy.run.ts";
+ *
+ * export default {
+ *   async fetch(request: Request, env: WorkerEnv) {
+ *     if (request.method === "GET") {
+ *       const object = await env.bucket.get("key");
+ *       return new Response(object?.body ?? null);
+ *     }
+ *     return new Response("Not Found", { status: 404 });
+ *   },
+ * };
+ * ```
+ *
+ * @section Effect Workers
+ * Pass the Effect implementation as the third argument. This is the
+ * simplest Effect-based approach — everything lives in one file.
+ * Convenient for standalone Workers that don't need to be referenced
+ * by other Workers.
+ *
+ * @example Worker Effect
+ * ```typescript
+ * export default class MyWorker extends Cloudflare.Worker<MyWorker>()(
+ *   "MyWorker",
+ *   { main: import.meta.path },
+ *   Effect.gen(function* () {
+ *     // init: bind resources
+ *     const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ *
+ *     return {
+ *       // runtime: use them
+ *       fetch: Effect.gen(function* () {
+ *         const value = yield* kv.get("key");
+ *         return HttpServerResponse.text(value ?? "not found");
+ *       }),
+ *     };
+ *   }),
+ * ) {}
+ * ```
+ *
+ * @section Worker Layer
+ * When two Workers need to reference each other (e.g. WorkerA calls
+ * WorkerB and vice versa), or you simply want optimal tree-shaking,
+ * define the Worker class separately from its `.make()` call. The
+ * class is a lightweight identifier; `.make()` provides the runtime
+ * implementation as an `export default`. Rolldown treats `.make()`
+ * as pure, so any Worker that imports the class to bind it will not
+ * pull in the `.make()` dependencies — the bundler tree-shakes
+ * them away entirely.
+ *
+ * The class and `.make()` can live in the same file. This is the
+ * same pattern used by `Container` and `DurableObjectNamespace`,
+ * and is recommended for any cross-Worker or cross-DO bindings.
+ *
+ * @example Worker Layer (class + .make() in one file)
+ * ```typescript
+ * // src/WorkerB.ts
+ * export default class WorkerB extends Cloudflare.Worker<WorkerB>()(
+ *   "WorkerB",
+ *   { main: import.meta.path },
+ * ) {}
+ *
+ * export default WorkerB.make(
+ *   Effect.gen(function* () {
+ *     // init: bind resources
+ *     const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ *
+ *     return {
+ *       // runtime: use them
+ *       greet: (name: string) =>
+ *         Effect.gen(function* () {
+ *           yield* kv.put("last-greeted", name);
+ *           return `Hello ${name}`;
+ *         }),
+ *     };
+ *   }),
+ * );
+ * ```
+ *
+ * @example Binding a Worker Layer from another Worker
+ * ```typescript
+ * // src/WorkerA.ts — imports WorkerB; bundler tree-shakes .make()
+ * import WorkerB from "./WorkerB.ts";
+ *
+ * export default class WorkerA extends Cloudflare.Worker<WorkerA>()(
+ *   "WorkerA",
+ *   { main: import.meta.path },
+ *   Effect.gen(function* () {
+ *     const b = yield* Cloudflare.Worker.bind(WorkerB);
+ *     return {
+ *       fetch: Effect.gen(function* () {
+ *         return yield* b.greet("world");
+ *       }),
+ *     };
+ *   }),
+ * ) {}
+ * ```
+ *
+ * @section Configuration
+ * The props object controls compatibility flags, static assets, and
+ * build options. These are evaluated at deploy time.
+ *
+ * @example Enabling Node.js compatibility
+ * ```typescript
+ * {
+ *   main: import.meta.path,
+ *   compatibility: {
+ *     flags: ["nodejs_compat"],
+ *     date: "2026-03-17",
+ *   },
+ * }
+ * ```
+ *
+ * @example Serving static assets
+ * ```typescript
+ * {
+ *   main: import.meta.path,
+ *   assets: "./public",
+ * }
+ * ```
+ *
+ * @section R2 Bucket
+ * Bind an R2 bucket in the init phase with `Cloudflare.R2Bucket.bind`.
+ * The returned handle exposes `get`, `put`, `delete`, and `list`
+ * methods you can call in your runtime handlers.
+ *
+ * @example Binding and using R2
+ * ```typescript
+ * // init
+ * const bucket = yield* Cloudflare.R2Bucket.bind(MyBucket);
+ *
+ * return {
+ *   fetch: Effect.gen(function* () {
+ *     const request = yield* HttpServerRequest;
+ *     const key = request.url.split("/").pop()!;
+ *
+ *     if (request.method === "GET") {
+ *       const object = yield* bucket.get(key);
+ *       return object
+ *         ? HttpServerResponse.text(yield* object.text())
+ *         : HttpServerResponse.empty({ status: 404 });
+ *     }
+ *
+ *     yield* bucket.put(key, request.stream);
+ *     return HttpServerResponse.empty({ status: 201 });
+ *   }),
+ * };
+ * ```
+ *
+ * @section KV Namespace
+ * Bind a KV namespace with `Cloudflare.KVNamespace.bind`. KV provides
+ * eventually-consistent, low-latency key-value reads replicated
+ * globally across Cloudflare's edge.
+ *
+ * @example Binding and using KV
+ * ```typescript
+ * // init
+ * const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ *
+ * return {
+ *   fetch: Effect.gen(function* () {
+ *     const value = yield* kv.get("my-key");
+ *     return HttpServerResponse.text(value ?? "not found");
+ *   }),
+ * };
+ * ```
+ *
+ * @section D1 Database
+ * Bind a D1 database with `Cloudflare.D1Connection.bind`. D1 is a
+ * serverless SQLite database — use `prepare` to build parameterized
+ * queries and `all`, `first`, or `run` to execute them.
+ *
+ * @example Binding and querying D1
+ * ```typescript
+ * // init
+ * const db = yield* Cloudflare.D1Connection.bind(MyDB);
+ *
+ * return {
+ *   fetch: Effect.gen(function* () {
+ *     const results = yield* db
+ *       .prepare("SELECT * FROM users WHERE id = ?")
+ *       .bind(userId)
+ *       .all();
+ *     return yield* HttpServerResponse.json(results);
+ *   }),
+ * };
+ * ```
+ *
+ * @section Durable Objects
+ * Yield a `DurableObjectNamespace` class in the init phase to get a
+ * namespace handle. Call `getByName` or `getById` to get a typed RPC
+ * stub, then call its methods from your runtime handlers.
+ *
+ * @example Using a Durable Object
+ * ```typescript
+ * // init
+ * const counters = yield* Counter;
+ *
+ * return {
+ *   fetch: Effect.gen(function* () {
+ *     const counter = counters.getByName("user-123");
+ *     const value = yield* counter.increment();
+ *     return HttpServerResponse.text(String(value));
+ *   }),
+ * };
+ * ```
+ *
+ * @section Containers
+ * Containers run long-lived processes alongside Durable Objects. Bind
+ * one with `Cloudflare.Container.bind` and start it with
+ * `Cloudflare.start`. You can call typed methods on the running
+ * container or make HTTP requests to its exposed ports.
+ *
+ * @example Binding and starting a Container
+ * ```typescript
+ * // init (inside a DurableObjectNamespace)
+ * const sandbox = yield* Cloudflare.Container.bind(Sandbox);
+ *
+ * return Effect.gen(function* () {
+ *   const container = yield* Cloudflare.start(sandbox);
+ *
+ *   return {
+ *     exec: (cmd: string) => container.exec(cmd),
+ *     fetch: Effect.gen(function* () {
+ *       const { fetch } = yield* container.getTcpPort(3000);
+ *       const res = yield* fetch(HttpClientRequest.get("http://container/"));
+ *       return HttpServerResponse.fromClientResponse(res);
+ *     }),
+ *   };
+ * });
+ * ```
+ *
+ * @section Dynamic Workers
+ * `DynamicWorkerLoader` lets you spin up ephemeral Workers at runtime
+ * from inline JavaScript modules. This is useful for sandboxing
+ * user-provided code or running untrusted scripts in isolation.
+ *
+ * @example Loading a dynamic Worker
+ * ```typescript
+ * // init
+ * const loader = yield* Cloudflare.DynamicWorkerLoader("Loader");
+ *
+ * return {
+ *   fetch: Effect.gen(function* () {
+ *     const worker = loader.load({
+ *       compatibilityDate: "2026-01-28",
+ *       mainModule: "worker.js",
+ *       modules: {
+ *         "worker.js": `export default {
+ *           async fetch(req) { return new Response("sandboxed"); }
+ *         }`,
+ *       },
+ *     });
+ *
+ *     const res = yield* worker.fetch(
+ *       HttpClientRequest.get("https://worker/"),
+ *     );
+ *     return HttpServerResponse.fromClientResponse(res);
+ *   }),
+ * };
  * ```
  */
 export const Worker: Platform<

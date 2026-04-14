@@ -1,0 +1,264 @@
+---
+title: Lambda Function
+description: Deploy an AWS Lambda Function with granular bindings, event sources, sinks, and Layer composition.
+sidebar:
+  order: 8
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+This guide walks you through building an AWS Lambda Function that uses
+DynamoDB for storage, SQS for messaging, and DynamoDB Streams for
+change data capture — showing how bindings, event sources, and sinks
+compose together.
+
+:::note
+For binding fundamentals, see [Binding](/concepts/binding).
+For event sources and sinks, see [Event Source](/concepts/event-source)
+and [Sink](/concepts/sink).
+:::
+
+<Steps>
+
+1. **Define a service interface**
+
+   Start by defining the business interface as an Effect `Context.Service`.
+   This separates the contract from the implementation — you can swap
+   DynamoDB for S3 or an in-memory store without changing consumers.
+
+   ```typescript
+   // src/JobStorage.ts
+   import * as Context from "effect/Context";
+   import * as Effect from "effect/Effect";
+
+   export class JobStorage extends Context.Service<
+     JobStorage,
+     {
+       putJob(job: Job): Effect.Effect<Job, PutJobError>;
+       getJob(jobId: string): Effect.Effect<Job | undefined, GetJobError>;
+     }
+   >()("JobStorage") {}
+   ```
+
+2. **Create resources**
+
+   Inside the Layer that implements `JobStorage`, create the resources
+   you need. Resources are scoped to the Layer — they're created at
+   deploy time and available for binding.
+
+   ```typescript
+   import * as DynamoDB from "alchemy-effect/AWS/DynamoDB";
+   import * as SQS from "alchemy-effect/AWS/SQS";
+
+   export const JobStorageDynamoDB = Layer.effect(
+     JobStorage,
+     Effect.gen(function* () {
+       const table = yield* DynamoDB.Table("JobsTable", {
+         partitionKey: "id",
+         attributes: { id: "S" },
+       });
+       const queue = yield* SQS.Queue("JobsQueue");
+       // ...
+     }),
+   );
+   ```
+
+3. **Bind capabilities**
+
+   Each AWS binding maps 1:1 with an IAM action. You compose exactly
+   the permissions your function needs — nothing more.
+
+   ```typescript
+   const getItem = yield * DynamoDB.GetItem.bind(table);
+   const putItem = yield * DynamoDB.PutItem.bind(table);
+   ```
+
+   `getItem` is a typed function: pass a `Key`, get back a
+   `GetItemOutput`. At deploy time, the Policy attaches
+   `dynamodb:GetItem` on `table.tableArn` to the Lambda's IAM role.
+
+4. **Add a sink**
+
+   Bind an SQS sink for batched writes. The sink handles chunking
+   messages into `SendMessageBatch` calls automatically.
+
+   ```typescript
+   const sink = yield * SQS.QueueSink.bind(queue);
+   ```
+
+   You'll pipe records into this sink from the event source below.
+
+5. **Subscribe to an event source**
+
+   Use `DynamoDB.stream()` to subscribe to change records from the
+   table. The `.process()` callback receives a typed `Stream` of
+   records that you can transform and drain into the sink.
+
+   ```typescript
+   yield *
+     DynamoDB.stream(table, {
+       streamViewType: "NEW_AND_OLD_IMAGES",
+       startingPosition: "LATEST",
+       batchSize: 10,
+     }).process((stream) =>
+       stream.pipe(
+         Stream.map((record) =>
+           JSON.stringify({
+             eventName: record.eventName,
+             keys: record.dynamodb.Keys,
+             newImage: record.dynamodb.NewImage,
+           }),
+         ),
+         Stream.run(sink),
+       ),
+     );
+   ```
+
+   At deploy time this enables DynamoDB Streams on the table, grants
+   stream read IAM, and creates a `Lambda.EventSourceMapping`. At
+   runtime, Lambda invokes the function with stream records and the
+   event source Layer pipes them into your `Stream`.
+
+6. **Implement the service**
+
+   Wire the bound capabilities into the service methods:
+
+   ```typescript
+   const putJob = (job: Job) =>
+     putItem({
+       Item: {
+         id: { S: job.id },
+         content: { S: job.content },
+       },
+     }).pipe(
+       Effect.map(() => job),
+       Effect.catchCause((cause) =>
+         Effect.fail(
+           new PutJobError({
+             message: `Failed to store job "${job.id}": ${cause}`,
+             cause,
+           }),
+         ),
+       ),
+     );
+
+   return JobStorage.of({ putJob, getJob });
+   ```
+
+7. **Compose Layers**
+
+   Provide the binding Layers and event source Layers on the
+   `JobStorage` Layer. This is where you declare the full set of
+   runtime capabilities and background processes.
+
+   ```typescript
+   export const JobStorageDynamoDB = Layer.provideMerge(
+     Layer.effect(
+       JobStorage,
+       Effect.gen(function* () {
+         // ... resource creation, bindings, event source, service impl
+       }),
+     ),
+     Layer.mergeAll(Lambda.TableEventSource, SQS.QueueSinkLive).pipe(
+       Layer.provideMerge(
+         Layer.mergeAll(
+           DynamoDB.GetItemLive,
+           DynamoDB.PutItemLive,
+           SQS.SendMessageBatchLive,
+         ),
+       ),
+     ),
+   );
+   ```
+
+   The Layers split into two groups:
+   - **Capability layers** (`GetItemLive`, `PutItemLive`,
+     `SendMessageBatchLive`) — runtime SDK wrappers
+   - **Event source / sink layers** (`Lambda.TableEventSource`,
+     `SQS.QueueSinkLive`) — background process wiring
+
+8. **Define the Function**
+
+   Create the Lambda Function class. Provide the `JobStorage` Layer
+   (and any other service Layers) via `Effect.provide`.
+
+   ```typescript
+   // src/JobFunction.ts
+   import * as AWS from "alchemy-effect/AWS";
+   import * as Effect from "effect/Effect";
+   import * as Layer from "effect/Layer";
+   import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+   import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+   import { JobStorage, JobStorageDynamoDB } from "./JobStorage.ts";
+
+   export default class JobFunction extends AWS.Lambda.Function<JobFunction>()(
+     "JobFunction",
+     { main: import.meta.filename, url: true },
+     Effect.gen(function* () {
+       const jobStorage = yield* JobStorage;
+
+       return {
+         fetch: Effect.gen(function* () {
+           const request = yield* HttpServerRequest;
+           const url = new URL(request.url);
+
+           if (request.method === "POST" && url.pathname === "/") {
+             const content = yield* request.text;
+             const job = yield* jobStorage.putJob({
+               id: crypto.randomUUID(),
+               content,
+             });
+             return yield* HttpServerResponse.json(job, { status: 201 });
+           }
+
+           return HttpServerResponse.text("Not found", { status: 404 });
+         }),
+       };
+     }).pipe(Effect.provide(Layer.mergeAll(JobStorageDynamoDB))),
+   ) {}
+   ```
+
+9. **Deploy the Stack**
+
+   Wire the Function into your `alchemy.run.ts`:
+
+   ```typescript
+   // alchemy.run.ts
+   import * as Alchemy from "alchemy-effect";
+   import * as AWS from "alchemy-effect/AWS";
+   import * as Effect from "effect/Effect";
+   import JobFunction from "./src/JobFunction.ts";
+
+   export default Alchemy.Stack(
+     "JobLambda",
+     { providers: AWS.providers() },
+     Effect.gen(function* () {
+       const func = yield* JobFunction;
+       return { url: func.functionUrl };
+     }),
+   );
+   ```
+
+   ```sh
+   alchemy deploy
+   ```
+
+</Steps>
+
+## Swapping implementations
+
+Because `JobStorage` is defined as a service interface, you can swap
+DynamoDB for S3 by changing one Layer:
+
+```typescript
+Effect.provide(
+  Layer.mergeAll(
+    JobStorageS3, // instead of JobStorageDynamoDB
+    JobNotificationsSNS,
+  ),
+);
+```
+
+The `JobStorageS3` Layer uses `S3.GetObject.bind(bucket)`,
+`S3.PutObject.bind(bucket)`, and `S3.notifications().subscribe()` —
+same patterns, different resources.

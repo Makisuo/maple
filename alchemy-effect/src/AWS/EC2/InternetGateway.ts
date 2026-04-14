@@ -5,6 +5,7 @@ import * as Schedule from "effect/Schedule";
 import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import { Account } from "../Account.ts";
@@ -58,7 +59,9 @@ export interface InternetGateway extends Resource<
       state: "attaching" | "available" | "detaching" | "detached";
       vpcId: string;
     }>;
-  }
+  },
+  never,
+  Providers
 > {}
 export const InternetGateway = Resource<InternetGateway>(
   "AWS.EC2.InternetGateway",

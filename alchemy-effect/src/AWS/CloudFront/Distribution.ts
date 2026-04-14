@@ -5,6 +5,7 @@ import * as Schedule from "effect/Schedule";
 import type { Input } from "../../Input.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList, diffTags } from "../../Tags.ts";
 
 const CLOUDFRONT_HOSTED_ZONE_ID = "Z2FDTNDATAQYW2" as const;
@@ -215,7 +216,9 @@ export interface Distribution extends Resource<
      * Current tags on the distribution.
      */
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

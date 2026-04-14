@@ -2,6 +2,7 @@ import * as iam from "@distilled.cloud/aws/iam";
 import * as Effect from "effect/Effect";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export interface AccountPasswordPolicyProps
   extends iam.UpdateAccountPasswordPolicyRequest {}
@@ -9,7 +10,9 @@ export interface AccountPasswordPolicyProps
 export interface AccountPasswordPolicy extends Resource<
   "AWS.IAM.AccountPasswordPolicy",
   AccountPasswordPolicyProps,
-  iam.PasswordPolicy
+  iam.PasswordPolicy,
+  never,
+  Providers
 > {}
 
 /**

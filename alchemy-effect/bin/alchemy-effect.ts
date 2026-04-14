@@ -28,7 +28,7 @@ import * as AWSRegion from "../src/AWS/Region.ts";
 import * as CLI from "../src/Cli/index.ts";
 import { dotAlchemy } from "../src/Config.ts";
 import * as Plan from "../src/Plan.ts";
-import { getProviderByType, type LogLine } from "../src/Provider.ts";
+import { findProviderByType, type LogLine } from "../src/Provider.ts";
 import * as Stack from "../src/Stack.ts";
 import { Stage } from "../src/Stage.ts";
 import * as State from "../src/State/index.ts";
@@ -341,7 +341,7 @@ const tailCommand = Command.make(
           });
           if (!resourceState?.attr) continue;
 
-          const provider = yield* getProviderByType(resource.Type);
+          const provider = yield* findProviderByType(resource.Type);
           if (!provider.tail) continue;
 
           tailable.push({
@@ -636,7 +636,7 @@ const logsCommand = Command.make(
           });
           if (!resourceState?.attr) continue;
 
-          const provider = yield* getProviderByType(resource.Type);
+          const provider = yield* findProviderByType(resource.Type);
           if (!provider.logs) continue;
 
           const lines = yield* provider.logs({
@@ -726,7 +726,7 @@ const parseSince = (value: string): Date => {
   return parsed;
 };
 
-const root = Command.make("alchemy-effect", {}).pipe(
+const root = Command.make("alchemy", {}).pipe(
   Command.withSubcommands([
     bootstrapCommand,
     deployCommand,

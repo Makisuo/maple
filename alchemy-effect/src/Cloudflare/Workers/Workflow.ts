@@ -186,29 +186,71 @@ export class WorkflowScope extends Context.Service<
 >()("Cloudflare.Workflow") {}
 
 /**
- * Declare a Cloudflare Workflow inside a Worker program.
+ * A Cloudflare Workflow that orchestrates durable, multi-step tasks with
+ * automatic retries and at-least-once delivery.
  *
- * The outer Effect resolves infrastructure dependencies (Durable Objects,
- * etc.) and returns the workflow body -- an Effect that uses `WorkflowEvent`
- * and step primitives (`task`, `sleep`, `sleepUntil`).
+ * A Workflow follows the same two-phase pattern as Workers and Durable
+ * Objects. The outer `Effect.gen` resolves shared dependencies. The inner
+ * `Effect.gen` is the workflow body — it reads the triggering event and
+ * runs steps using `task`, `sleep`, and `sleepUntil`.
  *
- * Internally this creates a `WorkflowResource` that manages the Cloudflare
- * Workflows API lifecycle (PUT / DELETE), similar to how `bindContainer`
- * creates a `ContainerApplication`.
+ * ```typescript
+ * Effect.gen(function* () {
+ *   // Phase 1: resolve dependencies
+ *   const notifier = yield* NotificationService;
  *
- * @example
+ *   return Effect.gen(function* () {
+ *     // Phase 2: workflow body (durable steps)
+ *     const event = yield* Cloudflare.WorkflowEvent;
+ *     const result = yield* Cloudflare.task("process", doWork(event.payload));
+ *     yield* Cloudflare.sleep("cooldown", "10 seconds");
+ *     return result;
+ *   });
+ * })
+ * ```
+ *
+ * @resource
+ *
+ * @section Defining a Workflow
+ * @example Minimal workflow
  * ```typescript
  * export default class MyWorkflow extends Cloudflare.Workflow<MyWorkflow>()(
  *   "MyWorkflow",
  *   Effect.gen(function* () {
  *     return Effect.gen(function* () {
  *       const event = yield* Cloudflare.WorkflowEvent;
- *       const data = yield* Cloudflare.task("fetch-data", Effect.succeed({ ok: true }));
- *       yield* Cloudflare.sleep("pause", "5 seconds");
- *       return data;
+ *       return { received: event.payload };
  *     });
  *   }),
  * ) {}
+ * ```
+ *
+ * @section Step Primitives
+ * @example Running a named task
+ * ```typescript
+ * const result = yield* Cloudflare.task(
+ *   "process-order",
+ *   Effect.succeed({ orderId: "abc", total: 42 }),
+ * );
+ * ```
+ *
+ * @example Sleeping between steps
+ * ```typescript
+ * yield* Cloudflare.sleep("cooldown", "30 seconds");
+ * ```
+ *
+ * @section Starting and Monitoring Instances
+ * @example Creating an instance from a Worker
+ * ```typescript
+ * const workflow = yield* MyWorkflow;
+ * const instance = yield* workflow.create({ orderId: "abc" });
+ * ```
+ *
+ * @example Checking instance status
+ * ```typescript
+ * const workflow = yield* MyWorkflow;
+ * const handle = yield* workflow.get(instanceId);
+ * const status = yield* handle.status();
  * ```
  */
 export const Workflow: WorkflowClass = taggedFunction(WorkflowScope, ((
@@ -320,7 +362,9 @@ export interface WorkflowResource extends Resource<
   WorkflowResourceAttrs
 > {}
 
-const WorkflowResource = Resource<WorkflowResource>(WorkflowResourceTypeId);
+export const WorkflowResource = Resource<WorkflowResource>(
+  WorkflowResourceTypeId,
+);
 
 export const WorkflowProvider = () =>
   Provider.effect(

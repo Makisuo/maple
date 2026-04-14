@@ -6,7 +6,7 @@ export const GenericService =
       ...args: any[]
     ) => Context.Service<any, any>,
   >() =>
-  <Kind extends string>(Kind: string): ReturnType<Fn> & Fn => {
+  <Kind extends string>(Kind: Kind): ReturnType<Fn> & Fn => {
     const service = Context.Service<any, any>(Kind);
     const make = (Type: string) => Context.Service(`${Kind}<${Type}>`);
     return Object.assign(

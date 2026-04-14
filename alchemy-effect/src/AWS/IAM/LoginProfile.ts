@@ -4,6 +4,7 @@ import * as Redacted from "effect/Redacted";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { unwrapRedactedString } from "./common.ts";
 
 export interface LoginProfileProps {
@@ -28,7 +29,9 @@ export interface LoginProfile extends Resource<
     userName: string;
     createDate: Date | undefined;
     passwordResetRequired: boolean | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

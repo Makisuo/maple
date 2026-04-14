@@ -1,0 +1,35 @@
+---
+title: alchemy-effect
+description: Effect-native Infrastructure-as-Code framework. Build, test, and deploy cloud programs.
+template: splash
+hero:
+  title: |
+    Effect-native <span class="text-gradient">Cloud Programs</span>
+  tagline: Build, test, and deploy infrastructure and application logic in a single type-safe program powered by Effect.
+  actions:
+    - text: Get Started
+      link: /getting-started
+      icon: right-arrow
+      variant: primary
+    - text: GitHub
+      link: https://github.com/alchemy-run/alchemy-effect
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+<CardGrid>
+  <Card title="Infrastructure-as-Effects" icon="puzzle">
+    Your infrastructure and application logic live in the same program.
+  </Card>
+  <Card title="Built on Effect" icon="setting">
+    Type-safe errors, declarative retries, and streams power your infra.
+  </Card>
+  <Card title="If it compiles, it deploys" icon="approve-check">
+    Catch wiring mistakes at compile time, not after a five-minute deploy.
+  </Card>
+  <Card title="Local emulation" icon="laptop">
+    Run the full stack locally with alchemy dev. Instant feedback.
+  </Card>
+</CardGrid>

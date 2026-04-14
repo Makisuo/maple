@@ -4,6 +4,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export interface KeyValueStoreProps {
   /**
@@ -48,7 +49,9 @@ export interface KeyValueStore extends Resource<
      * Latest entity tag for update/delete operations.
      */
     etag: string | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

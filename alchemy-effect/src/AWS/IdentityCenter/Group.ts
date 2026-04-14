@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   listGroups,
   resolveIdentityStoreId,
@@ -39,7 +40,9 @@ export interface Group extends Resource<
     description: string | undefined;
     createdAt: Date | undefined;
     updatedAt: Date | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

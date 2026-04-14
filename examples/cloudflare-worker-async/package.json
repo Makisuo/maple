@@ -20,7 +20,7 @@
     "@cloudflare/workers-types": "catalog:",
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
-    "alchemy-effect": "workspace:*",
+    "alchemy": "workspace:*",
     "better-auth": "catalog:",
     "effect": "catalog:"
   }

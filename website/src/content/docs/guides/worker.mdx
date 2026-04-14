@@ -1,0 +1,109 @@
+---
+title: Worker
+description: Deploy a Cloudflare Worker with Effect-native bindings and request handling.
+sidebar:
+  order: 4
+---
+
+import { Steps } from "@astrojs/starlight/components";
+import Terminal from "../../../components/Terminal.astro";
+
+export const deployOutput = `[u]Plan[/u]: [g]1 to create[/g]
+
+[g]+[/g] [b]Api[/b] [d](Cloudflare.Worker)[/d] [c](1 bindings)[/c]
+[s2][g]+[/g] [c]MyKV[/c]
+
+Proceed?
+◉ Yes ○ No
+[g]✓[/g] [b]Api[/b] [d](Cloudflare.Worker)[/d] [g]created[/g]
+[s2][d]• Uploading worker (12.45 KB) ...[/d]
+[s2][d]• Enabling workers.dev subdomain...[/d]
+{
+[s2]url: "https://myapp-api-dev-you-abc123.workers.dev",
+}`;
+
+This guide walks you through creating and deploying a Cloudflare Worker
+with alchemy-effect.
+
+:::note
+For the full API reference, see the [Worker provider](/providers/cloudflare/worker).
+For async, effect, and layer patterns, see the [Platform concept](/concepts/platform).
+:::
+
+<Steps>
+
+1. **Define the Worker class**
+
+   Create a file for your Worker. The `main` prop tells Alchemy which
+   file to bundle and deploy.
+
+   ```typescript
+   // src/Api.ts
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+   import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+
+   export default class Api extends Cloudflare.Worker<Api>()(
+     "Api",
+     { main: import.meta.path },
+     Effect.gen(function* () {
+       return {
+         fetch: Effect.succeed(HttpServerResponse.text("Hello")),
+       };
+     }),
+   ) {}
+   ```
+
+2. **Add resource bindings**
+
+   Bind KV, R2, Durable Objects, or other services in the init phase.
+   They become available to all runtime handlers.
+
+   ```typescript
+   Effect.gen(function* () {
+     // init — bind resources
+     const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+     const counters = yield* Counter;
+
+     return {
+       // runtime — use them
+       fetch: Effect.gen(function* () {
+         const value = yield* kv.get("key");
+         const counter = counters.getByName("default");
+         yield* counter.increment();
+         return HttpServerResponse.text(value ?? "no value");
+       }),
+     };
+   });
+   ```
+
+3. **Create the Stack**
+
+   Wire the Worker into your `alchemy.run.ts` stack file.
+
+   ```typescript
+   // alchemy.run.ts
+   import * as Alchemy from "alchemy-effect";
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+   import Api from "./src/Api.ts";
+
+   export default Alchemy.Stack(
+     "MyApp",
+     { providers: Cloudflare.providers() },
+     Effect.gen(function* () {
+       const api = yield* Api;
+       return { url: api.url };
+     }),
+   );
+   ```
+
+4. **Deploy**
+
+   ```sh
+   alchemy deploy
+   ```
+
+   <Terminal content={deployOutput} />
+
+</Steps>

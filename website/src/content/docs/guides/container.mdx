@@ -1,0 +1,152 @@
+---
+title: Container
+description: Run long-lived processes with full isolation alongside Durable Objects.
+sidebar:
+  order: 6
+---
+
+import { Steps } from "@astrojs/starlight/components";
+import Terminal from "../../../components/Terminal.astro";
+
+export const deployOutput = `[u]Plan[/u]: [g]2 to create[/g]
+
+[g]+[/g] [b]Api[/b] [d](Cloudflare.Worker)[/d] [c](1 bindings)[/c]
+[s2][g]+[/g] [c]Agent[/c]
+[g]+[/g] [b]Sandbox[/b] [d](Cloudflare.Container)[/d]
+
+Proceed?
+◉ Yes ○ No
+[g]✓[/g] [b]Api[/b] [d](Cloudflare.Worker)[/d] [g]created[/g]
+[s2][d]• Uploading worker (18.50 KB) ...[/d]
+[g]✓[/g] [b]Sandbox[/b] [d](Cloudflare.Container)[/d] [g]created[/g]
+[s2][d]• Creating container application...[/d]`;
+
+This guide walks you through defining a Container, implementing its
+runtime, and starting it from a Durable Object.
+
+:::note
+For the full API reference, see the [Container provider](/providers/cloudflare/container).
+For why the layer pattern matters, see the [Platform concept](/concepts/platform).
+:::
+
+<Steps>
+
+1. **Define the Class**
+
+   Create a class that declares the container's identity and typed RPC
+   methods. This file is tiny — it has no runtime dependencies and
+   won't bloat the DO's bundle.
+
+   ```typescript
+   // src/Sandbox.ts
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+
+   export class Sandbox extends Cloudflare.Container<
+     Sandbox,
+     {
+       exec: (cmd: string) => Effect.Effect<{
+         exitCode: number;
+         stdout: string;
+       }>;
+     }
+   >()("Sandbox", { main: import.meta.filename }) {}
+   ```
+
+2. **Implement the Runtime**
+
+   Containers are the one case where `.make()` must live in a separate
+   file. Since a Container must be bound to a Durable Object, the DO
+   imports the class to get a typed handle. If the class and `.make()`
+   shared a file, the DO's bundle would pull in all of the container's
+   runtime dependencies, bloating it and likely breaking the Workers
+   runtime.
+
+   ```typescript
+   // src/Sandbox.runtime.ts
+   import { Sandbox } from "./Sandbox.ts";
+   import * as Effect from "effect/Effect";
+   import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+
+   export default Sandbox.make(
+     Effect.gen(function* () {
+       return Sandbox.of({
+         exec: (cmd) => Effect.succeed({ exitCode: 0, stdout: `ran: ${cmd}` }),
+         fetch: Effect.succeed(
+           HttpServerResponse.text("Hello from container!"),
+         ),
+       });
+     }),
+   );
+   ```
+
+3. **Start from a Durable Object**
+
+   Import only the class. Bind it in the outer
+   init phase, then start it in the inner per-instance phase.
+
+   ```typescript
+   // src/Agent.ts
+   import * as Cloudflare from "alchemy-effect/Cloudflare";
+   import * as Effect from "effect/Effect";
+   import { Sandbox } from "./Sandbox.ts"; // class only
+
+   export default class Agent extends Cloudflare.DurableObjectNamespace<Agent>()(
+     "Agent",
+     Effect.gen(function* () {
+       const sandbox = yield* Cloudflare.Container.bind(Sandbox);
+
+       return Effect.gen(function* () {
+         const container = yield* Cloudflare.start(sandbox);
+
+         return {
+           exec: (cmd: string) => container.exec(cmd),
+         };
+       });
+     }),
+   ) {}
+   ```
+
+4. **Wire the Worker and deploy**
+
+   ```typescript
+   // src/Api.ts
+   import Agent from "./Agent.ts";
+
+   export default class Api extends Cloudflare.Worker<Api>()(
+     "Api",
+     { main: import.meta.path },
+     Effect.gen(function* () {
+       const agents = yield* Agent;
+
+       return {
+         fetch: Effect.gen(function* () {
+           const agent = agents.getByName("sandbox-1");
+           const result = yield* agent.exec("echo hello");
+           return HttpServerResponse.text(result.stdout);
+         }),
+       };
+     }),
+   ) {}
+   ```
+
+   ```sh
+   alchemy deploy
+   ```
+
+   <Terminal content={deployOutput} />
+
+</Steps>
+
+## Making HTTP requests to the container
+
+If your container runs an HTTP server, use `getTcpPort` to get a
+fetch handle for a specific port:
+
+```typescript
+const container = yield * Cloudflare.start(sandbox);
+const { fetch } = yield * container.getTcpPort(3000);
+
+const response =
+  yield * fetch(HttpClientRequest.get("http://container/health"));
+```

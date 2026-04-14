@@ -138,7 +138,7 @@ export const virtualEntryPlugin = Effect.gen(function* () {
           typeof inputOptions.input === "string",
           "input must be a string",
         );
-        importPath = `./${path.relative(inputOptions.cwd ?? process.cwd(), inputOptions.input)}`;
+        importPath = `./${path.relative(inputOptions.cwd ?? process.cwd(), inputOptions.input).replaceAll("\\", "/")}`;
         inputOptions.input = ENTRY_MODULE_ID;
       },
       resolveId: {

@@ -5,6 +5,7 @@ import * as Schedule from "effect/Schedule";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList, diffTags } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import { Account } from "../Account.ts";
@@ -98,7 +99,9 @@ export interface EIP extends Resource<
      * The carrier IP address associated with the network interface.
      */
     carrierIp?: string;
-  }
+  },
+  never,
+  Providers
 > {}
 export const EIP = Resource<EIP>("AWS.EC2.EIP");
 

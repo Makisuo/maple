@@ -15,6 +15,7 @@ import type { Input } from "../../Input.ts";
 import { Platform, type Main, type PlatformProps } from "../../Platform.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { ServerHost } from "../../Server/Process.ts";
 import { Stack } from "../../Stack.ts";
 import { Stage } from "../../Stage.ts";
@@ -254,7 +255,8 @@ export interface Instance extends Resource<
   {
     env?: Record<string, any>;
     policyStatements?: PolicyStatement[];
-  }
+  },
+  Providers
 > {}
 
 export type InstanceServices = ServerHost | Credentials | Region;

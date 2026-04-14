@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { diffTags } from "../../Tags.ts";
 import { Account } from "../Account.ts";
 import { toTagRecord } from "./common.ts";
@@ -35,7 +36,9 @@ export interface OpenIDConnectProvider extends Resource<
     clientIDList: string[];
     thumbprintList: string[];
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

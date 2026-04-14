@@ -4,6 +4,7 @@ import * as Redacted from "effect/Redacted";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { toRedactedString } from "./common.ts";
 
 export interface AccessKeyProps {
@@ -30,7 +31,9 @@ export interface AccessKey extends Resource<
     lastUsedDate: Date | undefined;
     lastUsedServiceName: string | undefined;
     lastUsedRegion: string | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

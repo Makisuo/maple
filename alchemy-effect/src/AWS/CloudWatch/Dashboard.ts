@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { Account, type AccountID } from "../Account.ts";
 import { createName, retryConcurrent } from "./common.ts";
 
@@ -129,7 +130,9 @@ export interface Dashboard extends Resource<
     dashboardArn: DashboardArn;
     dashboardBody: DashboardBody | undefined;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

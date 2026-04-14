@@ -6,6 +6,7 @@ import type { Input } from "../../Input.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import type { RegionID } from "../Region.ts";
@@ -172,7 +173,9 @@ export interface Service extends Resource<
      * ARN of the generated listener, when `public: true`.
      */
     listenerArn?: string;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

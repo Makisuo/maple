@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export interface SSHPublicKeyProps {
   /**
@@ -30,7 +31,9 @@ export interface SSHPublicKey extends Resource<
     sshPublicKeyBody: string;
     status: iam.StatusType;
     uploadDate: Date | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

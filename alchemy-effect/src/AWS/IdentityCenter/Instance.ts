@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   listInstances,
   resolveInstance,
@@ -48,7 +49,9 @@ export interface Instance extends Resource<
     statusReason: string | undefined;
     createdDate: Date | undefined;
     mode: "existing" | "account";
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

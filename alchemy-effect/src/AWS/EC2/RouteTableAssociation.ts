@@ -7,6 +7,7 @@ import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { RouteTableId } from "./RouteTable.ts";
 import type { SubnetId } from "./Subnet.ts";
 
@@ -68,7 +69,9 @@ export interface RouteTableAssociation extends Resource<
       state: EC2.RouteTableAssociationStateCode;
       statusMessage?: string;
     };
-  }
+  },
+  never,
+  Providers
 > {}
 export const RouteTableAssociation = Resource<RouteTableAssociation>(
   "AWS.EC2.RouteTableAssociation",

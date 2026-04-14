@@ -1,5 +1,6 @@
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type { Simplify } from "effect/Types";
 import {
   Artifacts,
@@ -8,7 +9,6 @@ import {
   ensureArtifactStore,
   makeScopedArtifacts,
 } from "./Artifacts.ts";
-import * as Option from "effect/Option";
 import {
   type PlanStatusSession,
   type ScopedPlanStatusSession,
@@ -21,7 +21,7 @@ import type { Input } from "./Input.ts";
 import { generateInstanceId, InstanceId } from "./InstanceId.ts";
 import * as Output from "./Output.ts";
 import { type Apply, type Delete, type Plan } from "./Plan.ts";
-import { getProviderByType } from "./Provider.ts";
+import { findProviderByType } from "./Provider.ts";
 import type { ResourceBinding } from "./Resource.ts";
 import { Stack } from "./Stack.ts";
 import { Stage } from "./Stage.ts";
@@ -927,7 +927,7 @@ const collectGarbage = Effect.fnUntraced(function* (
               downstream: node.old.downstream,
               props: node.old.props,
               attr: node.old.attr,
-              provider: yield* getProviderByType(node.old.resourceType),
+              provider: yield* findProviderByType(node.old.resourceType),
             };
 
         const fqn = toFqn(namespace, logicalId);

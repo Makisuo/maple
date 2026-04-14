@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { Account, type AccountID } from "../Account.ts";
 import type { RegionID } from "../Region.ts";
 import {
@@ -43,7 +44,9 @@ export interface Alarm extends Resource<
     stateReason: string | undefined;
     metricAlarm: cloudwatch.MetricAlarm;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

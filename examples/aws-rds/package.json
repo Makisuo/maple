@@ -17,7 +17,7 @@
     "@distilled.cloud/aws": "catalog:",
     "@effect/platform-node": "catalog:",
     "@types/pg": "^8.18.0",
-    "alchemy-effect": "workspace:*",
+    "alchemy": "workspace:*",
     "effect": "catalog:",
     "pg": "^8.20.0"
   }

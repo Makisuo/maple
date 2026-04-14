@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export interface DBProxyTargetGroupProps {
   /**
@@ -40,7 +41,9 @@ export interface DBProxyTargetGroup extends Resource<
     connectionPoolConfig: rds.ConnectionPoolConfigurationInfo | undefined;
     dbClusterIdentifiers: string[];
     dbInstanceIdentifiers: string[];
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

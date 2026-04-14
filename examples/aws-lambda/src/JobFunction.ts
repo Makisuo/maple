@@ -1,4 +1,4 @@
-import { AWS } from "alchemy-effect";
+import * as AWS from "alchemy-effect/AWS";
 import { Stack } from "alchemy-effect/Stack";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,7 +16,7 @@ import {
   PutJobError,
 } from "./JobStorage.ts";
 
-export class JobFunction extends AWS.Lambda.Function<JobFunction>()(
+export default class JobFunction extends AWS.Lambda.Function<JobFunction>()(
   "JobFunction",
   Stack.useSync((stack) => ({
     main: import.meta.filename,

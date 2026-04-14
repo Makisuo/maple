@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { collectPages, retryOrganizations } from "./common.ts";
 
 export interface PolicyAttachmentProps {
@@ -25,7 +26,9 @@ export interface PolicyAttachment extends Resource<
     targetArn: string | undefined;
     targetName: string | undefined;
     targetType: organizations.TargetType | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

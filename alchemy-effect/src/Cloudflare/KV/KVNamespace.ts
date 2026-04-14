@@ -5,9 +5,10 @@ import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
 import { Account } from "../Account.ts";
+import type { Providers } from "../Providers.ts";
 import { KVNamespaceBinding } from "./KVNamespaceBinding.ts";
 
-export type NamespaceProps = {
+export type KVNamespaceProps = {
   /**
    * A human-readable string name for the namespace.
    * If omitted, a unique name will be generated.
@@ -18,20 +19,47 @@ export type NamespaceProps = {
 
 export type KVNamespace = Resource<
   "Cloudflare.KVNamespace",
-  NamespaceProps,
+  KVNamespaceProps,
   {
     title: string;
     namespaceId: string;
     supportsUrlEncoding: boolean | undefined;
     accountId: string;
-  }
+  },
+  never,
+  Providers
 >;
 
+/**
+ * A Cloudflare Workers KV namespace for key-value storage at the edge.
+ *
+ * KV provides eventually-consistent, low-latency reads with global
+ * replication. Create a namespace as a resource, then bind it to a Worker
+ * to get/put values at runtime.
+ *
+ * @section Creating a Namespace
+ * @example Basic KV namespace
+ * ```typescript
+ * const kv = yield* Cloudflare.KVNamespace("MyKV");
+ * ```
+ *
+ * @section Binding to a Worker
+ * @example Using KV inside a Worker
+ * ```typescript
+ * const kv = yield* Cloudflare.KVNamespace.bind(MyKV);
+ *
+ * // Read a value
+ * const value = yield* kv.get("my-key");
+ *
+ * // Write a value
+ * yield* kv.put("my-key", "hello world");
+ * ```
+ */
 export const KVNamespace = Resource<KVNamespace>("Cloudflare.KVNamespace")({
   bind: KVNamespaceBinding.bind,
 });
 
-export const NamespaceProvider = () =>
+export const KVNamespaceProvider = () =>
   Provider.effect(
     KVNamespace,
     Effect.gen(function* () {

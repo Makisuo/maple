@@ -4,6 +4,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   createInternalTags,
   createTagsList,
@@ -79,7 +80,9 @@ export interface Policy extends Resource<
     description: string | undefined;
     policyDocument: PolicyDocument;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

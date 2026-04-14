@@ -4,6 +4,7 @@ import { isResolved } from "../../Diff.ts";
 import type { Input } from "../../Input.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 
 export interface GroupMembershipProps {
   /**
@@ -22,7 +23,9 @@ export interface GroupMembership extends Resource<
   {
     groupName: string;
     userNames: string[];
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

@@ -4,6 +4,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, diffTags } from "../../Tags.ts";
 import type { SubnetId } from "../EC2/Subnet.ts";
 
@@ -38,7 +39,9 @@ export interface DBSubnetGroup extends Resource<
     status: string | undefined;
     supportedNetworkTypes: string[] | undefined;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

@@ -48,6 +48,128 @@ export type Container = {
   interceptAllOutboundHttp(binding: Fetcher): Effect.Effect<void>;
 };
 
+/**
+ * A Cloudflare Container that runs a long-lived process alongside a
+ * Durable Object.
+ *
+ * Containers always use the **Container Layer** pattern — the class
+ * and `.make()` must live in separate files. A Container must be
+ * bound to a Durable Object, and the DO imports the class to get a
+ * typed handle. If the class and `.make()` lived in the same file,
+ * the DO's bundle would pull in all of the container's runtime
+ * dependencies (process spawners, Node APIs, SDKs, etc.), which
+ * would bloat the bundle and likely break the Cloudflare Workers
+ * runtime. Keeping them separate ensures the bundler only includes
+ * the tiny class in the DO's output.
+ *
+ * See the {@link https://alchemy.run/concepts/platform | Platform
+ * concept} page for how this fits into the async / effect / layer
+ * progression.
+ *
+ * @section Container Layer
+ * Define the class and `.make()` in separate files. The class
+ * declares the container's identity, configuration, and typed
+ * shape. `.make()` provides the runtime implementation as a
+ * default export. Use `Container.of` to construct the typed
+ * shape — it ensures your implementation matches the methods
+ * declared on the class.
+ *
+ * @example Container class
+ * ```typescript
+ * // src/Sandbox.ts
+ * export class Sandbox extends Cloudflare.Container<
+ *   Sandbox,
+ *   {
+ *     exec: (cmd: string) => Effect.Effect<{
+ *       exitCode: number;
+ *       stdout: string;
+ *       stderr: string;
+ *     }>;
+ *   }
+ * >()(
+ *   "Sandbox",
+ *   { main: import.meta.filename },
+ * ) {}
+ * ```
+ *
+ * @example Container .make()
+ * ```typescript
+ * // src/Sandbox.runtime.ts
+ * export default Sandbox.make(
+ *   Effect.gen(function* () {
+ *     const cp = yield* ChildProcessSpawner;
+ *
+ *     return Sandbox.of({
+ *       exec: (cmd) =>
+ *         cp.spawn(ChildProcess.make(cmd, { shell: true })).pipe(
+ *           Effect.map(({ exitCode, stdout, stderr }) => ({
+ *             exitCode, stdout, stderr,
+ *           })),
+ *           Effect.scoped,
+ *         ),
+ *       fetch: Effect.succeed(
+ *         HttpServerResponse.text("Hello from container!"),
+ *       ),
+ *     });
+ *   }),
+ * );
+ * ```
+ *
+ * @section Configuration
+ * The props object accepts `main` (entrypoint file), `instanceType`
+ * (compute size), `runtime` (`"bun"` or `"node"`), and
+ * `observability` settings. Use `Stack.useSync` to vary config by
+ * stage.
+ *
+ * @example Stage-dependent configuration
+ * ```typescript
+ * export class Sandbox extends Cloudflare.Container<Sandbox>()(
+ *   "Sandbox",
+ *   Stack.useSync((stack) => ({
+ *     main: import.meta.filename,
+ *     instanceType: stack.stage === "prod" ? "standard-1" : "dev",
+ *     observability: { logs: { enabled: true } },
+ *   })),
+ * ) {}
+ * ```
+ *
+ * @section Starting from a Durable Object
+ * Use `Cloudflare.Container.bind` in the outer init phase to bind
+ * the container class, then `Cloudflare.start` in the inner
+ * per-instance phase to start it. Because the DO only imports the
+ * class, the runtime implementation is completely excluded from the
+ * DO's bundle.
+ *
+ * @example Binding and starting a container
+ * ```typescript
+ * // init (outer Effect) — only imports the class
+ * const sandbox = yield* Cloudflare.Container.bind(Sandbox);
+ *
+ * // per-instance (inner Effect)
+ * return Effect.gen(function* () {
+ *   const container = yield* Cloudflare.start(sandbox);
+ *
+ *   return {
+ *     exec: (cmd: string) => container.exec(cmd),
+ *   };
+ * });
+ * ```
+ *
+ * @section HTTP Requests to Container Ports
+ * Use `getTcpPort` to get a `fetch` handle for a specific port on
+ * the running container. This lets you make HTTP requests to
+ * servers running inside the container process.
+ *
+ * @example Fetching from a container port
+ * ```typescript
+ * const container = yield* Cloudflare.start(sandbox);
+ * const { fetch } = yield* container.getTcpPort(3000);
+ *
+ * const response = yield* fetch(
+ *   HttpClientRequest.get("http://container/health"),
+ * );
+ * ```
+ */
 export const Container: Platform<
   ContainerApplication,
   ContainerServices,

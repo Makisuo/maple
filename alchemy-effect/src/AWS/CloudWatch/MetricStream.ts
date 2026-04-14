@@ -5,6 +5,7 @@ import { isResolved } from "../../Diff.ts";
 import type { Input } from "../../Input.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { Account, type AccountID } from "../Account.ts";
 import type { RegionID } from "../Region.ts";
 import {
@@ -47,7 +48,9 @@ export interface MetricStream extends Resource<
     state: string | undefined;
     metricStream: cloudwatch.GetMetricStreamOutput;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

@@ -8,6 +8,7 @@ import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   createAlchemyTagFilters,
   createInternalTags,
@@ -154,7 +155,9 @@ export interface NatGateway extends Resource<
      * The date and time the NAT gateway was deleted, if applicable.
      */
     deleteTime?: string;
-  }
+  },
+  never,
+  Providers
 > {}
 export const NatGateway = Resource<NatGateway>("AWS.EC2.NatGateway");
 

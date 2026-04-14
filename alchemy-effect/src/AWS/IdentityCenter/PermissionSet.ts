@@ -4,6 +4,7 @@ import * as Stream from "effect/Stream";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { resolveInstance, retryIdentityCenter } from "./common.ts";
 
 export interface PermissionSetProps {
@@ -41,7 +42,9 @@ export interface PermissionSet extends Resource<
     sessionDuration: string | undefined;
     relayState: string | undefined;
     createdDate: Date | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

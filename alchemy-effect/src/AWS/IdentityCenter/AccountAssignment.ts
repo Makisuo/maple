@@ -5,6 +5,7 @@ import * as Stream from "effect/Stream";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { resolveInstance, retryIdentityCenter } from "./common.ts";
 
 export interface AccountAssignmentProps {
@@ -41,7 +42,9 @@ export interface AccountAssignment extends Resource<
     principalType: "USER" | "GROUP";
     targetId: string;
     targetType: "AWS_ACCOUNT";
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

@@ -10,6 +10,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   createInternalTags,
   diffTags,
@@ -159,7 +160,9 @@ export interface Stream extends Resource<
      * Current tags reported for the stream.
      */
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

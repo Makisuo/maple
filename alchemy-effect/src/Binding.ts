@@ -6,6 +6,7 @@ import { SingleShotGen } from "effect/Utils";
 import { ExecutionContext } from "./ExecutionContext.ts";
 import * as Namespace from "./Namespace.ts";
 import { ALCHEMY_PHASE } from "./Phase.ts";
+import { tryFindProviderByType } from "./Provider.ts";
 import type { ResourceLike } from "./Resource.ts";
 import { Self } from "./Self.ts";
 import { CurrentStack } from "./Stack.ts";
@@ -133,24 +134,24 @@ export const Policy =
 
     // we use a service option because at runtime (e.g. in a Lambda Function or Cloudflare Worker)
     // the Policy Layer is not provided and this becomes a no-op
-    const Service = Effect.serviceOption(self)
-      .asEffect()
-      .pipe(
-        Effect.map(Option.getOrUndefined),
-        Effect.flatMap((service) =>
-          service
-            ? Effect.succeed(service)
-            : Effect.all([CurrentStack, ALCHEMY_PHASE.asEffect()]).pipe(
-                Effect.flatMap(([stack, phase]) =>
-                  stack && phase === "plan"
-                    ? Effect.die(
-                        `Binding.Policy provider '${Identifier}' was not provided at Plan Time in Stack '${stack.name}'`,
-                      )
-                    : Effect.succeed((() => Effect.void) as any as Shape),
-                ),
+    const Service = tryFindProviderByType<Policy<Self, Identifier, Shape>>(
+      self.key as Identifier,
+    ).pipe(
+      Effect.map(Option.getOrUndefined),
+      Effect.flatMap((service) =>
+        service
+          ? Effect.succeed(service)
+          : Effect.all([CurrentStack, ALCHEMY_PHASE.asEffect()]).pipe(
+              Effect.flatMap(([stack, phase]) =>
+                stack && phase === "plan"
+                  ? Effect.die(
+                      `Binding.Policy provider 'Policy<${Identifier}>' was not provided at Plan Time in Stack '${stack.name}'`,
+                    )
+                  : Effect.succeed((() => Effect.void) as any as Shape),
               ),
-        ),
-      );
+            ),
+      ),
+    );
 
     const asEffect = () =>
       Effect.all([Self.asEffect(), Service]).pipe(

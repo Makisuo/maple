@@ -8,6 +8,7 @@ import { isResolved } from "../../Diff.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource, type ResourceBinding } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { diffTags } from "../../Tags.ts";
 import { Account, type AccountID } from "../Account.ts";
 import type { PolicyStatement } from "../IAM/Policy.ts";
@@ -76,7 +77,8 @@ export interface Bucket extends Resource<
      * Policy statements for the bucket.
      */
     policyStatements?: PolicyStatement[];
-  }
+  },
+  Providers
 > {}
 
 /**

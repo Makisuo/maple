@@ -7,6 +7,7 @@ import type { ScopedPlanStatusSession } from "../../Cli/Cli.ts";
 import { isResolved, somePropsAreDifferent } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList, diffTags } from "../../Tags.ts";
 import type { AccountID } from "../Account.ts";
 import type { RegionID } from "../Region.ts";
@@ -205,7 +206,9 @@ export interface Subnet extends Resource<
       enableResourceNameDnsARecord?: boolean;
       enableResourceNameDnsAAAARecord?: boolean;
     };
-  }
+  },
+  never,
+  Providers
 > {}
 export const Subnet = Resource<Subnet>("AWS.EC2.Subnet");
 

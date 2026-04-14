@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   collectPages,
   readResourceTags,
@@ -38,7 +39,9 @@ export interface Root extends Resource<
     rootName: string;
     policyTypes: organizations.PolicyTypeSummary[];
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

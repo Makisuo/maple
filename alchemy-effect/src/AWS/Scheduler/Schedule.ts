@@ -5,6 +5,7 @@ import type { Input } from "../../Input.ts";
 import { createPhysicalName } from "../../PhysicalName.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import {
   createInternalTags,
   createTagsList,
@@ -97,7 +98,9 @@ export interface Schedule extends Resource<
     scheduleName: string;
     groupName: string;
     state: string | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 
 export const Schedule = Resource<Schedule>("AWS.Scheduler.Schedule");

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { Account, type AccountID } from "../Account.ts";
 import type { RegionID } from "../Region.ts";
 import { createManagedTags, createName, retryConcurrent } from "./common.ts";
@@ -36,7 +37,9 @@ export interface AlarmMuteRule extends Resource<
     muteType: string | undefined;
     alarmMuteRule: cloudwatch.GetAlarmMuteRuleOutput;
     tags: Record<string, string>;
-  }
+  },
+  never,
+  Providers
 > {}
 
 /**

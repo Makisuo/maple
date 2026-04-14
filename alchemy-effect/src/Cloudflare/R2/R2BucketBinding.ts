@@ -142,7 +142,7 @@ export class R2BucketBinding extends Binding.Service<
 export const R2BucketBindingLive = Layer.effect(
   R2BucketBinding,
   Effect.gen(function* () {
-    const bind = yield* BucketBindingPolicy;
+    const bind = yield* R2BucketBindingPolicy;
 
     return Effect.fn(function* (bucket: R2Bucket) {
       yield* bind(bucket);
@@ -306,37 +306,32 @@ export const R2BucketBindingLive = Layer.effect(
   }),
 );
 
-export class BucketBindingPolicy extends Binding.Policy<
-  BucketBindingPolicy,
+export class R2BucketBindingPolicy extends Binding.Policy<
+  R2BucketBindingPolicy,
   (bucket: R2Bucket) => Effect.Effect<void>
 >()("Cloudflare.R2Bucket") {}
 
-export const R2BucketBindingPolicyLive = BucketBindingPolicy.layer.succeed(
-  (host, bucket) => R2BucketClient(host, bucket),
-);
-
-export const R2BucketClient = Effect.fn(function* (
-  host: ResourceLike,
-  bucket: R2Bucket,
-) {
-  if (isWorker(host)) {
-    yield* host.bind`${bucket}`({
-      bindings: [
-        {
-          type: "r2_bucket",
-          name: bucket.LogicalId,
-          bucketName: bucket.bucketName,
-          jurisdiction: bucket.jurisdiction.pipe(
-            Output.map((jurisdiction) =>
-              jurisdiction === "default" ? undefined : jurisdiction,
+export const R2BucketBindingPolicyLive = R2BucketBindingPolicy.layer.succeed(
+  Effect.fnUntraced(function* (host: ResourceLike, bucket: R2Bucket) {
+    if (isWorker(host)) {
+      yield* host.bind`${bucket}`({
+        bindings: [
+          {
+            type: "r2_bucket",
+            name: bucket.LogicalId,
+            bucketName: bucket.bucketName,
+            jurisdiction: bucket.jurisdiction.pipe(
+              Output.map((jurisdiction) =>
+                jurisdiction === "default" ? undefined : jurisdiction,
+              ),
             ),
-          ),
-        },
-      ],
-    });
-  } else {
-    return yield* Effect.die(
-      new Error(`BucketBinding does not support runtime '${host.Type}'`),
-    );
-  }
-});
+          },
+        ],
+      });
+    } else {
+      return yield* Effect.die(
+        new Error(`BucketBinding does not support runtime '${host.Type}'`),
+      );
+    }
+  }),
+);

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { isResolved } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import { createInternalTags, createTagsList, diffTags } from "../../Tags.ts";
 import type { SecurityGroupId } from "./SecurityGroup.ts";
 
@@ -135,7 +136,9 @@ export interface SecurityGroupRule extends Resource<
      * The description.
      */
     description?: string | undefined;
-  }
+  },
+  never,
+  Providers
 > {}
 export const SecurityGroupRule = Resource<SecurityGroupRule>(
   "AWS.EC2.SecurityGroupRule",

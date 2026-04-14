@@ -6,6 +6,7 @@ import * as Schedule from "effect/Schedule";
 import { isResolved, somePropsAreDifferent } from "../../Diff.ts";
 import * as Provider from "../../Provider.ts";
 import { Resource } from "../../Resource.ts";
+import type { Providers } from "../Providers.ts";
 import type { RouteTableId } from "./RouteTable.ts";
 
 export interface RouteProps {
@@ -116,7 +117,9 @@ export interface Route extends Resource<
     carrierGatewayId?: string;
     egressOnlyInternetGatewayId?: string;
     coreNetworkArn?: string;
-  }
+  },
+  never,
+  Providers
 > {}
 export const Route = Resource<Route>("AWS.EC2.Route");
 

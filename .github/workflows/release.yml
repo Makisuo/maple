@@ -3,15 +3,8 @@ name: Release NPM Package
 on:
   workflow_dispatch:
     inputs:
-      bump:
-        description: "Bump type"
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
       version-override:
-        description: "Exact version override (e.g. 0.7.0-alpha). Leave empty to use bump type."
+        description: "Exact version override (e.g. 2.0.0-beta.5). Leave empty to auto-increment beta."
         required: false
         type: string
 
@@ -59,7 +52,7 @@ jobs:
           if [ -n "${{ inputs.version-override }}" ]; then
             bun ./scripts/bump.ts "${{ inputs.version-override }}"
           else
-            bun ./scripts/bump.ts "${{ inputs.bump }}"
+            bun ./scripts/bump.ts beta
           fi
           VERSION=$(node -p "require('./alchemy-effect/package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -72,13 +65,11 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - name: Create and push tag
-        if: ${{ !contains(steps.bump.outputs.version, '-') }}
         run: |
           git tag -a "v${{ steps.bump.outputs.version }}" -m "Release v${{ steps.bump.outputs.version }}"
           git push --tags
 
       - name: Create GitHub Release
-        if: ${{ !contains(steps.bump.outputs.version, '-') }}
         run: |
           if ! gh release view "v${{ steps.bump.outputs.version }}" >/dev/null 2>&1; then
             PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
@@ -93,7 +84,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── Step 2: Build & publish alchemy-effect to npm ──
+  # ── Step 2: Build & publish alchemy to npm ──
   publish-alchemy-effect:
     needs: bump
     runs-on: ubuntu-latest

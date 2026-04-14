@@ -42,19 +42,27 @@ export const taggedFunction = <
 >(
   tag: Tag,
   fn: Fn,
-): Tag & Fn =>
-  Object.assign(fn, tag, {
-    asEffect() {
-      return tag.asEffect();
-    },
-    [Symbol.iterator]() {
-      return tag[Symbol.iterator]();
-    },
-    pipe() {
-      return pipeArguments(tag.asEffect(), arguments);
-    },
+): Tag & Fn => {
+  const overrides = {
+    asEffect: () => tag.asEffect(),
+    [Symbol.iterator]: () => tag[Symbol.iterator](),
+    pipe: (...fns: any[]) => pipeArguments(tag.asEffect(), fns as any),
     toString: () => `${tag.toString()}.${fn.name}`,
-  });
+  };
+
+  return new Proxy(fn, {
+    get: (target, prop, receiver) =>
+      Reflect.has(overrides, prop)
+        ? Reflect.get(overrides, prop, receiver)
+        : Reflect.has(target, prop)
+          ? Reflect.get(target, prop, receiver)
+          : Reflect.get(tag as object, prop, tag),
+    has: (target, prop) =>
+      Reflect.has(overrides, prop) ||
+      Reflect.has(target, prop) ||
+      Reflect.has(tag as object, prop),
+  }) as Tag & Fn;
+};
 
 export type UnwrapEffect<T> =
   T extends Effect.Effect<infer A, any, any> ? A : T;
