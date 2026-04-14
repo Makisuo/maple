@@ -22,7 +22,7 @@ import {
   PortableDashboardDocument,
   UserId,
 } from "@maple/domain/http"
-import { Database as DatabaseService } from "./DatabaseLive"
+import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { DashboardPersistenceService } from "./DashboardPersistenceService"
 import { Env } from "./Env"
 
@@ -54,7 +54,7 @@ const createTempDbUrl = () => {
   return `file:${dbPath}`
 }
 
-const testConfigProvider = (url: string) =>
+const testConfig = (url: string) =>
   ConfigProvider.layer(
     ConfigProvider.fromUnknown({
       PORT: "3472",
@@ -62,23 +62,19 @@ const testConfigProvider = (url: string) =>
       TINYBIRD_HOST: "https://api.tinybird.co",
       TINYBIRD_TOKEN: "test-token",
       MAPLE_DB_URL: url,
-      MAPLE_DB_AUTH_TOKEN: "",
       MAPLE_AUTH_MODE: "self_hosted",
       MAPLE_ROOT_PASSWORD: "test-root-password",
       MAPLE_DEFAULT_ORG_ID: "default",
       MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
       MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
-      CLERK_SECRET_KEY: "",
-      CLERK_PUBLISHABLE_KEY: "",
-      CLERK_JWT_KEY: "",
     }),
   )
 
 const makeLayer = (url: string) =>
   DashboardPersistenceService.Live.pipe(
-    Layer.provide(DatabaseService.Default),
+    Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
-    Layer.provide(testConfigProvider(url)),
+    Layer.provide(testConfig(url)),
   )
 
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)

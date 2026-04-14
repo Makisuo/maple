@@ -13,7 +13,7 @@ import {
 } from "@maple/domain/http"
 import { TinybirdSyncRejectedError } from "@maple/domain/tinybird-project-sync"
 import { encryptAes256Gcm } from "./Crypto"
-import { Database as DatabaseService } from "./DatabaseLive"
+import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService, __testables } from "./OrgTinybirdSettingsService"
 
@@ -61,30 +61,26 @@ const createTempDbUrl = () => {
   return { url: `file:${dbPath}`, dbPath }
 }
 
-const makeConfigProvider = (url: string) =>
+const makeConfig = (url: string) =>
   ConfigProvider.layer(
     ConfigProvider.fromUnknown({
       PORT: "3472",
       TINYBIRD_HOST: "https://maple-managed.tinybird.co",
       TINYBIRD_TOKEN: "managed-token",
       MAPLE_DB_URL: url,
-      MAPLE_DB_AUTH_TOKEN: "",
       MAPLE_AUTH_MODE: "self_hosted",
       MAPLE_ROOT_PASSWORD: "test-root-password",
       MAPLE_DEFAULT_ORG_ID: "default",
       MAPLE_INGEST_KEY_ENCRYPTION_KEY: encryptionKey.toString("base64"),
       MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
-      CLERK_SECRET_KEY: "",
-      CLERK_PUBLISHABLE_KEY: "",
-      CLERK_JWT_KEY: "",
     }),
   )
 
 const makeLayer = (url: string) =>
   OrgTinybirdSettingsService.Live.pipe(
-    Layer.provide(DatabaseService.Default),
+    Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
-    Layer.provide(makeConfigProvider(url)),
+    Layer.provide(makeConfig(url)),
   )
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)

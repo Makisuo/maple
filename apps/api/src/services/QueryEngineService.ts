@@ -14,8 +14,9 @@ import {
   QueryEngineValidationError,
   TinybirdQueryError,
 } from "@maple/domain/http"
-import { Array as Arr, Cache, Duration, Effect, Layer, Match, Metric, MutableHashMap, Option, Result, Context } from "effect"
+import { Array as Arr, Duration, Effect, Layer, Match, Metric, Option, Result, Context } from "effect"
 import type { TenantContext } from "./AuthService"
+import { EdgeCacheService } from "./EdgeCacheService"
 import { TinybirdService, type TinybirdServiceShape } from "./TinybirdService"
 import * as QueryEngineMetrics from "./QueryEngineMetrics"
 
@@ -1487,89 +1488,61 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
 export class QueryEngineService extends Context.Service<QueryEngineService, QueryEngineServiceShape>()("QueryEngineService", {
   make: Effect.gen(function* () {
     const tinybird = yield* TinybirdService
+    const edgeCache = yield* EdgeCacheService
     const executeImpl = makeQueryEngineExecute(tinybird)
-    const evaluate = makeQueryEngineEvaluate(tinybird)
+    const evaluateImpl = makeQueryEngineEvaluate(tinybird)
 
-    // --- Execute cache ---
-    const pendingExecute = MutableHashMap.empty<string, { tenant: TenantContext; request: QueryEngineExecuteRequest }>()
-    const executeCache = yield* Cache.make<
-      string,
-      QueryEngineExecuteResponse,
-      QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError
-    >({
-      capacity: 256,
-      timeToLive: "15 seconds",
-      lookup: (key) => {
-        const ctx = MutableHashMap.get(pendingExecute, key)
-        if (Option.isNone(ctx)) return Effect.die(`No pending request context for cache key: ${key}`)
-        return executeImpl(ctx.value.tenant, ctx.value.request).pipe(
-          Effect.tap(() => Metric.update(QueryEngineMetrics.cacheMissesTotal, 1)),
-        )
-      },
-    })
-
-    // --- Evaluate cache ---
-    const pendingEvaluate = MutableHashMap.empty<string, { tenant: TenantContext; request: QueryEngineEvaluateRequest }>()
-    const evaluateCache = yield* Cache.make<
-      string,
-      ReadonlyArray<GroupedAlertObservation>,
-      QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError
-    >({
-      capacity: 64,
-      timeToLive: "30 seconds",
-      lookup: (key) => {
-        const ctx = MutableHashMap.get(pendingEvaluate, key)
-        if (Option.isNone(ctx)) return Effect.die(`No pending evaluate context for cache key: ${key}`)
-        return evaluate(ctx.value.tenant, ctx.value.request)
-      },
-    })
-
-    // --- Direct route cache ---
-    const pendingDirect = MutableHashMap.empty<string, Effect.Effect<unknown, QueryEngineExecutionError>>()
-    const directCache = yield* Cache.make<
-      string,
-      unknown,
-      QueryEngineExecutionError | QueryEngineTimeoutError
-    >({
-      capacity: 256,
-      timeToLive: "15 seconds",
-      lookup: (key) => {
-        const ctx = MutableHashMap.get(pendingDirect, key)
-        if (Option.isNone(ctx)) return Effect.die(`No pending direct request context for cache key: ${key}`)
-        return ctx.value.pipe(
-          Effect.tap(() => Metric.update(QueryEngineMetrics.cacheMissesTotal, 1)),
-        )
-      },
-    })
+    const recordCacheOutcome = (hit: boolean) =>
+      Metric.update(
+        hit ? QueryEngineMetrics.cacheHitsTotal : QueryEngineMetrics.cacheMissesTotal,
+        1,
+      )
 
     const execute = (tenant: TenantContext, request: QueryEngineExecuteRequest) =>
-        withTimeout(
-          Effect.gen(function* () {
-            const startMs = Date.now()
-            const key = buildCacheKey(tenant.orgId, request)
-            const hadEntry = Option.isSome(yield* Cache.getSuccess(executeCache, key))
-            MutableHashMap.set(pendingExecute, key, { tenant, request })
-            const result = yield* Cache.get(executeCache, key)
-            if (hadEntry) {
-              yield* Metric.update(QueryEngineMetrics.cacheHitsTotal, 1)
-            }
-            yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
-            return result
-          }).pipe(Effect.withSpan("QueryEngineService.cachedExecute", {
+      withTimeout(
+        Effect.gen(function* () {
+          const startMs = Date.now()
+          const key = buildCacheKey(tenant.orgId, request)
+          const { value, hit } = yield* edgeCache.getOrCompute<
+            QueryEngineExecuteResponse,
+            QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError,
+            never
+          >(
+            { bucket: "qe-execute", key, ttlSeconds: 15 },
+            executeImpl(tenant, request),
+          )
+          yield* recordCacheOutcome(hit)
+          yield* Effect.annotateCurrentSpan("cache.hit", hit)
+          yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
+          return value
+        }).pipe(
+          Effect.withSpan("QueryEngineService.cachedExecute", {
             attributes: { orgId: tenant.orgId },
-          })),
-        )
+          }),
+        ),
+      )
 
     const cachedEvaluate = (tenant: TenantContext, request: QueryEngineEvaluateRequest) =>
-        withTimeout(
-          Effect.gen(function* () {
-            const key = buildEvaluateCacheKey(tenant.orgId, request)
-            MutableHashMap.set(pendingEvaluate, key, { tenant, request })
-            return yield* Cache.get(evaluateCache, key)
-          }).pipe(Effect.withSpan("QueryEngineService.cachedEvaluate", {
+      withTimeout(
+        Effect.gen(function* () {
+          const key = buildEvaluateCacheKey(tenant.orgId, request)
+          const { value, hit } = yield* edgeCache.getOrCompute<
+            ReadonlyArray<GroupedAlertObservation>,
+            QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError,
+            never
+          >(
+            { bucket: "qe-evaluate", key, ttlSeconds: 30 },
+            evaluateImpl(tenant, request),
+          )
+          yield* recordCacheOutcome(hit)
+          yield* Effect.annotateCurrentSpan("cache.hit", hit)
+          return value
+        }).pipe(
+          Effect.withSpan("QueryEngineService.cachedEvaluate", {
             attributes: { orgId: tenant.orgId },
-          })),
-        )
+          }),
+        ),
+      )
 
     const cachedDirect = <A>(
       tenant: TenantContext,
@@ -1577,29 +1550,37 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
       payload: unknown,
       effect: Effect.Effect<A, QueryEngineExecutionError>,
     ): Effect.Effect<A, QueryEngineExecutionError> =>
-        withTimeout(
-          Effect.gen(function* () {
-            const startMs = Date.now()
-            const key = buildDirectRouteCacheKey(tenant.orgId, routeName, payload)
-            const hadEntry = Option.isSome(yield* Cache.getSuccess(directCache, key))
-            MutableHashMap.set(pendingDirect, key, effect)
-            const result = yield* Cache.get(directCache, key)
-            if (hadEntry) {
-              yield* Metric.update(QueryEngineMetrics.cacheHitsTotal, 1)
-            }
-            yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
-            return result as A
-          }).pipe(Effect.withSpan("QueryEngineService.cachedDirect", {
+      withTimeout(
+        Effect.gen(function* () {
+          const startMs = Date.now()
+          const key = buildDirectRouteCacheKey(tenant.orgId, routeName, payload)
+          const { value, hit } = yield* edgeCache.getOrCompute<
+            A,
+            QueryEngineExecutionError,
+            never
+          >(
+            { bucket: "qe-direct", key, ttlSeconds: 15 },
+            effect,
+          )
+          yield* recordCacheOutcome(hit)
+          yield* Effect.annotateCurrentSpan("cache.hit", hit)
+          yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
+          return value
+        }).pipe(
+          Effect.withSpan("QueryEngineService.cachedDirect", {
             attributes: { orgId: tenant.orgId, routeName },
-          })),
-        ).pipe(
-          Effect.catchTag("@maple/http/errors/QueryEngineTimeoutError", (error) =>
-            Effect.fail(new QueryEngineExecutionError({
+          }),
+        ),
+      ).pipe(
+        Effect.catchTag("@maple/http/errors/QueryEngineTimeoutError", (error) =>
+          Effect.fail(
+            new QueryEngineExecutionError({
               message: error.message,
               causeTag: error._tag,
-            })),
+            }),
           ),
-        )
+        ),
+      )
 
     return {
       execute,

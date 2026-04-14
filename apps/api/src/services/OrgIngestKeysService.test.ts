@@ -11,7 +11,7 @@ import {
   UserId,
 } from "@maple/domain/http"
 import { hashIngestKey } from "@maple/db"
-import { Database as DatabaseService } from "./DatabaseLive"
+import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgIngestKeysService } from "./OrgIngestKeysService"
 
@@ -43,7 +43,7 @@ const createTempDbUrl = () => {
   return { url: `file:${dbPath}`, dbPath }
 }
 
-const makeConfigProvider = (
+const makeConfig = (
   url: string,
   encryptionKey?: string,
 ) =>
@@ -54,7 +54,6 @@ const makeConfigProvider = (
       TINYBIRD_HOST: "https://api.tinybird.co",
       TINYBIRD_TOKEN: "test-token",
       MAPLE_DB_URL: url,
-      MAPLE_DB_AUTH_TOKEN: "",
       MAPLE_AUTH_MODE: "self_hosted",
       MAPLE_ROOT_PASSWORD: "test-root-password",
       MAPLE_DEFAULT_ORG_ID: "default",
@@ -62,17 +61,14 @@ const makeConfigProvider = (
         ? {}
         : { MAPLE_INGEST_KEY_ENCRYPTION_KEY: encryptionKey }),
       MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
-      CLERK_SECRET_KEY: "",
-      CLERK_PUBLISHABLE_KEY: "",
-      CLERK_JWT_KEY: "",
     }),
   )
 
 const makeLayer = (url: string, encryptionKey = Buffer.alloc(32, 7).toString("base64")) =>
   OrgIngestKeysService.Live.pipe(
-    Layer.provide(DatabaseService.Default),
+    Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
-    Layer.provide(makeConfigProvider(url, encryptionKey)),
+    Layer.provide(makeConfig(url, encryptionKey)),
   )
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -332,9 +328,9 @@ describe("OrgIngestKeysService", () => {
   it("fails when encryption key config is missing", async () => {
     const { url } = createTempDbUrl()
     const layer = OrgIngestKeysService.Live.pipe(
-      Layer.provide(DatabaseService.Default),
+      Layer.provide(DatabaseLibsqlLive),
       Layer.provide(Env.Default),
-      Layer.provide(makeConfigProvider(url)),
+      Layer.provide(makeConfig(url)),
     )
 
     const exit = await Effect.runPromiseExit(
