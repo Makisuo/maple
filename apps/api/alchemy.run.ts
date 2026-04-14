@@ -45,6 +45,16 @@ const requireEnv = (key: string) => {
 
 const optionalEnv = (key: string) => process.env[key]?.trim() || undefined
 
+const optionalSecret = (key: string) => {
+  const value = optionalEnv(key)
+  return value !== undefined ? { [key]: alchemy.secret(value) } : {}
+}
+
+const optionalString = (key: string) => {
+  const value = optionalEnv(key)
+  return value !== undefined ? { [key]: value } : {}
+}
+
 export const apiWorker = await Worker("maple-api", {
   name: workerName,
   entrypoint: "./src/worker.ts",
@@ -57,7 +67,6 @@ export const apiWorker = await Worker("maple-api", {
     TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
     TINYBIRD_TOKEN: alchemy.secret(requireEnv("TINYBIRD_TOKEN")),
     MAPLE_AUTH_MODE: optionalEnv("MAPLE_AUTH_MODE") ?? "self_hosted",
-    MAPLE_ROOT_PASSWORD: alchemy.secret(optionalEnv("MAPLE_ROOT_PASSWORD")),
     MAPLE_DEFAULT_ORG_ID: optionalEnv("MAPLE_DEFAULT_ORG_ID") ?? "default",
     MAPLE_INGEST_KEY_ENCRYPTION_KEY: alchemy.secret(
       requireEnv("MAPLE_INGEST_KEY_ENCRYPTION_KEY"),
@@ -69,16 +78,17 @@ export const apiWorker = await Worker("maple-api", {
       optionalEnv("MAPLE_INGEST_PUBLIC_URL") ?? "https://ingest.maple.dev",
     MAPLE_APP_BASE_URL:
       optionalEnv("MAPLE_APP_BASE_URL") ?? "https://app.maple.dev",
-    CLERK_SECRET_KEY: alchemy.secret(optionalEnv("CLERK_SECRET_KEY")),
-    CLERK_PUBLISHABLE_KEY: optionalEnv("CLERK_PUBLISHABLE_KEY") ?? "",
-    CLERK_JWT_KEY: alchemy.secret(optionalEnv("CLERK_JWT_KEY")),
-    MAPLE_ORG_ID_OVERRIDE: optionalEnv("MAPLE_ORG_ID_OVERRIDE") ?? "",
-    AUTUMN_SECRET_KEY: alchemy.secret(optionalEnv("AUTUMN_SECRET_KEY")),
-    SD_INTERNAL_TOKEN: alchemy.secret(optionalEnv("SD_INTERNAL_TOKEN")),
-    INTERNAL_SERVICE_TOKEN: alchemy.secret(optionalEnv("INTERNAL_SERVICE_TOKEN")),
-    RESEND_API_KEY: alchemy.secret(optionalEnv("RESEND_API_KEY")),
     RESEND_FROM_EMAIL:
       optionalEnv("RESEND_FROM_EMAIL") ?? "Maple <notifications@maple.dev>",
+    ...optionalSecret("MAPLE_ROOT_PASSWORD"),
+    ...optionalSecret("CLERK_SECRET_KEY"),
+    ...optionalString("CLERK_PUBLISHABLE_KEY"),
+    ...optionalSecret("CLERK_JWT_KEY"),
+    ...optionalString("MAPLE_ORG_ID_OVERRIDE"),
+    ...optionalSecret("AUTUMN_SECRET_KEY"),
+    ...optionalSecret("SD_INTERNAL_TOKEN"),
+    ...optionalSecret("INTERNAL_SERVICE_TOKEN"),
+    ...optionalSecret("RESEND_API_KEY"),
   },
 })
 
