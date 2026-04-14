@@ -10,9 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test src/railway/target.test.ts"
   },
-  "dependencies": {
-    "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "catalog:tooling",
     "typescript": "catalog:tooling"

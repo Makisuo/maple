@@ -1,53 +1,31 @@
-import alchemy from "alchemy"
-import { Astro } from "alchemy/cloudflare"
-import { CloudflareStateStore } from "alchemy/state"
-import { parseRailwayDeploymentTarget } from "@maple/infra/railway"
+import { Stack } from "alchemy"
+import * as Cloudflare from "alchemy/Cloudflare"
+import * as Effect from "effect/Effect"
 
-const app = await alchemy("maple-landing", {
-  ...(process.env.ALCHEMY_STATE_TOKEN
-    ? {
-        stateStore: (scope) => new CloudflareStateStore(scope),
-      }
-    : {}),
+// Custom domain routing (maple.dev / staging-landing.maple.dev) is disabled
+// during the alchemy v2 migration — the installed alchemy@2.0.0-beta.3 doesn't
+// yet expose a `domains` binding on Worker/StaticSite props. Re-add once the
+// provider supports it.
+
+const stage = process.env.STAGE?.trim() ?? "dev"
+
+export const Landing = Cloudflare.StaticSite("landing", {
+  command: "astro build",
+  outdir: "dist",
+  assetsConfig: {
+    htmlHandling: "auto-trailing-slash",
+    notFoundHandling: "404-page",
+  },
 })
 
-const deploymentTarget = parseRailwayDeploymentTarget(app.stage)
-
-const landingDomains =
-  deploymentTarget.kind === "prd"
-    ? [
-        {
-          domainName: "maple.dev",
-          adopt: true,
-        },
-      ]
-    : deploymentTarget.kind === "stg"
-      ? [
-          {
-            domainName: "staging-landing.maple.dev",
-            adopt: true,
-          },
-        ]
-      : undefined
-
-const landingName =
-  deploymentTarget.kind === "prd"
-    ? "maple-landing"
-    : deploymentTarget.kind === "stg"
-      ? "maple-landing-stg"
-      : `maple-landing-${app.stage}`
-
-export const landing = await Astro("landing", {
-  name: landingName,
-  adopt: true,
-  domains: landingDomains,
-})
-
-console.log({
-  stage: app.stage,
-  landingUrl: landingDomains?.[0]?.domainName
-    ? `https://${landingDomains[0].domainName}`
-    : landing.url,
-})
-
-await app.finalize()
+export default Stack(
+  "MapleLanding",
+  { providers: Cloudflare.providers() },
+  Effect.gen(function* () {
+    const site = yield* Landing
+    return {
+      stage,
+      landingUrl: site.url,
+    }
+  }),
+)

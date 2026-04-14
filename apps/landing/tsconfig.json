@@ -5,7 +5,8 @@
     "**/*"
   ],
   "exclude": [
-    "dist"
+    "dist",
+    "alchemy.run.ts"
   ],
   "compilerOptions": {
     "jsx": "react-jsx",

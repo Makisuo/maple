@@ -33,7 +33,7 @@
     "@maple/query-engine": "workspace:*",
     "@react-email/components": "^1.0.11",
     "@tinybirdco/sdk": "catalog:tinybird",
-    "alchemy-effect": "^0.12.0",
+    "alchemy": "2.0.0-beta.3",
     "autumn-js": "^1.2.5",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.1",

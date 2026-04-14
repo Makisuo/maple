@@ -4,8 +4,6 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy:stack": "alchemy deploy",
-    "destroy:stack": "alchemy destroy",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -18,7 +16,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250214.0",
-    "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848",
     "typescript": "catalog:tooling",
     "wrangler": "^4.14.4"
   }

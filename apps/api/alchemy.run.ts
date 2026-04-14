@@ -1,5 +1,6 @@
-import { Cloudflare, Stack } from "alchemy-effect"
-import { Effect } from "effect"
+import { Stack } from "alchemy"
+import * as Cloudflare from "alchemy/Cloudflare"
+import * as Effect from "effect/Effect"
 
 const requireEnv = (key: string) => {
   const value = process.env[key]?.trim()
@@ -11,9 +12,9 @@ const requireEnv = (key: string) => {
 
 const optionalEnv = (key: string) => process.env[key]?.trim() || undefined
 
-const MapleDb = Cloudflare.D1Database("MapleDb")
+export const MapleDb = Cloudflare.D1Database("MapleDb")
 
-const ApiWorker = Cloudflare.Worker("ApiWorker", {
+export const ApiWorker = Cloudflare.Worker("ApiWorker", {
   main: "./src/worker.ts",
   url: true,
   compatibility: {
@@ -56,15 +57,16 @@ const ApiWorker = Cloudflare.Worker("ApiWorker", {
 
 export type ApiWorkerEnv = Cloudflare.InferEnv<typeof ApiWorker>
 
-export default ApiWorker.pipe(
-  Effect.flatMap((worker) =>
-    MapleDb.pipe(
-      Effect.map((database) => ({
-        url: worker.url,
-        databaseId: database.databaseId,
-        workerName: worker.workerName,
-      })),
-    ),
-  ),
-  Stack.make("MapleApiWorker", Cloudflare.providers()),
+export default Stack(
+  "MapleApi",
+  { providers: Cloudflare.providers() },
+  Effect.gen(function* () {
+    const worker = yield* ApiWorker
+    const db = yield* MapleDb
+    return {
+      url: worker.url,
+      databaseId: db.databaseId,
+      workerName: worker.workerName,
+    }
+  }),
 )

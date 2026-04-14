@@ -1,5 +1,5 @@
 import { createMapleD1Client, type CloudflareD1Database } from "@maple/db/client"
-import { WorkerEnvironment } from "alchemy-effect/Cloudflare/Workers"
+import { WorkerEnvironment } from "alchemy/Cloudflare/Workers"
 import { Effect, Layer } from "effect"
 import {
   Database,

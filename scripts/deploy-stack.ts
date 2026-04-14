@@ -45,9 +45,8 @@ const stage = parseStage(stageArg)
 const stageValue = resolveStage(stage)
 const turboTask = action === "deploy" ? "deploy:stack" : "destroy:stack"
 
-if (!process.env.RAILWAY_API_TOKEN?.trim()) {
-  fail("RAILWAY_API_TOKEN is required for deploy/destroy (Railway + Cloudflare).")
-}
+// Railway provisioning is disabled during the alchemy v2 migration; restore the
+// RAILWAY_API_TOKEN check when packages/infra/src/railway is re-enabled.
 
 const proc = Bun.spawn(
   ["turbo", turboTask, "--", "--stage", stageValue],

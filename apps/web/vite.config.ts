@@ -4,7 +4,6 @@ import { devtools } from "@tanstack/devtools-vite";
 import tanstackRouter from "@tanstack/router-plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import alchemy from "alchemy/cloudflare/vite";
 
 const envDir = path.resolve(import.meta.dirname, "../..");
 
@@ -19,6 +18,9 @@ export default defineConfig(({ mode }) => {
     process.env.VITE_CLERK_PUBLISHABLE_KEY = env.CLERK_PUBLISHABLE_KEY?.trim() || "";
   }
 
+  // alchemy v2's Cloudflare.Vite resource wires the Cloudflare vite plugin at
+  // deploy time via @distilled.cloud/cloudflare-vite-plugin — the project
+  // vite.config.ts no longer needs to add it explicitly.
   return {
     envDir,
     resolve: {
@@ -29,7 +31,6 @@ export default defineConfig(({ mode }) => {
       tanstackRouter({ target: "react", autoCodeSplitting: false }),
       tailwindcss(),
       viteReact(),
-      ...(process.env.ALCHEMY_ROOT ? [alchemy({ configPath: "./wrangler.jsonc" })] : []),
     ],
   };
 });

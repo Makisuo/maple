@@ -41,7 +41,7 @@
     "@xyflow/react": "catalog:ui",
     "agents": "^0.9.0",
     "ai": "^6.0.146",
-    "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848",
+    "alchemy": "2.0.0-beta.3",
     "autumn-js": "^1.2.5",
     "class-variance-authority": "catalog:ui",
     "clsx": "catalog:ui",

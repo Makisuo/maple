@@ -1,4 +1,4 @@
-import { WorkerEnvironment } from "alchemy-effect/Cloudflare/Workers"
+import { WorkerEnvironment } from "alchemy/Cloudflare/Workers"
 import { ConfigProvider, FileSystem, Layer, Path } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
