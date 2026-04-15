@@ -1,8 +1,9 @@
 import path from "node:path"
 import { Vite } from "alchemy/cloudflare"
-import type {
-  MapleDomains,
-  MapleStage,
+import {
+  resolveWorkerName,
+  type MapleDomains,
+  type MapleStage,
 } from "@maple/infra/cloudflare"
 
 export interface CreateMapleWebOptions {
@@ -14,6 +15,7 @@ export interface CreateMapleWebOptions {
 }
 
 export const createMapleWeb = async ({
+  stage,
   domains,
   apiUrl,
   ingestUrl,
@@ -34,6 +36,7 @@ export const createMapleWeb = async ({
   process.env.VITE_CHAT_AGENT_URL = chatAgentUrl
 
   const website = await Vite("app", {
+    name: resolveWorkerName("web", stage),
     cwd: import.meta.dirname,
     entrypoint: path.join(import.meta.dirname, "src", "worker.ts"),
     domains: domains.web
