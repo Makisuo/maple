@@ -1,1 +1,0 @@
-ALTER TABLE `org_tinybird_settings` ADD `last_deployment_id` text;

@@ -1,1 +1,0 @@
-ALTER TABLE `alert_rules` ADD `exclude_service_names_json` text;
