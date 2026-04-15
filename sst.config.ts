@@ -19,9 +19,6 @@ export default $config({
           ? "staging.maple.dev"
           : undefined
 
-    const webRoutes =
-      stage === "routetest" ? ["routetest.maple.dev/*"] : undefined
-
     const environment: Record<string, string> =
       stage === "production"
         ? {
@@ -47,7 +44,6 @@ export default $config({
       handler: "apps/web/src/worker.ts",
       url: true,
       domain: webDomain,
-      routes: webRoutes,
       assets: { directory: "apps/web/dist" },
       environment,
     })

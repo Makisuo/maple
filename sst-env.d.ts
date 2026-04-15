@@ -9,15 +9,6 @@ declare module "sst" {
   export interface Resource {
   }
 }
-// cloudflare 
-import * as cloudflare from "@cloudflare/workers-types";
-declare module "sst" {
-  export interface Resource {
-    "Landing": cloudflare.Service
-    "MAPLE_DB": cloudflare.D1Database
-    "Web": cloudflare.Service
-  }
-}
 
 import "sst"
 export {}

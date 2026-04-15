@@ -17,8 +17,6 @@
     "dev": "turbo dev --ui=tui",
     "dev:alerting": "bun --filter=@maple/alerting dev",
     "sst:deploy": "turbo run build --filter=@maple/web --filter=@maple/landing && sst deploy",
-    "sst:deploy:staging": "turbo run build --filter=@maple/web --filter=@maple/landing && sst deploy --stage staging && bun --cwd apps/api db:migrate:staging",
-    "sst:deploy:prod": "turbo run build --filter=@maple/web --filter=@maple/landing && sst deploy --stage production && bun --cwd apps/api db:migrate:prod",
     "sst:remove": "sst remove",
     "sst:dev": "sst dev",
     "test": "turbo test",
