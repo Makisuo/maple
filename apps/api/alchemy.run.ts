@@ -1,3 +1,4 @@
+import path from "node:path"
 import alchemy from "alchemy"
 import { D1Database, Worker } from "alchemy/cloudflare"
 import { CloudflareStateStore } from "alchemy/state"
@@ -20,6 +21,11 @@ const domains = resolveMapleDomains(stage)
 const mapleDb = await D1Database("MAPLE_DB", {
   name: resolveD1Name(stage),
   adopt: true,
+  migrationsDir: path.resolve(
+    import.meta.dirname,
+    "../../packages/db/drizzle",
+  ),
+  migrationsTable: "drizzle_migrations",
 })
 
 const requireEnv = (key: string): string => {
@@ -50,6 +56,7 @@ export const api = await Worker("api", {
   compatibilityDate: "2026-04-08",
   url: true,
   adopt: true,
+  dev: { port: 3472 },
   domains: domains.api ? [{ domainName: domains.api, adopt: true }] : undefined,
   bindings: {
     MAPLE_DB: mapleDb,

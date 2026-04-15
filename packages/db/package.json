@@ -7,9 +7,6 @@
     "./client": "./src/client.ts",
     "./config": "./src/config.ts",
     "./migrate": "./src/migrate.ts",
-    "./migrate-d1": "./src/migrate-d1.ts",
-    "./migrate-d1-local": "./src/migrate-d1-local.ts",
-    "./migrate-d1-remote": "./src/migrate-d1-remote.ts",
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {

@@ -8,8 +8,7 @@
   },
   "scripts": {
     "db:generate": "bun run --cwd ../../packages/db db:generate",
-    "db:migrate:local": "bun ./scripts/prepare-local-d1.ts",
-    "dev": "bun run db:migrate:local && wrangler dev --env-file ../../.env.local",
+    "dev": "alchemy dev --env-file ../../.env.local",
     "deploy:stack": "alchemy deploy",
     "destroy:stack": "alchemy destroy",
     "test": "bun test",
