@@ -32,9 +32,7 @@
     "dev": "astro dev --port 3391",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro",
-    "deploy:stack": "alchemy deploy",
-    "destroy:stack": "alchemy destroy"
+    "astro": "astro"
   },
   "type": "module"
 }

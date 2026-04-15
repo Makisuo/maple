@@ -48,6 +48,7 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 
   const worker = await Worker("api", {
     name: resolveWorkerName("api", stage),
+    cwd: import.meta.dirname,
     entrypoint: path.join(import.meta.dirname, "src", "worker.ts"),
     compatibility: "node",
     compatibilityDate: "2026-04-08",

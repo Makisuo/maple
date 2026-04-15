@@ -34,6 +34,7 @@ export const createMapleWeb = async ({
   process.env.VITE_CHAT_AGENT_URL = chatAgentUrl
 
   const website = await Vite("app", {
+    cwd: import.meta.dirname,
     entrypoint: path.join(import.meta.dirname, "src", "worker.ts"),
     domains: domains.web
       ? [{ domainName: domains.web, adopt: true }]
