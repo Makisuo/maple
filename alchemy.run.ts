@@ -1,6 +1,7 @@
 import alchemy from "alchemy"
 import { CloudflareStateStore } from "alchemy/state"
 import { parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
+import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi } from "./apps/api/alchemy.run.ts"
 import { createChatAgentWorker } from "./apps/chat-agent/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
@@ -24,7 +25,7 @@ const app = await alchemy("maple", {
 const stage = parseMapleStage(app.stage)
 const domains = resolveMapleDomains(stage)
 
-const { worker: api } = await createMapleApi({ stage, domains })
+const { worker: api, db: mapleDb } = await createMapleApi({ stage, domains })
 
 const resolvedApiUrl = domains.api ? `https://${domains.api}` : api.url
 if (!resolvedApiUrl) {
@@ -64,6 +65,8 @@ const web = await createMapleWeb({
 
 const landing = await createLandingWorker({ stage, domains })
 
+const alerting = await createAlertingWorker({ stage, domains, mapleDb })
+
 console.log({
   stage: app.stage,
   apiUrl: resolvedApiUrl,
@@ -71,6 +74,7 @@ console.log({
   ingestUrl: resolvedIngestUrl,
   webUrl: domains.web ? `https://${domains.web}` : web.url,
   landingUrl: domains.landing ? `https://${domains.landing}` : landing.url,
+  alertingWorker: alerting.name,
 })
 
 await app.finalize()
