@@ -9,25 +9,6 @@ import {
   resolveWorkerName,
 } from "@maple/infra/cloudflare"
 
-const app = await alchemy("maple-api", {
-  ...(process.env.ALCHEMY_STATE_TOKEN
-    ? { stateStore: (scope) => new CloudflareStateStore(scope) }
-    : {}),
-})
-
-const stage = parseMapleStage(app.stage)
-const domains = resolveMapleDomains(stage)
-
-const mapleDb = await D1Database("MAPLE_DB", {
-  name: resolveD1Name(stage),
-  adopt: true,
-  migrationsDir: path.resolve(
-    import.meta.dirname,
-    "../../packages/db/drizzle",
-  ),
-  migrationsTable: "drizzle_migrations",
-})
-
 const requireEnv = (key: string): string => {
   const value = process.env[key]?.trim()
   if (!value) {
@@ -48,6 +29,26 @@ const optionalSecret = (key: string): Record<string, ReturnType<typeof alchemy.s
   const value = process.env[key]?.trim()
   return value ? { [key]: alchemy.secret(value) } : {}
 }
+
+const app = await alchemy("maple-api", {
+  password: requireEnv("ALCHEMY_PASSWORD"),
+  ...(process.env.ALCHEMY_STATE_TOKEN
+    ? { stateStore: (scope) => new CloudflareStateStore(scope) }
+    : {}),
+})
+
+const stage = parseMapleStage(app.stage)
+const domains = resolveMapleDomains(stage)
+
+const mapleDb = await D1Database("MAPLE_DB", {
+  name: resolveD1Name(stage),
+  adopt: true,
+  migrationsDir: path.resolve(
+    import.meta.dirname,
+    "../../packages/db/drizzle",
+  ),
+  migrationsTable: "drizzle_migrations",
+})
 
 export const api = await Worker("api", {
   name: resolveWorkerName("api", stage),

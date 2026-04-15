@@ -2,8 +2,10 @@ export type MapleStage =
   | { kind: "prd" }
   | { kind: "stg" }
   | { kind: "pr"; prNumber: number }
+  | { kind: "dev"; name: string }
 
 const PR_STAGE_RE = /^pr-(\d+)$/
+const DEV_STAGE_RE = /^[a-z0-9][a-z0-9-]*$/
 
 export interface MapleDomains {
   web?: string
@@ -48,8 +50,12 @@ export function parseMapleStage(stage: string): MapleStage {
     }
   }
 
+  if (DEV_STAGE_RE.test(normalized)) {
+    return { kind: "dev", name: normalized }
+  }
+
   throw new Error(
-    `Unsupported deployment stage "${stage}". Expected one of: prd, stg, pr-<number>.`,
+    `Unsupported deployment stage "${stage}". Expected prd, stg, pr-<number>, or a dev stage name matching [a-z0-9-]+.`,
   )
 }
 
@@ -61,6 +67,8 @@ export function formatMapleStage(stage: MapleStage): string {
       return "stg"
     case "pr":
       return `pr-${stage.prNumber}`
+    case "dev":
+      return stage.name
   }
 }
 
@@ -71,6 +79,8 @@ export function resolveMapleDomains(stage: MapleStage): MapleDomains {
     case "stg":
       return STG_DOMAINS
     case "pr":
+      return {}
+    case "dev":
       return {}
   }
 }
@@ -83,6 +93,8 @@ export function resolveD1Name(stage: MapleStage): string {
       return "maple-api-stg"
     case "pr":
       return `maple-api-pr-${stage.prNumber}`
+    case "dev":
+      return `maple-api-dev-${stage.name}`
   }
 }
 
@@ -94,5 +106,7 @@ export function resolveWorkerName(base: string, stage: MapleStage): string {
       return `maple-${base}-stg`
     case "pr":
       return `maple-${base}-pr-${stage.prNumber}`
+    case "dev":
+      return `maple-${base}-dev-${stage.name}`
   }
 }
