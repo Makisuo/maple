@@ -36,6 +36,3 @@ jobs:
 
       - name: Deploy PRD stack with Alchemy
         run: bun run alchemy:deploy:prd
-
-      - name: Apply D1 schema migrations
-        run: bun scripts/migrate-d1-remote.ts --stage prd

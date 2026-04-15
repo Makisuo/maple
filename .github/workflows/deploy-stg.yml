@@ -39,6 +39,3 @@ jobs:
 
       - name: Deploy STG stack with Alchemy
         run: bun run alchemy:deploy:stg
-
-      - name: Apply D1 schema migrations
-        run: bun scripts/migrate-d1-remote.ts --stage stg
