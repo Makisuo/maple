@@ -32,6 +32,7 @@ export const createLandingWorker = async ({
 
   const worker = await Worker("landing", {
     name: resolveWorkerName("landing", stage),
+    cwd: import.meta.dirname,
     entrypoint: path.join(import.meta.dirname, "src", "worker.ts"),
     compatibility: "node",
     url: true,

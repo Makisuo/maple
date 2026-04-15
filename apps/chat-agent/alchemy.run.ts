@@ -25,6 +25,7 @@ export const createChatAgentWorker = async ({
 
   const worker = await Worker("chat-agent", {
     name: resolveWorkerName("chat-agent", stage),
+    cwd: import.meta.dirname,
     entrypoint: path.join(import.meta.dirname, "src", "index.ts"),
     compatibility: "node",
     url: true,
