@@ -7,8 +7,7 @@
     "./cloudflare": "./src/cloudflare/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "bun test --passWithNoTests"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "alchemy": "^0.91.2"
