@@ -57,7 +57,6 @@ export const api = await Worker("api", {
   compatibilityDate: "2026-04-08",
   url: true,
   adopt: true,
-  dev: { port: 3472 },
   domains: domains.api ? [{ domainName: domains.api, adopt: true }] : undefined,
   bindings: {
     MAPLE_DB: mapleDb,
