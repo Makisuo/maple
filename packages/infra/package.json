@@ -4,14 +4,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./railway": "./src/railway/index.ts"
+    "./cloudflare": "./src/cloudflare/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test src/railway/target.test.ts"
+    "test": "bun test --passWithNoTests"
   },
   "dependencies": {
-    "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848"
+    "alchemy": "^0.91.2"
   },
   "devDependencies": {
     "@types/node": "catalog:tooling",

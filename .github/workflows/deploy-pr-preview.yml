@@ -1,4 +1,4 @@
-name: Deploy PR Preview (Railway + Cloudflare)
+name: Deploy PR Preview (Cloudflare via Alchemy)
 
 on:
   pull_request:
@@ -44,8 +44,12 @@ jobs:
 
       - name: Deploy PR preview stack with Alchemy
         if: ${{ github.event.action != 'closed' }}
-        run: bun run deploy:pr
+        run: bun run alchemy:deploy:pr
+
+      - name: Apply D1 schema migrations
+        if: ${{ github.event.action != 'closed' }}
+        run: bun scripts/migrate-d1-remote.ts --stage pr-${{ github.event.pull_request.number }}
 
       - name: Destroy PR preview stack with Alchemy
         if: ${{ github.event.action == 'closed' }}
-        run: bun run destroy:pr
+        run: bun run alchemy:destroy:pr

@@ -1,9 +1,9 @@
-name: Deploy STG (Railway + Cloudflare)
+name: Deploy STG (Cloudflare via Alchemy)
 
 on:
   push:
     branches:
-      - develop
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -38,4 +38,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Deploy STG stack with Alchemy
-        run: bun run deploy:stg
+        run: bun run alchemy:deploy:stg
+
+      - name: Apply D1 schema migrations
+        run: bun scripts/migrate-d1-remote.ts --stage stg

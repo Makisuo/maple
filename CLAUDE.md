@@ -133,7 +133,6 @@ Use `/Users/maki/Documents/superwall/app` as the reference implementation for Ef
 End-user and platform documentation lives in `docs/`:
 - `docs/sampling-throughput.md` — How Maple handles sampling-aware throughput metrics
 - `docs/persistence.md` — Database persistence and migration operations
-- `docs/railway-deploy.md` — Railway deployment with Alchemy
 - `docs/sst-fork-workflow.md` — Running maple against a local SST fork, syncing with upstream, and opening PRs from fork branches
 
 ## Self-Observability (Trace Loop Prevention)

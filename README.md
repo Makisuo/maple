@@ -74,42 +74,36 @@ Services:
 - Ingest: `http://localhost:3474`
 - OTEL collector: `4317` (gRPC), `4318` (HTTP), `13133` (health/extensions)
 
-## Railway + Cloudflare Deploy (Alchemy)
+## Cloudflare Deploy (Alchemy)
 
-Deployments are orchestrated from one Alchemy run in `apps/web/alchemy.run.ts` with stage-driven targets:
+Deployments are per-app Alchemy runs pinned to Cloudflare Workers + D1:
 
-- Provisions Railway project `maple`
-- Uses Railway environments per stage: `prd`, `stg`, and `pr-<number>`
-- Provisions stage-scoped services `api`, `ingest`, and `otel-collector`
-- Configures service instance settings (`rootDirectory`, `dockerfilePath`, `watchPatterns`)
-- Applies required Railway variables for API and ingest
-- Uses production custom Railway domains (`api.maple.dev`, `ingest.maple.dev`) and Railway-generated domains in `stg` / `pr-*`
-- Deploys `apps/web` to Cloudflare
+- `apps/api/alchemy.run.ts` — D1 database `MAPLE_DB` + api Worker with all env bindings
+- `apps/landing/alchemy.run.ts` — Astro build + Worker serving static assets
+- `apps/web/alchemy.run.ts` — TanStack Start app via the `Vite()` resource
 
-Railway orchestration module: `@maple/infra/railway` (workspace package at `packages/infra`).
+Stage grammar is `prd` / `stg` / `pr-<number>`, resolved via `@maple/infra/cloudflare` (`parseMapleStage`, `resolveMapleDomains`, `resolveWorkerName`, `resolveD1Name`).
 
 Run locally:
 
 ```bash
-bun run deploy:prd
-bun run deploy:stg
-PR_NUMBER=123 bun run deploy:pr
+bun run alchemy:deploy:prd
+bun run alchemy:deploy:stg
+PR_NUMBER=123 bun run alchemy:deploy:pr
 ```
-
-All deploy scripts are full-stack only (Railway + Cloudflare). If `RAILWAY_API_TOKEN` is missing, deploy/destroy fails immediately.
 
 Tear down:
 
 ```bash
-bun run destroy:prd
-bun run destroy:stg
-PR_NUMBER=123 bun run destroy:pr
+bun run alchemy:destroy:prd
+bun run alchemy:destroy:stg
+PR_NUMBER=123 bun run alchemy:destroy:pr
 ```
 
 CI workflows:
 
-- PRD: `.github/workflows/deploy-prd.yml` (`push` on `main` + `workflow_dispatch`)
-- STG: `.github/workflows/deploy-stg.yml` (`push` on `develop` + `workflow_dispatch`)
+- STG (default on push to `main`): `.github/workflows/deploy-stg.yml`
+- PRD (manual only via `workflow_dispatch`): `.github/workflows/deploy-prd.yml`
 - PR preview lifecycle: `.github/workflows/deploy-pr-preview.yml` (`pull_request` opened/synchronize/reopened/closed)
 
 Secrets source model (CI):
@@ -119,16 +113,11 @@ Secrets source model (CI):
   - `ALCHEMY_PASSWORD`
   - `ALCHEMY_STATE_TOKEN`
   - `CLOUDFLARE_API_TOKEN`
-  - `CLOUDFLARE_ACCOUNT_ID`
-  - `CLOUDFLARE_EMAIL`
-  - `RAILWAY_API_TOKEN`
-  - `RAILWAY_WORKSPACE_ID`
+  - `CLOUDFLARE_DEFAULT_ACCOUNT_ID`
   - `TINYBIRD_HOST`
   - `TINYBIRD_TOKEN`
   - `RESEND_API_KEY`
   - `RESEND_FROM_EMAIL`
-  - `MAPLE_DB_URL`
-  - `MAPLE_DB_AUTH_TOKEN`
   - `MAPLE_INGEST_KEY_ENCRYPTION_KEY`
   - `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`
   - `MAPLE_AUTH_MODE`
@@ -141,7 +130,7 @@ Free/Starter note: when using a personal Doppler token, the workflow must also s
 
 Runtime API URL behavior:
 
-- Deploy-time web builds always use the Railway API domain from the same Alchemy run (`api.maple.dev` in `prd`, Railway-generated in `stg` / `pr-*`).
+- Deploy-time web builds resolve `VITE_API_BASE_URL` from the Cloudflare api worker domain (`api.maple.dev` in `prd`, `api-staging.maple.dev` in `stg`, worker.dev URL for `pr-*`).
 - Local `bun --filter=@maple/web dev` can still use root `.env` `VITE_API_BASE_URL` for local API routing.
 
 ## Environment

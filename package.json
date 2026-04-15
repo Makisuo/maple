@@ -8,17 +8,14 @@
   ],
   "scripts": {
     "build": "turbo build",
-    "deploy:pr": "bun scripts/deploy-stack.ts deploy pr",
-    "deploy:prd": "bun scripts/deploy-stack.ts deploy prd",
-    "deploy:stg": "bun scripts/deploy-stack.ts deploy stg",
-    "destroy:pr": "bun scripts/deploy-stack.ts destroy pr",
-    "destroy:prd": "bun scripts/deploy-stack.ts destroy prd",
-    "destroy:stg": "bun scripts/deploy-stack.ts destroy stg",
     "dev": "turbo dev --ui=tui",
     "dev:alerting": "bun --filter=@maple/alerting dev",
-    "sst:deploy": "turbo run build --filter=@maple/web --filter=@maple/landing && sst deploy",
-    "sst:remove": "sst remove",
-    "sst:dev": "sst dev",
+    "alchemy:deploy:prd": "bun run --filter=@maple/api deploy:stack -- --stage prd && bun run --filter=@maple/web deploy:stack -- --stage prd && bun run --filter=@maple/landing deploy:stack -- --stage prd",
+    "alchemy:deploy:stg": "bun run --filter=@maple/api deploy:stack -- --stage stg && bun run --filter=@maple/web deploy:stack -- --stage stg && bun run --filter=@maple/landing deploy:stack -- --stage stg",
+    "alchemy:deploy:pr": "bun run --filter=@maple/api deploy:stack -- --stage pr-${PR_NUMBER} && bun run --filter=@maple/web deploy:stack -- --stage pr-${PR_NUMBER} && bun run --filter=@maple/landing deploy:stack -- --stage pr-${PR_NUMBER}",
+    "alchemy:destroy:prd": "bun run --filter=@maple/landing destroy:stack -- --stage prd && bun run --filter=@maple/web destroy:stack -- --stage prd && bun run --filter=@maple/api destroy:stack -- --stage prd",
+    "alchemy:destroy:stg": "bun run --filter=@maple/landing destroy:stack -- --stage stg && bun run --filter=@maple/web destroy:stack -- --stage stg && bun run --filter=@maple/api destroy:stack -- --stage stg",
+    "alchemy:destroy:pr": "bun run --filter=@maple/landing destroy:stack -- --stage pr-${PR_NUMBER} && bun run --filter=@maple/web destroy:stack -- --stage pr-${PR_NUMBER} && bun run --filter=@maple/api destroy:stack -- --stage pr-${PR_NUMBER}",
     "test": "turbo test",
     "tinybird:manifest": "bun run ./scripts/generate-tinybird-project-manifest.ts",
     "tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
@@ -26,6 +23,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260414.1",
+    "@maple/db": "workspace:*",
     "@tinybirdco/sdk": "catalog:tinybird",
     "turbo": "^2.9.3",
     "typescript": "catalog:tooling"
@@ -70,7 +68,5 @@
       "recharts": "2.15.4"
     }
   },
-  "dependencies": {
-    "sst": "4.7.3"
-  }
+  "dependencies": {}
 }

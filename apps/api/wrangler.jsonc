@@ -12,8 +12,7 @@
       "binding": "MAPLE_DB",
       "database_name": "maple-api-local",
       "database_id": "00000000-0000-0000-0000-000000000000",
-      "preview_database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "../../packages/db/drizzle"
+      "preview_database_id": "00000000-0000-0000-0000-000000000000"
     }
   ]
 }
