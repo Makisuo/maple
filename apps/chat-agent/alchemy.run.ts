@@ -1,51 +1,44 @@
+import path from "node:path"
 import alchemy from "alchemy"
-import { Worker, DurableObjectNamespace } from "alchemy/cloudflare"
-import { CloudflareStateStore } from "alchemy/state"
+import { DurableObjectNamespace, Worker } from "alchemy/cloudflare"
+import type {
+  MapleDomains,
+  MapleStage,
+} from "@maple/infra/cloudflare"
+import { resolveWorkerName } from "@maple/infra/cloudflare"
 
-const app = await alchemy("maple-chat-agent", {
-  ...(process.env.ALCHEMY_STATE_TOKEN
-    ? { stateStore: (scope) => new CloudflareStateStore(scope) }
-    : {}),
-})
+export interface CreateChatAgentWorkerOptions {
+  stage: MapleStage
+  domains: MapleDomains
+  mapleApiUrl: string
+}
 
-const chatAgentDO = DurableObjectNamespace("chat-agent-do", {
-  className: "ChatAgent",
-  sqlite: true,
-})
-
-const domains =
-  app.stage === "prd"
-    ? [{ domainName: "chat.maple.dev", adopt: true }]
-    : app.stage === "stg"
-      ? [{ domainName: "chat-staging.maple.dev", adopt: true }]
-      : undefined
-
-const workerName =
-  app.stage === "prd"
-    ? "maple-chat-agent"
-    : app.stage === "stg"
-      ? "maple-chat-agent-stg"
-      : `maple-chat-agent-${app.stage}`
-
-const mapleApiUrl =
-  app.stage === "prd"
-    ? "https://api.maple.dev"
-    : process.env.MAPLE_API_URL ?? "http://localhost:3472"
-
-export const chatWorker = await Worker("chat-agent", {
-  name: workerName,
-  entrypoint: "./src/index.ts",
-  compatibility: "node",
-  url: true,
-  bindings: {
-    ChatAgent: chatAgentDO,
-    MAPLE_API_URL: mapleApiUrl,
-    INTERNAL_SERVICE_TOKEN: alchemy.secret(process.env.INTERNAL_SERVICE_TOKEN),
-    OPENROUTER_API_KEY: alchemy.secret(process.env.OPENROUTER_API_KEY),
-  },
+export const createChatAgentWorker = async ({
+  stage,
   domains,
-  adopt: true,
-})
+  mapleApiUrl,
+}: CreateChatAgentWorkerOptions) => {
+  const chatAgentDO = DurableObjectNamespace("chat-agent-do", {
+    className: "ChatAgent",
+    sqlite: true,
+  })
 
-console.log({ stage: app.stage, chatWorkerUrl: chatWorker.url })
-await app.finalize()
+  const worker = await Worker("chat-agent", {
+    name: resolveWorkerName("chat-agent", stage),
+    entrypoint: path.join(import.meta.dirname, "src", "index.ts"),
+    compatibility: "node",
+    url: true,
+    adopt: true,
+    domains: domains.chat
+      ? [{ domainName: domains.chat, adopt: true }]
+      : undefined,
+    bindings: {
+      ChatAgent: chatAgentDO,
+      MAPLE_API_URL: mapleApiUrl,
+      INTERNAL_SERVICE_TOKEN: alchemy.secret(process.env.INTERNAL_SERVICE_TOKEN),
+      OPENROUTER_API_KEY: alchemy.secret(process.env.OPENROUTER_API_KEY),
+    },
+  })
+
+  return worker
+}

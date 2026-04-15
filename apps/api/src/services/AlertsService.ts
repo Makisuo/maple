@@ -1964,12 +1964,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         yield* requireAdmin(roles)
         yield* requireRuleRow(orgId, ruleId)
         yield* dbExecute((db) =>
-          db.transaction(async (tx) => {
-            await tx.delete(alertDeliveryEvents).where(and(eq(alertDeliveryEvents.orgId, orgId), eq(alertDeliveryEvents.ruleId, ruleId)))
-            await tx.delete(alertIncidents).where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.ruleId, ruleId)))
-            await tx.delete(alertRuleStates).where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId)))
-            await tx.delete(alertRules).where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
-          }),
+          db.batch([
+            db.delete(alertDeliveryEvents).where(and(eq(alertDeliveryEvents.orgId, orgId), eq(alertDeliveryEvents.ruleId, ruleId))),
+            db.delete(alertIncidents).where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.ruleId, ruleId))),
+            db.delete(alertRuleStates).where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId))),
+            db.delete(alertRules).where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId))),
+          ]),
         )
         return new AlertRuleDeleteResponse({ id: ruleId })
       })
@@ -2433,223 +2433,225 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         const stateConflictTarget: [typeof alertRuleStates.orgId, typeof alertRuleStates.ruleId, typeof alertRuleStates.groupKey] = [alertRuleStates.orgId, alertRuleStates.ruleId, alertRuleStates.groupKey]
 
         let incidentAction = "none" as string
-        yield* dbExecute((db) =>
-          db.transaction(async (tx) => {
-            const state =
-              (
-                await tx
-                  .select()
-                  .from(alertRuleStates)
-                  .where(
-                    and(
-                      eq(alertRuleStates.orgId, row.orgId),
-                      eq(alertRuleStates.ruleId, row.id),
-                      eq(alertRuleStates.groupKey, groupKey),
-                    ),
-                  )
-                  .limit(1)
-              )[0] ?? null
+        // Serialized per rule via the claim lock at runSchedulerTick (SCHEDULER_LOCK_TTL_MS
+        // CAS on alertRules.lastScheduledAt). All writes below are idempotent on retry:
+        // state upsert via onConflictDoUpdate, incident insert keyed on unique incidentKey,
+        // delivery events via onConflictDoNothing on deliveryKey.
+        yield* dbExecute(async (db) => {
+          const state =
+            (
+              await db
+                .select()
+                .from(alertRuleStates)
+                .where(
+                  and(
+                    eq(alertRuleStates.orgId, row.orgId),
+                    eq(alertRuleStates.ruleId, row.id),
+                    eq(alertRuleStates.groupKey, groupKey),
+                  ),
+                )
+                .limit(1)
+            )[0] ?? null
 
-            // Look up the open incident for this group via the unique
-            // (orgId, ruleId, status, groupKey) combination. The legacy
-            // serviceName-based filter is gone — composite group keys make
-            // serviceName ambiguous, and we now persist groupKey directly.
-            const openIncident =
-              (
-                await tx
-                  .select()
-                  .from(alertIncidents)
-                  .where(
-                    and(
-                      eq(alertIncidents.orgId, row.orgId),
-                      eq(alertIncidents.ruleId, row.id),
-                      eq(alertIncidents.status, "open"),
-                      eq(alertIncidents.groupKey, groupKey),
-                    ),
-                  )
-                  .limit(1)
-              )[0] ?? null
+          // Look up the open incident for this group via the unique
+          // (orgId, ruleId, status, groupKey) combination. The legacy
+          // serviceName-based filter is gone — composite group keys make
+          // serviceName ambiguous, and we now persist groupKey directly.
+          const openIncident =
+            (
+              await db
+                .select()
+                .from(alertIncidents)
+                .where(
+                  and(
+                    eq(alertIncidents.orgId, row.orgId),
+                    eq(alertIncidents.ruleId, row.id),
+                    eq(alertIncidents.status, "open"),
+                    eq(alertIncidents.groupKey, groupKey),
+                  ),
+                )
+                .limit(1)
+            )[0] ?? null
 
-            const upsertState = (fields: {
-              consecutiveBreaches: number
-              consecutiveHealthy: number
-              lastStatus: string
-              lastValue: number | null
-              lastSampleCount: number
-            }) =>
-              tx
-                .insert(alertRuleStates)
-                .values({
-                  orgId: row.orgId,
-                  ruleId: row.id,
-                  groupKey,
+          const upsertState = (fields: {
+            consecutiveBreaches: number
+            consecutiveHealthy: number
+            lastStatus: string
+            lastValue: number | null
+            lastSampleCount: number
+          }) =>
+            db
+              .insert(alertRuleStates)
+              .values({
+                orgId: row.orgId,
+                ruleId: row.id,
+                groupKey,
+                ...fields,
+                lastEvaluatedAt: timestamp,
+                lastError: null,
+                updatedAt: timestamp,
+              })
+              .onConflictDoUpdate({
+                target: stateConflictTarget,
+                set: {
                   ...fields,
                   lastEvaluatedAt: timestamp,
                   lastError: null,
                   updatedAt: timestamp,
-                })
-                .onConflictDoUpdate({
-                  target: stateConflictTarget,
-                  set: {
-                    ...fields,
-                    lastEvaluatedAt: timestamp,
-                    lastError: null,
-                    updatedAt: timestamp,
-                  },
-                })
-
-            if (evaluation.status === "skipped") {
-              await upsertState({
-                consecutiveBreaches: state?.consecutiveBreaches ?? 0,
-                consecutiveHealthy: state?.consecutiveHealthy ?? 0,
-                lastStatus: evaluation.status,
-                lastValue: evaluation.value,
-                lastSampleCount: evaluation.sampleCount,
+                },
               })
-              return
-            }
 
-            const consecutiveBreaches =
-              evaluation.status === "breached"
-                ? (state?.consecutiveBreaches ?? 0) + 1
-                : 0
-            const consecutiveHealthy =
-              evaluation.status === "healthy"
-                ? (state?.consecutiveHealthy ?? 0) + 1
-                : 0
-
+          if (evaluation.status === "skipped") {
             await upsertState({
-              consecutiveBreaches,
-              consecutiveHealthy,
+              consecutiveBreaches: state?.consecutiveBreaches ?? 0,
+              consecutiveHealthy: state?.consecutiveHealthy ?? 0,
               lastStatus: evaluation.status,
               lastValue: evaluation.value,
               lastSampleCount: evaluation.sampleCount,
             })
+            return
+          }
 
-            if (
-              evaluation.status === "breached" &&
-              openIncident == null &&
-              consecutiveBreaches >= normalized.consecutiveBreachesRequired
-            ) {
-              const incidentId = makeUuid()
-              const incidentKey = `${row.orgId}:${row.id}:${groupKey}`
-              const incident: AlertIncidentRow = {
-                id: incidentId,
-                orgId: row.orgId,
-                ruleId: row.id,
-                incidentKey,
-                ruleName: row.name,
-                groupKey,
-                signalType: normalized.signalType,
-                severity: normalized.severity,
-                status: "open",
-                comparator: normalized.comparator,
-                threshold: normalized.threshold,
-                firstTriggeredAt: timestamp,
+          const consecutiveBreaches =
+            evaluation.status === "breached"
+              ? (state?.consecutiveBreaches ?? 0) + 1
+              : 0
+          const consecutiveHealthy =
+            evaluation.status === "healthy"
+              ? (state?.consecutiveHealthy ?? 0) + 1
+              : 0
+
+          await upsertState({
+            consecutiveBreaches,
+            consecutiveHealthy,
+            lastStatus: evaluation.status,
+            lastValue: evaluation.value,
+            lastSampleCount: evaluation.sampleCount,
+          })
+
+          if (
+            evaluation.status === "breached" &&
+            openIncident == null &&
+            consecutiveBreaches >= normalized.consecutiveBreachesRequired
+          ) {
+            const incidentId = makeUuid()
+            const incidentKey = `${row.orgId}:${row.id}:${groupKey}`
+            const incident: AlertIncidentRow = {
+              id: incidentId,
+              orgId: row.orgId,
+              ruleId: row.id,
+              incidentKey,
+              ruleName: row.name,
+              groupKey,
+              signalType: normalized.signalType,
+              severity: normalized.severity,
+              status: "open",
+              comparator: normalized.comparator,
+              threshold: normalized.threshold,
+              firstTriggeredAt: timestamp,
+              lastTriggeredAt: timestamp,
+              resolvedAt: null,
+              lastObservedValue: evaluation.value,
+              lastSampleCount: evaluation.sampleCount,
+              lastEvaluatedAt: timestamp,
+              dedupeKey: incidentKey,
+              lastDeliveredEventType: null,
+              lastNotifiedAt: null,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            }
+
+            await db.insert(alertIncidents).values(incident)
+            await queueIncidentNotificationsOnDb(
+              db,
+              row.orgId as OrgId,
+              normalized,
+              incident,
+              evaluation,
+              "trigger",
+              timestamp,
+            )
+            incidentAction = "opened"
+            return
+          }
+
+          if (evaluation.status === "breached" && openIncident != null) {
+            const refreshedIncident = {
+              ...openIncident,
+              lastTriggeredAt: timestamp,
+              lastObservedValue: evaluation.value,
+              lastSampleCount: evaluation.sampleCount,
+              lastEvaluatedAt: timestamp,
+              updatedAt: timestamp,
+            }
+
+            await db
+              .update(alertIncidents)
+              .set({
                 lastTriggeredAt: timestamp,
-                resolvedAt: null,
                 lastObservedValue: evaluation.value,
                 lastSampleCount: evaluation.sampleCount,
                 lastEvaluatedAt: timestamp,
-                dedupeKey: incidentKey,
-                lastDeliveredEventType: null,
-                lastNotifiedAt: null,
-                createdAt: timestamp,
                 updatedAt: timestamp,
-              }
+              })
+              .where(eq(alertIncidents.id, openIncident.id))
 
-              await tx.insert(alertIncidents).values(incident)
+            const renotifyDueAt =
+              (openIncident.lastNotifiedAt ?? openIncident.firstTriggeredAt) +
+              normalized.renotifyIntervalMinutes * 60_000
+            if (renotifyDueAt <= timestamp) {
               await queueIncidentNotificationsOnDb(
-                tx,
+                db,
                 row.orgId as OrgId,
                 normalized,
-                incident,
+                refreshedIncident,
                 evaluation,
-                "trigger",
+                "renotify",
                 timestamp,
               )
-              incidentAction = "opened"
-              return
+            }
+            return
+          }
+
+          if (
+            evaluation.status === "healthy" &&
+            openIncident != null &&
+            consecutiveHealthy >= normalized.consecutiveHealthyRequired
+          ) {
+            const resolvedIncident = {
+              ...openIncident,
+              status: "resolved" as const,
+              resolvedAt: timestamp,
+              lastObservedValue: evaluation.value,
+              lastSampleCount: evaluation.sampleCount,
+              lastEvaluatedAt: timestamp,
+              updatedAt: timestamp,
             }
 
-            if (evaluation.status === "breached" && openIncident != null) {
-              const refreshedIncident = {
-                ...openIncident,
-                lastTriggeredAt: timestamp,
-                lastObservedValue: evaluation.value,
-                lastSampleCount: evaluation.sampleCount,
-                lastEvaluatedAt: timestamp,
-                updatedAt: timestamp,
-              }
-
-              await tx
-                .update(alertIncidents)
-                .set({
-                  lastTriggeredAt: timestamp,
-                  lastObservedValue: evaluation.value,
-                  lastSampleCount: evaluation.sampleCount,
-                  lastEvaluatedAt: timestamp,
-                  updatedAt: timestamp,
-                })
-                .where(eq(alertIncidents.id, openIncident.id))
-
-              const renotifyDueAt =
-                (openIncident.lastNotifiedAt ?? openIncident.firstTriggeredAt) +
-                normalized.renotifyIntervalMinutes * 60_000
-              if (renotifyDueAt <= timestamp) {
-                await queueIncidentNotificationsOnDb(
-                  tx,
-                  row.orgId as OrgId,
-                  normalized,
-                  refreshedIncident,
-                  evaluation,
-                  "renotify",
-                  timestamp,
-                )
-              }
-              return
-            }
-
-            if (
-              evaluation.status === "healthy" &&
-              openIncident != null &&
-              consecutiveHealthy >= normalized.consecutiveHealthyRequired
-            ) {
-              const resolvedIncident = {
-                ...openIncident,
-                status: "resolved" as const,
+            await db
+              .update(alertIncidents)
+              .set({
+                status: "resolved",
                 resolvedAt: timestamp,
                 lastObservedValue: evaluation.value,
                 lastSampleCount: evaluation.sampleCount,
                 lastEvaluatedAt: timestamp,
                 updatedAt: timestamp,
-              }
+              })
+              .where(eq(alertIncidents.id, openIncident.id))
 
-              await tx
-                .update(alertIncidents)
-                .set({
-                  status: "resolved",
-                  resolvedAt: timestamp,
-                  lastObservedValue: evaluation.value,
-                  lastSampleCount: evaluation.sampleCount,
-                  lastEvaluatedAt: timestamp,
-                  updatedAt: timestamp,
-                })
-                .where(eq(alertIncidents.id, openIncident.id))
-
-              await queueIncidentNotificationsOnDb(
-                tx,
-                row.orgId as OrgId,
-                normalized,
-                resolvedIncident,
-                evaluation,
-                "resolve",
-                timestamp,
-              )
-              incidentAction = "resolved"
-            }
-          }),
-        )
+            await queueIncidentNotificationsOnDb(
+              db,
+              row.orgId as OrgId,
+              normalized,
+              resolvedIncident,
+              evaluation,
+              "resolve",
+              timestamp,
+            )
+            incidentAction = "resolved"
+          }
+        })
         if (incidentAction === "opened") yield* Metric.update(AlertingMetrics.incidentsOpenedTotal, 1)
         if (incidentAction === "resolved") yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, 1)
       })
@@ -2746,58 +2748,58 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         )
         const staleGroupKeys = Arr.map(toResolve, (i) => i.groupKey ?? "__total__")
 
-        yield* dbExecute((db) =>
-          db.transaction(async (tx) => {
-            for (const incident of toResolve) {
-              const resolvedIncident = {
-                ...incident,
-                status: "resolved" as const,
+        // Serialized per rule via the claim lock + idempotent writes
+        // (incident status update converges; delivery events onConflictDoNothing).
+        yield* dbExecute(async (db) => {
+          for (const incident of toResolve) {
+            const resolvedIncident = {
+              ...incident,
+              status: "resolved" as const,
+              resolvedAt: timestamp,
+              updatedAt: timestamp,
+            }
+
+            await db
+              .update(alertIncidents)
+              .set({
+                status: "resolved",
                 resolvedAt: timestamp,
                 updatedAt: timestamp,
-              }
+              })
+              .where(eq(alertIncidents.id, incident.id))
 
-              await tx
-                .update(alertIncidents)
-                .set({
-                  status: "resolved",
-                  resolvedAt: timestamp,
-                  updatedAt: timestamp,
-                })
-                .where(eq(alertIncidents.id, incident.id))
+            await queueIncidentNotificationsOnDb(
+              db,
+              orgId,
+              normalized,
+              resolvedIncident,
+              syntheticEvaluation,
+              "resolve",
+              timestamp,
+            )
+          }
 
-              await queueIncidentNotificationsOnDb(
-                tx,
-                orgId,
-                normalized,
-                resolvedIncident,
-                syntheticEvaluation,
-                "resolve",
-                timestamp,
+          if (opts.resolveAll) {
+            await db
+              .delete(alertRuleStates)
+              .where(
+                and(
+                  eq(alertRuleStates.orgId, orgId),
+                  eq(alertRuleStates.ruleId, ruleId),
+                ),
               )
-            }
-
-            if (opts.resolveAll) {
-              await tx
-                .delete(alertRuleStates)
-                .where(
-                  and(
-                    eq(alertRuleStates.orgId, orgId),
-                    eq(alertRuleStates.ruleId, ruleId),
-                  ),
-                )
-            } else if (staleGroupKeys.length > 0) {
-              await tx
-                .delete(alertRuleStates)
-                .where(
-                  and(
-                    eq(alertRuleStates.orgId, orgId),
-                    eq(alertRuleStates.ruleId, ruleId),
-                    inArray(alertRuleStates.groupKey, staleGroupKeys),
-                  ),
-                )
-            }
-          }),
-        )
+          } else if (staleGroupKeys.length > 0) {
+            await db
+              .delete(alertRuleStates)
+              .where(
+                and(
+                  eq(alertRuleStates.orgId, orgId),
+                  eq(alertRuleStates.ruleId, ruleId),
+                  inArray(alertRuleStates.groupKey, staleGroupKeys),
+                ),
+              )
+          }
+        })
 
         yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, toResolve.length)
         yield* Metric.update(AlertingMetrics.staleIncidentsResolvedTotal, toResolve.length)
@@ -2836,40 +2838,39 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
           "Auto-resolved: group no longer appears in evaluation results",
         )
 
+        // Serialized per rule via claim lock + idempotent writes.
         yield* Effect.forEach(orphaned, (incident) => {
           const groupKey = incident.groupKey ?? "__total__"
-          return dbExecute((db) =>
-            db.transaction(async (tx) => {
-              await tx
-                .update(alertIncidents)
-                .set({
-                  status: "resolved",
-                  resolvedAt: timestamp,
-                  updatedAt: timestamp,
-                })
-                .where(eq(alertIncidents.id, incident.id))
+          return dbExecute(async (db) => {
+            await db
+              .update(alertIncidents)
+              .set({
+                status: "resolved",
+                resolvedAt: timestamp,
+                updatedAt: timestamp,
+              })
+              .where(eq(alertIncidents.id, incident.id))
 
-              await queueIncidentNotificationsOnDb(
-                tx,
-                orgId,
-                normalized,
-                { ...incident, status: "resolved", resolvedAt: timestamp, updatedAt: timestamp },
-                syntheticEvaluation,
-                "resolve",
-                timestamp,
+            await queueIncidentNotificationsOnDb(
+              db,
+              orgId,
+              normalized,
+              { ...incident, status: "resolved", resolvedAt: timestamp, updatedAt: timestamp },
+              syntheticEvaluation,
+              "resolve",
+              timestamp,
+            )
+
+            await db
+              .delete(alertRuleStates)
+              .where(
+                and(
+                  eq(alertRuleStates.orgId, orgId),
+                  eq(alertRuleStates.ruleId, ruleId),
+                  eq(alertRuleStates.groupKey, groupKey),
+                ),
               )
-
-              await tx
-                .delete(alertRuleStates)
-                .where(
-                  and(
-                    eq(alertRuleStates.orgId, orgId),
-                    eq(alertRuleStates.ruleId, ruleId),
-                    eq(alertRuleStates.groupKey, groupKey),
-                  ),
-                )
-            }),
-          )
+          })
         })
 
         yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, orphaned.length)

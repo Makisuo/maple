@@ -5,8 +5,6 @@
   "scripts": {
     "dev": "vite dev --port 3471",
     "build": "vite build",
-    "deploy:stack": "alchemy deploy",
-    "destroy:stack": "alchemy destroy",
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

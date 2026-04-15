@@ -1,5 +1,6 @@
 export { AlertRuntime, AlertsService } from "./services/AlertsService";
 export { Database } from "./services/DatabaseLive";
+export { DatabaseD1Live } from "./services/DatabaseD1Live";
 export { DatabaseLibsqlLive } from "./services/DatabaseLibsqlLive";
 export { DigestService } from "./services/DigestService";
 export { EdgeCacheService } from "./services/EdgeCacheService";
@@ -9,3 +10,4 @@ export { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsServic
 export { QueryEngineService } from "./services/QueryEngineService";
 export { TinybirdService } from "./services/TinybirdService";
 export { makeTelemetryLayer } from "./services/Telemetry";
+export { WorkerEnvironment } from "./services/WorkerEnvironment";

@@ -3,22 +3,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run --env-file ../../.env.local --watch src/index.ts",
-    "start": "bun run --env-file ../../.env.local src/index.ts",
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy",
     "test": "echo 'No tests yet'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@effect/platform-bun": "catalog:effect",
     "@maple/api": "workspace:*",
     "@maple/db": "workspace:*",
     "@maple/domain": "workspace:*",
     "effect": "catalog:effect"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260405.0",
     "@effect/language-service": "catalog:effect",
-    "@types/bun": "^1.3.11",
     "@types/node": "catalog:tooling",
-    "typescript": "catalog:tooling"
+    "typescript": "catalog:tooling",
+    "wrangler": "^4.41.0"
   }
 }

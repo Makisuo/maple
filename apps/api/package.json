@@ -9,8 +9,6 @@
   "scripts": {
     "db:generate": "bun run --cwd ../../packages/db db:generate",
     "dev": "wrangler dev --env-file ../../.env.local",
-    "deploy:stack": "alchemy deploy",
-    "destroy:stack": "alchemy destroy",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "tinybird:dev": "tinybird dev",
