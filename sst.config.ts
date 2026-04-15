@@ -12,7 +12,7 @@ export default $config({
   async run() {
     const stage = $app.stage
 
-    const domain =
+    const webDomain =
       stage === "production"
         ? "app.maple.dev"
         : stage === "staging"
@@ -43,14 +43,30 @@ export default $config({
     const web = new sst.cloudflare.Worker("Web", {
       handler: "apps/web/src/worker.ts",
       url: true,
-      domain,
+      domain: webDomain,
       assets: { directory: "apps/web/dist" },
       environment,
     })
 
+    const landingDomain =
+      stage === "production"
+        ? "maple.dev"
+        : stage === "staging"
+          ? "staging-landing.maple.dev"
+          : undefined
+
+    const landing = new sst.cloudflare.Worker("Landing", {
+      handler: "apps/landing/src/worker.ts",
+      url: true,
+      domain: landingDomain,
+      assets: { directory: "apps/landing/dist" },
+    })
+
     return {
       web: web.url,
-      webDomain: domain,
+      webDomain,
+      landing: landing.url,
+      landingDomain,
     }
   },
 })

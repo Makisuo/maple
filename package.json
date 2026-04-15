@@ -16,7 +16,7 @@
     "destroy:stg": "bun scripts/deploy-stack.ts destroy stg",
     "dev": "turbo dev --ui=tui",
     "dev:alerting": "bun --filter=@maple/alerting dev",
-    "sst:deploy": "turbo run build --filter=@maple/web && sst deploy",
+    "sst:deploy": "turbo run build --filter=@maple/web --filter=@maple/landing && sst deploy",
     "sst:remove": "sst remove",
     "sst:dev": "sst dev",
     "test": "turbo test",

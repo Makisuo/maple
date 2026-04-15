@@ -16,7 +16,6 @@
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
     "@xyflow/react": "catalog:ui",
-    "alchemy": "https://pkg.pr.new/Makisuo/alchemy@e3f48848",
     "astro": "^5.17.1",
     "autumn-js": "^1.2.5",
     "class-variance-authority": "catalog:ui",
@@ -32,9 +31,7 @@
     "dev": "astro dev --port 3391",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro",
-    "deploy:stack": "alchemy deploy",
-    "destroy:stack": "alchemy destroy"
+    "astro": "astro"
   },
   "type": "module"
 }

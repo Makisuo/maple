@@ -4,7 +4,11 @@
 /* deno-fmt-ignore-file */
 /* biome-ignore-all lint: auto-generated */
 
-/// <reference path="../../sst-env.d.ts" />
+import "sst"
+declare module "sst" {
+  export interface Resource {
+  }
+}
 
 import "sst"
 export {}
