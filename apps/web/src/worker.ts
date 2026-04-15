@@ -1,13 +1,16 @@
+type Env = {
+  ASSETS: { fetch: (request: Request) => Promise<Response> }
+}
+
 export default {
-  fetch(request: Request): Response {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
-    if (url.pathname.startsWith("/api/")) {
-      return Response.json({
-        name: "Cloudflare",
-      })
+    const assetResponse = await env.ASSETS.fetch(request)
+    if (assetResponse.status !== 404) {
+      return assetResponse
     }
 
-    return new Response(null, { status: 404 })
+    return env.ASSETS.fetch(new Request(new URL("/index.html", url), request))
   },
 }

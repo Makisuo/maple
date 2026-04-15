@@ -27,3 +27,6 @@ apps/api/.data/
 .mcp.json
 .dev.vars
 apps/chat-agent/.dev.vars
+
+# sst
+.sst
