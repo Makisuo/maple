@@ -73,7 +73,6 @@ export const createAlertingWorker = async ({
       ...optionalSecret("CLERK_SECRET_KEY"),
       ...optionalPlain("CLERK_PUBLISHABLE_KEY"),
       ...optionalSecret("CLERK_JWT_KEY"),
-      ...optionalPlain("MAPLE_ORG_ID_OVERRIDE"),
       ...optionalSecret("AUTUMN_SECRET_KEY"),
       ...optionalSecret("SD_INTERNAL_TOKEN"),
       ...optionalSecret("INTERNAL_SERVICE_TOKEN"),
