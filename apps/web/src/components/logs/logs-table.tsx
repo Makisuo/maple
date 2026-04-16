@@ -10,7 +10,10 @@ import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { formatCompactTimeInTimezone } from "@/lib/timezone-format"
 import { getSeverityColor } from "@/lib/severity"
 import { useInfiniteLogs, FETCH_THRESHOLD } from "@/hooks/use-infinite-logs"
+import { pickImportantAttributes } from "@/lib/log-attributes"
+import { LogAttributeChip } from "./log-attribute-chip"
 
+const VISIBLE_CHIPS = 4
 const ROW_HEIGHT = 28
 
 export interface LogsTableViewProps {
@@ -44,6 +47,83 @@ function LoadingState() {
     </div>
   )
 }
+
+interface LogRowProps {
+  log: Log
+  index: number
+  top: number
+  timeZone: string
+  measureRef: (node: Element | null) => void
+  onClick: (log: Log) => void
+}
+
+const LogRow = React.memo(function LogRow({
+  log,
+  index,
+  top,
+  timeZone,
+  measureRef,
+  onClick,
+}: LogRowProps) {
+  const all = React.useMemo(
+    () => pickImportantAttributes(log, Number.POSITIVE_INFINITY),
+    [log],
+  )
+  const chips = all.slice(0, VISIBLE_CHIPS)
+  const overflow = Math.max(0, all.length - VISIBLE_CHIPS)
+
+  return (
+    <div
+      ref={measureRef}
+      data-index={index}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${top}px)`,
+        borderLeftColor: getSeverityColor(log.severityText),
+      }}
+      className="border-l-2 flex items-center gap-2 px-3 py-1 text-xs font-mono cursor-pointer border-b border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+      tabIndex={0}
+      role="listitem"
+      onClick={() => onClick(log)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onClick(log)
+        }
+      }}
+    >
+      <span className="shrink-0 text-muted-foreground tabular-nums">
+        {formatCompactTimeInTimezone(log.timestamp, { timeZone })}
+      </span>
+      <span className="shrink-0 text-muted-foreground/60 truncate w-[120px] hidden md:inline-block">
+        {log.serviceName}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-foreground">
+        {log.body}
+      </span>
+      {chips.length > 0 && (
+        <div className="hidden md:flex items-center gap-1 shrink min-w-0 max-w-[50%] overflow-hidden">
+          {chips.map((chip) => (
+            <LogAttributeChip
+              key={chip.key}
+              attrKey={chip.key}
+              value={chip.value}
+              tone={chip.tone}
+            />
+          ))}
+          {overflow > 0 && (
+            <span className="text-[10px] text-muted-foreground/60 tabular-nums shrink-0 px-0.5">
+              +{overflow}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+})
 
 export function LogsTableView({
   allData,
@@ -110,41 +190,15 @@ export function LogsTableView({
               {virtualItems.map((virtualRow) => {
                 const log = allData[virtualRow.index]
                 return (
-                  <div
+                  <LogRow
                     key={virtualRow.index}
-                    ref={virtualizer.measureElement}
-                    data-index={virtualRow.index}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${virtualRow.start}px)`,
-                      borderLeftColor: getSeverityColor(log.severityText),
-                    }}
-                    className="border-l-2 flex items-center gap-2 px-3 py-1 text-xs font-mono cursor-pointer border-b border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
-                    tabIndex={0}
-                    role="listitem"
-                    onClick={() => handleRowClick(log)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        handleRowClick(log)
-                      }
-                    }}
-                  >
-                    <span className="shrink-0 text-muted-foreground tabular-nums">
-                      {formatCompactTimeInTimezone(log.timestamp, {
-                        timeZone: effectiveTimezone,
-                      })}
-                    </span>
-                    <span className="shrink-0 text-muted-foreground/60 truncate w-[120px] hidden md:inline-block">
-                      {log.serviceName}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-foreground">
-                      {log.body}
-                    </span>
-                  </div>
+                    log={log}
+                    index={virtualRow.index}
+                    top={virtualRow.start}
+                    timeZone={effectiveTimezone}
+                    measureRef={virtualizer.measureElement}
+                    onClick={handleRowClick}
+                  />
                 )
               })}
             </div>

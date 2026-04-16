@@ -1,10 +1,13 @@
 import { AIChatAgent } from "@cloudflare/ai-chat"
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
-import { createMCPClient } from "@ai-sdk/mcp"
-import { convertToModelMessages, streamText, stepCountIs, tool, createUIMessageStream, createUIMessageStreamResponse, type StreamTextOnFinishCallback, type ToolSet } from "ai"
+import { tool, createUIMessageStream, createUIMessageStreamResponse, type StreamTextOnFinishCallback, type ToolSet } from "ai"
+import { Effect } from "effect"
 import { routeAgentRequest } from "agents"
+import { makeAgentHarnessRuntime, type AgentHarnessRuntime } from "@maple/agent-harness"
 import { z } from "zod"
 import type { Env } from "./lib/types"
+import { createMapleAiTools } from "./lib/direct-tools"
+import { createModelGateway } from "./lib/model-gateway"
+import { createDurableObjectSessionStore, type DurableSqlClient } from "./lib/session-store"
 import { SYSTEM_PROMPT, DASHBOARD_BUILDER_SYSTEM_PROMPT } from "./lib/system-prompt"
 
 interface DashboardContext {
@@ -428,9 +431,43 @@ function createErrorResponse(errorMessage: string): Response {
   return createUIMessageStreamResponse({ stream })
 }
 
+function extractLatestUserText(
+  messages: ReadonlyArray<{
+    role: string
+    parts: ReadonlyArray<{ type: string; text?: string }>
+  }>,
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (!message || message.role !== "user") continue
+    const text = message.parts
+      .filter((part) => part.type === "text" && typeof part.text === "string")
+      .map((part) => part.text)
+      .join("\n")
+      .trim()
+    if (text.length > 0) return text
+  }
+  return undefined
+}
+
 export { ChatAgent }
 
 class ChatAgent extends AIChatAgent<Env> {
+  private harness?: AgentHarnessRuntime
+
+  private getHarness(): AgentHarnessRuntime {
+    if (!this.harness) {
+      this.harness = makeAgentHarnessRuntime(
+        "default",
+        createDurableObjectSessionStore(this.sql.bind(this) as DurableSqlClient),
+        createModelGateway(this.env.OPENROUTER_API_KEY),
+        { definitions: [] },
+      )
+    }
+
+    return this.harness
+  }
+
   async onChatMessage(
     onFinish: Parameters<AIChatAgent<Env>["onChatMessage"]>[0],
     options?: Parameters<AIChatAgent<Env>["onChatMessage"]>[1],
@@ -444,29 +481,8 @@ class ChatAgent extends AIChatAgent<Env> {
     const mode = (body?.mode as string) ?? "default"
     const dashboardContext = body?.dashboardContext as DashboardContext | undefined
 
-    let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | undefined
-
     try {
-      const mcpUrl = `${this.env.MAPLE_API_URL}/mcp`
-      console.log(`[chat-agent] Connecting to MCP server at ${mcpUrl} for org ${orgId} (mode: ${mode})`)
-
-      mcpClient = await createMCPClient({
-        transport: {
-          type: "http",
-          url: mcpUrl,
-          headers: {
-            Authorization: `Bearer maple_svc_${this.env.INTERNAL_SERVICE_TOKEN}`,
-            "X-Org-Id": orgId,
-          },
-        },
-        onUncaughtError: (error) => {
-          console.error("[chat-agent] MCP uncaught error:", error)
-        },
-      })
-
-      const mcpTools = await mcpClient.tools()
-      console.log(`[chat-agent] Loaded ${Object.keys(mcpTools).length} tools from MCP server`)
-
+      const directTools = createMapleAiTools(this.env as unknown as Record<string, unknown>, orgId)
       const isDashboardMode = mode === "dashboard_builder"
 
       let systemPrompt = isDashboardMode ? DASHBOARD_BUILDER_SYSTEM_PROMPT : SYSTEM_PROMPT
@@ -478,34 +494,27 @@ class ChatAgent extends AIChatAgent<Env> {
       }
 
       const allTools = isDashboardMode
-        ? { ...mcpTools, ...createDashboardBuilderTools(mcpTools as unknown as McpToolSet) }
-        : mcpTools
+        ? { ...directTools, ...createDashboardBuilderTools(directTools as unknown as McpToolSet) }
+        : directTools
 
-      const openrouter = createOpenAICompatible({
-        name: "openrouter",
-        baseURL: "https://openrouter.ai/api/v1",
-        apiKey: this.env.OPENROUTER_API_KEY,
-      })
+      const latestUserText = extractLatestUserText(this.messages)
+      if (!latestUserText) {
+        return createErrorResponse("A user text message is required")
+      }
 
-      const result = streamText({
-        model: openrouter.chatModel("moonshotai/kimi-k2.5:nitro"),
-        system: systemPrompt,
-        messages: await convertToModelMessages(this.messages),
-        tools: allTools as ToolSet,
-        stopWhen: stepCountIs(20),
-        abortSignal: options?.abortSignal,
-        onFinish: async (event) => {
-          await mcpClient?.close()
-          await (onFinish as unknown as StreamTextOnFinishCallback<ToolSet>)(event)
-        },
-      })
+      const { result } = await Effect.runPromise(
+        this.getHarness().prompt({
+          text: latestUserText,
+          turnId: options?.requestId ?? crypto.randomUUID(),
+          system: systemPrompt,
+          abortSignal: options?.abortSignal,
+          tools: allTools as ToolSet,
+          onFinish: onFinish as unknown as StreamTextOnFinishCallback<ToolSet>,
+        }),
+      )
 
       return result.toUIMessageStreamResponse()
     } catch (error) {
-      if (mcpClient) {
-        try { await mcpClient.close() } catch { /* ignore cleanup errors */ }
-      }
-
       const errorMessage = error instanceof Error ? error.message : String(error)
       console.error("[chat-agent] Error in onChatMessage:", errorMessage)
 

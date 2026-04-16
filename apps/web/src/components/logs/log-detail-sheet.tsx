@@ -1,6 +1,9 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
+import { toast } from "sonner"
 import { Link } from "@tanstack/react-router"
-import { XmarkIcon, ClockIcon, PulseIcon } from "@/components/icons"
+import { XmarkIcon, ClockIcon, PulseIcon, CopyIcon, MagnifierIcon } from "@/components/icons"
+import { useClipboard } from "@maple/ui/hooks/use-clipboard"
+import { Input } from "@maple/ui/components/ui/input"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
 import {
@@ -182,10 +185,35 @@ interface LogDetailSheetProps {
 export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps) {
   const { effectiveTimezone } = useTimezonePreference()
   const [viewedLog, setViewedLog] = useState<Log | null>(log)
+  const [attrSearch, setAttrSearch] = useState("")
+  const clipboard = useClipboard()
 
   useEffect(() => {
     if (log) setViewedLog(log)
   }, [log])
+
+  useEffect(() => {
+    setAttrSearch("")
+  }, [viewedLog])
+
+  const jsonPayload = useMemo(() => {
+    if (!viewedLog) return ""
+    return JSON.stringify(
+      {
+        timestamp: viewedLog.timestamp,
+        severityText: viewedLog.severityText,
+        severityNumber: viewedLog.severityNumber,
+        serviceName: viewedLog.serviceName,
+        body: viewedLog.body,
+        traceId: viewedLog.traceId || undefined,
+        spanId: viewedLog.spanId || undefined,
+        logAttributes: viewedLog.logAttributes,
+        resourceAttributes: viewedLog.resourceAttributes,
+      },
+      null,
+      2,
+    )
+  }, [viewedLog])
 
   if (!viewedLog) return null
 
@@ -252,7 +280,21 @@ export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps)
           <div className="p-3 space-y-3">
             {/* Message */}
             <div className="space-y-1">
-              <h4 className="text-xs font-medium text-muted-foreground">Message</h4>
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-medium text-muted-foreground">Message</h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clipboard.copy(jsonPayload)
+                    toast.success("Copied log as JSON")
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  title="Copy entire log as JSON"
+                >
+                  <CopyIcon size={10} />
+                  Copy JSON
+                </button>
+              </div>
               <div className="rounded-md border p-2">
                 <CopyableValue value={viewedLog.body}>
                   <p className="font-mono text-[11px] whitespace-pre-wrap break-all">
@@ -287,14 +329,47 @@ export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps)
               </div>
             )}
 
+            {/* Attribute search */}
+            {(Object.keys(viewedLog.logAttributes).length > 0 ||
+              Object.keys(viewedLog.resourceAttributes).length > 0) && (
+              <div className="relative">
+                <MagnifierIcon
+                  strokeWidth={2}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none"
+                />
+                <Input
+                  type="text"
+                  value={attrSearch}
+                  onChange={(e) => setAttrSearch(e.target.value)}
+                  placeholder="Search attributes..."
+                  className="h-7 pl-7 pr-7 text-xs"
+                />
+                {attrSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setAttrSearch("")}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
+                  >
+                    <XmarkIcon strokeWidth={2} className="size-3" />
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Log Attributes */}
             <AttributesTable
               attributes={viewedLog.logAttributes}
               title="Log Attributes"
+              searchQuery={attrSearch}
+              groupByNamespace
             />
 
             {/* Resource Attributes */}
-            <ResourceAttributesSection attributes={viewedLog.resourceAttributes} />
+            <ResourceAttributesSection
+              attributes={viewedLog.resourceAttributes}
+              searchQuery={attrSearch}
+              groupByNamespace
+            />
 
             {/* Trace Timeline */}
             <TraceTimeline

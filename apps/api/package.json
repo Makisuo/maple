@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
     "./alerting": "./src/alerting.ts"
   },
   "scripts": {
