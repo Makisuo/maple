@@ -69,6 +69,8 @@ For form-bound autocomplete controls, prefer `Field` wrappers so label, required
 
 ## Patterns from coss particles
 
+- **Portal forwarding**: optional `portalProps` on `AutocompletePopup` → Base UI combobox/autocomplete portal (`keepMounted`, `container`, …). See [portal-props.md](../portal-props.md).
+
 ### Key patterns
 
 Autocomplete with input affordances:

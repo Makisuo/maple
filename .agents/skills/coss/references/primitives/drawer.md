@@ -70,6 +70,8 @@ import {
 
 ## Patterns from coss particles
 
+- **Portal forwarding**: optional `portalProps` on `DrawerPopup` → Base UI `Drawer.Portal` (`keepMounted`, `container`, …). See [portal-props.md](../portal-props.md).
+
 ### Key patterns
 
 Drawer with handle:

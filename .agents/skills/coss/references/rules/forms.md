@@ -18,7 +18,7 @@ Use this when implementing fields, input groups, validation states, and form exa
 
 ## Input OTP Rule
 
-- Keep `maxLength` synchronized with rendered `InputOTPSlot` count.
+- Keep `length` on the root synchronized with the number of rendered `OTPFieldInput` slots.
 
 ## Textarea Rule
 

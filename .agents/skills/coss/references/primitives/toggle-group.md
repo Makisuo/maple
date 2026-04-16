@@ -20,16 +20,16 @@ npm install @base-ui/react
 ## Canonical imports
 
 ```tsx
-import { Toggle, ToggleGroup } from "@/components/ui/toggle-group"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 ```
 
 ## Minimal pattern
 
 ```tsx
 <ToggleGroup>
-  <Toggle>Bold</Toggle>
-  <Toggle>Italic</Toggle>
-  <Toggle>Underline</Toggle>
+  <ToggleGroupItem>Bold</ToggleGroupItem>
+  <ToggleGroupItem>Italic</ToggleGroupItem>
+  <ToggleGroupItem>Underline</ToggleGroupItem>
 </ToggleGroup>
 ```
 
@@ -41,15 +41,15 @@ Toggle group with icon buttons:
 
 ```tsx
 <ToggleGroup defaultValue={["bold"]}>
-  <Toggle aria-label="Toggle bold" value="bold">
+  <ToggleGroupItem aria-label="Toggle bold" value="bold">
     <BoldIcon aria-hidden="true" />
-  </Toggle>
-  <Toggle aria-label="Toggle italic" value="italic">
+  </ToggleGroupItem>
+  <ToggleGroupItem aria-label="Toggle italic" value="italic">
     <ItalicIcon aria-hidden="true" />
-  </Toggle>
-  <Toggle aria-label="Toggle underline" value="underline">
+  </ToggleGroupItem>
+  <ToggleGroupItem aria-label="Toggle underline" value="underline">
     <UnderlineIcon aria-hidden="true" />
-  </Toggle>
+  </ToggleGroupItem>
 </ToggleGroup>
 ```
 
@@ -61,6 +61,7 @@ Controlled toggle group:
 const [value, setValue] = useState(["bold"])
 
 <ToggleGroup value={value} onValueChange={setValue}>
+  <ToggleGroupItem value="bold">Bold</ToggleGroupItem>
   ...
 </ToggleGroup>
 ```

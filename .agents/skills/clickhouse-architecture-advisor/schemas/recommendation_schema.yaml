@@ -1,0 +1,30 @@
+recommendation:
+  title: string
+  what: string
+  why: string
+  how: string
+  decision_context: string
+  category:
+    enum:
+      - official
+      - derived
+      - field
+  confidence:
+    enum:
+      - high
+      - medium
+      - heuristic
+  source_links:
+    type: array
+    items:
+      type: string
+  caveats:
+    type: array
+    items:
+      type: string
+  validation:
+    type: array
+    items:
+      type: string
+  example_sql:
+    type: string

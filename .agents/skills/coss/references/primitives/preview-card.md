@@ -39,6 +39,8 @@ import {
 
 ## Patterns from coss particles
 
+- **Portal forwarding**: optional `portalProps` on `PreviewCardPopup` → Base UI `PreviewCard.Portal` (`keepMounted`, `container`, …). See [portal-props.md](../portal-props.md).
+
 ### Key patterns
 
 Preview card with rich content:

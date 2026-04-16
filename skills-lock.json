@@ -1,20 +1,60 @@
 {
   "version": 1,
   "skills": {
+    "chdb-datastore": {
+      "source": "clickhouse/agent-skills",
+      "sourceType": "github",
+      "computedHash": "1d08ca756983b607ff97d1342089e301c98fd7d94ffc9786e89cedb6ca3a1217"
+    },
+    "chdb-sql": {
+      "source": "clickhouse/agent-skills",
+      "sourceType": "github",
+      "computedHash": "6377a15564a7ec4fc4ded081728bf1be3eac6e5b72a5a07ce5cb21e7595ff02d"
+    },
+    "clickhouse-architecture-advisor": {
+      "source": "clickhouse/agent-skills",
+      "sourceType": "github",
+      "computedHash": "e3138fddb5d5cb272973f54f79a9525c5c8b47ca3fa31d6285085ce50252ac35"
+    },
     "clickhouse-best-practices": {
       "source": "clickhouse/agent-skills",
       "sourceType": "github",
-      "computedHash": "2b8d018f92874e50d28d9c1d18dd3d979e6750c9a322f4f54984da69454292d2"
+      "computedHash": "86432753a4207b6401df82fbca57fef59cc0cf0d7ecc9c26a0f3c2df4f63a2b9"
+    },
+    "clickhousectl-cloud-deploy": {
+      "source": "clickhouse/agent-skills",
+      "sourceType": "github",
+      "computedHash": "dd9f68a15ae36d1000da2b7153980f675a27887f93cf21dd6e0f8d3226dfb9c7"
+    },
+    "clickhousectl-local-dev": {
+      "source": "clickhouse/agent-skills",
+      "sourceType": "github",
+      "computedHash": "a21e2a6f5c7836afa0a782890a7247f90c21a8d735ea985d6910e7ffc172e2bf"
     },
     "coss": {
       "source": "cosscom/coss",
       "sourceType": "github",
-      "computedHash": "876a7033152b2aa9592e77dfd1cacd15e02d751e22c92c8422143296f1765006"
+      "computedHash": "4e9910d40e40417c9363a573b59174f7653bb75dffb5b1dc468720a7f1324ebf"
+    },
+    "coss-particles": {
+      "source": "cosscom/coss",
+      "sourceType": "github",
+      "computedHash": "7f99b88dc87f9b262fc4860cd4126fa81ee184bfe2b7471ec6f3027cf212a739"
     },
     "tinybird": {
       "source": "tinybirdco/tinybird-agent-skills",
       "sourceType": "github",
       "computedHash": "9a3ed9630867759e995fd881f488a97bb28c123a9c73a4312305171d0fc86b9a"
+    },
+    "tinybird-cli-guidelines": {
+      "source": "tinybirdco/tinybird-agent-skills",
+      "sourceType": "github",
+      "computedHash": "8d36a5e33cecfb092fd0fb194140a248d3901de10b5b7d03e4e60a9942f0a930"
+    },
+    "tinybird-python-sdk-guidelines": {
+      "source": "tinybirdco/tinybird-agent-skills",
+      "sourceType": "github",
+      "computedHash": "610ada91b068339d90ea544804fb395518767ae3588d47f29e21b2c6037de2c3"
     },
     "tinybird-typescript-sdk-guidelines": {
       "source": "tinybirdco/tinybird-agent-skills",

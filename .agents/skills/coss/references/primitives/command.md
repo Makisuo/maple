@@ -78,6 +78,8 @@ const items = [
 
 ## Patterns from coss particles
 
+- **Portal forwarding**: optional `portalProps` on `CommandDialogPopup` → Base UI `Dialog.Portal` (`keepMounted`, `container`, …). See [portal-props.md](../portal-props.md).
+
 ### Key patterns
 
 Command with grouped sections:

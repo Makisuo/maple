@@ -21,27 +21,27 @@ npm install @base-ui/react
 
 ```tsx
 import { Button } from "@/components/ui/button"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   Toolbar,
   ToolbarButton,
   ToolbarGroup,
   ToolbarSeparator,
 } from "@/components/ui/toolbar"
-import { Toggle } from "@/components/ui/toggle-group"
 ```
 
 ## Minimal pattern
 
 ```tsx
 <Toolbar>
-  <ToolbarGroup>
-    <ToolbarButton render={<Toggle value="bold" />} aria-label="Bold">
-      Bold
+  <ToggleGroup className="border-none p-0" defaultValue={["left"]}>
+    <ToolbarButton aria-label="Align left" render={<ToggleGroupItem value="left" />}>
+      <AlignLeftIcon />
     </ToolbarButton>
-    <ToolbarButton render={<Toggle value="underline" />} aria-label="Underline">
-      Underline
+    <ToolbarButton aria-label="Align center" render={<ToggleGroupItem value="center" />}>
+      <AlignCenterIcon />
     </ToolbarButton>
-  </ToolbarGroup>
+  </ToggleGroup>
   <ToolbarSeparator />
   <ToolbarGroup>
     <ToolbarButton render={<Button type="button" variant="outline" />}>
@@ -53,7 +53,7 @@ import { Toggle } from "@/components/ui/toggle-group"
 
 ## Patterns from coss particles
 
-- **Part composition via `render`**: use `ToolbarButton render={<Toggle ... />}` or `render={<Button ... />}` instead of re-implementing button behavior.
+- **Part composition via `render`**: use `ToolbarButton render={<ToggleGroupItem ... />}` or `render={<Button ... />}` instead of re-implementing button behavior.
 - **Grouped layout**: use `ToolbarGroup` boundaries with `ToolbarSeparator` between logical command clusters.
 - **Icon-only controls**: pair icon buttons with explicit `aria-label`; combine with `Tooltip` for discoverability.
 - **Embedded selects**: wrap `SelectTrigger` with `ToolbarButton render={...}` to keep visual consistency in mixed control bars.
@@ -63,7 +63,7 @@ import { Toggle } from "@/components/ui/toggle-group"
 
 - Dropping `ToolbarSeparator`, causing unrelated command clusters to collapse visually.
 - Missing `aria-label` on icon-only toolbar actions.
-- Rendering raw `Button`/`Toggle` next to toolbar controls without `ToolbarButton`, creating inconsistent density/spacing.
+- Rendering raw `Button`/`ToggleGroupItem` next to toolbar controls without `ToolbarButton`, creating inconsistent density/spacing.
 - Treating Toolbar as a state manager; control selection/toggle state through composed primitives (`ToggleGroup`, `Select`, etc.).
 
 ## Useful particle references

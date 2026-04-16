@@ -68,6 +68,8 @@ For form-bound comboboxes, prefer `Field` composition (`Field` + `FieldLabel` + 
 
 ## Patterns from coss particles
 
+- **Portal forwarding**: optional `portalProps` on `ComboboxPopup` → Base UI `Combobox.Portal` (`keepMounted`, `container`, …). See [portal-props.md](../portal-props.md).
+
 ### Key patterns
 
 Combobox with label in a Field:

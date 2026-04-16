@@ -1,0 +1,32 @@
+async_inserts:
+  - https://clickhouse.com/docs/en/operations/settings/settings#async_insert
+  - https://clickhouse.com/docs/optimize/asynchronous-inserts
+
+partitioning:
+  - https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/custom-partitioning-key
+  - https://clickhouse.com/docs/partitions
+
+joins:
+  - https://clickhouse.com/docs/guides/joining-tables
+  - https://clickhouse.com/docs/best-practices/minimize-optimize-joins
+
+dictionaries:
+  - https://clickhouse.com/docs/en/sql-reference/dictionaries
+
+incremental_materialized_views:
+  - https://clickhouse.com/docs/materialized-view/incremental-materialized-view
+
+refreshable_materialized_views:
+  - https://clickhouse.com/docs/materialized-view/refreshable-materialized-view
+
+replacing_merge_tree:
+  - https://clickhouse.com/docs/en/guides/replacing-merge-tree
+
+collapsing_merge_tree:
+  - https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/collapsingmergetree
+
+query_optimization:
+  - https://clickhouse.com/docs/optimize/query-optimization
+
+time_series:
+  - https://clickhouse.com/docs/use-cases/time-series/basic-operations

@@ -2,6 +2,8 @@
 
 Use this file to quickly identify the right coss primitive for a UI task. Each entry includes the component name, a one-line purpose, and the path to its reference guide (relative to the skill root `apps/ui/skills/coss/`).
 
+For optional **`portalProps`** on composed `*Popup` components (Base UI portal forwarding), see `./references/portal-props.md`.
+
 ## Overlays & Popups
 - **Dialog** — Centered modal requiring user focus. `./references/primitives/dialog.md`
 - **AlertDialog** — Destructive/critical confirmation modal. `./references/primitives/alert-dialog.md`
@@ -20,7 +22,7 @@ Use this file to quickly identify the right coss primitive for a UI task. Each e
 - **Input** — Single-line text entry. `./references/primitives/input.md`
 - **Textarea** — Multi-line text entry. `./references/primitives/textarea.md`
 - **InputGroup** — Input with addons (icons, buttons, badges). `./references/primitives/input-group.md`
-- **InputOTP** — One-time passcode segmented slots. `./references/primitives/input-otp.md`
+- **OTPField** — One-time passcode segmented slots. `./references/primitives/otp-field.md`
 - **NumberField** — Numeric entry with stepper controls. `./references/primitives/number-field.md`
 - **Slider** — Continuous/ranged numeric control. `./references/primitives/slider.md`
 - **Calendar** — Date picker / calendar views. `./references/primitives/calendar.md`

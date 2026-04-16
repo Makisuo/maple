@@ -27,7 +27,7 @@ LEFT JOIN customers c ON c.id = o.customer_id;
 
 | Setting | Behavior | Use Case |
 |---------|----------|----------|
-| `join_use_nulls = 0` | Default values (empty string, 0) for non-matches | When you can handle default values |
-| `join_use_nulls = 1` (default) | NULL for non-matches | When you need to distinguish "no match" from "matched with default" |
+| `join_use_nulls = 0` (default) | Default values (empty string, 0) for non-matches | When you can handle default values |
+| `join_use_nulls = 1` | NULL for non-matches | When you need to distinguish "no match" from "matched with default" |
 
 Reference: [Minimize and Optimize JOINs](https://clickhouse.com/docs/best-practices/minimize-optimize-joins)

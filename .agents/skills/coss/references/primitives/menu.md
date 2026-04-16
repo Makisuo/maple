@@ -63,6 +63,7 @@ Use popup positioning props like `align` / `sideOffset` only when a layout needs
 
 ## Patterns from coss particles
 
+- **Portal forwarding**: optional `portalProps` on `MenuPopup` → Base UI `Menu.Portal` (`keepMounted`, `container`, …). See [portal-props.md](../portal-props.md).
 - Use `MenuTrigger render={<Button ... />}` as the default trigger composition.
 - Use `openOnHover` on `MenuTrigger` only for explicit hover-driven UX.
 - Use `MenuItem render={<Link ... />}` for navigational entries.

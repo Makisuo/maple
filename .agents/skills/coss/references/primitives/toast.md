@@ -70,6 +70,17 @@ toastManager.add({
 - **Stacked notifications**: use `toastManager.add(...)` for global app feedback with typed variants and optional actions.
 - **Anchored notifications**: use `anchoredToastManager.add(...)` with `positionerProps.anchor` for contextual, element-tied toasts.
 - **Lifecycle-driven flows**: use loading/promise patterns and explicit close/update handling for async operations.
+- **Deduplication / upsert**: pass a stable `id` on `toastManager.add`. If that `id` is already shown, Base UI updates the toast in place and the UI replays a short re-notify animation via `updateKey` instead of adding another surface.
+
+## Deduplicated (same `id`) usage
+
+```tsx
+toastManager.add({
+  id: "autosave",
+  title: "Saved",
+  description: "Draft updated.",
+})
+```
 
 ## Stacked usage
 

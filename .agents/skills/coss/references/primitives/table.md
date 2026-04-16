@@ -54,7 +54,7 @@ import {
 ## Patterns from coss particles
 
 - **Semantic baseline**: start with `TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell`, then add `TableCaption` and `TableFooter` as needed.
-- **Framed surfaces**: wrap table in `Frame` for bordered app-surface presentation (`p-table-2` and advanced variants).
+- **Card variant**: set `variant="card"` on `Table` for rounded, card-like rows and separated borders (`p-table-5`). Combine with `Frame` for app-surface framing (`p-table-2`), with `CardFrame` for static tables in a card shell (`p-table-7`), or with TanStack inside `CardFrame` for selection (`p-table-6`) or sorting and pagination (`p-table-8`).
 - **Status-rich rows**: combine `Badge` and decorative dots/icons for state columns while keeping text primary.
 - **Interactive data grids**: pair coss table parts with TanStack Table (`flexRender`, row models, selection state) for sorting/pagination/selection.
 - **No-results state**: always render an explicit empty-state row with `colSpan` matching visible columns.
@@ -71,7 +71,11 @@ import {
 ## Useful particle references
 
 - basic semantic table with caption/footer: `p-table-1`
-- framed table layout: `p-table-2`
-- TanStack integration with row selection: `p-table-3`
-- TanStack sorting + pagination + footer controls: `p-table-4`
+- `Frame` + card variant: `p-table-2`
+- TanStack + checkboxes + `Frame`: `p-table-3`
+- TanStack sorting + pagination + `Frame`: `p-table-4`
+- card variant only (no shell): `p-table-5`
+- `CardFrame` + static table: `p-table-7`
+- `CardFrame` + TanStack + checkboxes: `p-table-6`
+- `CardFrame` + TanStack + sort + pagination: `p-table-8`
 

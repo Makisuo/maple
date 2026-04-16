@@ -25,6 +25,10 @@ Use this when composing complex UI from coss primitives and particles.
 </Dialog>
 ```
 
+### Portal forwarding (`portalProps`)
+
+Only specific composed wrappers accept optional `portalProps` (spread onto Base UI `Portal`). See `../portal-props.md` for the allowlist.
+
 ### Grouped Controls
 
 ```tsx
