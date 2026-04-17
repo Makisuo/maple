@@ -452,20 +452,24 @@ function AlertCreatePage() {
                 <>
                   <div className="mt-2 space-y-1">
                     <Label className="text-sm text-muted-foreground">Group by</Label>
-                    <GroupByMultiSelect
-                      dataSource={
+                    {(() => {
+                      const effectiveDataSource =
                         ruleForm.signalType === "query"
                           ? ruleForm.queryDataSource
                           : ruleForm.signalType === "metric"
                             ? "metrics"
                             : "traces"
-                      }
-                      value={ruleForm.groupBy}
-                      onChange={(values) => setRuleForm((c) => ({ ...c, groupBy: values }))}
-                      attributeKeys={autocompleteValues.attributeKeys}
-                      placeholder="service.name"
-                      className="w-full"
-                    />
+                      return (
+                        <GroupByMultiSelect
+                          dataSource={effectiveDataSource}
+                          value={ruleForm.groupBy}
+                          onChange={(values) => setRuleForm((c) => ({ ...c, groupBy: values }))}
+                          attributeKeys={autocompleteValues[effectiveDataSource]?.attributeKeys}
+                          placeholder="service.name"
+                          className="w-full"
+                        />
+                      )
+                    })()}
                     <p className="text-xs text-muted-foreground">
                       Evaluate the rule per group. Each value (or composite of values) becomes its own incident.
                     </p>
