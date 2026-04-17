@@ -895,3 +895,52 @@ export const attributeValuesHourly = defineDatasource("attribute_values_hourly",
 });
 
 export type AttributeValuesHourlyRow = InferRow<typeof attributeValuesHourly>;
+
+/**
+ * Alert check history datasource.
+ * One row per alert rule evaluation (approximately one per rule per group per minute).
+ * Durable audit trail of every check — the underlying signal that incidents are derived from.
+ *
+ * Enum8 values for Status/IncidentTransition/Comparator/SignalType must stay in sync with
+ * the runtime literals in `packages/domain/src/http/alerts.ts` and `NormalizedRule`.
+ */
+export const alertChecks = defineDatasource("alert_checks", {
+  description:
+    "One row per alert rule evaluation. Durable audit trail of checks: status, observed value, threshold, sample count, incident linkage.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    RuleId: t.string(),
+    GroupKey: t.string(),
+    Timestamp: t.dateTime64(3),
+    Status: t.enum8("healthy", "breached", "skipped"),
+    SignalType: t.enum8(
+      "error_rate",
+      "p95_latency",
+      "p99_latency",
+      "apdex",
+      "throughput",
+      "metric",
+      "query",
+    ),
+    Comparator: t.enum8("gt", "gte", "lt", "lte"),
+    Threshold: t.float64(),
+    ObservedValue: t.float64().nullable(),
+    SampleCount: t.uint32(),
+    WindowMinutes: t.uint16(),
+    WindowStart: t.dateTime64(3),
+    WindowEnd: t.dateTime64(3),
+    ConsecutiveBreaches: t.uint16(),
+    ConsecutiveHealthy: t.uint16(),
+    IncidentId: t.string().nullable(),
+    IncidentTransition: t.enum8("none", "opened", "continued", "resolved"),
+    EvaluationDurationMs: t.uint32(),
+  },
+  engine: engine.mergeTree({
+    partitionKey: "toDate(Timestamp)",
+    sortingKey: ["OrgId", "RuleId", "GroupKey", "Timestamp"],
+    ttl: "toDate(Timestamp) + INTERVAL 90 DAY",
+  }),
+});
+
+export type AlertChecksRow = InferRow<typeof alertChecks>;

@@ -118,6 +118,21 @@ export const HttpAlertsLive = HttpApiBuilder.group(
             return yield* alerts.listIncidents(tenant.orgId)
           }),
         )
+        .handle("listRuleChecks", ({ params, query }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            return yield* alerts.listRuleChecks(
+              tenant.orgId,
+              params.ruleId,
+              {
+                groupKey: query.groupKey,
+                since: query.since,
+                until: query.until,
+                limit: query.limit ?? 500,
+              },
+            )
+          }),
+        )
         .handle("listDeliveryEvents", () =>
           Effect.gen(function* () {
             const tenant = yield* CurrentTenant.Context

@@ -7,6 +7,8 @@ import { useMemo, useState } from "react"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { AlertPreviewChart } from "@/components/alerts/alert-preview-chart"
+import { CheckHistoryStrip } from "@/components/alerts/check-history-strip"
+import { CheckHistorySparkline } from "@/components/alerts/check-history-sparkline"
 import {
   severityTone,
   signalLabels,
@@ -18,7 +20,7 @@ import {
   formatAlertDuration,
   computeIncidentStats,
 } from "@/lib/alerts/form-utils"
-import { AlertIncidentDocument, type AlertRuleDocument } from "@maple/domain/http"
+import { AlertIncidentDocument, AlertRuleId, type AlertCheckDocument, type AlertRuleDocument } from "@maple/domain/http"
 import {
   CheckIcon,
   PencilIcon,
@@ -57,7 +59,7 @@ import {
 } from "@maple/ui/components/ui/dropdown-menu"
 import { useAlertRuleChart } from "@/hooks/use-alert-rule-chart"
 
-const tabValues = ["overview", "history"] as const
+const tabValues = ["overview", "history", "checks"] as const
 type RuleDetailTab = (typeof tabValues)[number]
 
 const RuleDetailSearch = Schema.Struct({
@@ -77,6 +79,13 @@ function RuleDetailPage() {
 
   const rulesResult = useAtomValue(MapleApiAtomClient.query("alerts", "listRules", { reactivityKeys: ["alertRules"] }))
   const incidentsResult = useAtomValue(MapleApiAtomClient.query("alerts", "listIncidents", { reactivityKeys: ["alertIncidents"] }))
+  const checksResult = useAtomValue(
+    MapleApiAtomClient.query("alerts", "listRuleChecks", {
+      params: { ruleId: ruleId as AlertRuleId },
+      query: {},
+      reactivityKeys: ["alertChecks", ruleId],
+    }),
+  )
 
   const rules = Result.builder(rulesResult)
     .onSuccess((response) => [...response.rules] as AlertRuleDocument[])
@@ -84,6 +93,9 @@ function RuleDetailPage() {
   const allIncidents = Result.builder(incidentsResult)
     .onSuccess((response) => [...response.incidents] as AlertIncidentDocument[])
     .orElse(() => [] as AlertIncidentDocument[])
+  const checks = Result.builder(checksResult)
+    .onSuccess((response) => [...response.checks] as AlertCheckDocument[])
+    .orElse(() => [] as AlertCheckDocument[])
 
   const rule = useMemo(() => rules.find((r) => r.id === ruleId) ?? null, [rules, ruleId])
 
@@ -101,6 +113,9 @@ function RuleDetailPage() {
     : "overview"
 
   const [stateFilter, setStateFilter] = useState<"all" | "open" | "resolved">("all")
+  const [checkStatusFilter, setCheckStatusFilter] = useState<
+    "all" | "breached" | "healthy" | "skipped"
+  >("all")
 
   const filteredIncidents = useMemo(() => {
     if (stateFilter === "all") return ruleIncidents
@@ -167,6 +182,7 @@ function RuleDetailPage() {
       <TabsList variant="line">
         <TabsTrigger value="overview">Overview</TabsTrigger>
         <TabsTrigger value="history">History</TabsTrigger>
+        <TabsTrigger value="checks">Checks</TabsTrigger>
       </TabsList>
     </Tabs>
   )
@@ -501,6 +517,259 @@ function RuleDetailPage() {
           )}
         </div>
       )}
+
+      {/* ─── Checks Sub-Tab ─── */}
+      {activeTab === "checks" && (
+        <ChecksPanel
+          rule={rule}
+          checks={checks}
+          loading={Result.isInitial(checksResult)}
+          statusFilter={checkStatusFilter}
+          setStatusFilter={setCheckStatusFilter}
+        />
+      )}
     </DashboardLayout>
+  )
+}
+
+function ChecksPanel({
+  rule,
+  checks,
+  loading,
+  statusFilter,
+  setStatusFilter,
+}: {
+  rule: AlertRuleDocument
+  checks: AlertCheckDocument[]
+  loading: boolean
+  statusFilter: "all" | "breached" | "healthy" | "skipped"
+  setStatusFilter: (v: "all" | "breached" | "healthy" | "skipped") => void
+}) {
+  const totals = useMemo(() => {
+    let breached = 0
+    let healthy = 0
+    let skipped = 0
+    let transitions = 0
+    for (const c of checks) {
+      if (c.status === "breached") breached += 1
+      else if (c.status === "healthy") healthy += 1
+      else skipped += 1
+      if (c.incidentTransition !== "none") transitions += 1
+    }
+    return { breached, healthy, skipped, transitions, total: checks.length }
+  }, [checks])
+
+  const filteredChecks = useMemo(() => {
+    if (statusFilter === "all") return checks
+    return checks.filter((c) => c.status === statusFilter)
+  }, [checks, statusFilter])
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-48 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    )
+  }
+
+  if (checks.length === 0) {
+    return (
+      <Empty className="py-12">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <CheckIcon size={18} />
+          </EmptyMedia>
+          <EmptyTitle>No checks recorded yet</EmptyTitle>
+          <EmptyDescription>
+            Once this rule is evaluated the scheduler will record one check per minute here.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Stats row */}
+      <div className="grid grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-5">
+            <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+              Total Checks
+            </span>
+            <div className="mt-3">
+              <span className="text-3xl font-bold tabular-nums">{totals.total}</span>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-5">
+            <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+              Breached
+            </span>
+            <div className="mt-3">
+              <span className="text-3xl font-bold tabular-nums text-red-500">
+                {totals.breached}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-5">
+            <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+              Healthy
+            </span>
+            <div className="mt-3">
+              <span className="text-3xl font-bold tabular-nums text-emerald-500">
+                {totals.healthy}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-5">
+            <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+              Incident transitions
+            </span>
+            <div className="mt-3">
+              <span className="text-3xl font-bold tabular-nums">{totals.transitions}</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Status strip */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Status timeline</h2>
+          <span className="text-xs text-muted-foreground">
+            {totals.total} checks · oldest → newest
+          </span>
+        </div>
+        <CheckHistoryStrip checks={checks} signalType={rule.signalType} />
+      </div>
+
+      {/* Sparkline */}
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold">Observed value</h2>
+        <div className="rounded-md border bg-card p-4">
+          <CheckHistorySparkline
+            checks={checks}
+            threshold={rule.threshold}
+            signalType={rule.signalType}
+            className="h-[200px] w-full"
+          />
+        </div>
+      </div>
+
+      {/* Filters + table */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Checks</h2>
+          <div className="flex gap-1">
+            {(["all", "breached", "healthy", "skipped"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setStatusFilter(f)}
+                className={cn(
+                  "rounded-md border px-3 py-1 text-xs font-medium transition-colors capitalize",
+                  statusFilter === f
+                    ? "border-foreground/20 bg-foreground/5 text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[180px]">Time</TableHead>
+              <TableHead className="w-[100px]">Status</TableHead>
+              <TableHead className="w-[100px]">Value</TableHead>
+              <TableHead className="w-[100px]">Threshold</TableHead>
+              <TableHead className="w-[90px]">Samples</TableHead>
+              <TableHead>Group</TableHead>
+              <TableHead className="w-[140px]">Incident</TableHead>
+              <TableHead className="w-[80px]">Eval ms</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredChecks.slice(0, 200).map((check, idx) => {
+              const tone =
+                check.status === "breached"
+                  ? "text-red-500"
+                  : check.status === "healthy"
+                    ? "text-emerald-500"
+                    : "text-amber-500"
+              const transitionTone =
+                check.incidentTransition === "opened"
+                  ? "text-red-500"
+                  : check.incidentTransition === "resolved"
+                    ? "text-emerald-500"
+                    : check.incidentTransition === "continued"
+                      ? "text-muted-foreground"
+                      : ""
+              return (
+                <TableRow key={`${check.timestamp}-${check.groupKey}-${idx}`}>
+                  <TableCell className="font-mono text-xs">
+                    {new Date(check.timestamp).toLocaleString()}
+                  </TableCell>
+                  <TableCell>
+                    <span className={cn("flex items-center gap-1.5 text-sm", tone)}>
+                      <span
+                        className={cn(
+                          "size-1.5 rounded-full",
+                          check.status === "breached"
+                            ? "bg-red-500"
+                            : check.status === "healthy"
+                              ? "bg-emerald-500"
+                              : "bg-amber-500",
+                        )}
+                      />
+                      <span className="capitalize">{check.status}</span>
+                    </span>
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums">
+                    {check.observedValue == null
+                      ? "—"
+                      : formatSignalValue(rule.signalType, check.observedValue)}
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums text-muted-foreground">
+                    {formatSignalValue(rule.signalType, check.threshold)}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{check.sampleCount}</TableCell>
+                  <TableCell className="font-mono text-muted-foreground">
+                    {check.groupKey || "all"}
+                  </TableCell>
+                  <TableCell>
+                    {check.incidentTransition === "none" ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <Badge variant="outline" className={cn("text-xs capitalize", transitionTone)}>
+                        {check.incidentTransition}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {check.evaluationDurationMs}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+        {filteredChecks.length > 200 && (
+          <p className="text-xs text-muted-foreground text-center">
+            Showing first 200 of {filteredChecks.length} matching checks.
+          </p>
+        )}
+      </div>
+    </div>
   )
 }

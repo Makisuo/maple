@@ -28,6 +28,11 @@ export interface TinybirdServiceShape {
     tenant: TenantContext,
     sql: string,
   ) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, TinybirdQueryError>
+  readonly ingest: <T>(
+    tenant: TenantContext,
+    datasource: string,
+    rows: ReadonlyArray<T>,
+  ) => Effect.Effect<void, TinybirdQueryError>
 }
 
 const clientCache = new Map<string, CachedClient>()
@@ -72,6 +77,27 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
       return client
     }
 
+    const resolveHostToken = Effect.fn("TinybirdService.resolveHostToken")(function* (
+      tenant: TenantContext,
+      label: string,
+    ) {
+      const override = yield* orgTinybirdSettings
+        .resolveRuntimeConfig(tenant.orgId)
+        .pipe(Effect.mapError((error) => toTinybirdQueryError(label, error)))
+
+      if (Option.isSome(override)) {
+        yield* Effect.annotateCurrentSpan("clientSource", "org_override")
+        return { host: override.value.host, token: override.value.token, source: "org_override" as const }
+      }
+
+      yield* Effect.annotateCurrentSpan("clientSource", "managed")
+      return {
+        host: env.TINYBIRD_HOST,
+        token: Redacted.value(env.TINYBIRD_TOKEN),
+        source: "managed" as const,
+      }
+    })
+
     const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
       tenant: TenantContext,
       pipe: string,
@@ -79,17 +105,9 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
       yield* Effect.annotateCurrentSpan("pipe", pipe)
       yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 
-      const override = yield* orgTinybirdSettings
-        .resolveRuntimeConfig(tenant.orgId)
-        .pipe(Effect.mapError((error) => toTinybirdQueryError(pipe, error)))
-
-      if (Option.isSome(override)) {
-        yield* Effect.annotateCurrentSpan("clientSource", "org_override")
-        return getCachedOrCreateClient(tenant.orgId, override.value.host, override.value.token)
-      }
-
-      yield* Effect.annotateCurrentSpan("clientSource", "managed")
-      return getCachedOrCreateClient("__managed__", env.TINYBIRD_HOST, Redacted.value(env.TINYBIRD_TOKEN))
+      const resolved = yield* resolveHostToken(tenant, pipe)
+      const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
+      return getCachedOrCreateClient(cacheKey, resolved.host, resolved.token)
     })
 
     const truncateSql = (s: string, maxLen = 1000) =>
@@ -169,9 +187,54 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
       return yield* executeSql(tenant, sql, "sqlQuery")
     })
 
+    const ingest = Effect.fn("TinybirdService.ingest")(function* <T>(
+      tenant: TenantContext,
+      datasource: string,
+      rows: ReadonlyArray<T>,
+    ) {
+      yield* Effect.annotateCurrentSpan("datasource", datasource)
+      yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+      yield* Effect.annotateCurrentSpan("rowCount", rows.length)
+
+      if (rows.length === 0) return
+
+      const label = `ingest:${datasource}`
+      const resolved = yield* resolveHostToken(tenant, label)
+      const ndjson = rows.map((row) => JSON.stringify(row)).join("\n")
+      const url = `${resolved.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`
+
+      yield* Effect.tryPromise({
+        try: async () => {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-ndjson",
+              Authorization: `Bearer ${resolved.token}`,
+            },
+            body: ndjson,
+          })
+          if (!response.ok) {
+            const body = await response.text().catch(() => "")
+            throw new Error(`HTTP ${response.status} ${response.statusText}: ${body.slice(0, 500)}`)
+          }
+        },
+        catch: (error) => toTinybirdQueryError(label, error),
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.logError("TinybirdService.ingest failed", {
+            datasource,
+            rowCount: rows.length,
+            error: String(error),
+            message: error.message,
+          }),
+        ),
+      )
+    })
+
     return {
       query,
       sqlQuery,
+      ingest,
     } satisfies TinybirdServiceShape
   }),
 }) {
@@ -183,6 +246,12 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
     tenant: TenantContext,
     payload: TinybirdQueryRequest,
   ) => this.use((service) => service.query(tenant, payload))
+
+  static readonly ingest = <T>(
+    tenant: TenantContext,
+    datasource: string,
+    rows: ReadonlyArray<T>,
+  ) => this.use((service) => service.ingest(tenant, datasource, rows))
 }
 
 export const __testables = {

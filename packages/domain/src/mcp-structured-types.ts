@@ -314,6 +314,33 @@ export interface ListAlertIncidentsData {
   resolvedCount: number
 }
 
+export interface AlertCheckRow {
+  timestamp: string
+  groupKey: string
+  status: string
+  observedValue: number | null
+  threshold: number
+  comparator: string
+  sampleCount: number
+  windowStart: string
+  windowEnd: string
+  consecutiveBreaches: number
+  consecutiveHealthy: number
+  incidentId: string | null
+  incidentTransition: string
+  evaluationDurationMs: number
+}
+
+export interface ListAlertChecksData {
+  ruleId: string
+  total: number
+  breached: number
+  healthy: number
+  skipped: number
+  transitions: number
+  checks: AlertCheckRow[]
+}
+
 // ---------------------------------------------------------------------------
 // Dashboard types
 // ---------------------------------------------------------------------------
@@ -544,6 +571,7 @@ export type StructuredToolOutput =
   | { tool: "service_map"; data: ServiceMapData }
   | { tool: "list_alert_rules"; data: ListAlertRulesData }
   | { tool: "list_alert_incidents"; data: ListAlertIncidentsData }
+  | { tool: "list_alert_checks"; data: ListAlertChecksData }
   | { tool: "create_alert_rule"; data: CreateAlertRuleData }
   | { tool: "get_alert_rule"; data: GetAlertRuleData }
   | { tool: "list_dashboards"; data: ListDashboardsData }

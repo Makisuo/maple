@@ -14,6 +14,7 @@ import { registerGetIncidentTimelineTool } from "./get-incident-timeline"
 import { registerGetServiceTopOperationsTool } from "./get-service-top-operations"
 import { registerInspectChartDataTool } from "./inspect-chart-data"
 import { registerInspectTraceTool } from "./inspect-trace"
+import { registerListAlertChecksTool } from "./list-alert-checks"
 import { registerListAlertIncidentsTool } from "./list-alert-incidents"
 import { registerListAlertRulesTool } from "./list-alert-rules"
 import { registerListDashboardsTool } from "./list-dashboards"
@@ -69,6 +70,7 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
   registerListAlertRulesTool(registrar)
   registerGetAlertRuleTool(registrar)
   registerListAlertIncidentsTool(registrar)
+  registerListAlertChecksTool(registrar)
   registerGetIncidentTimelineTool(registrar)
   registerCreateAlertRuleTool(registrar)
   registerListDashboardsTool(registrar)

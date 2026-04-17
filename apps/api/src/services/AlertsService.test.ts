@@ -80,6 +80,7 @@ function makeTinybirdStub(state: {
     query: (_tenant, payload) =>
       Effect.fail(new Error(`Unexpected pipe ${payload.pipe}`)) as never,
     sqlQuery: sqlQueryStub,
+    ingest: () => Effect.void,
   }
 }
 
@@ -102,7 +103,7 @@ const makeLayer = (url: string, tinybirdStub: TinybirdServiceShape, runtimeOverr
   const runtimeLive = Layer.succeed(AlertRuntime, { ...defaultTestRuntime, ...runtimeOverrides })
 
   return AlertsService.Live.pipe(
-    Layer.provide(Layer.mergeAll(envLive, databaseLive, queryEngineLive, runtimeLive)),
+    Layer.provide(Layer.mergeAll(envLive, databaseLive, queryEngineLive, tinybirdLive, runtimeLive)),
   ) as Layer.Layer<AlertsService, never, never>
 }
 

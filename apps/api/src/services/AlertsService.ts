@@ -22,9 +22,14 @@ import {
   AlertEventType as AlertEventTypeSchema,
   AlertForbiddenError,
   AlertGroupBy as AlertGroupBySchema,
+  AlertCheckDocument,
+  AlertChecksListResponse,
+  AlertEvaluationStatus as AlertEvaluationStatusSchema,
   AlertIncidentDocument,
   AlertIncidentsListResponse,
   AlertIncidentStatus,
+  AlertIncidentTransition,
+  AlertIncidentTransition as AlertIncidentTransitionSchema,
   AlertMetricAggregation as AlertMetricAggregationSchema,
   AlertMetricType as AlertMetricTypeSchema,
   AlertNotFoundError,
@@ -104,6 +109,8 @@ import {
 } from "./AlertDeliveryDispatch"
 import { Env } from "./Env"
 import { QueryEngineService, type GroupedAlertObservation } from "./QueryEngineService"
+import { TinybirdService } from "./TinybirdService"
+import type { AlertChecksRow } from "@maple/domain/tinybird"
 
 
 interface DestinationPublicConfig {
@@ -287,6 +294,8 @@ const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestination
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
+const decodeAlertEvaluationStatusSync = Schema.decodeUnknownSync(AlertEvaluationStatusSchema)
+const decodeAlertIncidentTransitionSync = Schema.decodeUnknownSync(AlertIncidentTransitionSchema)
 const decodeAlertMetricTypeSync = Schema.decodeUnknownSync(AlertMetricTypeSchema)
 const decodeAlertMetricAggregationSync = Schema.decodeUnknownSync(AlertMetricAggregationSchema)
 const decodeAlertIncidentStatusSync = Schema.decodeUnknownSync(AlertIncidentStatus)
@@ -906,6 +915,16 @@ export interface AlertsServiceShape {
   readonly listIncidents: (
     orgId: OrgId,
   ) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
+  readonly listRuleChecks: (
+    orgId: OrgId,
+    ruleId: AlertRuleId,
+    options: {
+      readonly groupKey?: string
+      readonly since?: string
+      readonly until?: string
+      readonly limit?: number
+    },
+  ) => Effect.Effect<AlertChecksListResponse, AlertPersistenceError | AlertNotFoundError>
   readonly listDeliveryEvents: (
     orgId: OrgId,
   ) => Effect.Effect<AlertDeliveryEventsListResponse, AlertPersistenceError>
@@ -927,6 +946,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
       const database = yield* Database
       const env = yield* Env
       const queryEngine = yield* QueryEngineService
+      const tinybird = yield* TinybirdService
       const runtime = yield* AlertRuntime
       const encryptionKey = yield* parseEncryptionKey(
         Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
@@ -2098,6 +2118,128 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         })
       })
 
+      const escapeSqlLiteral = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+      const toTinybirdSqlDateTime64 = (iso: string) => {
+        const d = new Date(iso)
+        if (Number.isNaN(d.getTime())) return null
+        const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
+        return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
+      }
+
+      const listRuleChecks = Effect.fn("AlertsService.listRuleChecks")(function* (
+        orgId: OrgId,
+        ruleId: AlertRuleId,
+        options: {
+          readonly groupKey?: string
+          readonly since?: string
+          readonly until?: string
+          readonly limit?: number
+        },
+      ) {
+        // Verify the rule exists and belongs to this org before querying Tinybird.
+        const ruleRow = yield* dbExecute((db) =>
+          db
+            .select({ id: alertRules.id })
+            .from(alertRules)
+            .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
+            .limit(1),
+        )
+        if (ruleRow.length === 0) {
+          return yield* new AlertNotFoundError({
+            message: "Alert rule not found",
+            resourceType: "alert_rule",
+            resourceId: ruleId,
+          })
+        }
+
+        const clamp = (n: number | undefined, min: number, max: number, fallback: number) => {
+          if (n == null || Number.isNaN(n)) return fallback
+          return Math.min(max, Math.max(min, Math.trunc(n)))
+        }
+        const limit = clamp(options.limit, 1, 2000, 500)
+
+        const predicates: string[] = [
+          `OrgId = '${escapeSqlLiteral(orgId)}'`,
+          `RuleId = '${escapeSqlLiteral(ruleId)}'`,
+        ]
+        if (options.groupKey != null && options.groupKey !== "") {
+          predicates.push(`GroupKey = '${escapeSqlLiteral(options.groupKey)}'`)
+        }
+        if (options.since != null) {
+          const since = toTinybirdSqlDateTime64(options.since)
+          if (since != null) {
+            predicates.push(`Timestamp >= toDateTime64('${since}', 3)`)
+          }
+        }
+        if (options.until != null) {
+          const until = toTinybirdSqlDateTime64(options.until)
+          if (until != null) {
+            predicates.push(`Timestamp <= toDateTime64('${until}', 3)`)
+          }
+        }
+
+        const sql = `
+          SELECT
+            formatDateTime(Timestamp, '%Y-%m-%dT%H:%M:%S.%fZ') AS timestamp,
+            GroupKey AS groupKey,
+            Status AS status,
+            SignalType AS signalType,
+            Comparator AS comparator,
+            Threshold AS threshold,
+            ObservedValue AS observedValue,
+            SampleCount AS sampleCount,
+            WindowMinutes AS windowMinutes,
+            formatDateTime(WindowStart, '%Y-%m-%dT%H:%M:%S.%fZ') AS windowStart,
+            formatDateTime(WindowEnd, '%Y-%m-%dT%H:%M:%S.%fZ') AS windowEnd,
+            ConsecutiveBreaches AS consecutiveBreaches,
+            ConsecutiveHealthy AS consecutiveHealthy,
+            IncidentId AS incidentId,
+            IncidentTransition AS incidentTransition,
+            EvaluationDurationMs AS evaluationDurationMs
+          FROM alert_checks
+          WHERE ${predicates.join(" AND ")}
+          ORDER BY Timestamp DESC
+          LIMIT ${limit}
+        `.trim()
+
+        const tenant = systemTenant(orgId)
+        const rows = yield* tinybird.sqlQuery(tenant, sql).pipe(
+          Effect.mapError(
+            (error) =>
+              new AlertPersistenceError({
+                message: `Failed to list alert checks: ${error.message}`,
+              }),
+          ),
+        )
+
+        const checks = rows.map((row) => {
+          const r = row as Record<string, unknown>
+          return new AlertCheckDocument({
+            timestamp: decodeIsoDateTimeStringSync(String(r.timestamp)),
+            groupKey: String(r.groupKey ?? ""),
+            status: decodeAlertEvaluationStatusSync(String(r.status)),
+            signalType: decodeAlertSignalTypeSync(String(r.signalType)),
+            comparator: decodeAlertComparatorSync(String(r.comparator)),
+            threshold: Number(r.threshold),
+            observedValue: r.observedValue == null ? null : Number(r.observedValue),
+            sampleCount: Number(r.sampleCount ?? 0),
+            windowMinutes: Number(r.windowMinutes ?? 0),
+            windowStart: decodeIsoDateTimeStringSync(String(r.windowStart)),
+            windowEnd: decodeIsoDateTimeStringSync(String(r.windowEnd)),
+            consecutiveBreaches: Number(r.consecutiveBreaches ?? 0),
+            consecutiveHealthy: Number(r.consecutiveHealthy ?? 0),
+            incidentId:
+              r.incidentId == null || r.incidentId === ""
+                ? null
+                : decodeAlertIncidentIdSync(String(r.incidentId)),
+            incidentTransition: decodeAlertIncidentTransitionSync(String(r.incidentTransition)),
+            evaluationDurationMs: Number(r.evaluationDurationMs ?? 0),
+          })
+        })
+
+        return new AlertChecksListResponse({ checks })
+      })
+
       const listDeliveryEvents = Effect.fn("AlertsService.listDeliveryEvents")(function* (
         orgId: OrgId,
       ) {
@@ -2433,6 +2575,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         const stateConflictTarget: [typeof alertRuleStates.orgId, typeof alertRuleStates.ruleId, typeof alertRuleStates.groupKey] = [alertRuleStates.orgId, alertRuleStates.ruleId, alertRuleStates.groupKey]
 
         let incidentAction = "none" as string
+        // Captured from inside dbExecute for the Tinybird check-history row
+        let capturedIncidentId: string | null = null
+        let capturedTransition: "none" | "opened" | "continued" | "resolved" = "none"
+        let capturedConsecutiveBreaches = 0
+        let capturedConsecutiveHealthy = 0
         // Serialized per rule via the claim lock at runSchedulerTick (SCHEDULER_LOCK_TTL_MS
         // CAS on alertRules.lastScheduledAt). All writes below are idempotent on retry:
         // state upsert via onConflictDoUpdate, incident insert keyed on unique incidentKey,
@@ -2473,6 +2620,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
                 .limit(1)
             )[0] ?? null
 
+          // Default for check-history ingest: carry open-incident linkage (if any),
+          // transition remains "none" unless a branch below overrides it.
+          capturedIncidentId = openIncident?.id ?? null
+
           const upsertState = (fields: {
             consecutiveBreaches: number
             consecutiveHealthy: number
@@ -2502,9 +2653,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
               })
 
           if (evaluation.status === "skipped") {
+            capturedConsecutiveBreaches = state?.consecutiveBreaches ?? 0
+            capturedConsecutiveHealthy = state?.consecutiveHealthy ?? 0
             await upsertState({
-              consecutiveBreaches: state?.consecutiveBreaches ?? 0,
-              consecutiveHealthy: state?.consecutiveHealthy ?? 0,
+              consecutiveBreaches: capturedConsecutiveBreaches,
+              consecutiveHealthy: capturedConsecutiveHealthy,
               lastStatus: evaluation.status,
               lastValue: evaluation.value,
               lastSampleCount: evaluation.sampleCount,
@@ -2520,6 +2673,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
             evaluation.status === "healthy"
               ? (state?.consecutiveHealthy ?? 0) + 1
               : 0
+          capturedConsecutiveBreaches = consecutiveBreaches
+          capturedConsecutiveHealthy = consecutiveHealthy
 
           await upsertState({
             consecutiveBreaches,
@@ -2572,6 +2727,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
               timestamp,
             )
             incidentAction = "opened"
+            capturedIncidentId = incidentId
+            capturedTransition = "opened"
             return
           }
 
@@ -2610,6 +2767,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
                 timestamp,
               )
             }
+            capturedIncidentId = openIncident.id
+            capturedTransition = "continued"
             return
           }
 
@@ -2650,10 +2809,45 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
               timestamp,
             )
             incidentAction = "resolved"
+            capturedIncidentId = openIncident.id
+            capturedTransition = "resolved"
           }
         })
         if (incidentAction === "opened") yield* Metric.update(AlertingMetrics.incidentsOpenedTotal, 1)
         if (incidentAction === "resolved") yield* Metric.update(AlertingMetrics.incidentsResolvedTotal, 1)
+
+        // Record one audit row per evaluation to the Tinybird alert_checks datasource.
+        // Forked as a daemon so ingest latency/failure never blocks the scheduler tick —
+        // ingest errors are logged inside TinybirdService.ingest and swallowed here.
+        // Tinybird DateTime64(3) wire format: "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
+        const toIngestDateTime64 = (epochMs: number) => {
+          const d = new Date(epochMs)
+          const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
+          return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
+        }
+        const checkRow: AlertChecksRow = {
+          OrgId: row.orgId,
+          RuleId: row.id,
+          GroupKey: groupKey,
+          Timestamp: toIngestDateTime64(timestamp),
+          Status: evaluation.status,
+          SignalType: normalized.signalType,
+          Comparator: normalized.comparator,
+          Threshold: normalized.threshold,
+          ObservedValue: evaluation.value,
+          SampleCount: evaluation.sampleCount,
+          WindowMinutes: normalized.windowMinutes,
+          WindowStart: toIngestDateTime64(timestamp - normalized.windowMinutes * 60_000),
+          WindowEnd: toIngestDateTime64(timestamp),
+          ConsecutiveBreaches: capturedConsecutiveBreaches,
+          ConsecutiveHealthy: capturedConsecutiveHealthy,
+          IncidentId: capturedIncidentId,
+          IncidentTransition: capturedTransition,
+          EvaluationDurationMs: Math.max(0, now() - timestamp),
+        }
+        yield* tinybird
+          .ingest(systemTenant(row.orgId as OrgId), "alert_checks", [checkRow])
+          .pipe(Effect.ignore, Effect.forkDetach)
       })
 
       /* -------------------------------------------------------------------------- */
@@ -3065,6 +3259,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         deleteRule,
         testRule,
         listIncidents,
+        listRuleChecks,
         listDeliveryEvents,
         runSchedulerTick,
       } satisfies AlertsServiceShape

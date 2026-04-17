@@ -636,6 +636,54 @@ export function buildAlertQueryFilterSet(params: {
   }
 }
 
+export const AlertIncidentTransition = Schema.Literals([
+  "none",
+  "opened",
+  "continued",
+  "resolved",
+]).annotate({
+  identifier: "@maple/AlertIncidentTransition",
+  title: "Alert Incident Transition",
+})
+export type AlertIncidentTransition = Schema.Schema.Type<typeof AlertIncidentTransition>
+
+export class AlertCheckDocument extends Schema.Class<AlertCheckDocument>("AlertCheckDocument")({
+  timestamp: IsoDateTimeString,
+  groupKey: Schema.String,
+  status: AlertEvaluationStatus,
+  signalType: AlertSignalType,
+  comparator: AlertComparator,
+  threshold: Schema.Number,
+  observedValue: Schema.NullOr(Schema.Number),
+  sampleCount: Schema.Number,
+  windowMinutes: Schema.Number,
+  windowStart: IsoDateTimeString,
+  windowEnd: IsoDateTimeString,
+  consecutiveBreaches: Schema.Number,
+  consecutiveHealthy: Schema.Number,
+  incidentId: Schema.NullOr(AlertIncidentId),
+  incidentTransition: AlertIncidentTransition,
+  evaluationDurationMs: Schema.Number,
+}) {}
+
+export class AlertChecksListResponse extends Schema.Class<AlertChecksListResponse>(
+  "AlertChecksListResponse",
+)({
+  checks: Schema.Array(AlertCheckDocument),
+}) {}
+
+export const ListRuleChecksQuery = Schema.Struct({
+  groupKey: Schema.optional(Schema.String),
+  since: Schema.optional(IsoDateTimeString),
+  until: Schema.optional(IsoDateTimeString),
+  limit: Schema.optional(
+    Schema.NumberFromString.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: 2000 }),
+    ),
+  ),
+})
+
 export class AlertsApiGroup extends HttpApiGroup.make("alerts")
   .add(
     HttpApiEndpoint.get("listDestinations", "/destinations", {
@@ -757,6 +805,16 @@ export class AlertsApiGroup extends HttpApiGroup.make("alerts")
     HttpApiEndpoint.get("listIncidents", "/incidents", {
       success: AlertIncidentsListResponse,
       error: AlertPersistenceError,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("listRuleChecks", "/rules/:ruleId/checks", {
+      params: {
+        ruleId: AlertRuleId,
+      },
+      query: ListRuleChecksQuery,
+      success: AlertChecksListResponse,
+      error: [AlertPersistenceError, AlertNotFoundError],
     }),
   )
   .add(

@@ -41,7 +41,7 @@ const buildLayer = (env: Record<string, unknown>) => {
 
   const AlertsServiceLive = AlertsService.Live.pipe(
     Layer.provide(
-      Layer.mergeAll(BaseLive, QueryEngineServiceLive, AlertRuntime.Default),
+      Layer.mergeAll(BaseLive, QueryEngineServiceLive, TinybirdServiceLive, AlertRuntime.Default),
     ),
   )
 
