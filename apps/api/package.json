@@ -9,7 +9,7 @@
   },
   "scripts": {
     "db:generate": "bun run --cwd ../../packages/db db:generate",
-    "dev": "wrangler dev --env-file ../../.env.local --inspector-port=9229",
+    "dev": "if [ -n \"$PORTLESS_PREFIX\" ]; then portless \"$PORTLESS_PREFIX-api\" sh -c 'wrangler dev --env-file ../../.env.local --port $PORT --inspector-port=$((PORT + 10000))'; else wrangler dev --env-file ../../.env.local --inspector-port=9229; fi",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",

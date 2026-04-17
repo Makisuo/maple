@@ -29,7 +29,7 @@
     "tw-animate-css": "catalog:tailwind"
   },
   "scripts": {
-    "dev": "astro dev --port 3391",
+    "dev": "if [ -n \"$PORTLESS_PREFIX\" ]; then portless \"$PORTLESS_PREFIX-landing\" astro dev; else astro dev --port 3391; fi",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"

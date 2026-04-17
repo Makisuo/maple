@@ -9,6 +9,7 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev --ui=tui",
+    "dev:portless": "bun run scripts/portless-dev.ts",
     "dev:alerting": "bun --filter=@maple/alerting dev",
     "alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk",
     "alchemy:deploy": "bun run alchemy:build-deps && alchemy deploy",
@@ -25,11 +26,12 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260414.1",
-    "@types/node": "catalog:tooling",
     "@maple/db": "workspace:*",
     "@maple/infra": "workspace:*",
     "@tinybirdco/sdk": "catalog:tinybird",
+    "@types/node": "catalog:tooling",
     "alchemy": "^0.91.2",
+    "portless": "^0.10.3",
     "turbo": "^2.9.3",
     "typescript": "catalog:tooling"
   },

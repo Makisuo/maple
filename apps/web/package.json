@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev --port 3471",
+    "dev": "if [ -n \"$PORTLESS_PREFIX\" ]; then portless \"$PORTLESS_PREFIX-web\" vite dev; else vite dev --port 3471; fi",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",

@@ -11,6 +11,7 @@ Maple is an OpenTelemetry observability platform built with TanStack Start (Reac
 ```bash
 # Development
 bun dev              # Start dev server on port 3471
+bun dev:portless     # Run all apps on https://<worktree>-<app>.localhost (worktree-safe, ephemeral ports)
 bun typecheck        # TypeScript type checking
 
 # Testing
