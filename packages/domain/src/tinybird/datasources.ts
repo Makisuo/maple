@@ -910,22 +910,18 @@ export const alertChecks = defineDatasource("alert_checks", {
   // jsonPaths enabled: alert_checks is ingested directly via POST /v0/events from
   // AlertsService.processEvaluation, not via a materialized view. Each column gets
   // an auto-generated `$.ColumnName` path matching the NDJSON keys in AlertChecksRow.
+  // Status/SignalType/Comparator/IncidentTransition use LowCardinality(String) — not
+  // Enum8 — because Tinybird's /v0/events JSONPath ingestion doesn't support Enum8.
+  // The runtime literals live in http/alerts.ts and NormalizedRule; TS narrows them
+  // at the assignment site in AlertsService.processEvaluation.
   schema: {
     OrgId: t.string().lowCardinality(),
     RuleId: t.string(),
     GroupKey: t.string(),
     Timestamp: t.dateTime64(3),
-    Status: t.enum8("healthy", "breached", "skipped"),
-    SignalType: t.enum8(
-      "error_rate",
-      "p95_latency",
-      "p99_latency",
-      "apdex",
-      "throughput",
-      "metric",
-      "query",
-    ),
-    Comparator: t.enum8("gt", "gte", "lt", "lte"),
+    Status: t.string().lowCardinality(),
+    SignalType: t.string().lowCardinality(),
+    Comparator: t.string().lowCardinality(),
     Threshold: t.float64(),
     ObservedValue: t.float64().nullable(),
     SampleCount: t.uint32(),
@@ -935,9 +931,33 @@ export const alertChecks = defineDatasource("alert_checks", {
     ConsecutiveBreaches: t.uint16(),
     ConsecutiveHealthy: t.uint16(),
     IncidentId: t.string().nullable(),
-    IncidentTransition: t.enum8("none", "opened", "continued", "resolved"),
+    IncidentTransition: t.string().lowCardinality(),
     EvaluationDurationMs: t.uint32(),
   },
+  // Bridge the legacy Enum8 → LowCardinality(String) migration. Tinybird requires
+  // this for incompatible type changes even on an empty table. Remove in a follow-up
+  // deploy once the new schema is live and no old rows exist.
+  forwardQuery: `
+    SELECT
+      OrgId,
+      RuleId,
+      GroupKey,
+      Timestamp,
+      CAST(Status, 'LowCardinality(String)') AS Status,
+      CAST(SignalType, 'LowCardinality(String)') AS SignalType,
+      CAST(Comparator, 'LowCardinality(String)') AS Comparator,
+      Threshold,
+      ObservedValue,
+      SampleCount,
+      WindowMinutes,
+      WindowStart,
+      WindowEnd,
+      ConsecutiveBreaches,
+      ConsecutiveHealthy,
+      IncidentId,
+      CAST(IncidentTransition, 'LowCardinality(String)') AS IncidentTransition,
+      EvaluationDurationMs
+  `,
   engine: engine.mergeTree({
     partitionKey: "toDate(Timestamp)",
     sortingKey: ["OrgId", "RuleId", "GroupKey", "Timestamp"],
