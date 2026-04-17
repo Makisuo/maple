@@ -907,7 +907,9 @@ export type AttributeValuesHourlyRow = InferRow<typeof attributeValuesHourly>;
 export const alertChecks = defineDatasource("alert_checks", {
   description:
     "One row per alert rule evaluation. Durable audit trail of checks: status, observed value, threshold, sample count, incident linkage.",
-  jsonPaths: false,
+  // jsonPaths enabled: alert_checks is ingested directly via POST /v0/events from
+  // AlertsService.processEvaluation, not via a materialized view. Each column gets
+  // an auto-generated `$.ColumnName` path matching the NDJSON keys in AlertChecksRow.
   schema: {
     OrgId: t.string().lowCardinality(),
     RuleId: t.string(),
