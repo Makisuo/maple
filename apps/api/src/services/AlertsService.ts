@@ -2180,7 +2180,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
         const sql = `
           SELECT
-            formatDateTime(Timestamp, '%Y-%m-%dT%H:%M:%S.%fZ') AS timestamp,
+            formatDateTime(Timestamp, '%Y-%m-%dT%H:%i:%S.%fZ') AS timestamp,
             GroupKey AS groupKey,
             Status AS status,
             SignalType AS signalType,
@@ -2189,8 +2189,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
             ObservedValue AS observedValue,
             SampleCount AS sampleCount,
             WindowMinutes AS windowMinutes,
-            formatDateTime(WindowStart, '%Y-%m-%dT%H:%M:%S.%fZ') AS windowStart,
-            formatDateTime(WindowEnd, '%Y-%m-%dT%H:%M:%S.%fZ') AS windowEnd,
+            formatDateTime(WindowStart, '%Y-%m-%dT%H:%i:%S.%fZ') AS windowStart,
+            formatDateTime(WindowEnd, '%Y-%m-%dT%H:%i:%S.%fZ') AS windowEnd,
             ConsecutiveBreaches AS consecutiveBreaches,
             ConsecutiveHealthy AS consecutiveHealthy,
             IncidentId AS incidentId,
@@ -2213,29 +2213,40 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
           ),
         )
 
-        const checks = rows.map((row) => {
-          const r = row as Record<string, unknown>
-          return new AlertCheckDocument({
-            timestamp: decodeIsoDateTimeStringSync(String(r.timestamp)),
-            groupKey: String(r.groupKey ?? ""),
-            status: decodeAlertEvaluationStatusSync(String(r.status)),
-            signalType: decodeAlertSignalTypeSync(String(r.signalType)),
-            comparator: decodeAlertComparatorSync(String(r.comparator)),
-            threshold: Number(r.threshold),
-            observedValue: r.observedValue == null ? null : Number(r.observedValue),
-            sampleCount: Number(r.sampleCount ?? 0),
-            windowMinutes: Number(r.windowMinutes ?? 0),
-            windowStart: decodeIsoDateTimeStringSync(String(r.windowStart)),
-            windowEnd: decodeIsoDateTimeStringSync(String(r.windowEnd)),
-            consecutiveBreaches: Number(r.consecutiveBreaches ?? 0),
-            consecutiveHealthy: Number(r.consecutiveHealthy ?? 0),
-            incidentId:
-              r.incidentId == null || r.incidentId === ""
-                ? null
-                : decodeAlertIncidentIdSync(String(r.incidentId)),
-            incidentTransition: decodeAlertIncidentTransitionSync(String(r.incidentTransition)),
-            evaluationDurationMs: Number(r.evaluationDurationMs ?? 0),
-          })
+        const checks = yield* Effect.try({
+          try: () =>
+            rows.map((row) => {
+              const r = row as Record<string, unknown>
+              const rawTransition =
+                r.incidentTransition == null || r.incidentTransition === ""
+                  ? "none"
+                  : String(r.incidentTransition)
+              return new AlertCheckDocument({
+                timestamp: decodeIsoDateTimeStringSync(String(r.timestamp)),
+                groupKey: String(r.groupKey ?? ""),
+                status: decodeAlertEvaluationStatusSync(String(r.status)),
+                signalType: decodeAlertSignalTypeSync(String(r.signalType)),
+                comparator: decodeAlertComparatorSync(String(r.comparator)),
+                threshold: Number(r.threshold),
+                observedValue: r.observedValue == null ? null : Number(r.observedValue),
+                sampleCount: Number(r.sampleCount ?? 0),
+                windowMinutes: Number(r.windowMinutes ?? 0),
+                windowStart: decodeIsoDateTimeStringSync(String(r.windowStart)),
+                windowEnd: decodeIsoDateTimeStringSync(String(r.windowEnd)),
+                consecutiveBreaches: Number(r.consecutiveBreaches ?? 0),
+                consecutiveHealthy: Number(r.consecutiveHealthy ?? 0),
+                incidentId:
+                  r.incidentId == null || r.incidentId === ""
+                    ? null
+                    : decodeAlertIncidentIdSync(String(r.incidentId)),
+                incidentTransition: decodeAlertIncidentTransitionSync(rawTransition),
+                evaluationDurationMs: Number(r.evaluationDurationMs ?? 0),
+              })
+            }),
+          catch: (error) =>
+            new AlertPersistenceError({
+              message: `Failed to decode alert check row: ${error instanceof Error ? error.message : String(error)}`,
+            }),
         })
 
         return new AlertChecksListResponse({ checks })

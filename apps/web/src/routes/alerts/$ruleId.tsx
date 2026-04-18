@@ -7,7 +7,6 @@ import { useMemo, useState } from "react"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { AlertPreviewChart } from "@/components/alerts/alert-preview-chart"
-import { CheckHistoryStrip } from "@/components/alerts/check-history-strip"
 import { CheckHistorySparkline } from "@/components/alerts/check-history-sparkline"
 import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
 import { AlertSeverityBadge } from "@/components/alerts/alert-severity-badge"
@@ -574,16 +573,11 @@ function ChecksPanel({
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Status timeline</h3>
+          <h3 className="text-sm font-semibold">Observed values</h3>
           <span className="text-xs text-muted-foreground">
             {totals.total} checks · oldest → newest
           </span>
         </div>
-        <CheckHistoryStrip checks={checks} signalType={rule.signalType} />
-      </div>
-
-      <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Observed value</h3>
         <Card>
           <CardContent className="p-5">
             <CheckHistorySparkline
