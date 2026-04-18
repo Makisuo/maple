@@ -4,6 +4,7 @@ import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { ActorChip } from "@/components/errors/actor-chip"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { formatRelativeTime } from "@/lib/format"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -23,25 +24,56 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@maple/ui/components/ui/empty"
-import type { ErrorIssueDocument } from "@maple/domain/http"
+import type { ErrorIssueDocument, WorkflowState } from "@maple/domain/http"
 
-const StatusValues = ["open", "resolved", "ignored", "archived"] as const
-type StatusFilter = (typeof StatusValues)[number] | "all"
+const FILTER_VALUES = [
+  "triage",
+  "todo",
+  "in_progress",
+  "in_review",
+  "done",
+  "cancelled",
+  "wontfix",
+  "all",
+] as const
 
-const FILTER_VALUES = ["open", "resolved", "ignored", "all"] as const
-const FILTER_LABEL: Record<(typeof FILTER_VALUES)[number], string> = {
-  open: "Open",
-  resolved: "Resolved",
-  ignored: "Ignored",
+type FilterValue = (typeof FILTER_VALUES)[number]
+
+const FILTER_LABEL: Record<FilterValue, string> = {
+  triage: "Triage",
+  todo: "Todo",
+  in_progress: "In progress",
+  in_review: "In review",
+  done: "Done",
+  cancelled: "Cancelled",
+  wontfix: "Wontfix",
   all: "All",
 }
 
-// Cap server-side reads. The list is for triage — pagination comes later.
-const ISSUES_PAGE_LIMIT = 50
+const GROUP_ORDER: ReadonlyArray<WorkflowState> = [
+  "triage",
+  "todo",
+  "in_progress",
+  "in_review",
+  "done",
+  "cancelled",
+  "wontfix",
+]
+
+const ISSUES_PAGE_LIMIT = 100
 
 const searchSchema = Schema.Struct({
-  status: Schema.optional(
-    Schema.Literals(["all", "open", "resolved", "ignored", "archived"]),
+  workflowState: Schema.optional(
+    Schema.Literals([
+      "all",
+      "triage",
+      "todo",
+      "in_progress",
+      "in_review",
+      "done",
+      "cancelled",
+      "wontfix",
+    ]),
   ),
 })
 
@@ -50,18 +82,30 @@ export const Route = effectRoute(createFileRoute("/errors/issues/"))({
   validateSearch: Schema.toStandardSchemaV1(searchSchema),
 })
 
-const STATUS_BADGE: Record<
-  ErrorIssueDocument["status"],
+const WORKFLOW_BADGE: Record<
+  WorkflowState,
   { label: string; tone: string }
 > = {
-  open: { label: "Open", tone: "bg-destructive/10 text-destructive" },
-  resolved: { label: "Resolved", tone: "bg-success/10 text-success" },
-  ignored: { label: "Ignored", tone: "bg-muted text-muted-foreground" },
-  archived: { label: "Archived", tone: "bg-muted text-muted-foreground" },
+  triage: {
+    label: "Triage",
+    tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  todo: { label: "Todo", tone: "bg-muted text-muted-foreground" },
+  in_progress: {
+    label: "In progress",
+    tone: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  },
+  in_review: {
+    label: "In review",
+    tone: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+  },
+  done: { label: "Done", tone: "bg-success/10 text-success" },
+  cancelled: { label: "Cancelled", tone: "bg-muted text-muted-foreground" },
+  wontfix: { label: "Wontfix", tone: "bg-muted text-muted-foreground" },
 }
 
-function IssueStatusBadge({ status }: { status: ErrorIssueDocument["status"] }) {
-  const { label, tone } = STATUS_BADGE[status]
+function WorkflowBadge({ state }: { state: WorkflowState }) {
+  const { label, tone } = WORKFLOW_BADGE[state]
   return (
     <Badge variant="outline" className={tone}>
       {label}
@@ -72,21 +116,25 @@ function IssueStatusBadge({ status }: { status: ErrorIssueDocument["status"] }) 
 function IssuesPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
-  const activeStatus: StatusFilter = search.status ?? "open"
+  const activeFilter: FilterValue = search.workflowState ?? "triage"
 
   const issuesQueryAtom = MapleApiAtomClient.query("errors", "listIssues", {
     query:
-      activeStatus === "all"
+      activeFilter === "all"
         ? { limit: ISSUES_PAGE_LIMIT }
-        : { status: activeStatus, limit: ISSUES_PAGE_LIMIT },
+        : { workflowState: activeFilter, limit: ISSUES_PAGE_LIMIT },
     reactivityKeys: ["errorIssues"],
   })
   const issuesResult = useAtomValue(issuesQueryAtom)
 
   const filterRow = (
-    <div role="radiogroup" aria-label="Filter by status" className="flex items-center gap-2">
+    <div
+      role="radiogroup"
+      aria-label="Filter by workflow state"
+      className="flex flex-wrap items-center gap-2"
+    >
       {FILTER_VALUES.map((value) => {
-        const isActive = activeStatus === value
+        const isActive = activeFilter === value
         return (
           <Button
             key={value}
@@ -98,7 +146,7 @@ function IssuesPage() {
               navigate({
                 search: (prev) => ({
                   ...prev,
-                  status: value === "open" ? undefined : value,
+                  workflowState: value === "triage" ? undefined : value,
                 }),
               })
             }
@@ -115,7 +163,7 @@ function IssuesPage() {
       <DashboardLayout
         breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
         title="Issues"
-        description="Persistent, triageable errors grouped by fingerprint."
+        description="Workflow-tracked errors, grouped by fingerprint."
       >
         <div className="space-y-4">
           {filterRow}
@@ -131,7 +179,7 @@ function IssuesPage() {
       <DashboardLayout
         breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
         title="Issues"
-        description="Persistent, triageable errors grouped by fingerprint."
+        description="Workflow-tracked errors, grouped by fingerprint."
       >
         <div className="space-y-4">
           {filterRow}
@@ -149,83 +197,109 @@ function IssuesPage() {
     .onSuccess((response) => {
       const issues = response.issues
       const isRefreshing = issuesResult.waiting
+
+      const grouped = new Map<WorkflowState, ErrorIssueDocument[]>()
+      for (const issue of issues) {
+        const bucket = grouped.get(issue.workflowState) ?? []
+        bucket.push(issue)
+        grouped.set(issue.workflowState, bucket)
+      }
+      for (const bucket of grouped.values()) {
+        bucket.sort((a, b) => {
+          if (a.priority !== b.priority) return a.priority - b.priority
+          return b.lastSeenAt.localeCompare(a.lastSeenAt)
+        })
+      }
+
       return (
         <DashboardLayout
           breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
           title="Issues"
-          description="Persistent, triageable errors grouped by fingerprint."
+          description="Workflow-tracked errors, grouped by fingerprint."
         >
-          <div className="space-y-4">
+          <div
+            className={`space-y-6 ${isRefreshing ? "opacity-60 transition-opacity" : ""}`}
+            aria-busy={isRefreshing}
+          >
             {filterRow}
             {issues.length === 0 ? (
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>No issues</EmptyTitle>
                   <EmptyDescription>
-                    {activeStatus === "open"
-                      ? "No open issues. Nice."
-                      : `No issues with status "${activeStatus}".`}
+                    {activeFilter === "triage"
+                      ? "No issues in triage. Nice."
+                      : `No issues in state "${FILTER_LABEL[activeFilter]}".`}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
             ) : (
-              <Table
-                className={isRefreshing ? "opacity-60 transition-opacity" : ""}
-                aria-busy={isRefreshing}
-              >
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Exception</TableHead>
-                    <TableHead>Service</TableHead>
-                    <TableHead className="text-right">Events</TableHead>
-                    <TableHead>Last seen</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {issues.map((issue) => (
-                    <TableRow key={issue.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <IssueStatusBadge status={issue.status} />
-                          {issue.hasOpenIncident ? (
-                            <Badge
-                              variant="outline"
-                              className="bg-destructive/10 text-destructive"
-                            >
-                              incident
-                            </Badge>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                      <TableCell className="max-w-md">
-                        <Link
-                          to="/errors/issues/$issueId"
-                          params={{ issueId: issue.id }}
-                          className="font-medium hover:underline"
-                        >
-                          {issue.exceptionType || "Unknown error"}
-                        </Link>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {issue.exceptionMessage}
-                        </div>
-                        {issue.topFrame ? (
-                          <div className="truncate font-mono text-xs text-muted-foreground/70">
-                            {issue.topFrame}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>{issue.serviceName}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {issue.occurrenceCount.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatRelativeTime(issue.lastSeenAt)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              GROUP_ORDER.filter((state) => (grouped.get(state)?.length ?? 0) > 0).map(
+                (state) => {
+                  const bucket = grouped.get(state) ?? []
+                  return (
+                    <section key={state}>
+                      <header className="mb-2 flex items-center gap-2">
+                        <WorkflowBadge state={state} />
+                        <span className="text-sm text-muted-foreground">
+                          {bucket.length} issue{bucket.length === 1 ? "" : "s"}
+                        </span>
+                      </header>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Exception</TableHead>
+                            <TableHead>Service</TableHead>
+                            <TableHead className="text-right">Events</TableHead>
+                            <TableHead>Last seen</TableHead>
+                            <TableHead>Assignee</TableHead>
+                            <TableHead>Holder</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {bucket.map((issue) => (
+                            <TableRow key={issue.id}>
+                              <TableCell className="max-w-md">
+                                <Link
+                                  to="/errors/issues/$issueId"
+                                  params={{ issueId: issue.id }}
+                                  className="font-medium hover:underline"
+                                >
+                                  {issue.exceptionType || "Unknown error"}
+                                </Link>
+                                <div className="truncate text-xs text-muted-foreground">
+                                  {issue.exceptionMessage}
+                                </div>
+                                {issue.hasOpenIncident ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="mt-1 bg-destructive/10 text-destructive"
+                                  >
+                                    incident open
+                                  </Badge>
+                                ) : null}
+                              </TableCell>
+                              <TableCell>{issue.serviceName}</TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {issue.occurrenceCount.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {formatRelativeTime(issue.lastSeenAt)}
+                              </TableCell>
+                              <TableCell>
+                                <ActorChip actor={issue.assignedActor} />
+                              </TableCell>
+                              <TableCell>
+                                <ActorChip actor={issue.leaseHolder} />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </section>
+                  )
+                },
+              )
             )}
           </div>
         </DashboardLayout>

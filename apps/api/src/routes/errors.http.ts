@@ -16,13 +16,15 @@ export const HttpErrorsLive = HttpApiBuilder.group(
             const tenant = yield* CurrentTenant.Context
             yield* Effect.annotateCurrentSpan({
               orgId: tenant.orgId,
-              status: query.status ?? "all",
+              workflowState: query.workflowState ?? "all",
               limit: query.limit ?? 100,
             })
             const response = yield* errors.listIssues(tenant.orgId, {
-              status: query.status,
+              workflowState: query.workflowState,
               service: query.service,
               deploymentEnv: query.deploymentEnv,
+              assignedActorId: query.assignedActorId,
+              includeArchived: query.includeArchived === "1",
               startTime: query.startTime,
               endTime: query.endTime,
               limit: query.limit,
@@ -49,22 +51,157 @@ export const HttpErrorsLive = HttpApiBuilder.group(
             })
           }).pipe(Effect.withSpan("HttpErrors.getIssue")),
         )
-        .handle("updateIssue", ({ params, payload }) =>
+        .handle("transitionIssue", ({ params, payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            const actor = yield* errors.ensureUserActor(
+              tenant.orgId,
+              tenant.userId,
+            )
+            yield* Effect.annotateCurrentSpan({
+              orgId: tenant.orgId,
+              issueId: params.issueId,
+              toState: payload.toState,
+            })
+            return yield* errors.transitionIssue(
+              tenant.orgId,
+              actor.id,
+              params.issueId,
+              payload.toState,
+              {
+                note: payload.note,
+                snoozeUntil: payload.snoozeUntil,
+              },
+            )
+          }).pipe(Effect.withSpan("HttpErrors.transitionIssue")),
+        )
+        .handle("claimIssue", ({ params, payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            const actor = yield* errors.ensureUserActor(
+              tenant.orgId,
+              tenant.userId,
+            )
+            const leaseDurationMs =
+              payload.leaseDurationSeconds !== undefined
+                ? payload.leaseDurationSeconds * 1000
+                : undefined
+            yield* Effect.annotateCurrentSpan({
+              orgId: tenant.orgId,
+              issueId: params.issueId,
+              leaseDurationMs: leaseDurationMs ?? "default",
+            })
+            return yield* errors.claimIssue(
+              tenant.orgId,
+              actor.id,
+              params.issueId,
+              leaseDurationMs,
+            )
+          }).pipe(Effect.withSpan("HttpErrors.claimIssue")),
+        )
+        .handle("heartbeatIssue", ({ params }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            const actor = yield* errors.ensureUserActor(
+              tenant.orgId,
+              tenant.userId,
+            )
+            return yield* errors.heartbeatIssue(
+              tenant.orgId,
+              actor.id,
+              params.issueId,
+            )
+          }).pipe(Effect.withSpan("HttpErrors.heartbeatIssue")),
+        )
+        .handle("releaseIssue", ({ params, payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            const actor = yield* errors.ensureUserActor(
+              tenant.orgId,
+              tenant.userId,
+            )
+            return yield* errors.releaseIssue(
+              tenant.orgId,
+              actor.id,
+              params.issueId,
+              {
+                transitionTo: payload.transitionTo,
+                note: payload.note,
+              },
+            )
+          }).pipe(Effect.withSpan("HttpErrors.releaseIssue")),
+        )
+        .handle("commentOnIssue", ({ params, payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            const actor = yield* errors.ensureUserActor(
+              tenant.orgId,
+              tenant.userId,
+            )
+            return yield* errors.commentOnIssue(
+              tenant.orgId,
+              actor.id,
+              params.issueId,
+              payload.body,
+              {
+                visibility: payload.visibility,
+                kind: payload.kind,
+              },
+            )
+          }).pipe(Effect.withSpan("HttpErrors.commentOnIssue")),
+        )
+        .handle("proposeFix", ({ params, payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            const actor = yield* errors.ensureUserActor(
+              tenant.orgId,
+              tenant.userId,
+            )
+            return yield* errors.proposeFix(
+              tenant.orgId,
+              actor.id,
+              params.issueId,
+              {
+                patchSummary: payload.patchSummary,
+                prUrl: payload.prUrl,
+                artifacts: payload.artifacts,
+              },
+            )
+          }).pipe(Effect.withSpan("HttpErrors.proposeFix")),
+        )
+        .handle("assignIssue", ({ params, payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            const actor = yield* errors.ensureUserActor(
+              tenant.orgId,
+              tenant.userId,
+            )
+            return yield* errors.assignIssue(
+              tenant.orgId,
+              actor.id,
+              params.issueId,
+              payload.actorId,
+            )
+          }).pipe(Effect.withSpan("HttpErrors.assignIssue")),
+        )
+        .handle("listIssueEvents", ({ params, query }) =>
           Effect.gen(function* () {
             const tenant = yield* CurrentTenant.Context
             yield* Effect.annotateCurrentSpan({
               orgId: tenant.orgId,
               issueId: params.issueId,
-              action: payload.status ?? "patch",
-              patches: Object.keys(payload).join(","),
             })
-            return yield* errors.updateIssue(
+            const response = yield* errors.listIssueEvents(
               tenant.orgId,
-              tenant.userId,
               params.issueId,
-              payload,
+              { limit: query.limit },
             )
-          }).pipe(Effect.withSpan("HttpErrors.updateIssue")),
+            yield* Effect.annotateCurrentSpan(
+              "eventCount",
+              response.events.length,
+            )
+            return response
+          }).pipe(Effect.withSpan("HttpErrors.listIssueEvents")),
         )
         .handle("listIssueIncidents", ({ params }) =>
           Effect.gen(function* () {
@@ -95,6 +232,27 @@ export const HttpErrorsLive = HttpApiBuilder.group(
             )
             return response
           }).pipe(Effect.withSpan("HttpErrors.listOpenIncidents")),
+        )
+        .handle("registerAgent", ({ payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            yield* Effect.annotateCurrentSpan({
+              orgId: tenant.orgId,
+              agentName: payload.name,
+            })
+            return yield* errors.registerAgent(tenant.orgId, tenant.userId, {
+              name: payload.name,
+              model: payload.model,
+              capabilities: payload.capabilities,
+            })
+          }).pipe(Effect.withSpan("HttpErrors.registerAgent")),
+        )
+        .handle("listAgents", () =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+            return yield* errors.listAgents(tenant.orgId)
+          }).pipe(Effect.withSpan("HttpErrors.listAgents")),
         )
         .handle("getNotificationPolicy", () =>
           Effect.gen(function* () {

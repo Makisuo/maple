@@ -17,9 +17,16 @@ import { registerInspectTraceTool } from "./inspect-trace"
 import { registerListAlertChecksTool } from "./list-alert-checks"
 import { registerListAlertIncidentsTool } from "./list-alert-incidents"
 import { registerListAlertRulesTool } from "./list-alert-rules"
+import { registerClaimErrorIssueTool } from "./claim-error-issue"
+import { registerCommentOnErrorIssueTool } from "./comment-on-error-issue"
+import { registerHeartbeatErrorIssueTool } from "./heartbeat-error-issue"
 import { registerListErrorIncidentsTool } from "./list-error-incidents"
+import { registerListErrorIssueEventsTool } from "./list-error-issue-events"
 import { registerListErrorIssuesTool } from "./list-error-issues"
-import { registerUpdateErrorIssueTool } from "./update-error-issue"
+import { registerProposeFixTool } from "./propose-fix"
+import { registerRegisterAgentTool } from "./register-agent"
+import { registerReleaseErrorIssueTool } from "./release-error-issue"
+import { registerTransitionErrorIssueTool } from "./transition-error-issue"
 import { registerUpdateErrorNotificationPolicyTool } from "./update-error-notification-policy"
 import { registerListDashboardsTool } from "./list-dashboards"
 import { registerListMetricsTool } from "./list-metrics"
@@ -99,7 +106,14 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
   registerListServicesTool(registrar)
   registerGetServiceTopOperationsTool(registrar)
   registerListErrorIssuesTool(registrar)
-  registerUpdateErrorIssueTool(registrar)
+  registerTransitionErrorIssueTool(registrar)
+  registerClaimErrorIssueTool(registrar)
+  registerReleaseErrorIssueTool(registrar)
+  registerHeartbeatErrorIssueTool(registrar)
+  registerCommentOnErrorIssueTool(registrar)
+  registerProposeFixTool(registrar)
+  registerListErrorIssueEventsTool(registrar)
+  registerRegisterAgentTool(registrar)
   registerListErrorIncidentsTool(registrar)
   registerUpdateErrorNotificationPolicyTool(registrar)
 

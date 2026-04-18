@@ -11,47 +11,56 @@ import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "../lib/query-tinybird"
 import { ErrorsService } from "@/services/ErrorsService"
-import { ErrorIssueStatus } from "@maple/domain/http"
+import { WorkflowState } from "@maple/domain/http"
 
-const decodeIssueStatus = Schema.decodeUnknownOption(ErrorIssueStatus)
+const decodeWorkflowState = Schema.decodeUnknownOption(WorkflowState)
 
 export function registerListErrorIssuesTool(server: McpToolRegistrar) {
   server.tool(
     "list_error_issues",
-    "List persistent, triageable error issues (grouped by exception fingerprint) with status, counts, and assignment. Each issue persists across occurrences so status/notes/assignee survive new events.",
+    "List persistent, triageable error issues (grouped by exception fingerprint) with workflow state, counts, and assignment. Each issue persists across occurrences so state/notes/assignee survive new events. Workflow states: triage, todo, in_progress, in_review, done, cancelled, wontfix.",
     Schema.Struct({
-      status: optionalStringParam(
-        "Filter by status: open, resolved, ignored, archived (default: all)",
+      workflow_state: optionalStringParam(
+        "Filter by workflow state: triage, todo, in_progress, in_review, done, cancelled, wontfix (default: all non-archived)",
       ),
       service: optionalStringParam("Filter by service name"),
       limit: optionalNumberParam("Max results (default 50)"),
+      include_archived: optionalStringParam(
+        "Pass '1' to include archived issues in results",
+      ),
     }),
-    Effect.fn("McpTool.listErrorIssues")(function* ({ status, service, limit }) {
+    Effect.fn("McpTool.listErrorIssues")(function* ({
+      workflow_state,
+      service,
+      limit,
+      include_archived,
+    }) {
       const tenant = yield* resolveTenant
       yield* Effect.annotateCurrentSpan({
         orgId: tenant.orgId,
-        status: status ?? "all",
+        workflowState: workflow_state ?? "all",
         service: service ?? "all",
         limit: limit ?? 50,
       })
       const errors = yield* ErrorsService
 
-      let typedStatus: ErrorIssueStatus | undefined
-      if (status) {
-        const decoded = decodeIssueStatus(status)
+      let typedState: WorkflowState | undefined
+      if (workflow_state) {
+        const decoded = decodeWorkflowState(workflow_state)
         if (Option.isNone(decoded)) {
           return validationError(
-            `Invalid status: '${status}'. Must be one of: open, resolved, ignored, archived.`,
+            `Invalid workflow_state: '${workflow_state}'. Must be one of: triage, todo, in_progress, in_review, done, cancelled, wontfix.`,
           )
         }
-        typedStatus = decoded.value
+        typedState = decoded.value
       }
 
       const result = yield* errors
         .listIssues(tenant.orgId, {
-          status: typedStatus,
+          workflowState: typedState,
           service,
           limit: limit ?? 50,
+          includeArchived: include_archived === "1",
         })
         .pipe(
           Effect.mapError(
@@ -75,34 +84,46 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
       } else {
         const headers = [
           "ID",
-          "Status",
+          "State",
+          "Priority",
           "Service",
           "Exception",
           "Events",
           "Last seen",
           "Assigned",
+          "Holder",
         ]
         const rows = issues.map((i) => [
           i.id.slice(0, 8),
-          i.hasOpenIncident ? `${i.status} (incident)` : i.status,
+          i.hasOpenIncident ? `${i.workflowState} (incident)` : i.workflowState,
+          String(i.priority),
           i.serviceName,
           truncate(`${i.exceptionType}: ${i.exceptionMessage}`, 50),
           formatNumber(i.occurrenceCount),
           i.lastSeenAt.slice(0, 19),
-          i.assignedTo ?? "—",
+          i.assignedActor
+            ? i.assignedActor.type === "agent"
+              ? `agent:${i.assignedActor.agentName ?? "?"}`
+              : i.assignedActor.userId ?? "user"
+            : "—",
+          i.leaseHolder
+            ? i.leaseHolder.type === "agent"
+              ? `agent:${i.leaseHolder.agentName ?? "?"}`
+              : i.leaseHolder.userId ?? "user"
+            : "—",
         ])
         lines.push(formatTable(headers, rows))
       }
 
-      const openIds = issues
-        .filter((i) => i.status === "open")
+      const triageIds = issues
+        .filter((i) => i.workflowState === "triage")
         .slice(0, 3)
         .map((i) => i.id)
       const nextSteps: string[] = []
-      for (const id of openIds) {
-        nextSteps.push(`\`get_error_issue issue_id="${id}"\` — see samples, timeseries, incidents`)
+      for (const id of triageIds) {
+        nextSteps.push(`\`claim_error_issue issue_id="${id}"\` — pick up this issue`)
         nextSteps.push(
-          `\`update_error_issue issue_id="${id}" status="resolved"\` — mark fixed`,
+          `\`transition_error_issue issue_id="${id}" to_state="todo"\` — move to backlog`,
         )
       }
       lines.push(formatNextSteps(nextSteps))
@@ -114,7 +135,8 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
             issues: issues.map((i) => ({
               id: i.id,
               fingerprintHash: i.fingerprintHash,
-              status: i.status,
+              workflowState: i.workflowState,
+              priority: i.priority,
               serviceName: i.serviceName,
               exceptionType: i.exceptionType,
               exceptionMessage: i.exceptionMessage,
@@ -122,7 +144,27 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
               occurrenceCount: i.occurrenceCount,
               firstSeenAt: i.firstSeenAt,
               lastSeenAt: i.lastSeenAt,
-              assignedTo: i.assignedTo,
+              assignedActor: i.assignedActor
+                ? {
+                    id: i.assignedActor.id,
+                    type: i.assignedActor.type,
+                    userId: i.assignedActor.userId,
+                    agentName: i.assignedActor.agentName,
+                    model: i.assignedActor.model,
+                    capabilities: i.assignedActor.capabilities,
+                  }
+                : null,
+              leaseHolder: i.leaseHolder
+                ? {
+                    id: i.leaseHolder.id,
+                    type: i.leaseHolder.type,
+                    userId: i.leaseHolder.userId,
+                    agentName: i.leaseHolder.agentName,
+                    model: i.leaseHolder.model,
+                    capabilities: i.leaseHolder.capabilities,
+                  }
+                : null,
+              leaseExpiresAt: i.leaseExpiresAt,
               notes: i.notes,
               hasOpenIncident: i.hasOpenIncident,
             })),

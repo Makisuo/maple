@@ -2,16 +2,18 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { ActorChip } from "@/components/errors/actor-chip"
+import { IssueTimeline } from "@/components/errors/issue-timeline"
+import { StateSelect } from "@/components/errors/state-select"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { formatRelativeTime } from "@/lib/format"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
-import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Textarea } from "@maple/ui/components/ui/textarea"
@@ -32,40 +34,58 @@ import {
 import {
   ErrorIssueId,
   type ErrorIssueDocument,
-  type ErrorIssueStatus,
-  UserId,
+  type WorkflowState,
 } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeSync(ErrorIssueId)
-const decodeUserId = Schema.decodeSync(UserId)
-
-type IssuePatch = {
-  status?: ErrorIssueStatus
-  assignedTo?: UserId | null
-  notes?: string | null
-}
 
 export const Route = effectRoute(createFileRoute("/errors/issues/$issueId"))({
   component: IssueDetailPage,
 })
 
-const STATUS_BADGE: Record<
-  ErrorIssueDocument["status"],
+const WORKFLOW_BADGE: Record<
+  WorkflowState,
   { label: string; tone: string }
 > = {
-  open: { label: "Open", tone: "bg-destructive/10 text-destructive" },
-  resolved: { label: "Resolved", tone: "bg-success/10 text-success" },
-  ignored: { label: "Ignored", tone: "bg-muted text-muted-foreground" },
-  archived: { label: "Archived", tone: "bg-muted text-muted-foreground" },
+  triage: {
+    label: "Triage",
+    tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  todo: { label: "Todo", tone: "bg-muted text-muted-foreground" },
+  in_progress: {
+    label: "In progress",
+    tone: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  },
+  in_review: {
+    label: "In review",
+    tone: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+  },
+  done: { label: "Done", tone: "bg-success/10 text-success" },
+  cancelled: { label: "Cancelled", tone: "bg-muted text-muted-foreground" },
+  wontfix: { label: "Wontfix", tone: "bg-muted text-muted-foreground" },
 }
 
-function IssueStatusBadge({ status }: { status: ErrorIssueDocument["status"] }) {
-  const { label, tone } = STATUS_BADGE[status]
+function WorkflowBadge({ state }: { state: WorkflowState }) {
+  const { label, tone } = WORKFLOW_BADGE[state]
   return (
     <Badge variant="outline" className={tone}>
       {label}
     </Badge>
   )
+}
+
+function formatLeaseCountdown(leaseExpiresAt: string, nowMs: number): string {
+  const expiresMs = Date.parse(leaseExpiresAt)
+  if (!Number.isFinite(expiresMs)) return "—"
+  const delta = expiresMs - nowMs
+  if (delta <= 0) return "expired"
+  const minutes = Math.floor(delta / 60_000)
+  const seconds = Math.floor((delta % 60_000) / 1000)
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60)
+    return `${hours}h ${minutes % 60}m`
+  }
+  return `${minutes}m ${seconds}s`
 }
 
 function IssueDetailPage() {
@@ -78,71 +98,143 @@ function IssueDetailPage() {
     reactivityKeys: ["errorIssues", `errorIssue:${issueId}`],
   })
   const detailResult = useAtomValue(detailQueryAtom)
-  const updateIssue = useAtomSet(
-    MapleApiAtomClient.mutation("errors", "updateIssue"),
+
+  const eventsQueryAtom = MapleApiAtomClient.query(
+    "errors",
+    "listIssueEvents",
+    {
+      params: { issueId },
+      query: { limit: 200 },
+      reactivityKeys: ["errorIssues", `errorIssue:${issueId}:events`],
+    },
+  )
+  const eventsResult = useAtomValue(eventsQueryAtom)
+
+  const transitionIssue = useAtomSet(
+    MapleApiAtomClient.mutation("errors", "transitionIssue"),
+    { mode: "promiseExit" },
+  )
+  const claimIssue = useAtomSet(
+    MapleApiAtomClient.mutation("errors", "claimIssue"),
+    { mode: "promiseExit" },
+  )
+  const heartbeatIssue = useAtomSet(
+    MapleApiAtomClient.mutation("errors", "heartbeatIssue"),
+    { mode: "promiseExit" },
+  )
+  const releaseIssue = useAtomSet(
+    MapleApiAtomClient.mutation("errors", "releaseIssue"),
+    { mode: "promiseExit" },
+  )
+  const commentOnIssue = useAtomSet(
+    MapleApiAtomClient.mutation("errors", "commentOnIssue"),
     { mode: "promiseExit" },
   )
 
   const [notesDraft, setNotesDraft] = useState("")
-  const [assigneeDraft, setAssigneeDraft] = useState("")
-  const [savingField, setSavingField] = useState<
-    "status" | "notes" | "assignee" | null
+  const [commentDraft, setCommentDraft] = useState("")
+  const [busy, setBusy] = useState<
+    "state" | "claim" | "release" | "heartbeat" | "comment" | null
   >(null)
 
-  // Only sync drafts when the issue *changes* (id flip or after a save). Don't
-  // overwrite in-flight typing on every refetch.
-  const lastSyncedRef = useRef<{
-    id: string | null
-    notes: string | null
-    assignedTo: string | null
-  }>({ id: null, notes: null, assignedTo: null })
+  const lastSyncedRef = useRef<{ id: string | null; notes: string | null }>({
+    id: null,
+    notes: null,
+  })
 
   useEffect(() => {
     if (!Result.isSuccess(detailResult)) return
     const issue = detailResult.value.issue
     const last = lastSyncedRef.current
-    if (
-      last.id === issue.id &&
-      last.notes === (issue.notes ?? null) &&
-      last.assignedTo === (issue.assignedTo ?? null)
-    ) {
-      return
-    }
-    lastSyncedRef.current = {
-      id: issue.id,
-      notes: issue.notes ?? null,
-      assignedTo: issue.assignedTo ?? null,
-    }
+    if (last.id === issue.id && last.notes === (issue.notes ?? null)) return
+    lastSyncedRef.current = { id: issue.id, notes: issue.notes ?? null }
     setNotesDraft(issue.notes ?? "")
-    setAssigneeDraft(issue.assignedTo ?? "")
   }, [detailResult])
 
-  const patchIssue = async (
-    patch: IssuePatch,
-    field: "status" | "notes" | "assignee",
-  ) => {
-    setSavingField(field)
-    const result = await updateIssue({
+  const [nowTick, setNowTick] = useState(Date.now())
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), 5_000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const invalidateKeys = useMemo(
+    () => ["errorIssues", `errorIssue:${issueId}`, `errorIssue:${issueId}:events`],
+    [issueId],
+  )
+
+  const transitionTo = async (next: WorkflowState) => {
+    setBusy("state")
+    const result = await transitionIssue({
       params: { issueId },
-      payload: patch,
-      reactivityKeys: ["errorIssues", `errorIssue:${issueId}`],
+      payload: { toState: next },
+      reactivityKeys: invalidateKeys,
     })
-    setSavingField(null)
+    setBusy(null)
+    if (Exit.isSuccess(result)) toast.success(`Moved to ${next}`)
+    else toast.error("State change failed")
+  }
+
+  const claim = async () => {
+    setBusy("claim")
+    const result = await claimIssue({
+      params: { issueId },
+      payload: {},
+      reactivityKeys: invalidateKeys,
+    })
+    setBusy(null)
+    if (Exit.isSuccess(result)) toast.success("Claimed")
+    else toast.error("Claim failed")
+  }
+
+  const heartbeat = async () => {
+    setBusy("heartbeat")
+    const result = await heartbeatIssue({
+      params: { issueId },
+      reactivityKeys: invalidateKeys,
+    })
+    setBusy(null)
+    if (Exit.isSuccess(result)) toast.success("Lease extended")
+    else toast.error("Heartbeat failed")
+  }
+
+  const release = async () => {
+    setBusy("release")
+    const result = await releaseIssue({
+      params: { issueId },
+      payload: {},
+      reactivityKeys: invalidateKeys,
+    })
+    setBusy(null)
+    if (Exit.isSuccess(result)) toast.success("Released")
+    else toast.error("Release failed")
+  }
+
+  const submitComment = async () => {
+    const body = commentDraft.trim()
+    if (body.length === 0) return
+    setBusy("comment")
+    const result = await commentOnIssue({
+      params: { issueId },
+      payload: { body },
+      reactivityKeys: invalidateKeys,
+    })
+    setBusy(null)
     if (Exit.isSuccess(result)) {
-      toast.success("Issue updated")
+      setCommentDraft("")
+      toast.success("Comment added")
     } else {
-      toast.error("Failed to update issue")
+      toast.error("Comment failed")
     }
   }
 
-  const decodeOptionalUserId = (raw: string): UserId | null => {
-    const trimmed = raw.trim()
-    if (trimmed.length === 0) return null
-    try {
-      return decodeUserId(trimmed)
-    } catch {
-      return null
-    }
+  const commitNotes = async (issue: ErrorIssueDocument) => {
+    const next = notesDraft.trim()
+    if (next === (issue.notes ?? "")) return
+    // Notes are carried on the issue document; submit via a no-op transition to
+    // the same state so the service persists them on the row. For v1 we don't
+    // expose a dedicated edit endpoint — transitions are the primary write path.
+    // For now, notes are read-only without a dedicated mutation; surface a hint.
+    toast.message("Notes editing will be wired up next")
   }
 
   const breadcrumbsLoading = [
@@ -181,6 +273,16 @@ function IssueDetailPage() {
     .onSuccess((detail) => {
       const { issue, timeseries, sampleTraces, incidents } = detail
       const totalInWindow = timeseries.reduce((sum, b) => sum + b.count, 0)
+      const events = Result.isSuccess(eventsResult)
+        ? eventsResult.value.events
+        : []
+      const leaseCountdown = issue.leaseExpiresAt
+        ? formatLeaseCountdown(issue.leaseExpiresAt, nowTick)
+        : null
+      const isTerminal =
+        issue.workflowState === "cancelled" || issue.workflowState === "done"
+      const canClaim = !issue.leaseHolder && !isTerminal
+
       return (
         <DashboardLayout
           breadcrumbs={[
@@ -192,9 +294,12 @@ function IssueDetailPage() {
           description={issue.serviceName}
           headerActions={
             <div className="flex items-center gap-2">
-              <IssueStatusBadge status={issue.status} />
+              <WorkflowBadge state={issue.workflowState} />
               {issue.hasOpenIncident ? (
-                <Badge variant="outline" className="bg-destructive/10 text-destructive">
+                <Badge
+                  variant="outline"
+                  className="bg-destructive/10 text-destructive"
+                >
                   Incident open
                 </Badge>
               ) : null}
@@ -232,100 +337,101 @@ function IssueDetailPage() {
                     value={formatRelativeTime(issue.lastSeenAt)}
                   />
                 </div>
-                <div className="flex flex-wrap items-center gap-2 pt-2">
-                  {issue.status !== "resolved" ? (
-                    <Button
-                      size="sm"
-                      onClick={() => patchIssue({ status: "resolved" }, "status")}
-                      disabled={savingField === "status"}
-                    >
-                      Resolve
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      onClick={() => patchIssue({ status: "open" }, "status")}
-                      disabled={savingField === "status"}
-                    >
-                      Reopen
-                    </Button>
-                  )}
-                  {issue.status !== "ignored" ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => patchIssue({ status: "ignored" }, "status")}
-                      disabled={savingField === "status"}
-                    >
-                      Ignore
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => patchIssue({ status: "open" }, "status")}
-                      disabled={savingField === "status"}
-                    >
-                      Unignore
-                    </Button>
-                  )}
-                  {issue.status !== "archived" ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => patchIssue({ status: "archived" }, "status")}
-                      disabled={savingField === "status"}
-                    >
-                      Archive
-                    </Button>
-                  ) : null}
+                <div className="flex flex-wrap items-center gap-3 border-t pt-4">
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-muted-foreground">State</Label>
+                    <StateSelect
+                      current={issue.workflowState}
+                      disabled={busy === "state"}
+                      onChange={transitionTo}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-muted-foreground">Assignee</Label>
+                    <ActorChip actor={issue.assignedActor} />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-muted-foreground">Lease holder</Label>
+                    <div className="flex items-center gap-2">
+                      <ActorChip actor={issue.leaseHolder} />
+                      {leaseCountdown ? (
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {leaseCountdown}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="ml-auto flex items-center gap-2">
+                    {canClaim ? (
+                      <Button size="sm" onClick={claim} disabled={busy === "claim"}>
+                        Claim
+                      </Button>
+                    ) : null}
+                    {issue.leaseHolder ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={heartbeat}
+                          disabled={busy === "heartbeat"}
+                        >
+                          Heartbeat
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={release}
+                          disabled={busy === "release"}
+                        >
+                          Release
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card>
-                <CardContent className="space-y-3 pt-6">
-                  <Label htmlFor="assignee-input" className="text-sm font-medium">
-                    Assignee
-                  </Label>
-                  <Input
-                    id="assignee-input"
-                    value={assigneeDraft}
-                    placeholder="user id"
-                    aria-busy={savingField === "assignee"}
-                    onChange={(e) => setAssigneeDraft(e.target.value)}
-                    onBlur={() => {
-                      const next = decodeOptionalUserId(assigneeDraft)
-                      if (next !== (issue.assignedTo ?? null)) {
-                        patchIssue({ assignedTo: next }, "assignee")
-                      }
-                    }}
-                  />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="space-y-3 pt-6">
-                  <Label htmlFor="notes-input" className="text-sm font-medium">
-                    Notes
-                  </Label>
-                  <Textarea
-                    id="notes-input"
-                    rows={4}
-                    value={notesDraft}
-                    placeholder="Triage notes, context, links…"
-                    aria-busy={savingField === "notes"}
-                    onChange={(e) => setNotesDraft(e.target.value)}
-                    onBlur={() => {
-                      const next = notesDraft.trim() === "" ? null : notesDraft
-                      if (next !== (issue.notes ?? null)) {
-                        patchIssue({ notes: next }, "notes")
-                      }
-                    }}
-                  />
-                </CardContent>
-              </Card>
-            </div>
+            <Card>
+              <CardContent className="space-y-3 pt-6">
+                <Label htmlFor="notes-input" className="text-sm font-medium">
+                  Notes (read-only for now)
+                </Label>
+                <Textarea
+                  id="notes-input"
+                  rows={3}
+                  value={notesDraft}
+                  readOnly
+                  placeholder="Triage notes appear here when set via comments or transitions."
+                />
+              </CardContent>
+            </Card>
+
+            <section>
+              <h2 className="mb-2 text-lg font-semibold">Timeline</h2>
+              <IssueTimeline events={events} />
+              <div className="mt-3 space-y-2">
+                <Label htmlFor="comment-input" className="text-sm font-medium">
+                  Add a comment
+                </Label>
+                <Textarea
+                  id="comment-input"
+                  rows={3}
+                  value={commentDraft}
+                  onChange={(e) => setCommentDraft(e.target.value)}
+                  placeholder="Context, findings, links…"
+                />
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    onClick={submitComment}
+                    disabled={busy === "comment" || commentDraft.trim().length === 0}
+                  >
+                    Comment
+                  </Button>
+                </div>
+              </div>
+            </section>
 
             <section>
               <h2 className="mb-2 text-lg font-semibold">Incidents</h2>

@@ -19,6 +19,7 @@ export const apiKeys = sqliteTable(
     revokedAt: integer("revoked_at", { mode: "number" }),
     lastUsedAt: integer("last_used_at", { mode: "number" }),
     expiresAt: integer("expires_at", { mode: "number" }),
+    metadataJson: text("metadata_json"),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     createdBy: text("created_by").notNull(),
   },
