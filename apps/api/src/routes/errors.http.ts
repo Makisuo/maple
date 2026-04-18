@@ -58,5 +58,21 @@ export const HttpErrorsLive = HttpApiBuilder.group(
             return yield* errors.listOpenIncidents(tenant.orgId)
           }),
         )
+        .handle("getNotificationPolicy", () =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            return yield* errors.getNotificationPolicy(tenant.orgId)
+          }),
+        )
+        .handle("upsertNotificationPolicy", ({ payload }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            return yield* errors.upsertNotificationPolicy(
+              tenant.orgId,
+              tenant.userId,
+              payload,
+            )
+          }),
+        )
     }),
 )

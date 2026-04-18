@@ -19,6 +19,7 @@ import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http"
 import { HttpServiceDiscoveryLive } from "./routes/sd.http"
 import { AlertRuntime, AlertsService } from "./services/AlertsService"
 import { ErrorsService } from "./services/ErrorsService"
+import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthService } from "./services/AuthService"
 import { AuthorizationLive } from "./services/AuthorizationLive"
@@ -80,8 +81,14 @@ export const AlertsServiceLive = AlertsService.layer.pipe(
   ),
 )
 
+export const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
+  Layer.provideMerge(CoreServicesLive),
+)
+
 export const ErrorsServiceLive = ErrorsService.layer.pipe(
-  Layer.provideMerge(Layer.mergeAll(CoreServicesLive, TinybirdServiceLive)),
+  Layer.provideMerge(
+    Layer.mergeAll(CoreServicesLive, TinybirdServiceLive, NotificationDispatcherLive),
+  ),
 )
 
 export const EmailServiceLive = EmailService.Default.pipe(

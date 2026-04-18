@@ -8,6 +8,7 @@ import {
   Env,
   ErrorsService,
   makeTelemetryLayer,
+  NotificationDispatcher,
   OrgTinybirdSettingsService,
   QueryEngineService,
   TinybirdService,
@@ -46,8 +47,14 @@ const buildLayer = (env: Record<string, unknown>) => {
     ),
   )
 
+  const NotificationDispatcherLive = NotificationDispatcher.Live.pipe(
+    Layer.provide(BaseLive),
+  )
+
   const ErrorsServiceLive = ErrorsService.Live.pipe(
-    Layer.provide(Layer.mergeAll(BaseLive, TinybirdServiceLive)),
+    Layer.provide(
+      Layer.mergeAll(BaseLive, TinybirdServiceLive, NotificationDispatcherLive),
+    ),
   )
 
   const EmailServiceLive = EmailService.Default.pipe(Layer.provide(EnvLive))

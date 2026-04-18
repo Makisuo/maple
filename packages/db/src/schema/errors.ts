@@ -6,6 +6,17 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core"
+import type {
+  ErrorIncidentId,
+  ErrorIssueId,
+  OrgId,
+  UserId,
+} from "@maple/domain/primitives"
+import type {
+  ErrorIncidentReason,
+  ErrorIncidentStatus,
+  ErrorIssueStatus,
+} from "@maple/domain/http"
 
 /**
  * Persistent identity for an error group (one row per unique fingerprint).
@@ -16,15 +27,15 @@ import {
 export const errorIssues = sqliteTable(
   "error_issues",
   {
-    id: text("id").notNull().primaryKey(),
-    orgId: text("org_id").notNull(),
+    id: text("id").$type<ErrorIssueId>().notNull().primaryKey(),
+    orgId: text("org_id").$type<OrgId>().notNull(),
     fingerprintHash: text("fingerprint_hash").notNull(),
     serviceName: text("service_name").notNull(),
     exceptionType: text("exception_type").notNull(),
     exceptionMessage: text("exception_message").notNull(),
     topFrame: text("top_frame").notNull(),
-    status: text("status").notNull(),
-    assignedTo: text("assigned_to"),
+    status: text("status").$type<ErrorIssueStatus>().notNull(),
+    assignedTo: text("assigned_to").$type<UserId>(),
     notes: text("notes"),
     firstSeenAt: integer("first_seen_at", { mode: "number" }).notNull(),
     lastSeenAt: integer("last_seen_at", { mode: "number" }).notNull(),
@@ -32,7 +43,7 @@ export const errorIssues = sqliteTable(
       .notNull()
       .default(0),
     resolvedAt: integer("resolved_at", { mode: "number" }),
-    resolvedBy: text("resolved_by"),
+    resolvedBy: text("resolved_by").$type<UserId>(),
     ignoredUntil: integer("ignored_until", { mode: "number" }),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
@@ -54,13 +65,13 @@ export const errorIssues = sqliteTable(
 export const errorIssueStates = sqliteTable(
   "error_issue_states",
   {
-    orgId: text("org_id").notNull(),
-    issueId: text("issue_id").notNull(),
+    orgId: text("org_id").$type<OrgId>().notNull(),
+    issueId: text("issue_id").$type<ErrorIssueId>().notNull(),
     lastObservedOccurrenceAt: integer("last_observed_occurrence_at", {
       mode: "number",
     }),
     lastEvaluatedAt: integer("last_evaluated_at", { mode: "number" }),
-    openIncidentId: text("open_incident_id"),
+    openIncidentId: text("open_incident_id").$type<ErrorIncidentId>(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
   },
   (table) => [
@@ -77,11 +88,11 @@ export const errorIssueStates = sqliteTable(
 export const errorIncidents = sqliteTable(
   "error_incidents",
   {
-    id: text("id").notNull().primaryKey(),
-    orgId: text("org_id").notNull(),
-    issueId: text("issue_id").notNull(),
-    status: text("status").notNull(),
-    reason: text("reason").notNull(),
+    id: text("id").$type<ErrorIncidentId>().notNull().primaryKey(),
+    orgId: text("org_id").$type<OrgId>().notNull(),
+    issueId: text("issue_id").$type<ErrorIssueId>().notNull(),
+    status: text("status").$type<ErrorIncidentStatus>().notNull(),
+    reason: text("reason").$type<ErrorIncidentReason>().notNull(),
     firstTriggeredAt: integer("first_triggered_at", { mode: "number" }).notNull(),
     lastTriggeredAt: integer("last_triggered_at", { mode: "number" }).notNull(),
     resolvedAt: integer("resolved_at", { mode: "number" }),
@@ -105,7 +116,7 @@ export const errorIncidents = sqliteTable(
 export const errorNotificationPolicies = sqliteTable(
   "error_notification_policies",
   {
-    orgId: text("org_id").notNull().primaryKey(),
+    orgId: text("org_id").$type<OrgId>().notNull().primaryKey(),
     enabled: integer("enabled", { mode: "number" }).notNull().default(1),
     destinationIdsJson: text("destination_ids_json").notNull().default("[]"),
     notifyOnFirstSeen: integer("notify_on_first_seen", { mode: "number" })

@@ -5,6 +5,9 @@ import {
   ErrorIncidentId,
   ErrorIssueId,
   IsoDateTimeString,
+  SpanId,
+  TraceId,
+  UserId,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
 import { AlertSeverity } from "./alerts"
@@ -46,13 +49,13 @@ export class ErrorIssueDocument extends Schema.Class<ErrorIssueDocument>(
   exceptionMessage: Schema.String,
   topFrame: Schema.String,
   status: ErrorIssueStatus,
-  assignedTo: Schema.NullOr(Schema.String),
+  assignedTo: Schema.NullOr(UserId),
   notes: Schema.NullOr(Schema.String),
   firstSeenAt: IsoDateTimeString,
   lastSeenAt: IsoDateTimeString,
   occurrenceCount: Schema.Number,
   resolvedAt: Schema.NullOr(IsoDateTimeString),
-  resolvedBy: Schema.NullOr(Schema.String),
+  resolvedBy: Schema.NullOr(UserId),
   ignoredUntil: Schema.NullOr(IsoDateTimeString),
   hasOpenIncident: Schema.Boolean,
 }) {}
@@ -73,8 +76,8 @@ export class ErrorIssueTimeseriesPoint extends Schema.Class<ErrorIssueTimeseries
 export class ErrorIssueSampleTrace extends Schema.Class<ErrorIssueSampleTrace>(
   "ErrorIssueSampleTrace",
 )({
-  traceId: Schema.String,
-  spanId: Schema.String,
+  traceId: TraceId,
+  spanId: SpanId,
   serviceName: Schema.String,
   timestamp: IsoDateTimeString,
   exceptionMessage: Schema.String,
@@ -113,7 +116,7 @@ export class ErrorIssueUpdateRequest extends Schema.Class<ErrorIssueUpdateReques
   "ErrorIssueUpdateRequest",
 )({
   status: Schema.optionalKey(ErrorIssueStatus),
-  assignedTo: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  assignedTo: Schema.optionalKey(Schema.NullOr(UserId)),
   notes: Schema.optionalKey(Schema.NullOr(Schema.String)),
   ignoredUntil: Schema.optionalKey(Schema.NullOr(IsoDateTimeString)),
 }) {}
@@ -199,11 +202,19 @@ export class ErrorIssueNotFoundError extends Schema.TaggedErrorClass<ErrorIssueN
   "@maple/http/errors/ErrorIssueNotFoundError",
   {
     message: Schema.String,
-    resourceType: Schema.String,
-    resourceId: Schema.String,
+    resourceType: Schema.Literals(["issue", "incident"]),
+    resourceId: Schema.Union([ErrorIssueId, ErrorIncidentId]),
   },
   { httpApiStatus: 404 },
-) {}
+) {
+  static forIssue(id: ErrorIssueId) {
+    return new ErrorIssueNotFoundError({
+      message: `No such error issue: '${id}'`,
+      resourceType: "issue",
+      resourceId: id,
+    })
+  }
+}
 
 export class ErrorsApiGroup extends HttpApiGroup.make("errors")
   .add(

@@ -604,6 +604,16 @@ export interface ListErrorIncidentsData {
   openCount: number
 }
 
+export interface UpdateErrorNotificationPolicyData {
+  enabled: boolean
+  destinationIds: ReadonlyArray<string>
+  notifyOnFirstSeen: boolean
+  notifyOnRegression: boolean
+  notifyOnResolve: boolean
+  minOccurrenceCount: number
+  severity: string
+}
+
 export type StructuredToolOutput =
   | { tool: "search_traces"; data: SearchTracesData }
   | { tool: "find_slow_traces"; data: FindSlowTracesData }
@@ -637,3 +647,7 @@ export type StructuredToolOutput =
   | { tool: "list_error_issues"; data: ListErrorIssuesData }
   | { tool: "update_error_issue"; data: UpdateErrorIssueData }
   | { tool: "list_error_incidents"; data: ListErrorIncidentsData }
+  | {
+      tool: "update_error_notification_policy"
+      data: UpdateErrorNotificationPolicyData
+    }

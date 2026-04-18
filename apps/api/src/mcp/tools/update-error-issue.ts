@@ -9,7 +9,14 @@ import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "../lib/query-tinybird"
 import { ErrorsService } from "@/services/ErrorsService"
-import type { ErrorIssueId, ErrorIssueStatus } from "@maple/domain/http"
+import { Schema as S } from "effect"
+import {
+  type ErrorIssueId,
+  type ErrorIssueStatus,
+  UserId,
+} from "@maple/domain/http"
+
+const decodeUserIdSync = S.decodeUnknownSync(UserId)
 
 const validStatuses: ReadonlyArray<ErrorIssueStatus> = [
   "open",
@@ -46,13 +53,13 @@ export function registerUpdateErrorIssueTool(server: McpToolRegistrar) {
       const errors = yield* ErrorsService
 
       const patch: {
-        status?: ErrorIssueStatus
-        assignedTo?: string | null
-        notes?: string | null
+        -readonly [K in keyof Parameters<typeof errors.updateIssue>[3]]: Parameters<
+          typeof errors.updateIssue
+        >[3][K]
       } = {}
       if (status) patch.status = status as ErrorIssueStatus
       if (assigned_to !== undefined) {
-        patch.assignedTo = assigned_to === "" ? null : assigned_to
+        patch.assignedTo = assigned_to === "" ? null : decodeUserIdSync(assigned_to)
       }
       if (notes !== undefined) {
         patch.notes = notes === "" ? null : notes

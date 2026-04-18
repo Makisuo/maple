@@ -19,6 +19,9 @@ import {
   ErrorValidationError,
   type OrgId,
   RoleName,
+  SpanId as SpanIdSchema,
+  TraceId as TraceIdSchema,
+  type UserId,
   UserId as UserIdSchema,
 } from "@maple/domain/http"
 import {
@@ -31,7 +34,7 @@ import {
   type ErrorNotificationPolicyRow,
 } from "@maple/db"
 import { and, desc, eq, gt, inArray, isNotNull, lt, sql } from "drizzle-orm"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Cause, Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import { Database, DatabaseError, type DatabaseClient } from "./DatabaseLive"
 import { Env } from "./Env"
@@ -45,6 +48,8 @@ const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(
 )
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
+const decodeTraceIdSync = Schema.decodeUnknownSync(TraceIdSchema)
+const decodeSpanIdSync = Schema.decodeUnknownSync(SpanIdSchema)
 
 const DEFAULT_LIST_WINDOW_MS = 24 * 60 * 60 * 1000
 const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -82,11 +87,11 @@ export interface ErrorsServiceShape {
   >
   readonly updateIssue: (
     orgId: OrgId,
-    userId: string,
+    userId: UserId,
     issueId: ErrorIssueId,
     patch: {
       readonly status?: ErrorIssueStatus
-      readonly assignedTo?: string | null
+      readonly assignedTo?: UserId | null
       readonly notes?: string | null
       readonly ignoredUntil?: string | null
     },
@@ -109,7 +114,7 @@ export interface ErrorsServiceShape {
   ) => Effect.Effect<ErrorNotificationPolicyDocument, ErrorPersistenceError>
   readonly upsertNotificationPolicy: (
     orgId: OrgId,
-    userId: string,
+    userId: UserId,
     request: ErrorNotificationPolicyUpsertRequest,
   ) => Effect.Effect<
     ErrorNotificationPolicyDocument,
@@ -140,7 +145,8 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
       const dispatcher = yield* NotificationDispatcher
 
       const now = () => Date.now()
-      const makeUuid = () => randomUUID()
+      const newErrorIssueId = () => decodeErrorIssueIdSync(randomUUID())
+      const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
 
       const describeCause = (cause: unknown): string | undefined => {
         if (cause == null) return undefined
@@ -197,13 +203,13 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
 
       const rowToIssue = (row: ErrorIssueRow, hasOpenIncident: boolean) =>
         new ErrorIssueDocument({
-          id: decodeErrorIssueIdSync(row.id),
+          id: row.id,
           fingerprintHash: row.fingerprintHash,
           serviceName: row.serviceName,
           exceptionType: row.exceptionType,
           exceptionMessage: row.exceptionMessage,
           topFrame: row.topFrame,
-          status: row.status as ErrorIssueStatus,
+          status: row.status,
           assignedTo: row.assignedTo ?? null,
           notes: row.notes ?? null,
           firstSeenAt: decodeIsoDateTimeStringSync(new Date(row.firstSeenAt).toISOString()),
@@ -223,10 +229,10 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
 
       const rowToIncident = (row: ErrorIncidentRow) =>
         new ErrorIncidentDocument({
-          id: decodeErrorIncidentIdSync(row.id),
-          issueId: decodeErrorIssueIdSync(row.issueId),
-          status: row.status as "open" | "resolved",
-          reason: row.reason as ErrorIncidentReason,
+          id: row.id,
+          issueId: row.issueId,
+          status: row.status,
+          reason: row.reason,
           firstTriggeredAt: decodeIsoDateTimeStringSync(new Date(row.firstTriggeredAt).toISOString()),
           lastTriggeredAt: decodeIsoDateTimeStringSync(new Date(row.lastTriggeredAt).toISOString()),
           resolvedAt:
@@ -259,9 +265,12 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
         return row
       })
 
-      const issuesWithOpenIncidents = (orgId: OrgId, issueIds: ReadonlyArray<string>) =>
+      const issuesWithOpenIncidents = (
+        orgId: OrgId,
+        issueIds: ReadonlyArray<ErrorIssueId>,
+      ) =>
         issueIds.length === 0
-          ? Effect.succeed(new Set<string>())
+          ? Effect.succeed(new Set<ErrorIssueId>())
           : dbExecute((db) =>
               db
                 .select({ issueId: errorIncidents.issueId })
@@ -270,7 +279,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
                   and(
                     eq(errorIncidents.orgId, orgId),
                     eq(errorIncidents.status, "open"),
-                    inArray(errorIncidents.issueId, issueIds as string[]),
+                    inArray(errorIncidents.issueId, issueIds),
                   ),
                 ),
             ).pipe(Effect.map((rows) => new Set(rows.map((r) => r.issueId))))
@@ -376,8 +385,8 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           const sampleTraces = (samplesResp.data as ReadonlyArray<Record<string, unknown>>).map(
             (row) =>
               new ErrorIssueSampleTrace({
-                traceId: String(row.traceId ?? ""),
-                spanId: String(row.spanId ?? ""),
+                traceId: decodeTraceIdSync(String(row.traceId ?? "")),
+                spanId: decodeSpanIdSync(String(row.spanId ?? "")),
                 serviceName: String(row.serviceName ?? ""),
                 timestamp: decodeIsoDateTimeStringSync(
                   new Date(String(row.timestamp)).toISOString(),
@@ -395,11 +404,13 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           })
         })
 
-      const normalizeOptionalText = (value: string | null | undefined) => {
+      const normalizeOptionalText = <T extends string>(
+        value: T | null | undefined,
+      ): T | null | undefined => {
         if (value === undefined) return undefined
         if (value === null) return null
         const trimmed = value.trim()
-        return trimmed.length === 0 ? null : trimmed
+        return trimmed.length === 0 ? null : (trimmed as T)
       }
 
       const updateIssue: ErrorsServiceShape["updateIssue"] = (
@@ -755,13 +766,13 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
       // issues, open/resolve incidents, auto-resolve silent ones.
       // -----------------------------------------------------------------
 
-      const processOrg = (
+      const processOrg = Effect.fn("ErrorsService.processOrg")(function* (
         orgId: OrgId,
         windowStartMs: number,
         windowEndMs: number,
         runRetention: boolean,
-      ) =>
-        Effect.gen(function* () {
+      ) {
+          yield* Effect.annotateCurrentSpan({ orgId, runRetention })
           const tenant = systemTenant(orgId)
           const policy =
             (yield* loadPolicyRow(orgId)) ?? defaultPolicy(orgId, windowEndMs)
@@ -831,7 +842,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
                 .limit(1),
             )
 
-            let issueId: string
+            let issueId: ErrorIssueId
             let wasResolved = false
             let wasNew = false
 
@@ -858,7 +869,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
               )
             } else {
               wasNew = true
-              issueId = makeUuid()
+              issueId = newErrorIssueId()
               yield* dbExecute((db) =>
                 db.insert(errorIssues).values({
                   id: issueId,
@@ -906,7 +917,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
                 : wasResolved
                   ? "regression"
                   : "first_seen"
-              const incidentId = makeUuid()
+              const incidentId = newErrorIncidentId()
               yield* dbExecute((db) =>
                 db.insert(errorIncidents).values({
                   id: incidentId,
@@ -1137,10 +1148,12 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             issuesArchived,
             issuesDeleted,
           }
-        })
+        },
+      )
 
-      const runTick: ErrorsServiceShape["runTick"] = () =>
-        Effect.gen(function* () {
+      const runTick: ErrorsServiceShape["runTick"] = Effect.fn(
+        "ErrorsService.runTick",
+      )(function* () {
           const endMs = now()
           // Default tick window = last 2 minutes. Re-processing of the same
           // fingerprint is idempotent (upsert semantics).
@@ -1170,13 +1183,6 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             ...issueOrgs.map((r) => r.orgId),
           ])
 
-          let issuesTouched = 0
-          let incidentsOpened = 0
-          let incidentsResolved = 0
-          let issuesReopened = 0
-          let issuesArchived = 0
-          let issuesDeleted = 0
-
           const emptyResult = {
             issuesTouched: 0,
             incidentsOpened: 0,
@@ -1186,48 +1192,49 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             issuesDeleted: 0,
           }
 
-          for (const org of knownOrgs) {
-            const result = yield* processOrg(
-              org as OrgId,
-              startMs,
-              endMs,
-              retentionRan,
-            ).pipe(
-              Effect.catch((error) =>
+          let orgFailures = 0
+          const results = yield* Effect.forEach([...knownOrgs], (org) =>
+            processOrg(org as OrgId, startMs, endMs, retentionRan).pipe(
+              Effect.catchCause((cause) =>
                 Effect.gen(function* () {
                   yield* Effect.logError("Error tick failed for org").pipe(
                     Effect.annotateLogs({
                       orgId: org,
-                      error: error instanceof Error ? error.message : String(error),
-                      cause:
-                        error instanceof ErrorPersistenceError && error.cause
-                          ? error.cause
-                          : undefined,
+                      error: Cause.pretty(cause),
                     }),
                   )
+                  orgFailures += 1
                   return emptyResult
                 }),
               ),
-            )
-            issuesTouched += result.issuesTouched
-            incidentsOpened += result.incidentsOpened
-            incidentsResolved += result.incidentsResolved
-            issuesReopened += result.issuesReopened
-            issuesArchived += result.issuesArchived
-            issuesDeleted += result.issuesDeleted
-          }
+            ),
+          )
+
+          const totals = results.reduce(
+            (acc, r) => ({
+              issuesTouched: acc.issuesTouched + r.issuesTouched,
+              incidentsOpened: acc.incidentsOpened + r.incidentsOpened,
+              incidentsResolved: acc.incidentsResolved + r.incidentsResolved,
+              issuesReopened: acc.issuesReopened + r.issuesReopened,
+              issuesArchived: acc.issuesArchived + r.issuesArchived,
+              issuesDeleted: acc.issuesDeleted + r.issuesDeleted,
+            }),
+            emptyResult,
+          )
+
+          yield* Effect.annotateCurrentSpan({
+            orgsKnown: knownOrgs.size,
+            orgFailures,
+            ...totals,
+          })
 
           return {
             orgsProcessed: knownOrgs.size,
-            issuesTouched,
-            incidentsOpened,
-            incidentsResolved,
-            issuesReopened,
-            issuesArchived,
-            issuesDeleted,
+            ...totals,
             retentionRan,
           }
-        })
+        },
+      )
 
       return {
         listIssues,

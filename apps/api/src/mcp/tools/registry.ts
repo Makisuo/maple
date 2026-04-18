@@ -20,6 +20,7 @@ import { registerListAlertRulesTool } from "./list-alert-rules"
 import { registerListErrorIncidentsTool } from "./list-error-incidents"
 import { registerListErrorIssuesTool } from "./list-error-issues"
 import { registerUpdateErrorIssueTool } from "./update-error-issue"
+import { registerUpdateErrorNotificationPolicyTool } from "./update-error-notification-policy"
 import { registerListDashboardsTool } from "./list-dashboards"
 import { registerListMetricsTool } from "./list-metrics"
 import { registerListServicesTool } from "./list-services"
@@ -92,6 +93,7 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
   registerListErrorIssuesTool(registrar)
   registerUpdateErrorIssueTool(registrar)
   registerListErrorIncidentsTool(registrar)
+  registerUpdateErrorNotificationPolicyTool(registrar)
 
   return definitions
 }
