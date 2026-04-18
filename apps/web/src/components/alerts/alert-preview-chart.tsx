@@ -11,6 +11,7 @@ import {
 } from "@maple/ui/components/ui/chart"
 import { inferBucketSeconds, inferRangeMs, formatBucketLabel } from "@maple/ui/lib/format"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { SERIES_COLORS } from "./chart-colors"
 
 interface AlertPreviewChartProps {
   data?: Record<string, unknown>[]
@@ -28,14 +29,6 @@ function asFiniteNumber(value: unknown): number {
 function formatBucketTime(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
-
-const SERIES_COLORS = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-]
 
 export function AlertPreviewChart({
   data,
