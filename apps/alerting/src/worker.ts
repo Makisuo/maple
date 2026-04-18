@@ -18,10 +18,7 @@ import { Cause, ConfigProvider, Effect, Layer, ManagedRuntime } from "effect"
 
 const buildLayer = (env: Record<string, unknown>) => {
   const ConfigLive = ConfigProvider.layer(ConfigProvider.fromUnknown(env))
-  const WorkerEnvLive = Layer.succeed(
-    WorkerEnvironment,
-    env as Record<string, any>,
-  )
+  const WorkerEnvLive = Layer.succeed(WorkerEnvironment, env)
   const EnvLive = Env.Default.pipe(Layer.provide(ConfigLive))
 
   const DatabaseLive = DatabaseD1Live.pipe(Layer.provide(WorkerEnvLive))
@@ -73,10 +70,10 @@ const buildLayer = (env: Record<string, unknown>) => {
   )
 }
 
-type AlertingRuntime = ManagedRuntime.ManagedRuntime<
-  AlertsService | DigestService | ErrorsService,
-  never
->
+type AlertingRuntime = ReturnType<typeof buildAlertingRuntime>
+
+const buildAlertingRuntime = (env: Record<string, unknown>) =>
+  ManagedRuntime.make(buildLayer(env))
 
 const runtimeCache = new WeakMap<object, AlertingRuntime>()
 
@@ -84,7 +81,7 @@ const getRuntime = (env: Record<string, unknown>): AlertingRuntime => {
   const key = env as object
   const existing = runtimeCache.get(key)
   if (existing) return existing
-  const built = ManagedRuntime.make(buildLayer(env)) as AlertingRuntime
+  const built = buildAlertingRuntime(env)
   runtimeCache.set(key, built)
   return built
 }

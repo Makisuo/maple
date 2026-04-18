@@ -10,6 +10,8 @@ import type { TracesMetric } from "@maple/query-engine"
 import type { OrgId } from "@maple/domain"
 import { Array as A, Match, Result } from "effect"
 
+type CompileTarget = Parameters<typeof CH.compile>[0]
+
 export interface PipeCompiledQuery {
   readonly sql: string
   readonly castRows: (rows: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<unknown>
@@ -37,13 +39,15 @@ export function compilePipeQuery(
   const int = (key: string, def?: number) => params[key] != null ? Number(params[key]) : def
   const bool = (key: string) => params[key] === true || params[key] === "1" || params[key] === "true"
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const compileCompare = (query: any, ranges: {
-    currentStart: string
-    currentEnd: string
-    previousStart: string
-    previousEnd: string
-  }): PipeCompiledQuery => {
+  const compileCompare = (
+    query: CompileTarget,
+    ranges: {
+      currentStart: string
+      currentEnd: string
+      previousStart: string
+      previousEnd: string
+    },
+  ): PipeCompiledQuery => {
     const currentSql = CH.compile(
       query,
       { orgId, startTime: ranges.currentStart, endTime: ranges.currentEnd },

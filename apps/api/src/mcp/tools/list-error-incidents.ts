@@ -1,14 +1,17 @@
 import {
   McpQueryError,
   optionalStringParam,
+  validationError,
   type McpToolRegistrar,
 } from "./types"
 import { formatTable } from "../lib/format"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "../lib/query-tinybird"
 import { ErrorsService } from "@/services/ErrorsService"
-import type { ErrorIssueId } from "@maple/domain/http"
+import { ErrorIssueId } from "@maple/domain/http"
+
+const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
 
 export function registerListErrorIncidentsTool(server: McpToolRegistrar) {
   server.tool(
@@ -21,26 +24,41 @@ export function registerListErrorIncidentsTool(server: McpToolRegistrar) {
     }),
     Effect.fn("McpTool.listErrorIncidents")(function* ({ issue_id }) {
       const tenant = yield* resolveTenant
+      yield* Effect.annotateCurrentSpan({
+        orgId: tenant.orgId,
+        issueId: issue_id ?? "all",
+      })
       const errors = yield* ErrorsService
 
-      const result = issue_id
-        ? yield* errors
-            .listIssueIncidents(tenant.orgId, issue_id as ErrorIssueId)
-            .pipe(
-              Effect.mapError(
-                (error) =>
-                  new McpQueryError({
-                    message: "message" in error ? error.message : String(error),
-                    pipe: "list_error_incidents",
-                  }),
-              ),
-            )
+      let issueId: ErrorIssueId | undefined
+      if (issue_id) {
+        const decoded = decodeIssueId(issue_id)
+        if (Option.isNone(decoded)) {
+          return validationError(
+            `Invalid issue_id: '${issue_id}'. Must be a UUID from list_error_issues.`,
+          )
+        }
+        issueId = decoded.value
+      }
+
+      const result = issueId
+        ? yield* errors.listIssueIncidents(tenant.orgId, issueId).pipe(
+            Effect.mapError(
+              (error) =>
+                new McpQueryError({
+                  message: error.message,
+                  pipe: "list_error_incidents",
+                  cause: error,
+                }),
+            ),
+          )
         : yield* errors.listOpenIncidents(tenant.orgId).pipe(
             Effect.mapError(
               (error) =>
                 new McpQueryError({
                   message: error.message,
                   pipe: "list_error_incidents",
+                  cause: error,
                 }),
             ),
           )

@@ -34,11 +34,19 @@ import type { McpToolError, McpToolRegistrar, McpToolResult } from "./types"
 import { registerUpdateDashboardTool } from "./update-dashboard"
 import { registerUpdateDashboardWidgetTool } from "./update-dashboard-widget"
 
+// `R` is intentionally `any` here: MapleToolDefinition is the type-erased
+// boundary between heterogeneous tool implementations (each with its own
+// service requirements) and the McpServer.addTool API (which expects
+// McpServerClient). The runtime layer wires the actual services; we accept the
+// loose `any` here to let both sides typecheck.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface MapleToolDefinition {
   readonly name: string
   readonly description: string
   readonly schema: Schema.Decoder<unknown, never>
-  readonly handler: (params: unknown) => Effect.Effect<McpToolResult, McpToolError, any>
+  readonly handler: (
+    params: unknown,
+  ) => Effect.Effect<McpToolResult, McpToolError, any>
 }
 
 export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
@@ -56,7 +64,7 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
         name,
         description,
         schema,
-        handler: handler as (params: unknown) => Effect.Effect<McpToolResult, McpToolError>,
+        handler: handler as MapleToolDefinition["handler"],
       })
     },
   }

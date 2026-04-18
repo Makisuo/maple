@@ -50,9 +50,7 @@ const buildHandler = (env: Record<string, unknown>) =>
       Layer.provideMerge(ApiObservabilityLive),
       Layer.provideMerge(WorkerPlatformLive),
       Layer.provideMerge(DatabaseD1Live),
-      Layer.provideMerge(
-        Layer.succeed(WorkerEnvironment, env as Record<string, any>),
-      ),
+      Layer.provideMerge(Layer.succeed(WorkerEnvironment, env)),
       Layer.provideMerge(
         ConfigProvider.layer(ConfigProvider.fromUnknown(env)),
       ),

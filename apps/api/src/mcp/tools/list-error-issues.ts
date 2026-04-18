@@ -2,15 +2,18 @@ import {
   McpQueryError,
   optionalNumberParam,
   optionalStringParam,
+  validationError,
   type McpToolRegistrar,
 } from "./types"
 import { formatNumber, formatTable, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "../lib/query-tinybird"
 import { ErrorsService } from "@/services/ErrorsService"
-import type { ErrorIssueStatus } from "@maple/domain/http"
+import { ErrorIssueStatus } from "@maple/domain/http"
+
+const decodeIssueStatus = Schema.decodeUnknownOption(ErrorIssueStatus)
 
 export function registerListErrorIssuesTool(server: McpToolRegistrar) {
   server.tool(
@@ -25,20 +28,43 @@ export function registerListErrorIssuesTool(server: McpToolRegistrar) {
     }),
     Effect.fn("McpTool.listErrorIssues")(function* ({ status, service, limit }) {
       const tenant = yield* resolveTenant
+      yield* Effect.annotateCurrentSpan({
+        orgId: tenant.orgId,
+        status: status ?? "all",
+        service: service ?? "all",
+        limit: limit ?? 50,
+      })
       const errors = yield* ErrorsService
+
+      let typedStatus: ErrorIssueStatus | undefined
+      if (status) {
+        const decoded = decodeIssueStatus(status)
+        if (Option.isNone(decoded)) {
+          return validationError(
+            `Invalid status: '${status}'. Must be one of: open, resolved, ignored, archived.`,
+          )
+        }
+        typedStatus = decoded.value
+      }
 
       const result = yield* errors
         .listIssues(tenant.orgId, {
-          status: status as ErrorIssueStatus | undefined,
+          status: typedStatus,
           service,
           limit: limit ?? 50,
         })
         .pipe(
           Effect.mapError(
             (error) =>
-              new McpQueryError({ message: error.message, pipe: "list_error_issues" }),
+              new McpQueryError({
+                message: error.message,
+                pipe: "list_error_issues",
+                cause: error,
+              }),
           ),
         )
+
+      yield* Effect.annotateCurrentSpan("resultCount", result.issues.length)
 
       const issues = result.issues
 

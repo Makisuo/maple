@@ -2,5 +2,5 @@ import { Context } from "effect"
 
 export class WorkerEnvironment extends Context.Service<
   WorkerEnvironment,
-  Record<string, any>
+  Record<string, unknown>
 >()("Cloudflare.Workers.WorkerEnvironment") {}

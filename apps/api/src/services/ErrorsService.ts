@@ -284,8 +284,14 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
                 ),
             ).pipe(Effect.map((rows) => new Set(rows.map((r) => r.issueId))))
 
-      const listIssues: ErrorsServiceShape["listIssues"] = (orgId, opts) =>
-        Effect.gen(function* () {
+      const listIssues: ErrorsServiceShape["listIssues"] = Effect.fn(
+        "ErrorsService.listIssues",
+      )(function* (orgId, opts) {
+          yield* Effect.annotateCurrentSpan({
+            orgId,
+            status: opts.status ?? "all",
+            limit: opts.limit ?? 100,
+          })
           const conditions = [eq(errorIssues.orgId, orgId)]
           if (opts.status) conditions.push(eq(errorIssues.status, opts.status))
           if (opts.service) conditions.push(eq(errorIssues.serviceName, opts.service))
@@ -312,13 +318,15 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             rows.map((r) => r.id),
           )
 
-          return new ErrorIssuesListResponse({
-            issues: rows.map((r) => rowToIssue(r, openSet.has(r.id))),
-          })
+          const issuesResult = rows.map((r) => rowToIssue(r, openSet.has(r.id)))
+          yield* Effect.annotateCurrentSpan("issueCount", issuesResult.length)
+          return new ErrorIssuesListResponse({ issues: issuesResult })
         })
 
-      const getIssue: ErrorsServiceShape["getIssue"] = (orgId, issueId, opts) =>
-        Effect.gen(function* () {
+      const getIssue: ErrorsServiceShape["getIssue"] = Effect.fn(
+        "ErrorsService.getIssue",
+      )(function* (orgId, issueId, opts) {
+          yield* Effect.annotateCurrentSpan({ orgId, issueId })
           const issueRow = yield* requireIssue(orgId, issueId)
           const endMs = opts.endTime ? Date.parse(opts.endTime) : now()
           const startMs = opts.startTime
@@ -413,13 +421,15 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
         return trimmed.length === 0 ? null : (trimmed as T)
       }
 
-      const updateIssue: ErrorsServiceShape["updateIssue"] = (
-        orgId,
-        userId,
-        issueId,
-        patch,
-      ) =>
-        Effect.gen(function* () {
+      const updateIssue: ErrorsServiceShape["updateIssue"] = Effect.fn(
+        "ErrorsService.updateIssue",
+      )(function* (orgId, userId, issueId, patch) {
+          yield* Effect.annotateCurrentSpan({
+            orgId,
+            issueId,
+            action: patch.status ?? "patch",
+            patches: Object.keys(patch).join(","),
+          })
           const current = yield* requireIssue(orgId, issueId)
           const timestamp = now()
           const nextStatus = patch.status ?? (current.status as ErrorIssueStatus)
@@ -505,11 +515,10 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           return rowToIssue(updatedRow, openSet.has(updatedRow.id))
         })
 
-      const listIssueIncidents: ErrorsServiceShape["listIssueIncidents"] = (
-        orgId,
-        issueId,
-      ) =>
-        Effect.gen(function* () {
+      const listIssueIncidents: ErrorsServiceShape["listIssueIncidents"] = Effect.fn(
+        "ErrorsService.listIssueIncidents",
+      )(function* (orgId, issueId) {
+          yield* Effect.annotateCurrentSpan({ orgId, issueId })
           yield* requireIssue(orgId, issueId)
           const rows = yield* dbExecute((db) =>
             db
@@ -521,13 +530,16 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
               .orderBy(desc(errorIncidents.lastTriggeredAt))
               .limit(200),
           )
+          yield* Effect.annotateCurrentSpan("incidentCount", rows.length)
           return new ErrorIncidentsListResponse({
             incidents: rows.map(rowToIncident),
           })
         })
 
-      const listOpenIncidents: ErrorsServiceShape["listOpenIncidents"] = (orgId) =>
-        Effect.gen(function* () {
+      const listOpenIncidents: ErrorsServiceShape["listOpenIncidents"] = Effect.fn(
+        "ErrorsService.listOpenIncidents",
+      )(function* (orgId) {
+          yield* Effect.annotateCurrentSpan({ orgId })
           const rows = yield* dbExecute((db) =>
             db
               .select()
@@ -541,6 +553,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
               .orderBy(desc(errorIncidents.lastTriggeredAt))
               .limit(500),
           )
+          yield* Effect.annotateCurrentSpan("incidentCount", rows.length)
           return new ErrorIncidentsListResponse({
             incidents: rows.map(rowToIncident),
           })
@@ -602,18 +615,21 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           return rows[0] ?? null
         })
 
-      const getNotificationPolicy: ErrorsServiceShape["getNotificationPolicy"] = (orgId) =>
-        Effect.gen(function* () {
+      const getNotificationPolicy: ErrorsServiceShape["getNotificationPolicy"] = Effect.fn(
+        "ErrorsService.getNotificationPolicy",
+      )(function* (orgId) {
+          yield* Effect.annotateCurrentSpan({ orgId })
           const row = yield* loadPolicyRow(orgId)
           return rowToPolicy(row ?? defaultPolicy(orgId, now()))
         })
 
-      const upsertNotificationPolicy: ErrorsServiceShape["upsertNotificationPolicy"] = (
-        orgId,
-        userId,
-        request,
-      ) =>
-        Effect.gen(function* () {
+      const upsertNotificationPolicy: ErrorsServiceShape["upsertNotificationPolicy"] =
+        Effect.fn("ErrorsService.upsertNotificationPolicy")(function* (
+          orgId,
+          userId,
+          request,
+        ) {
+          yield* Effect.annotateCurrentSpan({ orgId })
           const existing = yield* loadPolicyRow(orgId)
           const base = existing ?? defaultPolicy(orgId, now())
           const timestamp = now()
@@ -675,7 +691,8 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           )
 
           return rowToPolicy(merged)
-        })
+        },
+      )
 
       const issueLinkUrl = (issueId: string) =>
         `${env.MAPLE_APP_BASE_URL}/errors/issues/${encodeURIComponent(issueId)}`
@@ -811,189 +828,194 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             })
             .pipe(Effect.mapError(makePersistenceError))
 
-          const rows = resp.data as ReadonlyArray<{
-            fingerprintHash: string
-            serviceName: string
-            exceptionType: string
-            exceptionMessage: string
-            topFrame: string
-            count: number
-            affectedServicesCount: number
-            firstSeen: string
-            lastSeen: string
-          }>
+          const rows = (resp.data as ReadonlyArray<Record<string, unknown>>).map(
+            (raw) => ({
+              fingerprintHash: String(raw.fingerprintHash ?? ""),
+              serviceName: String(raw.serviceName ?? ""),
+              exceptionType: String(raw.exceptionType ?? ""),
+              exceptionMessage: String(raw.exceptionMessage ?? ""),
+              topFrame: String(raw.topFrame ?? ""),
+              count: Number(raw.count ?? 0),
+              affectedServicesCount: Number(raw.affectedServicesCount ?? 0),
+              firstSeen: String(raw.firstSeen ?? ""),
+              lastSeen: String(raw.lastSeen ?? ""),
+            }),
+          )
 
-          let issuesTouched = 0
-          let incidentsOpened = 0
+          const fingerprintResults = yield* Effect.forEach(rows, (row) =>
+            Effect.gen(function* () {
+              const firstSeenMs = Date.parse(row.firstSeen)
+              const lastSeenMs = Date.parse(row.lastSeen)
+              const existing = yield* dbExecute((db) =>
+                db
+                  .select()
+                  .from(errorIssues)
+                  .where(
+                    and(
+                      eq(errorIssues.orgId, orgId),
+                      eq(errorIssues.fingerprintHash, row.fingerprintHash),
+                    ),
+                  )
+                  .limit(1),
+              )
 
-          for (const row of rows) {
-            const firstSeenMs = Date.parse(row.firstSeen)
-            const lastSeenMs = Date.parse(row.lastSeen)
-            const existing = yield* dbExecute((db) =>
-              db
-                .select()
-                .from(errorIssues)
-                .where(
-                  and(
-                    eq(errorIssues.orgId, orgId),
-                    eq(errorIssues.fingerprintHash, row.fingerprintHash),
-                  ),
-                )
-                .limit(1),
-            )
-
-            let issueId: ErrorIssueId
-            let wasResolved = false
-            let wasNew = false
-
-            if (existing[0]) {
               const prior = existing[0]
-              issueId = prior.id
-              wasResolved = prior.status === "resolved"
-              if (prior.status === "ignored" && (prior.ignoredUntil == null || prior.ignoredUntil > windowEndMs)) {
-                continue
+              let issueId: ErrorIssueId
+              let wasResolved = false
+              let wasNew = false
+
+              if (prior) {
+                issueId = prior.id
+                wasResolved = prior.status === "resolved"
+                if (
+                  prior.status === "ignored" &&
+                  (prior.ignoredUntil == null || prior.ignoredUntil > windowEndMs)
+                ) {
+                  return { touched: 0, opened: 0 }
+                }
+
+                const nextStatus = wasResolved ? "open" : prior.status
+                yield* dbExecute((db) =>
+                  db
+                    .update(errorIssues)
+                    .set({
+                      status: nextStatus,
+                      lastSeenAt: lastSeenMs,
+                      occurrenceCount: sql`${errorIssues.occurrenceCount} + ${row.count}`,
+                      ...(wasResolved ? { resolvedAt: null, resolvedBy: null } : {}),
+                      updatedAt: windowEndMs,
+                    })
+                    .where(eq(errorIssues.id, prior.id)),
+                )
+              } else {
+                wasNew = true
+                issueId = newErrorIssueId()
+                yield* dbExecute((db) =>
+                  db.insert(errorIssues).values({
+                    id: issueId,
+                    orgId,
+                    fingerprintHash: row.fingerprintHash,
+                    serviceName: row.serviceName,
+                    exceptionType: row.exceptionType,
+                    exceptionMessage: row.exceptionMessage,
+                    topFrame: row.topFrame,
+                    status: "open",
+                    assignedTo: null,
+                    notes: null,
+                    firstSeenAt: firstSeenMs,
+                    lastSeenAt: lastSeenMs,
+                    occurrenceCount: row.count,
+                    resolvedAt: null,
+                    resolvedBy: null,
+                    ignoredUntil: null,
+                    createdAt: windowEndMs,
+                    updatedAt: windowEndMs,
+                  }),
+                )
               }
 
-              const nextStatus = wasResolved ? "open" : prior.status
-              yield* dbExecute((db) =>
+              const stateRow = yield* dbExecute((db) =>
                 db
-                  .update(errorIssues)
-                  .set({
-                    status: nextStatus,
-                    lastSeenAt: lastSeenMs,
-                    occurrenceCount: sql`${errorIssues.occurrenceCount} + ${row.count}`,
-                    ...(wasResolved ? { resolvedAt: null, resolvedBy: null } : {}),
-                    updatedAt: windowEndMs,
-                  })
-                  .where(eq(errorIssues.id, prior.id)),
-              )
-            } else {
-              wasNew = true
-              issueId = newErrorIssueId()
-              yield* dbExecute((db) =>
-                db.insert(errorIssues).values({
-                  id: issueId,
-                  orgId,
-                  fingerprintHash: row.fingerprintHash,
-                  serviceName: row.serviceName,
-                  exceptionType: row.exceptionType,
-                  exceptionMessage: row.exceptionMessage,
-                  topFrame: row.topFrame,
-                  status: "open",
-                  assignedTo: null,
-                  notes: null,
-                  firstSeenAt: firstSeenMs,
-                  lastSeenAt: lastSeenMs,
-                  occurrenceCount: row.count,
-                  resolvedAt: null,
-                  resolvedBy: null,
-                  ignoredUntil: null,
-                  createdAt: windowEndMs,
-                  updatedAt: windowEndMs,
-                }),
-              )
-            }
-
-            issuesTouched += 1
-
-            // Incident lifecycle
-            const stateRow = yield* dbExecute((db) =>
-              db
-                .select()
-                .from(errorIssueStates)
-                .where(
-                  and(
-                    eq(errorIssueStates.orgId, orgId),
-                    eq(errorIssueStates.issueId, issueId),
-                  ),
-                )
-                .limit(1),
-            )
-            const hasOpenIncident = stateRow[0]?.openIncidentId != null
-
-            if (!hasOpenIncident) {
-              const reason: ErrorIncidentReason = wasNew
-                ? "first_seen"
-                : wasResolved
-                  ? "regression"
-                  : "first_seen"
-              const incidentId = newErrorIncidentId()
-              yield* dbExecute((db) =>
-                db.insert(errorIncidents).values({
-                  id: incidentId,
-                  orgId,
-                  issueId,
-                  status: "open",
-                  reason,
-                  firstTriggeredAt: firstSeenMs,
-                  lastTriggeredAt: lastSeenMs,
-                  resolvedAt: null,
-                  occurrenceCount: row.count,
-                  createdAt: windowEndMs,
-                  updatedAt: windowEndMs,
-                }),
-              )
-              incidentsOpened += 1
-
-              yield* dbExecute((db) =>
-                db
-                  .insert(errorIssueStates)
-                  .values({
-                    orgId,
-                    issueId,
-                    lastObservedOccurrenceAt: lastSeenMs,
-                    lastEvaluatedAt: windowEndMs,
-                    openIncidentId: incidentId,
-                    updatedAt: windowEndMs,
-                  })
-                  .onConflictDoUpdate({
-                    target: [errorIssueStates.orgId, errorIssueStates.issueId],
-                    set: {
-                      lastObservedOccurrenceAt: lastSeenMs,
-                      lastEvaluatedAt: windowEndMs,
-                      openIncidentId: incidentId,
-                      updatedAt: windowEndMs,
-                    },
-                  }),
-              )
-
-              yield* notifyIncidentOpened(orgId, policy, {
-                issueId,
-                incidentId,
-                reason,
-                serviceName: row.serviceName,
-                exceptionType: row.exceptionType,
-                count: row.count,
-              })
-            } else {
-              // Update existing open incident with latest activity
-              yield* dbExecute((db) =>
-                db
-                  .update(errorIncidents)
-                  .set({
-                    lastTriggeredAt: lastSeenMs,
-                    occurrenceCount: sql`${errorIncidents.occurrenceCount} + ${row.count}`,
-                    updatedAt: windowEndMs,
-                  })
-                  .where(eq(errorIncidents.id, stateRow[0]!.openIncidentId!)),
-              )
-              yield* dbExecute((db) =>
-                db
-                  .update(errorIssueStates)
-                  .set({
-                    lastObservedOccurrenceAt: lastSeenMs,
-                    lastEvaluatedAt: windowEndMs,
-                    updatedAt: windowEndMs,
-                  })
+                  .select()
+                  .from(errorIssueStates)
                   .where(
                     and(
                       eq(errorIssueStates.orgId, orgId),
                       eq(errorIssueStates.issueId, issueId),
                     ),
-                  ),
+                  )
+                  .limit(1),
               )
-            }
-          }
+              const openIncidentIdRaw = stateRow[0]?.openIncidentId ?? null
+
+              if (openIncidentIdRaw == null) {
+                const reason: ErrorIncidentReason = wasNew
+                  ? "first_seen"
+                  : wasResolved
+                    ? "regression"
+                    : "first_seen"
+                const incidentId = newErrorIncidentId()
+                yield* dbExecute((db) =>
+                  db.insert(errorIncidents).values({
+                    id: incidentId,
+                    orgId,
+                    issueId,
+                    status: "open",
+                    reason,
+                    firstTriggeredAt: firstSeenMs,
+                    lastTriggeredAt: lastSeenMs,
+                    resolvedAt: null,
+                    occurrenceCount: row.count,
+                    createdAt: windowEndMs,
+                    updatedAt: windowEndMs,
+                  }),
+                )
+
+                yield* dbExecute((db) =>
+                  db
+                    .insert(errorIssueStates)
+                    .values({
+                      orgId,
+                      issueId,
+                      lastObservedOccurrenceAt: lastSeenMs,
+                      lastEvaluatedAt: windowEndMs,
+                      openIncidentId: incidentId,
+                      updatedAt: windowEndMs,
+                    })
+                    .onConflictDoUpdate({
+                      target: [errorIssueStates.orgId, errorIssueStates.issueId],
+                      set: {
+                        lastObservedOccurrenceAt: lastSeenMs,
+                        lastEvaluatedAt: windowEndMs,
+                        openIncidentId: incidentId,
+                        updatedAt: windowEndMs,
+                      },
+                    }),
+                )
+
+                yield* notifyIncidentOpened(orgId, policy, {
+                  issueId,
+                  incidentId,
+                  reason,
+                  serviceName: row.serviceName,
+                  exceptionType: row.exceptionType,
+                  count: row.count,
+                })
+
+                return { touched: 1, opened: 1 }
+              } else {
+                yield* dbExecute((db) =>
+                  db
+                    .update(errorIncidents)
+                    .set({
+                      lastTriggeredAt: lastSeenMs,
+                      occurrenceCount: sql`${errorIncidents.occurrenceCount} + ${row.count}`,
+                      updatedAt: windowEndMs,
+                    })
+                    .where(eq(errorIncidents.id, openIncidentIdRaw)),
+                )
+                yield* dbExecute((db) =>
+                  db
+                    .update(errorIssueStates)
+                    .set({
+                      lastObservedOccurrenceAt: lastSeenMs,
+                      lastEvaluatedAt: windowEndMs,
+                      updatedAt: windowEndMs,
+                    })
+                    .where(
+                      and(
+                        eq(errorIssueStates.orgId, orgId),
+                        eq(errorIssueStates.issueId, issueId),
+                      ),
+                    ),
+                )
+                return { touched: 1, opened: 0 }
+              }
+            }),
+          )
+
+          const issuesTouched = fingerprintResults.reduce((s, r) => s + r.touched, 0)
+          const incidentsOpened = fingerprintResults.reduce((s, r) => s + r.opened, 0)
 
           // Auto-resolve stale incidents: open incidents whose last activity is
           // older than the silence window.
@@ -1010,59 +1032,60 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
                 ),
               ),
           )
-          let incidentsResolved = 0
-          for (const incident of staleIncidents) {
-            yield* dbExecute((db) =>
-              db
-                .update(errorIncidents)
-                .set({
-                  status: "resolved",
-                  resolvedAt: windowEndMs,
-                  updatedAt: windowEndMs,
-                })
-                .where(eq(errorIncidents.id, incident.id)),
-            )
-            yield* dbExecute((db) =>
-              db
-                .update(errorIssueStates)
-                .set({ openIncidentId: null, updatedAt: windowEndMs })
-                .where(
-                  and(
-                    eq(errorIssueStates.orgId, orgId),
-                    eq(errorIssueStates.issueId, incident.issueId),
-                  ),
-                ),
-            )
-            incidentsResolved += 1
-
-            if (policy.enabled === 1 && policy.notifyOnResolve === 1) {
-              const issueRows = yield* dbExecute((db) =>
+          yield* Effect.forEach(staleIncidents, (incident) =>
+            Effect.gen(function* () {
+              yield* dbExecute((db) =>
                 db
-                  .select({
-                    serviceName: errorIssues.serviceName,
-                    exceptionType: errorIssues.exceptionType,
+                  .update(errorIncidents)
+                  .set({
+                    status: "resolved",
+                    resolvedAt: windowEndMs,
+                    updatedAt: windowEndMs,
                   })
-                  .from(errorIssues)
+                  .where(eq(errorIncidents.id, incident.id)),
+              )
+              yield* dbExecute((db) =>
+                db
+                  .update(errorIssueStates)
+                  .set({ openIncidentId: null, updatedAt: windowEndMs })
                   .where(
                     and(
-                      eq(errorIssues.orgId, orgId),
-                      eq(errorIssues.id, incident.issueId),
+                      eq(errorIssueStates.orgId, orgId),
+                      eq(errorIssueStates.issueId, incident.issueId),
                     ),
-                  )
-                  .limit(1),
+                  ),
               )
-              const issueRow = issueRows[0]
-              if (issueRow) {
-                yield* notifyIncidentResolved(orgId, policy, {
-                  issueId: incident.issueId,
-                  incidentId: incident.id,
-                  serviceName: issueRow.serviceName,
-                  exceptionType: issueRow.exceptionType,
-                  occurrenceCount: incident.occurrenceCount,
-                })
+
+              if (policy.enabled === 1 && policy.notifyOnResolve === 1) {
+                const issueRows = yield* dbExecute((db) =>
+                  db
+                    .select({
+                      serviceName: errorIssues.serviceName,
+                      exceptionType: errorIssues.exceptionType,
+                    })
+                    .from(errorIssues)
+                    .where(
+                      and(
+                        eq(errorIssues.orgId, orgId),
+                        eq(errorIssues.id, incident.issueId),
+                      ),
+                    )
+                    .limit(1),
+                )
+                const issueRow = issueRows[0]
+                if (issueRow) {
+                  yield* notifyIncidentResolved(orgId, policy, {
+                    issueId: incident.issueId,
+                    incidentId: incident.id,
+                    serviceName: issueRow.serviceName,
+                    exceptionType: issueRow.exceptionType,
+                    occurrenceCount: incident.occurrenceCount,
+                  })
+                }
               }
-            }
-          }
+            }),
+          )
+          const incidentsResolved = staleIncidents.length
 
           let issuesArchived = 0
           let issuesDeleted = 0

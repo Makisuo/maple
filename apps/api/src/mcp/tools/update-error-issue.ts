@@ -5,25 +5,19 @@ import {
   validationError,
   type McpToolRegistrar,
 } from "./types"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "../lib/query-tinybird"
 import { ErrorsService } from "@/services/ErrorsService"
-import { Schema as S } from "effect"
 import {
-  type ErrorIssueId,
-  type ErrorIssueStatus,
+  ErrorIssueId,
+  ErrorIssueStatus,
   UserId,
 } from "@maple/domain/http"
 
-const decodeUserIdSync = S.decodeUnknownSync(UserId)
-
-const validStatuses: ReadonlyArray<ErrorIssueStatus> = [
-  "open",
-  "resolved",
-  "ignored",
-  "archived",
-]
+const decodeIssueId = Schema.decodeUnknownOption(ErrorIssueId)
+const decodeIssueStatus = Schema.decodeUnknownOption(ErrorIssueStatus)
+const decodeUserId = Schema.decodeUnknownOption(UserId)
 
 export function registerUpdateErrorIssueTool(server: McpToolRegistrar) {
   server.tool(
@@ -34,7 +28,7 @@ export function registerUpdateErrorIssueTool(server: McpToolRegistrar) {
       status: optionalStringParam(
         "New status: open, resolved, ignored, or archived",
       ),
-      assigned_to: optionalStringParam("User ID / email, or empty string to unassign"),
+      assigned_to: optionalStringParam("User ID, or empty string to unassign"),
       notes: optionalStringParam("Triage notes. Pass empty string to clear."),
     }),
     Effect.fn("McpTool.updateErrorIssue")(function* ({
@@ -43,36 +37,66 @@ export function registerUpdateErrorIssueTool(server: McpToolRegistrar) {
       assigned_to,
       notes,
     }) {
-      if (status && !validStatuses.includes(status as ErrorIssueStatus)) {
-        return validationError(
-          `Invalid status: ${status}. Must be one of: ${validStatuses.join(", ")}.`,
-        )
-      }
-
       const tenant = yield* resolveTenant
+      yield* Effect.annotateCurrentSpan({
+        orgId: tenant.orgId,
+        issueId: issue_id,
+        action: status ?? "patch",
+      })
       const errors = yield* ErrorsService
 
-      const patch: {
-        -readonly [K in keyof Parameters<typeof errors.updateIssue>[3]]: Parameters<
-          typeof errors.updateIssue
-        >[3][K]
-      } = {}
-      if (status) patch.status = status as ErrorIssueStatus
-      if (assigned_to !== undefined) {
-        patch.assignedTo = assigned_to === "" ? null : decodeUserIdSync(assigned_to)
+      const decodedIssueId = decodeIssueId(issue_id)
+      if (Option.isNone(decodedIssueId)) {
+        return validationError(
+          `Invalid issue_id: '${issue_id}'. Must be a UUID from list_error_issues.`,
+        )
       }
-      if (notes !== undefined) {
-        patch.notes = notes === "" ? null : notes
+      const issueId = decodedIssueId.value
+
+      let typedStatus: ErrorIssueStatus | undefined
+      if (status) {
+        const decoded = decodeIssueStatus(status)
+        if (Option.isNone(decoded)) {
+          return validationError(
+            `Invalid status: '${status}'. Must be one of: open, resolved, ignored, archived.`,
+          )
+        }
+        typedStatus = decoded.value
       }
 
+      let typedAssignedTo: UserId | null | undefined
+      if (assigned_to !== undefined) {
+        if (assigned_to === "") {
+          typedAssignedTo = null
+        } else {
+          const decoded = decodeUserId(assigned_to)
+          if (Option.isNone(decoded)) {
+            return validationError(
+              `Invalid assigned_to: '${assigned_to}'. Must be a non-empty user id.`,
+            )
+          }
+          typedAssignedTo = decoded.value
+        }
+      }
+
+      const patch: {
+        status?: ErrorIssueStatus
+        assignedTo?: UserId | null
+        notes?: string | null
+      } = {}
+      if (typedStatus !== undefined) patch.status = typedStatus
+      if (typedAssignedTo !== undefined) patch.assignedTo = typedAssignedTo
+      if (notes !== undefined) patch.notes = notes === "" ? null : notes
+
       const issue = yield* errors
-        .updateIssue(tenant.orgId, tenant.userId, issue_id as ErrorIssueId, patch)
+        .updateIssue(tenant.orgId, tenant.userId, issueId, patch)
         .pipe(
           Effect.mapError(
             (error) =>
               new McpQueryError({
-                message: "message" in error ? error.message : String(error),
+                message: error.message,
                 pipe: "update_error_issue",
+                cause: error,
               }),
           ),
         )
