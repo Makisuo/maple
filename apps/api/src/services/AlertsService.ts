@@ -2691,12 +2691,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
             consecutiveBreaches >= normalized.consecutiveBreachesRequired
           ) {
             const incidentId = makeUuid()
-            const incidentKey = `${row.orgId}:${row.id}:${groupKey}`
             const incident: AlertIncidentRow = {
               id: incidentId,
               orgId: row.orgId,
               ruleId: row.id,
-              incidentKey,
+              incidentKey: incidentId,
               ruleName: row.name,
               groupKey,
               signalType: normalized.signalType,
@@ -2710,7 +2709,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
               lastObservedValue: evaluation.value,
               lastSampleCount: evaluation.sampleCount,
               lastEvaluatedAt: timestamp,
-              dedupeKey: incidentKey,
+              dedupeKey: `${row.orgId}:${row.id}:${groupKey}`,
               lastDeliveredEventType: null,
               lastNotifiedAt: null,
               createdAt: timestamp,
