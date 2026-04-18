@@ -442,6 +442,71 @@ export interface ErrorsTimeseriesParams {
 }
 
 // ---------------------------------------------------------------------------
+// error_issues (fingerprint-grouped aggregate from error_events)
+// ---------------------------------------------------------------------------
+
+export interface ErrorIssuesOutput {
+  readonly fingerprintHash: string
+  readonly serviceName: string
+  readonly exceptionType: string
+  readonly exceptionMessage: string
+  readonly topFrame: string
+  readonly count: number
+  readonly affectedServicesCount: number
+  readonly firstSeen: string
+  readonly lastSeen: string
+}
+
+export interface ErrorIssuesParams {
+  org_id: string
+  start_time?: string
+  end_time?: string
+  services?: string
+  deployment_envs?: string
+  fingerprint_hashes?: string
+  exception_types?: string
+  limit?: number
+}
+
+// ---------------------------------------------------------------------------
+// error_issue_timeseries (per-fingerprint occurrence bucket)
+// ---------------------------------------------------------------------------
+
+export interface ErrorIssueTimeseriesOutput {
+  readonly bucket: string
+  readonly count: number
+}
+
+export interface ErrorIssueTimeseriesParams {
+  org_id: string
+  fingerprint_hash: string
+  start_time?: string
+  end_time?: string
+  bucket_seconds?: number
+}
+
+// ---------------------------------------------------------------------------
+// error_issue_sample_traces (recent occurrences for an issue)
+// ---------------------------------------------------------------------------
+
+export interface ErrorIssueSampleTracesOutput {
+  readonly traceId: string
+  readonly spanId: string
+  readonly serviceName: string
+  readonly timestamp: string
+  readonly exceptionMessage: string
+  readonly durationMicros: number
+}
+
+export interface ErrorIssueSampleTracesParams {
+  org_id: string
+  fingerprint_hash: string
+  start_time?: string
+  end_time?: string
+  limit?: number
+}
+
+// ---------------------------------------------------------------------------
 // error_detail_traces
 // ---------------------------------------------------------------------------
 

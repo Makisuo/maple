@@ -240,6 +240,32 @@ export function compilePipeQuery(
         services: str("services")?.split(",").filter(Boolean), limit: int("limit", 10),
       }), { orgId, startTime, endTime })),
     ),
+    Match.when("error_issues", () =>
+      eraseType(CH.compile(CH.errorIssuesQuery({
+        services: str("services")?.split(",").filter(Boolean),
+        deploymentEnvs: str("deployment_envs")?.split(",").filter(Boolean),
+        fingerprintHashes: str("fingerprint_hashes")?.split(",").filter(Boolean),
+        exceptionTypes: str("exception_types")?.split(",").filter(Boolean),
+        limit: int("limit", 50),
+      }), { orgId, startTime, endTime })),
+    ),
+    Match.when("error_issue_timeseries", () =>
+      eraseType(CH.compile(CH.errorIssueTimeseriesQuery(), {
+        orgId,
+        startTime,
+        endTime,
+        fingerprintHash: String(params.fingerprint_hash),
+        bucketSeconds: int("bucket_seconds", 3600)!,
+      })),
+    ),
+    Match.when("error_issue_sample_traces", () =>
+      eraseType(CH.compile(CH.errorIssueSampleTracesQuery({ limit: int("limit", 25) }), {
+        orgId,
+        startTime,
+        endTime,
+        fingerprintHash: String(params.fingerprint_hash),
+      })),
+    ),
     // ----- Metrics -----
     Match.when("list_metrics", () =>
       eraseType(CH.compileUnion(CH.listMetricsQuery({

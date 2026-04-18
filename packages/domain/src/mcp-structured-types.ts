@@ -558,6 +558,52 @@ export interface InspectChartDataData {
   notes: string[]
 }
 
+export interface ErrorIssueRow {
+  id: string
+  fingerprintHash: string
+  status: string
+  serviceName: string
+  exceptionType: string
+  exceptionMessage: string
+  topFrame: string
+  occurrenceCount: number
+  firstSeenAt: string
+  lastSeenAt: string
+  assignedTo: string | null
+  notes: string | null
+  hasOpenIncident: boolean
+}
+
+export interface ListErrorIssuesData {
+  issues: ErrorIssueRow[]
+  total: number
+}
+
+export interface UpdateErrorIssueData {
+  id: string
+  status: string
+  assignedTo: string | null
+  notes: string | null
+  resolvedAt: string | null
+}
+
+export interface ErrorIncidentRow {
+  id: string
+  issueId: string
+  status: string
+  reason: string
+  firstTriggeredAt: string
+  lastTriggeredAt: string
+  resolvedAt: string | null
+  occurrenceCount: number
+}
+
+export interface ListErrorIncidentsData {
+  incidents: ErrorIncidentRow[]
+  total: number
+  openCount: number
+}
+
 export type StructuredToolOutput =
   | { tool: "search_traces"; data: SearchTracesData }
   | { tool: "find_slow_traces"; data: FindSlowTracesData }
@@ -588,3 +634,6 @@ export type StructuredToolOutput =
   | { tool: "get_service_top_operations"; data: GetServiceTopOperationsData }
   | { tool: "get_incident_timeline"; data: GetIncidentTimelineData }
   | { tool: "inspect_chart_data"; data: InspectChartDataData }
+  | { tool: "list_error_issues"; data: ListErrorIssuesData }
+  | { tool: "update_error_issue"; data: UpdateErrorIssueData }
+  | { tool: "list_error_incidents"; data: ListErrorIncidentsData }

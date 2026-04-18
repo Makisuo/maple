@@ -6,6 +6,7 @@ import {
   EdgeCacheService,
   EmailService,
   Env,
+  ErrorsService,
   makeTelemetryLayer,
   OrgTinybirdSettingsService,
   QueryEngineService,
@@ -45,6 +46,10 @@ const buildLayer = (env: Record<string, unknown>) => {
     ),
   )
 
+  const ErrorsServiceLive = ErrorsService.Live.pipe(
+    Layer.provide(Layer.mergeAll(BaseLive, TinybirdServiceLive)),
+  )
+
   const EmailServiceLive = EmailService.Default.pipe(Layer.provide(EnvLive))
 
   const DigestServiceLive = DigestService.Default.pipe(
@@ -55,14 +60,14 @@ const buildLayer = (env: Record<string, unknown>) => {
     Layer.provide(ConfigLive),
   )
 
-  return Layer.mergeAll(AlertsServiceLive, DigestServiceLive).pipe(
+  return Layer.mergeAll(AlertsServiceLive, DigestServiceLive, ErrorsServiceLive).pipe(
     Layer.provideMerge(TelemetryLive),
     Layer.provideMerge(ConfigLive),
   )
 }
 
 type AlertingRuntime = ManagedRuntime.ManagedRuntime<
-  AlertsService | DigestService,
+  AlertsService | DigestService | ErrorsService,
   never
 >
 
@@ -92,6 +97,26 @@ const alertTick = Effect.gen(function* () {
   Effect.withSpan("alerting.scheduler_tick"),
   Effect.catchCause((cause) =>
     Effect.logError("Alerting worker tick failed").pipe(
+      Effect.annotateLogs({ error: Cause.pretty(cause) }),
+    ),
+  ),
+)
+
+const errorTick = Effect.gen(function* () {
+  const errors = yield* ErrorsService
+  const result = yield* errors.runTick()
+  yield* Effect.logInfo("Errors worker tick complete").pipe(
+    Effect.annotateLogs({
+      orgsProcessed: result.orgsProcessed,
+      issuesTouched: result.issuesTouched,
+      incidentsOpened: result.incidentsOpened,
+      incidentsResolved: result.incidentsResolved,
+    }),
+  )
+}).pipe(
+  Effect.withSpan("alerting.error_tick"),
+  Effect.catchCause((cause) =>
+    Effect.logError("Errors worker tick failed").pipe(
       Effect.annotateLogs({ error: Cause.pretty(cause) }),
     ),
   ),
@@ -131,7 +156,10 @@ export default {
     ctx: ExecutionContextLike,
   ): Promise<void> {
     const runtime = getRuntime(env)
-    const program = event.cron === "*/15 * * * *" ? digestTick : alertTick
+    const program =
+      event.cron === "*/15 * * * *"
+        ? digestTick
+        : Effect.all([alertTick, errorTick], { concurrency: 2, discard: true })
     const promise = runtime.runPromise(program)
     ctx.waitUntil(promise)
     await promise

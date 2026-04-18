@@ -222,6 +222,9 @@ export {
   errorsFacetsQuery,
   errorsSummaryQuery,
   errorDetailTracesQuery,
+  errorIssuesQuery,
+  errorIssueTimeseriesQuery,
+  errorIssueSampleTracesQuery,
   type ErrorsByTypeOpts,
   type ErrorsByTypeOutput,
   type ErrorsTimeseriesOpts,
@@ -238,6 +241,10 @@ export {
   type ErrorsSummaryOutput,
   type ErrorDetailTracesOpts,
   type ErrorDetailTracesOutput,
+  type ErrorIssuesOpts,
+  type ErrorIssuesOutput,
+  type ErrorIssueTimeseriesOutput,
+  type ErrorIssueSampleTracesOutput,
 } from "./queries/errors"
 
 // Queries — Service Map

@@ -5,6 +5,7 @@ import { AuthApiGroup, AuthPublicApiGroup } from "./auth";
 import { CloudflareLogpushApiGroup } from "./cloudflare-logpush";
 import { DashboardsApiGroup } from "./dashboards";
 import { DigestApiGroup } from "./digest";
+import { ErrorsApiGroup } from "./errors";
 import { IngestKeysApiGroup } from "./ingest-keys";
 import { ObservabilityApiGroup } from "./observability";
 import { OrgTinybirdSettingsApiGroup } from "./org-tinybird-settings";
@@ -19,6 +20,7 @@ export class MapleApi extends HttpApi.make("MapleApi")
   .add(CloudflareLogpushApiGroup)
   .add(DashboardsApiGroup)
   .add(DigestApiGroup)
+  .add(ErrorsApiGroup)
   .add(IngestKeysApiGroup)
   .add(ObservabilityApiGroup)
   .add(OrgTinybirdSettingsApiGroup)

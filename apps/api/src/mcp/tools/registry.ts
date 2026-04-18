@@ -17,6 +17,9 @@ import { registerInspectTraceTool } from "./inspect-trace"
 import { registerListAlertChecksTool } from "./list-alert-checks"
 import { registerListAlertIncidentsTool } from "./list-alert-incidents"
 import { registerListAlertRulesTool } from "./list-alert-rules"
+import { registerListErrorIncidentsTool } from "./list-error-incidents"
+import { registerListErrorIssuesTool } from "./list-error-issues"
+import { registerUpdateErrorIssueTool } from "./update-error-issue"
 import { registerListDashboardsTool } from "./list-dashboards"
 import { registerListMetricsTool } from "./list-metrics"
 import { registerListServicesTool } from "./list-services"
@@ -86,6 +89,9 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
   registerExploreAttributesTool(registrar)
   registerListServicesTool(registrar)
   registerGetServiceTopOperationsTool(registrar)
+  registerListErrorIssuesTool(registrar)
+  registerUpdateErrorIssueTool(registrar)
+  registerListErrorIncidentsTool(registrar)
 
   return definitions
 }

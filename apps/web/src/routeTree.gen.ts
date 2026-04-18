@@ -35,6 +35,8 @@ import { Route as ErrorsErrorTypeRouteImport } from './routes/errors/$errorType'
 import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards/$dashboardId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
+import { Route as ErrorsIssuesIndexRouteImport } from './routes/errors/issues/index'
+import { Route as ErrorsIssuesIssueIdRouteImport } from './routes/errors/issues/$issueId'
 import { Route as DashboardsDashboardIdWidgetsWidgetIdRouteImport } from './routes/dashboards/$dashboardId_.widgets.$widgetId'
 
 const SignUpRoute = SignUpRouteImport.update({
@@ -167,6 +169,16 @@ const AlertsRuleIdRoute = AlertsRuleIdRouteImport.update({
   path: '/alerts/$ruleId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ErrorsIssuesIndexRoute = ErrorsIssuesIndexRouteImport.update({
+  id: '/errors/issues/',
+  path: '/errors/issues/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ErrorsIssuesIssueIdRoute = ErrorsIssuesIssueIdRouteImport.update({
+  id: '/errors/issues/$issueId',
+  path: '/errors/issues/$issueId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardsDashboardIdWidgetsWidgetIdRoute =
   DashboardsDashboardIdWidgetsWidgetIdRouteImport.update({
     id: '/dashboards/$dashboardId_/widgets/$widgetId',
@@ -201,6 +213,8 @@ export interface FileRoutesByFullPath {
   '/errors/': typeof ErrorsIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
+  '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
+  '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
 }
 export interface FileRoutesByTo {
@@ -230,6 +244,8 @@ export interface FileRoutesByTo {
   '/errors': typeof ErrorsIndexRoute
   '/services': typeof ServicesIndexRoute
   '/traces': typeof TracesIndexRoute
+  '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
+  '/errors/issues': typeof ErrorsIssuesIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
 }
 export interface FileRoutesById {
@@ -260,6 +276,8 @@ export interface FileRoutesById {
   '/errors/': typeof ErrorsIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
+  '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
+  '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/dashboards/$dashboardId_/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
 }
 export interface FileRouteTypes {
@@ -291,6 +309,8 @@ export interface FileRouteTypes {
     | '/errors/'
     | '/services/'
     | '/traces/'
+    | '/errors/issues/$issueId'
+    | '/errors/issues/'
     | '/dashboards/$dashboardId/widgets/$widgetId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -320,6 +340,8 @@ export interface FileRouteTypes {
     | '/errors'
     | '/services'
     | '/traces'
+    | '/errors/issues/$issueId'
+    | '/errors/issues'
     | '/dashboards/$dashboardId/widgets/$widgetId'
   id:
     | '__root__'
@@ -349,6 +371,8 @@ export interface FileRouteTypes {
     | '/errors/'
     | '/services/'
     | '/traces/'
+    | '/errors/issues/$issueId'
+    | '/errors/issues/'
     | '/dashboards/$dashboardId_/widgets/$widgetId'
   fileRoutesById: FileRoutesById
 }
@@ -379,6 +403,8 @@ export interface RootRouteChildren {
   ErrorsIndexRoute: typeof ErrorsIndexRoute
   ServicesIndexRoute: typeof ServicesIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
+  ErrorsIssuesIssueIdRoute: typeof ErrorsIssuesIssueIdRoute
+  ErrorsIssuesIndexRoute: typeof ErrorsIssuesIndexRoute
   DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute
 }
 
@@ -566,6 +592,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AlertsRuleIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/errors/issues/': {
+      id: '/errors/issues/'
+      path: '/errors/issues'
+      fullPath: '/errors/issues/'
+      preLoaderRoute: typeof ErrorsIssuesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/errors/issues/$issueId': {
+      id: '/errors/issues/$issueId'
+      path: '/errors/issues/$issueId'
+      fullPath: '/errors/issues/$issueId'
+      preLoaderRoute: typeof ErrorsIssuesIssueIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboards/$dashboardId_/widgets/$widgetId': {
       id: '/dashboards/$dashboardId_/widgets/$widgetId'
       path: '/dashboards/$dashboardId/widgets/$widgetId'
@@ -603,6 +643,8 @@ const rootRouteChildren: RootRouteChildren = {
   ErrorsIndexRoute: ErrorsIndexRoute,
   ServicesIndexRoute: ServicesIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
+  ErrorsIssuesIssueIdRoute: ErrorsIssuesIssueIdRoute,
+  ErrorsIssuesIndexRoute: ErrorsIssuesIndexRoute,
   DashboardsDashboardIdWidgetsWidgetIdRoute:
     DashboardsDashboardIdWidgetsWidgetIdRoute,
 }

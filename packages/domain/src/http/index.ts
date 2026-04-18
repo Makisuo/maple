@@ -6,6 +6,7 @@ export * from "./cloudflare-logpush";
 export * as CurrentTenant from "./current-tenant";
 export * from "./dashboards";
 export * from "./digest";
+export * from "./errors";
 export * from "./ingest-keys";
 export * from "./org-tinybird-settings";
 export * from "../primitives";

@@ -6,6 +6,7 @@ import {
   serviceMapEdgesHourly,
   serviceOverviewSpans,
   errorSpans,
+  errorEvents,
   traceDetailSpans,
   traceListMv,
   attributeKeysHourly,
@@ -404,6 +405,54 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
           StatusMessage,
           Duration,
           ResourceAttributes['deployment.environment'] AS DeploymentEnv
+        FROM traces
+        WHERE StatusCode = 'Error'
+      `,
+    }),
+  ],
+});
+
+/**
+ * Materialized view populating error_events from traces where StatusCode='Error'.
+ * Unwraps the first OTel `exception` event in EventsAttributes to surface
+ * exception.type / exception.message / exception.stacktrace as flat columns,
+ * normalizes the top stack frame, and computes a cityHash64 fingerprint used
+ * to group occurrences into Issues. Falls back to StatusMessage when no
+ * exception event is present (legacy / non-semantic spans).
+ */
+export const errorEventsMv = defineMaterializedView("error_events_mv", {
+  description:
+    "Materializes per-occurrence error events from traces. Unwraps the first OTel exception event and computes a cityHash64 FingerprintHash for issue grouping.",
+  datasource: errorEvents,
+  nodes: [
+    node({
+      name: "error_events_mv_node",
+      sql: `
+        WITH
+          arrayFirstIndex(n -> n = 'exception', EventsName) AS _ei,
+          if(_ei > 0, EventsAttributes[_ei]['exception.type'], '') AS _exType,
+          if(_ei > 0, EventsAttributes[_ei]['exception.message'], StatusMessage) AS _exMsg,
+          if(_ei > 0, EventsAttributes[_ei]['exception.stacktrace'], '') AS _exStack,
+          replaceRegexpAll(
+            splitByChar('\\n', _exStack)[1],
+            ':[0-9]+|0x[0-9a-fA-F]+',
+            ''
+          ) AS _topFrame
+        SELECT
+          OrgId,
+          toDateTime(Timestamp) AS Timestamp,
+          TraceId,
+          SpanId,
+          ParentSpanId,
+          ServiceName,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          _exType AS ExceptionType,
+          _exMsg AS ExceptionMessage,
+          _exStack AS ExceptionStacktrace,
+          _topFrame AS TopFrame,
+          cityHash64(OrgId, ServiceName, _exType, _topFrame) AS FingerprintHash,
+          StatusMessage,
+          Duration
         FROM traces
         WHERE StatusCode = 'Error'
       `,
