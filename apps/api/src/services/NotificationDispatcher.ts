@@ -9,48 +9,20 @@ import {
   type OrgId,
 } from "@maple/domain/http"
 import { and, eq, inArray } from "drizzle-orm"
-import { Context, Effect, Layer, Redacted, Schema } from "effect"
+import { Context, Effect, Layer, Redacted } from "effect"
 import {
   dispatchDelivery as dispatchDeliveryImpl,
   type DispatchContext,
 } from "./AlertDeliveryDispatch"
-import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "./Crypto"
+import { hydrateDestinationRow } from "./AlertDestinationHydration"
+import { parseBase64Aes256GcmKey } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
 
 /*
  * Shared notification dispatch for alert-adjacent features (error issues /
- * incidents). Mirrors the minimal slice of AlertsService we need: load
- * destinations by id, decrypt secrets, dispatch a single synchronous event.
- *
- * Failures are logged and swallowed — the caller must remain a best-effort
- * side channel. A dedicated delivery-event table / retry queue can be
- * layered on later.
+ * incidents). Best-effort side channel: failures are logged and swallowed.
  */
-
-const DestinationSecretConfigSchema = Schema.Union([
-  Schema.Struct({
-    type: Schema.Literal("slack"),
-    webhookUrl: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("pagerduty"),
-    integrationKey: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("webhook"),
-    url: Schema.String,
-    signingSecret: Schema.NullOr(Schema.String),
-  }),
-])
-
-const DestinationPublicConfigSchema = Schema.Struct({
-  summary: Schema.String,
-  channelLabel: Schema.NullOr(Schema.String),
-})
-
-const SecretConfigFromJson = Schema.fromJsonString(DestinationSecretConfigSchema)
-const PublicConfigFromJson = Schema.fromJsonString(DestinationPublicConfigSchema)
 
 const DELIVERY_TIMEOUT_MS = 15_000
 
@@ -94,29 +66,16 @@ export class NotificationDispatcher extends Context.Service<
       (message) => new Error(message),
     )
 
-    const hydrate = (row: AlertDestinationRow) =>
-      Effect.gen(function* () {
-        const publicConfig = yield* Schema.decodeUnknownEffect(PublicConfigFromJson)(
-          row.configJson,
-        )
-        const secretJson = yield* decryptAes256Gcm(
-          {
-            ciphertext: row.secretCiphertext,
-            iv: row.secretIv,
-            tag: row.secretTag,
-          },
-          encryptionKey,
-          () => new Error("Failed to decrypt destination secret"),
-        )
-        const secretConfig = yield* Schema.decodeUnknownEffect(SecretConfigFromJson)(
-          secretJson,
-        )
-        return { publicConfig, secretConfig } as const
-      })
-
     const dispatchOne = (row: AlertDestinationRow, request: NotificationRequest) =>
       Effect.gen(function* () {
-        const hydrated = yield* hydrate(row)
+        const hydrated = yield* hydrateDestinationRow(row, encryptionKey, {
+          onPublicConfigInvalid: () =>
+            new Error("Stored destination config is invalid"),
+          onDecryptFailure: () =>
+            new Error("Failed to decrypt destination secret"),
+          onSecretConfigInvalid: () =>
+            new Error("Stored destination secret is invalid"),
+        })
         const context: DispatchContext = {
           destination: row,
           publicConfig: hydrated.publicConfig,
