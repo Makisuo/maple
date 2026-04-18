@@ -31,11 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@maple/ui/components/ui/table"
-import {
-  ErrorIssueId,
-  type ErrorIssueDocument,
-  type WorkflowState,
-} from "@maple/domain/http"
+import { ErrorIssueId, type WorkflowState } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeSync(ErrorIssueId)
 
@@ -225,16 +221,6 @@ function IssueDetailPage() {
     } else {
       toast.error("Comment failed")
     }
-  }
-
-  const commitNotes = async (issue: ErrorIssueDocument) => {
-    const next = notesDraft.trim()
-    if (next === (issue.notes ?? "")) return
-    // Notes are carried on the issue document; submit via a no-op transition to
-    // the same state so the service persists them on the row. For v1 we don't
-    // expose a dedicated edit endpoint — transitions are the primary write path.
-    // For now, notes are read-only without a dedicated mutation; surface a hint.
-    toast.message("Notes editing will be wired up next")
   }
 
   const breadcrumbsLoading = [
