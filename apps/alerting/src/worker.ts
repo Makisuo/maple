@@ -111,6 +111,10 @@ const errorTick = Effect.gen(function* () {
       issuesTouched: result.issuesTouched,
       incidentsOpened: result.incidentsOpened,
       incidentsResolved: result.incidentsResolved,
+      issuesReopened: result.issuesReopened,
+      issuesArchived: result.issuesArchived,
+      issuesDeleted: result.issuesDeleted,
+      retentionRan: result.retentionRan,
     }),
   )
 }).pipe(

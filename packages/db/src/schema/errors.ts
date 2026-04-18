@@ -97,6 +97,36 @@ export const errorIncidents = sqliteTable(
   ],
 )
 
+/**
+ * Per-org policy controlling which alert destinations receive error
+ * notifications and under what conditions. Referenced by the scheduled
+ * error tick when it opens or auto-resolves incidents.
+ */
+export const errorNotificationPolicies = sqliteTable(
+  "error_notification_policies",
+  {
+    orgId: text("org_id").notNull().primaryKey(),
+    enabled: integer("enabled", { mode: "number" }).notNull().default(1),
+    destinationIdsJson: text("destination_ids_json").notNull().default("[]"),
+    notifyOnFirstSeen: integer("notify_on_first_seen", { mode: "number" })
+      .notNull()
+      .default(1),
+    notifyOnRegression: integer("notify_on_regression", { mode: "number" })
+      .notNull()
+      .default(1),
+    notifyOnResolve: integer("notify_on_resolve", { mode: "number" })
+      .notNull()
+      .default(0),
+    minOccurrenceCount: integer("min_occurrence_count", { mode: "number" })
+      .notNull()
+      .default(1),
+    severity: text("severity").notNull().default("warning"),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+    updatedBy: text("updated_by").notNull(),
+  },
+)
+
 export type ErrorIssueRow = typeof errorIssues.$inferSelect
 export type ErrorIssueStateRow = typeof errorIssueStates.$inferSelect
 export type ErrorIncidentRow = typeof errorIncidents.$inferSelect
+export type ErrorNotificationPolicyRow = typeof errorNotificationPolicies.$inferSelect

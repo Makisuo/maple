@@ -15,6 +15,13 @@
       "when": 1776509229669,
       "tag": "0001_errors",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776552337819,
+      "tag": "0002_ancient_ken_ellis",
+      "breakpoints": true
     }
   ]
 }

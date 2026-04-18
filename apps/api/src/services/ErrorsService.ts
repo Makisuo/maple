@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
 import {
+  type AlertDestinationId,
+  type AlertSeverity,
   ErrorIncidentDocument,
   ErrorIncidentsListResponse,
   type ErrorIncidentReason,
@@ -11,6 +13,8 @@ import {
   ErrorIssuesListResponse,
   type ErrorIssueStatus,
   ErrorIssueTimeseriesPoint,
+  ErrorNotificationPolicyDocument,
+  type ErrorNotificationPolicyUpsertRequest,
   ErrorPersistenceError,
   ErrorValidationError,
   type OrgId,
@@ -23,11 +27,15 @@ import {
   errorIssues,
   type ErrorIssueRow,
   errorIssueStates,
+  errorNotificationPolicies,
+  type ErrorNotificationPolicyRow,
 } from "@maple/db"
 import { and, desc, eq, gt, inArray, isNotNull, lt, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
-import { Database, type DatabaseClient } from "./DatabaseLive"
+import { Database, DatabaseError, type DatabaseClient } from "./DatabaseLive"
+import { Env } from "./Env"
+import { NotificationDispatcher } from "./NotificationDispatcher"
 import { TinybirdService } from "./TinybirdService"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
@@ -41,6 +49,11 @@ const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const DEFAULT_LIST_WINDOW_MS = 24 * 60 * 60 * 1000
 const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
 const AUTO_RESOLVE_MINUTES = 30
+const TICK_WINDOW_MS = 2 * 60_000
+const RESOLVED_RETENTION_DAYS = 14
+const ARCHIVED_RETENTION_DAYS = 90
+const RETENTION_PHASE_EVERY_N_TICKS = 30
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface ErrorsServiceShape {
   readonly listIssues: (
@@ -91,8 +104,28 @@ export interface ErrorsServiceShape {
   readonly listOpenIncidents: (
     orgId: OrgId,
   ) => Effect.Effect<ErrorIncidentsListResponse, ErrorPersistenceError>
+  readonly getNotificationPolicy: (
+    orgId: OrgId,
+  ) => Effect.Effect<ErrorNotificationPolicyDocument, ErrorPersistenceError>
+  readonly upsertNotificationPolicy: (
+    orgId: OrgId,
+    userId: string,
+    request: ErrorNotificationPolicyUpsertRequest,
+  ) => Effect.Effect<
+    ErrorNotificationPolicyDocument,
+    ErrorPersistenceError | ErrorValidationError
+  >
   readonly runTick: () => Effect.Effect<
-    { readonly orgsProcessed: number; readonly issuesTouched: number; readonly incidentsOpened: number; readonly incidentsResolved: number },
+    {
+      readonly orgsProcessed: number
+      readonly issuesTouched: number
+      readonly incidentsOpened: number
+      readonly incidentsResolved: number
+      readonly issuesReopened: number
+      readonly issuesArchived: number
+      readonly issuesDeleted: number
+      readonly retentionRan: boolean
+    },
     ErrorPersistenceError
   >
 }
@@ -103,17 +136,54 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
     make: Effect.gen(function* () {
       const database = yield* Database
       const tinybird = yield* TinybirdService
+      const env = yield* Env
+      const dispatcher = yield* NotificationDispatcher
 
       const now = () => Date.now()
       const makeUuid = () => randomUUID()
 
-      const makePersistenceError = (error: unknown) =>
-        new ErrorPersistenceError({
-          message: error instanceof Error ? error.message : "Error persistence failure",
+      const describeCause = (cause: unknown): string | undefined => {
+        if (cause == null) return undefined
+        if (cause instanceof Error) return cause.stack ?? cause.message
+        if (typeof cause === "string") return cause
+        try {
+          return JSON.stringify(cause)
+        } catch {
+          return String(cause)
+        }
+      }
+
+      const makePersistenceError = (error: unknown) => {
+        if (error instanceof DatabaseError) {
+          return new ErrorPersistenceError({
+            message: error.message,
+            cause: describeCause(error.cause),
+          })
+        }
+        if (error instanceof Error) {
+          return new ErrorPersistenceError({
+            message: error.message,
+            cause: describeCause(error.cause),
+          })
+        }
+        return new ErrorPersistenceError({
+          message: "Error persistence failure",
+          cause: describeCause(error),
         })
+      }
 
       const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-        database.execute(fn).pipe(Effect.mapError(makePersistenceError))
+        database.execute(fn).pipe(
+          Effect.tapError((error) =>
+            Effect.logError("ErrorsService dbExecute failed").pipe(
+              Effect.annotateLogs({
+                message: error.message,
+                cause: describeCause(error.cause) ?? "(none)",
+              }),
+            ),
+          ),
+          Effect.mapError(makePersistenceError),
+        )
 
       const toTinybirdDateTime = (epochMs: number) =>
         new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
@@ -466,13 +536,259 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
         })
 
       // -----------------------------------------------------------------
+      // Notification policy (per-org) controlling incident delivery.
+      // -----------------------------------------------------------------
+
+      const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(
+        ErrorNotificationPolicyDocument.fields.destinationIds,
+      )
+
+      const defaultPolicy = (orgId: OrgId, timestamp: number): ErrorNotificationPolicyRow => ({
+        orgId,
+        enabled: 0,
+        destinationIdsJson: "[]",
+        notifyOnFirstSeen: 1,
+        notifyOnRegression: 1,
+        notifyOnResolve: 0,
+        minOccurrenceCount: 1,
+        severity: "warning",
+        updatedAt: timestamp,
+        updatedBy: "system",
+      })
+
+      const parsePolicyDestinations = (raw: string): ReadonlyArray<AlertDestinationId> => {
+        try {
+          const parsed = JSON.parse(raw)
+          if (!Array.isArray(parsed)) return []
+          return decodeAlertDestinationIdSync(parsed.filter((v) => typeof v === "string"))
+        } catch {
+          return []
+        }
+      }
+
+      const rowToPolicy = (row: ErrorNotificationPolicyRow) =>
+        new ErrorNotificationPolicyDocument({
+          enabled: row.enabled === 1,
+          destinationIds: parsePolicyDestinations(row.destinationIdsJson),
+          notifyOnFirstSeen: row.notifyOnFirstSeen === 1,
+          notifyOnRegression: row.notifyOnRegression === 1,
+          notifyOnResolve: row.notifyOnResolve === 1,
+          minOccurrenceCount: row.minOccurrenceCount,
+          severity: row.severity as AlertSeverity,
+          updatedAt: decodeIsoDateTimeStringSync(new Date(row.updatedAt).toISOString()),
+          updatedBy: row.updatedBy,
+        })
+
+      const loadPolicyRow = (orgId: OrgId) =>
+        Effect.gen(function* () {
+          const rows = yield* dbExecute((db) =>
+            db
+              .select()
+              .from(errorNotificationPolicies)
+              .where(eq(errorNotificationPolicies.orgId, orgId))
+              .limit(1),
+          )
+          return rows[0] ?? null
+        })
+
+      const getNotificationPolicy: ErrorsServiceShape["getNotificationPolicy"] = (orgId) =>
+        Effect.gen(function* () {
+          const row = yield* loadPolicyRow(orgId)
+          return rowToPolicy(row ?? defaultPolicy(orgId, now()))
+        })
+
+      const upsertNotificationPolicy: ErrorsServiceShape["upsertNotificationPolicy"] = (
+        orgId,
+        userId,
+        request,
+      ) =>
+        Effect.gen(function* () {
+          const existing = yield* loadPolicyRow(orgId)
+          const base = existing ?? defaultPolicy(orgId, now())
+          const timestamp = now()
+
+          const nextDestinations =
+            request.destinationIds !== undefined
+              ? JSON.stringify(request.destinationIds)
+              : base.destinationIdsJson
+
+          const merged: ErrorNotificationPolicyRow = {
+            orgId,
+            enabled: request.enabled !== undefined ? (request.enabled ? 1 : 0) : base.enabled,
+            destinationIdsJson: nextDestinations,
+            notifyOnFirstSeen:
+              request.notifyOnFirstSeen !== undefined
+                ? request.notifyOnFirstSeen
+                  ? 1
+                  : 0
+                : base.notifyOnFirstSeen,
+            notifyOnRegression:
+              request.notifyOnRegression !== undefined
+                ? request.notifyOnRegression
+                  ? 1
+                  : 0
+                : base.notifyOnRegression,
+            notifyOnResolve:
+              request.notifyOnResolve !== undefined
+                ? request.notifyOnResolve
+                  ? 1
+                  : 0
+                : base.notifyOnResolve,
+            minOccurrenceCount:
+              request.minOccurrenceCount !== undefined
+                ? request.minOccurrenceCount
+                : base.minOccurrenceCount,
+            severity: request.severity !== undefined ? request.severity : base.severity,
+            updatedAt: timestamp,
+            updatedBy: userId,
+          }
+
+          yield* dbExecute((db) =>
+            db
+              .insert(errorNotificationPolicies)
+              .values(merged)
+              .onConflictDoUpdate({
+                target: errorNotificationPolicies.orgId,
+                set: {
+                  enabled: merged.enabled,
+                  destinationIdsJson: merged.destinationIdsJson,
+                  notifyOnFirstSeen: merged.notifyOnFirstSeen,
+                  notifyOnRegression: merged.notifyOnRegression,
+                  notifyOnResolve: merged.notifyOnResolve,
+                  minOccurrenceCount: merged.minOccurrenceCount,
+                  severity: merged.severity,
+                  updatedAt: merged.updatedAt,
+                  updatedBy: merged.updatedBy,
+                },
+              }),
+          )
+
+          return rowToPolicy(merged)
+        })
+
+      const issueLinkUrl = (issueId: string) =>
+        `${env.MAPLE_APP_BASE_URL}/errors/issues/${encodeURIComponent(issueId)}`
+
+      const notifyIncidentOpened = (
+        orgId: OrgId,
+        policy: ErrorNotificationPolicyRow,
+        params: {
+          readonly issueId: string
+          readonly incidentId: string
+          readonly reason: ErrorIncidentReason
+          readonly serviceName: string
+          readonly exceptionType: string
+          readonly count: number
+        },
+      ) => {
+        if (policy.enabled !== 1) return Effect.void
+        if (params.count < policy.minOccurrenceCount) return Effect.void
+        if (params.reason === "first_seen" && policy.notifyOnFirstSeen !== 1) return Effect.void
+        if (params.reason === "regression" && policy.notifyOnRegression !== 1) return Effect.void
+
+        const destinationIds = parsePolicyDestinations(policy.destinationIdsJson)
+        if (destinationIds.length === 0) return Effect.void
+
+        return dispatcher
+          .dispatch(orgId, destinationIds, {
+            deliveryKey: `err:${orgId}:${params.incidentId}:open`,
+            ruleId: params.issueId,
+            ruleName: `${params.exceptionType} in ${params.serviceName}`,
+            groupKey: params.serviceName,
+            signalType: "error_rate",
+            severity: policy.severity as AlertSeverity,
+            comparator: "gte",
+            threshold: policy.minOccurrenceCount,
+            eventType: "trigger",
+            incidentId: params.incidentId,
+            incidentStatus: "open",
+            dedupeKey: `error:${orgId}:${params.issueId}`,
+            windowMinutes: 2,
+            value: params.count,
+            sampleCount: params.count,
+            linkUrl: issueLinkUrl(params.issueId),
+          })
+          .pipe(Effect.asVoid)
+      }
+
+      const notifyIncidentResolved = (
+        orgId: OrgId,
+        policy: ErrorNotificationPolicyRow,
+        params: {
+          readonly issueId: string
+          readonly incidentId: string
+          readonly serviceName: string
+          readonly exceptionType: string
+          readonly occurrenceCount: number
+        },
+      ) => {
+        if (policy.enabled !== 1) return Effect.void
+        if (policy.notifyOnResolve !== 1) return Effect.void
+
+        const destinationIds = parsePolicyDestinations(policy.destinationIdsJson)
+        if (destinationIds.length === 0) return Effect.void
+
+        return dispatcher
+          .dispatch(orgId, destinationIds, {
+            deliveryKey: `err:${orgId}:${params.incidentId}:resolve`,
+            ruleId: params.issueId,
+            ruleName: `${params.exceptionType} in ${params.serviceName}`,
+            groupKey: params.serviceName,
+            signalType: "error_rate",
+            severity: policy.severity as AlertSeverity,
+            comparator: "gte",
+            threshold: policy.minOccurrenceCount,
+            eventType: "resolve",
+            incidentId: params.incidentId,
+            incidentStatus: "resolved",
+            dedupeKey: `error:${orgId}:${params.issueId}`,
+            windowMinutes: 2,
+            value: params.occurrenceCount,
+            sampleCount: params.occurrenceCount,
+            linkUrl: issueLinkUrl(params.issueId),
+          })
+          .pipe(Effect.asVoid)
+      }
+
+      // -----------------------------------------------------------------
       // Scheduled tick: scan error_events for new fingerprints, upsert
       // issues, open/resolve incidents, auto-resolve silent ones.
       // -----------------------------------------------------------------
 
-      const processOrg = (orgId: OrgId, windowStartMs: number, windowEndMs: number) =>
+      const processOrg = (
+        orgId: OrgId,
+        windowStartMs: number,
+        windowEndMs: number,
+        runRetention: boolean,
+      ) =>
         Effect.gen(function* () {
           const tenant = systemTenant(orgId)
+          const policy =
+            (yield* loadPolicyRow(orgId)) ?? defaultPolicy(orgId, windowEndMs)
+
+          // Re-open ignored issues whose silence window has expired, so that
+          // any new events observed in this tick are treated as regressions
+          // rather than skipped by the early-continue below.
+          const reopened = yield* dbExecute((db) =>
+            db
+              .update(errorIssues)
+              .set({
+                status: "open",
+                ignoredUntil: null,
+                updatedAt: windowEndMs,
+              })
+              .where(
+                and(
+                  eq(errorIssues.orgId, orgId),
+                  eq(errorIssues.status, "ignored"),
+                  isNotNull(errorIssues.ignoredUntil),
+                  lt(errorIssues.ignoredUntil, windowEndMs),
+                ),
+              )
+              .returning({ id: errorIssues.id }),
+          )
+          const issuesReopened = reopened.length
+
           const resp = yield* tinybird
             .query(tenant, {
               pipe: "error_issues",
@@ -629,6 +945,15 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
                     },
                   }),
               )
+
+              yield* notifyIncidentOpened(orgId, policy, {
+                issueId,
+                incidentId,
+                reason,
+                serviceName: row.serviceName,
+                exceptionType: row.exceptionType,
+                count: row.count,
+              })
             } else {
               // Update existing open incident with latest activity
               yield* dbExecute((db) =>
@@ -698,9 +1023,120 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
                 ),
             )
             incidentsResolved += 1
+
+            if (policy.enabled === 1 && policy.notifyOnResolve === 1) {
+              const issueRows = yield* dbExecute((db) =>
+                db
+                  .select({
+                    serviceName: errorIssues.serviceName,
+                    exceptionType: errorIssues.exceptionType,
+                  })
+                  .from(errorIssues)
+                  .where(
+                    and(
+                      eq(errorIssues.orgId, orgId),
+                      eq(errorIssues.id, incident.issueId),
+                    ),
+                  )
+                  .limit(1),
+              )
+              const issueRow = issueRows[0]
+              if (issueRow) {
+                yield* notifyIncidentResolved(orgId, policy, {
+                  issueId: incident.issueId,
+                  incidentId: incident.id,
+                  serviceName: issueRow.serviceName,
+                  exceptionType: issueRow.exceptionType,
+                  occurrenceCount: incident.occurrenceCount,
+                })
+              }
+            }
           }
 
-          return { issuesTouched, incidentsOpened, incidentsResolved }
+          let issuesArchived = 0
+          let issuesDeleted = 0
+
+          if (runRetention) {
+            // Archive resolved issues that have sat resolved beyond the
+            // retention window. They stay in the table (for history) but
+            // fall out of the default list views.
+            const resolvedCutoff = windowEndMs - RESOLVED_RETENTION_DAYS * DAY_MS
+            const archivedRows = yield* dbExecute((db) =>
+              db
+                .update(errorIssues)
+                .set({ status: "archived", updatedAt: windowEndMs })
+                .where(
+                  and(
+                    eq(errorIssues.orgId, orgId),
+                    eq(errorIssues.status, "resolved"),
+                    isNotNull(errorIssues.resolvedAt),
+                    lt(errorIssues.resolvedAt, resolvedCutoff),
+                  ),
+                )
+                .returning({ id: errorIssues.id }),
+            )
+            issuesArchived = archivedRows.length
+
+            // Purge archived issues older than the hard retention window,
+            // along with their incidents and state rows.
+            const archivedCutoff = windowEndMs - ARCHIVED_RETENTION_DAYS * DAY_MS
+            const toDelete = yield* dbExecute((db) =>
+              db
+                .select({ id: errorIssues.id })
+                .from(errorIssues)
+                .where(
+                  and(
+                    eq(errorIssues.orgId, orgId),
+                    eq(errorIssues.status, "archived"),
+                    lt(errorIssues.updatedAt, archivedCutoff),
+                  ),
+                )
+                .limit(500),
+            )
+            if (toDelete.length > 0) {
+              const ids = toDelete.map((r) => r.id)
+              yield* dbExecute((db) =>
+                db
+                  .delete(errorIncidents)
+                  .where(
+                    and(
+                      eq(errorIncidents.orgId, orgId),
+                      inArray(errorIncidents.issueId, ids),
+                    ),
+                  ),
+              )
+              yield* dbExecute((db) =>
+                db
+                  .delete(errorIssueStates)
+                  .where(
+                    and(
+                      eq(errorIssueStates.orgId, orgId),
+                      inArray(errorIssueStates.issueId, ids),
+                    ),
+                  ),
+              )
+              yield* dbExecute((db) =>
+                db
+                  .delete(errorIssues)
+                  .where(
+                    and(
+                      eq(errorIssues.orgId, orgId),
+                      inArray(errorIssues.id, ids),
+                    ),
+                  ),
+              )
+              issuesDeleted = ids.length
+            }
+          }
+
+          return {
+            issuesTouched,
+            incidentsOpened,
+            incidentsResolved,
+            issuesReopened,
+            issuesArchived,
+            issuesDeleted,
+          }
         })
 
       const runTick: ErrorsServiceShape["runTick"] = () =>
@@ -708,7 +1144,13 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           const endMs = now()
           // Default tick window = last 2 minutes. Re-processing of the same
           // fingerprint is idempotent (upsert semantics).
-          const startMs = endMs - 2 * 60_000
+          const startMs = endMs - TICK_WINDOW_MS
+
+          // Retention is expensive; only run it every N ticks (≈ hourly at
+          // the default 2-minute cadence). Deterministic gate so multiple
+          // workers don't stampede.
+          const retentionRan =
+            Math.floor(endMs / TICK_WINDOW_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
 
           // Discover orgs with activity in the window via state table + issues
           // table. First-time orgs come in via a lightweight distinct scan.
@@ -731,24 +1173,48 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           let issuesTouched = 0
           let incidentsOpened = 0
           let incidentsResolved = 0
+          let issuesReopened = 0
+          let issuesArchived = 0
+          let issuesDeleted = 0
+
+          const emptyResult = {
+            issuesTouched: 0,
+            incidentsOpened: 0,
+            incidentsResolved: 0,
+            issuesReopened: 0,
+            issuesArchived: 0,
+            issuesDeleted: 0,
+          }
 
           for (const org of knownOrgs) {
-            const result = yield* processOrg(org as OrgId, startMs, endMs).pipe(
+            const result = yield* processOrg(
+              org as OrgId,
+              startMs,
+              endMs,
+              retentionRan,
+            ).pipe(
               Effect.catch((error) =>
                 Effect.gen(function* () {
                   yield* Effect.logError("Error tick failed for org").pipe(
                     Effect.annotateLogs({
                       orgId: org,
                       error: error instanceof Error ? error.message : String(error),
+                      cause:
+                        error instanceof ErrorPersistenceError && error.cause
+                          ? error.cause
+                          : undefined,
                     }),
                   )
-                  return { issuesTouched: 0, incidentsOpened: 0, incidentsResolved: 0 }
+                  return emptyResult
                 }),
               ),
             )
             issuesTouched += result.issuesTouched
             incidentsOpened += result.incidentsOpened
             incidentsResolved += result.incidentsResolved
+            issuesReopened += result.issuesReopened
+            issuesArchived += result.issuesArchived
+            issuesDeleted += result.issuesDeleted
           }
 
           return {
@@ -756,6 +1222,10 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             issuesTouched,
             incidentsOpened,
             incidentsResolved,
+            issuesReopened,
+            issuesArchived,
+            issuesDeleted,
+            retentionRan,
           }
         })
 
@@ -765,6 +1235,8 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
         updateIssue,
         listIssueIncidents,
         listOpenIncidents,
+        getNotificationPolicy,
+        upsertNotificationPolicy,
         runTick,
       } satisfies ErrorsServiceShape
     }),

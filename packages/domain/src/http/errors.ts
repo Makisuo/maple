@@ -1,11 +1,13 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import {
+  AlertDestinationId,
   ErrorIncidentId,
   ErrorIssueId,
   IsoDateTimeString,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { AlertSeverity } from "./alerts"
 
 export const ErrorIssueStatus = Schema.Literals([
   "open",
@@ -116,6 +118,34 @@ export class ErrorIssueUpdateRequest extends Schema.Class<ErrorIssueUpdateReques
   ignoredUntil: Schema.optionalKey(Schema.NullOr(IsoDateTimeString)),
 }) {}
 
+export class ErrorNotificationPolicyDocument extends Schema.Class<ErrorNotificationPolicyDocument>(
+  "ErrorNotificationPolicyDocument",
+)({
+  enabled: Schema.Boolean,
+  destinationIds: Schema.Array(AlertDestinationId),
+  notifyOnFirstSeen: Schema.Boolean,
+  notifyOnRegression: Schema.Boolean,
+  notifyOnResolve: Schema.Boolean,
+  minOccurrenceCount: Schema.Number,
+  severity: AlertSeverity,
+  updatedAt: IsoDateTimeString,
+  updatedBy: Schema.String,
+}) {}
+
+export class ErrorNotificationPolicyUpsertRequest extends Schema.Class<ErrorNotificationPolicyUpsertRequest>(
+  "ErrorNotificationPolicyUpsertRequest",
+)({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  destinationIds: Schema.optionalKey(Schema.Array(AlertDestinationId)),
+  notifyOnFirstSeen: Schema.optionalKey(Schema.Boolean),
+  notifyOnRegression: Schema.optionalKey(Schema.Boolean),
+  notifyOnResolve: Schema.optionalKey(Schema.Boolean),
+  minOccurrenceCount: Schema.optionalKey(
+    Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100_000 })),
+  ),
+  severity: Schema.optionalKey(AlertSeverity),
+}) {}
+
 const IssueListQuery = Schema.Struct({
   status: Schema.optional(ErrorIssueStatus),
   service: Schema.optional(Schema.String),
@@ -149,7 +179,10 @@ const IssueDetailQuery = Schema.Struct({
 
 export class ErrorPersistenceError extends Schema.TaggedErrorClass<ErrorPersistenceError>()(
   "@maple/http/errors/ErrorPersistenceError",
-  { message: Schema.String },
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.String),
+  },
   { httpApiStatus: 503 },
 ) {}
 
@@ -207,6 +240,19 @@ export class ErrorsApiGroup extends HttpApiGroup.make("errors")
     HttpApiEndpoint.get("listOpenIncidents", "/incidents", {
       success: ErrorIncidentsListResponse,
       error: ErrorPersistenceError,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("getNotificationPolicy", "/policy", {
+      success: ErrorNotificationPolicyDocument,
+      error: ErrorPersistenceError,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.put("upsertNotificationPolicy", "/policy", {
+      payload: ErrorNotificationPolicyUpsertRequest,
+      success: ErrorNotificationPolicyDocument,
+      error: [ErrorPersistenceError, ErrorValidationError],
     }),
   )
   .prefix("/api/errors")
