@@ -1,5 +1,5 @@
 import { ConfigProvider, FileSystem, Layer, Path } from "effect"
-import { HttpRouter } from "effect/unstable/http"
+import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
@@ -35,6 +35,13 @@ const WorkerPlatformLive = Layer.mergeAll(
   WorkerHttpPlatformLive,
 )
 
+// POST /mcp hangs indefinitely when `toWebHandler` is called with no `middleware`
+// option (Cloudflare 1101 worker timeout in prod, miniflare "worker hung" locally).
+// Providing ANY middleware — even a pass-through — unsticks it. Suspected Effect
+// RpcServer / HttpRouter scope-propagation bug when only the default logger is
+// installed. Remove this once upstream fixes it.
+const passthroughMiddleware = HttpMiddleware.make((httpApp) => httpApp)
+
 const buildHandler = (env: Record<string, unknown>) =>
   HttpRouter.toWebHandler(
     AllRoutes.pipe(
@@ -50,6 +57,7 @@ const buildHandler = (env: Record<string, unknown>) =>
         ConfigProvider.layer(ConfigProvider.fromUnknown(env)),
       ),
     ),
+    { middleware: passthroughMiddleware },
   )
 
 const handlerCache = new WeakMap<object, ReturnType<typeof buildHandler>>()
@@ -65,6 +73,7 @@ const getHandler = (env: Record<string, unknown>) => {
 
 export default {
   fetch(request: Request, env: Record<string, unknown>) {
-    return getHandler(env).handler(request as unknown as globalThis.Request)
+    const handler = getHandler(env).handler as (req: globalThis.Request) => Promise<Response>
+    return handler(request as unknown as globalThis.Request)
   },
 }
