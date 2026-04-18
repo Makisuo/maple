@@ -1,7 +1,6 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { Effect, Option, Redacted } from "effect"
 import { autumnHandler } from "autumn-js/backend"
-import { UnauthorizedError } from "@maple/domain/http"
 import { Env } from "../services/Env"
 import { AuthService } from "../services/AuthService"
 
@@ -23,33 +22,18 @@ export const AutumnRouter = HttpRouter.use((router) =>
 
         const body = yield* req.json
 
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            autumnHandler({
-              request: { url: req.url, method: req.method, body },
-              customerId: tenant.orgId,
-              clientOptions: { secretKey },
-            }),
-          catch: (error) =>
-            new Error(
-              `Autumn request failed: ${error instanceof Error ? error.message : String(error)}`,
-            ),
-        })
+        const result = yield* Effect.tryPromise(() =>
+          autumnHandler({
+            request: { url: req.url, method: req.method, body },
+            customerId: tenant.orgId,
+            clientOptions: { secretKey },
+          }),
+        )
 
         return yield* HttpServerResponse.json(result.response, {
           status: result.statusCode,
         })
-      }).pipe(
-        Effect.catchIf(
-          (error: unknown): error is UnauthorizedError =>
-            error instanceof UnauthorizedError,
-          (error) =>
-            HttpServerResponse.json(
-              { error: "Unauthorized", message: error.message },
-              { status: 401 },
-            ),
-        ),
-      )
+      })
 
     const routes = [
       "getOrCreateCustomer",
