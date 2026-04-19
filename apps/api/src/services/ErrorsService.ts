@@ -64,6 +64,7 @@ import {
   or,
   sql,
 } from "drizzle-orm"
+import { CH } from "@maple/query-engine"
 import { Cause, Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import { Database, DatabaseError, type DatabaseClient } from "./DatabaseLive"
@@ -936,29 +937,35 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
 
         const tenant = systemTenant(orgId)
 
+        const timeseriesCompiled = CH.compile(CH.errorIssueTimeseriesQuery(), {
+          orgId,
+          fingerprintHash: issueRow.fingerprintHash,
+          startTime: toTinybirdDateTime(startMs),
+          endTime: toTinybirdDateTime(endMs),
+          bucketSeconds,
+        })
         const timeseriesEffect = tinybird
-          .query(tenant, {
-            pipe: "error_issue_timeseries",
-            params: {
-              fingerprint_hash: issueRow.fingerprintHash,
-              start_time: toTinybirdDateTime(startMs),
-              end_time: toTinybirdDateTime(endMs),
-              bucket_seconds: bucketSeconds,
-            },
-          })
-          .pipe(Effect.mapError((e) => makePersistenceError(e)))
+          .sqlQuery(tenant, timeseriesCompiled.sql)
+          .pipe(
+            Effect.map((rows) => timeseriesCompiled.castRows(rows)),
+            Effect.mapError((e) => makePersistenceError(e)),
+          )
 
+        const samplesCompiled = CH.compile(
+          CH.errorIssueSampleTracesQuery({ limit: sampleLimit }),
+          {
+            orgId,
+            fingerprintHash: issueRow.fingerprintHash,
+            startTime: toTinybirdDateTime(startMs),
+            endTime: toTinybirdDateTime(endMs),
+          },
+        )
         const samplesEffect = tinybird
-          .query(tenant, {
-            pipe: "error_issue_sample_traces",
-            params: {
-              fingerprint_hash: issueRow.fingerprintHash,
-              start_time: toTinybirdDateTime(startMs),
-              end_time: toTinybirdDateTime(endMs),
-              limit: sampleLimit,
-            },
-          })
-          .pipe(Effect.mapError((e) => makePersistenceError(e)))
+          .sqlQuery(tenant, samplesCompiled.sql)
+          .pipe(
+            Effect.map((rows) => samplesCompiled.castRows(rows)),
+            Effect.mapError((e) => makePersistenceError(e)),
+          )
 
         const incidentsEffect = dbExecute((db) =>
           db
@@ -974,7 +981,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             .limit(50),
         )
 
-        const [timeseriesResp, samplesResp, incidentRows] = yield* Effect.all(
+        const [timeseriesRows, sampleRows, incidentRows] = yield* Effect.all(
           [timeseriesEffect, samplesEffect, incidentsEffect],
           { concurrency: 3 },
         )
@@ -985,9 +992,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           issueRow.leaseHolderActorId ?? null,
         ])
 
-        const timeseries = (
-          timeseriesResp.data as ReadonlyArray<Record<string, unknown>>
-        ).map(
+        const timeseries = timeseriesRows.map(
           (row) =>
             new ErrorIssueTimeseriesPoint({
               bucket: decodeIsoDateTimeStringSync(
@@ -997,9 +1002,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             }),
         )
 
-        const sampleTraces = (
-          samplesResp.data as ReadonlyArray<Record<string, unknown>>
-        ).map(
+        const sampleTraces = sampleRows.map(
           (row) =>
             new ErrorIssueSampleTrace({
               traceId: decodeTraceIdSync(String(row.traceId ?? "")),
@@ -1937,30 +1940,26 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
         )
         const issuesReopened = wakeCandidates.length
 
-        const resp = yield* tinybird
-          .query(tenant, {
-            pipe: "error_issues",
-            params: {
-              start_time: toTinybirdDateTime(windowStartMs),
-              end_time: toTinybirdDateTime(windowEndMs),
-              limit: 500,
-            },
-          })
+        const issuesCompiled = CH.compile(CH.errorIssuesQuery({ limit: 500 }), {
+          orgId,
+          startTime: toTinybirdDateTime(windowStartMs),
+          endTime: toTinybirdDateTime(windowEndMs),
+        })
+        const issuesRaw = yield* tinybird
+          .sqlQuery(tenant, issuesCompiled.sql)
           .pipe(Effect.mapError(makePersistenceError))
 
-        const rows = (resp.data as ReadonlyArray<Record<string, unknown>>).map(
-          (raw) => ({
-            fingerprintHash: String(raw.fingerprintHash ?? ""),
-            serviceName: String(raw.serviceName ?? ""),
-            exceptionType: String(raw.exceptionType ?? ""),
-            exceptionMessage: String(raw.exceptionMessage ?? ""),
-            topFrame: String(raw.topFrame ?? ""),
-            count: Number(raw.count ?? 0),
-            affectedServicesCount: Number(raw.affectedServicesCount ?? 0),
-            firstSeen: String(raw.firstSeen ?? ""),
-            lastSeen: String(raw.lastSeen ?? ""),
-          }),
-        )
+        const rows = issuesCompiled.castRows(issuesRaw).map((raw) => ({
+          fingerprintHash: String(raw.fingerprintHash ?? ""),
+          serviceName: String(raw.serviceName ?? ""),
+          exceptionType: String(raw.exceptionType ?? ""),
+          exceptionMessage: String(raw.exceptionMessage ?? ""),
+          topFrame: String(raw.topFrame ?? ""),
+          count: Number(raw.count ?? 0),
+          affectedServicesCount: Number(raw.affectedServicesCount ?? 0),
+          firstSeen: String(raw.firstSeen ?? ""),
+          lastSeen: String(raw.lastSeen ?? ""),
+        }))
 
         const fingerprintResults = yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
