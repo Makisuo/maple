@@ -7,17 +7,21 @@ import {
   RoleName,
   UserId,
 } from "@maple/domain/http"
+import type { TinybirdDeploymentReadiness } from "@maple/domain/tinybird-project-sync"
 import { encryptAes256Gcm } from "./Crypto"
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
-import { OrgTinybirdSettingsService, __testables } from "./OrgTinybirdSettingsService"
+import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
+import {
+  makeTestTinybirdSyncClientLayer,
+  type TinybirdSyncClientOverrides,
+} from "./TinybirdSyncClient.testing"
 import { cleanupTempDirs, createTempDbUrl as makeTempDb, executeSql, queryFirstRow } from "./test-sqlite"
 
 const createdTempDirs: string[] = []
 const encryptionKey = Buffer.alloc(32, 7)
 
 afterEach(() => {
-  __testables.reset()
   cleanupTempDirs(createdTempDirs)
 })
 
@@ -59,8 +63,9 @@ const makeConfig = (url: string) =>
     }),
   )
 
-const makeLayer = (url: string) =>
+const makeLayer = (url: string, overrides: TinybirdSyncClientOverrides = {}) =>
   OrgTinybirdSettingsService.Live.pipe(
+    Layer.provide(makeTestTinybirdSyncClientLayer(overrides)),
     Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
     Layer.provide(makeConfig(url)),
@@ -123,20 +128,8 @@ const insertSyncRun = async (
     ],
   )
 
-// ---------------------------------------------------------------------------
-// Workflow-shim helpers for tests
-// ---------------------------------------------------------------------------
-
-/**
- * Install a workflow-start shim that simulates the workflow completing
- * successfully by writing both the sync-run "succeeded" row and the
- * orgTinybirdSettings "active" row directly to the DB. Mirrors what the real
- * TinybirdSyncWorkflow would do against a cooperative Tinybird instance.
- */
-// Helper: defer a fn's side effects so the service's upsert/resync can
-// observe a still-"syncing" state before the simulated workflow mutates the
-// DB. Mirrors Cloudflare Workflows, which return from `.create()` as soon as
-// the instance is queued, not when it completes.
+// Simulate the Cloudflare Workflow binding returning right away while mutating
+// DB state asynchronously — mirrors how a real workflow queues and then runs.
 const deferred = (fn: () => Promise<void>) => () =>
   new Promise<void>((resolve, reject) => {
     setTimeout(() => {
@@ -150,8 +143,6 @@ const simulateSuccessfulWorkflow = (
 ) => {
   const run = async (orgId: string) => {
     const now = Date.now()
-    // Read encrypted token + requestedBy from the pending sync-run row so we
-    // promote with the same encrypted value the service already stored.
     const existing = await queryFirstRow<{
       requested_by: string
       target_token_ciphertext: string
@@ -209,18 +200,11 @@ const simulateSuccessfulWorkflow = (
       [opts.deploymentId, now, now, orgId],
     )
   }
-  __testables.setStartWorkflowImpl(async (_env, orgId) => {
-    // Fire-and-forget: the Cloudflare Workflow binding returns as soon as the
-    // instance is queued, so the service's upsert should see the queued row
-    // before the simulated workflow has had a chance to mutate state.
+  return async (orgId: OrgId) => {
     void deferred(() => run(orgId))()
-  })
+  }
 }
 
-/**
- * Install a workflow-start shim that simulates a workflow failure by marking
- * the sync-run as failed (no active config row).
- */
 const simulateFailingWorkflow = (dbPath: string, errorMessage: string) => {
   const run = async (orgId: string) => {
     const now = Date.now()
@@ -233,33 +217,26 @@ const simulateFailingWorkflow = (dbPath: string, errorMessage: string) => {
       [errorMessage, now, now, orgId],
     )
   }
-  __testables.setStartWorkflowImpl(async (_env, orgId) => {
+  return async (orgId: OrgId) => {
     void deferred(() => run(orgId))()
-  })
+  }
 }
 
-const simulateNoOpWorkflow = () => {
-  __testables.setStartWorkflowImpl(async () => {
-    // Leave the queued row as-is; simulates a workflow instance that was
-    // created but hasn't picked up work yet.
-  })
+const simulateNoOpWorkflow = () => async () => {
+  // Leave the queued row as-is; simulates a workflow instance queued but idle.
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe("OrgTinybirdSettingsService", () => {
   it("encrypts the token at rest and never returns it from get", async () => {
     const { url, dbPath } = createTempDbUrl()
-    __testables.setGetProjectRevisionImpl(async () => "rev-1")
-    simulateSuccessfulWorkflow(dbPath, {
-      host: "https://customer.tinybird.co",
-      deploymentId: "dep-1",
-      projectRevision: "rev-1",
+    const layer = makeLayer(url, {
+      getProjectRevision: async () => "rev-1",
+      startWorkflow: simulateSuccessfulWorkflow(dbPath, {
+        host: "https://customer.tinybird.co",
+        deploymentId: "dep-1",
+        projectRevision: "rev-1",
+      }),
     })
-
-    const layer = makeLayer(url)
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -303,10 +280,10 @@ describe("OrgTinybirdSettingsService", () => {
 
   it("preserves a failed first-time setup as a draft and does not create an active config", async () => {
     const { url, dbPath } = createTempDbUrl()
-    __testables.setGetProjectRevisionImpl(async () => "rev-1")
-    simulateFailingWorkflow(dbPath, "bad credentials")
-
-    const layer = makeLayer(url)
+    const layer = makeLayer(url, {
+      getProjectRevision: async () => "rev-1",
+      startWorkflow: simulateFailingWorkflow(dbPath, "bad credentials"),
+    })
 
     const { immediate, result } = await Effect.runPromise(
       Effect.gen(function* () {
@@ -358,16 +335,18 @@ describe("OrgTinybirdSettingsService", () => {
       encryptAes256Gcm("token-a", encryptionKey, (message) => new Error(message)),
     )
 
-    __testables.setGetDeploymentTransportStatusImpl(async () => ({
+    const liveStatus: TinybirdDeploymentReadiness = {
       deploymentId: "dep-1",
       status: "live",
       isTerminal: true,
       isReady: true,
       errorMessage: null,
-    }))
-    __testables.setGetProjectRevisionImpl(async () => "rev-1")
+    }
 
-    const layer = makeLayer(url)
+    const layer = makeLayer(url, {
+      getDeploymentStatus: async () => liveStatus,
+      getProjectRevision: async () => "rev-1",
+    })
 
     // Warm up the service (creates the schema via the first-load bootstrap path).
     await Effect.runPromiseExit(
@@ -406,14 +385,14 @@ describe("OrgTinybirdSettingsService", () => {
 
   it("returns the last live deployment when the org is idle", async () => {
     const { url, dbPath } = createTempDbUrl()
-    __testables.setGetProjectRevisionImpl(async () => "rev-1")
-    simulateSuccessfulWorkflow(dbPath, {
-      host: "https://customer.tinybird.co",
-      deploymentId: "dep-1",
-      projectRevision: "rev-1",
+    const layer = makeLayer(url, {
+      getProjectRevision: async () => "rev-1",
+      startWorkflow: simulateSuccessfulWorkflow(dbPath, {
+        host: "https://customer.tinybird.co",
+        deploymentId: "dep-1",
+        projectRevision: "rev-1",
+      }),
     })
-
-    const layer = makeLayer(url)
 
     await Effect.runPromise(
       OrgTinybirdSettingsService.upsert(
@@ -514,13 +493,11 @@ describe("OrgTinybirdSettingsService", () => {
 
   it("returns a conflict when another sync is already active", async () => {
     const { url, dbPath } = createTempDbUrl()
-    __testables.setGetProjectRevisionImpl(async () => "rev-1")
-    simulateNoOpWorkflow()
+    const layer = makeLayer(url, {
+      getProjectRevision: async () => "rev-1",
+      startWorkflow: simulateNoOpWorkflow(),
+    })
 
-    const layer = makeLayer(url)
-
-    // Seed a schema bootstrap so the table exists, then insert a non-terminal
-    // running sync-run to force a conflict.
     await Effect.runPromiseExit(
       OrgTinybirdSettingsService.get(asOrgId("org_bootstrap"), adminRoles).pipe(Effect.provide(layer)),
     )
@@ -560,14 +537,14 @@ describe("OrgTinybirdSettingsService", () => {
 
   it("upsert enqueues the sync workflow with the org id", async () => {
     const { url } = createTempDbUrl()
-    __testables.setGetProjectRevisionImpl(async () => "rev-1")
 
     const calls: Array<{ orgId: string }> = []
-    __testables.setStartWorkflowImpl(async (_env, orgId) => {
-      calls.push({ orgId })
+    const layer = makeLayer(url, {
+      getProjectRevision: async () => "rev-1",
+      startWorkflow: async (orgId) => {
+        calls.push({ orgId })
+      },
     })
-
-    const layer = makeLayer(url)
 
     await Effect.runPromise(
       OrgTinybirdSettingsService.upsert(
@@ -583,14 +560,14 @@ describe("OrgTinybirdSettingsService", () => {
 
   it("allows root and org admins, and rejects members", async () => {
     const { url, dbPath } = createTempDbUrl()
-    __testables.setGetProjectRevisionImpl(async () => "rev-1")
-    simulateSuccessfulWorkflow(dbPath, {
-      host: "https://customer.tinybird.co",
-      deploymentId: "dep-1",
-      projectRevision: "rev-1",
+    const layer = makeLayer(url, {
+      getProjectRevision: async () => "rev-1",
+      startWorkflow: simulateSuccessfulWorkflow(dbPath, {
+        host: "https://customer.tinybird.co",
+        deploymentId: "dep-1",
+        projectRevision: "rev-1",
+      }),
     })
-
-    const layer = makeLayer(url)
 
     const orgAdminResult = await Effect.runPromise(
       Effect.gen(function* () {

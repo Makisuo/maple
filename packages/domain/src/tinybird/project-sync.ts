@@ -92,51 +92,50 @@ export interface TinybirdInstanceHealth {
   readonly avgQueryLatencyMs: number | null
 }
 
-interface SqlResponse {
-  readonly data?: ReadonlyArray<Record<string, unknown>>
-}
+const SqlResponseSchema = Schema.Struct({
+  data: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
+})
+type SqlResponse = typeof SqlResponseSchema.Type
 
-abstract class TinybirdSyncError extends Error {
-  readonly statusCode: number | null
+const WorkspaceProbeSchema = Schema.Struct({
+  name: Schema.optional(Schema.String),
+})
+type WorkspaceProbe = typeof WorkspaceProbeSchema.Type
 
-  constructor(message: string, statusCode: number | null = null) {
-    super(message)
-    this.statusCode = statusCode
-  }
-}
+export class TinybirdSyncRejectedError extends Schema.TaggedErrorClass<TinybirdSyncRejectedError>()(
+  "@maple/tinybird/errors/SyncRejected",
+  {
+    message: Schema.String,
+    statusCode: Schema.NullOr(Schema.Number),
+  },
+) {}
 
-export class TinybirdSyncRejectedError extends TinybirdSyncError {
-  readonly _tag = "TinybirdSyncRejectedError" as const
+export class TinybirdSyncUnavailableError extends Schema.TaggedErrorClass<TinybirdSyncUnavailableError>()(
+  "@maple/tinybird/errors/SyncUnavailable",
+  {
+    message: Schema.String,
+    statusCode: Schema.NullOr(Schema.Number),
+  },
+) {}
 
-  constructor(message: string, statusCode: number | null = null) {
-    super(message, statusCode)
-    this.name = "TinybirdSyncRejectedError"
-  }
-}
-
-export class TinybirdSyncUnavailableError extends TinybirdSyncError {
-  readonly _tag = "TinybirdSyncUnavailableError" as const
-
-  constructor(message: string, statusCode: number | null = null) {
-    super(message, statusCode)
-    this.name = "TinybirdSyncUnavailableError"
-  }
-}
-
-/**
- * Not-yet-ready signal for poll steps. Thrown so Cloudflare Workflow step
- * retry policies re-run the step; not a real failure.
- */
-export class TinybirdDeploymentNotReadyError extends Error {
-  readonly _tag = "TinybirdDeploymentNotReadyError" as const
-  readonly status: string
-  readonly deploymentId: string
-
-  constructor(deploymentId: string, status: string) {
-    super(`Tinybird deployment ${deploymentId} not ready yet (status: ${status})`)
-    this.name = "TinybirdDeploymentNotReadyError"
-    this.status = status
-    this.deploymentId = deploymentId
+// Not-yet-ready signal for poll steps. Thrown so Cloudflare Workflow step retry
+// policies re-run the step; not a real failure. Cloudflare inspects the thrown
+// JS Error for retry semantics — TaggedErrorClass produces a class that extends
+// Error, so `instanceof` still works at the step boundary.
+export class TinybirdDeploymentNotReadyError extends Schema.TaggedErrorClass<TinybirdDeploymentNotReadyError>()(
+  "@maple/tinybird/errors/DeploymentNotReady",
+  {
+    message: Schema.String,
+    deploymentId: Schema.String,
+    status: Schema.String,
+  },
+) {
+  static from(deploymentId: string, status: string): TinybirdDeploymentNotReadyError {
+    return new TinybirdDeploymentNotReadyError({
+      message: `Tinybird deployment ${deploymentId} not ready yet (status: ${status})`,
+      deploymentId,
+      status,
+    })
   }
 }
 
@@ -195,10 +194,10 @@ const formatFeedback = (feedback: ReadonlyArray<FeedbackEntry>): string | null =
 }
 
 const toUnavailableError = (message: string, statusCode: number | null = null) =>
-  new TinybirdSyncUnavailableError(message, statusCode)
+  new TinybirdSyncUnavailableError({ message, statusCode })
 
 const toRejectedError = (message: string, statusCode: number | null = null) =>
-  new TinybirdSyncRejectedError(message, statusCode)
+  new TinybirdSyncRejectedError({ message, statusCode })
 
 const classifyHttpError = (statusCode: number, message: string) =>
   statusCode >= 400 && statusCode < 500
@@ -224,15 +223,17 @@ const mapApiFailure = (
   return toUnavailableError(fallback)
 }
 
-const parseJsonOrNull = <T>(rawBody: string): Effect.Effect<T | null> => {
-  const body = rawBody.trim()
-  if (body.length === 0) return Effect.succeed(null)
-  return Effect.try({
-    try: () => JSON.parse(body) as T,
-    catch: () => null,
-  }).pipe(
-    Effect.orElseSucceed(() => null as T | null),
-  )
+const parseJsonSafe = <A, I>(
+  schema: Schema.Codec<A, I>,
+) => {
+  const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(schema))
+  return (rawBody: string): Effect.Effect<A | null> => {
+    const body = rawBody.trim()
+    if (body.length === 0) return Effect.succeed(null)
+    return decode(body).pipe(
+      Effect.orElseSucceed(() => null),
+    )
+  }
 }
 
 const toNumberOrNull = (value: unknown): number | null => {
@@ -243,25 +244,6 @@ const toNumberOrNull = (value: unknown): number | null => {
   }
   return null
 }
-
-const catchHttpErrors = <A>(
-  effect: Effect.Effect<
-    A,
-    TinybirdSyncRejectedError | TinybirdSyncUnavailableError | { readonly _tag: string; readonly message?: string },
-    never
-  >,
-): Effect.Effect<A, TinybirdSyncRejectedError | TinybirdSyncUnavailableError, never> =>
-  effect.pipe(
-    Effect.catchIf(
-      (
-        error,
-      ): error is {
-        readonly _tag: string
-        readonly message?: string
-      } => !(error instanceof TinybirdSyncRejectedError) && !(error instanceof TinybirdSyncUnavailableError),
-      (error) => Effect.fail(toUnavailableError(error.message ?? `Tinybird request failed (${error._tag})`)),
-    ),
-  ) as Effect.Effect<A, TinybirdSyncRejectedError | TinybirdSyncUnavailableError, never>
 
 const makeApi = (params: TinybirdProjectSyncParams) =>
   new TinybirdApi({
@@ -438,7 +420,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
           const deployRawBody = yield* Effect.promise(() => deployResponse.text()).pipe(Effect.orElseSucceed(() => ""))
 
           if (deployResponse.status >= 400) {
-            const parsedDeployBody = yield* parseJsonOrNull<DeployResponse>(deployRawBody)
+            const parsedDeployBody = yield* parseJsonSafe(DeployResponseSchema)(deployRawBody)
             return yield* Effect.fail(
               classifyHttpError(
                 deployResponse.status,
@@ -498,7 +480,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
             )
           }
 
-          return yield* Effect.fail(new TinybirdDeploymentNotReadyError(params.deploymentId, status.status))
+          return yield* Effect.fail(TinybirdDeploymentNotReadyError.from(params.deploymentId, status.status))
         },
       )
 
@@ -572,25 +554,31 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
           yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
           const api = makeApi(params)
 
-          const requestJsonBestEffort = <T>(path: string, init?: RequestInit) =>
-            Effect.promise(() => api.request(path, init))
-              .pipe(
-                Effect.flatMap((response) =>
-                  Effect.promise(() => response.text()).pipe(
-                    Effect.flatMap((rawBody) => response.ok ? parseJsonOrNull<T>(rawBody) : Effect.succeed(null as T | null)),
-                  )
-                ),
-                Effect.orElseSucceed(() => null as T | null),
-              )
+          const requestJsonBestEffort = <A, I>(
+            schema: Schema.Codec<A, I>,
+            path: string,
+            init?: RequestInit,
+          ): Effect.Effect<A | null> => {
+            const parse = parseJsonSafe(schema)
+            return Effect.promise(() => api.request(path, init)).pipe(
+              Effect.flatMap((response) =>
+                Effect.promise(() => response.text()).pipe(
+                  Effect.flatMap((rawBody) => response.ok ? parse(rawBody) : Effect.succeed(null)),
+                )
+              ),
+              Effect.orElseSucceed(() => null),
+            )
+          }
 
           const querySql = (sql: string) =>
-            requestJsonBestEffort<SqlResponse>(
+            requestJsonBestEffort(
+              SqlResponseSchema,
               `/v0/sql?q=${encodeURIComponent(`${sql} FORMAT JSON`)}`,
             )
 
           const [workspace, datasourcesResult, errorsResult, latencyResult] = yield* Effect.all(
             [
-              requestJsonBestEffort<{ name?: string }>("/v1/workspace"),
+              requestJsonBestEffort(WorkspaceProbeSchema, "/v1/workspace"),
               querySql(
                 "SELECT datasource_name, bytes, rows FROM tinybird.datasources_storage WHERE timestamp = (SELECT max(timestamp) FROM tinybird.datasources_storage) ORDER BY bytes DESC",
               ),
@@ -633,22 +621,13 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
       })
 
       return {
-        cleanupStaleDeployments: (params: TinybirdProjectSyncParams) =>
-          catchHttpErrors(cleanupStaleDeployments(params)),
-        startDeployment: (params: TinybirdProjectSyncParams) => catchHttpErrors(startDeployment(params)),
-        pollDeployment: (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) =>
-          pollDeployment(params) as Effect.Effect<
-            TinybirdDeploymentReadiness,
-            TinybirdSyncRejectedError | TinybirdSyncUnavailableError | TinybirdDeploymentNotReadyError,
-            never
-          >,
-        getDeploymentStatus: (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) =>
-          catchHttpErrors(fetchDeploymentStatusInternal(params)),
-        setDeploymentLive: (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) =>
-          catchHttpErrors(setDeploymentLive(params)),
-        cleanupOwnedDeployment: (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) =>
-          catchHttpErrors(cleanupOwnedDeployment(params)),
-        fetchInstanceHealth: (params: TinybirdProjectSyncParams) => catchHttpErrors(fetchInstanceHealth(params)),
+        cleanupStaleDeployments,
+        startDeployment,
+        pollDeployment,
+        getDeploymentStatus: fetchDeploymentStatusInternal,
+        setDeploymentLive,
+        cleanupOwnedDeployment,
+        fetchInstanceHealth,
         getCurrentProjectRevision,
       }
     }),
@@ -687,7 +666,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
 // ---------------------------------------------------------------------------
 
 const provideSync = <A, E>(effect: Effect.Effect<A, E, TinybirdProjectSync>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(TinybirdProjectSync.layer)) as Effect.Effect<A, E>)
+  Effect.runPromise(effect.pipe(Effect.provide(TinybirdProjectSync.layer)))
 
 export const cleanupStaleTinybirdDeployments = (
   params: TinybirdProjectSyncParams,

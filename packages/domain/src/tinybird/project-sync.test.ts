@@ -135,7 +135,7 @@ describe("Tinybird project sync", () => {
           token: "token",
         }),
       ).rejects.toMatchObject({
-        name: "TinybirdSyncRejectedError",
+        _tag: "@maple/tinybird/errors/SyncRejected",
         message:
           "Tinybird already has a deployment in progress. Wait for it to finish, then retry. If needed, promote or discard the existing deployment in Tinybird first.",
       })

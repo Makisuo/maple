@@ -379,7 +379,7 @@ describe("TinybirdSyncWorkflow", () => {
         step,
         { appLayer },
       ),
-    ).rejects.toMatchObject({ _tag: "TinybirdDeploymentNotReadyError" })
+    ).rejects.toMatchObject({ _tag: "@maple/tinybird/errors/DeploymentNotReady" })
 
     // The run should stay in a non-terminal state so a retry is meaningful.
     const runRow = await queryFirstRow<{ run_status: string; phase: string }>(

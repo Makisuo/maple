@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260414.1",
+    "@effect/vitest": "4.0.0-beta.47",
     "@maple/db": "workspace:*",
     "@maple/infra": "workspace:*",
     "@tinybirdco/sdk": "catalog:tinybird",

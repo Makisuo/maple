@@ -2,20 +2,22 @@ import { afterEach, describe, expect, it } from "vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import {
   OrgId,
-  OrgTinybirdSettingsEncryptionError,
   RoleName,
   UserId,
 } from "@maple/domain/http"
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
-import { OrgTinybirdSettingsService, __testables as orgTinybirdTestables } from "./OrgTinybirdSettingsService"
+import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
 import { TinybirdService, __testables as tinybirdTestables } from "./TinybirdService"
+import {
+  makeTestTinybirdSyncClientLayer,
+  type TinybirdSyncClientOverrides,
+} from "./TinybirdSyncClient.testing"
 import { cleanupTempDirs, createTempDbUrl as makeTempDb, executeSql, queryFirstRow } from "./test-sqlite"
 
 const createdTempDirs: string[] = []
 
 afterEach(() => {
-  orgTinybirdTestables.reset()
   tinybirdTestables.reset()
   cleanupTempDirs(createdTempDirs)
 })
@@ -40,15 +42,21 @@ const makeConfig = (url: string) =>
     }),
   )
 
-const makeTinybirdLayer = (url: string) =>
+const makeTinybirdLayer = (url: string, overrides: TinybirdSyncClientOverrides = {}) =>
   TinybirdService.Default.pipe(
-    Layer.provide(OrgTinybirdSettingsService.Live.pipe(Layer.provide(DatabaseLibsqlLive))),
+    Layer.provide(
+      OrgTinybirdSettingsService.Live.pipe(
+        Layer.provide(makeTestTinybirdSyncClientLayer(overrides)),
+        Layer.provide(DatabaseLibsqlLive),
+      ),
+    ),
     Layer.provide(Env.Default),
     Layer.provide(makeConfig(url)),
   )
 
-const makeOrgTinybirdLayer = (url: string) =>
+const makeOrgTinybirdLayer = (url: string, overrides: TinybirdSyncClientOverrides = {}) =>
   OrgTinybirdSettingsService.Live.pipe(
+    Layer.provide(makeTestTinybirdSyncClientLayer(overrides)),
     Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
     Layer.provide(makeConfig(url)),
@@ -130,11 +138,11 @@ describe("Tinybird routing", () => {
 
   it("uses the org-specific Tinybird client for raw queries when an override exists", async () => {
     const { url, dbPath } = createTempDbUrl()
-    orgTinybirdTestables.setGetProjectRevisionImpl(async () => "rev-1")
+
     // Simulate the Tinybird sync workflow completing: write both the sync-run
     // "succeeded" row and the active settings row so TinybirdService picks up
     // the BYO override on subsequent queries.
-    orgTinybirdTestables.setStartWorkflowImpl(async (_env, orgId) => {
+    const completeSync = async (orgId: string) => {
       const now = Date.now()
       const existing = await queryFirstRow<{
         requested_by: string
@@ -183,7 +191,15 @@ describe("Tinybird routing", () => {
         `UPDATE org_tinybird_sync_runs SET run_status='succeeded', phase='succeeded', deployment_id='dep-1', deployment_status='live', finished_at=?, updated_at=? WHERE org_id = ?`,
         [now, now, orgId],
       )
-    })
+    }
+
+    const overrides: TinybirdSyncClientOverrides = {
+      getProjectRevision: async () => "rev-1",
+      startWorkflow: async (orgId) => {
+        // The real workflow is async; queue the state mutation the same way.
+        void Promise.resolve().then(() => completeSync(orgId))
+      },
+    }
 
     const calls: Array<{ baseUrl: string; token: string; method: string }> = []
     tinybirdTestables.setClientFactory((baseUrl, token) => ({
@@ -194,8 +210,8 @@ describe("Tinybird routing", () => {
     }))
 
     const combinedLayer = Layer.mergeAll(
-      makeOrgTinybirdLayer(url),
-      makeTinybirdLayer(url),
+      makeOrgTinybirdLayer(url, overrides),
+      makeTinybirdLayer(url, overrides),
     )
 
     const rawResult = await Effect.runPromise(

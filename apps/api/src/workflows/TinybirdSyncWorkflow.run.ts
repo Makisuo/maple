@@ -1,6 +1,5 @@
 import { orgTinybirdSettings, orgTinybirdSyncRuns } from "@maple/db"
-import { eq } from "drizzle-orm"
-import { Effect, Layer } from "effect"
+import { OrgId, UserId } from "@maple/domain/http"
 import {
   cleanupStaleTinybirdDeployments,
   pollTinybirdDeploymentStep,
@@ -8,28 +7,42 @@ import {
   startTinybirdDeploymentStep,
   TinybirdDeploymentNotReadyError,
 } from "@maple/domain/tinybird-project-sync"
-import {
-  decryptAes256Gcm,
-  parseBase64Aes256GcmKey,
-} from "../services/Crypto"
-import { Database } from "../services/DatabaseLive"
+import { eq } from "drizzle-orm"
+import { Effect, Layer, Schema } from "effect"
+import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "../services/Crypto"
 import { DatabaseD1Live } from "../services/DatabaseD1Live"
+import { Database } from "../services/DatabaseLive"
 import { WorkerEnvironment } from "../services/WorkerEnvironment"
 
+export class TinybirdSyncRunMissingError extends Schema.TaggedErrorClass<TinybirdSyncRunMissingError>()(
+  "@maple/tinybird/errors/SyncRunMissing",
+  {
+    orgId: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
+export class TinybirdWorkflowTokenError extends Schema.TaggedErrorClass<TinybirdWorkflowTokenError>()(
+  "@maple/tinybird/errors/WorkflowTokenError",
+  {
+    message: Schema.String,
+  },
+) {}
+
 export interface TinybirdSyncWorkflowPayload {
-  readonly orgId: string
+  readonly orgId: OrgId
 }
 
 export interface TinybirdSyncWorkflowResult {
-  readonly orgId: string
+  readonly orgId: OrgId
   readonly result: "succeeded" | "failed" | "no_changes"
   readonly deploymentId: string | null
   readonly errorMessage: string | null
 }
 
 interface SyncRunSnapshot {
-  readonly orgId: string
-  readonly requestedBy: string
+  readonly orgId: OrgId
+  readonly requestedBy: UserId
   readonly targetHost: string
   readonly targetTokenCiphertext: string
   readonly targetTokenIv: string
@@ -52,57 +65,65 @@ type StepConfig = {
   }
 }
 
-/**
- * Minimal structural subset of Cloudflare's `WorkflowStep` so this module can
- * be imported from unit tests without the `cloudflare:workers` runtime.
- */
+// Minimal structural subset of Cloudflare's `WorkflowStep` so this module can
+// be imported from unit tests without the `cloudflare:workers` runtime.
 export interface WorkflowStepLike {
   do<T>(name: string, callback: StepCallback<T>): Promise<T>
   do<T>(name: string, config: StepConfig, callback: StepCallback<T>): Promise<T>
 }
 
 // ---------------------------------------------------------------------------
+// Decoders
+// ---------------------------------------------------------------------------
+
+const decodeOrgId = Schema.decodeUnknownSync(OrgId)
+const decodeUserId = Schema.decodeUnknownSync(UserId)
+
+// ---------------------------------------------------------------------------
 // Effect plumbing
 // ---------------------------------------------------------------------------
 
-const defaultAppLayer = (env: Record<string, unknown>): Layer.Layer<Database> =>
+const defaultAppLayer = (env: Record<string, unknown>) =>
   DatabaseD1Live.pipe(
-    Layer.provide(Layer.succeed(WorkerEnvironment, env as Record<string, any>)),
+    Layer.provide(Layer.succeed(WorkerEnvironment, env)),
   )
 
 const runStep = <A, E>(
   appLayer: Layer.Layer<Database>,
   effect: Effect.Effect<A, E, Database>,
-): Promise<A> => {
-  const provided = effect.pipe(Effect.provide(appLayer)) as Effect.Effect<A, E, never>
-  return Effect.runPromise(provided)
-}
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(appLayer)))
 
 // ---------------------------------------------------------------------------
-// DB helpers (Effect-wrapped Drizzle)
+// DB helpers (Effect.fn — annotated spans + typed errors)
 // ---------------------------------------------------------------------------
 
-const readSyncRun = (orgId: string) =>
-  Effect.gen(function* () {
-    const database = yield* Database
-    const rows = yield* database.execute((db) =>
-      db
-        .select()
-        .from(orgTinybirdSyncRuns)
-        .where(eq(orgTinybirdSyncRuns.orgId, orgId))
-        .limit(1),
+const readSyncRun = Effect.fn("TinybirdSyncWorkflow.readSyncRun")(function* (orgId: OrgId) {
+  yield* Effect.annotateCurrentSpan("orgId", orgId)
+  const database = yield* Database
+  const rows = yield* database.execute((db) =>
+    db
+      .select()
+      .from(orgTinybirdSyncRuns)
+      .where(eq(orgTinybirdSyncRuns.orgId, orgId))
+      .limit(1),
+  )
+  const row = rows[0]
+  if (!row) {
+    return yield* Effect.fail(
+      new TinybirdSyncRunMissingError({
+        orgId,
+        message: `No sync run row found for org ${orgId}`,
+      }),
     )
-    const row = rows[0]
-    if (!row) {
-      return yield* Effect.die(new Error(`No sync run row found for org ${orgId}`))
-    }
-    return row satisfies typeof orgTinybirdSyncRuns.$inferSelect
-  })
+  }
+  return row
+})
 
 type SyncRunPatch = Partial<Omit<typeof orgTinybirdSyncRuns.$inferInsert, "orgId">>
 
-const updateSyncRun = (orgId: string, patch: SyncRunPatch) =>
-  Effect.gen(function* () {
+const updateSyncRun = Effect.fn("TinybirdSyncWorkflow.updateSyncRun")(
+  function* (orgId: OrgId, patch: SyncRunPatch) {
+    yield* Effect.annotateCurrentSpan("orgId", orgId)
     const database = yield* Database
     yield* database.execute((db) =>
       db
@@ -110,15 +131,20 @@ const updateSyncRun = (orgId: string, patch: SyncRunPatch) =>
         .set({ ...patch, updatedAt: patch.updatedAt ?? Date.now() })
         .where(eq(orgTinybirdSyncRuns.orgId, orgId)),
     )
-  })
+  },
+)
 
-const promoteActiveConfig = (
-  orgId: string,
-  row: SyncRunSnapshot,
-  projectRevision: string,
-  deploymentId: string | null,
-) =>
-  Effect.gen(function* () {
+const promoteActiveConfig = Effect.fn("TinybirdSyncWorkflow.promoteActiveConfig")(
+  function* (
+    orgId: OrgId,
+    row: SyncRunSnapshot,
+    projectRevision: string,
+    deploymentId: string | null,
+  ) {
+    yield* Effect.annotateCurrentSpan("orgId", orgId)
+    if (deploymentId !== null) {
+      yield* Effect.annotateCurrentSpan("deploymentId", deploymentId)
+    }
     const database = yield* Database
     const now = Date.now()
     yield* database.execute((db) =>
@@ -157,19 +183,24 @@ const promoteActiveConfig = (
           },
         }),
     )
-  })
+  },
+)
 
-const resolveToken = (
-  env: Record<string, unknown>,
-  row: SyncRunSnapshot,
-): Effect.Effect<string, Error> =>
-  Effect.gen(function* () {
+const resolveToken = Effect.fn("TinybirdSyncWorkflow.resolveToken")(
+  function* (env: Record<string, unknown>, row: SyncRunSnapshot) {
     const rawKey = env.MAPLE_INGEST_KEY_ENCRYPTION_KEY
     if (typeof rawKey !== "string" || rawKey.trim().length === 0) {
-      return yield* Effect.fail(new Error("Missing MAPLE_INGEST_KEY_ENCRYPTION_KEY in workflow env"))
+      return yield* Effect.fail(
+        new TinybirdWorkflowTokenError({
+          message: "Missing MAPLE_INGEST_KEY_ENCRYPTION_KEY in workflow env",
+        }),
+      )
     }
 
-    const key = yield* parseBase64Aes256GcmKey(rawKey, (message) => new Error(message))
+    const key = yield* parseBase64Aes256GcmKey(
+      rawKey,
+      (message) => new TinybirdWorkflowTokenError({ message }),
+    )
 
     return yield* decryptAes256Gcm(
       {
@@ -178,13 +209,17 @@ const resolveToken = (
         tag: row.targetTokenTag,
       },
       key,
-      () => new Error("Failed to decrypt Tinybird token in workflow"),
+      () =>
+        new TinybirdWorkflowTokenError({
+          message: "Failed to decrypt Tinybird token in workflow",
+        }),
     )
-  })
+  },
+)
 
 const toSnapshot = (row: typeof orgTinybirdSyncRuns.$inferSelect): SyncRunSnapshot => ({
-  orgId: row.orgId,
-  requestedBy: row.requestedBy,
+  orgId: decodeOrgId(row.orgId),
+  requestedBy: decodeUserId(row.requestedBy),
   targetHost: row.targetHost,
   targetTokenCiphertext: row.targetTokenCiphertext,
   targetTokenIv: row.targetTokenIv,
@@ -218,8 +253,20 @@ const DEFAULT_STEP_CONFIG: StepConfig = {
 // ---------------------------------------------------------------------------
 
 export interface RunTinybirdSyncOptions {
-  /** Override the Database layer — tests pass a libsql-backed layer. */
+  // Override the Database layer — tests pass a libsql-backed layer.
   readonly appLayer?: Layer.Layer<Database>
+}
+
+const logCleanupWarning = (orgId: OrgId, error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error)
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      event: "tinybird-sync.cleanup-stale-deployments.failed",
+      orgId,
+      message,
+    }),
+  )
 }
 
 export const runTinybirdSyncWorkflow = async (
@@ -252,7 +299,8 @@ export const runTinybirdSyncWorkflow = async (
       runStep(appLayer, resolveToken(env, snapshot)))
 
     await step.do("mark-running", DEFAULT_STEP_CONFIG, async () => {
-      await runStep(appLayer,
+      await runStep(
+        appLayer,
         updateSyncRun(orgId, {
           runStatus: "running",
           phase: "starting",
@@ -262,10 +310,13 @@ export const runTinybirdSyncWorkflow = async (
     })
 
     await step.do("cleanup-stale-deployments", DEFAULT_STEP_CONFIG, async () => {
+      // Best-effort cleanup — failures are logged structurally and swallowed so
+      // the sync can proceed even if the stale-deployment list endpoint is
+      // temporarily unavailable.
       try {
         await cleanupStaleTinybirdDeployments({ baseUrl: snapshot.targetHost, token })
       } catch (error) {
-        console.warn(`cleanup-stale-deployments failed for org ${orgId}:`, error)
+        logCleanupWarning(orgId, error)
       }
     })
 
@@ -278,10 +329,12 @@ export const runTinybirdSyncWorkflow = async (
       // status — the existing live deployment is unchanged, so we mark the
       // BYO settings active without owning a tracked deployment id.
       await step.do("promote-no-changes", DEFAULT_STEP_CONFIG, async () => {
-        await runStep(appLayer,
+        await runStep(
+          appLayer,
           promoteActiveConfig(orgId, snapshot, started.projectRevision, null),
         )
-        await runStep(appLayer,
+        await runStep(
+          appLayer,
           updateSyncRun(orgId, {
             runStatus: "succeeded",
             phase: "succeeded",
@@ -310,7 +363,8 @@ export const runTinybirdSyncWorkflow = async (
     const deploymentId = started.deploymentId
 
     await step.do("mark-deploying", DEFAULT_STEP_CONFIG, async () => {
-      await runStep(appLayer,
+      await runStep(
+        appLayer,
         updateSyncRun(orgId, {
           runStatus: "running",
           phase: "deploying",
@@ -325,7 +379,8 @@ export const runTinybirdSyncWorkflow = async (
       pollTinybirdDeploymentStep({ baseUrl: snapshot.targetHost, token, deploymentId }))
 
     await step.do("mark-setting-live", DEFAULT_STEP_CONFIG, async () => {
-      await runStep(appLayer,
+      await runStep(
+        appLayer,
         updateSyncRun(orgId, {
           runStatus: "running",
           phase: "setting_live",
@@ -341,13 +396,15 @@ export const runTinybirdSyncWorkflow = async (
     }
 
     await step.do("promote-active-config", DEFAULT_STEP_CONFIG, async () => {
-      await runStep(appLayer,
+      await runStep(
+        appLayer,
         promoteActiveConfig(orgId, snapshot, snapshot.targetProjectRevision, deploymentId),
       )
     })
 
     await step.do("mark-succeeded", DEFAULT_STEP_CONFIG, async () => {
-      await runStep(appLayer,
+      await runStep(
+        appLayer,
         updateSyncRun(orgId, {
           runStatus: "succeeded",
           phase: "succeeded",
@@ -369,3 +426,4 @@ export const runTinybirdSyncWorkflow = async (
     return { orgId, result: "failed", deploymentId: null, errorMessage: message }
   }
 }
+

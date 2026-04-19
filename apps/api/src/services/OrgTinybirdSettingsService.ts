@@ -20,14 +20,9 @@ import {
   UserId,
 } from "@maple/domain/http"
 import {
-  cleanupOwnedTinybirdDeployment,
-  fetchInstanceHealth as fetchInstanceHealthFn,
-  getCurrentTinybirdProjectRevision,
-  getTinybirdDeploymentStatus as getDeploymentStatusFn,
   TinybirdSyncRejectedError,
   TinybirdSyncUnavailableError,
 } from "@maple/domain/tinybird-project-sync"
-import type { TinybirdSyncWorkflowPayload } from "../workflows/TinybirdSyncWorkflow"
 import { orgTinybirdSettings, orgTinybirdSyncRuns } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Option, Redacted, Schema, Semaphore, Context } from "effect"
@@ -39,15 +34,7 @@ import {
 } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
-import { WorkerEnvironment } from "./WorkerEnvironment"
-
-interface WorkflowBinding {
-  readonly create: (
-    options?: { readonly id?: string; readonly params?: TinybirdSyncWorkflowPayload },
-  ) => Promise<unknown>
-}
-
-const TINYBIRD_SYNC_WORKFLOW_BINDING_KEY = "TINYBIRD_SYNC_WORKFLOW"
+import { TinybirdSyncClient } from "./TinybirdSyncClient"
 
 interface RuntimeTinybirdConfig {
   readonly host: string
@@ -141,27 +128,6 @@ export interface OrgTinybirdSettingsServiceShape {
 }
 
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
-let getDeploymentTransportStatusImpl = getDeploymentStatusFn
-let cleanupOwnedDeploymentImpl = cleanupOwnedTinybirdDeployment
-let getProjectRevisionImpl = getCurrentTinybirdProjectRevision
-let fetchInstanceHealthImpl = fetchInstanceHealthFn
-
-type StartWorkflowFn = (
-  env: Record<string, unknown>,
-  orgId: string,
-) => Promise<void>
-
-const defaultStartWorkflow: StartWorkflowFn = async (env, orgId) => {
-  const binding = env[TINYBIRD_SYNC_WORKFLOW_BINDING_KEY] as WorkflowBinding | undefined
-  if (!binding || typeof binding.create !== "function") {
-    throw new Error(
-      `Missing Cloudflare Workflow binding: ${TINYBIRD_SYNC_WORKFLOW_BINDING_KEY}`,
-    )
-  }
-  await binding.create({ params: { orgId } })
-}
-
-let startWorkflowImpl: StartWorkflowFn = defaultStartWorkflow
 
 const toPersistenceError = (error: unknown) =>
   new OrgTinybirdSettingsPersistenceError({
@@ -262,7 +228,9 @@ const inferPhaseFromDeploymentStatus = (
   return "deploying"
 }
 
-const mapTinybirdError = (error: unknown) => {
+const mapTinybirdError = (
+  error: unknown,
+): OrgTinybirdSettingsUpstreamRejectedError | OrgTinybirdSettingsUpstreamUnavailableError => {
   if (error instanceof TinybirdSyncRejectedError) {
     return new OrgTinybirdSettingsUpstreamRejectedError({
       message: error.message,
@@ -270,9 +238,16 @@ const mapTinybirdError = (error: unknown) => {
     })
   }
 
+  if (error instanceof TinybirdSyncUnavailableError) {
+    return new OrgTinybirdSettingsUpstreamUnavailableError({
+      message: error.message,
+      statusCode: error.statusCode,
+    })
+  }
+
   return new OrgTinybirdSettingsUpstreamUnavailableError({
     message: error instanceof Error ? error.message : "Tinybird request failed",
-    statusCode: error instanceof TinybirdSyncUnavailableError ? error.statusCode : null,
+    statusCode: null,
   })
 }
 
@@ -282,7 +257,7 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
     make: Effect.gen(function* () {
       const database = yield* Database
       const env = yield* Env
-      const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
+      const tinybirdSyncClient = yield* TinybirdSyncClient
       const encryptionKey = yield* parseEncryptionKey(
         Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
       )
@@ -390,10 +365,7 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
       })
 
       const getCurrentProjectRevision = Effect.fn("OrgTinybirdSettingsService.getCurrentProjectRevision")(function* () {
-        return yield* Effect.tryPromise({
-          try: () => getProjectRevisionImpl(),
-          catch: (error) => mapTinybirdError(error),
-        })
+        return yield* tinybirdSyncClient.getProjectRevision()
       })
 
       const toCurrentRun = (
@@ -577,15 +549,12 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
           encryptionKey,
         )
 
-        const status = yield* Effect.tryPromise({
-          try: () =>
-            getDeploymentTransportStatusImpl({
-              baseUrl: syncRun.targetHost,
-              token,
-              deploymentId: syncRunDeploymentId,
-            }),
-          catch: (error) => mapTinybirdError(error),
+        const status = yield* tinybirdSyncClient.getDeploymentStatus({
+          baseUrl: syncRun.targetHost,
+          token,
+          deploymentId: syncRunDeploymentId,
         }).pipe(
+          Effect.mapError(mapTinybirdError),
           Effect.catchTag("@maple/http/errors/OrgTinybirdSettingsUpstreamRejectedError", (error) =>
             markRunFailed(orgId, error).pipe(
               Effect.as({
@@ -677,16 +646,20 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
                 encryptionKey,
               )
 
-              yield* Effect.tryPromise({
-                try: () =>
-                  cleanupOwnedDeploymentImpl({
-                    baseUrl: existingRun.value.targetHost,
-                    token: cleanupToken,
-                    deploymentId: existingDeploymentId,
-                  }),
-                catch: (error) => error,
+              yield* tinybirdSyncClient.cleanupOwnedDeployment({
+                baseUrl: existingRun.value.targetHost,
+                token: cleanupToken,
+                deploymentId: existingDeploymentId,
               }).pipe(
-                Effect.tapError(() => Effect.logWarning("Failed to cleanup previous Tinybird deployment")),
+                Effect.tapError((error) =>
+                  Effect.logWarning("Failed to cleanup previous Tinybird deployment").pipe(
+                    Effect.annotateLogs({
+                      orgId,
+                      deploymentId: existingDeploymentId,
+                      error: error.message,
+                    }),
+                  ),
+                ),
                 Effect.ignore,
               )
             }
@@ -712,18 +685,13 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
               finishedAt: null,
             })
 
-            const runEnv = Option.getOrUndefined(workerEnv)
-            yield* Effect.tryPromise({
-              try: () => startWorkflowImpl((runEnv ?? {}) as Record<string, unknown>, orgId),
-              catch: (error) =>
+            yield* tinybirdSyncClient.startWorkflow(orgId).pipe(
+              Effect.mapError((error) =>
                 new OrgTinybirdSettingsUpstreamUnavailableError({
-                  message:
-                    error instanceof Error
-                      ? `Failed to start Tinybird sync workflow: ${error.message}`
-                      : "Failed to start Tinybird sync workflow",
+                  message: error.message,
                   statusCode: null,
                 }),
-            }).pipe(
+              ),
               Effect.tapError((error) => markRunFailed(orgId, error)),
             )
           }),
@@ -781,11 +749,7 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
           Effect.catchTag("@maple/http/errors/OrgTinybirdSettingsUpstreamUnavailableError", () =>
             Effect.succeed(Option.getOrUndefined(storedSyncRun))),
         )
-        const currentRevision = yield* getCurrentProjectRevision().pipe(
-          Effect.map((revision) => revision as string | null),
-          Effect.catchTag("@maple/http/errors/OrgTinybirdSettingsUpstreamUnavailableError", () => Effect.succeed(null)),
-          Effect.catchTag("@maple/http/errors/OrgTinybirdSettingsUpstreamRejectedError", () => Effect.succeed(null)),
-        )
+        const currentRevision = yield* getCurrentProjectRevision()
 
         const refreshedActiveRow = yield* selectActiveRow(orgId)
         return toResponse(Option.getOrUndefined(refreshedActiveRow), currentRevision, syncRun)
@@ -915,14 +879,10 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
           encryptionKey,
         )
 
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            fetchInstanceHealthImpl({
-              baseUrl: row.host,
-              token,
-            }),
-          catch: (error) => mapTinybirdError(error),
-        })
+        const result = yield* tinybirdSyncClient.fetchInstanceHealth({
+          baseUrl: row.host,
+          token,
+        }).pipe(Effect.mapError(mapTinybirdError))
 
         return new OrgTinybirdInstanceHealthResponse({
           workspaceName: result.workspaceName,
@@ -981,27 +941,3 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
     this.use((service) => service.resolveRuntimeConfig(orgId))
 }
 
-export const __testables = {
-  setGetDeploymentTransportStatusImpl: (impl: typeof getDeploymentStatusFn) => {
-    getDeploymentTransportStatusImpl = impl
-  },
-  setCleanupOwnedDeploymentImpl: (impl: typeof cleanupOwnedTinybirdDeployment) => {
-    cleanupOwnedDeploymentImpl = impl
-  },
-  setGetProjectRevisionImpl: (impl: typeof getCurrentTinybirdProjectRevision) => {
-    getProjectRevisionImpl = impl
-  },
-  setFetchInstanceHealthImpl: (impl: typeof fetchInstanceHealthFn) => {
-    fetchInstanceHealthImpl = impl
-  },
-  setStartWorkflowImpl: (impl: StartWorkflowFn) => {
-    startWorkflowImpl = impl
-  },
-  reset: () => {
-    getDeploymentTransportStatusImpl = getDeploymentStatusFn
-    cleanupOwnedDeploymentImpl = cleanupOwnedTinybirdDeployment
-    getProjectRevisionImpl = getCurrentTinybirdProjectRevision
-    fetchInstanceHealthImpl = fetchInstanceHealthFn
-    startWorkflowImpl = defaultStartWorkflow
-  },
-}

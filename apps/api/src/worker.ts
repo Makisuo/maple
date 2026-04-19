@@ -50,9 +50,7 @@ const buildHandler = (env: Record<string, unknown>) =>
       Layer.provideMerge(ApiObservabilityLive),
       Layer.provideMerge(WorkerPlatformLive),
       Layer.provideMerge(DatabaseD1Live),
-      Layer.provideMerge(
-        Layer.succeed(WorkerEnvironment, env as Record<string, any>),
-      ),
+      Layer.provideMerge(Layer.succeed(WorkerEnvironment, env)),
       Layer.provideMerge(
         ConfigProvider.layer(ConfigProvider.fromUnknown(env)),
       ),
@@ -75,7 +73,11 @@ export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"
 
 export default {
   fetch(request: Request, env: Record<string, unknown>) {
-    const handler = getHandler(env).handler as (req: globalThis.Request) => Promise<Response>
-    return handler(request as unknown as globalThis.Request)
+    // TODO: `toWebHandler` still reports TinybirdService/Scope/HttpServerRequest
+    // as unprovided requirements, but they resolve at runtime via MainLive's
+    // transitive composition. Re-audit the Layer graph and drop this cast
+    // once the residual `R` genuinely becomes `never`.
+    const handler = getHandler(env).handler as (request: Request) => Promise<Response>
+    return handler(request)
   },
 }
