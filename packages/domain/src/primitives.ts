@@ -137,3 +137,20 @@ export const ScrapeAuthType = Schema.Literals(["none", "bearer", "basic"]).annot
   },
 )
 export type ScrapeAuthType = Schema.Schema.Type<typeof ScrapeAuthType>
+
+export const TinybirdDeploymentId = MapleId(
+  "@maple/TinybirdDeploymentId",
+  "Tinybird Deployment ID",
+)
+export type TinybirdDeploymentId = Schema.Schema.Type<typeof TinybirdDeploymentId>
+
+export const TinybirdProjectRevision = MapleId(
+  "@maple/TinybirdProjectRevision",
+  "Tinybird Project Revision",
+)
+export type TinybirdProjectRevision = Schema.Schema.Type<
+  typeof TinybirdProjectRevision
+>
+
+export const TinybirdHost = MapleId("@maple/TinybirdHost", "Tinybird Host")
+export type TinybirdHost = Schema.Schema.Type<typeof TinybirdHost>

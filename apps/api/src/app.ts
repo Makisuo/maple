@@ -34,6 +34,7 @@ import { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsServic
 import { QueryEngineService } from "./services/QueryEngineService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { TinybirdService } from "./services/TinybirdService"
+import { TinybirdSyncClient } from "./services/TinybirdSyncClient"
 import { TracerLive } from "./services/Telemetry"
 
 export const HealthRouter = HttpRouter.use((router) =>
@@ -56,7 +57,7 @@ export const CoreServicesLive = Layer.mergeAll(
   CloudflareLogpushService.layer,
   DashboardPersistenceService.layer,
   OrgIngestKeysService.layer,
-  OrgTinybirdSettingsService.layer,
+  OrgTinybirdSettingsService.layer.pipe(Layer.provide(TinybirdSyncClient.layer)),
   ScrapeTargetsService.layer,
 ).pipe(
   Layer.provideMerge(InfraLive),

@@ -1,6 +1,7 @@
 import path from "node:path"
 import alchemy from "alchemy"
-import { D1Database, Worker } from "alchemy/cloudflare"
+import { D1Database, Worker, Workflow } from "alchemy/cloudflare"
+import type { TinybirdSyncWorkflowPayload } from "./src/workflows/TinybirdSyncWorkflow"
 import type {
   MapleDomains,
   MapleStage,
@@ -46,6 +47,14 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
     migrationsTable: "drizzle_migrations",
   })
 
+  const tinybirdSyncWorkflow = Workflow<TinybirdSyncWorkflowPayload>(
+    "tinybird-sync-workflow",
+    {
+      workflowName: resolveWorkerName("tinybird-sync", stage),
+      className: "TinybirdSyncWorkflow",
+    },
+  )
+
   const worker = await Worker("api", {
     name: resolveWorkerName("api", stage),
     cwd: import.meta.dirname,
@@ -59,6 +68,7 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
       : undefined,
     bindings: {
       MAPLE_DB: mapleDb,
+      TINYBIRD_SYNC_WORKFLOW: tinybirdSyncWorkflow,
       TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
       TINYBIRD_TOKEN: alchemy.secret(requireEnv("TINYBIRD_TOKEN")),
       MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE?.trim() || "self_hosted",

@@ -2,6 +2,10 @@ import { createHash } from "node:crypto"
 import { resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
+// The SDK doesn't re-export `buildFromInclude` (or the generator resource
+// types) from its main entry point, so we load the JS module dynamically at
+// runtime and keep a minimal structural type covering the fields we consume.
+
 export interface GeneratedResource {
   readonly name: string
   readonly content: string
@@ -15,8 +19,8 @@ export interface TinybirdProjectManifest {
 
 interface TinybirdBuildResult {
   readonly resources: {
-    readonly datasources: Array<GeneratedResource>
-    readonly pipes: Array<GeneratedResource>
+    readonly datasources: ReadonlyArray<GeneratedResource>
+    readonly pipes: ReadonlyArray<GeneratedResource>
   }
 }
 
@@ -36,6 +40,11 @@ const INCLUDE_PATHS = [
 
 const loadTinybirdGenerator = async (): Promise<TinybirdGeneratorModule> =>
   import(pathToFileURL(resolve(REPO_ROOT, "node_modules/@tinybirdco/sdk/dist/generator/index.js")).href) as Promise<TinybirdGeneratorModule>
+
+const toResource = (resource: GeneratedResource): GeneratedResource => ({
+  name: resource.name,
+  content: resource.content,
+})
 
 export const createTinybirdProjectRevision = (
   datasources: ReadonlyArray<GeneratedResource>,
@@ -61,14 +70,8 @@ export const buildTinybirdProjectManifest = async (): Promise<TinybirdProjectMan
     cwd: REPO_ROOT,
   })
 
-  const datasources = buildResult.resources.datasources.map((resource) => ({
-    name: resource.name,
-    content: resource.content,
-  }))
-  const pipes = buildResult.resources.pipes.map((resource) => ({
-    name: resource.name,
-    content: resource.content,
-  }))
+  const datasources = buildResult.resources.datasources.map(toResource)
+  const pipes = buildResult.resources.pipes.map(toResource)
 
   return {
     datasources,
