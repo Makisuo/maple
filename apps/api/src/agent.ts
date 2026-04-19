@@ -11,7 +11,8 @@ const buildMapleAgentLayer = (env: Record<string, unknown>) => {
     env as Record<string, any>,
   )
 
-  return Layer.mergeAll(MainLive, DatabaseD1Live).pipe(
+  return MainLive.pipe(
+    Layer.provideMerge(DatabaseD1Live),
     Layer.provideMerge(workerEnvLive),
     Layer.provideMerge(configLive),
   )
