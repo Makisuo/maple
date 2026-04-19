@@ -1,10 +1,11 @@
-import { ConfigProvider, FileSystem, Layer, Path } from "effect"
+import { ConfigProvider, Context, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
+import { flushTelemetry } from "./services/Telemetry"
 import { WorkerEnvironment } from "./services/WorkerEnvironment"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
@@ -40,7 +41,7 @@ const WorkerPlatformLive = Layer.mergeAll(
 // Providing ANY middleware — even a pass-through — unsticks it. Suspected Effect
 // RpcServer / HttpRouter scope-propagation bug when only the default logger is
 // installed. Remove this once upstream fixes it.
-const passthroughMiddleware = HttpMiddleware.make((httpApp) => httpApp)
+const passthroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
 
 const buildHandler = (env: Record<string, unknown>) =>
   HttpRouter.toWebHandler(
@@ -72,12 +73,10 @@ const getHandler = (env: Record<string, unknown>) => {
 export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"
 
 export default {
-  fetch(request: Request, env: Record<string, unknown>) {
-    // TODO: `toWebHandler` still reports TinybirdService/Scope/HttpServerRequest
-    // as unprovided requirements, but they resolve at runtime via MainLive's
-    // transitive composition. Re-audit the Layer graph and drop this cast
-    // once the residual `R` genuinely becomes `never`.
-    const handler = getHandler(env).handler as (request: Request) => Promise<Response>
-    return handler(request)
+  fetch(request: Request, env: Record<string, unknown>, ctx: ExecutionContext) {
+    const context = getHandler(env)
+    const response = context.handler(request, Context.makeUnsafe<any>(new Map()))
+    ctx.waitUntil(response.then(flushTelemetry))
+    return response
   },
 }

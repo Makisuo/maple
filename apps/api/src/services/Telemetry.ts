@@ -2,6 +2,27 @@ import { Config, Effect, Layer, Option, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Otlp } from "effect/unstable/observability"
 
+const pendingExports = new Set<Promise<unknown>>()
+
+const trackingFetch: typeof globalThis.fetch = (input, init) => {
+  const promise = globalThis.fetch(input, init)
+  const tracked = promise.finally(() => {
+    pendingExports.delete(tracked)
+  })
+  pendingExports.add(tracked)
+  return promise
+}
+
+export const flushTelemetry = async (): Promise<void> => {
+  while (pendingExports.size > 0) {
+    await Promise.allSettled([...pendingExports])
+  }
+}
+
+const TrackingFetchLayer = FetchHttpClient.layer.pipe(
+  Layer.provide(Layer.succeed(FetchHttpClient.Fetch, trackingFetch)),
+)
+
 export const makeTelemetryLayer = (serviceName: string) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -24,7 +45,7 @@ export const makeTelemetryLayer = (serviceName: string) =>
           onNone: () => undefined,
           onSome: (key) => ({ Authorization: `Bearer ${Redacted.value(key)}` }),
         }),
-      }).pipe(Layer.provide(FetchHttpClient.layer))
+      }).pipe(Layer.provide(TrackingFetchLayer))
     }),
   )
 
