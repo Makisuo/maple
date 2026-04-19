@@ -51,6 +51,7 @@ import {
   errorIssueStates,
   errorNotificationPolicies,
   type ErrorNotificationPolicyRow,
+  orgIngestKeys,
 } from "@maple/db"
 import {
   and,
@@ -2348,9 +2349,13 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
             .from(errorIssues)
             .where(isNotNull(errorIssues.orgId)),
         )
+        const ingestOrgs = yield* dbExecute((db) =>
+          db.selectDistinct({ orgId: orgIngestKeys.orgId }).from(orgIngestKeys),
+        )
         const knownOrgs = new Set<string>([
           ...stateOrgs.map((r) => r.orgId),
           ...issueOrgs.map((r) => r.orgId),
+          ...ingestOrgs.map((r) => r.orgId),
         ])
 
         const emptyResult = {
