@@ -11,5 +11,6 @@ export { Env } from "./services/Env";
 export { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService";
 export { QueryEngineService } from "./services/QueryEngineService";
 export { TinybirdService } from "./services/TinybirdService";
+export { TinybirdSyncClient } from "./services/TinybirdSyncClient";
 export { makeTelemetryLayer } from "./services/Telemetry";
 export { WorkerEnvironment } from "./services/WorkerEnvironment";
