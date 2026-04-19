@@ -23,16 +23,14 @@ import {
   cleanupOwnedTinybirdDeployment,
   fetchInstanceHealth as fetchInstanceHealthFn,
   getCurrentTinybirdProjectRevision,
-  getDeploymentStatus as getDeploymentStatusFn,
-  resumeTinybirdDeployment as resumeTinybirdDeploymentFn,
-  setTinybirdDeploymentLive as setTinybirdDeploymentLiveFn,
-  startTinybirdDeployment,
+  getTinybirdDeploymentStatus as getDeploymentStatusFn,
   TinybirdSyncRejectedError,
   TinybirdSyncUnavailableError,
 } from "@maple/domain/tinybird-project-sync"
+import type { TinybirdSyncWorkflowPayload } from "../workflows/TinybirdSyncWorkflow"
 import { orgTinybirdSettings, orgTinybirdSyncRuns } from "@maple/db"
 import { eq } from "drizzle-orm"
-import { Duration, Effect, Layer, Option, Redacted, Schema, Semaphore, Context } from "effect"
+import { Effect, Layer, Option, Redacted, Schema, Semaphore, Context } from "effect"
 import {
   decryptAes256Gcm,
   encryptAes256Gcm,
@@ -41,6 +39,15 @@ import {
 } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
+import { WorkerEnvironment } from "./WorkerEnvironment"
+
+interface WorkflowBinding {
+  readonly create: (
+    options?: { readonly id?: string; readonly params?: TinybirdSyncWorkflowPayload },
+  ) => Promise<unknown>
+}
+
+const TINYBIRD_SYNC_WORKFLOW_BINDING_KEY = "TINYBIRD_SYNC_WORKFLOW"
 
 interface RuntimeTinybirdConfig {
   readonly host: string
@@ -60,10 +67,6 @@ const decodeRunStatus = Schema.decodeUnknownSync(OrgTinybirdSyncRunStatus)
 const decodePhase = Schema.decodeUnknownSync(OrgTinybirdSyncPhase)
 const ROOT_ROLE = Schema.decodeUnknownSync(RoleName)("root")
 const ORG_ADMIN_ROLE = Schema.decodeUnknownSync(RoleName)("org:admin")
-
-const POLL_INTERVAL = Duration.millis(2_000)
-const MAX_DEPLOYMENT_POLL_ATTEMPTS = 300
-const SYNC_RUN_TIMEOUT_MS = Duration.toMillis(POLL_INTERVAL) * MAX_DEPLOYMENT_POLL_ATTEMPTS
 
 export interface OrgTinybirdSettingsServiceShape {
   readonly get: (
@@ -138,13 +141,27 @@ export interface OrgTinybirdSettingsServiceShape {
 }
 
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
-let startDeploymentImpl = startTinybirdDeployment
 let getDeploymentTransportStatusImpl = getDeploymentStatusFn
-let resumeDeploymentImpl = resumeTinybirdDeploymentFn
-let setDeploymentLiveImpl = setTinybirdDeploymentLiveFn
 let cleanupOwnedDeploymentImpl = cleanupOwnedTinybirdDeployment
 let getProjectRevisionImpl = getCurrentTinybirdProjectRevision
 let fetchInstanceHealthImpl = fetchInstanceHealthFn
+
+type StartWorkflowFn = (
+  env: Record<string, unknown>,
+  orgId: string,
+) => Promise<void>
+
+const defaultStartWorkflow: StartWorkflowFn = async (env, orgId) => {
+  const binding = env[TINYBIRD_SYNC_WORKFLOW_BINDING_KEY] as WorkflowBinding | undefined
+  if (!binding || typeof binding.create !== "function") {
+    throw new Error(
+      `Missing Cloudflare Workflow binding: ${TINYBIRD_SYNC_WORKFLOW_BINDING_KEY}`,
+    )
+  }
+  await binding.create({ params: { orgId } })
+}
+
+let startWorkflowImpl: StartWorkflowFn = defaultStartWorkflow
 
 const toPersistenceError = (error: unknown) =>
   new OrgTinybirdSettingsPersistenceError({
@@ -265,6 +282,7 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
     make: Effect.gen(function* () {
       const database = yield* Database
       const env = yield* Env
+      const workerEnv = yield* Effect.serviceOption(WorkerEnvironment)
       const encryptionKey = yield* parseEncryptionKey(
         Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
       )
@@ -531,216 +549,6 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
         ).pipe(Effect.mapError(toPersistenceError))
       })
 
-      const waitForDeploymentReady = Effect.fn("OrgTinybirdSettingsService.waitForDeploymentReady")(function* (
-        orgId: OrgId,
-        host: string,
-        token: string,
-        deploymentId: string,
-      ) {
-        yield* Effect.annotateCurrentSpan("orgId", orgId)
-        yield* Effect.annotateCurrentSpan("deploymentId", deploymentId)
-        for (let attempt = 0; attempt < MAX_DEPLOYMENT_POLL_ATTEMPTS; attempt += 1) {
-          if (attempt > 0) {
-            yield* Effect.sleep(POLL_INTERVAL)
-          }
-
-          const status = yield* Effect.tryPromise({
-            try: () =>
-              getDeploymentTransportStatusImpl({
-                baseUrl: host,
-                token,
-                deploymentId,
-              }),
-            catch: (error) => mapTinybirdError(error),
-          })
-
-          yield* updateSyncRun(orgId, {
-            deploymentStatus: status.status,
-            phase: inferPhaseFromDeploymentStatus(status.status),
-            errorMessage: status.errorMessage,
-          })
-
-          if (status.status === "data_ready" || status.status === "live") {
-            return status
-          }
-
-          if (status.isTerminal) {
-            return yield* Effect.fail(
-              new OrgTinybirdSettingsUpstreamRejectedError({
-                message: status.errorMessage
-                  ? `Tinybird deployment ${status.status}: ${status.errorMessage}`
-                  : `Tinybird deployment ${status.status} before reaching data_ready`,
-                statusCode: null,
-              }),
-            )
-          }
-        }
-
-        return yield* Effect.fail(
-          new OrgTinybirdSettingsUpstreamUnavailableError({
-            message: "Tinybird deployment timed out before reaching data_ready",
-            statusCode: null,
-          }),
-        )
-      })
-
-      const performSyncRun = Effect.fn("OrgTinybirdSettingsService.performSyncRun")(function* (
-        run: SyncRunRow,
-        token: string,
-      ) {
-        const runOrgId = decodeOrgId(run.orgId)
-        const runUserId = decodeUserId(run.requestedBy)
-        yield* Effect.annotateCurrentSpan("orgId", runOrgId)
-        let deploymentId = run.deploymentId ?? undefined
-
-        if (!deploymentId) {
-          yield* updateSyncRun(runOrgId, {
-            runStatus: "running",
-            phase: "starting",
-            deploymentId: null,
-            deploymentStatus: null,
-            errorMessage: null,
-            finishedAt: null,
-          })
-
-          const started = yield* Effect.tryPromise({
-            try: () =>
-              startDeploymentImpl({
-                baseUrl: run.targetHost,
-                token,
-              }),
-            catch: (error) => mapTinybirdError(error),
-          })
-
-          if (started.result === "no_changes") {
-            yield* promoteActiveConfig(
-              runOrgId,
-              runUserId,
-              run.targetHost,
-              token,
-              started.projectRevision,
-              started.deploymentId ?? null,
-            )
-
-            yield* updateSyncRun(runOrgId, {
-              runStatus: "succeeded",
-              phase: "succeeded",
-              deploymentId: started.deploymentId ?? null,
-              deploymentStatus: started.deploymentStatus ?? "live",
-              errorMessage: null,
-              finishedAt: Date.now(),
-            })
-            return
-          }
-
-          deploymentId = started.deploymentId
-          if (!deploymentId) {
-            return yield* Effect.fail(
-              new OrgTinybirdSettingsUpstreamUnavailableError({
-                message: "Tinybird project sync did not return a deployment id",
-                statusCode: null,
-              }),
-            )
-          }
-
-          yield* updateSyncRun(runOrgId, {
-            runStatus: "running",
-            phase: inferPhaseFromDeploymentStatus(started.deploymentStatus ?? "deploying"),
-            deploymentId,
-            deploymentStatus: started.deploymentStatus ?? "deploying",
-            errorMessage: started.errorMessage,
-          })
-        }
-
-        const initialStatus = yield* Effect.tryPromise({
-          try: () =>
-            getDeploymentTransportStatusImpl({
-              baseUrl: run.targetHost,
-              token,
-              deploymentId,
-            }),
-          catch: (error) => mapTinybirdError(error),
-        })
-
-        yield* updateSyncRun(runOrgId, {
-          phase: inferPhaseFromDeploymentStatus(initialStatus.status),
-          deploymentStatus: initialStatus.status,
-          errorMessage: initialStatus.errorMessage,
-        })
-
-        if (initialStatus.isTerminal && initialStatus.status !== "data_ready" && initialStatus.status !== "live") {
-          return yield* Effect.fail(
-            new OrgTinybirdSettingsUpstreamRejectedError({
-              message: initialStatus.errorMessage
-                ? `Tinybird deployment ${initialStatus.status}: ${initialStatus.errorMessage}`
-                : `Tinybird deployment ${initialStatus.status} before reaching data_ready`,
-              statusCode: null,
-            }),
-          )
-        }
-
-        const readyStatus = initialStatus.status === "data_ready" || initialStatus.status === "live"
-          ? initialStatus
-          : yield* waitForDeploymentReady(runOrgId, run.targetHost, token, deploymentId)
-
-        if (readyStatus.status !== "live") {
-          yield* updateSyncRun(runOrgId, {
-            runStatus: "running",
-            phase: "setting_live",
-            deploymentStatus: readyStatus.status,
-            errorMessage: null,
-          })
-
-          yield* Effect.tryPromise({
-            try: () =>
-              setDeploymentLiveImpl({
-                baseUrl: run.targetHost,
-                token,
-                deploymentId,
-              }),
-            catch: (error) => mapTinybirdError(error),
-          })
-        }
-
-        yield* promoteActiveConfig(
-          runOrgId,
-          runUserId,
-          run.targetHost,
-          token,
-          run.targetProjectRevision,
-          deploymentId,
-        )
-
-        yield* updateSyncRun(runOrgId, {
-          runStatus: "succeeded",
-          phase: "succeeded",
-          deploymentId,
-          deploymentStatus: "live",
-          errorMessage: null,
-          finishedAt: Date.now(),
-        })
-      })
-
-      const resumeSyncRun = Effect.fn("OrgTinybirdSettingsService.resumeSyncRun")(function* (orgId: OrgId) {
-        const syncRun = yield* selectSyncRunRow(orgId)
-        if (Option.isNone(syncRun)) return
-        if (!NON_TERMINAL_RUN_STATUSES.has(syncRun.value.runStatus)) return
-
-        const token = yield* decryptToken(
-          {
-            ciphertext: syncRun.value.targetTokenCiphertext,
-            iv: syncRun.value.targetTokenIv,
-            tag: syncRun.value.targetTokenTag,
-          },
-          encryptionKey,
-        )
-
-        yield* performSyncRun(syncRun.value, token).pipe(
-          Effect.tapError((error) => markRunFailed(orgId, error)),
-          Effect.result,
-        )
-      })
-
       const reconcileSyncRunWithTinybird = Effect.fn("OrgTinybirdSettingsService.reconcileSyncRunWithTinybird")(function* (
         syncRun: SyncRunRow | null | undefined,
         options?: { readonly swallowUnavailable?: boolean },
@@ -753,28 +561,10 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
         const orgId = decodeOrgId(syncRun.orgId)
         yield* Effect.annotateCurrentSpan("orgId", orgId)
 
-        if (!syncRun.deploymentId) {
-          if (Date.now() - syncRun.startedAt >= SYNC_RUN_TIMEOUT_MS) {
-            yield* markRunFailed(
-              orgId,
-              new OrgTinybirdSettingsUpstreamUnavailableError({
-                message: "Tinybird sync timed out before a deployment id was created",
-                statusCode: null,
-              }),
-            )
-
-            const timedOut = yield* selectSyncRunRow(orgId)
-            return Option.getOrUndefined(timedOut) ?? syncRun
-          }
-
-          yield* resumeSyncRun(orgId).pipe(
-            Effect.forkDetach,
-            Effect.ignore,
-          )
-
-          const refreshed = yield* selectSyncRunRow(orgId)
-          return Option.getOrUndefined(refreshed) ?? syncRun
-        }
+        // The workflow owns the state machine. If no deployment id exists yet,
+        // the workflow hasn't reached the start-deployment step — nothing to
+        // reconcile; return the row as-is and let the workflow progress.
+        if (!syncRun.deploymentId) return syncRun
 
         const syncRunDeploymentId = syncRun.deploymentId
 
@@ -816,6 +606,9 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
           return Option.getOrUndefined(refreshed) ?? syncRun
         }
 
+        // Tinybird says live but our row still shows running — workflow
+        // finished but the status write hasn't landed yet (or the workflow
+        // died between set-live and promote). Promote + finalize here.
         if (status.status === "live") {
           yield* promoteActiveConfig(
             orgId,
@@ -833,18 +626,6 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
             errorMessage: null,
             finishedAt: Date.now(),
           })
-        } else if (status.status === "data_ready") {
-          yield* updateSyncRun(orgId, {
-            runStatus: "running",
-            phase: "setting_live",
-            deploymentStatus: status.status,
-            errorMessage: status.errorMessage,
-          })
-
-          yield* resumeSyncRun(orgId).pipe(
-            Effect.forkDetach,
-            Effect.ignore,
-          )
         } else if (status.isTerminal) {
           yield* markRunFailed(
             orgId,
@@ -855,14 +636,9 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
               statusCode: null,
             }),
           )
-        } else {
-          yield* updateSyncRun(orgId, {
-            runStatus: "running",
-            phase: inferPhaseFromDeploymentStatus(status.status),
-            deploymentStatus: status.status,
-            errorMessage: status.errorMessage,
-          })
         }
+        // Otherwise: workflow is still running — leave the row as it is; the
+        // workflow's step DB writes are the source of truth.
 
         const refreshed = yield* selectSyncRunRow(orgId)
         return Option.getOrUndefined(refreshed) ?? syncRun
@@ -936,7 +712,20 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
               finishedAt: null,
             })
 
-            yield* resumeSyncRun(orgId).pipe(Effect.forkDetach)
+            const runEnv = Option.getOrUndefined(workerEnv)
+            yield* Effect.tryPromise({
+              try: () => startWorkflowImpl((runEnv ?? {}) as Record<string, unknown>, orgId),
+              catch: (error) =>
+                new OrgTinybirdSettingsUpstreamUnavailableError({
+                  message:
+                    error instanceof Error
+                      ? `Failed to start Tinybird sync workflow: ${error.message}`
+                      : "Failed to start Tinybird sync workflow",
+                  statusCode: null,
+                }),
+            }).pipe(
+              Effect.tapError((error) => markRunFailed(orgId, error)),
+            )
           }),
         )
       })
@@ -1149,22 +938,6 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
         })
       })
 
-      const resumePendingRuns = Effect.fn("OrgTinybirdSettingsService.resumePendingRuns")(function* () {
-        const rows = yield* database.execute((db) =>
-          db
-            .select()
-            .from(orgTinybirdSyncRuns),
-        ).pipe(Effect.mapError(toPersistenceError))
-
-        yield* Effect.forEach(
-          rows.filter((row) => NON_TERMINAL_RUN_STATUSES.has(row.runStatus)),
-          (row) => resumeSyncRun(decodeOrgId(row.orgId)).pipe(Effect.forkDetach),
-          { discard: true },
-        )
-      })
-
-      yield* resumePendingRuns().pipe(Effect.forkDetach)
-
       return {
         get,
         upsert,
@@ -1209,17 +982,8 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
 }
 
 export const __testables = {
-  setStartDeploymentImpl: (impl: typeof startTinybirdDeployment) => {
-    startDeploymentImpl = impl
-  },
   setGetDeploymentTransportStatusImpl: (impl: typeof getDeploymentStatusFn) => {
     getDeploymentTransportStatusImpl = impl
-  },
-  setResumeDeploymentImpl: (impl: typeof resumeTinybirdDeploymentFn) => {
-    resumeDeploymentImpl = impl
-  },
-  setSetDeploymentLiveImpl: (impl: typeof setTinybirdDeploymentLiveFn) => {
-    setDeploymentLiveImpl = impl
   },
   setCleanupOwnedDeploymentImpl: (impl: typeof cleanupOwnedTinybirdDeployment) => {
     cleanupOwnedDeploymentImpl = impl
@@ -1230,13 +994,14 @@ export const __testables = {
   setFetchInstanceHealthImpl: (impl: typeof fetchInstanceHealthFn) => {
     fetchInstanceHealthImpl = impl
   },
+  setStartWorkflowImpl: (impl: StartWorkflowFn) => {
+    startWorkflowImpl = impl
+  },
   reset: () => {
-    startDeploymentImpl = startTinybirdDeployment
     getDeploymentTransportStatusImpl = getDeploymentStatusFn
-    resumeDeploymentImpl = resumeTinybirdDeploymentFn
-    setDeploymentLiveImpl = setTinybirdDeploymentLiveFn
     cleanupOwnedDeploymentImpl = cleanupOwnedTinybirdDeployment
     getProjectRevisionImpl = getCurrentTinybirdProjectRevision
     fetchInstanceHealthImpl = fetchInstanceHealthFn
+    startWorkflowImpl = defaultStartWorkflow
   },
 }

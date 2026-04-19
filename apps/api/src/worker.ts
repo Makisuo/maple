@@ -71,6 +71,8 @@ const getHandler = (env: Record<string, unknown>) => {
   return built
 }
 
+export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"
+
 export default {
   fetch(request: Request, env: Record<string, unknown>) {
     const handler = getHandler(env).handler as (req: globalThis.Request) => Promise<Response>

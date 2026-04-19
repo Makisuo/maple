@@ -16,5 +16,12 @@
       "migrations_dir": "../../packages/db/drizzle",
       "migrations_table": "drizzle_migrations"
     }
+  ],
+  "workflows": [
+    {
+      "name": "tinybird-sync-workflow",
+      "binding": "TINYBIRD_SYNC_WORKFLOW",
+      "class_name": "TinybirdSyncWorkflow"
+    }
   ]
 }

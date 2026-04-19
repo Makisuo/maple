@@ -10,7 +10,7 @@ import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService, __testables as orgTinybirdTestables } from "./OrgTinybirdSettingsService"
 import { TinybirdService, __testables as tinybirdTestables } from "./TinybirdService"
-import { cleanupTempDirs, createTempDbUrl as makeTempDb } from "./test-sqlite"
+import { cleanupTempDirs, createTempDbUrl as makeTempDb, executeSql, queryFirstRow } from "./test-sqlite"
 
 const createdTempDirs: string[] = []
 
@@ -21,8 +21,8 @@ afterEach(() => {
 })
 
 const createTempDbUrl = () => {
-  const { url } = makeTempDb("maple-tinybird-routing-", createdTempDirs)
-  return { url }
+  const { url, dbPath } = makeTempDb("maple-tinybird-routing-", createdTempDirs)
+  return { url, dbPath }
 }
 
 const makeConfig = (url: string) =>
@@ -129,15 +129,61 @@ describe("Tinybird routing", () => {
   })
 
   it("uses the org-specific Tinybird client for raw queries when an override exists", async () => {
-    const { url } = createTempDbUrl()
-    orgTinybirdTestables.setStartDeploymentImpl(async () => ({
-      projectRevision: "rev-1",
-      result: "no_changes",
-      deploymentId: "dep-1",
-      deploymentStatus: "live",
-      errorMessage: null,
-    }))
+    const { url, dbPath } = createTempDbUrl()
     orgTinybirdTestables.setGetProjectRevisionImpl(async () => "rev-1")
+    // Simulate the Tinybird sync workflow completing: write both the sync-run
+    // "succeeded" row and the active settings row so TinybirdService picks up
+    // the BYO override on subsequent queries.
+    orgTinybirdTestables.setStartWorkflowImpl(async (_env, orgId) => {
+      const now = Date.now()
+      const existing = await queryFirstRow<{
+        requested_by: string
+        target_token_ciphertext: string
+        target_token_iv: string
+        target_token_tag: string
+        target_host: string
+      }>(
+        dbPath,
+        "SELECT requested_by, target_host, target_token_ciphertext, target_token_iv, target_token_tag FROM org_tinybird_sync_runs WHERE org_id = ?",
+        [orgId],
+      )
+      if (!existing) return
+
+      await executeSql(
+        dbPath,
+        `INSERT INTO org_tinybird_settings (
+          org_id, host, token_ciphertext, token_iv, token_tag, sync_status,
+          last_sync_at, last_sync_error, project_revision, last_deployment_id,
+          created_at, updated_at, created_by, updated_by
+        ) VALUES (?, ?, ?, ?, ?, 'active', ?, NULL, 'rev-1', 'dep-1', ?, ?, ?, ?)
+        ON CONFLICT(org_id) DO UPDATE SET
+          host=excluded.host,
+          token_ciphertext=excluded.token_ciphertext,
+          token_iv=excluded.token_iv,
+          token_tag=excluded.token_tag,
+          project_revision='rev-1',
+          last_deployment_id='dep-1',
+          updated_at=excluded.updated_at`,
+        [
+          orgId,
+          existing.target_host,
+          existing.target_token_ciphertext,
+          existing.target_token_iv,
+          existing.target_token_tag,
+          now,
+          now,
+          now,
+          existing.requested_by,
+          existing.requested_by,
+        ],
+      )
+
+      await executeSql(
+        dbPath,
+        `UPDATE org_tinybird_sync_runs SET run_status='succeeded', phase='succeeded', deployment_id='dep-1', deployment_status='live', finished_at=?, updated_at=? WHERE org_id = ?`,
+        [now, now, orgId],
+      )
+    })
 
     const calls: Array<{ baseUrl: string; token: string; method: string }> = []
     tinybirdTestables.setClientFactory((baseUrl, token) => ({
