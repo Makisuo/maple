@@ -112,12 +112,35 @@ interface OrgTinybirdSettingsSectionProps {
   hasEntitlement: boolean
 }
 
+const DEFAULT_LOGS_RETENTION_DAYS = 90
+const DEFAULT_TRACES_RETENTION_DAYS = 90
+const DEFAULT_METRICS_RETENTION_DAYS = 365
+
+type RetentionParse =
+  | { readonly kind: "empty" }
+  | { readonly kind: "valid"; readonly value: number }
+  | { readonly kind: "invalid" }
+
+function parseRetentionInput(raw: string): RetentionParse {
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return { kind: "empty" }
+  const parsed = Number(trimmed)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 3650) return { kind: "invalid" }
+  return { kind: "valid", value: parsed }
+}
+
+const retentionOrNull = (parsed: RetentionParse): number | null =>
+  parsed.kind === "valid" ? parsed.value : null
+
 export function OrgTinybirdSettingsSection({
   isAdmin,
   hasEntitlement,
 }: OrgTinybirdSettingsSectionProps) {
   const [host, setHost] = useState("")
   const [token, setToken] = useState("")
+  const [logsRetention, setLogsRetention] = useState("")
+  const [tracesRetention, setTracesRetention] = useState("")
+  const [metricsRetention, setMetricsRetention] = useState("")
   const [isSaving, setIsSaving] = useState(false)
   const [isResyncing, setIsResyncing] = useState(false)
   const [disableOpen, setDisableOpen] = useState(false)
@@ -222,6 +245,26 @@ export function OrgTinybirdSettingsSection({
     }
   }, [settings?.activeHost, settings?.configured, settings?.draftHost])
 
+  useEffect(() => {
+    setLogsRetention(
+      settings?.logsRetentionDays != null ? String(settings.logsRetentionDays) : "",
+    )
+    setTracesRetention(
+      settings?.tracesRetentionDays != null ? String(settings.tracesRetentionDays) : "",
+    )
+    setMetricsRetention(
+      settings?.metricsRetentionDays != null ? String(settings.metricsRetentionDays) : "",
+    )
+  }, [settings?.logsRetentionDays, settings?.tracesRetentionDays, settings?.metricsRetentionDays])
+
+  const parsedLogsRetention = useMemo(() => parseRetentionInput(logsRetention), [logsRetention])
+  const parsedTracesRetention = useMemo(() => parseRetentionInput(tracesRetention), [tracesRetention])
+  const parsedMetricsRetention = useMemo(() => parseRetentionInput(metricsRetention), [metricsRetention])
+  const retentionInvalid =
+    parsedLogsRetention.kind === "invalid" ||
+    parsedTracesRetention.kind === "invalid" ||
+    parsedMetricsRetention.kind === "invalid"
+
   const statusBadge = useMemo(() => {
     if (isDeploying) {
       return (
@@ -248,11 +291,18 @@ export function OrgTinybirdSettingsSection({
   }, [configured, isDeploying, settings?.syncStatus])
 
   async function handleSave() {
+    if (retentionInvalid) {
+      toast.error("Retention values must be integers between 1 and 3650")
+      return
+    }
     setIsSaving(true)
     const result = await upsertMutation({
       payload: new OrgTinybirdSettingsUpsertRequest({
         host,
         token,
+        logsRetentionDays: retentionOrNull(parsedLogsRetention),
+        tracesRetentionDays: retentionOrNull(parsedTracesRetention),
+        metricsRetentionDays: retentionOrNull(parsedMetricsRetention),
       }),
     })
     setIsSaving(false)
@@ -359,6 +409,74 @@ export function OrgTinybirdSettingsSection({
                   </p>
                 </div>
 
+                <div className="grid gap-3 rounded-lg border px-4 py-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Raw data retention</p>
+                    <p className="text-muted-foreground text-xs">
+                      Override the TTL Maple applies to raw ingest tables in your Tinybird project. Leave a
+                      field blank to use Maple&apos;s default. Changes trigger a redeploy on save.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="tinybird-logs-retention" className="text-xs">
+                        Logs (days)
+                      </Label>
+                      <Input
+                        id="tinybird-logs-retention"
+                        type="number"
+                        min={1}
+                        max={3650}
+                        inputMode="numeric"
+                        placeholder={String(DEFAULT_LOGS_RETENTION_DAYS)}
+                        value={logsRetention}
+                        onChange={(event) => setLogsRetention(event.target.value)}
+                        disabled={isBusy}
+                        aria-invalid={parsedLogsRetention.kind === "invalid"}
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="tinybird-traces-retention" className="text-xs">
+                        Traces (days)
+                      </Label>
+                      <Input
+                        id="tinybird-traces-retention"
+                        type="number"
+                        min={1}
+                        max={3650}
+                        inputMode="numeric"
+                        placeholder={String(DEFAULT_TRACES_RETENTION_DAYS)}
+                        value={tracesRetention}
+                        onChange={(event) => setTracesRetention(event.target.value)}
+                        disabled={isBusy}
+                        aria-invalid={parsedTracesRetention.kind === "invalid"}
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="tinybird-metrics-retention" className="text-xs">
+                        Metrics (days)
+                      </Label>
+                      <Input
+                        id="tinybird-metrics-retention"
+                        type="number"
+                        min={1}
+                        max={3650}
+                        inputMode="numeric"
+                        placeholder={String(DEFAULT_METRICS_RETENTION_DAYS)}
+                        value={metricsRetention}
+                        onChange={(event) => setMetricsRetention(event.target.value)}
+                        disabled={isBusy}
+                        aria-invalid={parsedMetricsRetention.kind === "invalid"}
+                      />
+                    </div>
+                  </div>
+                  {retentionInvalid ? (
+                    <p className="text-destructive text-xs">
+                      Retention values must be whole numbers between 1 and 3650 days.
+                    </p>
+                  ) : null}
+                </div>
+
                 <div className="rounded-lg border px-4 py-3 text-sm">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Active target</span>
@@ -404,7 +522,7 @@ export function OrgTinybirdSettingsSection({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => void handleSave()} disabled={isBusy || !isValidHost || (!hasSavedToken && token.trim().length === 0)}>
+                  <Button onClick={() => void handleSave()} disabled={isBusy || !isValidHost || retentionInvalid || (!hasSavedToken && token.trim().length === 0)}>
                     {isSaving ? "Saving..." : configured ? "Update connection" : "Save connection"}
                   </Button>
                   <Button

@@ -1,6 +1,12 @@
 import { datasources, pipes, projectRevision } from "../generated/tinybird-project-manifest"
 import { TinybirdApi, TinybirdApiError } from "@tinybirdco/sdk"
 import { Duration, Effect, Layer, Schema, Context } from "effect"
+import {
+  applyRawTtlOverrides,
+  computeEffectiveRevision,
+  EMPTY_TTL_OVERRIDES,
+  type RawTableTtlOverrides,
+} from "./ttl-override"
 
 const REQUEST_TIMEOUT = Duration.seconds(30)
 
@@ -59,6 +65,10 @@ const FAILURE_STATUSES = new Set(["failed", "error", "deleting", "deleted"])
 export interface TinybirdProjectSyncParams {
   readonly baseUrl: string
   readonly token: string
+}
+
+export interface TinybirdDeployParams extends TinybirdProjectSyncParams {
+  readonly overrides?: RawTableTtlOverrides
 }
 
 export interface TinybirdStartDeploymentResult {
@@ -253,9 +263,10 @@ const makeApi = (params: TinybirdProjectSyncParams) =>
     timeout: Duration.toMillis(REQUEST_TIMEOUT),
   })
 
-const buildDeployFormData = () => {
+const buildDeployFormData = (overrides: RawTableTtlOverrides) => {
+  const effectiveDatasources = applyRawTtlOverrides(datasources, overrides)
   const formData = new FormData()
-  for (const datasource of datasources) {
+  for (const datasource of effectiveDatasources) {
     formData.append(
       "data_project://",
       new Blob([datasource.content], { type: "text/plain" }),
@@ -277,7 +288,7 @@ export interface TinybirdProjectSyncShape {
     params: TinybirdProjectSyncParams,
   ) => Effect.Effect<void, TinybirdSyncRejectedError | TinybirdSyncUnavailableError>
   readonly startDeployment: (
-    params: TinybirdProjectSyncParams,
+    params: TinybirdDeployParams,
   ) => Effect.Effect<TinybirdStartDeploymentResult, TinybirdSyncRejectedError | TinybirdSyncUnavailableError>
   readonly pollDeployment: (
     params: TinybirdProjectSyncParams & { readonly deploymentId: string },
@@ -403,10 +414,12 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
       )
 
       const startDeployment = Effect.fn("TinybirdProjectSync.startDeployment")(
-        function* (params: TinybirdProjectSyncParams) {
+        function* (params: TinybirdDeployParams) {
           yield* Effect.annotateCurrentSpan("baseUrl", params.baseUrl)
           const api = makeApi(params)
-          const formData = buildDeployFormData()
+          const overrides = params.overrides ?? EMPTY_TTL_OVERRIDES
+          const formData = buildDeployFormData(overrides)
+          const effectiveRevision = computeEffectiveRevision(projectRevision, overrides)
 
           const deployResponse = yield* Effect.tryPromise({
             try: () =>
@@ -455,7 +468,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
           const feedback = deployBody.deployment?.feedback ?? []
 
           return {
-            projectRevision,
+            projectRevision: effectiveRevision,
             result: deployBody.result,
             deploymentId: deployBody.deployment?.id ?? null,
             deploymentStatus: deployBody.deployment?.status ?? null,
@@ -639,7 +652,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
   static readonly cleanupStaleDeployments = (params: TinybirdProjectSyncParams) =>
     this.use((service) => service.cleanupStaleDeployments(params))
 
-  static readonly startDeployment = (params: TinybirdProjectSyncParams) =>
+  static readonly startDeployment = (params: TinybirdDeployParams) =>
     this.use((service) => service.startDeployment(params))
 
   static readonly pollDeployment = (params: TinybirdProjectSyncParams & { readonly deploymentId: string }) =>
@@ -673,7 +686,7 @@ export const cleanupStaleTinybirdDeployments = (
 ): Promise<void> => provideSync(TinybirdProjectSync.cleanupStaleDeployments(params))
 
 export const startTinybirdDeploymentStep = (
-  params: TinybirdProjectSyncParams,
+  params: TinybirdDeployParams,
 ): Promise<TinybirdStartDeploymentResult> =>
   provideSync(TinybirdProjectSync.startDeployment(params))
 

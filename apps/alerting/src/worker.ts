@@ -26,9 +26,10 @@ const buildLayer = (env: Record<string, unknown>) => {
 
   const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 
+  const TinybirdSyncClientLive = TinybirdSyncClient.Default
+
   const OrgTinybirdSettingsLive = OrgTinybirdSettingsService.Live.pipe(
-    Layer.provide(TinybirdSyncClient.layer),
-    Layer.provide(BaseLive),
+    Layer.provide(Layer.mergeAll(BaseLive, TinybirdSyncClientLive)),
   )
 
   const TinybirdServiceLive = TinybirdService.Live.pipe(
@@ -77,16 +78,15 @@ type AlertingRuntime = ReturnType<typeof buildAlertingRuntime>
 const buildAlertingRuntime = (env: Record<string, unknown>) =>
   ManagedRuntime.make(buildLayer(env))
 
-const runtimeCache = new WeakMap<object, AlertingRuntime>()
-
-const getRuntime = (env: Record<string, unknown>): AlertingRuntime => {
-  const key = env as object
-  const existing = runtimeCache.get(key)
-  if (existing) return existing
-  const built = buildAlertingRuntime(env)
-  runtimeCache.set(key, built)
-  return built
-}
+// Intentionally NOT cached across invocations. A cached runtime's scope never
+// closes on CF Workers, which means OtlpExporter's `Scope.addFinalizer` (the
+// only reliable flush path here — the background export-interval fiber does
+// not progress between scheduled ticks) is never fired and telemetry silently
+// piles up in the in-memory buffer. Building per-tick keeps layer construction
+// cheap (closures, no real I/O) and lets us dispose the runtime in
+// `ctx.waitUntil`, which triggers the finalizer → runExport → OTLP POST.
+const makeRuntime = (env: Record<string, unknown>): AlertingRuntime =>
+  ManagedRuntime.make(buildLayer(env)) as AlertingRuntime
 
 const alertTick = Effect.gen(function* () {
   const alerts = yield* AlertsService
@@ -165,14 +165,20 @@ export default {
     env: Record<string, unknown>,
     ctx: ExecutionContextLike,
   ): Promise<void> {
-    const runtime = getRuntime(env)
+    const runtime = makeRuntime(env)
     const program =
       event.cron === "*/15 * * * *"
         ? digestTick
         : Effect.all([alertTick, errorTick], { concurrency: 2, discard: true })
-    const promise = runtime.runPromise(program)
-    ctx.waitUntil(promise)
-    await promise
+    const done = runtime
+      .runPromise(program)
+      .finally(() =>
+        runtime.dispose().catch((err) =>
+          console.error("[telemetry] alerting runtime dispose failed:", err),
+        ),
+      )
+    ctx.waitUntil(done)
+    await done
   },
   fetch(_request: Request): Response {
     return new Response("maple-alerting: scheduled only", { status: 404 })

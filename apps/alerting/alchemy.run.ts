@@ -5,7 +5,7 @@ import type {
   MapleDomains,
   MapleStage,
 } from "@maple/infra/cloudflare"
-import { resolveWorkerName } from "@maple/infra/cloudflare"
+import { formatMapleStage, resolveWorkerName } from "@maple/infra/cloudflare"
 
 const requireEnv = (key: string): string => {
   const value = process.env[key]?.trim()
@@ -69,6 +69,10 @@ export const createAlertingWorker = async ({
       RESEND_FROM_EMAIL:
         process.env.RESEND_FROM_EMAIL?.trim() ||
         "Maple <notifications@maple.dev>",
+      ...optionalPlain("OTEL_BASE_URL"),
+      ...optionalPlain("OTEL_ENVIRONMENT", formatMapleStage(stage)),
+      ...optionalPlain("COMMIT_SHA"),
+      ...optionalSecret("MAPLE_OTEL_INGEST_KEY"),
       ...optionalSecret("MAPLE_ROOT_PASSWORD"),
       ...optionalSecret("CLERK_SECRET_KEY"),
       ...optionalPlain("CLERK_PUBLISHABLE_KEY"),

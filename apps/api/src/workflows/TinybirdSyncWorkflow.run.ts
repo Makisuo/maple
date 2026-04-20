@@ -48,6 +48,9 @@ interface SyncRunSnapshot {
   readonly targetTokenIv: string
   readonly targetTokenTag: string
   readonly targetProjectRevision: string
+  readonly targetLogsRetentionDays: number | null
+  readonly targetTracesRetentionDays: number | null
+  readonly targetMetricsRetentionDays: number | null
   readonly deploymentId: string | null
 }
 
@@ -161,6 +164,9 @@ const promoteActiveConfig = Effect.fn("TinybirdSyncWorkflow.promoteActiveConfig"
           lastSyncError: null,
           projectRevision,
           lastDeploymentId: deploymentId,
+          logsRetentionDays: row.targetLogsRetentionDays,
+          tracesRetentionDays: row.targetTracesRetentionDays,
+          metricsRetentionDays: row.targetMetricsRetentionDays,
           createdAt: now,
           updatedAt: now,
           createdBy: row.requestedBy,
@@ -178,6 +184,9 @@ const promoteActiveConfig = Effect.fn("TinybirdSyncWorkflow.promoteActiveConfig"
             lastSyncError: null,
             projectRevision,
             lastDeploymentId: deploymentId,
+            logsRetentionDays: row.targetLogsRetentionDays,
+            tracesRetentionDays: row.targetTracesRetentionDays,
+            metricsRetentionDays: row.targetMetricsRetentionDays,
             updatedAt: now,
             updatedBy: row.requestedBy,
           },
@@ -225,6 +234,9 @@ const toSnapshot = (row: typeof orgTinybirdSyncRuns.$inferSelect): SyncRunSnapsh
   targetTokenIv: row.targetTokenIv,
   targetTokenTag: row.targetTokenTag,
   targetProjectRevision: row.targetProjectRevision,
+  targetLogsRetentionDays: row.targetLogsRetentionDays,
+  targetTracesRetentionDays: row.targetTracesRetentionDays,
+  targetMetricsRetentionDays: row.targetMetricsRetentionDays,
   deploymentId: row.deploymentId,
 })
 
@@ -321,7 +333,15 @@ export const runTinybirdSyncWorkflow = async (
     })
 
     const started = await step.do("start-deployment", async () =>
-      startTinybirdDeploymentStep({ baseUrl: snapshot.targetHost, token }))
+      startTinybirdDeploymentStep({
+        baseUrl: snapshot.targetHost,
+        token,
+        overrides: {
+          logsRetentionDays: snapshot.targetLogsRetentionDays,
+          tracesRetentionDays: snapshot.targetTracesRetentionDays,
+          metricsRetentionDays: snapshot.targetMetricsRetentionDays,
+        },
+      }))
 
     if (started.result === "no_changes") {
       // Tinybird's `no_changes` response may include a phantom `deployment`

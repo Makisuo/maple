@@ -23,6 +23,11 @@ import {
   TinybirdSyncRejectedError,
   TinybirdSyncUnavailableError,
 } from "@maple/domain/tinybird-project-sync"
+import {
+  computeEffectiveRevision,
+  EMPTY_TTL_OVERRIDES,
+  type RawTableTtlOverrides,
+} from "@maple/domain/tinybird"
 import { orgTinybirdSettings, orgTinybirdSyncRuns } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Option, Redacted, Schema, Semaphore, Context } from "effect"
@@ -207,6 +212,53 @@ const normalizeToken = (
     ),
   )
 
+const MIN_RETENTION_DAYS = 1
+const MAX_RETENTION_DAYS = 3650
+
+const normalizeRetentionDays = (
+  raw: number | null | undefined,
+  field: string,
+): Effect.Effect<number | null, OrgTinybirdSettingsValidationError> =>
+  raw == null
+    ? Effect.succeed(null)
+    : Number.isInteger(raw) && raw >= MIN_RETENTION_DAYS && raw <= MAX_RETENTION_DAYS
+      ? Effect.succeed(raw)
+      : Effect.fail(
+          new OrgTinybirdSettingsValidationError({
+            message: `${field} must be an integer between ${MIN_RETENTION_DAYS} and ${MAX_RETENTION_DAYS}`,
+          }),
+        )
+
+const resolveRetentionValue = (
+  payloadValue: number | null | undefined,
+  syncRunExists: boolean,
+  syncRunValue: number | null | undefined,
+  activeValue: number | null | undefined,
+): number | null => {
+  if (payloadValue !== undefined) return payloadValue
+  if (syncRunExists) return syncRunValue ?? null
+  return activeValue ?? null
+}
+
+const toOverrides = (input: {
+  readonly logsRetentionDays: number | null
+  readonly tracesRetentionDays: number | null
+  readonly metricsRetentionDays: number | null
+}): RawTableTtlOverrides => ({
+  logsRetentionDays: input.logsRetentionDays,
+  tracesRetentionDays: input.tracesRetentionDays,
+  metricsRetentionDays: input.metricsRetentionDays,
+})
+
+const activeRowOverrides = (row: ActiveRow | null | undefined): RawTableTtlOverrides =>
+  row == null
+    ? EMPTY_TTL_OVERRIDES
+    : toOverrides({
+        logsRetentionDays: row.logsRetentionDays ?? null,
+        tracesRetentionDays: row.tracesRetentionDays ?? null,
+        metricsRetentionDays: row.metricsRetentionDays ?? null,
+      })
+
 const isOrgAdmin = (roles: ReadonlyArray<RoleName>) =>
   roles.includes(ROOT_ROLE) || roles.includes(ORG_ADMIN_ROLE)
 
@@ -343,6 +395,9 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
                 targetTokenIv: row.targetTokenIv,
                 targetTokenTag: row.targetTokenTag,
                 targetProjectRevision: row.targetProjectRevision,
+                targetLogsRetentionDays: row.targetLogsRetentionDays,
+                targetTracesRetentionDays: row.targetTracesRetentionDays,
+                targetMetricsRetentionDays: row.targetMetricsRetentionDays,
                 runStatus: row.runStatus,
                 phase: row.phase,
                 deploymentId: row.deploymentId,
@@ -398,8 +453,11 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
         }
         if (syncRun?.runStatus === "failed") return "error" as const
         if (activeRow == null) return null
-        if (currentRevision !== null && activeRow.projectRevision !== currentRevision) {
-          return "out_of_sync" as const
+        if (currentRevision !== null) {
+          const effective = computeEffectiveRevision(currentRevision, activeRowOverrides(activeRow))
+          if (activeRow.projectRevision !== effective) {
+            return "out_of_sync" as const
+          }
         }
         return "active" as const
       }
@@ -419,6 +477,9 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
           lastSyncAt: isIsoDateTime(syncRun?.finishedAt ?? syncRun?.updatedAt ?? activeRow?.lastSyncAt ?? null),
           lastSyncError: syncRun?.runStatus === "failed" ? syncRun.errorMessage ?? null : null,
           projectRevision: activeRow?.projectRevision ?? syncRun?.targetProjectRevision ?? null,
+          logsRetentionDays: activeRow?.logsRetentionDays ?? syncRun?.targetLogsRetentionDays ?? null,
+          tracesRetentionDays: activeRow?.tracesRetentionDays ?? syncRun?.targetTracesRetentionDays ?? null,
+          metricsRetentionDays: activeRow?.metricsRetentionDays ?? syncRun?.targetMetricsRetentionDays ?? null,
           currentRun,
         })
       }
@@ -478,6 +539,7 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
         token: string,
         projectRevision: string,
         deploymentId: string | null,
+        overrides: RawTableTtlOverrides,
       ) {
         const existing = yield* selectActiveRow(orgId)
         const encryptedToken = yield* encryptToken(token, encryptionKey)
@@ -497,6 +559,9 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
               lastSyncError: null,
               projectRevision,
               lastDeploymentId: deploymentId,
+              logsRetentionDays: overrides.logsRetentionDays,
+              tracesRetentionDays: overrides.tracesRetentionDays,
+              metricsRetentionDays: overrides.metricsRetentionDays,
               createdAt: Option.isSome(existing) ? existing.value.createdAt : now,
               updatedAt: now,
               createdBy: Option.isSome(existing) ? existing.value.createdBy : requestedBy,
@@ -514,6 +579,9 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
                 lastSyncError: null,
                 projectRevision,
                 lastDeploymentId: deploymentId,
+                logsRetentionDays: overrides.logsRetentionDays,
+                tracesRetentionDays: overrides.tracesRetentionDays,
+                metricsRetentionDays: overrides.metricsRetentionDays,
                 updatedAt: now,
                 updatedBy: requestedBy,
               },
@@ -586,6 +654,11 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
             token,
             syncRun.targetProjectRevision,
             syncRun.deploymentId,
+            toOverrides({
+              logsRetentionDays: syncRun.targetLogsRetentionDays ?? null,
+              tracesRetentionDays: syncRun.targetTracesRetentionDays ?? null,
+              metricsRetentionDays: syncRun.targetMetricsRetentionDays ?? null,
+            }),
           )
 
           yield* updateSyncRun(orgId, {
@@ -618,7 +691,8 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
         userId: UserId,
         host: string,
         token: string,
-        currentRevision: string,
+        baseRevision: string,
+        overrides: RawTableTtlOverrides,
       ) {
         return yield* kickoffSemaphore.withPermit(
           Effect.gen(function* () {
@@ -666,6 +740,7 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
 
             const encrypted = yield* encryptToken(token, encryptionKey)
             const now = Date.now()
+            const effectiveRevision = computeEffectiveRevision(baseRevision, overrides)
 
             yield* upsertSyncRun({
               orgId,
@@ -674,7 +749,10 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
               targetTokenCiphertext: encrypted.ciphertext,
               targetTokenIv: encrypted.iv,
               targetTokenTag: encrypted.tag,
-              targetProjectRevision: currentRevision,
+              targetProjectRevision: effectiveRevision,
+              targetLogsRetentionDays: overrides.logsRetentionDays,
+              targetTracesRetentionDays: overrides.tracesRetentionDays,
+              targetMetricsRetentionDays: overrides.metricsRetentionDays,
               runStatus: "queued",
               phase: "starting",
               deploymentId: null,
@@ -768,9 +846,44 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
         const activeRow = yield* selectActiveRow(orgId)
         const syncRun = yield* selectSyncRunRow(orgId)
         const token = yield* resolveInputToken(payload.token, activeRow, syncRun)
+        const syncRunExists = Option.isSome(syncRun)
+        const syncRunRow = Option.getOrUndefined(syncRun)
+        const activeRowValue = Option.getOrUndefined(activeRow)
+        const logsRetentionDays = yield* normalizeRetentionDays(
+          resolveRetentionValue(
+            payload.logsRetentionDays,
+            syncRunExists,
+            syncRunRow?.targetLogsRetentionDays,
+            activeRowValue?.logsRetentionDays,
+          ),
+          "logsRetentionDays",
+        )
+        const tracesRetentionDays = yield* normalizeRetentionDays(
+          resolveRetentionValue(
+            payload.tracesRetentionDays,
+            syncRunExists,
+            syncRunRow?.targetTracesRetentionDays,
+            activeRowValue?.tracesRetentionDays,
+          ),
+          "tracesRetentionDays",
+        )
+        const metricsRetentionDays = yield* normalizeRetentionDays(
+          resolveRetentionValue(
+            payload.metricsRetentionDays,
+            syncRunExists,
+            syncRunRow?.targetMetricsRetentionDays,
+            activeRowValue?.metricsRetentionDays,
+          ),
+          "metricsRetentionDays",
+        )
+        const overrides: RawTableTtlOverrides = {
+          logsRetentionDays,
+          tracesRetentionDays,
+          metricsRetentionDays,
+        }
         const currentRevision = yield* getCurrentProjectRevision()
 
-        yield* kickoffSyncRun(orgId, userId, host, token, currentRevision)
+        yield* kickoffSyncRun(orgId, userId, host, token, currentRevision, overrides)
 
         const nextActiveRow = yield* selectActiveRow(orgId)
         const nextSyncRun = yield* selectSyncRunRow(orgId)
@@ -819,8 +932,9 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
           encryptionKey,
         )
         const currentRevision = yield* getCurrentProjectRevision()
+        const overrides = activeRowOverrides(activeRow)
 
-        yield* kickoffSyncRun(orgId, userId, activeRow.host, token, currentRevision)
+        yield* kickoffSyncRun(orgId, userId, activeRow.host, token, currentRevision, overrides)
 
         const nextSyncRun = yield* selectSyncRunRow(orgId)
         return toResponse(activeRow, currentRevision, Option.getOrUndefined(nextSyncRun))

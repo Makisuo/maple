@@ -45,6 +45,9 @@ export class OrgTinybirdSettingsResponse extends Schema.Class<OrgTinybirdSetting
   lastSyncAt: Schema.NullOr(IsoDateTimeString),
   lastSyncError: Schema.NullOr(Schema.String),
   projectRevision: Schema.NullOr(Schema.String),
+  logsRetentionDays: Schema.NullOr(Schema.Number),
+  tracesRetentionDays: Schema.NullOr(Schema.Number),
+  metricsRetentionDays: Schema.NullOr(Schema.Number),
   currentRun: Schema.NullOr(OrgTinybirdCurrentRunResponse),
 }) {}
 
@@ -53,6 +56,9 @@ export class OrgTinybirdSettingsUpsertRequest extends Schema.Class<OrgTinybirdSe
 )({
   host: Schema.String,
   token: Schema.String,
+  logsRetentionDays: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  tracesRetentionDays: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  metricsRetentionDays: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 }) {}
 
 export class OrgTinybirdDeploymentStatusResponse extends Schema.Class<OrgTinybirdDeploymentStatusResponse>(
