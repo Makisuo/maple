@@ -7,22 +7,10 @@ import { ActorAvatar } from "./actor-chip"
 import { IssueContextMenu } from "./issue-context-menu"
 import { WorkflowStatePopover } from "./workflow-state-popover"
 import type { IssueMutations } from "./use-issue-mutations"
+import { clampPriority, shortIssueId } from "./issue-id"
 import { PriorityBarsIcon, WorkflowRingIcon } from "@/components/icons"
-import type { PriorityLevel } from "@/components/icons"
 import { formatNumber } from "@/lib/format"
 import { getServiceColorClass } from "@maple/ui/lib/colors"
-
-function clampPriority(value: number): PriorityLevel {
-  if (!Number.isFinite(value)) return 0
-  const rounded = Math.trunc(value)
-  if (rounded < 0) return 0
-  if (rounded > 4) return 4
-  return rounded as PriorityLevel
-}
-
-function shortIssueId(id: string): string {
-  return id.replace(/-/g, "").slice(0, 7).toUpperCase()
-}
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 

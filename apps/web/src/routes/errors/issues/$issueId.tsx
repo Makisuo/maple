@@ -1,36 +1,31 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { ActorChip } from "@/components/errors/actor-chip"
+import { IssueActionsBar } from "@/components/errors/issue-actions-bar"
+import { IssueCommentComposer } from "@/components/errors/issue-comment-composer"
+import { IssueHero } from "@/components/errors/issue-hero"
+import { IssueIncidentsTable } from "@/components/errors/issue-incidents-table"
+import { IssueMetadataRail } from "@/components/errors/issue-metadata-rail"
+import { IssueNotesCallout } from "@/components/errors/issue-notes-callout"
+import { IssueOccurrenceSparkline } from "@/components/errors/issue-occurrence-sparkline"
+import { IssueOccurrencesTable } from "@/components/errors/issue-occurrences-table"
+import { IssueStatRibbon } from "@/components/errors/issue-stat-ribbon"
 import { IssueTimeline } from "@/components/errors/issue-timeline"
-import { StateSelect } from "@/components/errors/state-select"
+import { LeaseHud } from "@/components/errors/lease-hud"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatRelativeTime } from "@/lib/format"
 import { Badge } from "@maple/ui/components/ui/badge"
-import { Button } from "@maple/ui/components/ui/button"
-import { Card, CardContent } from "@maple/ui/components/ui/card"
-import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { Textarea } from "@maple/ui/components/ui/textarea"
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
 } from "@maple/ui/components/ui/empty"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@maple/ui/components/ui/table"
 import { ErrorIssueId, type WorkflowState } from "@maple/domain/http"
 
 const decodeIssueId = Schema.decodeSync(ErrorIssueId)
@@ -70,18 +65,15 @@ function WorkflowBadge({ state }: { state: WorkflowState }) {
   )
 }
 
-function formatLeaseCountdown(leaseExpiresAt: string, nowMs: number): string {
-  const expiresMs = Date.parse(leaseExpiresAt)
-  if (!Number.isFinite(expiresMs)) return "—"
-  const delta = expiresMs - nowMs
-  if (delta <= 0) return "expired"
-  const minutes = Math.floor(delta / 60_000)
-  const seconds = Math.floor((delta % 60_000) / 1000)
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60)
-    return `${hours}h ${minutes % 60}m`
-  }
-  return `${minutes}m ${seconds}s`
+function SectionHeader({ id, label }: { id: string; label: string }) {
+  return (
+    <h2
+      id={id}
+      className="mb-3 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground"
+    >
+      {label}
+    </h2>
+  )
 }
 
 function IssueDetailPage() {
@@ -127,34 +119,17 @@ function IssueDetailPage() {
     { mode: "promiseExit" },
   )
 
-  const [notesDraft, setNotesDraft] = useState("")
   const [commentDraft, setCommentDraft] = useState("")
   const [busy, setBusy] = useState<
     "state" | "claim" | "release" | "heartbeat" | "comment" | null
   >(null)
 
-  const lastSyncedRef = useRef<{ id: string | null; notes: string | null }>({
-    id: null,
-    notes: null,
-  })
-
-  useEffect(() => {
-    if (!Result.isSuccess(detailResult)) return
-    const issue = detailResult.value.issue
-    const last = lastSyncedRef.current
-    if (last.id === issue.id && last.notes === (issue.notes ?? null)) return
-    lastSyncedRef.current = { id: issue.id, notes: issue.notes ?? null }
-    setNotesDraft(issue.notes ?? "")
-  }, [detailResult])
-
-  const [nowTick, setNowTick] = useState(Date.now())
-  useEffect(() => {
-    const interval = setInterval(() => setNowTick(Date.now()), 5_000)
-    return () => clearInterval(interval)
-  }, [])
-
   const invalidateKeys = useMemo(
-    () => ["errorIssues", `errorIssue:${issueId}`, `errorIssue:${issueId}:events`],
+    () => [
+      "errorIssues",
+      `errorIssue:${issueId}`,
+      `errorIssue:${issueId}:events`,
+    ],
     [issueId],
   )
 
@@ -235,8 +210,9 @@ function IssueDetailPage() {
         breadcrumbs={[...breadcrumbsLoading]}
         title="Issue"
       >
-        <div className="space-y-2">
-          <Skeleton className="h-16 w-full" />
+        <div className="space-y-4">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-20 w-full" />
           <Skeleton className="h-40 w-full" />
         </div>
       </DashboardLayout>
@@ -262,12 +238,6 @@ function IssueDetailPage() {
       const events = Result.isSuccess(eventsResult)
         ? eventsResult.value.events
         : []
-      const leaseCountdown = issue.leaseExpiresAt
-        ? formatLeaseCountdown(issue.leaseExpiresAt, nowTick)
-        : null
-      const isTerminal =
-        issue.workflowState === "cancelled" || issue.workflowState === "done"
-      const canClaim = !issue.leaseHolder && !isTerminal
 
       return (
         <DashboardLayout
@@ -292,242 +262,60 @@ function IssueDetailPage() {
             </div>
           }
         >
-          <div className="space-y-6">
-            <Card>
-              <CardContent className="space-y-4 pt-6">
-                <div>
-                  <div className="text-sm text-muted-foreground">Message</div>
-                  <div className="mt-1">{issue.exceptionMessage}</div>
-                </div>
-                {issue.topFrame ? (
-                  <div>
-                    <div className="text-sm text-muted-foreground">Top frame</div>
-                    <div className="mt-1 font-mono text-xs">{issue.topFrame}</div>
-                  </div>
-                ) : null}
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                  <Stat
-                    label="Events (total)"
-                    value={issue.occurrenceCount.toLocaleString()}
-                  />
-                  <Stat
-                    label="Events (window)"
-                    value={totalInWindow.toLocaleString()}
-                  />
-                  <Stat
-                    label="First seen"
-                    value={formatRelativeTime(issue.firstSeenAt)}
-                  />
-                  <Stat
-                    label="Last seen"
-                    value={formatRelativeTime(issue.lastSeenAt)}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center gap-3 border-t pt-4">
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-xs text-muted-foreground">State</Label>
-                    <StateSelect
-                      current={issue.workflowState}
-                      disabled={busy === "state"}
-                      onChange={transitionTo}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-xs text-muted-foreground">Assignee</Label>
-                    <ActorChip actor={issue.assignedActor} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-xs text-muted-foreground">Lease holder</Label>
-                    <div className="flex items-center gap-2">
-                      <ActorChip actor={issue.leaseHolder} />
-                      {leaseCountdown ? (
-                        <span className="text-xs text-muted-foreground tabular-nums">
-                          {leaseCountdown}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="ml-auto flex items-center gap-2">
-                    {canClaim ? (
-                      <Button size="sm" onClick={claim} disabled={busy === "claim"}>
-                        Claim
-                      </Button>
-                    ) : null}
-                    {issue.leaseHolder ? (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={heartbeat}
-                          disabled={busy === "heartbeat"}
-                        >
-                          Heartbeat
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={release}
-                          disabled={busy === "release"}
-                        >
-                          Release
-                        </Button>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="space-y-8">
+            <section className="space-y-4">
+              <IssueHero issue={issue} />
+              <IssueOccurrenceSparkline data={timeseries} />
+              <IssueMetadataRail issue={issue} />
+            </section>
 
-            <Card>
-              <CardContent className="space-y-3 pt-6">
-                <Label htmlFor="notes-input" className="text-sm font-medium">
-                  Notes (read-only for now)
-                </Label>
-                <Textarea
-                  id="notes-input"
-                  rows={3}
-                  value={notesDraft}
-                  readOnly
-                  placeholder="Triage notes appear here when set via comments or transitions."
-                />
-              </CardContent>
-            </Card>
+            <IssueActionsBar
+              issue={issue}
+              busy={busy}
+              onTransition={transitionTo}
+              onClaim={claim}
+              onHeartbeat={heartbeat}
+              onRelease={release}
+            />
 
-            <section>
-              <h2 className="mb-2 text-lg font-semibold">Timeline</h2>
+            {issue.leaseHolder && issue.leaseExpiresAt ? (
+              <LeaseHud
+                leaseExpiresAt={issue.leaseExpiresAt}
+                claimedAt={issue.claimedAt}
+                leaseHolder={issue.leaseHolder}
+              />
+            ) : null}
+
+            <IssueStatRibbon issue={issue} totalInWindow={totalInWindow} />
+
+            {issue.notes ? <IssueNotesCallout notes={issue.notes} /> : null}
+
+            <section aria-labelledby="activity-heading">
+              <SectionHeader id="activity-heading" label="Activity" />
               <IssueTimeline events={events} />
-              <div className="mt-3 space-y-2">
-                <Label htmlFor="comment-input" className="text-sm font-medium">
-                  Add a comment
-                </Label>
-                <Textarea
-                  id="comment-input"
-                  rows={3}
-                  value={commentDraft}
-                  onChange={(e) => setCommentDraft(e.target.value)}
-                  placeholder="Context, findings, links…"
-                />
-                <div className="flex justify-end">
-                  <Button
-                    size="sm"
-                    onClick={submitComment}
-                    disabled={busy === "comment" || commentDraft.trim().length === 0}
-                  >
-                    Comment
-                  </Button>
-                </div>
-              </div>
+              <IssueCommentComposer
+                value={commentDraft}
+                onChange={setCommentDraft}
+                onSubmit={submitComment}
+                disabled={busy === "comment"}
+              />
             </section>
 
-            <section>
-              <h2 className="mb-2 text-lg font-semibold">Incidents</h2>
-              {incidents.length === 0 ? (
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyTitle>No incidents yet</EmptyTitle>
-                    <EmptyDescription>
-                      Incidents open on first-seen or regression events.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Reason</TableHead>
-                      <TableHead>Opened</TableHead>
-                      <TableHead>Last triggered</TableHead>
-                      <TableHead className="text-right">Events</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {incidents.map((incident) => (
-                      <TableRow key={incident.id}>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={
-                              incident.status === "open"
-                                ? "bg-destructive/10 text-destructive"
-                                : "bg-muted text-muted-foreground"
-                            }
-                          >
-                            {incident.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{incident.reason}</TableCell>
-                        <TableCell>
-                          {formatRelativeTime(incident.firstTriggeredAt)}
-                        </TableCell>
-                        <TableCell>
-                          {formatRelativeTime(incident.lastTriggeredAt)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {incident.occurrenceCount.toLocaleString()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+            <section aria-labelledby="incidents-heading">
+              <SectionHeader id="incidents-heading" label="Incidents" />
+              <IssueIncidentsTable incidents={incidents} />
             </section>
 
-            <section>
-              <h2 className="mb-2 text-lg font-semibold">Latest occurrences</h2>
-              {sampleTraces.length === 0 ? (
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyTitle>No samples in window</EmptyTitle>
-                  </EmptyHeader>
-                </Empty>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Service</TableHead>
-                      <TableHead>Message</TableHead>
-                      <TableHead>Trace</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sampleTraces.map((trace) => (
-                      <TableRow key={`${trace.traceId}-${trace.spanId}`}>
-                        <TableCell className="text-muted-foreground">
-                          {formatRelativeTime(trace.timestamp)}
-                        </TableCell>
-                        <TableCell>{trace.serviceName}</TableCell>
-                        <TableCell className="max-w-sm truncate">
-                          {trace.exceptionMessage}
-                        </TableCell>
-                        <TableCell>
-                          <Link
-                            to="/traces/$traceId"
-                            params={{ traceId: trace.traceId }}
-                            className="font-mono text-xs hover:underline"
-                          >
-                            {trace.traceId.slice(0, 12)}…
-                          </Link>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+            <section aria-labelledby="occurrences-heading">
+              <SectionHeader
+                id="occurrences-heading"
+                label="Latest occurrences"
+              />
+              <IssueOccurrencesTable traces={sampleTraces} />
             </section>
           </div>
         </DashboardLayout>
       )
     })
     .render()
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 font-medium">{value}</div>
-    </div>
-  )
 }
