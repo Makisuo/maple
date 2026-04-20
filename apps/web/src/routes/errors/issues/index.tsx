@@ -1,30 +1,28 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { ActorChip } from "@/components/errors/actor-chip"
+import { IssueGroup } from "@/components/errors/issue-group"
+import { IssuesBulkBar } from "@/components/errors/issues-bulk-bar"
+import { IssuesToolbar } from "@/components/errors/issues-toolbar"
+import { useIssueMutations } from "@/components/errors/use-issue-mutations"
+import type { SelectToggleEvent } from "@/components/errors/issue-row"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatRelativeTime } from "@/lib/format"
-import { Badge } from "@maple/ui/components/ui/badge"
-import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@maple/ui/components/ui/table"
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
 } from "@maple/ui/components/ui/empty"
-import type { ErrorIssueDocument, WorkflowState } from "@maple/domain/http"
+import type {
+  ErrorIssueDocument,
+  ErrorIssueId,
+  WorkflowState,
+} from "@maple/domain/http"
 
 const FILTER_VALUES = [
   "triage",
@@ -49,6 +47,11 @@ const FILTER_LABEL: Record<FilterValue, string> = {
   wontfix: "Wontfix",
   all: "All",
 }
+
+const TOOLBAR_TABS = FILTER_VALUES.map((value) => ({
+  value,
+  label: FILTER_LABEL[value],
+}))
 
 const GROUP_ORDER: ReadonlyArray<WorkflowState> = [
   "triage",
@@ -82,35 +85,11 @@ export const Route = effectRoute(createFileRoute("/errors/issues/"))({
   validateSearch: Schema.toStandardSchemaV1(searchSchema),
 })
 
-const WORKFLOW_BADGE: Record<
-  WorkflowState,
-  { label: string; tone: string }
-> = {
-  triage: {
-    label: "Triage",
-    tone: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  },
-  todo: { label: "Todo", tone: "bg-muted text-muted-foreground" },
-  in_progress: {
-    label: "In progress",
-    tone: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  },
-  in_review: {
-    label: "In review",
-    tone: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
-  },
-  done: { label: "Done", tone: "bg-success/10 text-success" },
-  cancelled: { label: "Cancelled", tone: "bg-muted text-muted-foreground" },
-  wontfix: { label: "Wontfix", tone: "bg-muted text-muted-foreground" },
-}
-
-function WorkflowBadge({ state }: { state: WorkflowState }) {
-  const { label, tone } = WORKFLOW_BADGE[state]
-  return (
-    <Badge variant="outline" className={tone}>
-      {label}
-    </Badge>
-  )
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
 }
 
 function IssuesPage() {
@@ -126,36 +105,26 @@ function IssuesPage() {
     reactivityKeys: ["errorIssues"],
   })
   const issuesResult = useAtomValue(issuesQueryAtom)
+  const mutations = useIssueMutations()
 
-  const filterRow = (
-    <div
-      role="radiogroup"
-      aria-label="Filter by workflow state"
-      className="flex flex-wrap items-center gap-2"
-    >
-      {FILTER_VALUES.map((value) => {
-        const isActive = activeFilter === value
-        return (
-          <Button
-            key={value}
-            size="sm"
-            variant={isActive ? "default" : "outline"}
-            role="radio"
-            aria-checked={isActive}
-            onClick={() =>
-              navigate({
-                search: (prev) => ({
-                  ...prev,
-                  workflowState: value === "triage" ? undefined : value,
-                }),
-              })
-            }
-          >
-            {FILTER_LABEL[value]}
-          </Button>
-        )
-      })}
-    </div>
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+  const anchorRef = useRef<string | null>(null)
+
+  const toolbar = (
+    <IssuesToolbar
+      tabs={TOOLBAR_TABS}
+      active={activeFilter}
+      onChange={(value) => {
+        setSelectedIds(new Set())
+        navigate({
+          search: (prev) => ({
+            ...prev,
+            workflowState: value === "triage" ? undefined : value,
+          }),
+        })
+      }}
+    />
   )
 
   return Result.builder(issuesResult)
@@ -165,12 +134,14 @@ function IssuesPage() {
         title="Issues"
         description="Workflow-tracked errors, grouped by fingerprint."
       >
-        <div className="space-y-4">
-          {filterRow}
-          <div className="space-y-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+        <div>
+          {toolbar}
+          <div className="space-y-px p-2">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
           </div>
         </div>
       </DashboardLayout>
@@ -181,129 +152,259 @@ function IssuesPage() {
         title="Issues"
         description="Workflow-tracked errors, grouped by fingerprint."
       >
-        <div className="space-y-4">
-          {filterRow}
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>Failed to load issues</EmptyTitle>
-              <EmptyDescription>
-                {error.message ?? "Try refreshing or check API logs."}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+        <div>
+          {toolbar}
+          <div className="p-4">
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>Failed to load issues</EmptyTitle>
+                <EmptyDescription>
+                  {error.message ?? "Try refreshing or check API logs."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </div>
         </div>
       </DashboardLayout>
     ))
     .onSuccess((response) => {
       const issues = response.issues
-      const isRefreshing = issuesResult.waiting
-
-      const grouped = new Map<WorkflowState, ErrorIssueDocument[]>()
-      for (const issue of issues) {
-        const bucket = grouped.get(issue.workflowState) ?? []
-        bucket.push(issue)
-        grouped.set(issue.workflowState, bucket)
-      }
-      for (const bucket of grouped.values()) {
-        bucket.sort((a, b) => {
-          if (a.priority !== b.priority) return a.priority - b.priority
-          return b.lastSeenAt.localeCompare(a.lastSeenAt)
-        })
-      }
-
       return (
-        <DashboardLayout
-          breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
-          title="Issues"
-          description="Workflow-tracked errors, grouped by fingerprint."
-        >
-          <div
-            className={`space-y-6 ${isRefreshing ? "opacity-60 transition-opacity" : ""}`}
-            aria-busy={isRefreshing}
-          >
-            {filterRow}
-            {issues.length === 0 ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyTitle>No issues</EmptyTitle>
-                  <EmptyDescription>
-                    {activeFilter === "triage"
-                      ? "No issues in triage. Nice."
-                      : `No issues in state "${FILTER_LABEL[activeFilter]}".`}
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : (
-              GROUP_ORDER.filter((state) => (grouped.get(state)?.length ?? 0) > 0).map(
-                (state) => {
-                  const bucket = grouped.get(state) ?? []
-                  return (
-                    <section key={state}>
-                      <header className="mb-2 flex items-center gap-2">
-                        <WorkflowBadge state={state} />
-                        <span className="text-sm text-muted-foreground">
-                          {bucket.length} issue{bucket.length === 1 ? "" : "s"}
-                        </span>
-                      </header>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Exception</TableHead>
-                            <TableHead>Service</TableHead>
-                            <TableHead className="text-right">Events</TableHead>
-                            <TableHead>Last seen</TableHead>
-                            <TableHead>Assignee</TableHead>
-                            <TableHead>Holder</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {bucket.map((issue) => (
-                            <TableRow key={issue.id}>
-                              <TableCell className="max-w-md">
-                                <Link
-                                  to="/errors/issues/$issueId"
-                                  params={{ issueId: issue.id }}
-                                  className="font-medium hover:underline"
-                                >
-                                  {issue.exceptionType || "Unknown error"}
-                                </Link>
-                                <div className="truncate text-xs text-muted-foreground">
-                                  {issue.exceptionMessage}
-                                </div>
-                                {issue.hasOpenIncident ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="mt-1 bg-destructive/10 text-destructive"
-                                  >
-                                    incident open
-                                  </Badge>
-                                ) : null}
-                              </TableCell>
-                              <TableCell>{issue.serviceName}</TableCell>
-                              <TableCell className="text-right tabular-nums">
-                                {issue.occurrenceCount.toLocaleString()}
-                              </TableCell>
-                              <TableCell className="text-muted-foreground">
-                                {formatRelativeTime(issue.lastSeenAt)}
-                              </TableCell>
-                              <TableCell>
-                                <ActorChip actor={issue.assignedActor} />
-                              </TableCell>
-                              <TableCell>
-                                <ActorChip actor={issue.leaseHolder} />
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </section>
-                  )
-                },
-              )
-            )}
-          </div>
-        </DashboardLayout>
+        <IssuesPageBody
+          issues={issues}
+          isRefreshing={issuesResult.waiting}
+          activeFilter={activeFilter}
+          mutations={mutations}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          focusedId={focusedId}
+          setFocusedId={setFocusedId}
+          anchorRef={anchorRef}
+          toolbar={toolbar}
+        />
       )
     })
     .render()
+}
+
+interface IssuesPageBodyProps {
+  issues: ReadonlyArray<ErrorIssueDocument>
+  isRefreshing: boolean
+  activeFilter: FilterValue
+  mutations: ReturnType<typeof useIssueMutations>
+  selectedIds: Set<string>
+  setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>
+  focusedId: string | null
+  setFocusedId: React.Dispatch<React.SetStateAction<string | null>>
+  anchorRef: React.MutableRefObject<string | null>
+  toolbar: React.ReactNode
+}
+
+function IssuesPageBody({
+  issues,
+  isRefreshing,
+  activeFilter,
+  mutations,
+  selectedIds,
+  setSelectedIds,
+  focusedId,
+  setFocusedId,
+  anchorRef,
+  toolbar,
+}: IssuesPageBodyProps) {
+  const grouped = useMemo(() => {
+    const map = new Map<WorkflowState, ErrorIssueDocument[]>()
+    for (const issue of issues) {
+      const bucket = map.get(issue.workflowState) ?? []
+      bucket.push(issue)
+      map.set(issue.workflowState, bucket)
+    }
+    for (const bucket of map.values()) {
+      bucket.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority
+        return b.lastSeenAt.localeCompare(a.lastSeenAt)
+      })
+    }
+    return map
+  }, [issues])
+
+  const visibleGroups = useMemo(
+    () => GROUP_ORDER.filter((state) => (grouped.get(state)?.length ?? 0) > 0),
+    [grouped],
+  )
+
+  const flatIssues = useMemo<ReadonlyArray<ErrorIssueDocument>>(() => {
+    const out: ErrorIssueDocument[] = []
+    for (const state of visibleGroups) {
+      const bucket = grouped.get(state)
+      if (bucket) out.push(...bucket)
+    }
+    return out
+  }, [grouped, visibleGroups])
+
+  const selectedArray = useMemo(
+    () =>
+      flatIssues
+        .filter((i) => selectedIds.has(i.id))
+        .map((i) => i.id as ErrorIssueId),
+    [flatIssues, selectedIds],
+  )
+
+  const handleSelectToggle = useCallback(
+    (id: string, event: SelectToggleEvent) => {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (event.shiftKey && anchorRef.current) {
+          const ids = flatIssues.map((i) => i.id as string)
+          const a = ids.indexOf(anchorRef.current)
+          const b = ids.indexOf(id)
+          if (a !== -1 && b !== -1) {
+            const [lo, hi] = a < b ? [a, b] : [b, a]
+            for (let i = lo; i <= hi; i++) next.add(ids[i]!)
+            return next
+          }
+        }
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        anchorRef.current = id
+        return next
+      })
+      setFocusedId(id)
+    },
+    [flatIssues, anchorRef, setSelectedIds, setFocusedId],
+  )
+
+  const handleFocus = useCallback(
+    (id: string) => {
+      setFocusedId(id)
+    },
+    [setFocusedId],
+  )
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+  }, [setSelectedIds])
+
+  const navigate = useNavigate({ from: Route.fullPath })
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return
+      if (e.defaultPrevented) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (flatIssues.length === 0) return
+
+      const ids = flatIssues.map((i) => i.id as string)
+      const currentIndex = focusedId ? ids.indexOf(focusedId) : -1
+
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault()
+        const next = currentIndex < 0 ? 0 : Math.min(currentIndex + 1, ids.length - 1)
+        const id = ids[next]!
+        setFocusedId(id)
+        scrollIntoView(id)
+        return
+      }
+      if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault()
+        const next = currentIndex <= 0 ? 0 : currentIndex - 1
+        const id = ids[next]!
+        setFocusedId(id)
+        scrollIntoView(id)
+        return
+      }
+      if (e.key === "Enter" && focusedId) {
+        e.preventDefault()
+        navigate({
+          to: "/errors/issues/$issueId",
+          params: { issueId: focusedId as ErrorIssueId },
+        })
+        return
+      }
+      if (e.key.toLowerCase() === "x" && focusedId) {
+        e.preventDefault()
+        handleSelectToggle(focusedId, {
+          shiftKey: e.shiftKey,
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+        })
+        return
+      }
+      if (e.key === "Escape") {
+        if (selectedIds.size > 0) {
+          e.preventDefault()
+          clearSelection()
+        }
+        return
+      }
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [
+    flatIssues,
+    focusedId,
+    selectedIds,
+    setFocusedId,
+    handleSelectToggle,
+    clearSelection,
+    navigate,
+  ])
+
+  return (
+    <DashboardLayout
+      breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
+      title="Issues"
+      description="Workflow-tracked errors, grouped by fingerprint."
+    >
+      <div
+        className={isRefreshing ? "opacity-60 transition-opacity" : undefined}
+        aria-busy={isRefreshing}
+      >
+        {toolbar}
+        {issues.length === 0 ? (
+          <div className="p-4">
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>No issues</EmptyTitle>
+                <EmptyDescription>
+                  {activeFilter === "triage"
+                    ? "No issues in triage. Nice."
+                    : `No issues in state "${FILTER_LABEL[activeFilter]}".`}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </div>
+        ) : (
+          <div>
+            {visibleGroups.map((state) => (
+              <IssueGroup
+                key={state}
+                state={state}
+                issues={grouped.get(state) ?? []}
+                mutations={mutations}
+                selectedIds={selectedIds}
+                focusedId={focusedId}
+                onSelectToggle={handleSelectToggle}
+                onFocus={handleFocus}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+      <IssuesBulkBar
+        selectedIds={selectedArray}
+        mutations={mutations}
+        onClear={clearSelection}
+      />
+    </DashboardLayout>
+  )
+}
+
+function scrollIntoView(issueId: string) {
+  if (typeof document === "undefined") return
+  const el = document.querySelector<HTMLElement>(
+    `[data-issue-id="${CSS.escape(issueId)}"]`,
+  )
+  if (!el) return
+  el.scrollIntoView({ block: "nearest", behavior: "smooth" })
 }
