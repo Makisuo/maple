@@ -1,36 +1,51 @@
-import { ConfigProvider, Layer, ManagedRuntime } from "effect"
-import { MainLive } from "./app"
-import { mapleToolDefinitions, toInputSchema } from "./mcp/tools/registry"
-import { DatabaseD1Live } from "./services/DatabaseD1Live"
-import { WorkerEnvironment } from "./services/WorkerEnvironment"
-
-const buildMapleAgentLayer = (env: Record<string, unknown>) => {
-  const configLive = ConfigProvider.layer(ConfigProvider.fromUnknown(env))
-  const workerEnvLive = Layer.succeed(
-    WorkerEnvironment,
-    env as Record<string, any>,
-  )
-
-  return MainLive.pipe(
-    Layer.provideMerge(DatabaseD1Live),
-    Layer.provideMerge(workerEnvLive),
-    Layer.provideMerge(configLive),
-  )
-}
+import { ConfigProvider, Layer, ManagedRuntime, type Schema } from "effect"
 
 type MapleAgentRuntime = ManagedRuntime.ManagedRuntime<any, never>
 
-const runtimeCache = new WeakMap<object, MapleAgentRuntime>()
+type RegistryModule = typeof import("./mcp/tools/registry")
 
-export const getMapleAgentRuntime = (
-  env: Record<string, unknown>,
-): MapleAgentRuntime => {
-  const key = env as object
-  const existing = runtimeCache.get(key)
-  if (existing) return existing
-  const built = ManagedRuntime.make(buildMapleAgentLayer(env) as any) as MapleAgentRuntime
-  runtimeCache.set(key, built)
-  return built
+export interface MapleAgentSetup {
+  readonly runtime: MapleAgentRuntime
+  readonly mapleToolDefinitions: RegistryModule["mapleToolDefinitions"]
+  readonly toInputSchema: (schema: Schema.Top) => Record<string, unknown>
 }
 
-export { mapleToolDefinitions, toInputSchema }
+const setupCache = new WeakMap<object, Promise<MapleAgentSetup>>()
+
+const buildSetup = async (env: Record<string, unknown>): Promise<MapleAgentSetup> => {
+  const [appMod, dbMod, envMod, registryMod] = await Promise.all([
+    import("./app"),
+    import("./services/DatabaseD1Live"),
+    import("./services/WorkerEnvironment"),
+    import("./mcp/tools/registry"),
+  ])
+
+  const configLive = ConfigProvider.layer(ConfigProvider.fromUnknown(env))
+  const workerEnvLive = Layer.succeed(
+    envMod.WorkerEnvironment,
+    env as Record<string, any>,
+  )
+
+  const layer = appMod.MainLive.pipe(
+    Layer.provideMerge(dbMod.DatabaseD1Live),
+    Layer.provideMerge(workerEnvLive),
+    Layer.provideMerge(configLive),
+  )
+
+  return {
+    runtime: ManagedRuntime.make(layer as any) as MapleAgentRuntime,
+    mapleToolDefinitions: registryMod.mapleToolDefinitions,
+    toInputSchema: registryMod.toInputSchema,
+  }
+}
+
+export const getMapleAgentSetup = (
+  env: Record<string, unknown>,
+): Promise<MapleAgentSetup> => {
+  const key = env as object
+  const existing = setupCache.get(key)
+  if (existing) return existing
+  const built = buildSetup(env)
+  setupCache.set(key, built)
+  return built
+}

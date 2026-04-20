@@ -482,7 +482,7 @@ class ChatAgent extends AIChatAgent<Env> {
     const dashboardContext = body?.dashboardContext as DashboardContext | undefined
 
     try {
-      const directTools = createMapleAiTools(this.env as unknown as Record<string, unknown>, orgId)
+      const directTools = await createMapleAiTools(this.env as unknown as Record<string, unknown>, orgId)
       const isDashboardMode = mode === "dashboard_builder"
 
       let systemPrompt = isDashboardMode ? DASHBOARD_BUILDER_SYSTEM_PROMPT : SYSTEM_PROMPT

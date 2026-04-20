@@ -554,4 +554,9 @@ export function buildSpec(output: StructuredToolOutput): Spec {
       return { root, elements }
     }
   }
+
+  const root = addElement(elements, "StatCards", {
+    cards: [{ label: "Tool", value: (output as { tool: string }).tool, format: "text" }],
+  })
+  return { root, elements }
 }

@@ -1,7 +1,7 @@
 import { jsonSchema, tool, type ToolSet } from "ai"
 import { Effect, Layer, Schema } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
-import { getMapleAgentRuntime, mapleToolDefinitions, toInputSchema } from "@maple/api/agent"
+import { getMapleAgentSetup } from "@maple/api/agent"
 
 const createInternalToolRequest = (
   orgId: string,
@@ -14,11 +14,11 @@ const createInternalToolRequest = (
     },
   })
 
-export const createMapleAiTools = (
+export const createMapleAiTools = async (
   env: Record<string, unknown>,
   orgId: string,
-): ToolSet => {
-  const runtime = getMapleAgentRuntime(env)
+): Promise<ToolSet> => {
+  const { runtime, mapleToolDefinitions, toInputSchema } = await getMapleAgentSetup(env)
   const requestLayer = Layer.succeed(
     HttpServerRequest.HttpServerRequest,
     HttpServerRequest.fromWeb(
