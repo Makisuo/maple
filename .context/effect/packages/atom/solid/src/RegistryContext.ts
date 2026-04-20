@@ -27,7 +27,7 @@ export const RegistryProvider = (options: {
     scheduleTask: options.scheduleTask,
     initialValues: options.initialValues,
     timeoutResolution: options.timeoutResolution,
-    defaultIdleTTL: options.defaultIdleTTL
+    defaultIdleTTL: options.defaultIdleTTL ?? 400
   })
   onCleanup(() => registry.dispose())
   return createComponent(RegistryContext.Provider, {

@@ -4,6 +4,7 @@
 import * as Arr from "../../Array.ts"
 import * as Cause from "../../Cause.ts"
 import * as Channel from "../../Channel.ts"
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
@@ -22,7 +23,6 @@ import type { ReadonlyRecord } from "../../Record.ts"
 import * as Scheduler from "../../Scheduler.ts"
 import * as Schema from "../../Schema.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as SubscriptionRef from "../../SubscriptionRef.ts"
 import type { Mutable, NoInfer } from "../../Types.ts"
@@ -52,7 +52,7 @@ export interface Atom<A> extends Pipeable, Inspectable.Inspectable {
   readonly [TypeId]: TypeId
   readonly keepAlive: boolean
   readonly lazy: boolean
-  readonly read: (get: Context) => A
+  readonly read: (get: AtomContext) => A
   readonly refresh?: (f: <A>(atom: Atom<A>) => void) => void
   readonly label?: readonly [name: string, stack: string]
   readonly idleTTL?: number
@@ -116,35 +116,35 @@ export interface Writable<R, W = R> extends Atom<R> {
  * @since 4.0.0
  * @category context
  */
-export interface Context {
+export interface AtomContext {
   <A>(atom: Atom<A>): A
-  get<A>(this: Context, atom: Atom<A>): A
-  result<A, E>(this: Context, atom: Atom<AsyncResult.AsyncResult<A, E>>, options?: {
+  get<A>(this: AtomContext, atom: Atom<A>): A
+  result<A, E>(this: AtomContext, atom: Atom<AsyncResult.AsyncResult<A, E>>, options?: {
     readonly suspendOnWaiting?: boolean | undefined
   }): Effect.Effect<A, E>
-  resultOnce<A, E>(this: Context, atom: Atom<AsyncResult.AsyncResult<A, E>>, options?: {
+  resultOnce<A, E>(this: AtomContext, atom: Atom<AsyncResult.AsyncResult<A, E>>, options?: {
     readonly suspendOnWaiting?: boolean | undefined
   }): Effect.Effect<A, E>
-  once<A>(this: Context, atom: Atom<A>): A
-  addFinalizer(this: Context, f: () => void): void
-  mount<A>(this: Context, atom: Atom<A>): void
-  refresh<A>(this: Context, atom: Atom<A>): void
-  refreshSelf(this: Context): void
-  self<A>(this: Context): Option.Option<A>
-  setSelf<A>(this: Context, a: A): void
-  set<R, W>(this: Context, atom: Writable<R, W>, value: W): void
-  setResult<A, E, W>(this: Context, atom: Writable<AsyncResult.AsyncResult<A, E>, W>, value: W): Effect.Effect<A, E>
-  some<A>(this: Context, atom: Atom<Option.Option<A>>): Effect.Effect<A>
-  someOnce<A>(this: Context, atom: Atom<Option.Option<A>>): Effect.Effect<A>
-  stream<A>(this: Context, atom: Atom<A>, options?: {
+  once<A>(this: AtomContext, atom: Atom<A>): A
+  addFinalizer(this: AtomContext, f: () => void): void
+  mount<A>(this: AtomContext, atom: Atom<A>): void
+  refresh<A>(this: AtomContext, atom: Atom<A>): void
+  refreshSelf(this: AtomContext): void
+  self<A>(this: AtomContext): Option.Option<A>
+  setSelf<A>(this: AtomContext, a: A): void
+  set<R, W>(this: AtomContext, atom: Writable<R, W>, value: W): void
+  setResult<A, E, W>(this: AtomContext, atom: Writable<AsyncResult.AsyncResult<A, E>, W>, value: W): Effect.Effect<A, E>
+  some<A>(this: AtomContext, atom: Atom<Option.Option<A>>): Effect.Effect<A>
+  someOnce<A>(this: AtomContext, atom: Atom<Option.Option<A>>): Effect.Effect<A>
+  stream<A>(this: AtomContext, atom: Atom<A>, options?: {
     readonly withoutInitialValue?: boolean
     readonly bufferSize?: number
   }): Stream.Stream<A>
-  streamResult<A, E>(this: Context, atom: Atom<AsyncResult.AsyncResult<A, E>>, options?: {
+  streamResult<A, E>(this: AtomContext, atom: Atom<AsyncResult.AsyncResult<A, E>>, options?: {
     readonly withoutInitialValue?: boolean
     readonly bufferSize?: number
   }): Stream.Stream<A, E>
-  subscribe<A>(this: Context, atom: Atom<A>, f: (_: A) => void, options?: {
+  subscribe<A>(this: AtomContext, atom: Atom<A>, f: (_: A) => void, options?: {
     readonly immediate?: boolean
   }): void
   readonly registry: Registry.AtomRegistry
@@ -317,7 +317,7 @@ export const isWritable = <R, W>(atom: Atom<R>): atom is Writable<R, W> => Writa
  * @category constructors
  */
 export const readable = <A>(
-  read: (get: Context) => A,
+  read: (get: AtomContext) => A,
   refresh?: (f: <A>(atom: Atom<A>) => void) => void
 ): Atom<A> => {
   const self = Object.create(AtomProto)
@@ -333,7 +333,7 @@ export const readable = <A>(
  * @category constructors
  */
 export const writable = <R, W>(
-  read: (get: Context) => R,
+  read: (get: AtomContext) => R,
   write: (ctx: WriteContext<R>, value: W) => void,
   refresh?: (f: <A>(atom: Atom<A>) => void) => void
 ): Writable<R, W> => {
@@ -359,7 +359,7 @@ function constSetSelf<A>(ctx: WriteContext<A>, value: A) {
  * @category constructors
  */
 export const make: {
-  <A, E>(create: (get: Context) => Effect.Effect<A, E, Scope.Scope | AtomRegistry>, options?: {
+  <A, E>(create: (get: AtomContext) => Effect.Effect<A, E, Scope.Scope | AtomRegistry>, options?: {
     readonly initialValue?: A | undefined
     readonly uninterruptible?: boolean | undefined
   }): Atom<AsyncResult.AsyncResult<A, E>>
@@ -367,13 +367,13 @@ export const make: {
     readonly initialValue?: A
     readonly uninterruptible?: boolean | undefined
   }): Atom<AsyncResult.AsyncResult<A, E>>
-  <A, E>(create: (get: Context) => Stream.Stream<A, E, AtomRegistry>, options?: {
+  <A, E>(create: (get: AtomContext) => Stream.Stream<A, E, AtomRegistry>, options?: {
     readonly initialValue?: A
   }): Atom<AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError>>
   <A, E>(stream: Stream.Stream<A, E, AtomRegistry>, options?: {
     readonly initialValue?: A
   }): Atom<AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError>>
-  <A>(create: (get: Context) => A): Atom<A>
+  <A>(create: (get: AtomContext) => A): Atom<A>
   <A>(initialValue: A): Writable<A>
 } = (arg: any, options?: {
   readonly initialValue?: unknown
@@ -394,28 +394,28 @@ const makeRead: {
   <A, E>(effect: Effect.Effect<A, E, Scope.Scope | AtomRegistry>, options?: {
     readonly initialValue?: A
     readonly uninterruptible?: boolean | undefined
-  }): (get: Context, services?: ServiceMap.ServiceMap<any>) => AsyncResult.AsyncResult<A, E>
-  <A, E>(create: (get: Context) => Effect.Effect<A, E, Scope.Scope | AtomRegistry>, options?: {
+  }): (get: AtomContext, services?: Context.Context<any>) => AsyncResult.AsyncResult<A, E>
+  <A, E>(create: (get: AtomContext) => Effect.Effect<A, E, Scope.Scope | AtomRegistry>, options?: {
     readonly initialValue?: A
     readonly uninterruptible?: boolean | undefined
-  }): (get: Context, services?: ServiceMap.ServiceMap<any>) => AsyncResult.AsyncResult<A, E>
+  }): (get: AtomContext, services?: Context.Context<any>) => AsyncResult.AsyncResult<A, E>
   <A, E>(stream: Stream.Stream<A, E, AtomRegistry>, options?: {
     readonly initialValue?: A
     readonly uninterruptible?: boolean | undefined
-  }): (get: Context, services?: ServiceMap.ServiceMap<any>) => AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError>
-  <A, E>(create: (get: Context) => Stream.Stream<A, E, AtomRegistry>, options?: {
+  }): (get: AtomContext, services?: Context.Context<any>) => AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError>
+  <A, E>(create: (get: AtomContext) => Stream.Stream<A, E, AtomRegistry>, options?: {
     readonly initialValue?: A
     readonly uninterruptible?: boolean | undefined
-  }): (get: Context, services?: ServiceMap.ServiceMap<any>) => AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError>
-  <A>(create: (get: Context) => A): (get: Context, services?: ServiceMap.ServiceMap<any>) => A
+  }): (get: AtomContext, services?: Context.Context<any>) => AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError>
+  <A>(create: (get: AtomContext) => A): (get: AtomContext, services?: Context.Context<any>) => A
   <A>(initialValue: A): Writable<A>
 } = <A, E>(
   arg:
     | Effect.Effect<A, E, Scope.Scope | AtomRegistry>
-    | ((get: Context) => Effect.Effect<A, E, Scope.Scope | AtomRegistry>)
+    | ((get: AtomContext) => Effect.Effect<A, E, Scope.Scope | AtomRegistry>)
     | Stream.Stream<A, E, AtomRegistry>
-    | ((get: Context) => Stream.Stream<A, E, AtomRegistry>)
-    | ((get: Context) => A)
+    | ((get: AtomContext) => Stream.Stream<A, E, AtomRegistry>)
+    | ((get: AtomContext) => A)
     | A,
   options?: {
     readonly initialValue?: unknown
@@ -423,8 +423,8 @@ const makeRead: {
   }
 ) => {
   if (typeof arg === "function" && !Effect.isEffect(arg) && !Stream.isStream(arg)) {
-    const create = arg as (get: Context) => any
-    return function(get: Context, providedServices?: ServiceMap.ServiceMap<any>) {
+    const create = arg as (get: AtomContext) => any
+    return function(get: AtomContext, providedServices?: Context.Context<any>) {
       const value = create(get)
       switch (typeof value) {
         case "function":
@@ -442,11 +442,11 @@ const makeRead: {
       }
     }
   } else if (Effect.isEffect(arg)) {
-    return function(get: Context, providedServices?: ServiceMap.ServiceMap<any>) {
+    return function(get: AtomContext, providedServices?: Context.Context<any>) {
       return effect(get, arg as any, options, providedServices)
     }
   } else if (Stream.isStream(arg)) {
-    return function(get: Context, providedServices?: ServiceMap.ServiceMap<any>) {
+    return function(get: AtomContext, providedServices?: Context.Context<any>) {
       return stream(get, arg as any, options, providedServices)
     }
   }
@@ -465,13 +465,13 @@ const state = <A>(
   }, constSetSelf)
 
 const effect = <A, E>(
-  get: Context,
+  get: AtomContext,
   effect: Effect.Effect<A, E, Scope.Scope | AtomRegistry>,
   options?: {
     readonly initialValue?: A
     readonly uninterruptible?: boolean | undefined
   },
-  services?: ServiceMap.ServiceMap<any>
+  services?: Context.Context<any>
 ): AsyncResult.AsyncResult<A, E> => {
   const initialValue = options?.initialValue !== undefined
     ? AsyncResult.success<A, E>(options.initialValue)
@@ -480,10 +480,10 @@ const effect = <A, E>(
 }
 
 function makeEffect<A, E>(
-  ctx: Context,
+  ctx: AtomContext,
   effect: Effect.Effect<A, E, Scope.Scope | AtomRegistry>,
   initialValue: AsyncResult.AsyncResult<A, E>,
-  services = ServiceMap.empty(),
+  services = Context.empty(),
   uninterruptible = false
 ): AsyncResult.AsyncResult<A, E> {
   const previous = ctx.self<AsyncResult.AsyncResult<A, E>>()
@@ -498,7 +498,7 @@ function makeEffect<A, E>(
   let syncResult: AsyncResult.AsyncResult<A, E> | undefined
   let isAsync = false
   const cancel = runCallbackSync(
-    ServiceMap.makeUnsafe<Scope.Scope | AtomRegistry>(servicesMap),
+    Context.makeUnsafe<Scope.Scope | AtomRegistry>(servicesMap),
     effect,
     function(exit) {
       syncResult = AsyncResult.fromExitWithPrevious(exit, previous)
@@ -521,7 +521,7 @@ function makeEffect<A, E>(
 }
 
 function runCallbackSync<R, A, E, ER = never>(
-  services: ServiceMap.ServiceMap<R>,
+  services: Context.Context<R>,
   effect: Effect.Effect<A, E, R>,
   onExit: (exit: Exit.Exit<A, E | ER>) => void,
   uninterruptible = false
@@ -556,14 +556,14 @@ function runCallbackSync<R, A, E, ER = never>(
  * @since 4.0.0
  * @category models
  */
-export interface AtomRuntime<R, ER = never> extends Atom<AsyncResult.AsyncResult<ServiceMap.ServiceMap<R>, ER>> {
+export interface AtomRuntime<R, ER = never> extends Atom<AsyncResult.AsyncResult<Context.Context<R>, ER>> {
   readonly factory: RuntimeFactory
 
   readonly layer: Atom<Layer.Layer<R, ER>>
 
   readonly atom: {
     <A, E>(
-      create: (get: Context) => Effect.Effect<A, E, Scope.Scope | R | AtomRegistry | Reactivity.Reactivity>,
+      create: (get: AtomContext) => Effect.Effect<A, E, Scope.Scope | R | AtomRegistry | Reactivity.Reactivity>,
       options?: {
         readonly initialValue?: A
         readonly uninterruptible?: boolean | undefined
@@ -573,7 +573,7 @@ export interface AtomRuntime<R, ER = never> extends Atom<AsyncResult.AsyncResult
       readonly initialValue?: A
       readonly uninterruptible?: boolean | undefined
     }): Atom<AsyncResult.AsyncResult<A, E | ER>>
-    <A, E>(create: (get: Context) => Stream.Stream<A, E, AtomRegistry | Reactivity.Reactivity | R>, options?: {
+    <A, E>(create: (get: AtomContext) => Stream.Stream<A, E, AtomRegistry | Reactivity.Reactivity | R>, options?: {
       readonly initialValue?: A
     }): Atom<AsyncResult.AsyncResult<A, E | ER | Cause.NoSuchElementError>>
     <A, E>(stream: Stream.Stream<A, E, AtomRegistry | Reactivity.Reactivity | R>, options?: {
@@ -620,7 +620,7 @@ export interface AtomRuntime<R, ER = never> extends Atom<AsyncResult.AsyncResult
 
   readonly pull: <A, E>(
     create:
-      | ((get: Context) => Stream.Stream<A, E, R | AtomRegistry | Reactivity.Reactivity>)
+      | ((get: AtomContext) => Stream.Stream<A, E, R | AtomRegistry | Reactivity.Reactivity>)
       | Stream.Stream<A, E, R | AtomRegistry | Reactivity.Reactivity>,
     options?: {
       readonly disableAccumulation?: boolean
@@ -632,7 +632,7 @@ export interface AtomRuntime<R, ER = never> extends Atom<AsyncResult.AsyncResult
     create:
       | Effect.Effect<SubscriptionRef.SubscriptionRef<A>, E, Scope.Scope | R | AtomRegistry | Reactivity.Reactivity>
       | ((
-        get: Context
+        get: AtomContext
       ) => Effect.Effect<SubscriptionRef.SubscriptionRef<A>, E, Scope.Scope | R | AtomRegistry | Reactivity.Reactivity>)
   ) => Writable<AsyncResult.AsyncResult<A, E>, A>
 }
@@ -645,7 +645,7 @@ export interface RuntimeFactory {
   <R, E>(
     create:
       | Layer.Layer<R, E, AtomRegistry | Reactivity.Reactivity>
-      | ((get: Context) => Layer.Layer<R, E, AtomRegistry | Reactivity.Reactivity>)
+      | ((get: AtomContext) => Layer.Layer<R, E, AtomRegistry | Reactivity.Reactivity>)
   ): AtomRuntime<R, E>
   readonly memoMap: Layer.MemoMap
   readonly addGlobalLayer: <A, E>(layer: Layer.Layer<A, E, AtomRegistry | Reactivity.Reactivity>) => void
@@ -670,7 +670,7 @@ export const context: (options: {
   function factory<E, R>(
     create:
       | Layer.Layer<R, E, AtomRegistry | Reactivity.Reactivity>
-      | ((get: Context) => Layer.Layer<R, E, AtomRegistry | Reactivity.Reactivity>)
+      | ((get: AtomContext) => Layer.Layer<R, E, AtomRegistry | Reactivity.Reactivity>)
   ): AtomRuntime<R, E> {
     const self = Object.create(RuntimeProto)
     self.keepAlive = false
@@ -685,7 +685,7 @@ export const context: (options: {
     )
     self.layer = layerAtom
 
-    self.read = function read(get: Context) {
+    self.read = function read(get: AtomContext) {
       const layer = get(layerAtom)
       const build = Effect.flatMap(Effect.scope, (scope) => Layer.buildWithMemoMap(layer, options.memoMap, scope))
       return effect(get, build, { uninterruptible: true })
@@ -698,10 +698,10 @@ export const context: (options: {
     globalLayer = Layer.provideMerge(globalLayer, Layer.provide(layer, Reactivity.layer))
   }
   const reactivityAtom = removeTtl(make(
-    Effect.servicesWith((services: ServiceMap.ServiceMap<Scope.Scope>) =>
-      Layer.buildWithMemoMap(Reactivity.layer, options.memoMap, ServiceMap.get(services, Scope.Scope))
+    Effect.contextWith((services: Context.Context<Scope.Scope>) =>
+      Layer.buildWithMemoMap(Reactivity.layer, options.memoMap, Context.get(services, Scope.Scope))
     ).pipe(
-      Effect.map(ServiceMap.get(Reactivity.Reactivity))
+      Effect.map(Context.get(Reactivity.Reactivity))
     )
   ))
   factory.withReactivity =
@@ -746,12 +746,12 @@ export const withReactivity: (
 // -----------------------------------------------------------------------------
 
 const stream = <A, E>(
-  get: Context,
+  get: AtomContext,
   stream: Stream.Stream<A, E, AtomRegistry>,
   options?: {
     readonly initialValue?: A
   },
-  services?: ServiceMap.ServiceMap<any>
+  services?: Context.Context<any>
 ): AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError> => {
   const initialValue = options?.initialValue !== undefined
     ? AsyncResult.success<A, E>(options.initialValue)
@@ -760,13 +760,13 @@ const stream = <A, E>(
 }
 
 function makeStream<A, E>(
-  ctx: Context,
+  ctx: AtomContext,
   stream: Stream.Stream<A, E, AtomRegistry>,
   initialValue: AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError>,
-  services = ServiceMap.empty()
+  services = Context.empty()
 ): AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError> {
   const previous = ctx.self<AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError>>()
-  services = ServiceMap.add(services, AtomRegistry, ctx.registry)
+  services = Context.add(services, AtomRegistry, ctx.registry)
 
   const run = Effect.scopedWith((scope) =>
     Effect.flatMap(Channel.toPullScoped(stream.channel, scope), (pull) =>
@@ -808,7 +808,7 @@ function makeStream<A, E>(
   servicesMap.set(Scheduler.Scheduler.key, ctx.registry.scheduler)
 
   const cancel = runCallbackSync(
-    ServiceMap.makeUnsafe<AtomRegistry>(servicesMap),
+    Context.makeUnsafe<AtomRegistry>(servicesMap),
     run,
     constVoid,
     false
@@ -832,18 +832,18 @@ function makeStream<A, E>(
  * @category constructors
  */
 export const subscriptionRef: {
-  <A>(ref: SubscriptionRef.SubscriptionRef<A> | ((get: Context) => SubscriptionRef.SubscriptionRef<A>)): Writable<A>
+  <A>(ref: SubscriptionRef.SubscriptionRef<A> | ((get: AtomContext) => SubscriptionRef.SubscriptionRef<A>)): Writable<A>
   <A, E>(
     effect:
       | Effect.Effect<SubscriptionRef.SubscriptionRef<A>, E, Scope.Scope | AtomRegistry>
-      | ((get: Context) => Effect.Effect<SubscriptionRef.SubscriptionRef<A>, E, Scope.Scope | AtomRegistry>)
+      | ((get: AtomContext) => Effect.Effect<SubscriptionRef.SubscriptionRef<A>, E, Scope.Scope | AtomRegistry>)
   ): Writable<AsyncResult.AsyncResult<A, E>, A>
 } = (
   ref:
     | SubscriptionRef.SubscriptionRef<any>
-    | ((get: Context) => SubscriptionRef.SubscriptionRef<any>)
+    | ((get: AtomContext) => SubscriptionRef.SubscriptionRef<any>)
     | Effect.Effect<SubscriptionRef.SubscriptionRef<any>, any, Scope.Scope | AtomRegistry>
-    | ((get: Context) => Effect.Effect<SubscriptionRef.SubscriptionRef<any>, any, Scope.Scope | AtomRegistry>)
+    | ((get: AtomContext) => Effect.Effect<SubscriptionRef.SubscriptionRef<any>, any, Scope.Scope | AtomRegistry>)
 ) =>
   makeSubRef(
     readable((get) => {
@@ -856,11 +856,11 @@ export const subscriptionRef: {
   ) as any
 
 const readSubscriptionRef = (
-  get: Context,
+  get: AtomContext,
   sub:
     | SubscriptionRef.SubscriptionRef<any>
     | AsyncResult.AsyncResult<SubscriptionRef.SubscriptionRef<any>, any>,
-  services = ServiceMap.empty()
+  services = Context.empty()
 ) => {
   if (SubscriptionRef.isSubscriptionRef(sub)) {
     get.addFinalizer(
@@ -886,7 +886,7 @@ const makeSubRef = (
     SubscriptionRef.SubscriptionRef<any> | AsyncResult.AsyncResult<SubscriptionRef.SubscriptionRef<any>, any>
   >,
   read: (
-    get: Context,
+    get: AtomContext,
     ref: SubscriptionRef.SubscriptionRef<any> | AsyncResult.Success<SubscriptionRef.SubscriptionRef<any>, any>
   ) => any
 ) => {
@@ -1083,8 +1083,8 @@ function makeResultFn<Arg, E, A>(
     : undefined
 
   function read(
-    get: Context,
-    services?: ServiceMap.ServiceMap<any>
+    get: AtomContext,
+    services?: Context.Context<any>
   ): AsyncResult.AsyncResult<A, E | Cause.NoSuchElementError> {
     const fibers = fibersAtom ? get(fibersAtom) : undefined
     ;(get as any).isFn = true
@@ -1143,7 +1143,7 @@ export type PullResult<A, E = never> = AsyncResult.AsyncResult<{
  * @category constructors
  */
 export const pull = <A, E>(
-  create: ((get: Context) => Stream.Stream<A, E, AtomRegistry>) | Stream.Stream<A, E, AtomRegistry>,
+  create: ((get: AtomContext) => Stream.Stream<A, E, AtomRegistry>) | Stream.Stream<A, E, AtomRegistry>,
   options?: {
     readonly disableAccumulation?: boolean | undefined
   }
@@ -1156,9 +1156,9 @@ export const pull = <A, E>(
 }
 
 const makeStreamPullEffect = <A, E>(
-  get: Context,
+  get: AtomContext,
   pullSignal: Atom<number>,
-  create: Stream.Stream<A, E, AtomRegistry> | ((get: Context) => Stream.Stream<A, E, AtomRegistry>),
+  create: Stream.Stream<A, E, AtomRegistry> | ((get: AtomContext) => Stream.Stream<A, E, AtomRegistry>),
   options?: {
     readonly disableAccumulation?: boolean | undefined
   }
@@ -1171,7 +1171,7 @@ const makeStreamPullEffect = <A, E>(
     Stream.toPull(typeof create === "function" ? create(get) : create),
     (pullChunk) => {
       const fiber = Fiber.getCurrent()!
-      const services = fiber.services as ServiceMap.ServiceMap<AtomRegistry | Scope.Scope>
+      const services = fiber.context as Context.Context<AtomRegistry | Scope.Scope>
       let acc: ReadonlyArray<A> = Arr.empty<A>()
       const pull: Effect.Effect<
         {
@@ -1331,7 +1331,7 @@ export const withFallback: {
     >
   > =>
 {
-  function withFallback(get: Context) {
+  function withFallback(get: AtomContext) {
     const result = get(self)
     if (result._tag === "Initial") {
       return AsyncResult.waiting(get(fallback))
@@ -1426,14 +1426,14 @@ export const initialValue: {
  */
 export const transform: {
   <R extends Atom<any>, B>(
-    f: (get: Context, atom: R) => B,
+    f: (get: AtomContext, atom: R) => B,
     options?: {
       readonly initialValueTarget?: Atom<B> | undefined
     }
   ): (self: R) => [R] extends [Writable<infer _, infer RW>] ? Writable<B, RW> : Atom<B>
   <R extends Atom<any>, B>(
     self: R,
-    f: (get: Context, atom: R) => B,
+    f: (get: AtomContext, atom: R) => B,
     options?: {
       readonly initialValueTarget?: Atom<B> | undefined
     }
@@ -1442,7 +1442,7 @@ export const transform: {
   (args) => isAtom(args[0]),
   (<A, B>(
     self: Atom<A>,
-    f: (get: Context, atom: Atom<A>, options?: {
+    f: (get: AtomContext, atom: Atom<A>, options?: {
       readonly initialValueTarget?: Atom<B> | undefined
     }) => B,
     options?: {
@@ -1948,7 +1948,7 @@ export const kvs = <S extends Schema.Codec<any, any>, const Mode extends "sync" 
  */
 export const searchParam = <S extends Schema.Codec<any, string> = never>(name: string, options?: {
   readonly schema?: S | undefined
-}): Writable<S extends never ? string : Option.Option<S["Type"]>> => {
+}): Writable<[S] extends [never] ? string : Option.Option<S["Type"]>> => {
   const decode = options?.schema && Schema.decodeExit(options.schema)
   const encode = options?.schema && Schema.encodeExit(options.schema)
   return writable(

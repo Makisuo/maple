@@ -1,6 +1,6 @@
 import { assertTrue, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import { Effect, Option, Predicate, Schema, SchemaGetter, SchemaIssue, ServiceMap } from "effect"
+import { Context, Effect, Option, Predicate, Schema, SchemaGetter, SchemaIssue } from "effect"
 import { describe, it } from "vitest"
 
 function validate<I, A>(
@@ -151,7 +151,7 @@ describe("toStandardSchemaV1", () => {
   })
 
   describe("missing dependencies", () => {
-    class MagicNumber extends ServiceMap.Service<MagicNumber, number>()("MagicNumber") {}
+    class MagicNumber extends Context.Service<MagicNumber, number>()("MagicNumber") {}
 
     it("sync decoding should throw", () => {
       const DepString = Schema.Number.pipe(Schema.decode({

@@ -1,6 +1,7 @@
 /**
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { flow } from "effect/Function"
 import * as Inspectable from "effect/Inspectable"
@@ -9,7 +10,6 @@ import * as Option from "effect/Option"
 import { type Pipeable, pipeArguments } from "effect/Pipeable"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Cookies from "effect/unstable/http/Cookies"
 import * as Headers from "effect/unstable/http/Headers"
@@ -60,7 +60,7 @@ export {
  * @since 1.0.0
  * @category Dispatcher
  */
-export class Dispatcher extends ServiceMap.Service<Dispatcher, Undici.Dispatcher>()(
+export class Dispatcher extends Context.Service<Dispatcher, Undici.Dispatcher>()(
   "@effect/platform-node/NodeHttpClient/Dispatcher"
 ) {}
 
@@ -89,7 +89,7 @@ export const dispatcherLayerGlobal: Layer.Layer<Dispatcher> = Layer.sync(Dispatc
  * @since 1.0.0
  * @category undici
  */
-export const UndiciOptions = ServiceMap.Reference<Partial<Undici.Dispatcher.RequestOptions>>(
+export const UndiciOptions = Context.Reference<Partial<Undici.Dispatcher.RequestOptions>>(
   "@effect/platform-node/NodeHttpClient/UndiciOptions",
   { defaultValue: () => ({}) }
 )
@@ -306,7 +306,7 @@ export const layerUndiciNoDispatcher: Layer.Layer<
   Client.HttpClient,
   never,
   Dispatcher
-> = Client.layerMergedServices(makeUndici)
+> = Client.layerMergedContext(makeUndici)
 
 /**
  * @since 1.0.0
@@ -322,7 +322,7 @@ export const layerUndici: Layer.Layer<Client.HttpClient> = Layer.provide(layerUn
  * @since 1.0.0
  * @category HttpAgent
  */
-export class HttpAgent extends ServiceMap.Service<HttpAgent, {
+export class HttpAgent extends Context.Service<HttpAgent, {
   readonly http: Http.Agent
   readonly https: Https.Agent
 }>()("@effect/platform-node/NodeHttpClient/HttpAgent") {}
@@ -576,7 +576,7 @@ export const layerNodeHttpNoAgent: Layer.Layer<
   Client.HttpClient,
   never,
   HttpAgent
-> = Client.layerMergedServices(makeNodeHttp)
+> = Client.layerMergedContext(makeNodeHttp)
 
 /**
  * @since 1.0.0

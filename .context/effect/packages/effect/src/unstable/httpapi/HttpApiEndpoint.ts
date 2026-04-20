@@ -3,12 +3,12 @@
  */
 import * as Arr from "../../Array.ts"
 import type { Brand } from "../../Brand.ts"
+import * as Context from "../../Context.ts"
 import type { Effect } from "../../Effect.ts"
 import { identity } from "../../Function.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as Stream from "../../Stream.ts"
 import type * as Types from "../../Types.ts"
 import type { HttpMethod } from "../http/HttpMethod.ts"
@@ -16,7 +16,6 @@ import * as HttpRouter from "../http/HttpRouter.ts"
 import type { HttpServerRequest } from "../http/HttpServerRequest.ts"
 import type { HttpServerResponse } from "../http/HttpServerResponse.ts"
 import type * as Multipart from "../http/Multipart.ts"
-import { BadRequestFromSchemaError, type BadRequestNoContent } from "./HttpApiError.ts"
 import type * as HttpApiGroup from "./HttpApiGroup.ts"
 import type * as HttpApiMiddleware from "./HttpApiMiddleware.ts"
 import * as HttpApiSchema from "./HttpApiSchema.ts"
@@ -54,7 +53,7 @@ export interface HttpApiEndpoint<
   out Payload extends Schema.Top = never,
   out Headers extends Schema.Top = never,
   out Success extends Schema.Top = typeof HttpApiSchema.NoContent,
-  out Error extends Schema.Top = typeof BadRequestNoContent,
+  out Error extends Schema.Top = never,
   in out Middleware = never,
   out MiddlewareR = never
 > extends Pipeable {
@@ -77,8 +76,8 @@ export interface HttpApiEndpoint<
   readonly payload: PayloadMap
   readonly success: ReadonlySet<Schema.Top>
   readonly error: ReadonlySet<Schema.Top>
-  readonly annotations: ServiceMap.ServiceMap<never>
-  readonly middlewares: ReadonlySet<ServiceMap.Key<Middleware, any>>
+  readonly annotations: Context.Context<never>
+  readonly middlewares: ReadonlySet<Context.Key<Middleware, any>>
 
   /**
    * Add a prefix to the path of the endpoint.
@@ -102,7 +101,7 @@ export interface HttpApiEndpoint<
   /**
    * Add an `HttpApiMiddleware` to the endpoint.
    */
-  middleware<I extends HttpApiMiddleware.AnyId, S>(middleware: ServiceMap.Key<I, S>): HttpApiEndpoint<
+  middleware<I extends HttpApiMiddleware.AnyId, S>(middleware: Context.Key<I, S>): HttpApiEndpoint<
     Name,
     Method,
     Path,
@@ -120,7 +119,7 @@ export interface HttpApiEndpoint<
    * Add an annotation on the endpoint.
    */
   annotate<I, S>(
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     value: Types.NoInfer<S>
   ): HttpApiEndpoint<
     Name,
@@ -137,10 +136,10 @@ export interface HttpApiEndpoint<
   >
 
   /**
-   * Merge the annotations of the endpoint with the provided service map.
+   * Merge the annotations of the endpoint with the provided context.
    */
   annotateMerge<I>(
-    annotations: ServiceMap.ServiceMap<I>
+    annotations: Context.Context<I>
   ): HttpApiEndpoint<
     Name,
     Method,
@@ -172,7 +171,7 @@ export function getSuccessSchemas(endpoint: AnyWithProps): [Schema.Top, ...Array
 }
 
 /** @internal */
-export function getErrorSchemas(endpoint: AnyWithProps): [Schema.Top, ...Array<Schema.Top>] {
+export function getErrorSchemas(endpoint: AnyWithProps): Array<Schema.Top> {
   const schemas = new Set<Schema.Top>(endpoint.error)
   for (const middleware of endpoint.middlewares) {
     const key = middleware as any as HttpApiMiddleware.AnyService
@@ -180,7 +179,7 @@ export function getErrorSchemas(endpoint: AnyWithProps): [Schema.Top, ...Array<S
       schemas.add(schema)
     }
   }
-  return Arr.append(Array.from(schemas), BadRequestFromSchemaError)
+  return Array.from(schemas)
 }
 
 /**
@@ -800,16 +799,16 @@ const Proto = {
       middlewares: new Set([...this.middlewares, middleware as any])
     })
   },
-  annotate(this: AnyWithProps, key: ServiceMap.Key<any, any>, value: any) {
+  annotate(this: AnyWithProps, key: Context.Key<any, any>, value: any) {
     return makeProto({
       ...this,
-      annotations: ServiceMap.add(this.annotations, key, value)
+      annotations: Context.add(this.annotations, key, value)
     })
   },
-  annotateMerge(this: AnyWithProps, annotations: ServiceMap.ServiceMap<any>) {
+  annotateMerge(this: AnyWithProps, annotations: Context.Context<any>) {
     return makeProto({
       ...this,
-      annotations: ServiceMap.merge(this.annotations, annotations)
+      annotations: Context.merge(this.annotations, annotations)
     })
   }
 }
@@ -836,8 +835,8 @@ function makeProto<
   readonly payload: PayloadMap
   readonly success: ReadonlySet<Schema.Top>
   readonly error: ReadonlySet<Schema.Top>
-  readonly annotations: ServiceMap.ServiceMap<never>
-  readonly middlewares: ReadonlySet<ServiceMap.Key<Middleware, any>>
+  readonly annotations: Context.Context<never>
+  readonly middlewares: ReadonlySet<Context.Key<Middleware, any>>
 }): HttpApiEndpoint<
   Name,
   Method,
@@ -951,7 +950,7 @@ export const make = <Method extends HttpMethod>(method: Method): {
       : StringTree<ExtractSchemaOrArray<Payload>>,
     StringTree<Headers extends Schema.Struct.Fields ? Schema.Struct<Headers> : Headers>,
     Json<Success extends ReadonlyArray<Schema.Top> ? Success[number] : Success>,
-    Json<(Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error) | typeof BadRequestNoContent>
+    Json<Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error>
   >
   <
     const Name extends string,
@@ -983,7 +982,7 @@ export const make = <Method extends HttpMethod>(method: Method): {
     ExtractSchemaOrArray<Payload>,
     ExtractSchemaOrArray<Headers>,
     Success extends ReadonlyArray<Schema.Top> ? Success[number] : Success,
-    (Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error) | typeof BadRequestNoContent
+    Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error
   >
 } =>
 <
@@ -1018,7 +1017,7 @@ export const make = <Method extends HttpMethod>(method: Method): {
     : Payload,
   Headers extends Schema.Struct.Fields ? Schema.Struct<Headers> : Headers,
   Success extends ReadonlyArray<Schema.Top> ? Success[number] : Success,
-  (Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error) | typeof BadRequestNoContent
+  Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error
 > => {
   const disableCodecs = options?.disableCodecs ?? false
   const transformStringTree = disableCodecs ? identity : Schema.toCodecStringTree
@@ -1032,7 +1031,7 @@ export const make = <Method extends HttpMethod>(method: Method): {
     payload: getPayload(options?.payload, method, disableCodecs),
     success: getResponse(options?.success, disableCodecs),
     error: getResponse(options?.error, disableCodecs),
-    annotations: ServiceMap.empty(),
+    annotations: Context.empty(),
     middlewares: new Set()
   })
 }

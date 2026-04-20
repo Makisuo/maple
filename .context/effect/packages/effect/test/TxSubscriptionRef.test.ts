@@ -4,7 +4,7 @@ import { Effect, Stream, TxQueue, TxSubscriptionRef } from "effect"
 describe("TxSubscriptionRef", () => {
   describe("constructors", () => {
     it.effect("make creates ref with initial value", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(42)
         const value = yield* TxSubscriptionRef.get(ref)
         assert.strictEqual(value, 42)
@@ -13,21 +13,21 @@ describe("TxSubscriptionRef", () => {
 
   describe("mutations", () => {
     it.effect("set updates the value", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(0)
         yield* TxSubscriptionRef.set(ref, 10)
         assert.strictEqual(yield* TxSubscriptionRef.get(ref), 10)
       })))
 
     it.effect("update applies a function", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(5)
         yield* TxSubscriptionRef.update(ref, (n) => n * 2)
         assert.strictEqual(yield* TxSubscriptionRef.get(ref), 10)
       })))
 
     it.effect("modify returns a value and updates", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(10)
         const result = yield* TxSubscriptionRef.modify(ref, (n) => [`was ${n}`, n + 1])
         assert.strictEqual(result, "was 10")
@@ -35,7 +35,7 @@ describe("TxSubscriptionRef", () => {
       })))
 
     it.effect("getAndSet returns old value and sets new", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make("a")
         const old = yield* TxSubscriptionRef.getAndSet(ref, "b")
         assert.strictEqual(old, "a")
@@ -43,7 +43,7 @@ describe("TxSubscriptionRef", () => {
       })))
 
     it.effect("getAndUpdate returns old value and applies function", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(1)
         const old = yield* TxSubscriptionRef.getAndUpdate(ref, (n) => n + 10)
         assert.strictEqual(old, 1)
@@ -51,7 +51,7 @@ describe("TxSubscriptionRef", () => {
       })))
 
     it.effect("updateAndGet applies function and returns new value", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(3)
         const result = yield* TxSubscriptionRef.updateAndGet(ref, (n) => n * 3)
         assert.strictEqual(result, 9)
@@ -62,12 +62,12 @@ describe("TxSubscriptionRef", () => {
   describe("subscriptions", () => {
     it.effect("changes includes current value as first element", () =>
       Effect.gen(function*() {
-        const ref = yield* Effect.transaction(TxSubscriptionRef.make(100))
+        const ref = yield* Effect.tx(TxSubscriptionRef.make(100))
 
         yield* Effect.scoped(
           Effect.gen(function*() {
             const sub = yield* TxSubscriptionRef.changes(ref)
-            const first = yield* Effect.transaction(TxQueue.take(sub))
+            const first = yield* Effect.tx(TxQueue.take(sub))
             assert.strictEqual(first, 100)
           })
         )
@@ -75,29 +75,29 @@ describe("TxSubscriptionRef", () => {
 
     it.effect("changes receives updates in order", () =>
       Effect.gen(function*() {
-        const ref = yield* Effect.transaction(TxSubscriptionRef.make(0))
+        const ref = yield* Effect.tx(TxSubscriptionRef.make(0))
 
         yield* Effect.scoped(
           Effect.gen(function*() {
             const sub = yield* TxSubscriptionRef.changes(ref)
             // Take the initial value
-            const initial = yield* Effect.transaction(TxQueue.take(sub))
+            const initial = yield* Effect.tx(TxQueue.take(sub))
             assert.strictEqual(initial, 0)
 
-            yield* Effect.transaction(TxSubscriptionRef.set(ref, 1))
-            yield* Effect.transaction(TxSubscriptionRef.set(ref, 2))
-            yield* Effect.transaction(TxSubscriptionRef.set(ref, 3))
+            yield* Effect.tx(TxSubscriptionRef.set(ref, 1))
+            yield* Effect.tx(TxSubscriptionRef.set(ref, 2))
+            yield* Effect.tx(TxSubscriptionRef.set(ref, 3))
 
-            assert.strictEqual(yield* Effect.transaction(TxQueue.take(sub)), 1)
-            assert.strictEqual(yield* Effect.transaction(TxQueue.take(sub)), 2)
-            assert.strictEqual(yield* Effect.transaction(TxQueue.take(sub)), 3)
+            assert.strictEqual(yield* Effect.tx(TxQueue.take(sub)), 1)
+            assert.strictEqual(yield* Effect.tx(TxQueue.take(sub)), 2)
+            assert.strictEqual(yield* Effect.tx(TxQueue.take(sub)), 3)
           })
         )
       }))
 
     it.effect("multiple subscribers each see all changes", () =>
       Effect.gen(function*() {
-        const ref = yield* Effect.transaction(TxSubscriptionRef.make(0))
+        const ref = yield* Effect.tx(TxSubscriptionRef.make(0))
 
         yield* Effect.scoped(
           Effect.gen(function*() {
@@ -105,20 +105,20 @@ describe("TxSubscriptionRef", () => {
             const sub2 = yield* TxSubscriptionRef.changes(ref)
 
             // Both get the initial value
-            assert.strictEqual(yield* Effect.transaction(TxQueue.take(sub1)), 0)
-            assert.strictEqual(yield* Effect.transaction(TxQueue.take(sub2)), 0)
+            assert.strictEqual(yield* Effect.tx(TxQueue.take(sub1)), 0)
+            assert.strictEqual(yield* Effect.tx(TxQueue.take(sub2)), 0)
 
-            yield* Effect.transaction(TxSubscriptionRef.set(ref, 42))
+            yield* Effect.tx(TxSubscriptionRef.set(ref, 42))
 
-            assert.strictEqual(yield* Effect.transaction(TxQueue.take(sub1)), 42)
-            assert.strictEqual(yield* Effect.transaction(TxQueue.take(sub2)), 42)
+            assert.strictEqual(yield* Effect.tx(TxQueue.take(sub1)), 42)
+            assert.strictEqual(yield* Effect.tx(TxQueue.take(sub2)), 42)
           })
         )
       }))
 
     it.effect("changesStream emits initial value then updates", () =>
       Effect.gen(function*() {
-        const ref = yield* Effect.transaction(TxSubscriptionRef.make(0))
+        const ref = yield* Effect.tx(TxSubscriptionRef.make(0))
 
         // Collect initial value only (take 1 before any updates)
         const initial = yield* Stream.runCollect(
@@ -129,10 +129,10 @@ describe("TxSubscriptionRef", () => {
 
     it.effect("changesStream emits updates after initial", () =>
       Effect.gen(function*() {
-        const ref = yield* Effect.transaction(TxSubscriptionRef.make(0))
+        const ref = yield* Effect.tx(TxSubscriptionRef.make(0))
 
-        yield* Effect.transaction(TxSubscriptionRef.set(ref, 1))
-        yield* Effect.transaction(TxSubscriptionRef.set(ref, 2))
+        yield* Effect.tx(TxSubscriptionRef.set(ref, 1))
+        yield* Effect.tx(TxSubscriptionRef.set(ref, 2))
 
         const values = yield* Stream.runCollect(
           TxSubscriptionRef.changesStream(ref).pipe(Stream.take(1))
@@ -143,7 +143,7 @@ describe("TxSubscriptionRef", () => {
 
     it.effect("scope close unsubscribes", () =>
       Effect.gen(function*() {
-        const ref = yield* Effect.transaction(TxSubscriptionRef.make(0))
+        const ref = yield* Effect.tx(TxSubscriptionRef.make(0))
 
         yield* Effect.scoped(
           Effect.gen(function*() {
@@ -153,28 +153,28 @@ describe("TxSubscriptionRef", () => {
         )
 
         // After scope closes, setting values should not fail
-        yield* Effect.transaction(TxSubscriptionRef.set(ref, 1))
-        assert.strictEqual(yield* Effect.transaction(TxSubscriptionRef.get(ref)), 1)
+        yield* Effect.tx(TxSubscriptionRef.set(ref, 1))
+        assert.strictEqual(yield* Effect.tx(TxSubscriptionRef.get(ref)), 1)
       }))
   })
 
   describe("pipe support", () => {
     it.effect("set data-last style", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(0)
         yield* ref.pipe(TxSubscriptionRef.set(99))
         assert.strictEqual(yield* TxSubscriptionRef.get(ref), 99)
       })))
 
     it.effect("update data-last style", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(5)
         yield* ref.pipe(TxSubscriptionRef.update((n: number) => n + 1))
         assert.strictEqual(yield* TxSubscriptionRef.get(ref), 6)
       })))
 
     it.effect("modify data-last style", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(10)
         const result = yield* ref.pipe(
           TxSubscriptionRef.modify((n: number) => [n * 2, n + 1])
@@ -186,7 +186,7 @@ describe("TxSubscriptionRef", () => {
 
   describe("type guards", () => {
     it.effect("isTxSubscriptionRef identifies instances", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const ref = yield* TxSubscriptionRef.make(0)
         assert.isTrue(TxSubscriptionRef.isTxSubscriptionRef(ref))
         assert.isFalse(TxSubscriptionRef.isTxSubscriptionRef({}))

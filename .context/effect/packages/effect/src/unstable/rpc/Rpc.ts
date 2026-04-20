@@ -2,6 +2,8 @@
  * @since 4.0.0
  */
 import type * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
+import type { Deferred } from "../../Deferred.ts"
 import type { Effect } from "../../Effect.ts"
 import type { Exit as Exit_ } from "../../Exit.ts"
 import * as Option from "../../Option.ts"
@@ -10,9 +12,9 @@ import * as Predicate from "../../Predicate.ts"
 import * as PrimaryKey from "../../PrimaryKey.ts"
 import type * as Queue from "../../Queue.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { Stream } from "../../Stream.ts"
 import type * as Struct from "../../Struct.ts"
+import type { NoInfer } from "../../Types.ts"
 import type { Headers } from "../http/Headers.ts"
 import type { RequestId } from "./RpcMessage.ts"
 import type * as RpcMiddleware from "./RpcMiddleware.ts"
@@ -32,9 +34,9 @@ export const isRpc = (u: unknown): u is Rpc<any, any, any> => Predicate.hasPrope
  */
 export interface DefectSchema extends Schema.Top {
   readonly Type: unknown
-  makeUnsafe(input: null, options?: Schema.MakeOptions): unknown
-  makeUnsafe(input: undefined, options?: Schema.MakeOptions): unknown
-  makeUnsafe(input: {}, options?: Schema.MakeOptions): unknown
+  make(input: null, options?: Schema.MakeOptions): unknown
+  make(input: undefined, options?: Schema.MakeOptions): unknown
+  make(input: {}, options?: Schema.MakeOptions): unknown
   readonly DecodingServices: never
   readonly EncodingServices: never
 }
@@ -63,7 +65,7 @@ export interface Rpc<
   readonly successSchema: Success
   readonly errorSchema: Error
   readonly defectSchema: Schema.Top
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly middlewares: ReadonlySet<Middleware>
   readonly "~requires": Requires
 
@@ -133,16 +135,36 @@ export interface Rpc<
    * Add an annotation on the rpc.
    */
   annotate<I, S>(
-    tag: ServiceMap.Key<I, S>,
-    value: S
+    tag: Context.Key<I, S>,
+    value: NoInfer<S>
   ): Rpc<Tag, Payload, Success, Error, Middleware, Requires>
 
   /**
    * Merge the annotations of the rpc with the provided annotations.
    */
   annotateMerge<I>(
-    annotations: ServiceMap.ServiceMap<I>
+    annotations: Context.Context<I>
   ): Rpc<Tag, Payload, Success, Error, Middleware, Requires>
+}
+
+/**
+ * @since 4.0.0
+ * @category models
+ */
+export class ServerClient {
+  readonly id: number
+  annotations: Context.Context<never>
+  constructor(id: number) {
+    this.id = id
+    this.annotations = Context.empty()
+  }
+  annotate<I, S>(
+    tag: Context.Key<I, S>,
+    value: NoInfer<S>
+  ): ServerClient {
+    this.annotations = Context.add(this.annotations, tag, value)
+    return this
+  }
 }
 
 /**
@@ -155,12 +177,12 @@ export interface Handler<Tag extends string> {
   readonly _: unique symbol
   readonly tag: Tag
   readonly handler: (request: any, options: {
-    readonly clientId: number
+    readonly client: ServerClient
     readonly requestId: RequestId
     readonly headers: Headers
     readonly rpc: Any
-  }) => Effect<any, any> | Stream<any, any>
-  readonly services: ServiceMap.ServiceMap<never>
+  }) => Effect<{} | Deferred<any, any>, any> | Stream<any, any>
+  readonly context: Context.Context<never>
 }
 
 /**
@@ -171,6 +193,7 @@ export interface Any extends Pipeable {
   readonly [TypeId]: typeof TypeId
   readonly _tag: string
   readonly key: string
+  readonly annotations: Context.Context<never>
 }
 
 /**
@@ -185,7 +208,7 @@ export interface AnyWithProps extends Pipeable {
   readonly successSchema: Schema.Top
   readonly errorSchema: Schema.Top
   readonly defectSchema: Schema.Top
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly middlewares: ReadonlySet<RpcMiddleware.AnyServiceWithProps>
   readonly "~requires": any
 }
@@ -393,7 +416,7 @@ export type Middleware<R> = R extends Rpc<
   infer _Error,
   infer _Middleware,
   infer _Requires
-> ? ServiceMap.Service.Identifier<_Middleware>
+> ? Context.Service.Identifier<_Middleware>
   : never
 
 /**
@@ -474,12 +497,12 @@ export type ToHandler<R extends Any> = R extends Rpc<
 export type ToHandlerFn<Current extends Any, R = any> = (
   payload: Payload<Current>,
   options: {
-    readonly clientId: number
+    readonly client: ServerClient
     readonly requestId: RequestId
     readonly headers: Headers
     readonly rpc: Current
   }
-) => ResultFrom<Current, R> | Wrapper<ResultFrom<Current, R>>
+) => WrapperOr<ResultFrom<Current, R>>
 
 /**
  * @since 4.0.0
@@ -569,7 +592,7 @@ export type ResultFrom<R extends Any, Services> = R extends Rpc<
         Services
       > :
   Effect<
-    _Success["Type"],
+    _Success["Type"] | Deferred<_Success["Type"], _Error["Type"]>,
     _Error["Type"],
     Services
   > :
@@ -659,7 +682,7 @@ const Proto = {
       middlewares: this.middlewares
     })
   },
-  annotate(this: AnyWithProps, tag: ServiceMap.Key<any, any>, value: any) {
+  annotate(this: AnyWithProps, tag: Context.Key<any, any>, value: any) {
     return makeProto({
       _tag: this._tag,
       payloadSchema: this.payloadSchema,
@@ -667,10 +690,10 @@ const Proto = {
       errorSchema: this.errorSchema,
       defectSchema: this.defectSchema,
       middlewares: this.middlewares,
-      annotations: ServiceMap.add(this.annotations, tag, value)
+      annotations: Context.add(this.annotations, tag, value)
     })
   },
-  annotateMerge(this: AnyWithProps, context: ServiceMap.ServiceMap<any>) {
+  annotateMerge(this: AnyWithProps, context: Context.Context<any>) {
     return makeProto({
       _tag: this._tag,
       payloadSchema: this.payloadSchema,
@@ -678,7 +701,7 @@ const Proto = {
       errorSchema: this.errorSchema,
       defectSchema: this.defectSchema,
       middlewares: this.middlewares,
-      annotations: ServiceMap.merge(this.annotations, context)
+      annotations: Context.merge(this.annotations, context)
     })
   }
 }
@@ -696,7 +719,7 @@ const makeProto = <
   readonly successSchema: Success
   readonly errorSchema: Error
   readonly defectSchema: Schema.Top
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly middlewares: ReadonlySet<Middleware>
 }): Rpc<Tag, Payload, Success, Error, Middleware, Requires> => {
   function Rpc() {}
@@ -757,7 +780,7 @@ export const make = <
       successSchema,
     errorSchema: options?.stream ? Schema.Never : errorSchema,
     defectSchema,
-    annotations: ServiceMap.empty(),
+    annotations: Context.empty(),
     middlewares: new Set<never>()
   }) as any
 }
@@ -813,6 +836,12 @@ export interface Wrapper<A> {
  * @since 4.0.0
  * @category Wrapper
  */
+export type WrapperOr<A> = A | Wrapper<A>
+
+/**
+ * @since 4.0.0
+ * @category Wrapper
+ */
 export const isWrapper = (u: object): u is Wrapper<any> => WrapperTypeId in u
 
 /**
@@ -837,6 +866,23 @@ export const wrap = (options: {
       fork: options.fork ?? false,
       uninterruptible: options.uninterruptible ?? false
     }
+
+/**
+ * @since 4.0.0
+ * @category Wrapper
+ */
+export const unwrap = <A extends object>(value: WrapperOr<A>): A => isWrapper(value) ? value.value : value
+
+/**
+ * @since 4.0.0
+ * @category Wrapper
+ */
+export const wrapMap = <A extends object, B extends object>(self: WrapperOr<A>, f: (value: A) => B): WrapperOr<B> => {
+  if (isWrapper(self)) {
+    return wrap(self)(f(self.value))
+  }
+  return f(self)
+}
 
 /**
  * You can use `fork` to wrap a response Effect or Stream, to ensure that the

@@ -3,7 +3,7 @@
  *
  * Define request types with `Request.Class`, resolve them in batches with `RequestResolver`.
  */
-import { Effect, Exit, Layer, Request, RequestResolver, Schema, ServiceMap, Tracer } from "effect"
+import { Context, Effect, Exit, Layer, Request, RequestResolver, Schema, Tracer } from "effect"
 
 export class User extends Schema.Class<User>("User")({
   id: Schema.Number,
@@ -15,7 +15,7 @@ export class UserNotFound extends Schema.TaggedErrorClass<UserNotFound>()("UserN
   id: Schema.Number
 }) {}
 
-export class Users extends ServiceMap.Service<Users, {
+export class Users extends Context.Service<Users, {
   getUserById(id: number): Effect.Effect<User, UserNotFound>
 }>()("app/Users") {
   static readonly layer = Layer.effect(
@@ -41,8 +41,8 @@ export class Users extends ServiceMap.Service<Users, {
           const user = usersTable.get(entry.request.id)
 
           // If the request had requirements, you can access them with
-          // `entry.services`
-          const requestSpan = ServiceMap.getOption(entry.services, Tracer.ParentSpan)
+          // `entry.context`
+          const requestSpan = Context.getOption(entry.context, Tracer.ParentSpan)
           console.log("Request span", requestSpan)
 
           if (user) {

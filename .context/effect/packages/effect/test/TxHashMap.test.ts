@@ -4,7 +4,7 @@ import { Effect, Hash, HashMap, Option, Result, TxHashMap } from "effect"
 describe("TxHashMap", () => {
   describe("constructors", () => {
     it.effect("empty", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.empty<string, number>()
         const isEmpty = yield* TxHashMap.isEmpty(txMap)
         const size = yield* TxHashMap.size(txMap)
@@ -14,7 +14,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("make", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2], ["c", 3])
         const size = yield* TxHashMap.size(txMap)
         const a = yield* TxHashMap.get(txMap, "a")
@@ -28,7 +28,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("fromIterable", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const entries = [["a", 1], ["b", 2], ["c", 3]] as const
         const txMap = yield* TxHashMap.fromIterable(entries)
         const size = yield* TxHashMap.size(txMap)
@@ -45,7 +45,7 @@ describe("TxHashMap", () => {
 
   describe("basic operations", () => {
     it.effect("get - existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const a = yield* TxHashMap.get(txMap, "a")
         const b = yield* TxHashMap.get(txMap, "b")
@@ -55,7 +55,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("get - non-existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const c = yield* TxHashMap.get(txMap, "c")
 
@@ -63,7 +63,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("has - existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const hasA = yield* TxHashMap.has(txMap, "a")
         const hasB = yield* TxHashMap.has(txMap, "b")
@@ -73,7 +73,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("has - non-existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const hasC = yield* TxHashMap.has(txMap, "c")
 
@@ -81,7 +81,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("set - new key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         yield* TxHashMap.set(txMap, "c", 3)
 
@@ -93,7 +93,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("set - existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         yield* TxHashMap.set(txMap, "a", 10)
 
@@ -105,7 +105,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("remove - existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2], ["c", 3])
         const removed = yield* TxHashMap.remove(txMap, "b")
 
@@ -118,7 +118,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("remove - non-existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const removed = yield* TxHashMap.remove(txMap, "c")
 
@@ -129,7 +129,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("clear", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2], ["c", 3])
         yield* TxHashMap.clear(txMap)
 
@@ -143,7 +143,7 @@ describe("TxHashMap", () => {
 
   describe("query operations", () => {
     it.effect("size", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const empty = yield* TxHashMap.empty<string, number>()
         const small = yield* TxHashMap.make(["a", 1])
         const large = yield* TxHashMap.make(["a", 1], ["b", 2], ["c", 3], ["d", 4])
@@ -154,7 +154,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("isEmpty", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const empty = yield* TxHashMap.empty<string, number>()
         const nonEmpty = yield* TxHashMap.make(["a", 1])
 
@@ -163,7 +163,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("isNonEmpty", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const empty = yield* TxHashMap.empty<string, number>()
         const nonEmpty = yield* TxHashMap.make(["a", 1])
 
@@ -174,7 +174,7 @@ describe("TxHashMap", () => {
 
   describe("advanced operations", () => {
     it.effect("modify - existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["counter", 5])
         const oldValue = yield* TxHashMap.modify(txMap, "counter", (n) => n * 2)
         const newValue = yield* TxHashMap.get(txMap, "counter")
@@ -184,7 +184,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("modify - non-existing key", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.empty<string, number>()
         const oldValue = yield* TxHashMap.modify(txMap, "counter", (n) => n * 2)
         const size = yield* TxHashMap.size(txMap)
@@ -194,7 +194,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("modifyAt - insert new value", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1])
         yield* TxHashMap.modifyAt(txMap, "b", () => Option.some(2))
 
@@ -206,7 +206,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("modifyAt - remove existing value", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         yield* TxHashMap.modifyAt(txMap, "a", () => Option.none())
 
@@ -218,7 +218,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("keys", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2], ["c", 3])
         const keys = yield* TxHashMap.keys(txMap)
 
@@ -226,7 +226,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("values", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2], ["c", 3])
         const values = yield* TxHashMap.values(txMap)
 
@@ -234,7 +234,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("entries", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const entries = yield* TxHashMap.entries(txMap)
 
@@ -242,7 +242,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("snapshot", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const snapshot = yield* TxHashMap.snapshot(txMap)
 
@@ -262,7 +262,7 @@ describe("TxHashMap", () => {
 
   describe("bulk operations", () => {
     it.effect("union", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const other = HashMap.make(["b", 20], ["c", 3]) // "b" should be overwritten
 
@@ -280,7 +280,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("removeMany", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2], ["c", 3], ["d", 4])
         yield* TxHashMap.removeMany(txMap, ["b", "d"])
 
@@ -298,7 +298,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("setMany", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
         const newEntries = [["c", 3], ["d", 4], ["a", 10]] as const // "a" should be overwritten
 
@@ -320,7 +320,7 @@ describe("TxHashMap", () => {
 
   describe("transactional semantics", () => {
     it.effect("single operations are automatically transactional", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["counter", 0])
 
         // These operations should be individually atomic
@@ -332,7 +332,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("multi-step operations", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["a", 1], ["b", 2])
 
         // Multi-step operations
@@ -357,7 +357,7 @@ describe("TxHashMap", () => {
 
   describe("pipe syntax", () => {
     it.effect("supports data-last operations", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.empty<string, number>()
 
         // Test data-last pipe operations
@@ -374,7 +374,7 @@ describe("TxHashMap", () => {
 
   describe("Phase 1: Essential Functions", () => {
     it.effect("isTxHashMap should correctly identify TxHashMap instances", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["key", "value"])
 
         // Positive cases
@@ -391,7 +391,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("getHash should lookup values using custom hash", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["user123", { name: "Alice", role: "admin" }],
           ["user456", { name: "Bob", role: "user" }]
@@ -418,7 +418,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("hasHash should check existence using custom hash", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["admin", { read: true, write: true }],
           ["user", { read: true, write: false }]
@@ -446,7 +446,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("getHash and hasHash should work together", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["session_abc", { userId: "user1", active: true }],
           ["session_def", { userId: "user2", active: false }]
@@ -475,7 +475,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("hash functions should work correctly", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(["key1", "value1"])
         const hash = Hash.string("key2")
 
@@ -497,7 +497,7 @@ describe("TxHashMap", () => {
 
   describe("Phase 2: Functional Programming Operations", () => {
     it.effect("map should transform values while preserving keys", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["user1", { name: "Alice", age: 25 }],
           ["user2", { name: "Bob", age: 30 }],
@@ -523,7 +523,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("filter should keep only matching entries", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["apple", { price: 1.50, category: "fruit" }],
           ["carrot", { price: 0.80, category: "vegetable" }],
@@ -551,7 +551,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("reduce should fold over all entries", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["item1", 10],
           ["item2", 20],
@@ -580,7 +580,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("filterMap should filter and transform in one operation", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["valid1", "10"],
           ["invalid", "not-a-number"],
@@ -632,7 +632,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("hasBy should check if any entry matches predicate", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["admin", { role: "admin", active: true }],
           ["user1", { role: "user", active: true }],
@@ -657,7 +657,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("findFirst should return first matching entry", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["session1", { userId: "user1", loginTime: "09:00" }],
           ["session2", { userId: "user2", loginTime: "10:00" }],
@@ -687,7 +687,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("some should check if any entry matches predicate", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["order1", { status: "pending", amount: 100 }],
           ["order2", { status: "completed", amount: 250 }],
@@ -715,7 +715,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("every should check if all entries match predicate", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["task1", { completed: true, priority: "high" }],
           ["task2", { completed: true, priority: "medium" }],
@@ -747,7 +747,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("functional operations should work correctly", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["item1", { price: 10, discount: 0 }],
           ["item2", { price: 20, discount: 0 }],
@@ -785,7 +785,7 @@ describe("TxHashMap", () => {
 
   describe("Phase 3: Specialized Operations", () => {
     it.effect("forEach should execute side effects for each entry", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["user1", { name: "Alice", status: "active" }],
           ["user2", { name: "Bob", status: "inactive" }],
@@ -819,7 +819,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("flatMap should transform and flatten TxHashMaps", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const departments = yield* TxHashMap.make(
           ["eng", ["alice", "bob"]],
           ["sales", ["charlie"]]
@@ -854,7 +854,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("compact should remove None values and unwrap Some values", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const optionalData = yield* TxHashMap.make<string, Option.Option<{ value: number }>>(
           ["valid1", Option.some({ value: 10 })],
           ["invalid1", Option.none()],
@@ -886,7 +886,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("toEntries should return all entries as array", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["a", 1],
           ["b", 2],
@@ -907,7 +907,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("toValues should return all values as array", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make(
           ["x", { price: 100 }],
           ["y", { price: 200 }],
@@ -928,7 +928,7 @@ describe("TxHashMap", () => {
       })))
 
     it.effect("specialized operations should work correctly", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txMap = yield* TxHashMap.make<string, Option.Option<number>>(
           ["a", Option.some(1)],
           ["b", Option.none()],

@@ -79,6 +79,7 @@
  * @since 1.0.0
  */
 import * as Duration from "../../Duration.ts"
+import * as Effect from "../../Effect.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import { redact } from "../../Redactable.ts"
@@ -91,8 +92,8 @@ const ReasonTypeId = "~effect/unstable/ai/AiError/Reason" as const
 
 const providerMetadataWithDefaults = <Metadata extends ProviderMetadata>() =>
   (ProviderMetadata as unknown as typeof ProviderMetadata & Schema.Schema<Metadata>).pipe(
-    Schema.withConstructorDefault(() => Option.some({} as Metadata)),
-    Schema.withDecodingDefault(() => ({} as Metadata))
+    Schema.withConstructorDefault(Effect.succeed({})),
+    Schema.withDecodingDefault(Effect.succeed({}))
   )
 
 const redactHeaders = (headers: Record<string, string>): Record<string, string> => {

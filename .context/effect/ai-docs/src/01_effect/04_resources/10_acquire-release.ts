@@ -5,14 +5,14 @@
  * a resource, ensuring that it is properly cleaned up when the service is no
  * longer needed.
  */
-import { Config, Effect, Layer, Redacted, Schema, ServiceMap } from "effect"
+import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
 import * as NodeMailer from "nodemailer"
 
 export class SmtpError extends Schema.ErrorClass<SmtpError>("SmtpError")({
   cause: Schema.Defect
 }) {}
 
-export class Smtp extends ServiceMap.Service<Smtp, {
+export class Smtp extends Context.Service<Smtp, {
   send(message: {
     readonly to: string
     readonly subject: string
@@ -74,7 +74,7 @@ export class MailerError extends Schema.TaggedErrorClass<MailerError>()("MailerE
   reason: SmtpError
 }) {}
 
-export class Mailer extends ServiceMap.Service<Mailer, {
+export class Mailer extends Context.Service<Mailer, {
   sendWelcomeEmail(to: string): Effect.Effect<void, MailerError>
 }>()("app/Mailer") {
   static readonly layerNoDeps = Layer.effect(

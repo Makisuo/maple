@@ -77,6 +77,7 @@
  *
  * @since 2.0.0
  */
+import * as Context from "./Context.ts"
 import type * as Effect from "./Effect.ts"
 import type { Equal } from "./Equal.ts"
 import type { Fiber } from "./Fiber.ts"
@@ -87,7 +88,6 @@ import type { Option } from "./Option.ts"
 import type { Pipeable } from "./Pipeable.ts"
 import type { StackFrame } from "./References.ts"
 import type * as Result from "./Result.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 import type * as Types from "./Types.ts"
 
 /**
@@ -319,7 +319,7 @@ export declare namespace Cause {
     readonly [ReasonTypeId]: typeof ReasonTypeId
     readonly _tag: Tag
     readonly annotations: ReadonlyMap<string, unknown>
-    annotate(annotations: ServiceMap.ServiceMap<never> | ReadonlyMap<string, unknown>, options?: {
+    annotate(annotations: Context.Context<never> | ReadonlyMap<string, unknown>, options?: {
       readonly overwrite?: boolean | undefined
     }): this
   }
@@ -1580,7 +1580,7 @@ export const UnknownError: new(cause: unknown, message?: string) => UnknownError
 /**
  * Attaches metadata to every reason in a {@link Cause}.
  *
- * Annotations are stored as a `ServiceMap` on each reason and can be
+ * Annotations are stored as a `Context` on each reason and can be
  * retrieved later via {@link reasonAnnotations} or {@link annotations}.
  * The runtime uses this to attach stack traces and spans.
  *
@@ -1591,10 +1591,10 @@ export const UnknownError: new(cause: unknown, message?: string) => UnknownError
  * **Example** (annotating a cause)
  *
  * ```ts
- * import { Cause, ServiceMap } from "effect"
+ * import { Cause, Context } from "effect"
  *
  * const cause = Cause.fail("error")
- * const annotated = Cause.annotate(cause, ServiceMap.empty())
+ * const annotated = Cause.annotate(cause, Context.empty())
  * ```
  *
  * @see {@link annotations} — read merged annotations from a cause
@@ -1605,18 +1605,18 @@ export const UnknownError: new(cause: unknown, message?: string) => UnknownError
  */
 export const annotate: {
   (
-    annotations: ServiceMap.ServiceMap<never>,
+    annotations: Context.Context<never>,
     options?: { readonly overwrite?: boolean | undefined }
   ): <E>(self: Cause<E>) => Cause<E>
   <E>(
     self: Cause<E>,
-    annotations: ServiceMap.ServiceMap<never>,
+    annotations: Context.Context<never>,
     options?: { readonly overwrite?: boolean | undefined }
   ): Cause<E>
 } = core.causeAnnotate
 
 /**
- * Reads the annotations from a single {@link Reason} as a `ServiceMap`.
+ * Reads the annotations from a single {@link Reason} as a `Context`.
  *
  * Use this when you need tracing metadata (e.g. {@link StackTrace}) from
  * a specific reason rather than the whole cause.
@@ -1627,7 +1627,7 @@ export const annotate: {
  * @category annotations
  * @since 4.0.0
  */
-export const reasonAnnotations: <E>(self: Reason<E>) => ServiceMap.ServiceMap<never> = effect.reasonAnnotations
+export const reasonAnnotations: <E>(self: Reason<E>) => Context.Context<never> = effect.reasonAnnotations
 
 /**
  * Reads the merged annotations from all reasons in a {@link Cause}.
@@ -1640,22 +1640,22 @@ export const reasonAnnotations: <E>(self: Reason<E>) => ServiceMap.ServiceMap<ne
  * @category annotations
  * @since 4.0.0
  */
-export const annotations: <E>(self: Cause<E>) => ServiceMap.ServiceMap<never> = effect.causeAnnotations
+export const annotations: <E>(self: Cause<E>) => Context.Context<never> = effect.causeAnnotations
 
 /**
- * `ServiceMap` key for the stack frame captured at the point of failure.
+ * `Context` key for the stack frame captured at the point of failure.
  *
  * The runtime annotates every reason with this when a stack frame is
  * available. Retrieve it via
- * `ServiceMap.get(Cause.reasonAnnotations(reason), Cause.StackTrace)`.
+ * `Context.get(Cause.reasonAnnotations(reason), Cause.StackTrace)`.
  *
  * @category annotations
  * @since 4.0.0
  */
-export class StackTrace extends ServiceMap.Service<StackTrace, StackFrame>()("effect/Cause/StackTrace") {}
+export class StackTrace extends Context.Service<StackTrace, StackFrame>()("effect/Cause/StackTrace") {}
 
 /**
- * `ServiceMap` key for the stack frame captured at the point of
+ * `Context` key for the stack frame captured at the point of
  * interruption.
  *
  * Similar to {@link StackTrace} but specific to {@link Interrupt} reasons.
@@ -1664,5 +1664,5 @@ export class StackTrace extends ServiceMap.Service<StackTrace, StackFrame>()("ef
  * @since 4.0.0
  */
 export class InterruptorStackTrace
-  extends ServiceMap.Service<InterruptorStackTrace, StackFrame>()("effect/Cause/InterruptorStackTrace")
+  extends Context.Service<InterruptorStackTrace, StackFrame>()("effect/Cause/InterruptorStackTrace")
 {}

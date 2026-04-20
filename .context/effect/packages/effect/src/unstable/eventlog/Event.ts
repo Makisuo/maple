@@ -38,7 +38,6 @@ export interface Event<
 > {
   readonly [TypeId]: TypeId
   readonly tag: Tag
-  readonly key: string
   readonly primaryKey: (payload: Schema.Schema.Type<Payload>) => string
   readonly payload: Payload
   readonly payloadMsgPack: Msgpack.schema<Payload>
@@ -62,7 +61,6 @@ export interface EventHandler<in out Tag extends string> {
 export interface Any {
   readonly [TypeId]: TypeId
   readonly tag: string
-  readonly key: string
   readonly primaryKey: (payload: any) => string
   readonly payload: Schema.Top
   readonly payloadMsgPack: Msgpack.schema<Schema.Top>
@@ -312,7 +310,6 @@ export function make(options: {
   const error = options.error ?? Schema.Never
   return Object.assign(Object.create(Proto), {
     tag: options.tag,
-    key: serviceKey(options.tag),
     primaryKey: options.primaryKey,
     payload,
     payloadMsgPack: Msgpack.schema(payload),
@@ -338,8 +335,3 @@ export function addError(event: Any, error: Schema.Top): Any {
     error: Schema.Union([event.error, error])
   })
 }
-
-/**
- * @since 4.0.0
- */
-export const serviceKey = (tag: string): string => `effect/eventlog/Event/${tag}`

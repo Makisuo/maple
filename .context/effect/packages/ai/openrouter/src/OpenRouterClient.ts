@@ -2,13 +2,13 @@
  * @since 1.0.0
  */
 import type * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { identity } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import type * as AiError from "effect/unstable/ai/AiError"
 import * as Sse from "effect/unstable/encoding/Sse"
@@ -70,7 +70,7 @@ export type ChatStreamingResponseChunkData = typeof Generated.ChatStreamingRespo
  * @since 1.0.0
  * @category service
  */
-export class OpenRouterClient extends ServiceMap.Service<
+export class OpenRouterClient extends Context.Service<
   OpenRouterClient,
   Service
 >()("@effect/ai-openrouter/OpenRouterClient") {}

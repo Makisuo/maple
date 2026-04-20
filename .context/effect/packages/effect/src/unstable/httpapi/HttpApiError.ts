@@ -1,11 +1,11 @@
 /**
  * @since 4.0.0
  */
+import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
 import * as ErrorReporter from "../../ErrorReporter.ts"
-import { identity } from "../../Function.ts"
+import { hasProperty } from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
-import * as Transformation from "../../SchemaTransformation.ts"
 import * as HttpServerRespondable from "../http/HttpServerRespondable.ts"
 import * as HttpServerResponse from "../http/HttpServerResponse.ts"
 import * as HttpApiSchema from "./HttpApiSchema.ts"
@@ -47,26 +47,6 @@ export class BadRequest extends Schema.ErrorClass<BadRequest>("effect/HttpApiErr
 export const BadRequestNoContent = BadRequest.pipe(HttpApiSchema.asNoContent({
   decode: () => new BadRequest({})
 }))
-
-/**
- * @category Built-in errors
- * @since 4.0.0
- */
-export const BadRequestFromSchemaError = BadRequest.pipe(
-  Schema.decodeTo(
-    Schema.Union([Schema.declare(Schema.isSchemaError), BadRequest]),
-    Transformation.transform({
-      encode: (_) => BadRequest.singleton,
-      decode: identity
-    })
-  ),
-  HttpApiSchema.asNoContent({
-    decode: () => new BadRequest({})
-  })
-).annotate({
-  httpApiStatus: 400,
-  description: "BadRequest"
-})
 
 /**
  * @category Built-in errors
@@ -332,3 +312,44 @@ export class ServiceUnavailable
 export const ServiceUnavailableNoContent = ServiceUnavailable.pipe(HttpApiSchema.asNoContent({
   decode: () => new ServiceUnavailable({})
 }))
+
+/**
+ * @category Parsing errors
+ * @since 4.0.0
+ */
+export type HttpApiSchemaErrorTypeId = "~effect/httpapi/HttpApiError/HttpApiSchemaError"
+
+/**
+ * @category Parsing errors
+ * @since 4.0.0
+ */
+export const HttpApiSchemaErrorTypeId: HttpApiSchemaErrorTypeId = "~effect/httpapi/HttpApiError/HttpApiSchemaError"
+
+/**
+ * @category Parsing errors
+ * @since 4.0.0
+ */
+export class HttpApiSchemaError extends Data.TaggedClass("HttpApiSchemaError")<{
+  readonly kind: "Params" | "Headers" | "Query" | "Body" | "Payload"
+  readonly cause: Schema.SchemaError
+}> {
+  readonly [HttpApiSchemaErrorTypeId]: HttpApiSchemaErrorTypeId = HttpApiSchemaErrorTypeId
+
+  static is(u: unknown): u is HttpApiSchemaError {
+    return hasProperty(u, HttpApiSchemaErrorTypeId)
+  }
+
+  static wrap<A, R>(
+    kind: HttpApiSchemaError["kind"],
+    effect: Effect.Effect<A, Schema.SchemaError, R>
+  ): Effect.Effect<A, HttpApiSchemaError, R> {
+    return Effect.mapError(effect, (error) => new HttpApiSchemaError({ kind, cause: error }))
+  }
+
+  readonly name = "HttpApiSchemaError"
+  readonly message = this.kind;
+
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(badRequestResponse)
+  }
+}

@@ -277,6 +277,70 @@ describe("OpenAiLanguageModel", () => {
         assert.strictEqual(functionTool.function.strict, true)
       }))
 
+    it.effect("converts dynamic tools to function type", () =>
+      Effect.gen(function*() {
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+
+        const layer = OpenAiClient.layer({ apiKey: Redacted.make("sk-test-key") }).pipe(
+          Layer.provide(Layer.succeed(
+            HttpClient.HttpClient,
+            makeHttpClient((request) => {
+              capturedRequest = request
+              return Effect.succeed(jsonResponse(
+                request,
+                makeChatCompletion({
+                  choices: [{
+                    index: 0,
+                    finish_reason: "stop",
+                    message: {
+                      role: "assistant",
+                      content: "Done"
+                    }
+                  }]
+                })
+              ))
+            })
+          ))
+        )
+
+        const inputSchema = {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            limit: { type: "number" }
+          },
+          required: ["query"],
+          additionalProperties: false
+        } as const
+
+        const DynamicTool = Tool.dynamic("DynamicTool", {
+          description: "A dynamic tool",
+          parameters: inputSchema
+        })
+
+        yield* LanguageModel.generateText({
+          prompt: "use dynamic tool",
+          toolkit: Toolkit.make(DynamicTool),
+          disableToolCallResolution: true
+        }).pipe(
+          Effect.provide(OpenAiLanguageModel.model("gpt-4o-mini")),
+          Effect.provide(layer)
+        )
+
+        assert.isDefined(capturedRequest)
+        if (capturedRequest === undefined) {
+          return
+        }
+
+        const requestBody = yield* getRequestBody(capturedRequest)
+        const functionTool = requestBody.tools?.find((tool: any) =>
+          tool.type === "function" && tool.function?.name === "DynamicTool"
+        )
+        assert.isDefined(functionTool)
+        assert.strictEqual(functionTool.function.description, "A dynamic tool")
+        assert.deepStrictEqual(functionTool.function.parameters, inputSchema)
+      }))
+
     it.effect("maps provider apply_patch function call back to custom provider-defined tool", () =>
       Effect.gen(function*() {
         let capturedRequest: HttpClientRequest.HttpClientRequest | undefined

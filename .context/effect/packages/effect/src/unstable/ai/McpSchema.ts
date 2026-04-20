@@ -1,14 +1,14 @@
 /**
  * @since 4.0.0
  */
-import type * as Effect from "../../Effect.ts"
+import * as Context from "../../Context.ts"
+import * as Effect from "../../Effect.ts"
 import { constFalse, constTrue } from "../../Function.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
 import * as Getter from "../../SchemaGetter.ts"
 import type * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Rpc from "../rpc/Rpc.ts"
 import type * as RpcClient from "../rpc/RpcClient.ts"
 import type { RpcClientError } from "../rpc/RpcClientError.ts"
@@ -28,16 +28,18 @@ export interface optionalWithDefault<S extends Schema.Top & Schema.WithoutConstr
 export const optionalWithDefault = <S extends Schema.Top & Schema.WithoutConstructorDefault>(
   schema: S,
   defaultValue: () => Schema.optionalKey<S>["Type"]
-): optionalWithDefault<S> =>
-  Schema.optionalKey(schema).pipe(
+): optionalWithDefault<S> => {
+  const effect = Effect.sync(defaultValue)
+  return Schema.optionalKey(schema).pipe(
     Schema.decode<Schema.optionalKey<S>>({
-      decode: Getter.withDefault(defaultValue),
+      decode: Getter.withDefault(effect),
       encode: Getter.passthrough()
     }),
     Schema.withConstructorDefault<
       Schema.decodeTo<Schema.toType<Schema.optionalKey<S>>, Schema.optionalKey<S>>
-    >(() => Option.some(defaultValue()))
+    >(effect)
   )
+}
 
 /**
  * @since 4.0.0
@@ -1616,7 +1618,7 @@ export class CompleteResult extends Schema.Opaque<CompleteResult>()(Schema.Struc
   /**
    * @since 4.0.0
    */
-  static readonly empty = CompleteResult.makeUnsafe({
+  static readonly empty = CompleteResult.make({
     completion: {
       values: [],
       total: 0,
@@ -1840,7 +1842,7 @@ export class ElicitationDeclined
  * @since 4.0.0
  * @category client
  */
-export class McpServerClient extends ServiceMap.Service<McpServerClient, {
+export class McpServerClient extends Context.Service<McpServerClient, {
   readonly clientId: number
   readonly initializePayload: typeof Initialize.payloadSchema["Type"]
   readonly getClient: Effect.Effect<
@@ -2104,7 +2106,7 @@ export interface Param<Name extends string, S extends Schema.Top> extends
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
+  readonly "Rebuild": Param<Name, S>
   readonly [ParamSchemaTypeId]: typeof ParamSchemaTypeId
   readonly name: Name
   readonly schema: S
@@ -2131,7 +2133,7 @@ export function param<const Name extends string, S extends Schema.Top>(
  * @category annotations
  */
 export class EnabledWhen
-  extends ServiceMap.Service<EnabledWhen, Predicate.Predicate<typeof Initialize.payloadSchema.Type>>()(
+  extends Context.Service<EnabledWhen, Predicate.Predicate<typeof Initialize.payloadSchema.Type>>()(
     "effect/unstable/ai/McpSchema/EnabledWhen"
   )
 {}

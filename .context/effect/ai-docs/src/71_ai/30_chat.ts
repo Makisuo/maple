@@ -5,7 +5,7 @@
  * AI agents or chat assistants.
  */
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai"
-import { Config, DateTime, Effect, Layer, Ref, Schema, ServiceMap } from "effect"
+import { Config, Context, DateTime, Effect, Layer, Ref, Schema } from "effect"
 import { AiError, Chat, Prompt, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 
@@ -51,7 +51,7 @@ export class AiAssistantError extends Schema.TaggedErrorClass<AiAssistantError>(
   }
 }
 
-export class AiAssistant extends ServiceMap.Service<AiAssistant, {
+export class AiAssistant extends Context.Service<AiAssistant, {
   // Send a message while maintaining conversation history across turns.
   chat(message: string): Effect.Effect<string, AiAssistantError>
   // Ask a question and use an agentic loop with tool calls to answer it.

@@ -3,6 +3,7 @@
  */
 import type { Array } from "effect"
 import * as Channel from "effect/Channel"
+import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -12,7 +13,6 @@ import { identity } from "effect/Function"
 import * as Latch from "effect/Latch"
 import * as Layer from "effect/Layer"
 import * as Scope from "effect/Scope"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Socket from "effect/unstable/socket/Socket"
 import * as Net from "node:net"
 import type { Duplex } from "node:stream"
@@ -27,7 +27,7 @@ export * as NodeWS from "ws"
  * @since 1.0.0
  * @category tags
  */
-export class NetSocket extends ServiceMap.Service<NetSocket, Net.Socket>()(
+export class NetSocket extends Context.Service<NetSocket, Net.Socket>()(
   "@effect/platform-node/NodeSocket/NetSocket"
 ) {}
 
@@ -41,11 +41,11 @@ export const makeNet = (
   }
 ): Effect.Effect<Socket.Socket> =>
   fromDuplex(
-    Effect.servicesWith((services: ServiceMap.ServiceMap<Scope.Scope>) => {
+    Effect.contextWith((context: Context.Context<Scope.Scope>) => {
       let conn: Net.Socket | undefined
       return Effect.flatMap(
         Scope.addFinalizer(
-          ServiceMap.get(services, Scope.Scope),
+          Context.get(context, Scope.Scope),
           Effect.sync(() => {
             if (!conn) return
             if (conn.closed === false) {
@@ -89,7 +89,7 @@ export const fromDuplex = <RO>(
   Effect.withFiber<Socket.Socket, never, Exclude<RO, Scope.Scope>>((fiber) => {
     let currentSocket: Duplex | undefined
     const latch = Latch.makeUnsafe(false)
-    const openServices = fiber.services as ServiceMap.ServiceMap<RO>
+    const openServices = fiber.context as Context.Context<RO>
 
     const run = <R, E, _>(handler: (_: Uint8Array) => Effect.Effect<_, E, R> | void, opts?: {
       readonly onOpen?: Effect.Effect<void> | undefined
@@ -166,7 +166,7 @@ export const fromDuplex = <RO>(
           )
         }
       })).pipe(
-        Effect.updateServices((input: ServiceMap.ServiceMap<R>) => ServiceMap.merge(openServices, input)),
+        Effect.updateContext((input: Context.Context<R>) => Context.merge(openServices, input)),
         Effect.onExit(() =>
           Effect.sync(() => {
             latch.closeUnsafe()

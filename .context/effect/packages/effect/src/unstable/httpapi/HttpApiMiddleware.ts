@@ -1,12 +1,12 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import { hasProperty } from "../../Predicate.ts"
-import * as Schema from "../../Schema.ts"
+import type * as Schema from "../../Schema.ts"
 import { Scope } from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { unhandled } from "../../Types.ts"
 import type * as HttpClientError from "../http/HttpClientError.ts"
 import type * as HttpClientRequest from "../http/HttpClientRequest.ts"
@@ -14,6 +14,7 @@ import type * as HttpClientResponse from "../http/HttpClientResponse.ts"
 import type * as HttpRouter from "../http/HttpRouter.ts"
 import type { HttpServerResponse } from "../http/HttpServerResponse.ts"
 import type * as HttpApiEndpoint from "./HttpApiEndpoint.ts"
+import { HttpApiSchemaError } from "./HttpApiError.ts"
 import type * as HttpApiGroup from "./HttpApiGroup.ts"
 import type * as HttpApiSecurity from "./HttpApiSecurity.ts"
 
@@ -97,7 +98,7 @@ export interface ForClient<Id> {
  * @since 4.0.0
  * @category models
  */
-export interface AnyService extends ServiceMap.Key<any, any> {
+export interface AnyService extends Context.Key<any, any> {
   readonly [TypeId]: typeof TypeId
   readonly provides: any
   readonly error: ReadonlySet<Schema.Top>
@@ -213,9 +214,9 @@ export type ServiceClass<
     ([Config["security"]] extends [never] ? HttpApiMiddleware<Config["provides"], Config["error"], Config["requires"]>
       : HttpApiMiddlewareSecurity<Config["security"], Config["provides"], Config["error"], Config["requires"]>)
 > =
-  & ServiceMap.Service<Self, Service>
+  & Context.Service<Self, Service>
   & {
-    new(_: never): ServiceMap.ServiceClass.Shape<Id, Service> & {
+    new(_: never): Context.ServiceClass.Shape<Id, Service> & {
       readonly [TypeId]: {
         readonly error: Config["error"]
         readonly requires: Config["requires"]
@@ -279,7 +280,8 @@ export const Service = <
   const creationError = new Err()
   Err.stackTraceLimit = limit
 
-  class Service extends ServiceMap.Service<Self, any>()(id) {}
+  /** @effect-diagnostics-next-line classSelfMismatch:off */
+  class Service extends Context.Service<Self, any>()(id) {}
   const self = Service as any
   Object.defineProperty(Service, "stack", {
     get() {
@@ -330,13 +332,13 @@ function getError(error: ErrorConstraint | undefined): ReadonlySet<Schema.Top> {
  * @category SchemaError transform
  */
 export const layerSchemaErrorTransform = <Id, E extends ErrorConstraint, Requires>(
-  service: ServiceMap.Service<Id, HttpApiMiddleware<never, E, Requires>>,
+  service: Context.Service<Id, HttpApiMiddleware<never, E, Requires>>,
   transform: (
-    error: Schema.SchemaError,
+    error: HttpApiSchemaError,
     context: { readonly endpoint: HttpApiEndpoint.AnyWithProps; readonly group: HttpApiGroup.AnyWithProps }
   ) => Effect.Effect<
     HttpServerResponse,
-    ErrorSchemaFromConstraint<E>["Type"] | Schema.SchemaError,
+    ErrorSchemaFromConstraint<E>["Type"] | HttpApiSchemaError,
     Requires | HttpRouter.Provided
   >
 ): Layer.Layer<Id> =>
@@ -347,9 +349,9 @@ export const layerSchemaErrorTransform = <Id, E extends ErrorConstraint, Require
         httpEffect,
         (e): Effect.Effect<
           HttpServerResponse,
-          unhandled | Schema.SchemaError | ErrorSchemaFromConstraint<E>["Type"],
+          unhandled | HttpApiSchemaError | ErrorSchemaFromConstraint<E>["Type"],
           Requires | HttpRouter.Provided
-        > => Schema.isSchemaError(e) ? transform(e, options) : Effect.fail(e)
+        > => HttpApiSchemaError.is(e) ? transform(e, options) : Effect.fail(e)
       )
   )
 
@@ -358,7 +360,7 @@ export const layerSchemaErrorTransform = <Id, E extends ErrorConstraint, Require
  * @category client
  */
 export const layerClient = <Id extends AnyId, S, R, EX = never, RX = never>(
-  tag: ServiceMap.Key<Id, S>,
+  tag: Context.Key<Id, S>,
   service:
     | HttpApiMiddlewareClient<Error<Id>, Id[typeof TypeId]["clientError"], R>
     | Effect.Effect<
@@ -367,18 +369,18 @@ export const layerClient = <Id extends AnyId, S, R, EX = never, RX = never>(
       RX
     >
 ): Layer.Layer<ForClient<Id>, EX, R | Exclude<RX, Scope>> =>
-  Layer.effectServices(Effect.gen(function*() {
-    const services = (yield* Effect.services<R | Scope>()).pipe(
-      ServiceMap.omit(Scope)
-    ) as ServiceMap.ServiceMap<R>
+  Layer.effectContext(Effect.gen(function*() {
+    const services = (yield* Effect.context<R | Scope>()).pipe(
+      Context.omit(Scope)
+    ) as Context.Context<R>
     const middleware = Effect.isEffect(service) ? yield* service : service
-    return ServiceMap.makeUnsafe(
+    return Context.makeUnsafe(
       new Map([[
         `${tag.key}/Client`,
         (options: any) =>
-          Effect.updateServices(
+          Effect.updateContext(
             middleware(options),
-            (requestContext) => ServiceMap.merge(services, requestContext)
+            (requestContext) => Context.merge(services, requestContext)
           )
       ]])
     )

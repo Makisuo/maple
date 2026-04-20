@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, SchemaGetter, SchemaIssue, ServiceMap } from "effect"
+import { Context, Effect, Option, Schema, SchemaGetter, SchemaIssue } from "effect"
 import { TestSchema } from "effect/testing"
 import { describe, it } from "vitest"
 
@@ -13,7 +13,7 @@ describe("TestSchema", () => {
   })
 
   it("decoding.provide", async () => {
-    class Service extends ServiceMap.Service<Service, { fallback: Effect.Effect<string> }>()("Service") {}
+    class Service extends Context.Service<Service, { fallback: Effect.Effect<string> }>()("Service") {}
 
     const schema = Schema.String.pipe(
       Schema.decode({
@@ -46,7 +46,7 @@ describe("TestSchema", () => {
   })
 
   it("encoding.provide", async () => {
-    class Service extends ServiceMap.Service<Service, { fallback: Effect.Effect<string> }>()("Service") {}
+    class Service extends Context.Service<Service, { fallback: Effect.Effect<string> }>()("Service") {}
 
     const schema = Schema.String.pipe(
       Schema.decode({

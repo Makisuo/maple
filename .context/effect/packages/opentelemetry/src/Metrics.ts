@@ -35,7 +35,7 @@ export type TemporalityPreference = "cumulative" | "delta"
 export const makeProducer = (temporality?: TemporalityPreference): Effect.Effect<MetricProducer, never, Resource> =>
   Effect.gen(function*() {
     const resource = yield* Resource
-    const services = yield* Effect.services<never>()
+    const services = yield* Effect.context<never>()
     return new MetricProducerImpl(resource, services, temporality)
   })
 

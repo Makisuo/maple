@@ -12,7 +12,7 @@
  *   (e.g. `["database", "host"]`).
  * - **ConfigProvider** – an object with a `load(path)` method that resolves a
  *   path to a `Node | undefined`. Providers can be composed and transformed.
- * - **ServiceMap.Reference** – `ConfigProvider` is registered as a reference
+ * - **Context.Reference** – `ConfigProvider` is registered as a reference
  *   service that defaults to `fromEnv()`, so it works without explicit
  *   provision.
  * - **SourceError** – the typed error returned when a backing store is
@@ -78,6 +78,7 @@
  * @since 4.0.0
  */
 
+import * as Context from "./Context.ts"
 import * as Data from "./Data.ts"
 import * as Effect from "./Effect.ts"
 import * as FileSystem from "./FileSystem.ts"
@@ -90,7 +91,6 @@ import type { Pipeable } from "./Pipeable.ts"
 import type { PlatformError } from "./PlatformError.ts"
 import * as Predicate from "./Predicate.ts"
 import type { Scope } from "./Scope.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 import * as Str from "./String.ts"
 
 /**
@@ -322,10 +322,10 @@ export interface ConfigProvider extends Pipeable {
 }
 
 /**
- * The `ConfigProvider` service reference, registered in the service map with a
+ * The `ConfigProvider` service reference, registered in the context with a
  * default value of `fromEnv()`.
  *
- * Because it is a `ServiceMap.Reference`, it is available without explicit
+ * Because it is a `Context.Reference`, it is available without explicit
  * provision — `Config` schemas automatically resolve it.
  *
  * When to use:
@@ -355,7 +355,7 @@ export interface ConfigProvider extends Pipeable {
  * @category Services
  * @since 4.0.0
  */
-export const ConfigProvider: ServiceMap.Reference<ConfigProvider> = ServiceMap.Reference<ConfigProvider>(
+export const ConfigProvider: Context.Reference<ConfigProvider> = Context.Reference<ConfigProvider>(
   "effect/ConfigProvider",
   { defaultValue: () => fromEnv() }
 )

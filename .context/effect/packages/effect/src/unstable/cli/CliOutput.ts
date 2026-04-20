@@ -2,9 +2,9 @@
  * @since 4.0.0
  */
 
+import * as Context from "../../Context.ts"
 import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as CliError from "./CliError.ts"
 import type { HelpDoc } from "./HelpDoc.ts"
 
@@ -210,7 +210,7 @@ export interface Formatter {
  * @since 4.0.0
  * @category services
  */
-export const Formatter: ServiceMap.Reference<Formatter> = ServiceMap.Reference(
+export const Formatter: Context.Reference<Formatter> = Context.Reference(
   "effect/cli/CliOutput",
   { defaultValue: () => defaultFormatter() }
 )

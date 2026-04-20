@@ -3,14 +3,14 @@
  *
  * Build an in-process event bus with `PubSub` and expose it as a service.
  */
-import { Effect, Layer, PubSub, ServiceMap, Stream } from "effect"
+import { Context, Effect, Layer, PubSub, Stream } from "effect"
 
 export type OrderEvent =
   | { readonly _tag: "OrderPlaced"; readonly orderId: string }
   | { readonly _tag: "PaymentCaptured"; readonly orderId: string }
   | { readonly _tag: "OrderShipped"; readonly orderId: string }
 
-export class OrderEvents extends ServiceMap.Service<OrderEvents, {
+export class OrderEvents extends Context.Service<OrderEvents, {
   publish(event: OrderEvent): Effect.Effect<void>
   publishAll(events: ReadonlyArray<OrderEvent>): Effect.Effect<void>
   readonly subscribe: Stream.Stream<OrderEvent>

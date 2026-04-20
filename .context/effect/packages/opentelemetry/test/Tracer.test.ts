@@ -126,7 +126,7 @@ describe("Tracer", () => {
           return span.parent.value
         }).pipe(Effect.withSpan("child"))
 
-        const services = yield* Effect.services<never>()
+        const services = yield* Effect.context<never>()
 
         yield* Effect.promise(async () => {
           await OtelApi.trace.getTracer("test").startActiveSpan("otel-span", {
@@ -136,7 +136,7 @@ describe("Tracer", () => {
             try {
               const parent = await effect.pipe(
                 Tracer.withSpanContext(span.spanContext()),
-                Effect.provideServices(services),
+                Effect.provideContext(services),
                 Effect.runPromise
               )
               const { spanId, traceId } = span.spanContext()

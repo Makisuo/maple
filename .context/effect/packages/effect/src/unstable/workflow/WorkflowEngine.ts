@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import type * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
 import * as Fiber from "../../Fiber.ts"
@@ -12,7 +13,6 @@ import * as Option from "../../Option.ts"
 import * as Schedule from "../../Schedule.ts"
 import * as Schema from "../../Schema.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as Activity from "./Activity.ts"
 import type { DurableClock } from "./DurableClock.ts"
 import type * as DurableDeferred from "./DurableDeferred.ts"
@@ -22,7 +22,7 @@ import * as Workflow from "./Workflow.ts"
  * @since 4.0.0
  * @category Services
  */
-export class WorkflowEngine extends ServiceMap.Service<
+export class WorkflowEngine extends Context.Service<
   WorkflowEngine,
   {
     /**
@@ -112,6 +112,15 @@ export class WorkflowEngine extends ServiceMap.Service<
     ) => Effect.Effect<void>
 
     /**
+     * Unsafely interrupt a registered workflow, potentially ignoring
+     * compensation finalizers and orphaning child workflows.
+     */
+    readonly interruptUnsafe: (
+      workflow: Workflow.Any,
+      executionId: string
+    ) => Effect.Effect<void>
+
+    /**
      * Resume a registered workflow.
      */
     readonly resume: (
@@ -190,7 +199,7 @@ export class WorkflowEngine extends ServiceMap.Service<
  * @since 4.0.0
  * @category Services
  */
-export class WorkflowInstance extends ServiceMap.Service<
+export class WorkflowInstance extends Context.Service<
   WorkflowInstance,
   {
     /**
@@ -282,6 +291,10 @@ export interface Encoded {
     workflow: Workflow.Any,
     executionId: string
   ) => Effect.Effect<void>
+  readonly interruptUnsafe: (
+    workflow: Workflow.Any,
+    executionId: string
+  ) => Effect.Effect<void>
   readonly resume: (
     workflow: Workflow.Any,
     executionId: string
@@ -323,13 +336,13 @@ export interface Encoded {
 export const makeUnsafe = (options: Encoded): WorkflowEngine["Service"] =>
   WorkflowEngine.of({
     register: Effect.fnUntraced(function*(workflow, execute) {
-      const services = yield* Effect.services<WorkflowEngine>()
+      const services = yield* Effect.context<WorkflowEngine>()
       yield* options.register(workflow, (payload, executionId) =>
         Effect.suspend(() =>
           execute(payload, executionId)
         ).pipe(
-          Effect.updateServices(
-            (input) => ServiceMap.merge(services, input) as ServiceMap.ServiceMap<any>
+          Effect.updateContext(
+            (input) => Context.merge(services, input) as Context.Context<any>
           )
         ))
     }),
@@ -416,6 +429,7 @@ export const makeUnsafe = (options: Encoded): WorkflowEngine["Service"] =>
     }),
     poll: options.poll,
     interrupt: options.interrupt,
+    interruptUnsafe: options.interruptUnsafe,
     resume: options.resume,
     activityExecute: Effect.fnUntraced(function*<
       Success extends Schema.Top,
@@ -616,6 +630,14 @@ export const layerMemory: Layer.Layer<WorkflowEngine> = Layer.effect(WorkflowEng
         if (!state) return
         state.instance.interrupted = true
         yield* resume(executionId)
+      }),
+      interruptUnsafe: Effect.fnUntraced(function*(_workflow, executionId) {
+        const state = executions.get(executionId)
+        if (!state) return
+        state.instance.interrupted = true
+        if (state.fiber) {
+          yield* Fiber.interrupt(state.fiber)
+        }
       }),
       resume(_workflow, executionId) {
         return resume(executionId)

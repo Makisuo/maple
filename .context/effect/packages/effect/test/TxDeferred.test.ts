@@ -4,7 +4,7 @@ import { Effect, Exit, Fiber, Option, Result, TxDeferred } from "effect"
 describe("TxDeferred", () => {
   describe("constructors", () => {
     it.effect("make creates a deferred that polls as None", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         const state = yield* TxDeferred.poll(deferred)
         assert.isTrue(Option.isNone(state))
@@ -13,14 +13,14 @@ describe("TxDeferred", () => {
 
   describe("getters", () => {
     it.effect("poll returns None on fresh deferred", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<string>()
         const state = yield* TxDeferred.poll(deferred)
         assert.isTrue(Option.isNone(state))
       })))
 
     it.effect("poll returns Some(Success(value)) after succeed", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         yield* TxDeferred.succeed(deferred, 42)
         const state = yield* TxDeferred.poll(deferred)
@@ -34,7 +34,7 @@ describe("TxDeferred", () => {
       })))
 
     it.effect("poll returns Some(Failure(error)) after fail", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number, string>()
         yield* TxDeferred.fail(deferred, "boom")
         const state = yield* TxDeferred.poll(deferred)
@@ -48,7 +48,7 @@ describe("TxDeferred", () => {
       })))
 
     it.effect("await returns value after succeed", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         yield* TxDeferred.succeed(deferred, 42)
         const value = yield* TxDeferred.await(deferred)
@@ -56,7 +56,7 @@ describe("TxDeferred", () => {
       })))
 
     it.effect("await fails with error after fail", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number, string>()
         yield* TxDeferred.fail(deferred, "boom")
         const exit = yield* Effect.exit(TxDeferred.await(deferred))
@@ -64,7 +64,7 @@ describe("TxDeferred", () => {
       })))
 
     it.effect("await retries until completed", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         const fiber = yield* Effect.forkChild(TxDeferred.await(deferred))
         yield* TxDeferred.succeed(deferred, 99)
@@ -75,14 +75,14 @@ describe("TxDeferred", () => {
 
   describe("mutations", () => {
     it.effect("succeed returns true on fresh deferred", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         const result = yield* TxDeferred.succeed(deferred, 42)
         assert.isTrue(result)
       })))
 
     it.effect("succeed returns false if already completed", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         yield* TxDeferred.succeed(deferred, 42)
         const result = yield* TxDeferred.succeed(deferred, 99)
@@ -90,14 +90,14 @@ describe("TxDeferred", () => {
       })))
 
     it.effect("fail returns true on fresh deferred", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number, string>()
         const result = yield* TxDeferred.fail(deferred, "error")
         assert.isTrue(result)
       })))
 
     it.effect("fail returns false if already completed", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number, string>()
         yield* TxDeferred.succeed(deferred, 42)
         const result = yield* TxDeferred.fail(deferred, "error")
@@ -105,7 +105,7 @@ describe("TxDeferred", () => {
       })))
 
     it.effect("done with Result.succeed behaves like succeed", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         const result = yield* TxDeferred.done(deferred, Result.succeed(42))
         assert.isTrue(result)
@@ -114,7 +114,7 @@ describe("TxDeferred", () => {
       })))
 
     it.effect("done with Result.fail behaves like fail", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number, string>()
         const result = yield* TxDeferred.done(deferred, Result.fail("error"))
         assert.isTrue(result)
@@ -125,7 +125,7 @@ describe("TxDeferred", () => {
 
   describe("guards", () => {
     it.effect("isTxDeferred returns true for deferred, false for others", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         assert.isTrue(TxDeferred.isTxDeferred(deferred))
         assert.isFalse(TxDeferred.isTxDeferred({ some: "object" }))
@@ -136,10 +136,10 @@ describe("TxDeferred", () => {
   })
 
   describe("transactional behavior", () => {
-    it.effect("succeed + await composed in Effect.transaction works", () =>
+    it.effect("succeed + await composed in Effect.tx works", () =>
       Effect.gen(function*() {
-        const deferred = yield* Effect.transaction(TxDeferred.make<number>())
-        const value = yield* Effect.transaction(
+        const deferred = yield* TxDeferred.make<number>()
+        const value = yield* Effect.tx(
           Effect.gen(function*() {
             yield* TxDeferred.succeed(deferred, 42)
             return yield* TxDeferred.await(deferred)
@@ -150,16 +150,16 @@ describe("TxDeferred", () => {
 
     it.effect("two deferreds modified atomically", () =>
       Effect.gen(function*() {
-        const d1 = yield* Effect.transaction(TxDeferred.make<number>())
-        const d2 = yield* Effect.transaction(TxDeferred.make<string>())
-        yield* Effect.transaction(
+        const d1 = yield* TxDeferred.make<number>()
+        const d2 = yield* TxDeferred.make<string>()
+        yield* Effect.tx(
           Effect.gen(function*() {
             yield* TxDeferred.succeed(d1, 42)
             yield* TxDeferred.succeed(d2, "hello")
           })
         )
-        const v1 = yield* Effect.transaction(TxDeferred.await(d1))
-        const v2 = yield* Effect.transaction(TxDeferred.await(d2))
+        const v1 = yield* TxDeferred.await(d1)
+        const v2 = yield* TxDeferred.await(d2)
         assert.strictEqual(v1, 42)
         assert.strictEqual(v2, "hello")
       }))
@@ -167,7 +167,7 @@ describe("TxDeferred", () => {
 
   describe("concurrency", () => {
     it.effect("multiple fibers awaiting same deferred all unblock", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number>()
         const f1 = yield* Effect.forkChild(TxDeferred.await(deferred))
         const f2 = yield* Effect.forkChild(TxDeferred.await(deferred))
@@ -184,7 +184,7 @@ describe("TxDeferred", () => {
       })))
 
     it.effect("race between succeed and fail: only first wins", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const deferred = yield* TxDeferred.make<number, string>()
         const first = yield* TxDeferred.succeed(deferred, 42)
         const second = yield* TxDeferred.fail(deferred, "error")

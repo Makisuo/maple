@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Effect, Fiber, Option, ServiceMap, Stream } from "effect"
+import { Cause, Context, Effect, Fiber, Option, Stream } from "effect"
 // @ts-ignore
 // oxlint-disable-next-line @typescript-eslint/no-unused-vars
 import { NodeInspectSymbol } from "effect/Inspectable"
@@ -11,7 +11,7 @@ import * as RpcServer from "effect/unstable/rpc/RpcServer"
 import * as RpcTest from "effect/unstable/rpc/RpcTest"
 import { AuthClient, AuthLive, TimingLive, User, UserRpcs, UsersLive } from "./rpc-schemas.ts"
 
-export class UsersClient extends ServiceMap.Service<
+export class UsersClient extends Context.Service<
   UsersClient,
   RpcClient.RpcClient<RpcGroup.Rpcs<typeof UserRpcs>, RpcClientError>
 >()("UsersClient") {
@@ -35,6 +35,14 @@ export const e2eSuite = <E>(
         const user = yield* client.GetUser({ id: "1" })
         assert.instanceOf(user, User)
         assert.deepStrictEqual(user, new User({ id: "1", name: "Logged in user" }))
+      }).pipe(Effect.provide(layer)))
+
+    it.effect("should get deferred user", () =>
+      Effect.gen(function*() {
+        const client = yield* UsersClient
+        const user = yield* client.GetUserDeferred({ id: "1" })
+        assert.instanceOf(user, User)
+        assert.deepStrictEqual(user, new User({ id: "1", name: "John" }))
       }).pipe(Effect.provide(layer)))
 
     it.effect("nested method", () =>

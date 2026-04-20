@@ -14,7 +14,7 @@
  * - **parse** – instance method on every `Config` that takes a provider and
  *   returns `Effect<T, ConfigError>`.
  * - **Yieldable** – every `Config` can be yielded inside `Effect.gen`. It
- *   automatically resolves the current `ConfigProvider` from the service map.
+ *   automatically resolves the current `ConfigProvider` from the context.
  *
  * ## Common tasks
  *
@@ -153,7 +153,7 @@ export class ConfigError {
  * - `parse(provider)` – runs the config against a specific provider,
  *   returning `Effect<T, ConfigError>`.
  * - Yieldable – can be yielded inside `Effect.gen`, which automatically
- *   resolves the current `ConfigProvider` from the service map.
+ *   resolves the current `ConfigProvider` from the context.
  * - Pipeable – supports `.pipe(Config.map(...))` etc.
  *
  * @see {@link schema} – the main way to create a Config

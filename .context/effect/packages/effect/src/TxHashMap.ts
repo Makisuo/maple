@@ -55,7 +55,7 @@ const TxHashMapProto = {
  *   console.log(user) // Option.some("Alice")
  *
  *   // Multi-step atomic operations
- *   yield* Effect.transaction(
+ *   yield* Effect.tx(
  *     Effect.gen(function*() {
  *       const currentUser = yield* TxHashMap.get(txMap, "user1")
  *       if (currentUser._tag === "Some") {
@@ -238,7 +238,7 @@ export declare namespace TxHashMap {
  * @since 2.0.0
  * @category constructors
  */
-export const empty = <K, V>(): Effect.Effect<TxHashMap<K, V>, never, Effect.Transaction> =>
+export const empty = <K, V>(): Effect.Effect<TxHashMap<K, V>> =>
   Effect.gen(function*() {
     const ref = yield* TxRef.make(HashMap.empty<K, V>())
     return Object.assign(Object.create(TxHashMapProto), { ref })
@@ -277,7 +277,7 @@ export const empty = <K, V>(): Effect.Effect<TxHashMap<K, V>, never, Effect.Tran
  */
 export const make = <K, V>(
   ...entries: Array<readonly [K, V]>
-): Effect.Effect<TxHashMap<K, V>, never, Effect.Transaction> =>
+): Effect.Effect<TxHashMap<K, V>> =>
   Effect.gen(function*() {
     const hashMap = HashMap.make(...entries)
     const ref = yield* TxRef.make(hashMap)
@@ -320,7 +320,7 @@ export const make = <K, V>(
  */
 export const fromIterable = <K, V>(
   entries: Iterable<readonly [K, V]>
-): Effect.Effect<TxHashMap<K, V>, never, Effect.Transaction> =>
+): Effect.Effect<TxHashMap<K, V>> =>
   Effect.gen(function*() {
     const hashMap = HashMap.fromIterable(entries)
     const ref = yield* TxRef.make(hashMap)
@@ -359,11 +359,11 @@ export const fromIterable = <K, V>(
  * @category combinators
  */
 export const get: {
-  <K1 extends K, K>(key: K1): <V>(self: TxHashMap<K, V>) => Effect.Effect<Option.Option<V>, never, Effect.Transaction>
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<Option.Option<V>, never, Effect.Transaction>
+  <K1 extends K, K>(key: K1): <V>(self: TxHashMap<K, V>) => Effect.Effect<Option.Option<V>>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<Option.Option<V>>
 } = dual(
   2,
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<Option.Option<V>, never, Effect.Transaction> =>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<Option.Option<V>> =>
     Effect.gen(function*() {
       const map = yield* TxRef.get(self.ref)
       return HashMap.get(map, key)
@@ -405,11 +405,11 @@ export const get: {
  * @category combinators
  */
 export const set: {
-  <K, V>(key: K, value: V): (self: TxHashMap<K, V>) => Effect.Effect<void, never, Effect.Transaction>
-  <K, V>(self: TxHashMap<K, V>, key: K, value: V): Effect.Effect<void, never, Effect.Transaction>
+  <K, V>(key: K, value: V): (self: TxHashMap<K, V>) => Effect.Effect<void>
+  <K, V>(self: TxHashMap<K, V>, key: K, value: V): Effect.Effect<void>
 } = dual(
   3,
-  <K, V>(self: TxHashMap<K, V>, key: K, value: V): Effect.Effect<void, never, Effect.Transaction> =>
+  <K, V>(self: TxHashMap<K, V>, key: K, value: V): Effect.Effect<void> =>
     TxRef.update(self.ref, (map) => HashMap.set(map, key, value))
 )
 
@@ -444,11 +444,11 @@ export const set: {
  * @category combinators
  */
 export const has: {
-  <K1 extends K, K>(key: K1): <V>(self: TxHashMap<K, V>) => Effect.Effect<boolean, never, Effect.Transaction>
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<boolean, never, Effect.Transaction>
+  <K1 extends K, K>(key: K1): <V>(self: TxHashMap<K, V>) => Effect.Effect<boolean>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<boolean>
 } = dual(
   2,
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<boolean, never, Effect.Transaction> =>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<boolean> =>
     Effect.gen(function*() {
       const map = yield* TxRef.get(self.ref)
       return HashMap.has(map, key)
@@ -493,11 +493,11 @@ export const has: {
  * @category combinators
  */
 export const remove: {
-  <K1 extends K, K>(key: K1): <V>(self: TxHashMap<K, V>) => Effect.Effect<boolean, never, Effect.Transaction>
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<boolean, never, Effect.Transaction>
+  <K1 extends K, K>(key: K1): <V>(self: TxHashMap<K, V>) => Effect.Effect<boolean>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<boolean>
 } = dual(
   2,
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<boolean, never, Effect.Transaction> =>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1): Effect.Effect<boolean> =>
     Effect.gen(function*() {
       const currentMap = yield* TxRef.get(self.ref)
       const existed = HashMap.has(currentMap, key)
@@ -505,7 +505,7 @@ export const remove: {
         yield* TxRef.set(self.ref, HashMap.remove(currentMap, key))
       }
       return existed
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -544,8 +544,7 @@ export const remove: {
  * @since 2.0.0
  * @category combinators
  */
-export const clear = <K, V>(self: TxHashMap<K, V>): Effect.Effect<void, never, Effect.Transaction> =>
-  TxRef.set(self.ref, HashMap.empty<K, V>())
+export const clear = <K, V>(self: TxHashMap<K, V>): Effect.Effect<void> => TxRef.set(self.ref, HashMap.empty<K, V>())
 
 /**
  * Returns the number of entries in the TxHashMap.
@@ -579,7 +578,7 @@ export const clear = <K, V>(self: TxHashMap<K, V>): Effect.Effect<void, never, E
  * @since 2.0.0
  * @category combinators
  */
-export const size = <K, V>(self: TxHashMap<K, V>): Effect.Effect<number, never, Effect.Transaction> =>
+export const size = <K, V>(self: TxHashMap<K, V>): Effect.Effect<number> =>
   Effect.gen(function*() {
     const map = yield* TxRef.get(self.ref)
     return HashMap.size(map)
@@ -613,7 +612,7 @@ export const size = <K, V>(self: TxHashMap<K, V>): Effect.Effect<number, never, 
  * @since 2.0.0
  * @category combinators
  */
-export const isEmpty = <K, V>(self: TxHashMap<K, V>): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const isEmpty = <K, V>(self: TxHashMap<K, V>): Effect.Effect<boolean> =>
   Effect.gen(function*() {
     const map = yield* TxRef.get(self.ref)
     return HashMap.isEmpty(map)
@@ -642,7 +641,7 @@ export const isEmpty = <K, V>(self: TxHashMap<K, V>): Effect.Effect<boolean, nev
  * @since 2.0.0
  * @category combinators
  */
-export const isNonEmpty = <K, V>(self: TxHashMap<K, V>): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const isNonEmpty = <K, V>(self: TxHashMap<K, V>): Effect.Effect<boolean> =>
   Effect.map(isEmpty(self), (empty) => !empty)
 
 /**
@@ -692,15 +691,15 @@ export const modify: {
   <K, V>(
     key: K,
     f: (value: V) => V
-  ): (self: TxHashMap<K, V>) => Effect.Effect<Option.Option<V>, never, Effect.Transaction>
-  <K, V>(self: TxHashMap<K, V>, key: K, f: (value: V) => V): Effect.Effect<Option.Option<V>, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<Option.Option<V>>
+  <K, V>(self: TxHashMap<K, V>, key: K, f: (value: V) => V): Effect.Effect<Option.Option<V>>
 } = dual(
   3,
   <K, V>(
     self: TxHashMap<K, V>,
     key: K,
     f: (value: V) => V
-  ): Effect.Effect<Option.Option<V>, never, Effect.Transaction> =>
+  ): Effect.Effect<Option.Option<V>> =>
     Effect.gen(function*() {
       const currentMap = yield* TxRef.get(self.ref)
       const currentValue = HashMap.get(currentMap, key)
@@ -710,7 +709,7 @@ export const modify: {
         return currentValue
       }
       return Option.none()
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -766,19 +765,19 @@ export const modifyAt: {
   <K, V>(
     key: K,
     f: (value: Option.Option<V>) => Option.Option<V>
-  ): (self: TxHashMap<K, V>) => Effect.Effect<void, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<void>
   <K, V>(
     self: TxHashMap<K, V>,
     key: K,
     f: (value: Option.Option<V>) => Option.Option<V>
-  ): Effect.Effect<void, never, Effect.Transaction>
+  ): Effect.Effect<void>
 } = dual(
   3,
   <K, V>(
     self: TxHashMap<K, V>,
     key: K,
     f: (value: Option.Option<V>) => Option.Option<V>
-  ): Effect.Effect<void, never, Effect.Transaction> =>
+  ): Effect.Effect<void> =>
     Effect.gen(function*() {
       const currentMap = yield* TxRef.get(self.ref)
       const currentValue = HashMap.get(currentMap, key)
@@ -789,7 +788,7 @@ export const modifyAt: {
       } else if (Option.isSome(currentValue)) {
         yield* TxRef.set(self.ref, HashMap.remove(currentMap, key))
       }
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -822,7 +821,7 @@ export const modifyAt: {
  * @since 2.0.0
  * @category combinators
  */
-export const keys = <K, V>(self: TxHashMap<K, V>): Effect.Effect<Array<K>, never, Effect.Transaction> =>
+export const keys = <K, V>(self: TxHashMap<K, V>): Effect.Effect<Array<K>> =>
   Effect.gen(function*() {
     const map = yield* TxRef.get(self.ref)
     return Array.from(HashMap.keys(map))
@@ -859,7 +858,7 @@ export const keys = <K, V>(self: TxHashMap<K, V>): Effect.Effect<Array<K>, never
  * @since 2.0.0
  * @category combinators
  */
-export const values = <K, V>(self: TxHashMap<K, V>): Effect.Effect<Array<V>, never, Effect.Transaction> =>
+export const values = <K, V>(self: TxHashMap<K, V>): Effect.Effect<Array<V>> =>
   Effect.gen(function*() {
     const map = yield* TxRef.get(self.ref)
     return HashMap.toValues(map)
@@ -898,7 +897,7 @@ export const values = <K, V>(self: TxHashMap<K, V>): Effect.Effect<Array<V>, nev
  */
 export const entries = <K, V>(
   self: TxHashMap<K, V>
-): Effect.Effect<Array<readonly [K, V]>, never, Effect.Transaction> =>
+): Effect.Effect<Array<readonly [K, V]>> =>
   Effect.gen(function*() {
     const map = yield* TxRef.get(self.ref)
     return HashMap.toEntries(map)
@@ -940,7 +939,7 @@ export const entries = <K, V>(
  */
 export const snapshot = <K, V>(
   self: TxHashMap<K, V>
-): Effect.Effect<HashMap.HashMap<K, V>, never, Effect.Transaction> => TxRef.get(self.ref)
+): Effect.Effect<HashMap.HashMap<K, V>> => TxRef.get(self.ref)
 
 /**
  * Merges another HashMap into this TxHashMap. If both maps contain the same key,
@@ -992,17 +991,17 @@ export const snapshot = <K, V>(
 export const union: {
   <K1 extends K, K, V1 extends V, V>(
     other: HashMap.HashMap<K1, V1>
-  ): (self: TxHashMap<K, V>) => Effect.Effect<void, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<void>
   <K1 extends K, K, V1 extends V, V>(
     self: TxHashMap<K, V>,
     other: HashMap.HashMap<K1, V1>
-  ): Effect.Effect<void, never, Effect.Transaction>
+  ): Effect.Effect<void>
 } = dual(
   2,
   <K1 extends K, K, V1 extends V, V>(
     self: TxHashMap<K, V>,
     other: HashMap.HashMap<K1, V1>
-  ): Effect.Effect<void, never, Effect.Transaction> => TxRef.update(self.ref, (map) => HashMap.union(map, other))
+  ): Effect.Effect<void> => TxRef.update(self.ref, (map) => HashMap.union(map, other))
 )
 
 /**
@@ -1048,11 +1047,11 @@ export const union: {
  * @category combinators
  */
 export const removeMany: {
-  <K1 extends K, K>(keys: Iterable<K1>): <V>(self: TxHashMap<K, V>) => Effect.Effect<void, never, Effect.Transaction>
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, keys: Iterable<K1>): Effect.Effect<void, never, Effect.Transaction>
+  <K1 extends K, K>(keys: Iterable<K1>): <V>(self: TxHashMap<K, V>) => Effect.Effect<void>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, keys: Iterable<K1>): Effect.Effect<void>
 } = dual(
   2,
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, keys: Iterable<K1>): Effect.Effect<void, never, Effect.Transaction> =>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, keys: Iterable<K1>): Effect.Effect<void> =>
     TxRef.update(self.ref, (map) => HashMap.removeMany(map, keys))
 )
 
@@ -1116,17 +1115,17 @@ export const removeMany: {
 export const setMany: {
   <K1 extends K, K, V1 extends V, V>(
     entries: Iterable<readonly [K1, V1]>
-  ): (self: TxHashMap<K, V>) => Effect.Effect<void, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<void>
   <K1 extends K, K, V1 extends V, V>(
     self: TxHashMap<K, V>,
     entries: Iterable<readonly [K1, V1]>
-  ): Effect.Effect<void, never, Effect.Transaction>
+  ): Effect.Effect<void>
 } = dual(
   2,
   <K1 extends K, K, V1 extends V, V>(
     self: TxHashMap<K, V>,
     entries: Iterable<readonly [K1, V1]>
-  ): Effect.Effect<void, never, Effect.Transaction> => TxRef.update(self.ref, (map) => HashMap.setMany(map, entries))
+  ): Effect.Effect<void> => TxRef.update(self.ref, (map) => HashMap.setMany(map, entries))
 )
 
 /**
@@ -1202,20 +1201,19 @@ export const getHash: {
   <K1 extends K, K>(
     key: K1,
     hash: number
-  ): <V>(self: TxHashMap<K, V>) => Effect.Effect<Option.Option<V>, never, Effect.Transaction>
+  ): <V>(self: TxHashMap<K, V>) => Effect.Effect<Option.Option<V>>
   <K1 extends K, K, V>(
     self: TxHashMap<K, V>,
     key: K1,
     hash: number
-  ): Effect.Effect<Option.Option<V>, never, Effect.Transaction>
+  ): Effect.Effect<Option.Option<V>>
 } = dual(
   3,
   <K1 extends K, K, V>(
     self: TxHashMap<K, V>,
     key: K1,
     hash: number
-  ): Effect.Effect<Option.Option<V>, never, Effect.Transaction> =>
-    TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.getHash(map, key, hash)))
+  ): Effect.Effect<Option.Option<V>> => TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.getHash(map, key, hash)))
 )
 
 /**
@@ -1267,16 +1265,15 @@ export const hasHash: {
   <K1 extends K, K>(
     key: K1,
     hash: number
-  ): <V>(self: TxHashMap<K, V>) => Effect.Effect<boolean, never, Effect.Transaction>
-  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1, hash: number): Effect.Effect<boolean, never, Effect.Transaction>
+  ): <V>(self: TxHashMap<K, V>) => Effect.Effect<boolean>
+  <K1 extends K, K, V>(self: TxHashMap<K, V>, key: K1, hash: number): Effect.Effect<boolean>
 } = dual(
   3,
   <K1 extends K, K, V>(
     self: TxHashMap<K, V>,
     key: K1,
     hash: number
-  ): Effect.Effect<boolean, never, Effect.Transaction> =>
-    TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.hasHash(map, key, hash)))
+  ): Effect.Effect<boolean> => TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.hasHash(map, key, hash)))
 )
 
 /**
@@ -1327,22 +1324,22 @@ export const hasHash: {
 export const map: {
   <A, V, K>(
     f: (value: V, key: K) => A
-  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, A>>
   <K, V, A>(
     self: TxHashMap<K, V>,
     f: (value: V, key: K) => A
-  ): Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
+  ): Effect.Effect<TxHashMap<K, A>>
 } = dual(
   2,
   <K, V, A>(
     self: TxHashMap<K, V>,
     f: (value: V, key: K) => A
-  ): Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction> =>
+  ): Effect.Effect<TxHashMap<K, A>> =>
     Effect.gen(function*() {
       const currentMap = yield* TxRef.get(self.ref)
       const mappedMap = HashMap.map(currentMap, f)
       return yield* fromHashMap(mappedMap)
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -1396,29 +1393,29 @@ export const map: {
 export const filter: {
   <K, V, B extends V>(
     predicate: (value: V, key: K) => value is B
-  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, B>, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, B>>
   <K, V>(
     predicate: (value: V, key: K) => boolean
-  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, V>, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, V>>
   <K, V, B extends V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => value is B
-  ): Effect.Effect<TxHashMap<K, B>, never, Effect.Transaction>
+  ): Effect.Effect<TxHashMap<K, B>>
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<TxHashMap<K, V>, never, Effect.Transaction>
+  ): Effect.Effect<TxHashMap<K, V>>
 } = dual(
   2,
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<TxHashMap<K, V>, never, Effect.Transaction> =>
+  ): Effect.Effect<TxHashMap<K, V>> =>
     Effect.gen(function*() {
       const currentMap = yield* TxRef.get(self.ref)
       const filteredMap = HashMap.filter(currentMap, predicate)
       return yield* fromHashMap(filteredMap)
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -1479,20 +1476,19 @@ export const reduce: {
   <A, V, K>(
     zero: A,
     f: (accumulator: A, value: V, key: K) => A
-  ): (self: TxHashMap<K, V>) => Effect.Effect<A, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<A>
   <K, V, A>(
     self: TxHashMap<K, V>,
     zero: A,
     f: (accumulator: A, value: V, key: K) => A
-  ): Effect.Effect<A, never, Effect.Transaction>
+  ): Effect.Effect<A>
 } = dual(
   3,
   <K, V, A>(
     self: TxHashMap<K, V>,
     zero: A,
     f: (accumulator: A, value: V, key: K) => A
-  ): Effect.Effect<A, never, Effect.Transaction> =>
-    TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.reduce(map, zero, f)))
+  ): Effect.Effect<A> => TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.reduce(map, zero, f)))
 )
 
 /**
@@ -1555,22 +1551,22 @@ export const reduce: {
 export const filterMap: {
   <V, K, A, X>(
     f: (input: V, key: K) => Result<A, X>
-  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, A>>
   <K, V, A, X>(
     self: TxHashMap<K, V>,
     f: (input: V, key: K) => Result<A, X>
-  ): Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
+  ): Effect.Effect<TxHashMap<K, A>>
 } = dual(
   2,
   <K, V, A, X>(
     self: TxHashMap<K, V>,
     f: (input: V, key: K) => Result<A, X>
-  ): Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction> =>
+  ): Effect.Effect<TxHashMap<K, A>> =>
     Effect.gen(function*() {
       const currentMap = yield* TxRef.get(self.ref)
       const filteredMap = HashMap.filterMap(currentMap, f)
       return yield* fromHashMap(filteredMap)
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -1616,18 +1612,17 @@ export const filterMap: {
 export const hasBy: {
   <K, V>(
     predicate: (value: V, key: K) => boolean
-  ): (self: TxHashMap<K, V>) => Effect.Effect<boolean, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<boolean>
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<boolean, never, Effect.Transaction>
+  ): Effect.Effect<boolean>
 } = dual(
   2,
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<boolean, never, Effect.Transaction> =>
-    TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.hasBy(map, predicate)))
+  ): Effect.Effect<boolean> => TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.hasBy(map, predicate)))
 )
 
 /**
@@ -1675,17 +1670,17 @@ export const hasBy: {
 export const findFirst: {
   <K, V>(
     predicate: (value: V, key: K) => boolean
-  ): (self: TxHashMap<K, V>) => Effect.Effect<Option.Option<[K, V]>, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<Option.Option<[K, V]>>
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<Option.Option<[K, V]>, never, Effect.Transaction>
+  ): Effect.Effect<Option.Option<[K, V]>>
 } = dual(
   2,
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<Option.Option<[K, V]>, never, Effect.Transaction> =>
+  ): Effect.Effect<Option.Option<[K, V]>> =>
     TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.findFirst(map, predicate)))
 )
 
@@ -1732,18 +1727,17 @@ export const findFirst: {
 export const some: {
   <K, V>(
     predicate: (value: V, key: K) => boolean
-  ): (self: TxHashMap<K, V>) => Effect.Effect<boolean, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<boolean>
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<boolean, never, Effect.Transaction>
+  ): Effect.Effect<boolean>
 } = dual(
   2,
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<boolean, never, Effect.Transaction> =>
-    TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.some(map, predicate)))
+  ): Effect.Effect<boolean> => TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.some(map, predicate)))
 )
 
 /**
@@ -1789,18 +1783,17 @@ export const some: {
 export const every: {
   <K, V>(
     predicate: (value: V, key: K) => boolean
-  ): (self: TxHashMap<K, V>) => Effect.Effect<boolean, never, Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<boolean>
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<boolean, never, Effect.Transaction>
+  ): Effect.Effect<boolean>
 } = dual(
   2,
   <K, V>(
     self: TxHashMap<K, V>,
     predicate: (value: V, key: K) => boolean
-  ): Effect.Effect<boolean, never, Effect.Transaction> =>
-    TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.every(map, predicate)))
+  ): Effect.Effect<boolean> => TxRef.get(self.ref).pipe(Effect.map((map) => HashMap.every(map, predicate)))
 )
 
 /**
@@ -1847,17 +1840,17 @@ export const every: {
 export const forEach: {
   <V, K, R, E>(
     f: (value: V, key: K) => Effect.Effect<void, E, R>
-  ): (self: TxHashMap<K, V>) => Effect.Effect<void, E, R | Effect.Transaction>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<void, E, R>
   <K, V, R, E>(
     self: TxHashMap<K, V>,
     f: (value: V, key: K) => Effect.Effect<void, E, R>
-  ): Effect.Effect<void, E, R | Effect.Transaction>
+  ): Effect.Effect<void, E, R>
 } = dual(
   2,
   <K, V, R, E>(
     self: TxHashMap<K, V>,
     f: (value: V, key: K) => Effect.Effect<void, E, R>
-  ): Effect.Effect<void, E, R | Effect.Transaction> =>
+  ): Effect.Effect<void, E, R> =>
     Effect.gen(function*() {
       const currentMap = yield* TxRef.get(self.ref)
       const entries = HashMap.toEntries(currentMap)
@@ -1918,18 +1911,18 @@ export const forEach: {
  */
 export const flatMap: {
   <A, V, K>(
-    f: (value: V, key: K) => Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
-  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
+    f: (value: V, key: K) => Effect.Effect<TxHashMap<K, A>>
+  ): (self: TxHashMap<K, V>) => Effect.Effect<TxHashMap<K, A>>
   <K, V, A>(
     self: TxHashMap<K, V>,
-    f: (value: V, key: K) => Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
-  ): Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
+    f: (value: V, key: K) => Effect.Effect<TxHashMap<K, A>>
+  ): Effect.Effect<TxHashMap<K, A>>
 } = dual(
   2,
   <K, V, A>(
     self: TxHashMap<K, V>,
-    f: (value: V, key: K) => Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction>
-  ): Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction> =>
+    f: (value: V, key: K) => Effect.Effect<TxHashMap<K, A>>
+  ): Effect.Effect<TxHashMap<K, A>> =>
     Effect.gen(function*() {
       const currentMap = yield* TxRef.get(self.ref)
       const result = yield* empty<K, A>()
@@ -1942,7 +1935,7 @@ export const flatMap: {
       }
 
       return result
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -1992,12 +1985,12 @@ export const flatMap: {
  */
 export const compact = <K, A>(
   self: TxHashMap<K, Option.Option<A>>
-): Effect.Effect<TxHashMap<K, A>, never, Effect.Transaction> =>
+): Effect.Effect<TxHashMap<K, A>> =>
   Effect.gen(function*() {
     const currentMap = yield* TxRef.get(self.ref)
     const compactedMap = HashMap.compact(currentMap)
     return yield* fromHashMap(compactedMap)
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Returns an array of all key-value pairs in the TxHashMap.
@@ -2035,7 +2028,7 @@ export const compact = <K, A>(
  */
 export const toEntries = <K, V>(
   self: TxHashMap<K, V>
-): Effect.Effect<Array<readonly [K, V]>, never, Effect.Transaction> => entries(self)
+): Effect.Effect<Array<readonly [K, V]>> => entries(self)
 
 /**
  * Returns an array of all values in the TxHashMap.
@@ -2073,13 +2066,12 @@ export const toEntries = <K, V>(
  * @since 2.0.0
  * @category combinators
  */
-export const toValues = <K, V>(self: TxHashMap<K, V>): Effect.Effect<Array<V>, never, Effect.Transaction> =>
-  values(self)
+export const toValues = <K, V>(self: TxHashMap<K, V>): Effect.Effect<Array<V>> => values(self)
 
 /**
  * Helper function to create a TxHashMap from an existing HashMap
  */
-const fromHashMap = <K, V>(hashMap: HashMap.HashMap<K, V>): Effect.Effect<TxHashMap<K, V>, never, Effect.Transaction> =>
+const fromHashMap = <K, V>(hashMap: HashMap.HashMap<K, V>): Effect.Effect<TxHashMap<K, V>> =>
   Effect.gen(function*() {
     const ref = yield* TxRef.make(hashMap)
     return Object.assign(Object.create(TxHashMapProto), { ref })

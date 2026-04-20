@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "@effect/vitest"
-import { Cause, DateTime, Duration, Effect, Exit, Fiber, Layer, Option, Schema, ServiceMap } from "effect"
+import { Cause, Context, DateTime, Duration, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import {
   ClusterWorkflowEngine,
@@ -211,7 +211,7 @@ describe.concurrent("ClusterWorkflowEngine", () => {
       assert(typeof token === "string")
 
       yield* DurableDeferred.done(ChildDeferred, {
-        token: DurableDeferred.Token.makeUnsafe(token),
+        token: DurableDeferred.Token.make(token),
         exit: Exit.void
       })
       yield* TestClock.adjust(5000)
@@ -284,7 +284,7 @@ const EmailWorkflow = Workflow.make({
   }
 })
 
-class Flags extends ServiceMap.Service<Flags>()("Flags", {
+class Flags extends Context.Service<Flags>()("Flags", {
   make: Effect.sync(() => new Map<string, boolean | string>())
 }) {
   static readonly layer = Layer.effect(Flags, this.make)

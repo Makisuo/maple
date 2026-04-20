@@ -232,7 +232,7 @@ const makeFile = (() => {
     readonly fd: FileSystem.File.Descriptor
     private readonly append: boolean
 
-    private position: bigint = 0n
+    private position: bigint = BigInt(0)
 
     constructor(
       fd: FileSystem.File.Descriptor,

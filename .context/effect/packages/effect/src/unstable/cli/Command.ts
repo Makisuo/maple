@@ -3,6 +3,7 @@
  */
 import type { NonEmptyArray, NonEmptyReadonlyArray } from "../../Array.ts"
 import * as Console from "../../Console.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import type * as FileSystem from "../../FileSystem.ts"
 import { dual } from "../../Function.ts"
@@ -13,7 +14,6 @@ import type { Pipeable } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as References from "../../References.ts"
 import * as Result from "../../Result.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stdio from "../../Stdio.ts"
 import * as Terminal from "../../Terminal.ts"
 import type { NoInfer, Simplify } from "../../Types.ts"
@@ -125,7 +125,7 @@ export interface Command<Name extends string, Input, ContextInput = {}, E = neve
   /**
    * Custom annotations associated with this command.
    */
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 }
 
 /**
@@ -359,7 +359,7 @@ export interface CommandContext<Name extends string> {
 export interface ParsedTokens {
   readonly flags: Record<string, ReadonlyArray<string>>
   readonly arguments: ReadonlyArray<string>
-  readonly errors?: ReadonlyArray<CliError.CliError>
+  readonly errors?: ReadonlyArray<CliError.NonShowHelpErrors>
   readonly subcommand: Option.Option<{
     readonly name: string
     readonly parsedInput: ParsedTokens
@@ -783,7 +783,7 @@ export const withSharedFlags: {
       annotations: impl.annotations,
       globalFlags: impl.globalFlags,
       examples: impl.examples,
-      service: impl.service as ServiceMap.Key<CommandContext<Name>, NextContextInput>,
+      service: impl.service as Context.Key<CommandContext<Name>, NextContextInput>,
       subcommands: impl.subcommands,
       parse,
       parseContext,
@@ -938,47 +938,47 @@ export const withAlias: {
  */
 export const annotate: {
   <I, S>(
-    service: ServiceMap.Key<I, S>,
+    service: Context.Key<I, S>,
     value: NoInfer<S>
   ): <Name extends string, Input, E, R, ContextInput>(
     self: Command<Name, Input, ContextInput, E, R>
   ) => Command<Name, Input, ContextInput, E, R>
   <Name extends string, Input, E, R, ContextInput, I, S>(
     self: Command<Name, Input, ContextInput, E, R>,
-    service: ServiceMap.Key<I, S>,
+    service: Context.Key<I, S>,
     value: NoInfer<S>
   ): Command<Name, Input, ContextInput, E, R>
 } = dual(3, <Name extends string, Input, E, R, ContextInput, I, S>(
   self: Command<Name, Input, ContextInput, E, R>,
-  service: ServiceMap.Key<I, S>,
+  service: Context.Key<I, S>,
   value: NoInfer<S>
 ) => {
   const impl = toImpl(self)
-  return makeCommand({ ...impl, annotations: ServiceMap.add(impl.annotations, service, value) })
+  return makeCommand({ ...impl, annotations: Context.add(impl.annotations, service, value) })
 })
 
 /**
- * Merges a ServiceMap of annotations into a command.
+ * Merges a Context of annotations into a command.
  *
  * @since 4.0.0
  * @category combinators
  */
 export const annotateMerge: {
   <I>(
-    annotations: ServiceMap.ServiceMap<I>
+    annotations: Context.Context<I>
   ): <Name extends string, Input, E, R, ContextInput>(
     self: Command<Name, Input, ContextInput, E, R>
   ) => Command<Name, Input, ContextInput, E, R>
   <Name extends string, Input, E, R, ContextInput, I>(
     self: Command<Name, Input, ContextInput, E, R>,
-    annotations: ServiceMap.ServiceMap<I>
+    annotations: Context.Context<I>
   ): Command<Name, Input, ContextInput, E, R>
 } = dual(2, <Name extends string, Input, E, R, ContextInput, I>(
   self: Command<Name, Input, ContextInput, E, R>,
-  annotations: ServiceMap.ServiceMap<I>
+  annotations: Context.Context<I>
 ) => {
   const impl = toImpl(self)
-  return makeCommand({ ...impl, annotations: ServiceMap.merge(impl.annotations, annotations) })
+  return makeCommand({ ...impl, annotations: Context.merge(impl.annotations, annotations) })
 })
 
 /**
@@ -1099,19 +1099,19 @@ export const provide: {
  */
 export const provideSync: {
   <I, S, Input>(
-    service: ServiceMap.Key<I, S>,
+    service: Context.Key<I, S>,
     implementation: S | ((input: Input) => S)
   ): <const Name extends string, E, R, ContextInput>(
     self: Command<Name, Input, ContextInput, E, R>
   ) => Command<Name, Input, ContextInput, E, Exclude<R, I>>
   <const Name extends string, Input, E, R, ContextInput, I, S>(
     self: Command<Name, Input, ContextInput, E, R>,
-    service: ServiceMap.Key<I, S>,
+    service: Context.Key<I, S>,
     implementation: S | ((input: Input) => S)
   ): Command<Name, Input, ContextInput, E, Exclude<R, I>>
 } = dual(3, <const Name extends string, Input, E, R, ContextInput, I, S>(
   self: Command<Name, Input, ContextInput, E, R>,
-  service: ServiceMap.Key<I, S>,
+  service: Context.Key<I, S>,
   implementation: S | ((input: Input) => S)
 ) =>
   mapHandler(self, (handler, input) =>
@@ -1130,19 +1130,19 @@ export const provideSync: {
  */
 export const provideEffect: {
   <I, S, Input, R2, E2>(
-    service: ServiceMap.Key<I, S>,
+    service: Context.Key<I, S>,
     effect: Effect.Effect<S, E2, R2> | ((input: Input) => Effect.Effect<S, E2, R2>)
   ): <const Name extends string, E, R, ContextInput>(
     self: Command<Name, Input, ContextInput, E, R>
   ) => Command<Name, Input, ContextInput, E | E2, Exclude<R, I> | R2>
   <const Name extends string, Input, E, R, ContextInput, I, S, R2, E2>(
     self: Command<Name, Input, ContextInput, E, R>,
-    service: ServiceMap.Key<I, S>,
+    service: Context.Key<I, S>,
     effect: Effect.Effect<S, E2, R2> | ((input: Input) => Effect.Effect<S, E2, R2>)
   ): Command<Name, Input, ContextInput, E | E2, Exclude<R, I> | R2>
 } = dual(3, <const Name extends string, Input, E, R, ContextInput, I, S, R2, E2>(
   self: Command<Name, Input, ContextInput, E, R>,
-  service: ServiceMap.Key<I, S>,
+  service: Context.Key<I, S>,
   effect: Effect.Effect<S, E2, R2> | ((input: Input) => Effect.Effect<S, E2, R2>)
 ) =>
   mapHandler(
@@ -1183,9 +1183,9 @@ const getOutOfScopeGlobalFlagErrors = (
   activeFlags: ReadonlyArray<GlobalFlag.GlobalFlag<any>>,
   flagMap: Record<string, ReadonlyArray<string>>,
   commandPath: ReadonlyArray<string>
-): ReadonlyArray<CliError.CliError> => {
+): ReadonlyArray<CliError.UnrecognizedOption> => {
   const activeSet = new Set(activeFlags)
-  const errors: Array<CliError.CliError> = []
+  const errors: Array<CliError.UnrecognizedOption> = []
   const seen = new Set<string>()
 
   for (const flag of allFlags) {
@@ -1337,7 +1337,7 @@ export const runWith = <const Name extends string, Input, E, R, ContextInput>(
       // 2. Extract global flag tokens
       const allFlagParams = allFlags.flatMap((f) => Param.extractSingleParams(f.flag))
       const globalRegistry = Parser.createFlagRegistry(allFlagParams.filter(Param.isFlagParam))
-      const { flagMap, remainder } = Parser.consumeKnownFlags(tokens, globalRegistry)
+      const { flagMap, remainder, errors: globalFlagErrors } = Parser.consumeKnownFlags(tokens, globalRegistry)
       const emptyArgs: Param.ParsedArgs = { flags: flagMap, arguments: [] }
 
       // 3. Parse command arguments from remaining tokens
@@ -1348,9 +1348,12 @@ export const runWith = <const Name extends string, Input, E, R, ContextInput>(
 
       // 4. Reject globals that were passed outside the active command scope
       const outOfScopeErrors = getOutOfScopeGlobalFlagErrors(allFlags, activeFlags, flagMap, commandPath)
-      if (outOfScopeErrors.length > 0) {
+      if (outOfScopeErrors.length > 0 || globalFlagErrors.length > 0) {
         const parseErrors = parsedArgs.errors ?? []
-        return yield* new CliError.ShowHelp({ commandPath, errors: [...outOfScopeErrors, ...parseErrors] })
+        return yield* new CliError.ShowHelp({
+          commandPath,
+          errors: [...globalFlagErrors, ...outOfScopeErrors, ...parseErrors]
+        })
       }
 
       // 5. Process action flags — first present action wins, then exit
@@ -1373,7 +1376,10 @@ export const runWith = <const Name extends string, Input, E, R, ContextInput>(
       }
       const parseResult = yield* Effect.result(commandImpl.parse(parsedArgs))
       if (parseResult._tag === "Failure") {
-        return yield* new CliError.ShowHelp({ commandPath, errors: [parseResult.failure] })
+        return yield* new CliError.ShowHelp({
+          commandPath,
+          errors: [parseResult.failure as CliError.NonShowHelpErrors]
+        })
       }
 
       // 7. Provide setting values
@@ -1389,12 +1395,12 @@ export const runWith = <const Name extends string, Input, E, R, ContextInput>(
 
       // 8. Apply built-in setting behavior
       const services = Option.match(logLevel, {
-        onNone: () => ServiceMap.empty(),
-        onSome: (level) => ServiceMap.make(References.MinimumLogLevel, level)
+        onNone: () => Context.empty(),
+        onSome: (level) => Context.make(References.MinimumLogLevel, level)
       })
 
       // 9. Run command handler with composed context
-      yield* Effect.provideServices(program, services)
+      yield* Effect.provideContext(program, services)
     },
     Effect.catchFilter(
       (error) =>

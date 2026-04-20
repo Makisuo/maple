@@ -25,6 +25,8 @@ export * as CliOutput from "./CliOutput.ts"
 export * as Command from "./Command.ts"
 
 /**
+ * Shell completion descriptors and script generation for the unstable CLI API.
+ *
  * @since 4.0.0
  */
 export * as Completions from "./Completions.ts"

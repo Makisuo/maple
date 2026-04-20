@@ -2303,6 +2303,17 @@ const renderChoiceDescription = <A>(
 
 const metaOptionsCount = 2
 
+const renderMultiSelectTitle = (
+  title: string,
+  isHighlighted: boolean,
+  renderOptions?: RenderOptions | undefined
+) => {
+  if (renderOptions?.plain === true || !isHighlighted) {
+    return title
+  }
+  return Ansi.annotate(title, Ansi.combine(Ansi.underlined, Ansi.cyanBright))
+}
+
 const renderMultiSelectChoices = <A>(
   state: MultiSelectState,
   options: SelectOptionsReq<A> & MultiSelectOptionsReq,
@@ -2338,9 +2349,7 @@ const renderMultiSelectChoices = <A>(
     }
     if (index < metaOptions.length) {
       // Meta options
-      const title = isHighlighted && renderOptions?.plain !== true
-        ? Ansi.annotate(choice.title, Ansi.cyanBright)
-        : choice.title
+      const title = renderMultiSelectTitle(choice.title, isHighlighted, renderOptions)
       documents.push(prefix + " " + title)
     } else {
       // Regular choices
@@ -2350,9 +2359,7 @@ const renderMultiSelectChoices = <A>(
       const annotatedCheckbox = isHighlighted && renderOptions?.plain !== true
         ? Ansi.annotate(checkbox, Ansi.cyanBright)
         : checkbox
-      const title = isHighlighted && renderOptions?.plain !== true
-        ? Ansi.annotate(choice.title, Ansi.cyanBright)
-        : choice.title
+      const title = renderMultiSelectTitle(choice.title, isHighlighted, renderOptions)
       const description = renderChoiceDescription(choice as SelectChoice<A>, isHighlighted, renderOptions)
       documents.push(prefix + " " + annotatedCheckbox + " " + title + " " + description)
     }

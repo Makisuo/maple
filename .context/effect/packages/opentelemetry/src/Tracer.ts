@@ -5,13 +5,13 @@ import * as Otel from "@opentelemetry/api"
 import * as OtelSemConv from "@opentelemetry/semantic-conventions"
 import * as Cause from "effect/Cause"
 import type * as Clock from "effect/Clock"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import { constTrue, dual } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Tracer from "effect/Tracer"
 import { nanosToHrTime, recordToAttributes, unknownToAttributeValue } from "./internal/attributes.ts"
 import { Resource } from "./Resource.ts"
@@ -24,7 +24,7 @@ import { Resource } from "./Resource.ts"
  * @since 1.0.0
  * @category Services
  */
-export class OtelTracer extends ServiceMap.Service<
+export class OtelTracer extends Context.Service<
   OtelTracer,
   Otel.Tracer
 >()("@effect/opentelemetry/Tracer") {}
@@ -33,7 +33,7 @@ export class OtelTracer extends ServiceMap.Service<
  * @since 1.0.0
  * @category Services
  */
-export class OtelTracerProvider extends ServiceMap.Service<
+export class OtelTracerProvider extends Context.Service<
   OtelTracerProvider,
   Otel.TracerProvider
 >()("@effect/opentelemetry/Tracer/OtelTracerProvider") {}
@@ -42,7 +42,7 @@ export class OtelTracerProvider extends ServiceMap.Service<
  * @since 1.0.0
  * @category Services
  */
-export class OtelTraceFlags extends ServiceMap.Service<
+export class OtelTraceFlags extends Context.Service<
   OtelTraceFlags,
   Otel.TraceFlags
 >()("@effect/opentelemetry/Tracer/OtelTraceFlags") {}
@@ -51,7 +51,7 @@ export class OtelTraceFlags extends ServiceMap.Service<
  * @since 1.0.0
  * @category Services
  */
-export class OtelTraceState extends ServiceMap.Service<
+export class OtelTraceState extends Context.Service<
   OtelTraceState,
   Otel.TraceState
 >()("@effect/opentelemetry/Tracer/OtelTraceState") {}
@@ -101,20 +101,20 @@ export const makeExternalSpan = (options: {
   readonly traceFlags?: number | undefined
   readonly traceState?: string | Otel.TraceState | undefined
 }): Tracer.ExternalSpan => {
-  const annotations = ServiceMap.mutate(ServiceMap.empty(), (annotations) => {
+  const annotations = Context.mutate(Context.empty(), (annotations) => {
     let next = annotations
     if (options.traceFlags !== undefined) {
-      next = ServiceMap.add(next, OtelTraceFlags, options.traceFlags)
+      next = Context.add(next, OtelTraceFlags, options.traceFlags)
     }
 
     if (typeof options.traceState === "string") {
       try {
-        next = ServiceMap.add(next, OtelTraceState, Otel.createTraceState(options.traceState))
+        next = Context.add(next, OtelTraceState, Otel.createTraceState(options.traceState))
       } catch {
         //
       }
     } else if (options.traceState) {
-      next = ServiceMap.add(next, OtelTraceState, options.traceState)
+      next = Context.add(next, OtelTraceState, options.traceState)
     }
 
     return next
@@ -346,7 +346,7 @@ export class OtelSpan implements Tracer.Span {
 
   readonly name: string
   readonly kind: Tracer.SpanKind
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly links: Array<Tracer.SpanLink>
   readonly span: Otel.Span
   readonly spanId: string
@@ -464,7 +464,7 @@ const isSampled = (traceFlags: Otel.TraceFlags): boolean =>
 const getOtelParent = (
   tracer: Otel.TraceAPI,
   context: Otel.Context,
-  annotations: ServiceMap.ServiceMap<never>
+  annotations: Context.Context<never>
 ): Option.Option<Tracer.AnySpan> => {
   const otelParent = tracer.getSpan(context)?.spanContext()
   if (!otelParent) return Option.none()
@@ -478,7 +478,7 @@ const getOtelParent = (
 
 const makeSpanContext = (
   span: Tracer.AnySpan,
-  annotations?: ServiceMap.ServiceMap<never>
+  annotations?: Context.Context<never>
 ): Otel.SpanContext => {
   const traceFlags = makeTraceFlags(span, annotations)
   const traceState = makeTraceState(span, annotations)!
@@ -493,13 +493,13 @@ const makeSpanContext = (
 
 const makeTraceFlags = (
   span: Tracer.AnySpan,
-  annotations: ServiceMap.ServiceMap<never> | undefined
+  annotations: Context.Context<never> | undefined
 ): Otel.TraceFlags => {
   let traceFlags: Otel.TraceFlags | undefined
   if (Predicate.isNotUndefined(annotations)) {
     traceFlags = extractTraceService(span, annotations, OtelTraceFlags)
     if (Predicate.isUndefined(traceFlags)) {
-      traceFlags = ServiceMap.getOrUndefined(span.annotations, OtelTraceFlags)
+      traceFlags = Context.getOrUndefined(span.annotations, OtelTraceFlags)
     }
   }
   return traceFlags ?? Otel.TraceFlags.SAMPLED
@@ -507,13 +507,13 @@ const makeTraceFlags = (
 
 const makeTraceState = (
   span: Tracer.AnySpan,
-  annotations: ServiceMap.ServiceMap<never> | undefined
+  annotations: Context.Context<never> | undefined
 ): Otel.TraceState | undefined => {
   let traceState: Otel.TraceState | undefined
   if (Predicate.isNotUndefined(annotations)) {
     traceState = extractTraceService(span, annotations, OtelTraceState)
     if (Predicate.isUndefined(traceState)) {
-      traceState = ServiceMap.getOrUndefined(span.annotations, OtelTraceState)
+      traceState = Context.getOrUndefined(span.annotations, OtelTraceState)
     }
   }
   return traceState
@@ -521,20 +521,20 @@ const makeTraceState = (
 
 const extractTraceService = <I, S>(
   parent: Tracer.AnySpan,
-  annotations: ServiceMap.ServiceMap<never>,
-  service: ServiceMap.Service<I, S>
+  annotations: Context.Context<never>,
+  service: Context.Service<I, S>
 ) => {
-  const instance = ServiceMap.getOrUndefined(annotations, service)
+  const instance = Context.getOrUndefined(annotations, service)
   if (Predicate.isNotUndefined(instance)) {
     return instance
   }
-  return ServiceMap.getOrUndefined(parent.annotations, service)
+  return Context.getOrUndefined(parent.annotations, service)
 }
 
 const populateContext = (
   context: Otel.Context,
   span: Tracer.AnySpan,
-  annotations?: ServiceMap.ServiceMap<never> | undefined
+  annotations?: Context.Context<never> | undefined
 ): Otel.Context =>
   span instanceof OtelSpan ?
     Otel.trace.setSpan(context, span.span) :

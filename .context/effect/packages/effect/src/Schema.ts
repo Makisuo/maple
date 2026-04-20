@@ -102,8 +102,8 @@ import * as Equal from "./Equal.ts"
 import * as Equivalence from "./Equivalence.ts"
 import * as Exit_ from "./Exit.ts"
 import type { Formatter } from "./Formatter.ts"
-import { format, formatDate, formatPropertyKey } from "./Formatter.ts"
-import { identity } from "./Function.ts"
+import { format, formatPropertyKey } from "./Formatter.ts"
+import { identity, memoize } from "./Function.ts"
 import * as HashMap_ from "./HashMap.ts"
 import * as HashSet_ from "./HashSet.ts"
 import * as core from "./internal/core.ts"
@@ -112,7 +112,7 @@ import * as InternalArbitrary from "./internal/schema/arbitrary.ts"
 import * as InternalEquivalence from "./internal/schema/equivalence.ts"
 import * as InternalStandard from "./internal/schema/representation.ts"
 import * as InternalSchema from "./internal/schema/schema.ts"
-import * as InternalToCodec from "./internal/schema/to-codec.ts"
+import { SchemaError } from "./internal/schema/schema.ts"
 import * as JsonPatch from "./JsonPatch.ts"
 import * as JsonSchema from "./JsonSchema.ts"
 import { remainder } from "./Number.ts"
@@ -134,7 +134,7 @@ import * as Transformation from "./SchemaTransformation.ts"
 import type { Assign, Lambda, Mutable, Simplify } from "./Struct.ts"
 import * as Struct_ from "./Struct.ts"
 import * as FastCheck from "./testing/FastCheck.ts"
-import type { UnionToIntersection } from "./Types.ts"
+import type { RequiredKeys, UnionToIntersection } from "./Types.ts"
 import type { Unify } from "./Unify.ts"
 
 const TypeId = InternalSchema.TypeId
@@ -169,13 +169,14 @@ export type Mutability = "readonly" | "mutable"
 export type ConstructorDefault = "no-default" | "with-default"
 
 /**
- * Options for `makeUnsafe` and Class constructors.
+ * Options for `makeEffect`, `make`, and Class constructors.
  *
  * When to use:
  * - Pass `disableChecks: true` to skip validation when you trust the data.
  * - Pass `parseOptions` to control error reporting behavior.
  *
- * @see {@link Bottom.makeUnsafe}
+ * @see {@link Bottom.makeEffect}
+ * @see {@link Bottom.make}
  *
  * @since 4.0.0
  */
@@ -213,7 +214,7 @@ export interface Bottom<
   out RD,
   out RE,
   out Ast extends AST.AST,
-  out RebuildOut extends Top,
+  out Rebuild extends Top,
   out TypeMakeIn = T,
   out Iso = T,
   in out TypeParameters extends ReadonlyArray<Top> = readonly [],
@@ -226,10 +227,9 @@ export interface Bottom<
 > extends Pipeable.Pipeable {
   readonly [TypeId]: typeof TypeId
 
-  readonly ast: Ast
-  readonly "~rebuild.out": RebuildOut
+  readonly "ast": Ast
+  readonly "Rebuild": Rebuild
   readonly "~type.parameters": TypeParameters
-  readonly "~annotate.in": Annotations.Bottom<T, TypeParameters>
 
   readonly "Type": T
   readonly "Encoded": E
@@ -246,15 +246,16 @@ export interface Bottom<
   readonly "~encoded.mutability": EncodedMutability
   readonly "~encoded.optionality": EncodedOptionality
 
-  annotate(annotations: this["~annotate.in"]): this["~rebuild.out"]
-  annotateKey(annotations: Annotations.Key<this["Type"]>): this["~rebuild.out"]
-  check(...checks: readonly [AST.Check<this["Type"]>, ...Array<AST.Check<this["Type"]>>]): this["~rebuild.out"]
-  rebuild(ast: this["ast"]): this["~rebuild.out"]
+  annotate(annotations: Annotations.Bottom<this["Type"], this["~type.parameters"]>): this["Rebuild"]
+  annotateKey(annotations: Annotations.Key<this["Type"]>): this["Rebuild"]
+  check(...checks: readonly [AST.Check<this["Type"]>, ...Array<AST.Check<this["Type"]>>]): this["Rebuild"]
+  rebuild(ast: this["ast"]): this["Rebuild"]
   /**
    * @throws {Error} The issue is contained in the error cause.
    */
-  makeUnsafe(input: this["~type.make.in"], options?: MakeOptions): this["Type"]
+  make(input: this["~type.make.in"], options?: MakeOptions): this["Type"]
   makeOption(input: this["~type.make.in"], options?: MakeOptions): Option_.Option<this["Type"]>
+  makeEffect(input: this["~type.make.in"], options?: MakeOptions): Effect.Effect<this["Type"], SchemaError>
 }
 
 /**
@@ -277,9 +278,7 @@ export interface declareConstructor<T, E, TypeParameters extends ReadonlyArray<T
     Iso,
     TypeParameters
   >
-{
-  readonly "~rebuild.out": this
-}
+{}
 
 /**
  * Creates a schema for a **parametric** type (a generic container such as
@@ -358,7 +357,9 @@ export function declareConstructor<T, E = T, Iso = T>() {
  * @category Constructors
  * @since 4.0.0
  */
-export interface declare<T, Iso = T> extends declareConstructor<T, T, readonly [], Iso> {}
+export interface declare<T, Iso = T> extends declareConstructor<T, T, readonly [], Iso> {
+  readonly "Rebuild": declare<T, Iso>
+}
 
 /**
  * Creates a schema for a **non-parametric** opaque type using a type-guard
@@ -422,7 +423,7 @@ export function declare<T, Iso = T>(
  * const bottom = Schema.revealBottom(schema)
  *
  * // `bottom` now exposes Type, Encoded, DecodingServices, EncodingServices,
- * // ast, ~rebuild.out, ~type.make.in, Iso, ~type.parameters, etc.
+ * // ast, Rebuild, ~type.make.in, Iso, ~type.parameters, etc.
  * type T = typeof bottom["Type"]     // string
  * type E = typeof bottom["Encoded"]  // string
  * ```
@@ -437,7 +438,7 @@ export function revealBottom<S extends Top>(
   S["DecodingServices"],
   S["EncodingServices"],
   S["ast"],
-  S["~rebuild.out"],
+  S["Rebuild"],
   S["~type.make.in"],
   S["Iso"],
   S["~type.parameters"],
@@ -472,13 +473,45 @@ export function revealBottom<S extends Top>(
  * )
  * ```
  *
+ * @see {@link annotateEncoded} to annotate the encoded side instead.
+ *
  * @category Annotations
  * @since 4.0.0
  */
-export function annotate<S extends Top>(annotations: S["~annotate.in"]) {
-  return (self: S): S["~rebuild.out"] => {
-    return self.annotate(annotations)
-  }
+export function annotate<S extends Top>(annotations: Annotations.Bottom<S["Type"], S["~type.parameters"]>) {
+  return (self: S) => self.annotate(annotations)
+}
+
+/**
+ * Adds metadata annotations to the **encoded** side of a schema without
+ * changing its runtime behavior. This is the encoded-side counterpart of
+ * `annotate`, which targets the decoded (Type) side.
+ *
+ * Internally the schema is flipped so that `Encoded` becomes `Type`,
+ * annotated, and then flipped back.
+ *
+ * **Example** (Adding a title to the encoded representation)
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ *
+ * const schema = Schema.NumberFromString.pipe(
+ *   Schema.annotateEncoded({
+ *     title: "my title"
+ *   })
+ * )
+ *
+ * console.log(Schema.toEncoded(schema).ast.annotations?.title)
+ * // "my title"
+ * ```
+ *
+ * @see {@link annotate} to annotate the type side instead.
+ *
+ * @category Annotations
+ * @since 4.0.0
+ */
+export function annotateEncoded<S extends Top>(annotations: Annotations.Bottom<S["Encoded"], readonly []>) {
+  return (self: S): S["Rebuild"] => flip(flip(self).annotate(annotations))
 }
 
 /**
@@ -510,7 +543,7 @@ export function annotate<S extends Top>(annotations: S["~annotate.in"]) {
  * @since 4.0.0
  */
 export function annotateKey<S extends Top>(annotations: Annotations.Key<S["Type"]>) {
-  return (self: S): S["~rebuild.out"] => {
+  return (self: S): S["Rebuild"] => {
     return self.rebuild(AST.annotateKey(self.ast, annotations))
   }
 }
@@ -603,7 +636,7 @@ export declare namespace Schema {
  */
 export interface Schema<out T> extends Top {
   readonly "Type": T
-  readonly "~rebuild.out": Schema<T>
+  readonly "Rebuild": Schema<T>
 }
 
 /**
@@ -691,7 +724,7 @@ export interface Optic<out T, out Iso> extends Schema<T> {
   readonly "Iso": Iso
   readonly "DecodingServices": never
   readonly "EncodingServices": never
-  readonly "~rebuild.out": Optic<T, Iso>
+  readonly "Rebuild": Optic<T, Iso>
 }
 
 /**
@@ -728,7 +761,7 @@ export interface Codec<out T, out E = T, out RD = never, out RE = never> extends
   readonly "Encoded": E
   readonly "DecodingServices": RD
   readonly "EncodingServices": RE
-  readonly "~rebuild.out": Codec<T, E, RD, RE>
+  readonly "Rebuild": Codec<T, E, RD, RE>
 }
 
 /**
@@ -752,7 +785,7 @@ export interface Codec<out T, out E = T, out RD = never, out RE = never> extends
  * @since 4.0.0
  */
 export interface Decoder<out T, out RD = never> extends Codec<T, unknown, RD, unknown> {
-  readonly "~rebuild.out": Decoder<T, RD>
+  readonly "Rebuild": Decoder<T, RD>
 }
 
 /**
@@ -776,7 +809,7 @@ export interface Decoder<out T, out RD = never> extends Codec<T, unknown, RD, un
  * @since 4.0.0
  */
 export interface Encoder<out E, out RE = never> extends Codec<unknown, E, unknown, RE> {
-  readonly "~rebuild.out": Encoder<E, RE>
+  readonly "Rebuild": Encoder<E, RE>
 }
 
 /**
@@ -805,50 +838,36 @@ export function revealCodec<T, E, RD, RE>(codec: Codec<T, E, RD, RE>) {
   return codec
 }
 
-const SchemaErrorTypeId = "~effect/Schema/SchemaError"
-
-/**
- * Error thrown (or returned as the error channel value) when schema decoding
- * or encoding fails.
- *
- * The `issue` field contains a structured {@link Issue.Issue} tree describing
- * every validation failure, including the path to the problematic value,
- * expected types, and actual values received. `message` renders the issue tree
- * as a human-readable string.
- *
- * Use {@link isSchemaError} to narrow an unknown value to `SchemaError`.
- *
- * **Example** (Catching a SchemaError)
- *
- * ```ts
- * import { Schema } from "effect"
- *
- * try {
- *   Schema.decodeUnknownSync(Schema.Number)("not a number")
- * } catch (err) {
- *   if (Schema.isSchemaError(err)) {
- *     console.log(err.message)
- *     // Expected number, actual "not a number"
- *   }
- * }
- * ```
- *
- * @since 4.0.0
- */
-export class SchemaError {
-  readonly [SchemaErrorTypeId] = SchemaErrorTypeId
-  readonly _tag = "SchemaError"
-  readonly name: string = "SchemaError"
-  readonly issue: Issue.Issue
-  constructor(issue: Issue.Issue) {
-    this.issue = issue
-  }
-  get message() {
-    return this.issue.toString()
-  }
-  toString() {
-    return `SchemaError(${this.message})`
-  }
+export {
+  /**
+   * Error thrown (or returned as the error channel value) when schema decoding
+   * or encoding fails.
+   *
+   * The `issue` field contains a structured {@link Issue.Issue} tree describing
+   * every validation failure, including the path to the problematic value,
+   * expected types, and actual values received. `message` renders the issue tree
+   * as a human-readable string.
+   *
+   * Use {@link isSchemaError} to narrow an unknown value to `SchemaError`.
+   *
+   * **Example** (Catching a SchemaError)
+   *
+   * ```ts
+   * import { Schema } from "effect"
+   *
+   * try {
+   *   Schema.decodeUnknownSync(Schema.Number)("not a number")
+   * } catch (err) {
+   *   if (Schema.isSchemaError(err)) {
+   *     console.log(err.message)
+   *     // Expected number, actual "not a number"
+   *   }
+   * }
+   * ```
+   *
+   * @since 4.0.0
+   */
+  SchemaError
 }
 
 /**
@@ -871,7 +890,7 @@ export class SchemaError {
  * @since 4.0.0
  */
 export function isSchemaError(u: unknown): u is SchemaError {
-  return Predicate.hasProperty(u, SchemaErrorTypeId)
+  return Predicate.hasProperty(u, InternalSchema.SchemaErrorTypeId)
 }
 
 function makeStandardResult<A>(exit: Exit_.Exit<StandardSchemaV1.Result<A>>): StandardSchemaV1.Result<A> {
@@ -1440,6 +1459,32 @@ export const encodeSync = Parser.encodeSync
 export const make: <S extends Top>(ast: S["ast"], options?: object) => S = InternalSchema.make
 
 /**
+ * Transforms a schema into a class that can be extended with `extends`. The
+ * resulting class inherits the full schema API (e.g. `annotate`) and can define
+ * static methods that reference `this`.
+ *
+ * **Example** (Wrapping a primitive schema)
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ *
+ * class MyString extends Schema.asClass(Schema.String) {
+ *   static readonly decodeUnknownSync = Schema.decodeUnknownSync(this)
+ * }
+ *
+ * console.log(MyString.decodeUnknownSync("a"))
+ * // "a"
+ * ```
+ *
+ * @since 4.0.0
+ */
+export function asClass<S extends Top>(schema: S): S & { new(_: never): {} } {
+  // oxlint-disable-next-line @typescript-eslint/no-extraneous-class
+  class Class {}
+  return Object.setPrototypeOf(Class, schema)
+}
+
+/**
  * Tests if a value is a `Schema`.
  *
  * @category Guards
@@ -1450,7 +1495,7 @@ export function isSchema(u: unknown): u is Top {
 }
 
 /**
- * Schema type for an exact optional struct key. The key may be absent, but
+ * Companion type for an exact optional struct key. The key may be absent, but
  * when present must match the wrapped schema (no implicit `undefined`).
  * Produced by {@link optionalKey}.
  *
@@ -1475,7 +1520,6 @@ export interface optionalKey<S extends Top> extends
     "optional"
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -1522,12 +1566,14 @@ interface requiredKeyLambda extends Lambda {
 export const requiredKey = Struct_.lambda<requiredKeyLambda>((self) => self.schema)
 
 /**
- * Schema type for an optional struct key that also accepts `undefined`.
+ * Companion type for an optional struct key that also accepts `undefined`.
  * Equivalent to `optionalKey<UndefinedOr<S>>`. Produced by {@link optional}.
  *
  * @since 4.0.0
  */
-export interface optional<S extends Top> extends optionalKey<UndefinedOr<S>> {}
+export interface optional<S extends Top> extends optionalKey<UndefinedOr<S>> {
+  readonly "Rebuild": optional<S>
+}
 
 interface optionalLambda extends Lambda {
   <S extends Top>(self: S): optional<S>
@@ -1576,7 +1622,7 @@ interface requiredLambda extends Lambda {
 export const required = Struct_.lambda<requiredLambda>((self) => self.schema.members[0])
 
 /**
- * Schema type for a mutable struct key. The key's property is writable.
+ * Companion type for a mutable struct key. The key's property is writable.
  * Produced by {@link mutableKey}.
  *
  * @since 4.0.0
@@ -1600,7 +1646,6 @@ export interface mutableKey<S extends Top> extends
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -1655,9 +1700,7 @@ export interface toType<S extends Top> extends
     S["~encoded.mutability"],
     S["~encoded.optionality"]
   >
-{
-  readonly "~rebuild.out": this
-}
+{}
 
 interface toTypeLambda extends Lambda {
   <S extends Top>(self: S): toType<S>
@@ -1696,9 +1739,7 @@ export interface toEncoded<S extends Top> extends
     S["~encoded.mutability"],
     S["~encoded.optionality"]
   >
-{
-  readonly "~rebuild.out": this
-}
+{}
 
 interface toEncodedLambda extends Lambda {
   <S extends Top>(self: S): toEncoded<S>
@@ -1740,7 +1781,6 @@ export interface flip<S extends Top> extends
     S["~type.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly [FlipTypeId]: typeof FlipTypeId
   readonly schema: S
 }
@@ -1765,7 +1805,7 @@ function isFlip$(schema: Top): schema is flip<any> {
  *
  * @since 4.0.0
  */
-export function flip<S extends Top>(schema: S): S extends flip<infer F> ? F["~rebuild.out"] : flip<S>
+export function flip<S extends Top>(schema: S): S extends flip<infer F> ? F["Rebuild"] : flip<S>
 export function flip<S extends Top>(schema: S): flip<S> {
   if (isFlip$(schema)) {
     return schema.schema.rebuild(AST.flip(schema.ast))
@@ -1780,7 +1820,6 @@ export function flip<S extends Top>(schema: S): flip<S> {
  * @since 4.0.0
  */
 export interface Literal<L extends AST.LiteralValue> extends Bottom<L, L, never, never, AST.Literal, Literal<L>> {
-  readonly "~rebuild.out": this
   readonly literal: L
   transform<L2 extends AST.LiteralValue>(to: L2): decodeTo<Literal<L2>, Literal<L>>
 }
@@ -1873,7 +1912,6 @@ export interface TemplateLiteral<Parts extends TemplateLiteral.Parts> extends
     TemplateLiteral<Parts>
   >
 {
-  readonly "~rebuild.out": this
   readonly parts: Parts
 }
 
@@ -1935,7 +1973,6 @@ export interface TemplateLiteralParser<Parts extends TemplateLiteral.Parts> exte
     TemplateLiteralParser<Parts>
   >
 {
-  readonly "~rebuild.out": this
   readonly parts: Parts
 }
 
@@ -1970,7 +2007,6 @@ export function TemplateLiteralParser<const Parts extends TemplateLiteral.Parts>
 export interface Enum<A extends { [x: string]: string | number }>
   extends Bottom<A[keyof A], A[keyof A], never, never, AST.Enum, Enum<A>>
 {
-  readonly "~rebuild.out": this
   readonly enums: A
 }
 
@@ -2009,9 +2045,7 @@ export function Enum<A extends { [x: string]: string | number }>(enums: A): Enum
  * @see {@link Never} for the schema value.
  * @since 4.0.0
  */
-export interface Never extends Bottom<never, never, never, never, AST.Never, Never> {
-  readonly "~rebuild.out": this
-}
+export interface Never extends Bottom<never, never, never, never, AST.Never, Never> {}
 
 /**
  * Schema for the `never` type. Always fails validation — no value satisfies it.
@@ -2026,9 +2060,7 @@ export const Never: Never = make(AST.never)
  * @see {@link Any} for the schema value.
  * @since 4.0.0
  */
-export interface Any extends Bottom<any, any, never, never, AST.Any, Any> {
-  readonly "~rebuild.out": this
-}
+export interface Any extends Bottom<any, any, never, never, AST.Any, Any> {}
 
 /**
  * Schema for the `any` type. Accepts any value without validation.
@@ -2044,9 +2076,7 @@ export const Any: Any = make(AST.any)
  * @see {@link Unknown} for the schema value.
  * @since 4.0.0
  */
-export interface Unknown extends Bottom<unknown, unknown, never, never, AST.Unknown, Unknown> {
-  readonly "~rebuild.out": this
-}
+export interface Unknown extends Bottom<unknown, unknown, never, never, AST.Unknown, Unknown> {}
 
 /**
  * Schema for the `unknown` type. Accepts any value without validation.
@@ -2062,9 +2092,7 @@ export const Unknown: Unknown = make(AST.unknown)
  * @see {@link Null} for the schema value.
  * @since 4.0.0
  */
-export interface Null extends Bottom<null, null, never, never, AST.Null, Null> {
-  readonly "~rebuild.out": this
-}
+export interface Null extends Bottom<null, null, never, never, AST.Null, Null> {}
 
 /**
  * Schema for the `null` literal. Validates that the input is strictly `null`.
@@ -2080,9 +2108,7 @@ export const Null: Null = make(AST.null)
  * @see {@link Undefined} for the schema value.
  * @since 4.0.0
  */
-export interface Undefined extends Bottom<undefined, undefined, never, never, AST.Undefined, Undefined> {
-  readonly "~rebuild.out": this
-}
+export interface Undefined extends Bottom<undefined, undefined, never, never, AST.Undefined, Undefined> {}
 
 /**
  * Schema for the `undefined` literal. Validates that the input is strictly `undefined`.
@@ -2098,9 +2124,7 @@ export const Undefined: Undefined = make(AST.undefined)
  * @see {@link String} for the schema value.
  * @since 4.0.0
  */
-export interface String extends Bottom<string, string, never, never, AST.String, String> {
-  readonly "~rebuild.out": this
-}
+export interface String extends Bottom<string, string, never, never, AST.String, String> {}
 
 /**
  * Schema for `string` values. Validates that the input is `typeof` `"string"`.
@@ -2115,9 +2139,7 @@ export const String: String = make(AST.string)
  * @see {@link Number} for the schema value.
  * @since 4.0.0
  */
-export interface Number extends Bottom<number, number, never, never, AST.Number, Number> {
-  readonly "~rebuild.out": this
-}
+export interface Number extends Bottom<number, number, never, never, AST.Number, Number> {}
 
 /**
  * Schema for `number` values, including `NaN`, `Infinity`, and `-Infinity`.
@@ -2138,9 +2160,7 @@ export const Number: Number = make(AST.number)
  * @see {@link Boolean} for the schema value.
  * @since 4.0.0
  */
-export interface Boolean extends Bottom<boolean, boolean, never, never, AST.Boolean, Boolean> {
-  readonly "~rebuild.out": this
-}
+export interface Boolean extends Bottom<boolean, boolean, never, never, AST.Boolean, Boolean> {}
 
 /**
  * Schema for `boolean` values. Validates that the input is `typeof` `"boolean"`.
@@ -2156,9 +2176,7 @@ export const Boolean: Boolean = make(AST.boolean)
  * @see {@link Symbol} for the schema value.
  * @since 4.0.0
  */
-export interface Symbol extends Bottom<symbol, symbol, never, never, AST.Symbol, Symbol> {
-  readonly "~rebuild.out": this
-}
+export interface Symbol extends Bottom<symbol, symbol, never, never, AST.Symbol, Symbol> {}
 
 /**
  * Schema for `symbol` values. Validates that the input is `typeof` `"symbol"`.
@@ -2174,9 +2192,7 @@ export const Symbol: Symbol = make(AST.symbol)
  * @see {@link BigInt} for the schema value.
  * @since 4.0.0
  */
-export interface BigInt extends Bottom<bigint, bigint, never, never, AST.BigInt, BigInt> {
-  readonly "~rebuild.out": this
-}
+export interface BigInt extends Bottom<bigint, bigint, never, never, AST.BigInt, BigInt> {}
 
 /**
  * Schema for `bigint` values. Validates that the input is `typeof` `"bigint"`.
@@ -2191,9 +2207,7 @@ export const BigInt: BigInt = make(AST.bigInt)
  * @see {@link Void} for the schema value.
  * @since 4.0.0
  */
-export interface Void extends Bottom<void, void, never, never, AST.Void, Void> {
-  readonly "~rebuild.out": this
-}
+export interface Void extends Bottom<void, void, never, never, AST.Void, Void> {}
 
 /**
  * Schema for the `void` type. Accepts `undefined` as the encoded value.
@@ -2208,9 +2222,7 @@ export const Void: Void = make(AST.void)
  * @see {@link ObjectKeyword} for the schema value.
  * @since 4.0.0
  */
-export interface ObjectKeyword extends Bottom<object, object, never, never, AST.ObjectKeyword, ObjectKeyword> {
-  readonly "~rebuild.out": this
-}
+export interface ObjectKeyword extends Bottom<object, object, never, never, AST.ObjectKeyword, ObjectKeyword> {}
 
 /**
  * Schema for the `object` type. Validates that the input is a non-null object or function
@@ -2228,9 +2240,7 @@ export const ObjectKeyword: ObjectKeyword = make(AST.objectKeyword)
  */
 export interface UniqueSymbol<sym extends symbol>
   extends Bottom<sym, sym, never, never, AST.UniqueSymbol, UniqueSymbol<sym>>
-{
-  readonly "~rebuild.out": this
-}
+{}
 
 /**
  * Creates a schema for a specific symbol. Only that exact symbol satisfies the schema.
@@ -2381,7 +2391,6 @@ export interface Struct<Fields extends Struct.Fields> extends
     Struct.Iso<Fields>
   >
 {
-  readonly "~rebuild.out": this
   /**
    * The field definitions of this struct. Spread them into a new struct to
    * reuse fields across schemas.
@@ -2508,6 +2517,22 @@ export function fieldsAssign<const NewFields extends Struct.Fields>(fields: NewF
   return Struct_.lambda<fieldsAssign<NewFields>>((struct) => struct.mapFields(Struct_.assign(fields)))
 }
 
+interface encodeKeys<
+  S extends Top & { readonly fields: Struct.Fields },
+  M extends { readonly [K in keyof S["fields"]]?: PropertyKey }
+> extends
+  decodeTo<
+    S,
+    Struct<
+      {
+        [
+          K in keyof S["fields"] as K extends keyof M ? M[K] extends PropertyKey ? M[K] : K : K
+        ]: toEncoded<S["fields"][K]>
+      }
+    >
+  >
+{}
+
 /**
  * Renames struct keys in the encoded form without changing the decoded type.
  *
@@ -2536,18 +2561,7 @@ export function encodeKeys<
   S extends Top & { readonly fields: Struct.Fields },
   const M extends { readonly [K in keyof S["fields"]]?: PropertyKey }
 >(mapping: M) {
-  return function(
-    self: S
-  ): decodeTo<
-    S,
-    Struct<
-      {
-        [
-          K in keyof S["fields"] as K extends keyof M ? M[K] extends PropertyKey ? M[K] : K : K
-        ]: toEncoded<S["fields"][K]>
-      }
-    >
-  > {
+  return function(self: S): encodeKeys<S, M> {
     const fields: any = {}
     const reverseMapping: any = {}
     for (const k in self.fields) {
@@ -2565,7 +2579,7 @@ export function encodeKeys<
         decode: Struct_.renameKeys(reverseMapping),
         encode: Struct_.renameKeys(mapping)
       })
-    ))
+    )) as any
   }
 }
 
@@ -2709,7 +2723,7 @@ export declare namespace Record {
 }
 
 /**
- * Schema type for a key-value record (map) with a typed key and value schema.
+ * Companion type for a key-value record (map) with a typed key and value schema.
  * Produced by {@link Record}.
  *
  * @since 4.0.0
@@ -2726,7 +2740,6 @@ export interface $Record<Key extends Record.Key, Value extends Top> extends
     Record.Iso<Key, Value>
   >
 {
-  readonly "~rebuild.out": this
   readonly key: Key
   readonly value: Value
 }
@@ -2835,7 +2848,7 @@ export declare namespace StructWithRest {
 }
 
 /**
- * Schema type for a struct combined with one or more record schemas. Produced
+ * Companion type for a struct combined with one or more record schemas. Produced
  * by {@link StructWithRest}.
  *
  * @since 4.0.0
@@ -2855,7 +2868,6 @@ export interface StructWithRest<
     Simplify<StructWithRest.Iso<S, Records>>
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
   readonly records: Records
 }
@@ -2981,7 +2993,7 @@ export declare namespace Tuple {
 }
 
 /**
- * Schema type for a fixed-length tuple. Produced by {@link Tuple}.
+ * Companion type for a fixed-length tuple. Produced by {@link Tuple}.
  *
  * @since 4.0.0
  */
@@ -2997,7 +3009,6 @@ export interface Tuple<Elements extends Tuple.Elements> extends
     Tuple.Iso<Elements>
   >
 {
-  readonly "~rebuild.out": this
   readonly elements: Elements
   /**
    * Returns a new tuple with the elements modified by the provided function.
@@ -3132,7 +3143,7 @@ export declare namespace TupleWithRest {
 }
 
 /**
- * Schema type for a tuple with additional rest elements. Produced by
+ * Companion type for a tuple with additional rest elements. Produced by
  * {@link TupleWithRest}.
  *
  * @since 4.0.0
@@ -3152,7 +3163,6 @@ export interface TupleWithRest<
     TupleWithRest.Iso<S["Iso"], Rest>
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
   readonly rest: Rest
 }
@@ -3189,7 +3199,7 @@ export function TupleWithRest<S extends Tuple<Tuple.Elements>, const Rest extend
 }
 
 /**
- * Schema type for a `ReadonlyArray`. Produced by {@link ArraySchema}.
+ * Companion type for a `ReadonlyArray`. Produced by {@link ArraySchema}.
  *
  * @since 4.0.0
  */
@@ -3205,7 +3215,6 @@ export interface $Array<S extends Top> extends
     ReadonlyArray<S["Iso"]>
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -3243,7 +3252,7 @@ export {
 }
 
 /**
- * Schema type for a non-empty `ReadonlyArray`. Produced by {@link NonEmptyArray}.
+ * Companion type for a non-empty `ReadonlyArray`. Produced by {@link NonEmptyArray}.
  *
  * @since 4.0.0
  */
@@ -3259,7 +3268,6 @@ export interface NonEmptyArray<S extends Top> extends
     readonly [S["Iso"], ...Array<S["Iso"]>]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -3294,7 +3302,9 @@ export const NonEmptyArray = Struct_.lambda<NonEmptyArrayLambda>((schema) =>
  * @category Arrays
  * @since 4.0.0
  */
-export interface ArrayEnsure<S extends Top> extends decodeTo<$Array<toType<S>>, Union<readonly [S, $Array<S>]>> {}
+export interface ArrayEnsure<S extends Top> extends decodeTo<$Array<toType<S>>, Union<readonly [S, $Array<S>]>> {
+  readonly "Rebuild": ArrayEnsure<S>
+}
 
 /**
  * Decodes a single value or an array of values into an array.
@@ -3321,11 +3331,13 @@ export function ArrayEnsure<S extends Top>(schema: S): ArrayEnsure<S> {
 }
 
 /**
- * Schema type for an array with unique elements. Produced by {@link UniqueArray}.
+ * Companion type for an array with unique elements. Produced by {@link UniqueArray}.
  *
  * @since 4.0.0
  */
-export interface UniqueArray<S extends Top> extends $Array<S> {}
+export interface UniqueArray<S extends Top> extends $Array<S> {
+  readonly "Rebuild": UniqueArray<S>
+}
 
 /**
  * Returns a new array schema that ensures all elements are unique.
@@ -3366,7 +3378,6 @@ export interface mutable<S extends Top & { readonly "ast": AST.Arrays }> extends
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -3397,7 +3408,7 @@ export const mutable = Struct_.lambda<mutableLambda>((schema) => {
 })
 
 /**
- * Schema type for a union of multiple schemas. Produced by {@link Union}.
+ * Companion type for a union of multiple schemas. Produced by {@link Union}.
  *
  * @since 4.0.0
  */
@@ -3413,7 +3424,6 @@ export interface Union<Members extends ReadonlyArray<Top>> extends
     { [K in keyof Members]: Members[K]["Iso"] }[number]
   >
 {
-  readonly "~rebuild.out": this
   readonly members: Members
   /**
    * Returns a new union with the members modified by the provided function.
@@ -3497,7 +3507,6 @@ export function Union<const Members extends ReadonlyArray<Top>>(
 export interface Literals<L extends ReadonlyArray<AST.LiteralValue>>
   extends Bottom<L[number], L[number], never, never, AST.Union<AST.Literal>, Literals<L>>
 {
-  readonly "~rebuild.out": this
   readonly literals: L
   readonly members: { readonly [K in keyof L]: Literal<L[K]> }
   /**
@@ -3550,11 +3559,13 @@ export function Literals<const L extends ReadonlyArray<AST.LiteralValue>>(litera
 }
 
 /**
- * Schema type for `S | null`. Produced by {@link NullOr}.
+ * Companion type for `S | null`. Produced by {@link NullOr}.
  *
  * @since 4.0.0
  */
-export interface NullOr<S extends Top> extends Union<readonly [S, Null]> {}
+export interface NullOr<S extends Top> extends Union<readonly [S, Null]> {
+  readonly "Rebuild": NullOr<S>
+}
 
 interface NullOrLambda extends Lambda {
   <S extends Top>(self: S): NullOr<S>
@@ -3570,11 +3581,13 @@ interface NullOrLambda extends Lambda {
 export const NullOr = Struct_.lambda<NullOrLambda>((self) => Union([self, Null]))
 
 /**
- * Schema type for `S | undefined`. Produced by {@link UndefinedOr}.
+ * Companion type for `S | undefined`. Produced by {@link UndefinedOr}.
  *
  * @since 4.0.0
  */
-export interface UndefinedOr<S extends Top> extends Union<readonly [S, Undefined]> {}
+export interface UndefinedOr<S extends Top> extends Union<readonly [S, Undefined]> {
+  readonly "Rebuild": UndefinedOr<S>
+}
 
 interface UndefinedOrLambda extends Lambda {
   <S extends Top>(self: S): UndefinedOr<S>
@@ -3590,10 +3603,12 @@ interface UndefinedOrLambda extends Lambda {
 export const UndefinedOr = Struct_.lambda<UndefinedOrLambda>((self) => Union([self, Undefined]))
 
 /**
- * Schema type for `S | null | undefined`. Produced by {@link NullishOr}.
+ * Companion type for `S | null | undefined`. Produced by {@link NullishOr}.
  * @since 4.0.0
  */
-export interface NullishOr<S extends Top> extends Union<readonly [S, Null, Undefined]> {}
+export interface NullishOr<S extends Top> extends Union<readonly [S, Null, Undefined]> {
+  readonly "Rebuild": NullishOr<S>
+}
 
 interface NullishOrLambda extends Lambda {
   <S extends Top>(self: S): NullishOr<S>
@@ -3629,9 +3644,7 @@ export interface suspend<S extends Top> extends
     S["~encoded.mutability"],
     S["~encoded.optionality"]
   >
-{
-  readonly "~rebuild.out": this
-}
+{}
 
 /**
  * Creates a suspended schema that defers evaluation until needed. This is
@@ -3677,7 +3690,7 @@ export function suspend<S extends Top>(f: () => S): suspend<S> {
  * @since 4.0.0
  */
 export function check<S extends Top>(...checks: readonly [AST.Check<S["Type"]>, ...Array<AST.Check<S["Type"]>>]) {
-  return (self: S): S["~rebuild.out"] => self.check(...checks)
+  return (self: S): S["Rebuild"] => self.check(...checks)
 }
 
 /**
@@ -3705,7 +3718,6 @@ export interface refine<T extends S["Type"], S extends Top> extends
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -3751,7 +3763,6 @@ export interface brand<S extends Top, B> extends
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
   readonly identifier: string
 }
@@ -3764,7 +3775,7 @@ export interface brand<S extends Top, B> extends
  * @since 4.0.0
  */
 export function brand<B extends string>(identifier: B) {
-  return <S extends Top>(schema: S): brand<S["~rebuild.out"], B> =>
+  return <S extends Top>(schema: S): brand<S["Rebuild"], B> =>
     make(AST.brand(schema.ast, identifier), { schema, identifier })
 }
 
@@ -3778,7 +3789,7 @@ export function brand<B extends string>(identifier: B) {
 export function fromBrand<A extends Brand.Brand<any>>(identifier: string, ctor: Brand.Constructor<A>) {
   return <S extends Top & { readonly "Type": Brand.Brand.Unbranded<A> }>(
     self: S
-  ): brand<S["~rebuild.out"], Brand.Brand.Keys<A>> => {
+  ): brand<S["Rebuild"], Brand.Brand.Keys<A>> => {
     return (ctor.checks ? self.check(...ctor.checks) : self).pipe(brand(identifier))
   }
 }
@@ -3811,7 +3822,6 @@ export interface middlewareDecoding<S extends Top, RD> extends
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -3878,7 +3888,6 @@ export interface middlewareEncoding<S extends Top, RE> extends
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -3938,7 +3947,7 @@ export function middlewareEncoding<S extends Top, RE>(
  */
 export function catchDecoding<S extends Top>(
   f: (issue: Issue.Issue) => Effect.Effect<Option_.Option<S["Type"]>, Issue.Issue>
-): (self: S) => S["~rebuild.out"] {
+): (self: S) => S["Rebuild"] {
   return catchDecodingWithContext(f)
 }
 
@@ -3965,7 +3974,7 @@ export function catchDecodingWithContext<S extends Top, R = never>(
  */
 export function catchEncoding<S extends Top>(
   f: (issue: Issue.Issue) => Effect.Effect<Option_.Option<S["Encoded"]>, Issue.Issue>
-): (self: S) => S["~rebuild.out"] {
+): (self: S) => S["Rebuild"] {
   return catchEncodingWithContext(f)
 }
 
@@ -4009,7 +4018,6 @@ export interface decodeTo<To extends Top, From extends Top, RD = never, RE = nev
     From["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly from: From
   readonly to: To
 }
@@ -4256,61 +4264,52 @@ export interface withConstructorDefault<S extends Top & WithoutConstructorDefaul
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
 /**
  * Attaches a constructor default value to a schema field.
  *
- * The `defaultValue` function receives `Option.some(undefined)` when the field is
- * explicitly set to `undefined`, or `Option.none()` when the field is absent.
- * Return `Option.some(value)` to supply a default, or `Option.none()` to leave the
- * field required. An `Effect` may be returned for async or service-dependent defaults.
- *
- * Constructor defaults are applied only during `makeUnsafe` / `make`, not during
- * decoding or encoding.
+ * Constructor defaults are applied only during `make*`, not during decoding or
+ * encoding.
  *
  * **Example** (Optional field with a static default)
  *
  * ```ts
- * import { Option, Schema } from "effect"
+ * import { Effect, Schema } from "effect"
  *
  * const MySchema = Schema.Struct({
  *   name: Schema.String.pipe(
  *     Schema.optionalKey,
- *     Schema.withConstructorDefault(() => Option.some("anonymous"))
+ *     Schema.withConstructorDefault(Effect.succeed("anonymous"))
  *   )
  * })
  *
- * const value = MySchema.makeUnsafe({})
+ * const value = MySchema.make({})
  * // value: { name: "anonymous" }
  * ```
  *
  * @since 4.0.0
  */
 export function withConstructorDefault<S extends Top & WithoutConstructorDefault>(
-  defaultValue: (
-    input: Option_.Option<undefined>
-    // `S["~type.make.in"]` instead of `S["Type"]` is intentional here because
-    // it makes easier to define the default value if there are nested defaults
-  ) => Option_.Option<S["~type.make.in"]> | Effect.Effect<Option_.Option<S["~type.make.in"]>>
+  // `S["~type.make.in"]` instead of `S["Type"]` is intentional here because
+  // it makes easier to define the default value if there are nested defaults
+  defaultValue: Effect.Effect<S["~type.make.in"]>
 ) {
-  return (schema: S): withConstructorDefault<S> => {
-    return make(
-      AST.withConstructorDefault(schema.ast, defaultValue),
-      { schema }
-    )
-  }
+  return (schema: S): withConstructorDefault<S> =>
+    make(AST.withConstructorDefault(schema.ast, defaultValue), { schema })
 }
 
 /**
- * The type produced by {@link withDecodingDefaultKey} — a schema that decodes from an `optionalKey` encoded source.
+ * The type produced by {@link withDecodingDefaultKey}: a schema whose `Encoded`
+ * side is `optionalKey` and that fills in a default `Encoded` value during decoding.
  *
  * @see {@link withDecodingDefaultKey} for the constructor
  * @since 4.0.0
  */
-export interface withDecodingDefaultKey<S extends Top> extends decodeTo<S, optionalKey<toEncoded<S>>> {}
+export interface withDecodingDefaultKey<S extends Top> extends decodeTo<S, optionalKey<toEncoded<S>>> {
+  readonly "Rebuild": withDecodingDefaultKey<S>
+}
 
 /**
  * Options for {@link withDecodingDefaultKey} and {@link withDecodingDefault}.
@@ -4326,37 +4325,38 @@ export type DecodingDefaultOptions = {
 }
 
 /**
+ * Makes a struct key optional on the `Encoded` side and provides a default
+ * `Encoded` value when the key is missing during decoding.
+ *
+ * The key uses `optionalKey` on the encoded side, so it may be absent from the
+ * input object but **not** `undefined`. The default value is specified in terms
+ * of the `Encoded` type (before any decoding transformations).
+ *
  * **Options**
  *
- * - `encodingStrategy`: The strategy to use when encoding.
- *   - `passthrough`: (default) Pass the default value through to the output.
- *   - `omit`: Omit the value from the output.
- *
- * Provides a default value for a missing key during decoding.
- *
- * When the key is absent from the input, `defaultValue()` is called to supply a value.
- * During encoding, the behavior is controlled by `options.encodingStrategy`:
- * - `"passthrough"` (default): include the value in the output
- * - `"omit"`: omit the key from the output
+ * - `encodingStrategy`:
+ *   - `"passthrough"` (default): include the value in the encoded output.
+ *   - `"omit"`: omit the key from the encoded output.
  *
  * **Example** (Default for a missing struct key)
  *
  * ```ts
- * import { Schema } from "effect"
+ * import { Effect, Schema } from "effect"
  *
  * const MySchema = Schema.Struct({
- *   name: Schema.String.pipe(Schema.withDecodingDefaultKey(() => "anonymous"))
+ *   name: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("anonymous")))
  * })
  *
  * const result = Schema.decodeUnknownSync(MySchema)({})
  * // result: { name: "anonymous" }
  * ```
  *
- * @see {@link withDecodingDefault} for the `optional` (value-level) variant
+ * @see {@link withDecodingDefault} for the value-level variant (key absent **or** `undefined`)
+ * @see {@link withDecodingDefaultTypeKey} for the variant where the default is a `Type` value
  * @since 4.0.0
  */
 export function withDecodingDefaultKey<S extends Top>(
-  defaultValue: () => S["Encoded"],
+  defaultValue: Effect.Effect<S["Encoded"]>,
   options?: DecodingDefaultOptions
 ) {
   const encode = options?.encodingStrategy === "omit" ? Getter.omit() : Getter.passthrough()
@@ -4369,48 +4369,94 @@ export function withDecodingDefaultKey<S extends Top>(
 }
 
 /**
- * The type produced by {@link withDecodingDefault} — a schema that decodes from an `optional` encoded source.
+ * The type produced by {@link withDecodingDefaultTypeKey}: a schema whose
+ * `Encoded` side is `optionalKey` and that fills in a default `Type` value
+ * during decoding.
+ *
+ * @see {@link withDecodingDefaultTypeKey} for the constructor
+ * @since 4.0.0
+ */
+export interface withDecodingDefaultTypeKey<S extends Top>
+  extends decodeTo<withDecodingDefaultKey<toType<S>>, optionalKey<S>>
+{
+  readonly "Rebuild": withDecodingDefaultTypeKey<S>
+}
+
+/**
+ * Makes a struct key optional on the `Encoded` side (`optionalKey`, so the
+ * key may be absent but **not** `undefined`) and provides a default `Type`
+ * value when the key is missing during decoding.
+ *
+ * Unlike {@link withDecodingDefaultKey}, the default value is specified in
+ * terms of the `Type` (decoded) representation, so it does not need to go
+ * through the decoding transformation.
+ *
+ * **Options**
+ *
+ * - `encodingStrategy`:
+ *   - `"passthrough"` (default): include the value in the encoded output.
+ *   - `"omit"`: omit the key from the encoded output.
+ *
+ * @see {@link withDecodingDefaultKey} for the variant where the default is an `Encoded` value
+ * @see {@link withDecodingDefaultType} for the value-level variant
+ * @since 4.0.0
+ */
+export function withDecodingDefaultTypeKey<S extends Top>(
+  defaultValue: Effect.Effect<S["Type"]>,
+  options?: DecodingDefaultOptions
+) {
+  return (self: S): withDecodingDefaultTypeKey<S> => {
+    return toType(self).pipe(
+      withDecodingDefaultKey<toType<S>>(defaultValue, options),
+      encodeTo(optionalKey(self))
+    )
+  }
+}
+
+/**
+ * The type produced by {@link withDecodingDefault}: a schema whose `Encoded`
+ * side is `optional` and that fills in a default `Encoded` value during decoding.
  *
  * @see {@link withDecodingDefault} for the constructor
  * @since 4.0.0
  */
-export interface withDecodingDefault<S extends Top> extends decodeTo<S, optional<toEncoded<S>>> {}
+export interface withDecodingDefault<S extends Top> extends decodeTo<S, optional<toEncoded<S>>> {
+  readonly "Rebuild": withDecodingDefault<S>
+}
 
 /**
+ * Wraps the `Encoded` side with `optional` (key absent **or** `undefined`)
+ * and provides a default `Encoded` value when the field is missing or
+ * `undefined` during decoding.
+ *
+ * The default value is specified in terms of the `Encoded` type (before any
+ * decoding transformations).
+ *
  * **Options**
  *
- * - `encodingStrategy`: The strategy to use when encoding.
- *   - `passthrough`: (default) Pass the default value through to the output.
- *   - `omit`: Omit the value from the output.
- *
- * Provides a default value for an `optional` field during decoding.
- *
- * Similar to {@link withDecodingDefaultKey} but works on `optional` (value-level optional)
- * rather than `optionalKey` (key-level optional).
- *
- * When the value is `undefined` or absent, `defaultValue()` is called to supply a value.
- * During encoding, the behavior is controlled by `options.encodingStrategy`:
- * - `"passthrough"` (default): include the value in the output
- * - `"omit"`: omit the value from the output
+ * - `encodingStrategy`:
+ *   - `"passthrough"` (default): include the value in the encoded output.
+ *   - `"omit"`: omit the key from the encoded output.
  *
  * **Example** (Default for an optional field value)
  *
  * ```ts
- * import { Schema } from "effect"
+ * import { Effect, Schema } from "effect"
  *
  * const MySchema = Schema.Struct({
- *   name: Schema.String.pipe(Schema.optional, Schema.withDecodingDefault(() => "anonymous"))
+ *   name: Schema.String.pipe(Schema.optional, Schema.withDecodingDefault(Effect.succeed("anonymous")))
  * })
  *
  * const result = Schema.decodeUnknownSync(MySchema)({ name: undefined })
  * // result: { name: "anonymous" }
  * ```
  *
- * @see {@link withDecodingDefaultKey} for the key-level variant
+ * @see {@link withDecodingDefaultKey} for the key-level variant (key absent only, not `undefined`)
+ * @see {@link withDecodingDefaultType} for the variant where the default is a `Type` value
  * @since 4.0.0
  */
 export function withDecodingDefault<S extends Top>(
-  defaultValue: () => S["Encoded"],
+  defaultValue: Effect.Effect<S["Encoded"]>,
   options?: DecodingDefaultOptions
 ) {
   const encode = options?.encodingStrategy === "omit" ? Getter.omit() : Getter.passthrough()
@@ -4419,6 +4465,49 @@ export function withDecodingDefault<S extends Top>(
       decode: Getter.withDefault(defaultValue),
       encode
     }))
+  }
+}
+
+/**
+ * The type produced by {@link withDecodingDefaultType}: a schema whose
+ * `Encoded` side is `optional` and that fills in a default `Type` value during
+ * decoding.
+ *
+ * @see {@link withDecodingDefaultType} for the constructor
+ * @since 4.0.0
+ */
+export interface withDecodingDefaultType<S extends Top> extends decodeTo<withDecodingDefault<toType<S>>, optional<S>> {
+  readonly "Rebuild": withDecodingDefaultType<S>
+}
+
+/**
+ * Wraps the `Encoded` side with `optional` (key absent **or** `undefined`)
+ * and provides a default `Type` value when the field is missing or
+ * `undefined` during decoding.
+ *
+ * Unlike {@link withDecodingDefault}, the default value is specified in terms
+ * of the `Type` (decoded) representation, so it does not need to go through
+ * the decoding transformation.
+ *
+ * **Options**
+ *
+ * - `encodingStrategy`:
+ *   - `"passthrough"` (default): include the value in the encoded output.
+ *   - `"omit"`: omit the key from the encoded output.
+ *
+ * @see {@link withDecodingDefault} for the variant where the default is an `Encoded` value
+ * @see {@link withDecodingDefaultTypeKey} for the key-level variant
+ * @since 4.0.0
+ */
+export function withDecodingDefaultType<S extends Top>(
+  defaultValue: Effect.Effect<S["Type"]>,
+  options?: DecodingDefaultOptions
+) {
+  return (self: S): withDecodingDefaultType<S> => {
+    return toType(self).pipe(
+      withDecodingDefault<toType<S>>(defaultValue, options),
+      encodeTo(optional(self))
+    )
   }
 }
 
@@ -4434,7 +4523,7 @@ export interface tag<Tag extends AST.LiteralValue> extends withConstructorDefaul
 
 /**
  * Combines a {@link Literal} schema with {@link withConstructorDefault}, making it ideal
- * for discriminator fields in tagged unions. When constructing via `makeUnsafe`, the
+ * for discriminator fields in tagged unions. When constructing via `make`, the
  * `_tag` field can be omitted and will be filled automatically.
  *
  * **Example** (Discriminated union tag)
@@ -4444,8 +4533,8 @@ export interface tag<Tag extends AST.LiteralValue> extends withConstructorDefaul
  *
  * const A = Schema.Struct({ _tag: Schema.tag("A"), value: Schema.Number })
  *
- * // _tag is optional in makeUnsafe, auto-filled to "A"
- * const a = A.makeUnsafe({ value: 42 })
+ * // _tag is optional in make, auto-filled to "A"
+ * const a = A.make({ value: 42 })
  * // a: { _tag: "A", value: 42 }
  * ```
  *
@@ -4454,7 +4543,7 @@ export interface tag<Tag extends AST.LiteralValue> extends withConstructorDefaul
  * @since 4.0.0
  */
 export function tag<Tag extends AST.LiteralValue>(literal: Tag): tag<Tag> {
-  return Literal(literal).pipe(withConstructorDefault(() => Option_.some(literal)))
+  return Literal(literal).pipe(withConstructorDefault(Effect.succeed(literal)))
 }
 
 /**
@@ -4481,7 +4570,7 @@ export function tag<Tag extends AST.LiteralValue>(literal: Tag): tag<Tag> {
  * @since 4.0.0
  */
 export function tagDefaultOmit<Tag extends AST.LiteralValue>(literal: Tag) {
-  return tag(literal).pipe(withDecodingDefaultKey(() => literal, { encodingStrategy: "omit" }))
+  return tag(literal).pipe(withDecodingDefaultKey(Effect.succeed(literal), { encodingStrategy: "omit" }))
 }
 
 /**
@@ -4499,7 +4588,7 @@ export type TaggedStruct<Tag extends AST.LiteralValue, Fields extends Struct.Fie
  * to identify the specific variant of the object, which is especially useful
  * when working with union types.
  *
- * When using the `makeUnsafe` method, the `_tag` field is optional and will be
+ * When using the `make` method, the `_tag` field is optional and will be
  * added automatically. However, when decoding or encoding, the `_tag` field
  * must be present in the input.
  *
@@ -4684,7 +4773,6 @@ export interface TaggedUnion<Cases extends Record<string, Top>> extends
     { [K in keyof Cases]: Cases[K]["~type.make"] }[keyof Cases]
   >
 {
-  readonly "~rebuild.out": this
   readonly cases: Cases
   readonly isAnyOf: <const Keys>(
     keys: ReadonlyArray<Keys>
@@ -4755,7 +4843,7 @@ export interface Opaque<Self, S extends Top, Brand> extends
     S["DecodingServices"],
     S["EncodingServices"],
     S["ast"],
-    S["~rebuild.out"],
+    S["Rebuild"],
     S["~type.make.in"],
     S["Iso"],
     S["~type.parameters"],
@@ -4767,36 +4855,37 @@ export interface Opaque<Self, S extends Top, Brand> extends
     S["~encoded.optionality"]
   >
 {
-  // intentionally left without `readonly "~rebuild.out": this`
   new(_: never): S["Type"] & Brand
 }
 
 /**
- * Wraps a schema so that its decoded `Type` becomes a nominally distinct type `Self`.
- * Useful for creating opaque types that are structurally identical to a base schema
+ * Wraps a struct schema so that its decoded `Type` becomes a nominally distinct type `Self`.
+ * Useful for creating opaque types that are structurally identical to a base struct
  * but type-incompatible with it.
  *
- * **Example** (Opaque user ID)
+ * **Example** (Opaque struct)
  *
  * ```ts
  * import { Schema } from "effect"
  *
- * type UserId = string & { readonly _tag: "UserId" }
- * const UserId = Schema.Opaque<UserId>()(Schema.String)
+ * class Person extends Schema.Opaque<Person>()(
+ *   Schema.Struct({
+ *     name: Schema.String
+ *   })
+ * ) {}
  *
- * // Decoded value is UserId, not plain string
- * const id = Schema.decodeUnknownSync(UserId)("abc")
- * // id: UserId
+ * // Decoded value is Person, not { name: string }
+ * const person = Schema.decodeUnknownSync(Person)({ name: "Alice" })
+ * // person: Person
  * ```
  *
  * @since 4.0.0
  */
 export function Opaque<Self, Brand = {}>() {
-  return <S extends Top>(schema: S): Opaque<Self, S, Brand> & Omit<S, "Type"> => {
+  return <S extends Top>(schema: S): Opaque<Self, S, Brand> & Omit<S, keyof Top> => {
     // oxlint-disable-next-line @typescript-eslint/no-extraneous-class
     class Opaque {}
-    Object.setPrototypeOf(Opaque, schema)
-    return Opaque as any
+    return Object.setPrototypeOf(Opaque, schema)
   }
 }
 
@@ -4807,7 +4896,7 @@ export function Opaque<Self, Brand = {}>() {
  * @since 4.0.0
  */
 export interface instanceOf<T, Iso = T> extends declare<T, Iso> {
-  readonly "~rebuild.out": this
+  readonly "Rebuild": instanceOf<T, Iso>
 }
 
 /**
@@ -4840,9 +4929,8 @@ export function instanceOf<C extends abstract new(...args: any) => any, Iso = In
  * Used when building low-level AST transformations that bridge two schema types.
  *
  * @since 4.0.0
- * @experimental
  */
-export function link<T>() { // TODO: better name
+export function link<T>() {
   return <To extends Top>(
     encodeTo: To,
     transformation: {
@@ -4861,31 +4949,105 @@ export function link<T>() { // TODO: better name
 /**
  * Creates a custom filter check from a predicate function. The predicate
  * receives the input value, the schema's AST, and parse options, and returns
- * `true`/`undefined` on success or a failure description on error.
+ * a value of type {@link FilterOutput}.
  *
- * **Example** (Custom filter check)
+ * **Example** (Failure at a nested path)
+ *
  * ```ts
  * import { Schema } from "effect"
  *
- * // Check that a number is even
- * const isEven = Schema.makeFilter(
- *   (n: number) => n % 2 === 0 || "expected an even number"
+ * const schema = Schema.Struct({ password: Schema.String, confirmPassword: Schema.String }).check(
+ *   Schema.makeFilter((o) =>
+ *     o.password === o.confirmPassword
+ *       ? undefined
+ *       : { path: ["password"], issue: "password and confirmPassword must match" }
+ *   )
  * )
  *
- * const EvenNumber = Schema.Number.check(isEven)
+ * console.log(String(Schema.decodeUnknownExit(schema)({ password: "123456", confirmPassword: "1234567" })))
+ * // Failure(Cause([Fail(SchemaError: password and confirmPassword must match
+ * //   at ["password"])]))
+ * ```
+ *
+ * **Example** (Reporting multiple failures at once)
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ *
+ * const schema = Schema.Struct({ a: Schema.Finite, b: Schema.Finite, c: Schema.Finite }).check(
+ *   Schema.makeFilter((o) => {
+ *     const issues: Array<Schema.FilterIssue> = []
+ *     if (o.a > 0) {
+ *       if (o.b <= 0) issues.push({ path: ["b"], issue: "b must be greater than 0" })
+ *       if (o.c <= 0) issues.push({ path: ["c"], issue: "c must be greater than 0" })
+ *     }
+ *     return issues
+ *   })
+ * )
+ *
+ * console.log(String(Schema.decodeUnknownExit(schema)({ a: 1, b: 0, c: 0 })))
+ * // Failure(Cause([Fail(SchemaError: b must be greater than 0
+ * //   at ["b"]
+ * // c must be greater than 0
+ * //   at ["c"])]))
  * ```
  *
  * @category Checks Constructors
  * @since 4.0.0
  */
 export const makeFilter: <T>(
-  filter: (input: T, ast: AST.AST, options: AST.ParseOptions) => undefined | boolean | string | Issue.Issue | {
-    readonly path: ReadonlyArray<PropertyKey>
-    readonly message: string
-  },
+  filter: (input: T, ast: AST.AST, options: AST.ParseOptions) => FilterOutput,
   annotations?: Annotations.Filter | undefined,
   abort?: boolean
 ) => AST.Filter<T> = AST.makeFilter
+
+/**
+ * A single failure reported by a filter predicate. Used as the element type
+ * of the array arm of {@link FilterOutput}, and also accepted on its own.
+ *
+ * - `string`: failure with that string as the message. Produces an
+ *   {@link Issue.InvalidValue} wrapping the input, with the string used as
+ *   the issue's `message` annotation.
+ * - {@link Issue.Issue}: a fully-formed issue, returned as-is.
+ * - `{ path, issue }`: failure attached to a nested path. `issue` is either
+ *   a `string` (wrapped in an {@link Issue.InvalidValue}) or a full
+ *   {@link Issue.Issue}; the result is wrapped in an {@link Issue.Pointer}
+ *   at the given `path`.
+ *
+ * @category model
+ * @since 4.0.0
+ */
+export type FilterIssue = string | Issue.Issue | {
+  readonly path: ReadonlyArray<PropertyKey>
+  readonly issue: string | Issue.Issue
+}
+
+/**
+ * The value a filter predicate (see {@link makeFilter}) may return.
+ *
+ * Each shape is normalized into an {@link Issue.Issue} (or `undefined` for
+ * success) before being attached to the parse result:
+ *
+ * - `undefined`: success. The input satisfies the filter.
+ * - `true`: success. Equivalent to `undefined`, useful when the predicate is
+ *   a plain boolean expression.
+ * - `false`: generic failure. Produces an {@link Issue.InvalidValue} wrapping
+ *   the input, with no custom message.
+ * - {@link FilterIssue}: a single failure. See {@link FilterIssue} for the
+ *   shapes (`string`, {@link Issue.Issue}, or `{ path, issue }`).
+ * - `ReadonlyArray<FilterIssue>`: several failures reported together. An
+ *   empty array is treated as success; a single-element array is equivalent
+ *   to returning that element directly; otherwise the entries are grouped
+ *   into an {@link Issue.Composite}.
+ *
+ * @category model
+ * @since 4.0.0
+ */
+export type FilterOutput =
+  | undefined
+  | boolean
+  | FilterIssue
+  | ReadonlyArray<FilterIssue>
 
 /**
  * Groups multiple checks into a single {@link AST.FilterGroup}, applying
@@ -6783,19 +6945,41 @@ export function isUnique<T>(annotations?: Annotations.Filter) {
 // -----------------------------------------------------------------------------
 
 /**
+ * Companion type for {@link NonEmptyString}.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export interface NonEmptyString extends String {
+  readonly "Rebuild": NonEmptyString
+}
+
+/**
  * A schema for non-empty strings. Validates that a string has at least one
  * character.
  *
+ * @category String
  * @since 4.0.0
  */
-export const NonEmptyString = String.check(isNonEmpty())
+export const NonEmptyString: NonEmptyString = String.check(isNonEmpty())
+
+/**
+ * Companion type for {@link Char}.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export interface Char extends String {
+  readonly "Rebuild": Char
+}
 
 /**
  * A schema representing a single character.
  *
+ * @category String
  * @since 4.0.0
  */
-export const Char = String.check(isLengthBetween(1, 1))
+export const Char: Char = String.check(isLengthBetween(1, 1))
 
 /**
  * Schema for the `Option<A>` type, representing an optional value that is
@@ -6826,6 +7010,7 @@ export interface Option<A extends Top> extends
     OptionIso<A>
   >
 {
+  readonly "Rebuild": Option<A>
   readonly value: A
 }
 
@@ -6905,12 +7090,14 @@ export function Option<A extends Top>(value: A): Option<A> {
 }
 
 /**
- * Schema type for {@link OptionFromNullOr}.
+ * Companion type for {@link OptionFromNullOr}.
  *
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromNullOr<S extends Top> extends decodeTo<Option<toType<S>>, NullOr<S>> {}
+export interface OptionFromNullOr<S extends Top> extends decodeTo<Option<toType<S>>, NullOr<S>> {
+  readonly "Rebuild": OptionFromNullOr<S>
+}
 
 /**
  * Decodes a nullable, required value `T` to a required `Option<T>` value.
@@ -6934,12 +7121,14 @@ export function OptionFromNullOr<S extends Top>(schema: S): OptionFromNullOr<S> 
 }
 
 /**
- * Schema type for {@link OptionFromUndefinedOr}.
+ * Companion type for {@link OptionFromUndefinedOr}.
  *
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromUndefinedOr<S extends Top> extends decodeTo<Option<toType<S>>, UndefinedOr<S>> {}
+export interface OptionFromUndefinedOr<S extends Top> extends decodeTo<Option<toType<S>>, UndefinedOr<S>> {
+  readonly "Rebuild": OptionFromUndefinedOr<S>
+}
 
 /**
  * Decodes an undefined-or value `T` to a required `Option<T>` value.
@@ -6963,12 +7152,14 @@ export function OptionFromUndefinedOr<S extends Top>(schema: S): OptionFromUndef
 }
 
 /**
- * Schema type for {@link OptionFromNullishOr}.
+ * Companion type for {@link OptionFromNullishOr}.
  *
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromNullishOr<S extends Top> extends decodeTo<Option<toType<S>>, NullishOr<S>> {}
+export interface OptionFromNullishOr<S extends Top> extends decodeTo<Option<toType<S>>, NullishOr<S>> {
+  readonly "Rebuild": OptionFromNullishOr<S>
+}
 
 /**
  * Decodes a nullish value `T` to a required `Option<T>` value.
@@ -6997,12 +7188,14 @@ export function OptionFromNullishOr<S extends Top>(
 }
 
 /**
- * Schema type for {@link OptionFromOptionalKey}.
+ * Companion type for {@link OptionFromOptionalKey}.
  *
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromOptionalKey<S extends Top> extends decodeTo<Option<toType<S>>, optionalKey<S>> {}
+export interface OptionFromOptionalKey<S extends Top> extends decodeTo<Option<toType<S>>, optionalKey<S>> {
+  readonly "Rebuild": OptionFromOptionalKey<S>
+}
 
 /**
  * Decodes an optional value `A` to a required `Option<A>` value.
@@ -7026,12 +7219,14 @@ export function OptionFromOptionalKey<S extends Top>(schema: S): OptionFromOptio
 }
 
 /**
- * Schema type for {@link OptionFromOptional}.
+ * Companion type for {@link OptionFromOptional}.
  *
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromOptional<S extends Top> extends decodeTo<Option<toType<S>>, optional<S>> {}
+export interface OptionFromOptional<S extends Top> extends decodeTo<Option<toType<S>>, optional<S>> {
+  readonly "Rebuild": OptionFromOptional<S>
+}
 
 /**
  * Decodes an optional or `undefined` value `A` to an required `Option<A>`
@@ -7057,12 +7252,14 @@ export function OptionFromOptional<S extends Top>(schema: S): OptionFromOptional
 }
 
 /**
- * Schema type for {@link OptionFromOptionalNullOr}.
+ * Companion type for {@link OptionFromOptionalNullOr}.
  *
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromOptionalNullOr<S extends Top> extends decodeTo<Option<toType<S>>, optional<NullOr<S>>> {}
+export interface OptionFromOptionalNullOr<S extends Top> extends decodeTo<Option<toType<S>>, optional<NullOr<S>>> {
+  readonly "Rebuild": OptionFromOptionalNullOr<S>
+}
 
 /**
  * Decodes an optional or `null` or `undefined` value `A` to a required `Option<A>`
@@ -7119,6 +7316,7 @@ export interface Result<A extends Top, E extends Top> extends
     ResultIso<A, E>
   >
 {
+  readonly "Rebuild": Result<A, E>
   readonly success: A
   readonly failure: E
 }
@@ -7221,6 +7419,7 @@ export interface Redacted<S extends Top> extends
     readonly [S]
   >
 {
+  readonly "Rebuild": Redacted<S>
   readonly value: S
 }
 
@@ -7312,14 +7511,16 @@ export function Redacted<S extends Top>(value: S, options?: {
 }
 
 /**
- * Schema type for {@link RedactedFromValue}.
+ * Companion type for {@link RedactedFromValue}.
  *
  * @category Redacted
  * @since 4.0.0
  */
 export interface RedactedFromValue<S extends Top>
   extends decodeTo<Redacted<toType<S>>, middlewareDecoding<S, S["DecodingServices"]>>
-{}
+{
+  readonly "Rebuild": RedactedFromValue<S>
+}
 
 /**
  * Middleware that wraps decoded errors in `Redacted`, preventing sensitive
@@ -7370,6 +7571,7 @@ export interface CauseReason<E extends Top, D extends Top> extends
     CauseReasonIso<E, D>
   >
 {
+  readonly "Rebuild": CauseReason<E, D>
   readonly error: E
   readonly defect: D
 }
@@ -7517,6 +7719,7 @@ export interface Cause<E extends Top, D extends Top> extends
     CauseIso<E, D>
   >
 {
+  readonly "Rebuild": Cause<E, D>
   readonly error: E
   readonly defect: D
 }
@@ -7591,12 +7794,14 @@ function causeToFormatter<E>(error: Formatter<E>, defect: Formatter<unknown>) {
 }
 
 /**
- * Schema type for {@link Error}.
+ * Companion type for {@link Error}.
  *
- * @category Schemas
+ * @category Error
  * @since 4.0.0
  */
-export interface Error extends instanceOf<globalThis.Error> {}
+export interface Error extends instanceOf<globalThis.Error> {
+  readonly "Rebuild": Error
+}
 
 const ErrorJsonEncoded = Struct({
   message: String,
@@ -7655,9 +7860,9 @@ export const ErrorWithStack: Error = instanceOf(globalThis.Error, {
 })
 
 /**
- * Schema type for {@link Defect}.
+ * Companion type for {@link Defect}.
  *
- * @category Schemas
+ * @category Defect
  * @since 4.0.0
  */
 export interface Defect extends
@@ -7674,7 +7879,9 @@ export interface Defect extends
       decodeTo<Unknown, Any>
     ]
   >
-{}
+{
+  readonly "Rebuild": Defect
+}
 
 const defectTransformation = new Transformation.Transformation(
   Getter.passthrough(),
@@ -7708,7 +7915,7 @@ export const Defect: Defect = Union([
  * A schema that represents defects, that also includes stack traces in the
  * encoded form.
  *
- * @category Constructors
+ * @category Defect
  * @since 4.0.0
  */
 export const DefectWithStack: Defect = Union([
@@ -7742,6 +7949,7 @@ export interface Exit<A extends Top, E extends Top, D extends Top> extends
     ExitIso<A, E, D>
   >
 {
+  readonly "Rebuild": Exit<A, E, D>
   readonly value: A
   readonly error: E
   readonly defect: D
@@ -7860,7 +8068,7 @@ export function Exit<A extends Top, E extends Top, D extends Top>(value: A, erro
 }
 
 /**
- * Schema type for {@link ReadonlyMap}.
+ * Companion type for {@link ReadonlyMap}.
  *
  * @category ReadonlyMap
  * @since 4.0.0
@@ -7873,6 +8081,7 @@ export interface $ReadonlyMap<Key extends Top, Value extends Top> extends
     ReadonlyMapIso<Key, Value>
   >
 {
+  readonly "Rebuild": $ReadonlyMap<Key, Value>
   readonly key: Key
   readonly value: Value
 }
@@ -7966,6 +8175,7 @@ export interface HashMap<Key extends Top, Value extends Top> extends
     HashMapIso<Key, Value>
   >
 {
+  readonly "Rebuild": HashMap<Key, Value>
   readonly key: Key
   readonly value: Value
 }
@@ -8046,7 +8256,7 @@ export function HashMap<Key extends Top, Value extends Top>(key: Key, value: Val
 }
 
 /**
- * Schema type for {@link ReadonlySet}.
+ * Companion type for {@link ReadonlySet}.
  *
  * @category ReadonlySet
  * @since 4.0.0
@@ -8059,6 +8269,7 @@ export interface $ReadonlySet<Value extends Top> extends
     ReadonlySetIso<Value>
   >
 {
+  readonly "Rebuild": $ReadonlySet<Value>
   readonly value: Value
 }
 
@@ -8148,6 +8359,7 @@ export interface HashSet<Value extends Top> extends
     HashSetIso<Value>
   >
 {
+  readonly "Rebuild": HashSet<Value>
   readonly value: Value
 }
 
@@ -8240,6 +8452,7 @@ export interface Chunk<Value extends Top> extends
     ChunkIso<Value>
   >
 {
+  readonly "Rebuild": Chunk<Value>
   readonly value: Value
 }
 
@@ -8318,19 +8531,21 @@ export function Chunk<Value extends Top>(value: Value): Chunk<Value> {
 }
 
 /**
- * Schema type for {@link RegExp}.
+ * Companion type for {@link RegExp}.
  *
- * @category Schemas
+ * @category RegExp
  * @since 4.0.0
  */
-export interface RegExp extends instanceOf<globalThis.RegExp> {}
+export interface RegExp extends instanceOf<globalThis.RegExp> {
+  readonly "Rebuild": RegExp
+}
 
 /**
  * Schema for JavaScript `RegExp` objects.
  *
  * The default JSON serializer encodes a `RegExp` as `{ source, flags }`.
  *
- * @category Schemas
+ * @category RegExp
  * @since 4.0.0
  */
 export const RegExp: RegExp = instanceOf(
@@ -8390,12 +8605,16 @@ export const RegExp: RegExp = instanceOf(
 )
 
 /**
- * Schema type for {@link URL}.
+ * Companion type for {@link URL}.
  *
  * @category URL
  * @since 4.0.0
  */
-export interface URL extends instanceOf<globalThis.URL> {}
+export interface URL extends instanceOf<globalThis.URL> {
+  readonly "Rebuild": URL
+}
+
+const URLString = String.annotate({ expected: "a string that will be decoded as a URL" })
 
 /**
  * A schema for JavaScript `URL` objects.
@@ -8420,7 +8639,7 @@ export const URL: URL = instanceOf(
     expected: "URL",
     toCodecJson: () =>
       link<globalThis.URL>()(
-        String.annotate({ expected: "a string that will be decoded as a URL" }),
+        URLString,
         Transformation.urlFromString
       ),
     toArbitrary: () => (fc) => fc.webUrl().map((s) => new globalThis.URL(s)),
@@ -8429,12 +8648,14 @@ export const URL: URL = instanceOf(
 )
 
 /**
- * Schema type for {@link URLFromString}.
+ * Companion type for {@link URLFromString}.
  *
  * @category URL
  * @since 4.0.0
  */
-export interface URLFromString extends decodeTo<URL, String> {}
+export interface URLFromString extends decodeTo<URL, String> {
+  readonly "Rebuild": URLFromString
+}
 
 /**
  * A transformation schema that decodes a `string` into a `URL`.
@@ -8448,16 +8669,19 @@ export interface URLFromString extends decodeTo<URL, String> {}
  * @category URL
  * @since 4.0.0
  */
-export const URLFromString: URLFromString = String.annotate({ expected: "a string that will be decoded as a URL" })
-  .pipe(decodeTo(URL, Transformation.urlFromString)) // TODO: remove duplication with URL schema
+export const URLFromString: URLFromString = URLString.pipe(decodeTo(URL, Transformation.urlFromString))
 
 /**
- * Schema type for {@link Date}.
+ * Companion type for {@link Date}.
  *
- * @category Schemas
+ * @category Date
  * @since 4.0.0
  */
-export interface Date extends instanceOf<globalThis.Date> {}
+export interface Date extends instanceOf<globalThis.Date> {
+  readonly "Rebuild": Date
+}
+
+const DateString = String.annotate({ expected: "a string in ISO 8601 format that will be decoded as a Date" })
 
 /**
  * A schema for JavaScript `Date` objects.
@@ -8475,7 +8699,7 @@ export interface Date extends instanceOf<globalThis.Date> {}
  * // => Date { 2024-01-01T00:00:00.000Z }
  * ```
  *
- * @category Schemas
+ * @category Date
  * @since 4.0.0
  */
 export const Date: Date = instanceOf(
@@ -8491,23 +8715,46 @@ export const Date: Date = instanceOf(
     expected: "Date",
     toCodecJson: () =>
       link<globalThis.Date>()(
-        String.annotate({ expected: "a string in ISO 8601 format that will be decoded as a Date" }),
-        Transformation.transform({
-          decode: (s) => new globalThis.Date(s),
-          encode: formatDate
-        })
+        DateString,
+        Transformation.dateFromString
       ),
     toArbitrary: () => (fc, ctx) => fc.date(ctx?.constraints?.date)
   }
 )
 
 /**
- * Schema type for {@link DateValid}.
+ * Companion type for {@link DateFromString}.
  *
- * @category Schemas
+ * @category Date
  * @since 4.0.0
  */
-export interface DateValid extends Date {}
+export interface DateFromString extends decodeTo<Date, String> {
+  readonly "Rebuild": DateFromString
+}
+
+/**
+ * A transformation schema that parses an ISO 8601 string into a `Date`.
+ *
+ * Decoding:
+ * - A `string` is decoded as a `Date`.
+ *
+ * Encoding:
+ * - A `Date` is encoded as a `string`.
+ *
+ * @category Date
+ * @since 4.0.0
+ */
+export const DateFromString: DateFromString = DateString.pipe(decodeTo(Date, Transformation.dateFromString))
+
+/**
+ * Companion type for {@link DateValid}.
+ *
+ * @category Date
+ * @since 4.0.0
+ */
+export interface DateValid extends Date {
+  readonly "Rebuild": DateValid
+}
 
 /**
  * A schema for **valid** JavaScript `Date` objects.
@@ -8515,17 +8762,20 @@ export interface DateValid extends Date {}
  * This schema accepts `Date` instances but rejects invalid dates (such as `new
  * Date("invalid")`).
  *
+ * @category Date
  * @since 4.0.0
  */
-export const DateValid = Date.check(isDateValid())
+export const DateValid: DateValid = Date.check(isDateValid())
 
 /**
- * Schema type for {@link Duration}.
+ * Companion type for {@link Duration}.
  *
  * @category Duration
  * @since 4.0.0
  */
-export interface Duration extends declare<Duration_.Duration> {}
+export interface Duration extends declare<Duration_.Duration> {
+  readonly "Rebuild": Duration
+}
 
 /**
  * A schema for `Duration` values.
@@ -8607,12 +8857,16 @@ export const Duration: Duration = declare(
 )
 
 /**
- * Schema type for {@link DurationFromNanos}.
+ * Companion type for {@link DurationFromNanos}.
  *
  * @category Duration
  * @since 4.0.0
  */
-export interface DurationFromNanos extends decodeTo<Duration, BigInt> {}
+export interface DurationFromNanos extends decodeTo<Duration, BigInt> {
+  readonly "Rebuild": DurationFromNanos
+}
+
+const bigint0 = globalThis.BigInt(0)
 
 /**
  * A transformation schema that decodes a non-negative `bigint` into a
@@ -8627,17 +8881,19 @@ export interface DurationFromNanos extends decodeTo<Duration, BigInt> {}
  * @category Duration
  * @since 4.0.0
  */
-export const DurationFromNanos: DurationFromNanos = BigInt.check(isGreaterThanOrEqualToBigInt(0n)).pipe(
+export const DurationFromNanos: DurationFromNanos = BigInt.check(isGreaterThanOrEqualToBigInt(bigint0)).pipe(
   decodeTo(Duration, Transformation.durationFromNanos)
 )
 
 /**
- * Schema type for {@link DurationFromMillis}.
+ * Companion type for {@link DurationFromMillis}.
  *
  * @category Duration
  * @since 4.0.0
  */
-export interface DurationFromMillis extends decodeTo<Duration, Number> {}
+export interface DurationFromMillis extends decodeTo<Duration, Number> {
+  readonly "Rebuild": DurationFromMillis
+}
 
 /**
  * A transformation schema that decodes a non-negative (possibly infinite)
@@ -8660,12 +8916,16 @@ export const DurationFromMillis: DurationFromMillis = Number.check(isGreaterThan
 )
 
 /**
- * Schema type for {@link BigDecimal}.
+ * Companion type for {@link BigDecimal}.
  *
- * @category Schemas
+ * @category BigDecimal
  * @since 4.0.0
  */
-export interface BigDecimal extends declare<BigDecimal_.BigDecimal> {}
+export interface BigDecimal extends declare<BigDecimal_.BigDecimal> {
+  readonly "Rebuild": BigDecimal
+}
+
+const BigDecimalString = String.annotate({ expected: "a string that will be decoded as a BigDecimal" })
 
 /**
  * A schema for `BigDecimal` values.
@@ -8674,6 +8934,7 @@ export interface BigDecimal extends declare<BigDecimal_.BigDecimal> {}
  *
  * - encodes `BigDecimal` as a `string`
  *
+ * @category BigDecimal
  * @since 4.0.0
  */
 export const BigDecimal: BigDecimal = declare(
@@ -8690,7 +8951,7 @@ export const BigDecimal: BigDecimal = declare(
     expected: "BigDecimal",
     toCodecJson: () =>
       link<BigDecimal_.BigDecimal>()(
-        String.annotate({ expected: "a string that will be decoded as a BigDecimal" }),
+        BigDecimalString,
         Transformation.bigDecimalFromString
       ),
     toArbitrary: () => (fc) =>
@@ -8702,12 +8963,40 @@ export const BigDecimal: BigDecimal = declare(
 )
 
 /**
- * Schema type for {@link UnknownFromJsonString}.
+ * Companion type for {@link BigDecimalFromString}.
+ *
+ * @category BigDecimal
+ * @since 4.0.0
+ */
+export interface BigDecimalFromString extends decodeTo<BigDecimal, String> {
+  readonly "Rebuild": BigDecimalFromString
+}
+
+/**
+ * A transformation schema that parses a string into a `BigDecimal`.
+ *
+ * Decoding:
+ * - A `string` is decoded as a `BigDecimal`.
+ *
+ * Encoding:
+ * - A `BigDecimal` is encoded as a `string`.
+ *
+ * @category BigDecimal
+ * @since 4.0.0
+ */
+export const BigDecimalFromString: BigDecimalFromString = BigDecimalString.pipe(
+  decodeTo(BigDecimal, Transformation.bigDecimalFromString)
+)
+
+/**
+ * Companion type for {@link UnknownFromJsonString}.
  *
  * @category JSON
  * @since 4.0.0
  */
-export interface UnknownFromJsonString extends fromJsonString<Unknown> {}
+export interface UnknownFromJsonString extends fromJsonString<Unknown> {
+  readonly "Rebuild": UnknownFromJsonString
+}
 
 /**
  * A transformation schema that decodes a JSON-encoded string into an `unknown` value.
@@ -8729,17 +9018,20 @@ export interface UnknownFromJsonString extends fromJsonString<Unknown> {}
  * // => { a: 1, b: 2 }
  * ```
  *
+ * @category JSON
  * @since 4.0.0
  */
-export const UnknownFromJsonString = fromJsonString(Unknown)
+export const UnknownFromJsonString: UnknownFromJsonString = fromJsonString(Unknown)
 
 /**
- * Schema type for {@link fromJsonString}.
+ * Companion type for {@link fromJsonString}.
  *
  * @category JSON
  * @since 4.0.0
  */
-export interface fromJsonString<S extends Top> extends decodeTo<S, String> {}
+export interface fromJsonString<S extends Top> extends decodeTo<S, String> {
+  readonly "Rebuild": fromJsonString<S>
+}
 
 /**
  * Returns a schema that decodes a JSON string and then decodes the parsed value
@@ -8802,6 +9094,7 @@ export interface fromJsonString<S extends Top> extends decodeTo<S, String> {}
  * // }
  * ```
  *
+ * @category JSON
  * @since 4.0.0
  */
 export function fromJsonString<S extends Top>(schema: S): fromJsonString<S> {
@@ -8813,12 +9106,14 @@ export function fromJsonString<S extends Top>(schema: S): fromJsonString<S> {
 }
 
 /**
- * Schema type for {@link File}.
+ * Companion type for {@link File}.
  *
- * @category Schemas
+ * @category File
  * @since 4.0.0
  */
-export interface File extends instanceOf<globalThis.File> {}
+export interface File extends instanceOf<globalThis.File> {
+  readonly "Rebuild": File
+}
 
 /**
  * Schema for JavaScript `File` objects.
@@ -8826,7 +9121,7 @@ export interface File extends instanceOf<globalThis.File> {}
  * The default JSON serializer encodes a `File` as `{ data, type, name, lastModified }`
  * where `data` is base64-encoded.
  *
- * @category Schemas
+ * @category File
  * @since 4.0.0
  */
 export const File: File = instanceOf(globalThis.File, {
@@ -8883,12 +9178,14 @@ export const File: File = instanceOf(globalThis.File, {
 })
 
 /**
- * Schema type for {@link FormData}.
+ * Companion type for {@link FormData}.
  *
- * @category Schemas
+ * @category FormData
  * @since 4.0.0
  */
-export interface FormData extends instanceOf<globalThis.FormData> {}
+export interface FormData extends instanceOf<globalThis.FormData> {
+  readonly "Rebuild": FormData
+}
 
 /**
  * Schema for JavaScript `FormData` objects.
@@ -8896,7 +9193,7 @@ export interface FormData extends instanceOf<globalThis.FormData> {}
  * The default JSON serializer encodes a `FormData` as an array of `[key, entry]`
  * pairs where each entry is tagged as `"String"` or `"File"`.
  *
- * @category Schemas
+ * @category FormData
  * @since 4.0.0
  */
 export const FormData: FormData = instanceOf(globalThis.FormData, {
@@ -8943,12 +9240,14 @@ export const FormData: FormData = instanceOf(globalThis.FormData, {
 })
 
 /**
- * Schema type for {@link fromFormData}.
+ * Companion type for {@link fromFormData}.
  *
- * @category Schemas
+ * @category FormData
  * @since 4.0.0
  */
-export interface fromFormData<S extends Top> extends decodeTo<S, FormData> {}
+export interface fromFormData<S extends Top> extends decodeTo<S, FormData> {
+  readonly "Rebuild": fromFormData<S>
+}
 
 /**
  * `Schema.fromFormData` returns a schema that reads a `FormData` instance,
@@ -9038,19 +9337,21 @@ export function fromFormData<S extends Top>(schema: S): fromFormData<S> {
 }
 
 /**
- * Schema type for {@link URLSearchParams}.
+ * Companion type for {@link URLSearchParams}.
  *
- * @category Schemas
+ * @category URLSearchParams
  * @since 4.0.0
  */
-export interface URLSearchParams extends instanceOf<globalThis.URLSearchParams> {}
+export interface URLSearchParams extends instanceOf<globalThis.URLSearchParams> {
+  readonly "Rebuild": URLSearchParams
+}
 
 /**
  * Schema for JavaScript `URLSearchParams` objects.
  *
  * The default JSON serializer encodes a `URLSearchParams` as a query string.
  *
- * @category Schemas
+ * @category URLSearchParams
  * @since 4.0.0
  */
 export const URLSearchParams: URLSearchParams = instanceOf(globalThis.URLSearchParams, {
@@ -9073,12 +9374,14 @@ export const URLSearchParams: URLSearchParams = instanceOf(globalThis.URLSearchP
 })
 
 /**
- * Schema type for {@link fromURLSearchParams}.
+ * Companion type for {@link fromURLSearchParams}.
  *
- * @category Schemas
+ * @category URLSearchParams
  * @since 4.0.0
  */
-export interface fromURLSearchParams<S extends Top> extends decodeTo<S, URLSearchParams> {}
+export interface fromURLSearchParams<S extends Top> extends decodeTo<S, URLSearchParams> {
+  readonly "Rebuild": fromURLSearchParams<S>
+}
 
 /**
  * `Schema.fromURLSearchParams` returns a schema that reads a `URLSearchParams`
@@ -9159,42 +9462,50 @@ export function fromURLSearchParams<S extends Top>(schema: S): fromURLSearchPara
 }
 
 /**
- * Schema type for {@link Finite}.
+ * Companion type for {@link Finite}.
  *
- * @category Schemas
+ * @category Number
  * @since 4.0.0
  */
-export interface Finite extends Number {}
+export interface Finite extends Number {
+  readonly "Rebuild": Finite
+}
 
 /**
  * A schema for finite numbers, rejecting `NaN`, `Infinity`, and `-Infinity`.
  *
+ * @category Number
  * @since 4.0.0
  */
 export const Finite: Finite = Number.check(isFinite())
 
 /**
- * Schema type for {@link Int}.
+ * Companion type for {@link Int}.
  *
- * @category Schemas
+ * @category Number
  * @since 4.0.0
  */
-export interface Int extends Number {}
+export interface Int extends Number {
+  readonly "Rebuild": Int
+}
 
 /**
  * A schema for integers, rejecting `NaN`, `Infinity`, and `-Infinity`.
  *
+ * @category Number
  * @since 4.0.0
  */
 export const Int: Int = Number.check(isInt())
 
 /**
- * Schema type for {@link NumberFromString}.
+ * Companion type for {@link NumberFromString}.
  *
- * @category Schemas
+ * @category Number
  * @since 4.0.0
  */
-export interface NumberFromString extends decodeTo<Finite, String> {}
+export interface NumberFromString extends decodeTo<Finite, String> {
+  readonly "Rebuild": NumberFromString
+}
 
 /**
  * A transformation schema that parses a string into a number.
@@ -9205,6 +9516,7 @@ export interface NumberFromString extends decodeTo<Finite, String> {}
  * Encoding:
  * - A number is encoded as a `string`.
  *
+ * @category Number
  * @since 4.0.0
  */
 export const NumberFromString: NumberFromString = String.annotate({
@@ -9212,12 +9524,14 @@ export const NumberFromString: NumberFromString = String.annotate({
 }).pipe(decodeTo(Number, Transformation.numberFromString))
 
 /**
- * Schema type for {@link FiniteFromString}.
+ * Companion type for {@link FiniteFromString}.
  *
- * @category Schemas
+ * @category Number
  * @since 4.0.0
  */
-export interface FiniteFromString extends decodeTo<Finite, String> {}
+export interface FiniteFromString extends decodeTo<Finite, String> {
+  readonly "Rebuild": FiniteFromString
+}
 
 /**
  * A transformation schema that parses a string into a finite number.
@@ -9229,6 +9543,7 @@ export interface FiniteFromString extends decodeTo<Finite, String> {}
  * Encoding:
  * - A finite number is encoded as a `string`.
  *
+ * @category Number
  * @since 4.0.0
  */
 export const FiniteFromString: FiniteFromString = String.annotate({
@@ -9236,27 +9551,58 @@ export const FiniteFromString: FiniteFromString = String.annotate({
 }).pipe(decodeTo(Finite, Transformation.numberFromString))
 
 /**
- * Schema type for {@link Trimmed}.
+ * Companion type for {@link BigIntFromString}.
  *
- * @category Schemas
+ * @category BigInt
  * @since 4.0.0
  */
-export interface Trimmed extends String {}
+export interface BigIntFromString extends decodeTo<BigInt, String> {
+  readonly "Rebuild": BigIntFromString
+}
+
+/**
+ * A transformation schema that parses a string into a `bigint`.
+ *
+ * Decoding:
+ * - A `string` is decoded as a `bigint`.
+ *
+ * Encoding:
+ * - A `bigint` is encoded as a `string`.
+ *
+ * @category BigInt
+ * @since 4.0.0
+ */
+export const BigIntFromString: BigIntFromString = make<String>(AST.bigIntString).pipe(
+  decodeTo(BigInt, Transformation.bigintFromString)
+)
+
+/**
+ * Companion type for {@link Trimmed}.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export interface Trimmed extends String {
+  readonly "Rebuild": Trimmed
+}
 
 /**
  * A schema for strings that contains no leading or trailing whitespaces.
  *
+ * @category String
  * @since 4.0.0
  */
 export const Trimmed: Trimmed = String.check(isTrimmed())
 
 /**
- * Schema type for {@link Trim}.
+ * Companion type for {@link Trim}.
  *
- * @category Schemas
+ * @category String
  * @since 4.0.0
  */
-export interface Trim extends decodeTo<Trimmed, String> {}
+export interface Trim extends decodeTo<Trimmed, String> {
+  readonly "Rebuild": Trim
+}
 
 /**
  * A transformation schema that trims whitespace from a string.
@@ -9267,6 +9613,7 @@ export interface Trim extends decodeTo<Trimmed, String> {}
  * Encoding:
  * - The trimmed string is encoded as is.
  *
+ * @category String
  * @since 4.0.0
  */
 export const Trim: Trim = String.annotate({
@@ -9274,14 +9621,146 @@ export const Trim: Trim = String.annotate({
 }).pipe(decodeTo(Trimmed, Transformation.trim()))
 
 /**
+ * Companion type for {@link StringFromBase64}.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export interface StringFromBase64 extends decodeTo<String, String> {
+  readonly "Rebuild": StringFromBase64
+}
+
+/**
+ * Decodes a base64 (RFC4648) encoded string into a UTF-8 string.
+ *
+ * Decoding:
+ * - A **valid** base64 encoded string is decoded as a UTF-8 `string`.
+ *
+ * Encoding:
+ * - A `string` is encoded as a base64-encoded string.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export const StringFromBase64: StringFromBase64 = String.annotate({
+  expected: "a base64 encoded string that will be decoded as a UTF-8 string"
+}).pipe(
+  decodeTo(String, Transformation.stringFromBase64String)
+)
+
+/**
+ * Companion type for {@link StringFromBase64Url}.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export interface StringFromBase64Url extends decodeTo<String, String> {
+  readonly "Rebuild": StringFromBase64Url
+}
+
+/**
+ * Decodes a base64 (URL) encoded string into a UTF-8 string.
+ *
+ * Decoding:
+ * - A **valid** base64 (URL) encoded string is decoded as a UTF-8 `string`.
+ *
+ * Encoding:
+ * - A `string` is encoded as a base64 (URL) encoded string.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export const StringFromBase64Url: StringFromBase64Url = String.annotate({
+  expected: "a base64 (URL) encoded string that will be decoded as a UTF-8 string"
+}).pipe(
+  decodeTo(String, Transformation.stringFromBase64UrlString)
+)
+
+/**
+ * Companion type for {@link StringFromHex}.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export interface StringFromHex extends decodeTo<String, String> {
+  readonly "Rebuild": StringFromHex
+}
+
+/**
+ * Decodes a hex encoded string into a UTF-8 string.
+ *
+ * Decoding:
+ * - A **valid** hex encoded string is decoded as a UTF-8 `string`.
+ *
+ * Encoding:
+ * - A `string` is encoded as a hex string.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export const StringFromHex: StringFromHex = String.annotate({
+  expected: "a hex encoded string that will be decoded as a UTF-8 string"
+}).pipe(
+  decodeTo(String, Transformation.stringFromHexString)
+)
+
+/**
+ * Companion type for {@link StringFromUriComponent}.
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export interface StringFromUriComponent extends decodeTo<String, String> {
+  readonly "Rebuild": StringFromUriComponent
+}
+
+/**
+ * Decodes a URI component encoded string into a UTF-8 string.
+ * Can be used to store data in a URL.
+ *
+ * Decoding:
+ * - A **valid** URI component encoded string is decoded as a UTF-8 `string`.
+ *
+ * Encoding:
+ * - A `string` is encoded as a URI component encoded string.
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ *
+ * const PaginationSchema = Schema.Struct({
+ *   maxItemPerPage: Schema.Number,
+ *   page: Schema.Number
+ * })
+ *
+ * const UrlSchema = Schema.StringFromUriComponent.pipe(
+ *   Schema.decodeTo(Schema.fromJsonString(PaginationSchema))
+ * )
+ *
+ * console.log(Schema.encodeSync(UrlSchema)({ maxItemPerPage: 10, page: 1 }))
+ * // %7B%22maxItemPerPage%22%3A10%2C%22page%22%3A1%7D
+ * ```
+ *
+ * @category String
+ * @since 4.0.0
+ */
+export const StringFromUriComponent: StringFromUriComponent = String.annotate({
+  expected: "a URI component encoded string that will be decoded as a UTF-8 string"
+}).pipe(
+  decodeTo(String, Transformation.stringFromUriComponent)
+)
+
+/**
  * A union schema for JavaScript property keys: `number | symbol | string`.
  *
- * @category Schemas
+ * @category PropertyKey
  * @since 4.0.0
  */
 export const PropertyKey = Union([Finite, Symbol, String])
 
 /**
+ * @category StandardSchema
  * @since 4.0.0
  */
 export const StandardSchemaV1FailureResult = Struct({
@@ -9292,12 +9771,14 @@ export const StandardSchemaV1FailureResult = Struct({
 })
 
 /**
- * Schema type for {@link BooleanFromBit}.
+ * Companion type for {@link BooleanFromBit}.
  *
- * @category Schemas
+ * @category Boolean
  * @since 4.0.0
  */
-export interface BooleanFromBit extends decodeTo<Boolean, Literals<readonly [0, 1]>> {}
+export interface BooleanFromBit extends decodeTo<Boolean, Literals<readonly [0, 1]>> {
+  readonly "Rebuild": BooleanFromBit
+}
 
 /**
  * A boolean parsed from 0 or 1.
@@ -9316,12 +9797,14 @@ export const BooleanFromBit: BooleanFromBit = Literals([0, 1]).pipe(
 )
 
 /**
- * Schema type for {@link Uint8Array}.
+ * Companion type for {@link Uint8Array}.
  *
- * @category Schemas
+ * @category Uint8Array
  * @since 4.0.0
  */
-export interface Uint8Array extends instanceOf<globalThis.Uint8Array<ArrayBufferLike>> {}
+export interface Uint8Array extends instanceOf<globalThis.Uint8Array<ArrayBufferLike>> {
+  readonly "Rebuild": Uint8Array
+}
 
 const Base64String = String.annotate({
   expected: "a base64 encoded string that will be decoded as Uint8Array",
@@ -9357,12 +9840,14 @@ export const Uint8Array: Uint8Array = instanceOf(globalThis.Uint8Array<ArrayBuff
 })
 
 /**
- * Schema type for {@link Uint8ArrayFromBase64}.
+ * Companion type for {@link Uint8ArrayFromBase64}.
  *
- * @category Schemas
+ * @category Uint8Array
  * @since 4.0.0
  */
-export interface Uint8ArrayFromBase64 extends decodeTo<Uint8Array, String> {}
+export interface Uint8ArrayFromBase64 extends decodeTo<Uint8Array, String> {
+  readonly "Rebuild": Uint8ArrayFromBase64
+}
 
 /**
  * A transformation schema that decodes a base64 encoded string into a
@@ -9382,12 +9867,14 @@ export const Uint8ArrayFromBase64: Uint8ArrayFromBase64 = Base64String.pipe(
 )
 
 /**
- * Schema type for {@link Uint8ArrayFromBase64Url}.
+ * Companion type for {@link Uint8ArrayFromBase64Url}.
  *
- * @category Schemas
+ * @category Uint8Array
  * @since 4.0.0
  */
-export interface Uint8ArrayFromBase64Url extends decodeTo<Uint8Array, String> {}
+export interface Uint8ArrayFromBase64Url extends decodeTo<Uint8Array, String> {
+  readonly "Rebuild": Uint8ArrayFromBase64Url
+}
 
 /**
  * A transformation schema that decodes a base64 (URL) encoded string into a
@@ -9412,12 +9899,14 @@ export const Uint8ArrayFromBase64Url: Uint8ArrayFromBase64Url = String.annotate(
 )
 
 /**
- * Schema type for {@link Uint8ArrayFromHex}.
+ * Companion type for {@link Uint8ArrayFromHex}.
  *
- * @category Schemas
+ * @category Uint8Array
  * @since 4.0.0
  */
-export interface Uint8ArrayFromHex extends decodeTo<Uint8Array, String> {}
+export interface Uint8ArrayFromHex extends decodeTo<Uint8Array, String> {
+  readonly "Rebuild": Uint8ArrayFromHex
+}
 
 /**
  * A transformation schema that decodes a hex encoded string into a
@@ -9442,12 +9931,14 @@ export const Uint8ArrayFromHex: Uint8ArrayFromHex = String.annotate({
 )
 
 /**
- * Schema type for {@link DateTimeUtc}.
+ * Companion type for {@link DateTimeUtc}.
  *
  * @category DateTime
  * @since 4.0.0
  */
-export interface DateTimeUtc extends declare<DateTime.Utc> {}
+export interface DateTimeUtc extends declare<DateTime.Utc> {
+  readonly "Rebuild": DateTimeUtc
+}
 
 /**
  * A schema for `DateTime.Utc` values.
@@ -9484,12 +9975,14 @@ export const DateTimeUtc: DateTimeUtc = declare(
 )
 
 /**
- * Schema type for {@link DateTimeUtcFromDate}.
+ * Companion type for {@link DateTimeUtcFromDate}.
  *
  * @category DateTime
  * @since 4.0.0
  */
-export interface DateTimeUtcFromDate extends decodeTo<DateTimeUtc, Date> {}
+export interface DateTimeUtcFromDate extends decodeTo<DateTimeUtc, Date> {
+  readonly "Rebuild": DateTimeUtcFromDate
+}
 
 /**
  * A transformation schema that decodes a `Date` into a `DateTime.Utc`.
@@ -9511,12 +10004,14 @@ export const DateTimeUtcFromDate: DateTimeUtcFromDate = DateValid.pipe(
 )
 
 /**
- * Schema type for {@link DateTimeUtcFromString}.
+ * Companion type for {@link DateTimeUtcFromString}.
  *
  * @category DateTime
  * @since 4.0.0
  */
-export interface DateTimeUtcFromString extends decodeTo<DateTimeUtc, String> {}
+export interface DateTimeUtcFromString extends decodeTo<DateTimeUtc, String> {
+  readonly "Rebuild": DateTimeUtcFromString
+}
 
 /**
  * A transformation schema that decodes a string into a `DateTime.Utc`.
@@ -9542,12 +10037,14 @@ export const DateTimeUtcFromString: DateTimeUtcFromString = String.annotate({
 )
 
 /**
- * Schema type for {@link DateTimeUtcFromMillis}.
+ * Companion type for {@link DateTimeUtcFromMillis}.
  *
  * @category DateTime
  * @since 4.0.0
  */
-export interface DateTimeUtcFromMillis extends decodeTo<instanceOf<DateTime.Utc>, Number> {}
+export interface DateTimeUtcFromMillis extends decodeTo<instanceOf<DateTime.Utc>, Number> {
+  readonly "Rebuild": DateTimeUtcFromMillis
+}
 
 /**
  * A transformation schema that decodes a number into a `DateTime.Utc`.
@@ -9569,12 +10066,14 @@ export const DateTimeUtcFromMillis: DateTimeUtcFromMillis = Number.pipe(
 )
 
 /**
- * Schema type for {@link TimeZoneOffset}.
+ * Companion type for {@link TimeZoneOffset}.
  *
  * @category DateTime
  * @since 4.0.0
  */
-export interface TimeZoneOffset extends declare<DateTime.TimeZone.Offset> {}
+export interface TimeZoneOffset extends declare<DateTime.TimeZone.Offset> {
+  readonly "Rebuild": TimeZoneOffset
+}
 
 /**
  * A schema for `DateTime.TimeZone.Offset` values.
@@ -9611,12 +10110,16 @@ export const TimeZoneOffset: TimeZoneOffset = declare(
 )
 
 /**
- * Schema type for {@link TimeZoneNamed}.
+ * Companion type for {@link TimeZoneNamed}.
  *
  * @category DateTime
  * @since 4.0.0
  */
-export interface TimeZoneNamed extends declare<DateTime.TimeZone.Named> {}
+export interface TimeZoneNamed extends declare<DateTime.TimeZone.Named> {
+  readonly "Rebuild": TimeZoneNamed
+}
+
+const TimeZoneNamedString = String.annotate({ expected: "an IANA time zone identifier" })
 
 /**
  * A schema for `DateTime.TimeZone.Named` values.
@@ -9642,7 +10145,7 @@ export const TimeZoneNamed: TimeZoneNamed = declare(
     expected: "DateTime.TimeZone.Named",
     toCodecJson: () =>
       link<DateTime.TimeZone.Named>()(
-        String.annotate({ expected: "an IANA time zone identifier" }),
+        TimeZoneNamedString,
         Transformation.timeZoneNamedFromString
       ),
     toArbitrary: () => (fc) =>
@@ -9657,12 +10160,44 @@ export const TimeZoneNamed: TimeZoneNamed = declare(
 )
 
 /**
- * Schema type for {@link TimeZone}.
+ * Companion type for {@link TimeZoneNamedFromString}.
  *
  * @category DateTime
  * @since 4.0.0
  */
-export interface TimeZone extends declare<DateTime.TimeZone> {}
+export interface TimeZoneNamedFromString extends decodeTo<TimeZoneNamed, String> {
+  readonly "Rebuild": TimeZoneNamedFromString
+}
+
+/**
+ * A transformation schema that parses an IANA time zone identifier string into a `DateTime.TimeZone.Named`.
+ *
+ * Decoding:
+ * - A `string` is decoded as a `DateTime.TimeZone.Named`.
+ *
+ * Encoding:
+ * - A `DateTime.TimeZone.Named` is encoded as a `string`.
+ *
+ * @category DateTime
+ * @since 4.0.0
+ */
+export const TimeZoneNamedFromString: TimeZoneNamedFromString = TimeZoneNamedString.pipe(
+  decodeTo(TimeZoneNamed, Transformation.timeZoneNamedFromString)
+)
+
+/**
+ * Companion type for {@link TimeZone}.
+ *
+ * @category DateTime
+ * @since 4.0.0
+ */
+export interface TimeZone extends declare<DateTime.TimeZone> {
+  readonly "Rebuild": TimeZone
+}
+
+const TimeZoneString = String.annotate({
+  expected: "a time zone string (IANA identifier or offset like +03:00)"
+})
 
 /**
  * A schema for `DateTime.TimeZone` values.
@@ -9689,7 +10224,7 @@ export const TimeZone: TimeZone = declare(
     expected: "DateTime.TimeZone",
     toCodecJson: () =>
       link<DateTime.TimeZone>()(
-        String.annotate({ expected: "a time zone string (IANA identifier or offset like +03:00)" }),
+        TimeZoneString,
         Transformation.timeZoneFromString
       ),
     toArbitrary: () => (fc) =>
@@ -9707,12 +10242,44 @@ export const TimeZone: TimeZone = declare(
 )
 
 /**
- * Schema type for {@link DateTimeZoned}.
+ * Companion type for {@link TimeZoneFromString}.
  *
  * @category DateTime
  * @since 4.0.0
  */
-export interface DateTimeZoned extends declare<DateTime.Zoned> {}
+export interface TimeZoneFromString extends decodeTo<TimeZone, String> {
+  readonly "Rebuild": TimeZoneFromString
+}
+
+/**
+ * A transformation schema that parses a time zone string into a `DateTime.TimeZone`.
+ *
+ * Decoding:
+ * - A `string` (IANA identifier or offset like `+03:00`) is decoded as a `DateTime.TimeZone`.
+ *
+ * Encoding:
+ * - A `DateTime.TimeZone` is encoded as a `string`.
+ *
+ * @category DateTime
+ * @since 4.0.0
+ */
+export const TimeZoneFromString: TimeZoneFromString = TimeZoneString.pipe(
+  decodeTo(TimeZone, Transformation.timeZoneFromString)
+)
+
+/**
+ * Companion type for {@link DateTimeZoned}.
+ *
+ * @category DateTime
+ * @since 4.0.0
+ */
+export interface DateTimeZoned extends declare<DateTime.Zoned> {
+  readonly "Rebuild": DateTimeZoned
+}
+
+const DateTimeZonedString = String.annotate({
+  expected: "a zoned DateTime string (e.g. 2024-01-01T00:00:00.000+00:00[Europe/London])"
+})
 
 /**
  * A schema for `DateTime.Zoned` values.
@@ -9739,7 +10306,7 @@ export const DateTimeZoned: DateTimeZoned = declare(
     expected: "DateTime.Zoned",
     toCodecJson: () =>
       link<DateTime.Zoned>()(
-        String.annotate({ expected: "a zoned DateTime string (e.g. 2024-01-01T00:00:00.000+00:00[Europe/London])" }),
+        DateTimeZonedString,
         Transformation.dateTimeZonedFromString
       ),
     toArbitrary: () => (fc, ctx) =>
@@ -9755,6 +10322,32 @@ export const DateTimeZoned: DateTimeZoned = declare(
     toFormatter: () => (zoned) => DateTime.formatIsoZoned(zoned),
     toEquivalence: () => DateTime.Equivalence
   }
+)
+
+/**
+ * Companion type for {@link DateTimeZonedFromString}.
+ *
+ * @category DateTime
+ * @since 4.0.0
+ */
+export interface DateTimeZonedFromString extends decodeTo<DateTimeZoned, String> {
+  readonly "Rebuild": DateTimeZonedFromString
+}
+
+/**
+ * A transformation schema that parses a zoned DateTime string into a `DateTime.Zoned`.
+ *
+ * Decoding:
+ * - A `string` (e.g. `2024-01-01T00:00:00.000+00:00[Europe/London]`) is decoded as a `DateTime.Zoned`.
+ *
+ * Encoding:
+ * - A `DateTime.Zoned` is encoded as a `string`.
+ *
+ * @category DateTime
+ * @since 4.0.0
+ */
+export const DateTimeZonedFromString: DateTimeZonedFromString = DateTimeZonedString.pipe(
+  decodeTo(DateTimeZoned, Transformation.dateTimeZonedFromString)
 )
 
 // -----------------------------------------------------------------------------
@@ -9780,7 +10373,7 @@ export interface Class<Self, S extends Top & { readonly fields: Struct.Fields },
     S["EncodingServices"],
     AST.Declaration,
     decodeTo<declareConstructor<Self, S["Encoded"], readonly [S], S["Iso"]>, S>,
-    S["~type.make.in"],
+    RequiredKeys<S["~type.make.in"]> extends never ? void | S["~type.make.in"] : S["~type.make.in"],
     S["Iso"],
     readonly [S],
     Self,
@@ -9791,13 +10384,13 @@ export interface Class<Self, S extends Top & { readonly fields: Struct.Fields },
     S["~encoded.optionality"]
   >
 {
-  // intentionally left without `readonly "~rebuild.out": this`
   new(
     ...args: {} extends S["~type.make.in"] ? [props?: S["~type.make.in"], options?: MakeOptions]
       : [props: S["~type.make.in"], options?: MakeOptions]
   ): S["Type"] & Inherited
   readonly identifier: string
   readonly fields: S["fields"]
+
   /**
    * Returns a new struct with the fields modified by the provided function.
    *
@@ -9818,30 +10411,21 @@ export interface Class<Self, S extends Top & { readonly fields: Struct.Fields },
       readonly unsafePreserveChecks?: boolean | undefined
     } | undefined
   ): Struct<Simplify<Readonly<To>>>
-}
 
-type AddStaticMembers<C, Static> = C & Pick<Static, Exclude<keyof Static, keyof C>>
-
-/**
- * A {@link Class} that additionally exposes an `extend` method, allowing
- * subclasses to be derived with extra fields while inheriting all parent
- * fields and validation.
- *
- * @since 4.0.0
- */
-export interface ExtendableClass<Self, S extends Top & { readonly fields: Struct.Fields }, Inherited>
-  extends Class<Self, S, Inherited>
-{
-  extend<Extended, Static = {}, Brand = {}>(
+  extend<Extended = never, Static = {}, Brand = {}>(
     identifier: string
   ): <NewFields extends Struct.Fields>(
     fields: NewFields,
     annotations?: Annotations.Declaration<Extended, readonly [Struct<Simplify<Assign<S["fields"], NewFields>>>]>
-  ) => AddStaticMembers<
-    ExtendableClass<Extended, Struct<Simplify<Assign<S["fields"], NewFields>>>, Self & Brand>,
+  ) => [Extended] extends [never] ? MissingSelfGeneric<"Base.extend"> : InheritStaticMembers<
+    Class<Extended, Struct<Simplify<Assign<S["fields"], NewFields>>>, Self & Brand>,
     Static
   >
 }
+
+// Merges custom static members from a parent class onto the extended class,
+// giving priority to the extended class's own members (e.g. schema-generated statics).
+type InheritStaticMembers<C, Static> = C & Pick<Static, Exclude<keyof Static, keyof C>>
 
 const immerable: unique symbol = globalThis.Symbol.for("immer-draftable") as any
 
@@ -9853,20 +10437,17 @@ function makeClass<
   Inherited: Inherited,
   identifier: string,
   struct: S,
-  annotations?: Annotations.Declaration<Self, readonly [S]>
+  annotations: Annotations.Declaration<Self, readonly [S]> | undefined,
+  proto: ((identifier: string) => object) | undefined
 ): any {
   const getClassSchema = getClassSchemaFactory(struct, identifier, annotations)
   const ClassTypeId = getClassTypeId(identifier) // HMR support
 
-  return class extends Inherited {
+  const out = class extends Inherited {
     constructor(...[input, options]: ReadonlyArray<any>) {
-      const props = input ?? {}
-      const validated = struct.makeUnsafe(props, options)
-      super({ ...props, ...validated }, { ...options, disableChecks: true })
-    }
-
-    toString() {
-      return `${identifier}(${format({ ...this })})`
+      input = input ?? {}
+      const validated = struct.make(input, options)
+      super({ ...input, ...validated }, { ...options, disableChecks: true })
     }
 
     static readonly [TypeId] = TypeId
@@ -9876,24 +10457,6 @@ function makeClass<
     }
 
     static readonly [immerable] = true
-
-    declare static readonly "~rebuild.out": decodeTo<declareConstructor<Self, S["Encoded"], readonly [S], S["Iso"]>, S>
-    declare static readonly "~annotate.in": Annotations.Bottom<Self, readonly [S]>
-
-    declare static readonly "Type": Self
-    declare static readonly "Encoded": S["Encoded"]
-    declare static readonly "DecodingServices": S["DecodingServices"]
-    declare static readonly "EncodingServices": S["EncodingServices"]
-
-    declare static readonly "~type.make.in": S["~type.make.in"]
-    declare static readonly "~type.make": Self
-    declare static readonly "~type.constructor.default": S["~type.constructor.default"]
-    declare static readonly "Iso": S["Iso"]
-
-    declare static readonly "~type.mutability": S["~type.mutability"]
-    declare static readonly "~type.optionality": S["~type.optionality"]
-    declare static readonly "~encoded.mutability": S["~encoded.mutability"]
-    declare static readonly "~encoded.optionality": S["~encoded.optionality"]
 
     static readonly identifier = identifier
     static readonly fields = struct.fields
@@ -9907,11 +10470,17 @@ function makeClass<
     static rebuild(ast: AST.Declaration) {
       return getClassSchema(this).rebuild(ast)
     }
-    static makeUnsafe(input: S["~type.make.in"], options?: MakeOptions): Self {
+    static make(input: S["~type.make.in"], options?: MakeOptions): Self {
       return new this(input, options)
     }
     static makeOption(input: S["~type.make.in"], options?: MakeOptions): Option_.Option<Self> {
-      return Parser.makeOption(getClassSchema(this) as any)(input, options) as any
+      return Parser.makeOption(getClassSchema(this) as any)(input ?? {}, options) as any
+    }
+    static makeEffect(input: S["~type.make.in"], options?: MakeOptions): Effect.Effect<Self, SchemaError> {
+      return Effect.mapErrorEager(
+        Parser.makeEffect(getClassSchema(this) as any)(input ?? {}, options),
+        (issue) => new SchemaError(issue)
+      ) as any
     }
     static annotate(annotations: Annotations.Declaration<Self, readonly [S]>) {
       return this.rebuild(AST.annotate(this.ast, annotations))
@@ -9934,7 +10503,8 @@ function makeClass<
           this,
           identifier,
           makeStruct(AST.struct(fields, struct.ast.checks, { identifier }), fields),
-          annotations
+          annotations,
+          proto
         )
       }
     }
@@ -9947,6 +10517,12 @@ function makeClass<
       return struct.mapFields(f, options)
     }
   }
+
+  if (proto !== undefined) {
+    Object.assign(out.prototype, proto(identifier))
+  }
+
+  return out
 }
 
 function getClassTransformation(self: new(...args: ReadonlyArray<any>) => any) {
@@ -10002,6 +10578,9 @@ function isStruct(schema: Struct.Fields | Struct<Struct.Fields>): schema is Stru
   return isSchema(schema)
 }
 
+type MissingSelfGeneric<Usage extends string> =
+  `Missing \`Self\` generic - use \`class Self extends ${Usage}<Self>(...)\``
+
 /**
  * Creates a schema-backed class whose constructor validates input against a
  * {@link Struct} schema. Construction throws a {@link SchemaError} on invalid
@@ -10047,23 +10626,33 @@ function isStruct(schema: Struct.Fields | Struct<Struct.Fields>): schema is Stru
  * @since 4.0.0
  */
 export const Class: {
-  <Self, Brand = {}>(identifier: string): {
+  <Self = never, Brand = {}>(identifier: string): {
     <const Fields extends Struct.Fields>(
       fields: Fields,
       annotations?: Annotations.Declaration<Self, readonly [Struct<Fields>]>
-    ): ExtendableClass<Self, Struct<Fields>, Brand>
+    ): [Self] extends [never] ? MissingSelfGeneric<"Schema.Class"> : Class<Self, Struct<Fields>, Brand>
     <S extends Struct<Struct.Fields>>(
       schema: S,
       annotations?: Annotations.Declaration<Self, readonly [S]>
-    ): ExtendableClass<Self, S, Brand>
+    ): [Self] extends [never] ? MissingSelfGeneric<"Schema.Class"> : Class<Self, S, Brand>
   }
 } = <Self, Brand = {}>(identifier: string) =>
 (
   schema: Struct.Fields | Struct<Struct.Fields>,
   annotations?: Annotations.Declaration<Self, readonly [Struct<Struct.Fields>]>
-): ExtendableClass<Self, Struct<Struct.Fields>, Brand> => {
+): [Self] extends [never] ? MissingSelfGeneric<"Schema.Class"> : Class<Self, Struct<Struct.Fields>, Brand> => {
   const struct = isStruct(schema) ? schema : Struct(schema)
-  return makeClass(Data.Class, identifier, struct, annotations)
+  return makeClass(
+    Data.Class,
+    identifier,
+    struct,
+    annotations,
+    (identifier) => ({
+      toString() {
+        return `${identifier}(${format({ ...this })})`
+      }
+    })
+  )
 }
 
 /**
@@ -10092,12 +10681,12 @@ export const Class: {
  * @since 4.0.0
  */
 export const TaggedClass: {
-  <Self, Brand = {}>(identifier?: string): {
+  <Self = never, Brand = {}>(identifier?: string): {
     <Tag extends string, const Fields extends Struct.Fields>(
       tag: Tag,
       fields: Fields,
       annotations?: Annotations.Declaration<Self, readonly [TaggedStruct<Tag, Fields>]>
-    ): ExtendableClass<Self, TaggedStruct<Tag, Fields>, Brand>
+    ): [Self] extends [never] ? MissingSelfGeneric<"Schema.TaggedClass"> : Class<Self, TaggedStruct<Tag, Fields>, Brand>
     <Tag extends string, S extends Struct<Struct.Fields>>(
       tag: Tag,
       schema: S,
@@ -10105,7 +10694,8 @@ export const TaggedClass: {
         Self,
         readonly [Struct<Simplify<{ readonly _tag: tag<Tag> } & S["fields"]>>]
       >
-    ): ExtendableClass<Self, Struct<Simplify<{ readonly _tag: tag<Tag> } & S["fields"]>>, Brand>
+    ): [Self] extends [never] ? MissingSelfGeneric<"Schema.TaggedClass">
+      : Class<Self, Struct<Simplify<{ readonly _tag: tag<Tag> } & S["fields"]>>, Brand>
   }
 } = (identifier?: string) => {
   return (
@@ -10113,7 +10703,7 @@ export const TaggedClass: {
     schema: Struct.Fields | Struct<Struct.Fields>,
     annotations?: Annotations.Declaration<any, readonly [Struct<Struct.Fields>]>
   ): any => {
-    return Class(identifier ?? tagValue)(
+    return Class<any, {}>(identifier ?? tagValue)(
       isStruct(schema) ?
         schema.mapFields((fields) => ({ _tag: tag(tagValue), ...fields }), {
           unsafePreserveChecks: true
@@ -10123,17 +10713,6 @@ export const TaggedClass: {
     )
   }
 }
-
-/**
- * Interface for schema-backed error classes created with {@link ErrorClass}.
- * Extends {@link ExtendableClass} and is also a `YieldableError`, so instances
- * can be yielded inside `Effect.gen` as failures.
- *
- * @since 4.0.0
- */
-export interface ErrorClass<Self, S extends Top & { readonly fields: Struct.Fields }, Inherited>
-  extends ExtendableClass<Self, S, Inherited>
-{}
 
 /**
  * Creates a schema-backed error class that can be used as a typed,
@@ -10159,24 +10738,34 @@ export interface ErrorClass<Self, S extends Top & { readonly fields: Struct.Fiel
  * @since 4.0.0
  */
 export const ErrorClass: {
-  <Self, Brand = {}>(identifier: string): {
+  <Self = never, Brand = {}>(identifier: string): {
     <const Fields extends Struct.Fields>(
       fields: Fields,
       annotations?: Annotations.Declaration<Self, readonly [Struct<Fields>]>
-    ): ErrorClass<Self, Struct<Fields>, Cause_.YieldableError & Brand>
+    ): [Self] extends [never] ? MissingSelfGeneric<"Schema.ErrorClass">
+      : Class<Self, Struct<Fields>, Cause_.YieldableError & Brand>
     <S extends Struct<Struct.Fields>>(
       schema: S,
       annotations?: Annotations.Declaration<Self, readonly [S]>
-    ): ErrorClass<Self, S, Cause_.YieldableError & Brand>
+    ): [Self] extends [never] ? MissingSelfGeneric<"Schema.ErrorClass"> : Class<Self, S, Cause_.YieldableError & Brand>
   }
 } = <Self, Brand = {}>(identifier: string) =>
 (
   schema: Struct.Fields | Struct<Struct.Fields>,
   annotations?: Annotations.Declaration<Self, readonly [Struct<Struct.Fields>]>
-): ErrorClass<Self, Struct<Struct.Fields>, Cause_.YieldableError & Brand> => {
+): [Self] extends [never] ? MissingSelfGeneric<"Schema.ErrorClass">
+  : Class<Self, Struct<Struct.Fields>, Cause_.YieldableError & Brand> =>
+{
   const struct = isStruct(schema) ? schema : Struct(schema)
-  const self = makeClass(core.Error, identifier, struct, annotations)
-  ;(self.prototype as any).name = identifier
+  const self = makeClass(
+    core.Error,
+    identifier,
+    struct,
+    annotations,
+    (identifier) => ({
+      name: identifier
+    })
+  )
   return self
 }
 
@@ -10203,12 +10792,13 @@ export const ErrorClass: {
  * @since 4.0.0
  */
 export const TaggedErrorClass: {
-  <Self, Brand = {}>(identifier?: string): {
+  <Self = never, Brand = {}>(identifier?: string): {
     <Tag extends string, const Fields extends Struct.Fields>(
       tag: Tag,
       fields: Fields,
       annotations?: Annotations.Declaration<Self, readonly [TaggedStruct<Tag, Fields>]>
-    ): ErrorClass<Self, TaggedStruct<Tag, Fields>, Cause_.YieldableError & Brand>
+    ): [Self] extends [never] ? MissingSelfGeneric<"Schema.TaggedErrorClass">
+      : Class<Self, TaggedStruct<Tag, Fields>, Cause_.YieldableError & Brand>
     <Tag extends string, S extends Struct<Struct.Fields>>(
       tag: Tag,
       schema: S,
@@ -10216,7 +10806,8 @@ export const TaggedErrorClass: {
         Self,
         readonly [Struct<Simplify<{ readonly _tag: tag<Tag> } & S["fields"]>>]
       >
-    ): ErrorClass<Self, Struct<Simplify<{ readonly _tag: tag<Tag> } & S["fields"]>>, Cause_.YieldableError & Brand>
+    ): [Self] extends [never] ? MissingSelfGeneric<"Schema.TaggedErrorClass">
+      : Class<Self, Struct<Simplify<{ readonly _tag: tag<Tag> } & S["fields"]>>, Cause_.YieldableError & Brand>
   }
 } = (identifier?: string) => {
   return (
@@ -10224,7 +10815,7 @@ export const TaggedErrorClass: {
     schema: Struct.Fields | Struct<Struct.Fields>,
     annotations?: Annotations.Declaration<any, readonly [Struct<Struct.Fields>]>
   ): any => {
-    return ErrorClass(identifier ?? tagValue)(
+    return ErrorClass<any, {}>(identifier ?? tagValue)(
       isStruct(schema) ?
         schema.mapFields((fields) => ({ _tag: tag(tagValue), ...fields }), {
           unsafePreserveChecks: true
@@ -10303,7 +10894,7 @@ export function toArbitrary<S extends Top>(schema: S): FastCheck.Arbitrary<S["Ty
  * @since 4.0.0
  */
 export function overrideToFormatter<S extends Top>(toFormatter: () => Formatter<S["Type"]>) {
-  return (self: S): S["~rebuild.out"] => {
+  return (self: S): S["Rebuild"] => {
     return self.annotate({ toFormatter })
   }
 }
@@ -10468,7 +11059,7 @@ export function toFormatter<T>(schema: Schema<T>, options?: {
  * @since 4.0.0
  */
 export function overrideToEquivalence<S extends Top>(toEquivalence: () => Equivalence.Equivalence<S["Type"]>) {
-  return (self: S): S["~rebuild.out"] => self.annotate({ toEquivalence })
+  return (self: S): S["Rebuild"] => self.annotate({ toEquivalence })
 }
 
 /**
@@ -10567,7 +11158,66 @@ export function toJsonSchemaDocument(schema: Top, options?: ToJsonSchemaOptions)
  * @since 4.0.0
  */
 export function toCodecJson<T, E, RD, RE>(schema: Codec<T, E, RD, RE>): Codec<T, Json, RD, RE> {
-  return make(InternalToCodec.toCodecJson(schema.ast))
+  return make(toCodecJsonTop(schema.ast))
+}
+
+const toCodecJsonTop = AST.toCodec((ast) => {
+  const out = toCodecJsonBase(ast, toCodecJsonTop)
+  return out !== ast && AST.isOptional(ast) ? AST.optionalKeyLastLink(out) : out
+})
+
+function toCodecJsonBase(ast: AST.AST, recur: (ast: AST.AST) => AST.AST): AST.AST {
+  switch (ast._tag) {
+    case "Declaration": {
+      const getLink = ast.annotations?.toCodecJson ?? ast.annotations?.toCodec
+      if (Predicate.isFunction(getLink)) {
+        const tps = AST.isDeclaration(ast)
+          ? ast.typeParameters.map((tp) => InternalSchema.make(AST.toEncoded(tp)))
+          : []
+        const link = getLink(tps)
+        const to = recur(link.to)
+        return AST.replaceEncoding(ast, to === link.to ? [link] : [new AST.Link(to, link.transformation)])
+      }
+      return AST.replaceEncoding(ast, [AST.unknownToNull])
+    }
+    case "Unknown":
+    case "ObjectKeyword":
+      return AST.replaceEncoding(ast, [AST.unknownToJson])
+    case "Undefined":
+    case "Void":
+    case "Literal":
+    case "Number":
+      return ast.toCodecJson()
+    case "UniqueSymbol":
+    case "Symbol":
+    case "BigInt":
+      return ast.toCodecStringTree()
+    case "Objects": {
+      if (ast.propertySignatures.some((ps) => typeof ps.name !== "string")) {
+        throw new globalThis.Error("Objects property names must be strings", { cause: ast })
+      }
+      return ast.recur(recur)
+    }
+    case "Union": {
+      const sortedTypes = InternalSchema.jsonReorder(ast.types)
+      if (sortedTypes !== ast.types) {
+        return new AST.Union(
+          sortedTypes,
+          ast.mode,
+          ast.annotations,
+          ast.checks,
+          ast.encoding,
+          ast.context
+        ).recur(recur)
+      }
+      return ast.recur(recur)
+    }
+    case "Arrays":
+    case "Suspend":
+      return ast.recur(recur)
+  }
+  // `Schema.Any` is used as an escape hatch
+  return ast
 }
 
 /**
@@ -10578,7 +11228,32 @@ export function toCodecJson<T, E, RD, RE>(schema: Codec<T, E, RD, RE>): Codec<T,
  * @since 4.0.0
  */
 export function toCodecIso<S extends Top>(schema: S): Codec<S["Type"], S["Iso"]> {
-  return make(InternalToCodec.toCodecIso(AST.toType(schema.ast)))
+  return make(toCodecIsoTop(AST.toType(schema.ast)))
+}
+
+const toCodecIsoTop = memoize((ast: AST.AST): AST.AST => {
+  const out = toCodecIsoBase(ast, toCodecIsoTop)
+  return out !== ast && AST.isOptional(ast) ? AST.optionalKeyLastLink(out) : out
+})
+
+function toCodecIsoBase(ast: AST.AST, recur: (ast: AST.AST) => AST.AST): AST.AST {
+  switch (ast._tag) {
+    case "Declaration": {
+      const getLink = ast.annotations?.toCodecIso ?? ast.annotations?.toCodec
+      if (Predicate.isFunction(getLink)) {
+        const link = getLink(ast.typeParameters.map((tp) => InternalSchema.make(tp)))
+        const to = recur(link.to)
+        return AST.replaceEncoding(ast, to === link.to ? [link] : [new AST.Link(to, link.transformation)])
+      }
+      return ast
+    }
+    case "Arrays":
+    case "Objects":
+    case "Union":
+    case "Suspend":
+      return ast.recur(recur)
+  }
+  return ast
 }
 
 /**
@@ -10617,11 +11292,13 @@ export function toCodecStringTree<T, E, RD, RE>(
   schema: Codec<T, E, RD, RE>,
   options?: { readonly keepDeclarations?: boolean | undefined }
 ): Codec<T, unknown, RD, RE> {
-  if (options?.keepDeclarations === true) {
-    return make(toCodecEnsureArray(serializerStringTreeKeepDeclarations(schema.ast)))
-  } else {
-    return make(toCodecEnsureArray(serializerStringTree(schema.ast)))
-  }
+  return make(
+    toCodecEnsureArray(
+      options?.keepDeclarations === true
+        ? serializerStringTreeKeepDeclarations(schema.ast)
+        : serializerStringTree(schema.ast)
+    )
+  )
 }
 
 type XmlEncoderOptions = {
@@ -10754,7 +11431,7 @@ function getStringTreePriority(ast: AST.AST): number {
   }
 }
 
-const treeReorder = InternalToCodec.makeReorder(getStringTreePriority)
+const treeReorder = InternalSchema.makeReorder(getStringTreePriority)
 
 function serializerTree(
   ast: AST.AST,
@@ -10959,7 +11636,6 @@ export interface overrideToCodecIso<S extends Top, Iso> extends
     S["~encoded.optionality"]
   >
 {
-  readonly "~rebuild.out": this
   readonly schema: S
 }
 
@@ -11142,13 +11818,30 @@ export const MutableJson: Codec<MutableJson> = make(AST.MutableJson)
 // -----------------------------------------------------------------------------
 
 /**
- * Return all the typed annotations from the schema.
+ * Resolves the typed annotations from a schema. The term "resolve" (rather
+ * than "get") reflects the lookup strategy: if the schema has checks, the
+ * annotations are taken from the last check; otherwise they are taken from
+ * the base schema instance.
  *
  * @category Schema Resolvers
  * @since 4.0.0
  */
-export function resolveInto<S extends Top>(schema: S): S["~annotate.in"] | undefined {
+export function resolveAnnotations<S extends Top>(
+  schema: S
+): Annotations.Bottom<S["Type"], S["~type.parameters"]> | undefined {
   return InternalAnnotations.resolve(schema.ast)
+}
+
+/**
+ * Resolves the context (key-level) annotations from a schema. Context
+ * annotations are those attached via `annotateKey` and live on the AST's
+ * `context` rather than on the schema node itself.
+ *
+ * @category Schema Resolvers
+ * @since 4.0.0
+ */
+export function resolveAnnotationsKey<S extends Top>(schema: S): Annotations.Key<S["Type"]> | undefined {
+  return schema.ast.context?.annotations
 }
 
 /**
@@ -11156,7 +11849,7 @@ export function resolveInto<S extends Top>(schema: S): S["~annotate.in"] | undef
  * metadata to schemas. Annotations control documentation, validation messages,
  * JSON Schema generation, equivalence, arbitrary generation, and more.
  *
- * Use {@link resolveInto} to read the annotations attached to a schema at
+ * Use {@link resolveAnnotations} to read the annotations attached to a schema at
  * runtime.
  *
  * @since 4.0.0
@@ -11191,7 +11884,7 @@ export declare namespace Annotations {
    * const schema = Schema.String.annotate({ version: [1, 2, 0] })
    *
    * // const version: readonly [major: number, minor: number, patch: number] | undefined
-   * const version = Schema.resolveInto(schema)?.["version"]
+   * const version = Schema.resolveAnnotations(schema)?.["version"]
    *
    * if (version) {
    *   // Access individual parts of the version

@@ -1,4 +1,4 @@
-import { Effect, Layer, Metric, Option, Queue, Schema, ServiceMap } from "effect"
+import { Context, Effect, Layer, Metric, Option, Queue, Schema } from "effect"
 import { Headers } from "effect/unstable/http"
 import * as Rpc from "effect/unstable/rpc/Rpc"
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup"
@@ -18,7 +18,7 @@ class StreamUsers extends Rpc.make("StreamUsers", {
   stream: true
 }) {}
 
-class CurrentUser extends ServiceMap.Service<CurrentUser, User>()("CurrentUser") {}
+class CurrentUser extends Context.Service<CurrentUser, User>()("CurrentUser") {}
 
 class Unauthorized extends Schema.ErrorClass<Unauthorized>("Unauthorized")({
   _tag: Schema.tag("Unauthorized")

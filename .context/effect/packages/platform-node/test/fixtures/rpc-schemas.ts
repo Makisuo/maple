@@ -1,4 +1,4 @@
-import { Effect, Layer, Metric, Option, Queue, Schema, ServiceMap } from "effect"
+import { Context, Deferred, Effect, Layer, Metric, Option, Queue, Schema } from "effect"
 import { Headers } from "effect/unstable/http"
 import * as Rpc from "effect/unstable/rpc/Rpc"
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup"
@@ -18,7 +18,7 @@ class StreamUsers extends Rpc.make("StreamUsers", {
   stream: true
 }) {}
 
-class CurrentUser extends ServiceMap.Service<CurrentUser, User>()("CurrentUser") {}
+class CurrentUser extends Context.Service<CurrentUser, User>()("CurrentUser") {}
 
 class Unauthorized extends Schema.ErrorClass<Unauthorized>("Unauthorized")({
   _tag: Schema.tag("Unauthorized")
@@ -40,6 +40,10 @@ class GetUser extends Rpc.make("GetUser", {
 
 export const UserRpcs = RpcGroup.make(
   GetUser,
+  Rpc.make("GetUserDeferred", {
+    success: User,
+    payload: { id: Schema.String }
+  }),
   Rpc.make("GetUserOption", {
     success: Schema.Option(User),
     payload: { id: Schema.String }
@@ -103,6 +107,11 @@ export const UsersLive = UserRpcs.toLayer(Effect.gen(function*() {
       CurrentUser.asEffect().pipe(
         Rpc.fork
       ),
+    GetUserDeferred(_) {
+      const deferred = Deferred.makeUnsafe<User>()
+      Deferred.doneUnsafe(deferred, Effect.succeed(new User({ id: "1", name: "John" })))
+      return Effect.succeed(deferred)
+    },
     GetUserOption: Effect.fnUntraced(function*(req) {
       return Option.some(new User({ id: req.id, name: "John" }))
     }),

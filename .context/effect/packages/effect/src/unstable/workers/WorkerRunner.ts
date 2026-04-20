@@ -1,9 +1,9 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import type * as Effect from "../../Effect.ts"
 import type * as Queue from "../../Queue.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { WorkerError } from "./WorkerError.ts"
 
 /**
@@ -37,6 +37,6 @@ export type PlatformMessage<I> = readonly [request: 0, I] | readonly [close: 1]
  * @since 4.0.0
  * @category models
  */
-export class WorkerRunnerPlatform extends ServiceMap.Service<WorkerRunnerPlatform, {
+export class WorkerRunnerPlatform extends Context.Service<WorkerRunnerPlatform, {
   readonly start: <O = unknown, I = unknown>() => Effect.Effect<WorkerRunner<O, I>, WorkerError>
 }>()("effect/workers/WorkerRunner/WorkerRunnerPlatform") {}

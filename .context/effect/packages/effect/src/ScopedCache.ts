@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import * as Arr from "./Array.ts"
+import * as Context from "./Context.ts"
 import * as Deferred from "./Deferred.ts"
 import * as Duration from "./Duration.ts"
 import type * as Effect from "./Effect.ts"
@@ -16,7 +17,6 @@ import * as Option from "./Option.ts"
 import type { Pipeable } from "./Pipeable.ts"
 import * as Predicate from "./Predicate.ts"
 import * as Scope from "./Scope.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 const TypeId = "~effect/ScopedCache"
 
@@ -76,13 +76,13 @@ export const makeWith = <
   never,
   ("lookup" extends ServiceMode ? never : R) | Scope.Scope
 > =>
-  effect.servicesWith((services: ServiceMap.ServiceMap<any>) => {
-    const scope = ServiceMap.get(services, Scope.Scope)
+  effect.contextWith((context: Context.Context<any>) => {
+    const scope = Context.get(context, Scope.Scope)
     const self = Object.create(Proto)
     self.lookup = (key: Key): Effect.Effect<A, E> =>
-      effect.updateServices(
+      effect.updateContext(
         options.lookup(key),
-        (input) => ServiceMap.merge(services, input)
+        (input) => Context.merge(context, input)
       )
     const map = MutableHashMap.empty<Key, Entry<A, E>>()
     self.state = { _tag: "Open", map }

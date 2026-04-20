@@ -3,12 +3,12 @@
  */
 import * as Config from "../../Config.ts"
 import * as ConfigProvider from "../../ConfigProvider.ts"
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import { RunnerAddress } from "./RunnerAddress.ts"
 
 /**
@@ -17,7 +17,7 @@ import { RunnerAddress } from "./RunnerAddress.ts"
  * @since 4.0.0
  * @category models
  */
-export class ShardingConfig extends ServiceMap.Service<ShardingConfig, {
+export class ShardingConfig extends Context.Service<ShardingConfig, {
   /**
    * The address for the current runner that other runners can use to
    * communicate with it.
@@ -122,7 +122,7 @@ export class ShardingConfig extends ServiceMap.Service<ShardingConfig, {
   readonly simulateRemoteSerialization: boolean
 }>()("effect/cluster/ShardingConfig") {}
 
-const defaultRunnerAddress = RunnerAddress.makeUnsafe({ host: "localhost", port: 34431 })
+const defaultRunnerAddress = RunnerAddress.make({ host: "localhost", port: 34431 })
 
 /**
  * @since 4.0.0
@@ -177,7 +177,7 @@ export const config: Config.Config<ShardingConfig["Service"]> = Config.all({
       Config.withDefault(defaultRunnerAddress.port)
       // Config.withDescription("The port used for inter-runner communication.")
     )
-  }).pipe(Config.map((options) => RunnerAddress.makeUnsafe(options)), Config.option),
+  }).pipe(Config.map((options) => RunnerAddress.make(options)), Config.option),
   runnerListenAddress: Config.all({
     host: Config.string("listenHost"),
     // Config.withDescription("The host to listen on.")
@@ -185,7 +185,7 @@ export const config: Config.Config<ShardingConfig["Service"]> = Config.all({
       Config.withDefault(defaultRunnerAddress.port)
       // Config.withDescription("The port to listen on.")
     )
-  }).pipe(Config.map((options) => RunnerAddress.makeUnsafe(options)), Config.option),
+  }).pipe(Config.map((options) => RunnerAddress.make(options)), Config.option),
   runnerShardWeight: Config.int("runnerShardWeight").pipe(
     Config.withDefault(defaults.runnerShardWeight)
     // Config.withDescription("A number that determines how many shards this runner will be assigned relative to other runners.")

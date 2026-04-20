@@ -523,7 +523,7 @@ export * as Combiner from "./Combiner.ts"
  * - **parse** – instance method on every `Config` that takes a provider and
  *   returns `Effect<T, ConfigError>`.
  * - **Yieldable** – every `Config` can be yielded inside `Effect.gen`. It
- *   automatically resolves the current `ConfigProvider` from the service map.
+ *   automatically resolves the current `ConfigProvider` from the context.
  *
  * ## Common tasks
  *
@@ -596,7 +596,7 @@ export * as Config from "./Config.ts"
  *   (e.g. `["database", "host"]`).
  * - **ConfigProvider** – an object with a `load(path)` method that resolves a
  *   path to a `Node | undefined`. Providers can be composed and transformed.
- * - **ServiceMap.Reference** – `ConfigProvider` is registered as a reference
+ * - **Context.Reference** – `ConfigProvider` is registered as a reference
  *   service that defaults to `fromEnv()`, so it works without explicit
  *   provision.
  * - **SourceError** – the typed error returned when a backing store is
@@ -736,6 +736,20 @@ export * as ConfigProvider from "./ConfigProvider.ts"
  * @since 2.0.0
  */
 export * as Console from "./Console.ts"
+
+/**
+ * This module provides a data structure called `Context` that can be used
+ * for dependency injection in effectful programs. It is essentially a table
+ * mapping `Service`s identifiers to their implementations, and can be used to
+ * manage dependencies in a type-safe way. The `Context` data structure is
+ * essentially a way of providing access to a set of related services that can
+ * be passed around as a single unit. This module provides functions to create,
+ * modify, and query the contents of a `Context`, as well as a number of
+ * utility types for working with a `Context`.
+ *
+ * @since 4.0.0
+ */
+export * as Context from "./Context.ts"
 
 /**
  * @since 2.0.0
@@ -987,6 +1001,11 @@ export * as Duration from "./Duration.ts"
 export * as Effect from "./Effect.ts"
 
 /**
+ * @since 4.0.0
+ */
+export * as Effectable from "./Effectable.ts"
+
+/**
  * Encoding & decoding for Base64 (RFC4648), Base64Url, and Hex.
  *
  * @since 4.0.0
@@ -1086,7 +1105,7 @@ export * as Equal from "./Equal.ts"
  * - Using strict equality (`===`) → {@link strictEqual}
  * - Combining multiple equivalences (AND logic) → {@link combine}, {@link combineAll}
  * - Transforming input before comparison → {@link mapInput}
- * - Creating equivalences for structured types → {@link Struct}, {@link Tuple}, {@link Array}, {@link Record}
+ * - Creating equivalences for structured types → {@link Struct}, {@link Tuple}, {@link Array_}, {@link Record}
  *
  * ## Gotchas
  *
@@ -1114,7 +1133,7 @@ export * as Equal from "./Equal.ts"
  * ## See also
  *
  * - {@link Equal} - For structural equality (can convert to Equivalence)
- * - {@link Array.dedupeWith} - Remove duplicates using an equivalence
+ * - {@link Array_.dedupeWith} - Remove duplicates using an equivalence
  * - {@link Chunk} - Collections that use equivalences for operations
  *
  * @since 2.0.0
@@ -2943,6 +2962,71 @@ export * as RcRef from "./RcRef.ts"
 export * as Record from "./Record.ts"
 
 /**
+ * Context-aware redaction for sensitive values.
+ *
+ * The `Redactable` module provides a protocol for objects that need to present
+ * alternative representations of themselves depending on the runtime context.
+ * Typical use cases include masking secrets, tokens, or personal data in logs, traces,
+ * and serialized output.
+ *
+ * ## Mental model
+ *
+ * - **Redactable** - an object that implements `[symbolRedactable]`, a method
+ *   that receives the current `Context` and returns a replacement value.
+ * - **symbolRedactable** - the well-known `Symbol` key that marks an object as
+ *   redactable.
+ * - **redact** - the primary entry point: pass any value and get back either its
+ *   redacted form (if it is `Redactable`) or the original value unchanged.
+ * - **getRedacted** - lower-level helper that calls `[symbolRedactable]` directly
+ *   on a value already known to be `Redactable`.
+ * - The `Context` passed to `[symbolRedactable]` comes from the current fiber.
+ *   If no fiber is active, an empty `Context` is used.
+ *
+ * ## Common tasks
+ *
+ * - **Make a value redactable**: implement the {@link Redactable} interface by
+ *   adding a `[symbolRedactable]` method.
+ * - **Redact an unknown value**: call {@link redact} - it returns the original
+ *   value when it is not redactable.
+ * - **Check if a value is redactable**: use {@link isRedactable}.
+ * - **Get the redacted form of a known `Redactable`**: use {@link getRedacted}.
+ *
+ * ## Gotchas
+ *
+ * - `[symbolRedactable]` receives the fiber's `Context` as its argument.
+ * - Outside of an Effect runtime (no current fiber), `getRedacted` still works
+ *   but passes an empty `Context`, so service lookups will not find anything.
+ * - `redact` is not recursive: if a redactable object contains nested
+ *   redactable values, only the outermost redaction is applied.
+ *
+ * ## Quickstart
+ *
+ * **Example** (Masking an API key)
+ *
+ * ```ts
+ * import { Context, Redactable } from "effect"
+ *
+ * class ApiKey {
+ *   constructor(readonly raw: string) {}
+ *
+ *   [Redactable.symbolRedactable](_ctx: Context.Context<never>) {
+ *     return this.raw.slice(0, 4) + "..."
+ *   }
+ * }
+ *
+ * const key = new ApiKey("sk-1234567890abcdef")
+ *
+ * console.log(Redactable.isRedactable(key))  // true
+ * console.log(Redactable.redact(key))         // "sk-1..."
+ * console.log(Redactable.redact("plain"))     // "plain"
+ * ```
+ *
+ * ## See also
+ *
+ * - {@link Redactable} - the interface to implement
+ * - {@link symbolRedactable} - the symbol key
+ * - {@link redact} - the main redaction entry point
+ *
  * @since 4.0.0
  */
 export * as Redactable from "./Redactable.ts"
@@ -3270,7 +3354,7 @@ export * as Scheduler from "./Scheduler.ts"
  *
  * - Define a struct: {@link Struct}
  * - Define a union: {@link Union}, {@link TaggedUnion}, {@link Literals}
- * - Define an array: {@link Array}, {@link NonEmptyArray}
+ * - Define an array: {@link ArraySchema}, {@link NonEmptyArray}
  * - Define a record: {@link Record}
  * - Define a tuple: {@link Tuple}, {@link TupleWithRest}
  * - Validate unknown data synchronously: {@link decodeUnknownSync}
@@ -3449,6 +3533,7 @@ export * as SchemaAST from "./SchemaAST.ts"
  * - Parse/stringify JSON → {@link parseJson}, {@link stringifyJson}
  * - Encode/decode Base64 → {@link encodeBase64}, {@link decodeBase64}, {@link decodeBase64String}
  * - Encode/decode Hex → {@link encodeHex}, {@link decodeHex}, {@link decodeHexString}
+ * - Encode/decode URI components → {@link encodeUriComponent}, {@link decodeUriComponent}
  * - Parse DateTime → {@link dateTimeUtcFromInput}
  * - Decode/encode FormData → {@link decodeFormData}, {@link encodeFormData}
  * - Decode/encode URLSearchParams → {@link decodeURLSearchParams}, {@link encodeURLSearchParams}
@@ -3711,10 +3796,13 @@ export * as SchemaRepresentation from "./SchemaRepresentation.ts"
  * - Trim/case strings → {@link trim}, {@link toLowerCase}, {@link toUpperCase}, {@link capitalize}, {@link uncapitalize}, {@link snakeToCamel}
  * - Parse key-value strings → {@link splitKeyValue}
  * - Coerce string ↔ number/bigint → {@link numberFromString}, {@link bigintFromString}
+ * - Coerce string ↔ Date → {@link dateFromString}
  * - Decode durations → {@link durationFromNanos}, {@link durationFromMillis}
  * - Wrap nullable/optional as Option → {@link optionFromNullOr}, {@link optionFromOptionalKey}, {@link optionFromOptional}
  * - Parse URLs → {@link urlFromString}
  * - Base64 ↔ Uint8Array → {@link uint8ArrayFromBase64String}
+ * - Base64 ↔ string → {@link stringFromBase64String}
+ * - URI component ↔ string → {@link stringFromUriComponent}
  * - JSON string ↔ unknown → {@link fromJsonString}
  * - FormData/URLSearchParams ↔ unknown → {@link fromFormData}, {@link fromURLSearchParams}
  * - Check if a value is a Transformation → {@link isTransformation}
@@ -3795,20 +3883,6 @@ export * as ScopedRef from "./ScopedRef.ts"
  * @since 2.0.0
  */
 export * as Semaphore from "./Semaphore.ts"
-
-/**
- * This module provides a data structure called `ServiceMap` that can be used
- * for dependency injection in effectful programs. It is essentially a table
- * mapping `Service`s identifiers to their implementations, and can be used to
- * manage dependencies in a type-safe way. The `ServiceMap` data structure is
- * essentially a way of providing access to a set of related services that can
- * be passed around as a single unit. This module provides functions to create,
- * modify, and query the contents of a `ServiceMap`, as well as a number of
- * utility types for working with a `ServiceMap`.
- *
- * @since 4.0.0
- */
-export * as ServiceMap from "./ServiceMap.ts"
 
 /**
  * @since 2.0.0
@@ -4039,7 +4113,7 @@ export * as Tuple from "./Tuple.ts"
  *
  * Accessed values are tracked by the transaction in order to detect conflicts and to track changes.
  * A transaction will retry whenever a conflict is detected or whenever the transaction explicitly
- * calls `Effect.retryTransaction` and any of the accessed TxChunk values change.
+ * calls `Effect.txRetry` and any of the accessed TxChunk values change.
  *
  * @since 4.0.0
  */
@@ -4089,7 +4163,7 @@ export * as TxPubSub from "./TxPubSub.ts"
  *
  * Accessed values are tracked by the transaction in order to detect conflicts and to track changes.
  * A transaction will retry whenever a conflict is detected or whenever the transaction explicitly
- * calls `Effect.retryTransaction` and any of the accessed TxQueue values change.
+ * calls `Effect.txRetry` and any of the accessed TxQueue values change.
  *
  * @since 4.0.0
  */
@@ -4110,7 +4184,7 @@ export * as TxReentrantLock from "./TxReentrantLock.ts"
  *
  * Accessed values are tracked by the transaction in order to detect conflicts and in order to
  * track changes, a transaction will retry whenever a conflict is detected or whenever the
- * transaction explicitely calls to `Effect.retryTransaction` and any of the accessed TxRef values
+ * transaction explicitely calls to `Effect.txRetry` and any of the accessed TxRef values
  * change.
  *
  * @since 4.0.0

@@ -25,7 +25,7 @@ export const AuthorizationLayer = Layer.effect(
           httpEffect,
           CurrentUser,
           new User({
-            id: UserId.makeUnsafe(1),
+            id: UserId.make(1),
             name: "Dev User",
             email: "dev@acme.com"
           })

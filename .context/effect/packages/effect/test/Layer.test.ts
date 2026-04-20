@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Fiber, ServiceMap, Stream } from "effect"
+import { Context, Fiber, Stream } from "effect"
 import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -11,13 +11,13 @@ import * as Scope from "effect/Scope"
 describe("Layer", () => {
   it.effect("layers can be acquired in parallel", () =>
     Effect.gen(function*() {
-      const BoolTag = ServiceMap.Service<boolean>("boolean")
+      const BoolTag = Context.Service<boolean>("boolean")
       const latch = Latch.makeUnsafe()
-      const layer1 = Layer.effectServices<never, never, never>(Effect.never)
-      const layer2 = Layer.effectServices(
+      const layer1 = Layer.effectContext<never, never, never>(Effect.never)
+      const layer2 = Layer.effectContext(
         Effect.acquireRelease(
           latch.open.pipe(
-            Effect.map((bool) => ServiceMap.make(BoolTag, bool))
+            Effect.map((bool) => Context.make(BoolTag, bool))
           ),
           () => Effect.void
         )
@@ -44,9 +44,39 @@ describe("Layer", () => {
       const layer = Layer.succeed(Service1Tag)(service1)
       const env = layer.pipe(Layer.merge(layer), Layer.merge(layer), Layer.build)
       const result = yield* env.pipe(
-        Effect.map((context) => ServiceMap.get(context, Service1Tag))
+        Effect.map((context) => Context.get(context, Service1Tag))
       )
       assert.strictEqual(result, service1)
+    }))
+
+  it.effect("suspend is lazy", () =>
+    Effect.gen(function*() {
+      let evaluated = 0
+      const layer = Layer.suspend(() => {
+        evaluated++
+        return Layer.succeed(Service1Tag)(new Service1())
+      })
+
+      assert.strictEqual(evaluated, 0)
+      yield* Effect.scoped(Layer.build(layer))
+      assert.strictEqual(evaluated, 1)
+      yield* Effect.scoped(Layer.build(layer))
+      assert.strictEqual(evaluated, 2)
+    }))
+
+  it.effect("suspend preserves sharing", () =>
+    Effect.gen(function*() {
+      const array: Array<string> = []
+      let evaluated = 0
+      const layer = Layer.suspend(() => {
+        evaluated++
+        return makeLayer1(array)
+      })
+
+      yield* Effect.scoped(layer.pipe(Layer.merge(layer), Layer.build))
+
+      assert.strictEqual(evaluated, 1)
+      assert.deepStrictEqual(array, [acquire1, release1])
     }))
 
   it.effect("finalizers", () =>
@@ -97,13 +127,13 @@ describe("Layer", () => {
       const env = makeLayer1(arr).pipe(
         Layer.tap((context) =>
           Effect.sync(() => {
-            arr.push(`tap:${ServiceMap.get(context, Service1Tag).constructor.name}`)
+            arr.push(`tap:${Context.get(context, Service1Tag).constructor.name}`)
           })
         ),
         Layer.build
       )
       const context = yield* Effect.scoped(env)
-      const service = ServiceMap.get(context, Service1Tag)
+      const service = Context.get(context, Service1Tag)
       assert.strictEqual(yield* service.one(), 1)
       assert.deepStrictEqual(arr, [acquire1, "tap:Service1", release1])
     }))
@@ -306,7 +336,7 @@ describe("Layer", () => {
   describe("mock", () => {
     it.effect("allows passing partial service", () =>
       Effect.gen(function*() {
-        class Service1 extends ServiceMap.Service<Service1, {
+        class Service1 extends Context.Service<Service1, {
           one: Effect.Effect<number>
           two(): Effect.Effect<number>
           three: Stream.Stream<number>
@@ -334,7 +364,7 @@ describe("Layer", () => {
 
     it.effect("allows passing partial service in dual form", () =>
       Effect.gen(function*() {
-        class Service1 extends ServiceMap.Service<Service1, {
+        class Service1 extends Context.Service<Service1, {
           one: Effect.Effect<number>
           two(): Effect.Effect<number>
         }>()("Service1") {}
@@ -356,6 +386,30 @@ describe("Layer", () => {
   })
 
   describe("MemoMap", () => {
+    it.effect("memoizes suspend across builds", () =>
+      Effect.gen(function*() {
+        const arr: Array<string> = []
+        let evaluated = 0
+        const layer = Layer.suspend(() => {
+          evaluated++
+          return makeLayer1(arr)
+        })
+        const memoMap = Layer.makeMemoMapUnsafe()
+        const scope1 = yield* Scope.make()
+        const scope2 = yield* Scope.make()
+
+        yield* Layer.buildWithMemoMap(layer, memoMap, scope1)
+        yield* Layer.buildWithMemoMap(layer, memoMap, scope2)
+        yield* Scope.close(scope2, Exit.void)
+
+        assert.strictEqual(evaluated, 1)
+        assert.deepStrictEqual(arr, [acquire1])
+
+        yield* Scope.close(scope1, Exit.void)
+
+        assert.deepStrictEqual(arr, [acquire1, release1])
+      }))
+
     it.effect("memoizes layer across builds", () =>
       Effect.gen(function*() {
         const arr: Array<string> = []
@@ -409,7 +463,7 @@ export class Service1 {
     return Effect.succeed(1)
   }
 }
-const Service1Tag = ServiceMap.Service<Service1>("Service1")
+const Service1Tag = Context.Service<Service1>("Service1")
 const makeLayer1 = (array: Array<string>): Layer.Layer<Service1> => {
   return Layer.effect(Service1Tag)(
     Effect.acquireRelease(
@@ -426,7 +480,7 @@ class Service2 {
     return Effect.succeed(2)
   }
 }
-const Service2Tag = ServiceMap.Service<Service2>("Service2")
+const Service2Tag = Context.Service<Service2>("Service2")
 const makeLayer2 = (array: Array<string>): Layer.Layer<Service2> => {
   return Layer.effect(Service2Tag)(
     Effect.acquireRelease(
@@ -443,7 +497,7 @@ class Service3 {
     return Effect.succeed(3)
   }
 }
-const Service3Tag = ServiceMap.Service<Service3>("Service3")
+const Service3Tag = Context.Service<Service3>("Service3")
 const makeLayer3 = (array: Array<string>): Layer.Layer<Service3> => {
   return Layer.effect(Service3Tag)(
     Effect.acquireRelease(

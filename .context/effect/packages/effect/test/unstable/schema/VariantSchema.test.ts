@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import * as Schema from "effect/Schema"
+import { DateTime, Effect, Schema, SchemaParser } from "effect"
 import { Model, VariantSchema } from "effect/unstable/schema"
 
 describe("VariantSchema", () => {
@@ -47,4 +47,26 @@ describe("Model", () => {
     assert.deepStrictEqual(encodeJson({ active: true }), { active: true })
     assert.deepStrictEqual(decodeJson({ active: false }), { active: false })
   })
+
+  it.effect("Overridable is only optional for the constructor", () =>
+    Effect.gen(function*() {
+      const User = Model.Struct({
+        createdAt: Model.DateTimeInsertFromNumber
+      })
+
+      const insert = Model.extract(User, "insert")
+
+      const now = yield* DateTime.now
+      const user = yield* SchemaParser.makeEffect(insert)({})
+      assert.deepStrictEqual(user.createdAt, now)
+
+      yield* Schema.encodeEffect(insert)({
+        createdAt: Model.Override(now)
+      })
+
+      const error = yield* Schema.decodeUnknownEffect(insert)({}).pipe(
+        Effect.flip
+      )
+      assert.include(error.message, "createdAt")
+    }))
 })

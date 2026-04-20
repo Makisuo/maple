@@ -25,8 +25,8 @@ describe("LayerMap", () => {
         { idleTimeToLive: (key: string) => key.startsWith("short:") ? 500 : 2000 }
       )
 
-      yield* Effect.scoped(layerMap.services("short:a"))
-      yield* Effect.scoped(layerMap.services("long:b"))
+      yield* Effect.scoped(layerMap.contextEffect("short:a"))
+      yield* Effect.scoped(layerMap.contextEffect("long:b"))
       assert.deepStrictEqual(acquired, ["short:a", "long:b"])
       assert.deepStrictEqual(released, [])
 
@@ -55,8 +55,8 @@ describe("LayerMap", () => {
         }
       )
 
-      yield* Effect.scoped(layerMap.services("short"))
-      yield* Effect.scoped(layerMap.services("long"))
+      yield* Effect.scoped(layerMap.contextEffect("short"))
+      yield* Effect.scoped(layerMap.contextEffect("long"))
       assert.deepStrictEqual(acquired, ["short", "long"])
       assert.deepStrictEqual(released, [])
 
@@ -88,8 +88,8 @@ describe("LayerMap", () => {
         }
       }) {}
 
-      yield* Effect.scoped(LookupMap.services("short:a").pipe(Effect.provide(LookupMap.layer)))
-      yield* Effect.scoped(RecordMap.services("short").pipe(Effect.provide(RecordMap.layer)))
+      yield* Effect.scoped(LookupMap.contextEffect("short:a").pipe(Effect.provide(LookupMap.layer)))
+      yield* Effect.scoped(RecordMap.contextEffect("short").pipe(Effect.provide(RecordMap.layer)))
       assert.deepStrictEqual(acquired, ["short:a", "short"])
 
       yield* TestClock.adjust(500)

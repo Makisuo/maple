@@ -30,7 +30,7 @@ Some example types that implement `Yieldable`:
 - `Option` — yields the value or fails with `NoSuchElementError`
 - `Result` — yields the success or fails with the error
 - `Config` — yields the config value or fails with `ConfigError`
-- `ServiceMap.Service` — yields the service from the environment
+- `Context.Service` — yields the service from the environment
 
 Some example types that are **no longer** Effect subtypes and do **not**
 implement `Yieldable`:

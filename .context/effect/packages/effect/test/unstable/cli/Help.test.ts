@@ -57,8 +57,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         SUBCOMMANDS
           admin            Administrative commands
@@ -123,8 +123,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         EXAMPLES
           # Log in with browser OAuth
@@ -167,8 +167,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level"
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
       `)
     }).pipe(Effect.provide(TestLayer)))
 
@@ -197,8 +197,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level"
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
       `)
     }).pipe(Effect.provide(TestLayer)))
 
@@ -225,8 +225,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level"
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
       `)
     }).pipe(Effect.provide(TestLayer)))
 
@@ -256,8 +256,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level"
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
       `)
     }).pipe(Effect.provide(TestLayer)))
 
@@ -282,8 +282,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         SUBCOMMANDS
           set    Set configuration values
@@ -316,8 +316,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level"
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)"
       `)
     }).pipe(Effect.provide(TestLayer)))
 
@@ -394,8 +394,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         SUBCOMMANDS
           ungrouped    This command is not in a group
@@ -436,8 +436,8 @@ describe("Command help output", () => {
         GLOBAL FLAGS
           --help, -h              Show help information
           --version               Show version information
-          --completions choice    Print shell completion script
-          --log-level choice      Sets the minimum log level
+          --completions choice    Print shell completion script (choices: bash, zsh, fish, sh)
+          --log-level choice      Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
 
         SUBCOMMANDS
           plan, p    Draft a plan in your editor"

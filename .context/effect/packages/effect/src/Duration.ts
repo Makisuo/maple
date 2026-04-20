@@ -864,7 +864,7 @@ export const toHrTime = (self: Duration): [seconds: number, nanos: number] => {
       return [-Infinity, 0]
     case "Nanos": {
       const n = self.value.nanos
-      const sign = n < bigint0 ? -1n : 1n
+      const sign = n < bigint0 ? -BigInt(1) : BigInt(1)
       const a = n < bigint0 ? -n : n
       return [
         Number(sign * (a / bigint1e9)),

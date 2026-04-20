@@ -4,7 +4,7 @@ import { Effect, Exit, Fiber, TxReentrantLock } from "effect"
 describe("TxReentrantLock", () => {
   describe("constructors", () => {
     it.effect("make creates an unlocked lock", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         assert.strictEqual(yield* TxReentrantLock.locked(lock), false)
         assert.strictEqual(yield* TxReentrantLock.readLocked(lock), false)
@@ -16,7 +16,7 @@ describe("TxReentrantLock", () => {
 
   describe("read lock", () => {
     it.effect("acquireRead and releaseRead work correctly", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         const count = yield* TxReentrantLock.acquireRead(lock)
         assert.strictEqual(count, 1)
@@ -29,7 +29,7 @@ describe("TxReentrantLock", () => {
       })))
 
     it.effect("multiple read acquires from same fiber are reentrant", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         const c1 = yield* TxReentrantLock.acquireRead(lock)
         assert.strictEqual(c1, 1)
@@ -46,7 +46,7 @@ describe("TxReentrantLock", () => {
 
   describe("write lock", () => {
     it.effect("acquireWrite and releaseWrite work correctly", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         const count = yield* TxReentrantLock.acquireWrite(lock)
         assert.strictEqual(count, 1)
@@ -59,7 +59,7 @@ describe("TxReentrantLock", () => {
       })))
 
     it.effect("multiple write acquires from same fiber are reentrant", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         const c1 = yield* TxReentrantLock.acquireWrite(lock)
         assert.strictEqual(c1, 1)
@@ -74,7 +74,7 @@ describe("TxReentrantLock", () => {
       })))
 
     it.effect("write lock holder can acquire read lock (reentrancy)", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         yield* TxReentrantLock.acquireWrite(lock)
         const readCount = yield* TxReentrantLock.acquireRead(lock)
@@ -90,99 +90,99 @@ describe("TxReentrantLock", () => {
   describe("scoped operations", () => {
     it.effect("readLock scoped acquires and releases", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         yield* Effect.scoped(
           Effect.gen(function*() {
             yield* TxReentrantLock.readLock(lock)
-            assert.strictEqual(yield* Effect.transaction(TxReentrantLock.readLocked(lock)), true)
+            assert.strictEqual(yield* Effect.tx(TxReentrantLock.readLocked(lock)), true)
           })
         )
 
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.readLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.readLocked(lock)), false)
       }))
 
     it.effect("writeLock scoped acquires and releases", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         yield* Effect.scoped(
           Effect.gen(function*() {
             yield* TxReentrantLock.writeLock(lock)
-            assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), true)
+            assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), true)
           })
         )
 
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), false)
       }))
 
     it.effect("lock is alias for writeLock", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         yield* Effect.scoped(
           Effect.gen(function*() {
-            yield* TxReentrantLock.lock(lock)
-            assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), true)
+            yield* TxReentrantLock.writeLock(lock)
+            assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), true)
           })
         )
 
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), false)
       }))
   })
 
   describe("withLock operations", () => {
     it.effect("withReadLock runs effect and releases", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         const result = yield* TxReentrantLock.withReadLock(
           lock,
           Effect.gen(function*() {
-            assert.strictEqual(yield* Effect.transaction(TxReentrantLock.readLocked(lock)), true)
+            assert.strictEqual(yield* Effect.tx(TxReentrantLock.readLocked(lock)), true)
             return "read-result"
           })
         )
 
         assert.strictEqual(result, "read-result")
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.readLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.readLocked(lock)), false)
       }))
 
     it.effect("withWriteLock runs effect and releases", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         const result = yield* TxReentrantLock.withWriteLock(
           lock,
           Effect.gen(function*() {
-            assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), true)
+            assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), true)
             return "write-result"
           })
         )
 
         assert.strictEqual(result, "write-result")
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), false)
       }))
 
     it.effect("withLock is alias for withWriteLock", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         const result = yield* TxReentrantLock.withLock(
           lock,
           Effect.gen(function*() {
-            assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), true)
+            assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), true)
             return "exclusive"
           })
         )
 
         assert.strictEqual(result, "exclusive")
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.locked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.locked(lock)), false)
       }))
 
     it.effect("withReadLock releases on failure", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         const result = yield* Effect.exit(
           TxReentrantLock.withReadLock(
@@ -192,12 +192,12 @@ describe("TxReentrantLock", () => {
         )
 
         assert.isTrue(Exit.isFailure(result))
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.readLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.readLocked(lock)), false)
       }))
 
     it.effect("withWriteLock releases on failure", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         const result = yield* Effect.exit(
           TxReentrantLock.withWriteLock(
@@ -207,38 +207,38 @@ describe("TxReentrantLock", () => {
         )
 
         assert.isTrue(Exit.isFailure(result))
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), false)
       }))
 
     it.effect("withReadLock data-last (pipe) style", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         const result = yield* lock.pipe(
           TxReentrantLock.withReadLock(Effect.succeed("piped"))
         )
 
         assert.strictEqual(result, "piped")
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.readLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.readLocked(lock)), false)
       }))
 
     it.effect("withWriteLock data-last (pipe) style", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         const result = yield* lock.pipe(
           TxReentrantLock.withWriteLock(Effect.succeed("piped-write"))
         )
 
         assert.strictEqual(result, "piped-write")
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.writeLocked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.writeLocked(lock)), false)
       }))
   })
 
   describe("concurrency", () => {
     it.effect("multiple readers can proceed concurrently", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
 
         const fiber1 = yield* Effect.forkChild(
           TxReentrantLock.withReadLock(lock, Effect.succeed(1))
@@ -259,15 +259,15 @@ describe("TxReentrantLock", () => {
         assert.strictEqual(r1, 1)
         assert.strictEqual(r2, 2)
         assert.strictEqual(r3, 3)
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.locked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.locked(lock)), false)
       }))
 
     it.effect("writer blocks other writers", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
         const order: Array<string> = []
 
-        yield* Effect.transaction(TxReentrantLock.acquireWrite(lock))
+        yield* Effect.tx(TxReentrantLock.acquireWrite(lock))
 
         const fiber = yield* Effect.forkChild(
           TxReentrantLock.withWriteLock(
@@ -280,19 +280,19 @@ describe("TxReentrantLock", () => {
 
         // Child should be blocked because we hold the write lock
         order.push("parent-releasing")
-        yield* Effect.transaction(TxReentrantLock.releaseWrite(lock))
+        yield* Effect.tx(TxReentrantLock.releaseWrite(lock))
 
         yield* Fiber.join(fiber)
         assert.deepStrictEqual(order, ["parent-releasing", "child-wrote"])
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.locked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.locked(lock)), false)
       }))
 
     it.effect("writer blocks readers from other fibers", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
         const order: Array<string> = []
 
-        yield* Effect.transaction(TxReentrantLock.acquireWrite(lock))
+        yield* Effect.tx(TxReentrantLock.acquireWrite(lock))
 
         const fiber = yield* Effect.forkChild(
           TxReentrantLock.withReadLock(
@@ -304,19 +304,19 @@ describe("TxReentrantLock", () => {
         )
 
         order.push("parent-releasing")
-        yield* Effect.transaction(TxReentrantLock.releaseWrite(lock))
+        yield* Effect.tx(TxReentrantLock.releaseWrite(lock))
 
         yield* Fiber.join(fiber)
         assert.deepStrictEqual(order, ["parent-releasing", "child-read"])
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.locked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.locked(lock)), false)
       }))
 
     it.effect("reader blocks writer from another fiber", () =>
       Effect.gen(function*() {
-        const lock = yield* Effect.transaction(TxReentrantLock.make())
+        const lock = yield* Effect.tx(TxReentrantLock.make())
         const order: Array<string> = []
 
-        yield* Effect.transaction(TxReentrantLock.acquireRead(lock))
+        yield* Effect.tx(TxReentrantLock.acquireRead(lock))
 
         const fiber = yield* Effect.forkChild(
           TxReentrantLock.withWriteLock(
@@ -328,17 +328,17 @@ describe("TxReentrantLock", () => {
         )
 
         order.push("parent-releasing")
-        yield* Effect.transaction(TxReentrantLock.releaseRead(lock))
+        yield* Effect.tx(TxReentrantLock.releaseRead(lock))
 
         yield* Fiber.join(fiber)
         assert.deepStrictEqual(order, ["parent-releasing", "child-wrote"])
-        assert.strictEqual(yield* Effect.transaction(TxReentrantLock.locked(lock)), false)
+        assert.strictEqual(yield* Effect.tx(TxReentrantLock.locked(lock)), false)
       }))
   })
 
   describe("getters", () => {
     it.effect("readLocks counts total read locks", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         yield* TxReentrantLock.acquireRead(lock)
         yield* TxReentrantLock.acquireRead(lock)
@@ -352,7 +352,7 @@ describe("TxReentrantLock", () => {
       })))
 
     it.effect("writeLocks counts write lock depth", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         assert.strictEqual(yield* TxReentrantLock.writeLocks(lock), 0)
 
@@ -368,7 +368,7 @@ describe("TxReentrantLock", () => {
       })))
 
     it.effect("locked returns true when any lock is held", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         assert.strictEqual(yield* TxReentrantLock.locked(lock), false)
 
@@ -386,7 +386,7 @@ describe("TxReentrantLock", () => {
 
   describe("type guards", () => {
     it.effect("isTxReentrantLock identifies TxReentrantLock instances", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         assert.isTrue(TxReentrantLock.isTxReentrantLock(lock))
         assert.isFalse(TxReentrantLock.isTxReentrantLock({}))
@@ -397,14 +397,14 @@ describe("TxReentrantLock", () => {
 
   describe("release without acquire", () => {
     it.effect("releaseRead without acquire returns 0", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         const result = yield* TxReentrantLock.releaseRead(lock)
         assert.strictEqual(result, 0)
       })))
 
     it.effect("releaseWrite without acquire returns 0", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const lock = yield* TxReentrantLock.make()
         const result = yield* TxReentrantLock.releaseWrite(lock)
         assert.strictEqual(result, 0)

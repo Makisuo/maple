@@ -3,13 +3,13 @@
  *
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Yaml from "yaml"
 import { CodegenConfig, type SpecSource, SpecSource as SpecSourceUtils } from "./Config.ts"
 import * as Glob from "./Glob.ts"
@@ -61,7 +61,7 @@ export interface ProviderDiscovery {
  * @since 1.0.0
  * @category tags
  */
-export const ProviderDiscovery: ServiceMap.Service<ProviderDiscovery, ProviderDiscovery> = ServiceMap.Service(
+export const ProviderDiscovery: Context.Service<ProviderDiscovery, ProviderDiscovery> = Context.Service(
   "@effect/ai-codegen/ProviderDiscovery"
 )
 

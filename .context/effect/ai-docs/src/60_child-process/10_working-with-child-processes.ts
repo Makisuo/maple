@@ -4,14 +4,14 @@
  * This example shows how to collect process output, compose pipelines, and stream long-running command output.
  */
 import { NodeServices } from "@effect/platform-node"
-import { Console, Effect, Layer, Schema, ServiceMap, Stream, String } from "effect"
+import { Console, Context, Effect, Layer, Schema, Stream, String } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 export class DevToolsError extends Schema.TaggedErrorClass<DevToolsError>()("DevToolsError", {
   cause: Schema.Defect
 }) {}
 
-export class DevTools extends ServiceMap.Service<DevTools, {
+export class DevTools extends Context.Service<DevTools, {
   readonly nodeVersion: Effect.Effect<string, DevToolsError>
   readonly recentCommitSubjects: Effect.Effect<ReadonlyArray<string>, DevToolsError>
   readonly runLintFix: Effect.Effect<void, DevToolsError>

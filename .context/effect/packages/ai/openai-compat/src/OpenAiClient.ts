@@ -3,12 +3,12 @@
  */
 import * as Array from "effect/Array"
 import type * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { identity, pipe } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import type * as AiError from "effect/unstable/ai/AiError"
 import * as Sse from "effect/unstable/encoding/Sse"
@@ -49,7 +49,7 @@ export interface Service {
  * @since 1.0.0
  * @category service
  */
-export class OpenAiClient extends ServiceMap.Service<OpenAiClient, Service>()(
+export class OpenAiClient extends Context.Service<OpenAiClient, Service>()(
   "@effect/ai-openai-compat/OpenAiClient"
 ) {}
 

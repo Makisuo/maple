@@ -1,16 +1,16 @@
 /**
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
-import * as ServiceMap from "effect/ServiceMap"
 import type { HttpClient } from "effect/unstable/http/HttpClient"
 
 /**
  * @since 1.0.0
  * @category services
  */
-export class OpenAiConfig extends ServiceMap.Service<
+export class OpenAiConfig extends Context.Service<
   OpenAiConfig,
   OpenAiConfig.Service
 >()("@effect/ai-openai/OpenAiConfig") {
@@ -18,7 +18,7 @@ export class OpenAiConfig extends ServiceMap.Service<
    * @since 1.0.0
    */
   static readonly getOrUndefined: Effect.Effect<typeof OpenAiConfig.Service | undefined> = Effect.map(
-    Effect.services<never>(),
+    Effect.context<never>(),
     (context) => context.mapUnsafe.get(OpenAiConfig.key)
   )
 }

@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import type { NonEmptyReadonlyArray } from "../../Array.ts"
+import * as Context from "../../Context.ts"
 import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
@@ -11,7 +12,6 @@ import * as Schema from "../../Schema.ts"
 import * as Issue from "../../SchemaIssue.ts"
 import * as Parser from "../../SchemaParser.ts"
 import * as Transformation from "../../SchemaTransformation.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Rpc from "../rpc/Rpc.ts"
 import type * as RpcMessage from "../rpc/RpcMessage.ts"
 import type * as RpcSchema from "../rpc/RpcSchema.ts"
@@ -51,7 +51,7 @@ export const Encoded: Schema.Codec<Encoded> = Schema.Any as any
  */
 export class ReplyWithContext<R extends Rpc.Any> extends Data.TaggedClass("ReplyWithContext")<{
   readonly reply: Reply<R>
-  readonly services: ServiceMap.ServiceMap<Rpc.Services<R>>
+  readonly context: Context.Context<Rpc.Services<R>>
   readonly rpc: R
 }> {
   /**
@@ -68,7 +68,7 @@ export class ReplyWithContext<R extends Rpc.Any> extends Data.TaggedClass("Reply
         id: options.id,
         exit: Exit.die(Schema.encodeSync(Schema.Defect)(options.defect))
       }),
-      services: ServiceMap.empty() as any,
+      context: Context.empty() as any,
       rpc: neverRpc
     })
   }
@@ -85,7 +85,7 @@ export class ReplyWithContext<R extends Rpc.Any> extends Data.TaggedClass("Reply
         id: options.id,
         exit: Exit.interrupt()
       }),
-      services: ServiceMap.empty() as any,
+      context: Context.empty() as any,
       rpc: neverRpc
     })
   }
@@ -339,9 +339,9 @@ export const serialize = <R extends Rpc.Any>(
 ): Effect.Effect<Encoded, MalformedMessage> => {
   const schema = Reply(self.rpc)
   return MalformedMessage.refail(
-    Effect.provideServices(
+    Effect.provideContext(
       Schema.encodeEffect(schema)(self.reply),
-      self.services
+      self.context
     )
   )
 }
@@ -359,7 +359,7 @@ export const serializeLastReceived = <R extends Rpc.Any>(
   }
   const schema = Reply(self.rpc)
   return MalformedMessage.refail(
-    Effect.provideServices(Schema.encodeEffect(schema)(lastReceivedReply.value), self.services)
+    Effect.provideContext(Schema.encodeEffect(schema)(lastReceivedReply.value), self.context)
   ).pipe(
     Effect.map(Option.some)
   )

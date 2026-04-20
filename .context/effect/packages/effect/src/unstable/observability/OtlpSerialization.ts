@@ -1,8 +1,8 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Layer from "../../Layer.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as HttpBody from "../http/HttpBody.ts"
 import * as otlpProtobuf from "./internal/otlpProtobuf.ts"
 import type { LogsData } from "./OtlpLogger.ts"
@@ -13,7 +13,7 @@ import type { TraceData } from "./OtlpTracer.ts"
  * @since 4.0.0
  * @category Services
  */
-export class OtlpSerialization extends ServiceMap.Service<OtlpSerialization, {
+export class OtlpSerialization extends Context.Service<OtlpSerialization, {
   readonly traces: (data: TraceData) => HttpBody.HttpBody
   readonly metrics: (data: MetricsData) => HttpBody.HttpBody
   readonly logs: (data: LogsData) => HttpBody.HttpBody

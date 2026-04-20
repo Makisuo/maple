@@ -3,6 +3,7 @@
  */
 import * as Arr from "../../Array.ts"
 import * as Cause from "../../Cause.ts"
+import type * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import { identity } from "../../Function.ts"
 import * as Option from "../../Option.ts"
@@ -11,7 +12,6 @@ import * as Schema from "../../Schema.ts"
 import * as AST from "../../SchemaAST.ts"
 import * as Issue from "../../SchemaIssue.ts"
 import * as Transformation from "../../SchemaTransformation.ts"
-import type * as ServiceMap from "../../ServiceMap.ts"
 import type { Simplify } from "../../Types.ts"
 import * as UndefinedOr from "../../UndefinedOr.ts"
 import * as HttpBody from "../http/HttpBody.ts"
@@ -23,7 +23,6 @@ import * as HttpMethod from "../http/HttpMethod.ts"
 import * as UrlParams from "../http/UrlParams.ts"
 import * as HttpApi from "./HttpApi.ts"
 import * as HttpApiEndpoint from "./HttpApiEndpoint.ts"
-import type { BadRequest } from "./HttpApiError.ts"
 import type * as HttpApiGroup from "./HttpApiGroup.ts"
 import type * as HttpApiMiddleware from "./HttpApiMiddleware.ts"
 import * as HttpApiSchema from "./HttpApiSchema.ts"
@@ -32,7 +31,7 @@ import * as HttpApiSchema from "./HttpApiSchema.ts"
  * @since 4.0.0
  * @category models
  */
-export type Client<Groups extends HttpApiGroup.Any, E = BadRequest, R = never> = Simplify<
+export type Client<Groups extends HttpApiGroup.Any, E = never, R = never> = Simplify<
   & {
     readonly [Group in Extract<Groups, { readonly topLevel: false }> as HttpApiGroup.Name<Group>]: Client.Group<
       Group,
@@ -50,7 +49,7 @@ export type Client<Groups extends HttpApiGroup.Any, E = BadRequest, R = never> =
  * @since 4.0.0
  * @category models
  */
-export type ForApi<Api extends HttpApi.Any, E = BadRequest, R = never> = Api extends
+export type ForApi<Api extends HttpApi.Any, E = never, R = never> = Api extends
   HttpApi.HttpApi<infer _Id, infer Groups> ? Client<Groups, E, R> :
   never
 
@@ -186,12 +185,12 @@ const makeClient = <ApiId extends string, Groups extends HttpApiGroup.Any, E, R>
     }>
     readonly onGroup?: (options: {
       readonly group: HttpApiGroup.AnyWithProps
-      readonly mergedAnnotations: ServiceMap.ServiceMap<never>
+      readonly mergedAnnotations: Context.Context<never>
     }) => void
     readonly onEndpoint: (options: {
       readonly group: HttpApiGroup.AnyWithProps
       readonly endpoint: HttpApiEndpoint.AnyWithProps
-      readonly mergedAnnotations: ServiceMap.ServiceMap<never>
+      readonly mergedAnnotations: Context.Context<never>
       readonly middleware: ReadonlySet<HttpApiMiddleware.AnyService>
       readonly successes: ReadonlyMap<number, readonly [Schema.Top, ...Array<Schema.Top>]>
       readonly errors: ReadonlyMap<number, readonly [Schema.Top, ...Array<Schema.Top>]>
@@ -204,7 +203,7 @@ const makeClient = <ApiId extends string, Groups extends HttpApiGroup.Any, E, R>
   }
 ): Effect.Effect<void, unknown, unknown> =>
   Effect.gen(function*() {
-    const services = yield* Effect.services<any>()
+    const services = yield* Effect.context<any>()
 
     const httpClient = options.httpClient.pipe(
       options?.baseUrl === undefined
@@ -405,7 +404,7 @@ export const makeWith = <ApiId extends string, Groups extends HttpApiGroup.Any, 
       | undefined
     readonly baseUrl?: URL | string | undefined
   }
-): Effect.Effect<Client<Groups, BadRequest | E, R>, never, HttpApiGroup.MiddlewareClient<Groups>> => {
+): Effect.Effect<Client<Groups, E, R>, never, HttpApiGroup.MiddlewareClient<Groups>> => {
   const client: Record<string, Record<string, any>> = {}
   return makeClient(api, {
     ...options,
@@ -440,7 +439,7 @@ export const group = <
     readonly baseUrl?: URL | string | undefined
   }
 ): Effect.Effect<
-  Client.Group<Groups, GroupName, BadRequest | E, R>,
+  Client.Group<Groups, GroupName, E, R>,
   never,
   HttpApiGroup.MiddlewareClient<HttpApiGroup.WithName<Groups, GroupName>>
 > => {
@@ -480,7 +479,7 @@ export const endpoint = <
 ): Effect.Effect<
   Client.Method<
     HttpApiEndpoint.WithName<HttpApiGroup.Endpoints<HttpApiGroup.WithName<Groups, GroupName>>, EndpointName>,
-    BadRequest | E,
+    E,
     R
   >,
   never,
@@ -715,11 +714,11 @@ function getEncodePayloadSchemaFromBody(
   const encoding = HttpApiSchema.getPayloadEncoding(ast, method)
   const out = $HttpBody.pipe(Schema.decodeTo(
     schema,
-    Transformation.transformOrFail({
+    Transformation.transformOrFail<unknown, HttpBody.HttpBody>({
       decode(httpBody) {
         return Effect.fail(new Issue.Forbidden(Option.some(httpBody), { message: "Encode only schema" }))
       },
-      encode(t: unknown) {
+      encode(t) {
         switch (encoding._tag) {
           case "Multipart":
             return Effect.fail(new Issue.Forbidden(Option.some(t), { message: "Payload must be a FormData" }))

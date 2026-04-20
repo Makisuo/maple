@@ -6,7 +6,7 @@
  *
  * @internal
  */
-import type { ArgumentType, CommandDescriptor, FlagDescriptor, FlagType } from "./CommandDescriptor.ts"
+import type * as Completions from "../../Completions.ts"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,7 +46,7 @@ const subcommandCondition = (
  * flag has already been typed. Returns the condition string without wrapping
  * quotes (the caller adds those).
  */
-const flagContainsOptCondition = (flag: FlagDescriptor): string => {
+const flagContainsOptCondition = (flag: Completions.FlagDescriptor): string => {
   const optArgs: Array<string> = []
   for (const alias of flag.aliases) {
     if (alias.length === 1) {
@@ -66,7 +66,7 @@ const flagContainsOptCondition = (flag: FlagDescriptor): string => {
   return `not __fish_contains_opt ${optArgs.join(" ")}`
 }
 
-const flagCompletionArgs = (flag: FlagDescriptor): Array<string> => {
+const flagCompletionArgs = (flag: Completions.FlagDescriptor): Array<string> => {
   const args: Array<string> = [`-l ${flag.name}`]
   for (const alias of flag.aliases) {
     if (alias.length === 1) {
@@ -85,7 +85,7 @@ const flagCompletionArgs = (flag: FlagDescriptor): Array<string> => {
   return args
 }
 
-const flagValueArgs = (type: FlagType): string | undefined => {
+const flagValueArgs = (type: Completions.FlagType): string | undefined => {
   switch (type._tag) {
     case "Boolean":
       return undefined
@@ -100,7 +100,7 @@ const flagValueArgs = (type: FlagType): string | undefined => {
   }
 }
 
-const argValueArgs = (type: ArgumentType): string | undefined => {
+const argValueArgs = (type: Completions.ArgumentType): string | undefined => {
   switch (type._tag) {
     case "Choice":
       return `-r -f -a '${type.values.join(" ")}'`
@@ -117,7 +117,7 @@ const argValueArgs = (type: ArgumentType): string | undefined => {
 
 const generateCompletions = (
   executableName: string,
-  descriptor: CommandDescriptor,
+  descriptor: Completions.CommandDescriptor,
   parentPath: ReadonlyArray<string>,
   lines: Array<string>
 ): void => {
@@ -231,7 +231,7 @@ const generateCompletions = (
 /** @internal */
 export const generate = (
   executableName: string,
-  descriptor: CommandDescriptor
+  descriptor: Completions.CommandDescriptor
 ): string => {
   const lines: Array<string> = []
 

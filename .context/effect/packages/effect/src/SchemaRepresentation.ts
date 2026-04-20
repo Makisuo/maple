@@ -3015,7 +3015,13 @@ export function fromJsonSchemaMultiDocument(document: JsonSchema.MultiDocument<"
     }
 
     if (Array.isArray(js.allOf)) {
-      return js.allOf.reduce((acc, curr) => combine(acc, recur(curr)), out)
+      out = js.allOf.reduce((acc, curr) => combine(acc, recur(curr)), out)
+    }
+    if (Array.isArray(js.anyOf)) {
+      out = combine({ _tag: "Union", types: js.anyOf.map((type) => recur(type)), mode: "anyOf" }, out)
+    }
+    if (Array.isArray(js.oneOf)) {
+      out = combine({ _tag: "Union", types: js.oneOf.map((type) => recur(type)), mode: "oneOf" }, out)
     }
 
     return out
@@ -3054,10 +3060,6 @@ export function fromJsonSchemaMultiDocument(document: JsonSchema.MultiDocument<"
       } else {
         return { _tag: "Union", types, mode: "anyOf" }
       }
-    } else if (Array.isArray(js.anyOf)) {
-      return { _tag: "Union", types: js.anyOf.map((type) => recur(type)), mode: "anyOf" }
-    } else if (Array.isArray(js.oneOf)) {
-      return { _tag: "Union", types: js.oneOf.map((type) => recur(type)), mode: "oneOf" }
     }
 
     const type = isType(js.type) ? js.type : getType(js)
@@ -3290,7 +3292,7 @@ export function fromJsonSchemaMultiDocument(document: JsonSchema.MultiDocument<"
             return {
               _tag: "Union",
               types,
-              mode: "anyOf",
+              mode: a.mode,
               ...makeAnnotations(a.annotations)
             }
           }

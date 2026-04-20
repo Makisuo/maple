@@ -1,7 +1,7 @@
 {
   "name": "@effect/platform-browser",
   "type": "module",
-  "version": "4.0.0-beta.40",
+  "version": "4.0.0-beta.52",
   "license": "MIT",
   "description": "Platform specific implementations for the browser",
   "homepage": "https://effect.website",
@@ -65,7 +65,8 @@
   },
   "devDependencies": {
     "effect": "workspace:^",
-    "mock-xmlhttprequest": "^8.4.1"
+    "mock-xmlhttprequest": "^8.4.1",
+    "fake-indexeddb": "^6.2.5"
   },
   "dependencies": {
     "multipasta": "^0.2.7"

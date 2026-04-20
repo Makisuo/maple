@@ -1,6 +1,7 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Equal from "../../Equal.ts"
 import * as Equ from "../../Equivalence.ts"
 import { dual } from "../../Function.ts"
@@ -13,7 +14,6 @@ import * as Redactable from "../../Redactable.ts"
 import * as Redacted from "../../Redacted.ts"
 import * as Schema from "../../Schema.ts"
 import * as Transformation from "../../SchemaTransformation.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { Mutable } from "../../Types.ts"
 
 /**
@@ -52,8 +52,8 @@ Object.defineProperties(Proto, {
     value: TypeId
   },
   [Redactable.symbolRedactable]: {
-    value(this: Headers, context: ServiceMap.ServiceMap<never>): Record<string, string | Redacted.Redacted<string>> {
-      return redact(this, ServiceMap.get(context, CurrentRedactedNames))
+    value(this: Headers, context: Context.Context<never>): Record<string, string | Redacted.Redacted<string>> {
+      return redact(this, Context.get(context, CurrentRedactedNames))
     }
   },
   toJSON: {
@@ -323,7 +323,7 @@ export const redact: {
  * @since 4.0.0
  * @category fiber refs
  */
-export const CurrentRedactedNames = ServiceMap.Reference<
+export const CurrentRedactedNames = Context.Reference<
   ReadonlyArray<string | RegExp>
 >("effect/Headers/CurrentRedactedNames", {
   defaultValue: () => [

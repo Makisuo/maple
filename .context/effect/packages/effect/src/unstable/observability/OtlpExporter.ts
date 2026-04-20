@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import { Clock } from "../../Clock.ts"
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import * as Fiber from "../../Fiber.ts"
@@ -9,7 +10,6 @@ import * as Num from "../../Number.ts"
 import * as Option from "../../Option.ts"
 import * as Schedule from "../../Schedule.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Headers from "../../unstable/http/Headers.ts"
 import * as HttpClient from "../../unstable/http/HttpClient.ts"
 import * as HttpClientError from "../../unstable/http/HttpClientError.ts"
@@ -53,14 +53,15 @@ export const make: (
   never,
   HttpClient.HttpClient | Scope.Scope
 > = Effect.fnUntraced(function*(options) {
-  const services = yield* Effect.services<Scope.Scope | HttpClient.HttpClient>()
-  const clock = ServiceMap.get(services, Clock)
-  const scope = ServiceMap.get(services, Scope.Scope)
+  const services = yield* Effect.context<Scope.Scope | HttpClient.HttpClient>()
+  const clock = Context.get(services, Clock)
+  const scope = Context.get(services, Scope.Scope)
   const runFork = Effect.runForkWith(services)
   const exportInterval = Duration.max(Duration.fromInputUnsafe(options.exportInterval), Duration.zero)
   let disabledUntil: number | undefined = undefined
 
-  const client = HttpClient.filterStatusOk(ServiceMap.get(services, HttpClient.HttpClient)).pipe(
+  const client = HttpClient.filterStatusOk(Context.get(services, HttpClient.HttpClient)).pipe(
+    HttpClient.transformResponse(Effect.provideService(HttpClient.TracerPropagationEnabled, false)),
     HttpClient.retryTransient({ schedule: policy, times: 3 })
   )
 

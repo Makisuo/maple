@@ -57,6 +57,30 @@ export const A = Schema.String.annotate({ "description": "desc", "examples": ["e
 `)
   })
 
+  it("generateHttpApi emits explicit type and const declarations", () => {
+    const generator = JsonSchemaGenerator.make()
+    generator.addSchema("A", { type: "string" })
+    generator.addSchema("B", {
+      type: "object",
+      properties: {
+        id: {
+          type: "string"
+        }
+      },
+      required: ["id"],
+      additionalProperties: false
+    })
+
+    const result = generator.generateHttpApi("openapi-3.1", {})
+
+    expect(result).toContain(`export type A = string
+export const A = Schema.String`)
+    expect(result).toContain(`export type B = { readonly "id": string }
+export const B = Schema.Struct({ "id": Schema.String })`)
+    expect(result).not.toContain("Schema.Class<")
+    expect(result).not.toContain("Schema.Opaque<")
+  })
+
   it("recursive schema", () => {
     const generator = JsonSchemaGenerator.make()
     generator.addSchema("A", { $ref: "#/components/schemas/B" })
@@ -89,5 +113,61 @@ export const B = Schema.Struct({ "name": Schema.String, "children": Schema.Array
 export type A = B
 export const A = B
 `)
+  })
+
+  it("renders recursive definitions before non-recursive references for runtime generation", () => {
+    const generator = JsonSchemaGenerator.make()
+    generator.addSchema("A", { $ref: "#/components/schemas/ErrorResponse" })
+    const definitions = {
+      InnerErrors: {
+        type: "object",
+        properties: {
+          field: {
+            type: "string"
+          }
+        },
+        required: ["field"],
+        additionalProperties: false
+      },
+      ErrorDetails: {
+        oneOf: [
+          {
+            type: "object",
+            additionalProperties: {
+              $ref: "#/components/schemas/ErrorDetails"
+            }
+          },
+          {
+            $ref: "#/components/schemas/InnerErrors"
+          }
+        ]
+      },
+      ErrorResponse: {
+        type: "object",
+        properties: {
+          errors: {
+            $ref: "#/components/schemas/ErrorDetails"
+          }
+        },
+        additionalProperties: false
+      }
+    }
+
+    const runtimeResult = generator.generate("openapi-3.1", definitions, false)
+    const recursiveDeclaration =
+      "export const ErrorDetails = Schema.suspend((): Schema.Codec<ErrorDetails> => __recursive_ErrorDetails)"
+
+    expect(runtimeResult).toContain(recursiveDeclaration)
+    expect(runtimeResult).toContain("const __recursive_ErrorDetails =")
+    expect(runtimeResult.indexOf(recursiveDeclaration)).toBeLessThan(
+      runtimeResult.indexOf("export const ErrorResponse =")
+    )
+
+    const httpApiResult = generator.generateHttpApi("openapi-3.1", definitions)
+    expect(httpApiResult).toContain(recursiveDeclaration)
+    expect(httpApiResult).toContain("const __recursive_ErrorDetails =")
+    expect(httpApiResult.indexOf(recursiveDeclaration)).toBeLessThan(
+      httpApiResult.indexOf("export const ErrorResponse =")
+    )
   })
 })

@@ -3,7 +3,7 @@
  *
  * Define a service that uses the HttpClient module to fetch data from an external API
  */
-import { Effect, flow, Layer, Schedule, Schema, ServiceMap } from "effect"
+import { Context, Effect, flow, Layer, Schedule, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 
 class Todo extends Schema.Class<Todo>("Todo")({
@@ -13,7 +13,7 @@ class Todo extends Schema.Class<Todo>("Todo")({
   completed: Schema.Boolean
 }) {}
 
-export class JsonPlaceholder extends ServiceMap.Service<JsonPlaceholder, {
+export class JsonPlaceholder extends Context.Service<JsonPlaceholder, {
   readonly allTodos: Effect.Effect<ReadonlyArray<Todo>, JsonPlaceholderError>
   getTodo(id: number): Effect.Effect<Todo, JsonPlaceholderError>
   createTodo(todo: Omit<Todo, "id">): Effect.Effect<Todo, JsonPlaceholderError>

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { assertNone, assertSome, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
-import { Effect, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import * as Option from "effect/Option"
 import { HttpClientRequest, HttpServerRequest } from "effect/unstable/http"
 
@@ -107,6 +107,38 @@ describe("HttpServerRequest", () => {
         assert.strictEqual(parts[1].contentType, "text/plain")
         assert.strictEqual(new TextDecoder().decode(yield* parts[1].contentEffect), "hello")
       }
+    }))
+
+  it.effect("schemaBodyJson applies parse options", () =>
+    Effect.gen(function*() {
+      const request = HttpServerRequest.fromWeb(
+        new Request("http://localhost:3000", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            status: "ok",
+            name: "svc",
+            sha: "abc",
+            version: "1.0.0"
+          })
+        })
+      )
+      const schema = Schema.Struct({
+        status: Schema.String,
+        name: Schema.String
+      })
+
+      const decoded = yield* HttpServerRequest.schemaBodyJson(schema, { onExcessProperty: "preserve" }).pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request)
+      )
+      const decodedRecord = decoded as Record<string, unknown>
+
+      assert.strictEqual(decoded.status, "ok")
+      assert.strictEqual(decoded.name, "svc")
+      assert.strictEqual(decodedRecord.sha, "abc")
+      assert.strictEqual(decodedRecord.version, "1.0.0")
     }))
 
   it("remoteAddress defaults to none for web requests", () => {

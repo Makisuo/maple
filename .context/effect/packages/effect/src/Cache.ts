@@ -1,6 +1,7 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "./Context.ts"
 import * as Deferred from "./Deferred.ts"
 import * as Duration from "./Duration.ts"
 import type * as Effect from "./Effect.ts"
@@ -16,7 +17,6 @@ import * as Option from "./Option.ts"
 import type { Pipeable } from "./Pipeable.ts"
 import type { Predicate } from "./Predicate.ts"
 import * as Result from "./Result.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 const TypeId = "~effect/Cache"
 
@@ -120,48 +120,21 @@ export interface Entry<A, E> {
  * ```ts
  * import { Cache, Effect, Exit } from "effect"
  *
- * // Cache with different TTL for success vs failure
- * const program = Effect.gen(function*() {
- *   const cache = yield* Cache.makeWith<string, number, string>({
- *     capacity: 100,
- *     lookup: (key) =>
- *       key === "fail"
- *         ? Effect.fail("error")
- *         : Effect.succeed(key.length),
- *     timeToLive: (exit, key) => {
- *       if (Exit.isFailure(exit)) return "1 minute" // Short TTL for errors
- *       return key.startsWith("temp") ? "5 minutes" : "1 hour"
- *     }
- *   })
- *
- *   // Get values with different TTL policies
- *   const result1 = yield* Cache.get(cache, "hello")
- *   const result2 = yield* Cache.get(cache, "temp_data")
- *   console.log({ result1, result2 }) // { result1: 5, result2: 9 }
- * })
- * ```
- *
- * @example
- * ```ts
- * import { Cache, Effect, Exit } from "effect"
- *
  * // Cache with TTL based on computed value
  * const userCache = Effect.gen(function*() {
- *   const cache = yield* Cache.makeWith<
- *     number,
- *     { id: number; active: boolean },
- *     never
- *   >({
- *     capacity: 1000,
- *     lookup: (id) => Effect.succeed({ id, active: id % 2 === 0 }),
- *     timeToLive: (exit) => {
- *       if (Exit.isSuccess(exit)) {
- *         const user = exit.value
- *         return user.active ? "1 hour" : "5 minutes"
+ *   const cache = yield* Cache.makeWith(
+ *     (id: number) => Effect.succeed({ id, active: id % 2 === 0 }),
+ *     {
+ *       capacity: 1000,
+ *       timeToLive(exit) {
+ *         if (Exit.isSuccess(exit)) {
+ *           const user = exit.value
+ *           return user.active ? "1 hour" : "5 minutes"
+ *         }
+ *         return "30 seconds"
  *       }
- *       return "30 seconds"
  *     }
- *   })
+ *   )
  *
  *   return cache
  * })
@@ -176,8 +149,7 @@ export const makeWith = <
   E = never,
   R = never,
   ServiceMode extends "lookup" | "construction" = never
->(options: {
-  readonly lookup: (key: Key) => Effect.Effect<A, E, R>
+>(lookup: (key: Key) => Effect.Effect<A, E, R>, options: {
   readonly capacity: number
   readonly timeToLive?: ((exit: Exit.Exit<A, E>, key: Key) => Duration.Input) | undefined
   readonly requireServicesAt?: ServiceMode | undefined
@@ -186,12 +158,12 @@ export const makeWith = <
   never,
   "lookup" extends ServiceMode ? never : R
 > =>
-  effect.servicesWith((services: ServiceMap.ServiceMap<any>) => {
+  effect.contextWith((context: Context.Context<any>) => {
     const self = Object.create(Proto)
     self.lookup = (key: Key): Effect.Effect<A, E> =>
-      effect.updateServices(
-        options.lookup(key),
-        (input) => ServiceMap.merge(services, input)
+      effect.updateContext(
+        lookup(key),
+        (input) => Context.merge(context, input)
       )
     self.map = MutableHashMap.make()
     self.capacity = options.capacity
@@ -272,7 +244,7 @@ export const make = <
   never,
   "lookup" extends ServiceMode ? never : R
 > =>
-  makeWith<Key, A, E, R, ServiceMode>({
+  makeWith<Key, A, E, R, ServiceMode>(options.lookup, {
     ...options,
     timeToLive: options.timeToLive ? () => options.timeToLive! : defaultTimeToLive
   })

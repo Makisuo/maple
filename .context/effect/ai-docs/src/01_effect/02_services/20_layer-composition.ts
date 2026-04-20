@@ -6,7 +6,7 @@
  */
 
 import { PgClient } from "@effect/sql-pg"
-import { Array, Config, Effect, Layer, type Option, Schema, ServiceMap } from "effect"
+import { Array, Config, Context, Effect, Layer, type Option, Schema } from "effect"
 import { SqlClient, SqlError } from "effect/unstable/sql"
 
 // Define a layer for the SqlClient service
@@ -21,7 +21,7 @@ export class UserRespositoryError extends Schema.TaggedErrorClass<UserRespositor
   reason: SqlError.SqlError
 }) {}
 
-export class UserRepository extends ServiceMap.Service<UserRepository, {
+export class UserRepository extends Context.Service<UserRepository, {
   findById(id: string): Effect.Effect<
     Option.Option<{ readonly id: string; readonly name: string }>,
     UserRespositoryError

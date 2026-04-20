@@ -10,13 +10,13 @@
  *
  * @since 4.0.0
  */
+import type * as Context from "./Context.ts"
 import * as internalEffect from "./internal/effect.ts"
 import * as references from "./internal/references.ts"
 import type { Logger } from "./Logger.ts"
 import type { LogLevel, Severity } from "./LogLevel.ts"
 import type { ReadonlyRecord } from "./Record.ts"
 import { MaxOpsBeforeYield, PreventSchedulerYield } from "./Scheduler.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 import { CurrentTraceLevel, DisablePropagation, MinimumTraceLevel, type SpanLink, Tracer } from "./Tracer.ts"
 
 export {
@@ -90,7 +90,7 @@ export {
  * @category references
  * @since 4.0.0
  */
-export const CurrentConcurrency: ServiceMap.Reference<number | "unbounded"> = references.CurrentConcurrency
+export const CurrentConcurrency: Context.Reference<number | "unbounded"> = references.CurrentConcurrency
 
 /**
  * Reference for managing log annotations that are automatically added to all log entries.
@@ -146,7 +146,7 @@ export const CurrentConcurrency: ServiceMap.Reference<number | "unbounded"> = re
  * @since 4.0.0
  * @category references
  */
-export const CurrentLogAnnotations: ServiceMap.Reference<ReadonlyRecord<string, unknown>> =
+export const CurrentLogAnnotations: Context.Reference<ReadonlyRecord<string, unknown>> =
   references.CurrentLogAnnotations
 
 /**
@@ -189,7 +189,7 @@ export const CurrentLogAnnotations: ServiceMap.Reference<ReadonlyRecord<string, 
  * @category references
  * @since 4.0.0
  */
-export const CurrentLogLevel: ServiceMap.Reference<Severity> = references.CurrentLogLevel
+export const CurrentLogLevel: Context.Reference<Severity> = references.CurrentLogLevel
 
 /**
  * Reference for managing log spans that track the duration and hierarchy of operations.
@@ -249,14 +249,14 @@ export const CurrentLogLevel: ServiceMap.Reference<Severity> = references.Curren
  * @since 4.0.0
  * @category references
  */
-export const CurrentLogSpans: ServiceMap.Reference<ReadonlyArray<[label: string, timestamp: number]>> =
+export const CurrentLogSpans: Context.Reference<ReadonlyArray<[label: string, timestamp: number]>> =
   references.CurrentLogSpans
 
 /**
  * @since 4.0.0
  * @category references
  */
-export const CurrentStackFrame: ServiceMap.Reference<StackFrame | undefined> = references.CurrentStackFrame
+export const CurrentStackFrame: Context.Reference<StackFrame | undefined> = references.CurrentStackFrame
 
 /**
  * Reference for setting the minimum log level threshold. Log entries below this
@@ -307,7 +307,7 @@ export const CurrentStackFrame: ServiceMap.Reference<StackFrame | undefined> = r
  * @category references
  * @since 4.0.0
  */
-export const MinimumLogLevel: ServiceMap.Reference<LogLevel> = references.MinimumLogLevel
+export const MinimumLogLevel: Context.Reference<LogLevel> = references.MinimumLogLevel
 
 /**
  * Reference for controlling whether tracing is enabled globally. When set to false,
@@ -353,7 +353,7 @@ export const MinimumLogLevel: ServiceMap.Reference<LogLevel> = references.Minimu
  * @since 4.0.0
  * @category references
  */
-export const TracerEnabled: ServiceMap.Reference<boolean> = references.TracerEnabled
+export const TracerEnabled: Context.Reference<boolean> = references.TracerEnabled
 
 /**
  * Reference for managing span annotations that are automatically added to all new spans.
@@ -405,7 +405,7 @@ export const TracerEnabled: ServiceMap.Reference<boolean> = references.TracerEna
  * @since 4.0.0
  * @category references
  */
-export const TracerSpanAnnotations: ServiceMap.Reference<ReadonlyRecord<string, unknown>> =
+export const TracerSpanAnnotations: Context.Reference<ReadonlyRecord<string, unknown>> =
   references.TracerSpanAnnotations
 
 /**
@@ -468,7 +468,7 @@ export const TracerSpanAnnotations: ServiceMap.Reference<ReadonlyRecord<string, 
  * @since 4.0.0
  * @category references
  */
-export const TracerSpanLinks: ServiceMap.Reference<ReadonlyArray<SpanLink>> = references.TracerSpanLinks
+export const TracerSpanLinks: Context.Reference<ReadonlyArray<SpanLink>> = references.TracerSpanLinks
 
 /**
  * Reference for controlling whether trace timing is enabled globally. When set
@@ -511,7 +511,7 @@ export const TracerSpanLinks: ServiceMap.Reference<ReadonlyArray<SpanLink>> = re
  * @since 4.0.0
  * @category references
  */
-export const TracerTimingEnabled: ServiceMap.Reference<boolean> = references.TracerTimingEnabled
+export const TracerTimingEnabled: Context.Reference<boolean> = references.TracerTimingEnabled
 
 /**
  * The log level for unhandled errors. This reference allows you to set the log
@@ -520,7 +520,7 @@ export const TracerTimingEnabled: ServiceMap.Reference<boolean> = references.Tra
  * @category references
  * @since 4.0.0
  */
-export const UnhandledLogLevel: ServiceMap.Reference<Severity | undefined> = references.UnhandledLogLevel
+export const UnhandledLogLevel: Context.Reference<Severity | undefined> = references.UnhandledLogLevel
 
 /**
  * @since 4.0.0
@@ -536,13 +536,13 @@ export interface StackFrame {
  * @since 4.0.0
  * @category references
  */
-export const CurrentLoggers: ServiceMap.Reference<ReadonlySet<Logger<unknown, any>>> = internalEffect.CurrentLoggers
+export const CurrentLoggers: Context.Reference<ReadonlySet<Logger<unknown, any>>> = internalEffect.CurrentLoggers
 
 /**
  * @since 4.0.0
  * @category references
  */
-export const LogToStderr: ServiceMap.Reference<boolean> = internalEffect.LogToStderr
+export const LogToStderr: Context.Reference<boolean> = internalEffect.LogToStderr
 
 export {
   /**

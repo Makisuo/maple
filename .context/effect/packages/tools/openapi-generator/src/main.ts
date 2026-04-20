@@ -10,18 +10,21 @@ import * as OpenApiPatch from "./OpenApiPatch.ts"
 
 const spec = Flag.fileParse("spec").pipe(
   Flag.withAlias("s"),
-  Flag.withDescription("The OpenAPI spec file to generate the client from")
+  Flag.withDescription("The OpenAPI spec file to generate output from")
 )
 
 const name = Flag.string("name").pipe(
   Flag.withAlias("n"),
-  Flag.withDescription("The name of the generated client"),
+  Flag.withDescription("The name of the generated output"),
   Flag.withDefault("Client")
 )
 
-const typeOnly = Flag.boolean("type-only").pipe(
-  Flag.withAlias("t"),
-  Flag.withDescription("Generate a type-only client without schemas")
+const format = Flag.choice("format", ["httpclient", "httpclient-type-only", "httpapi"] as const).pipe(
+  Flag.withAlias("f"),
+  Flag.withDescription(
+    "Output format to generate: httpclient | httpclient-type-only | httpapi (default: httpclient)"
+  ),
+  Flag.withDefault("httpclient")
 )
 
 const patch = Flag.string("patch").pipe(
@@ -34,8 +37,8 @@ const patch = Flag.string("patch").pipe(
   Flag.between(0, Infinity)
 )
 
-const root = Command.make("openapigen", { spec, typeOnly, name, patch }).pipe(
-  Command.withHandler(Effect.fnUntraced(function*({ name, spec, typeOnly, patch }) {
+const root = Command.make("openapigen", { spec, format, name, patch }).pipe(
+  Command.withHandler(Effect.fnUntraced(function*({ name, spec, format, patch }) {
     let patchedSpec: Schema.Json = spec as Schema.Json
 
     if (patch.length > 0) {
@@ -53,11 +56,23 @@ const root = Command.make("openapigen", { spec, typeOnly, name, patch }).pipe(
     }
 
     const generator = yield* OpenApiGenerator.OpenApiGenerator
-    const source = yield* generator.generate(patchedSpec as unknown as OpenAPISpec, { name, typeOnly })
+    const warnings: Array<OpenApiGenerator.OpenApiGeneratorWarning> = []
+    const source = yield* generator.generate(patchedSpec as unknown as OpenAPISpec, {
+      name,
+      format,
+      onWarning: (warning) => {
+        warnings.push(warning)
+      }
+    })
+    yield* Effect.forEach(
+      warnings,
+      (warning) => Console.error(formatWarning(warning)),
+      { discard: true }
+    )
     return yield* Console.log(source)
   })),
-  Command.provide(({ typeOnly }) =>
-    typeOnly
+  Command.provide(({ format }) =>
+    format === "httpclient-type-only"
       ? OpenApiGenerator.layerTransformerTs
       : OpenApiGenerator.layerTransformerSchema
   )
@@ -66,3 +81,14 @@ const root = Command.make("openapigen", { spec, typeOnly, name, patch }).pipe(
 export const run: Effect.Effect<void, CliError.CliError, Command.Environment> = Command.run(root, {
   version: "0.0.0"
 })
+
+const formatWarning = (warning: OpenApiGenerator.OpenApiGeneratorWarning): string => {
+  const context = [
+    warning.method?.toUpperCase(),
+    warning.path,
+    warning.operationId ? `(${warning.operationId})` : undefined
+  ].filter((value): value is string => value !== undefined)
+  return context.length > 0
+    ? `WARNING [${warning.code}] ${context.join(" ")}: ${warning.message}`
+    : `WARNING [${warning.code}] ${warning.message}`
+}

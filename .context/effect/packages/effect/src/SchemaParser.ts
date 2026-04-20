@@ -417,16 +417,22 @@ export interface Parser {
 const recur = memoize(
   (ast: AST.AST): Parser => {
     let parser: Parser
+    const astOptions = InternalAnnotations.resolve(ast)?.["parseOptions"]
     if (!ast.context && !ast.encoding && !ast.checks) {
       return (ou, options) => {
         parser ??= ast.getParser(recur)
-        return parser(ou, InternalAnnotations.resolve(ast)?.["parseOptions"] ?? options)
+        if (astOptions) {
+          options = { ...options, ...astOptions }
+        }
+        return parser(ou, options)
       }
     }
     const isStructural = AST.isArrays(ast) || AST.isObjects(ast) ||
       (AST.isDeclaration(ast) && ast.typeParameters.length > 0)
     return (ou, options) => {
-      options = InternalAnnotations.resolve(ast)?.["parseOptions"] ?? options
+      if (astOptions) {
+        options = { ...options, ...astOptions }
+      }
       const encoding = ast.encoding
       let srou: Effect.Effect<Option.Option<unknown>, Issue.Issue, unknown> | undefined
       if (encoding) {

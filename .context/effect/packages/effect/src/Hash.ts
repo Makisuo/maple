@@ -116,8 +116,8 @@ export const hash: <A>(self: A) => number = <A>(self: A) => {
             return self[symbol]()
           } else if (typeof self === "function") {
             return random(self)
-          } else if (Array.isArray(self)) {
-            return array(self)
+          } else if (Array.isArray(self) || ArrayBuffer.isView(self)) {
+            return array(self as any)
           } else if (self instanceof Map) {
             return hashMap(self)
           } else if (self instanceof Set) {

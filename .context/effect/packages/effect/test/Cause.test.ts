@@ -1,8 +1,8 @@
 import * as Cause from "effect/Cause"
+import * as Context from "effect/Context"
 import { pipe } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
-import * as ServiceMap from "effect/ServiceMap"
 import assert from "node:assert/strict"
 import { describe, it } from "vitest"
 
@@ -581,19 +581,19 @@ describe("Cause", () => {
   describe("annotate", () => {
     it("attaches annotations to a cause (data-first)", () => {
       const cause = Cause.fail("error")
-      const annotated = Cause.annotate(cause, ServiceMap.empty())
+      const annotated = Cause.annotate(cause, Context.empty())
       assert.strictEqual(Cause.isCause(annotated), true)
       assert.strictEqual(annotated.reasons.length, 1)
     })
 
     it("works in data-last (pipeable) form", () => {
-      const annotated = pipe(Cause.fail("error"), Cause.annotate(ServiceMap.empty()))
+      const annotated = pipe(Cause.fail("error"), Cause.annotate(Context.empty()))
       assert.strictEqual(Cause.isCause(annotated), true)
     })
 
     it("does not mutate the original cause", () => {
       const original = Cause.fail("error")
-      Cause.annotate(original, ServiceMap.empty())
+      Cause.annotate(original, Context.empty())
       assert.strictEqual(original.reasons.length, 1)
     })
   })
@@ -615,13 +615,13 @@ describe("Cause", () => {
   })
 
   describe("StackTrace", () => {
-    it("is a ServiceMap.Service", () => {
+    it("is a Context.Service", () => {
       assert.ok(Cause.StackTrace !== undefined)
     })
   })
 
   describe("InterruptorStackTrace", () => {
-    it("is a ServiceMap.Service", () => {
+    it("is a Context.Service", () => {
       assert.ok(Cause.InterruptorStackTrace !== undefined)
     })
   })

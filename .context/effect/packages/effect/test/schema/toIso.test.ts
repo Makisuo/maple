@@ -50,8 +50,8 @@ describe("Optic generation", () => {
         const modify = optic.modify(addOne)
 
         deepStrictEqual(
-          modify(B.makeUnsafe({ a: A.makeUnsafe({ value: Value.makeUnsafe({ a: new Date(0) }) }) })),
-          B.makeUnsafe({ a: A.makeUnsafe({ value: Value.makeUnsafe({ a: new Date(1) }) }) })
+          modify(B.make({ a: A.make({ value: Value.make({ a: new Date(0) }) }) })),
+          B.make({ a: A.make({ value: Value.make({ a: new Date(1) }) }) })
         )
       })
     })
@@ -61,7 +61,7 @@ describe("Optic generation", () => {
       const optic = Schema.toIso(schema).key("a")
       const modify = optic.modify(addOne)
 
-      deepStrictEqual(modify(Value.makeUnsafe({ a: new Date(0) })), Value.makeUnsafe({ a: new Date(1) }))
+      deepStrictEqual(modify(Value.make({ a: new Date(0) })), Value.make({ a: new Date(1) }))
     })
 
     it("toEncoded(Class)", () => {
@@ -76,10 +76,10 @@ describe("Optic generation", () => {
       it("Number & isPositive", () => {
         const schema = Schema.Number.check(Schema.isGreaterThan(0)).pipe(Schema.brand("isPositive"))
         const optic = Schema.toIso(schema)
-        const modify = optic.modify((n) => schema.makeUnsafe(n - 1))
+        const modify = optic.modify((n) => schema.make(n - 1))
 
-        strictEqual(modify(schema.makeUnsafe(2)), 1)
-        throws(() => modify(schema.makeUnsafe(1)), "Expected a value greater than 0, got 0")
+        strictEqual(modify(schema.make(2)), 1)
+        throws(() => modify(schema.make(1)), "Expected a value greater than 0, got 0")
       })
     })
 
@@ -89,8 +89,8 @@ describe("Optic generation", () => {
       const modify = optic.modify(addOne)
 
       deepStrictEqual(
-        modify([Value.makeUnsafe({ a: new Date(0) })]),
-        [Value.makeUnsafe({ a: new Date(1) })]
+        modify([Value.make({ a: new Date(0) })]),
+        [Value.make({ a: new Date(1) })]
       )
     })
 
@@ -100,7 +100,7 @@ describe("Optic generation", () => {
       const item = Schema.toIsoFocus(Value).key("a")
       const modify = optic.modify((as) => as.map(item.modify(addOne)))
 
-      deepStrictEqual(modify([Value.makeUnsafe({ a: new Date(0) })]), [Value.makeUnsafe({ a: new Date(1) })])
+      deepStrictEqual(modify([Value.make({ a: new Date(0) })]), [Value.make({ a: new Date(1) })])
     })
 
     it("NonEmptyArray", () => {
@@ -111,14 +111,14 @@ describe("Optic generation", () => {
 
       deepStrictEqual(
         modify([
-          Value.makeUnsafe({ a: new Date(0) }),
-          Value.makeUnsafe({ a: new Date(1) }),
-          Value.makeUnsafe({ a: new Date(2) })
+          Value.make({ a: new Date(0) }),
+          Value.make({ a: new Date(1) }),
+          Value.make({ a: new Date(2) })
         ]),
         [
-          Value.makeUnsafe({ a: new Date(1) }),
-          Value.makeUnsafe({ a: new Date(3) }),
-          Value.makeUnsafe({ a: new Date(4) })
+          Value.make({ a: new Date(1) }),
+          Value.make({ a: new Date(3) }),
+          Value.make({ a: new Date(4) })
         ]
       )
     })
@@ -133,14 +133,14 @@ describe("Optic generation", () => {
 
       deepStrictEqual(
         modify([
-          Value.makeUnsafe({ a: new Date(0) }),
-          Value.makeUnsafe({ a: new Date(1) }),
-          Value.makeUnsafe({ a: new Date(2) })
+          Value.make({ a: new Date(0) }),
+          Value.make({ a: new Date(1) }),
+          Value.make({ a: new Date(2) })
         ]),
         [
-          Value.makeUnsafe({ a: new Date(1) }),
-          Value.makeUnsafe({ a: new Date(3) }),
-          Value.makeUnsafe({ a: new Date(4) })
+          Value.make({ a: new Date(1) }),
+          Value.make({ a: new Date(3) }),
+          Value.make({ a: new Date(4) })
         ]
       )
     })
@@ -155,20 +155,20 @@ describe("Optic generation", () => {
 
       deepStrictEqual(
         modify({
-          value: Value.makeUnsafe({ a: new Date(0) })
+          value: Value.make({ a: new Date(0) })
         }),
         {
-          value: Value.makeUnsafe({ a: new Date(1) })
+          value: Value.make({ a: new Date(1) })
         }
       )
       deepStrictEqual(
         modify({
-          value: Value.makeUnsafe({ a: new Date(0) }),
-          optionalValue: Value.makeUnsafe({ a: new Date(2) })
+          value: Value.make({ a: new Date(0) }),
+          optionalValue: Value.make({ a: new Date(2) })
         }),
         {
-          value: Value.makeUnsafe({ a: new Date(1) }),
-          optionalValue: Value.makeUnsafe({ a: new Date(2) })
+          value: Value.make({ a: new Date(1) }),
+          optionalValue: Value.make({ a: new Date(2) })
         }
       )
     })
@@ -181,12 +181,12 @@ describe("Optic generation", () => {
 
       deepStrictEqual(
         modify({
-          a: Value.makeUnsafe({ a: new Date(0) }),
-          b: Value.makeUnsafe({ a: new Date(1) })
+          a: Value.make({ a: new Date(0) }),
+          b: Value.make({ a: new Date(1) })
         }),
         {
-          a: Value.makeUnsafe({ a: new Date(1) }),
-          b: Value.makeUnsafe({ a: new Date(2) })
+          a: Value.make({ a: new Date(1) }),
+          b: Value.make({ a: new Date(2) })
         }
       )
     })
@@ -204,8 +204,8 @@ describe("Optic generation", () => {
       }))
 
       deepStrictEqual(
-        modify({ a: Value.makeUnsafe({ a: new Date(0) }), b: Value.makeUnsafe({ a: new Date(1) }) }),
-        { a: Value.makeUnsafe({ a: new Date(1) }), b: Value.makeUnsafe({ a: new Date(3) }) }
+        modify({ a: Value.make({ a: new Date(0) }), b: Value.make({ a: new Date(1) }) }),
+        { a: Value.make({ a: new Date(1) }), b: Value.make({ a: new Date(3) }) }
       )
     })
 
@@ -216,7 +216,7 @@ describe("Optic generation", () => {
       const modify = optic.modify((x) => Predicate.isString(x) ? x : item.modify(addOne)(x))
 
       deepStrictEqual(modify("a"), "a")
-      deepStrictEqual(modify(Value.makeUnsafe({ a: new Date(0) })), Value.makeUnsafe({ a: new Date(1) }))
+      deepStrictEqual(modify(Value.make({ a: new Date(0) })), Value.make({ a: new Date(1) }))
     })
 
     it("suspend", () => {
@@ -241,10 +241,10 @@ describe("Optic generation", () => {
       const modify = optic.modify(f)
 
       deepStrictEqual(
-        modify({ a: Value.makeUnsafe({ a: new Date(0) }), as: [{ a: Value.makeUnsafe({ a: new Date(1) }), as: [] }] }),
+        modify({ a: Value.make({ a: new Date(0) }), as: [{ a: Value.make({ a: new Date(1) }), as: [] }] }),
         {
-          a: Value.makeUnsafe({ a: new Date(1) }),
-          as: [{ a: Value.makeUnsafe({ a: new Date(2) }), as: [] }]
+          a: Value.make({ a: new Date(1) }),
+          as: [{ a: Value.make({ a: new Date(2) }), as: [] }]
         }
       )
     })
@@ -254,7 +254,7 @@ describe("Optic generation", () => {
       const optic = Schema.toIso(schema).key("a")
       const modify = optic.modify(addOne)
 
-      deepStrictEqual(modify(Value.makeUnsafe({ a: new Date(0) })), { a: new Date(1) })
+      deepStrictEqual(modify(Value.make({ a: new Date(0) })), { a: new Date(1) })
     })
 
     it("flip(flip(schema))", () => {
@@ -262,7 +262,7 @@ describe("Optic generation", () => {
       const optic = Schema.toIso(schema).key("a")
       const modify = optic.modify(addOne)
 
-      deepStrictEqual(modify(Value.makeUnsafe({ a: new Date(0) })), Value.makeUnsafe({ a: new Date(1) }))
+      deepStrictEqual(modify(Value.make({ a: new Date(0) })), Value.make({ a: new Date(1) }))
     })
 
     it("Opaque", () => {
@@ -280,8 +280,8 @@ describe("Optic generation", () => {
       const modify = optic.modify(addOne)
 
       assertSome(
-        modify(Option.some(Value.makeUnsafe({ a: new Date(0) }))),
-        Value.makeUnsafe({ a: new Date(1) })
+        modify(Option.some(Value.make({ a: new Date(0) }))),
+        Value.make({ a: new Date(1) })
       )
       assertNone(modify(Option.none()))
     })
@@ -292,8 +292,8 @@ describe("Optic generation", () => {
       const modify = optic.modify(addOne)
 
       deepStrictEqual(
-        modify(Result.succeed(Value.makeUnsafe({ a: new Date(0) }))),
-        Result.succeed(Value.makeUnsafe({ a: new Date(1) }))
+        modify(Result.succeed(Value.make({ a: new Date(0) }))),
+        Result.succeed(Value.make({ a: new Date(1) }))
       )
     })
 
@@ -303,8 +303,8 @@ describe("Optic generation", () => {
       const modify = optic.modify(addOne)
 
       deepStrictEqual(
-        modify(Cause.makeFailReason(Value.makeUnsafe({ a: new Date(0) }))),
-        Cause.makeFailReason(Value.makeUnsafe({ a: new Date(1) }))
+        modify(Cause.makeFailReason(Value.make({ a: new Date(0) }))),
+        Cause.makeFailReason(Value.make({ a: new Date(1) }))
       )
     })
 
@@ -315,8 +315,8 @@ describe("Optic generation", () => {
       const modify = optic.modify((failures) => failures.map(failure.modify(addOne)))
 
       deepStrictEqual(
-        modify(Cause.fail(Value.makeUnsafe({ a: new Date(0) }))),
-        Cause.fail(Value.makeUnsafe({ a: new Date(1) }))
+        modify(Cause.fail(Value.make({ a: new Date(0) }))),
+        Cause.fail(Value.make({ a: new Date(1) }))
       )
     })
 
@@ -334,8 +334,8 @@ describe("Optic generation", () => {
       const modify = optic.modify(addOne)
 
       deepStrictEqual(
-        modify(Exit.succeed(Value.makeUnsafe({ a: new Date(0) }))),
-        Exit.succeed(Value.makeUnsafe({ a: new Date(1) }))
+        modify(Exit.succeed(Value.make({ a: new Date(0) }))),
+        Exit.succeed(Value.make({ a: new Date(1) }))
       )
     })
 
@@ -346,8 +346,8 @@ describe("Optic generation", () => {
       const modify = optic.modify((as) => as.map(item.modify(addOne)))
 
       deepStrictEqual(
-        modify(new Set([Value.makeUnsafe({ a: new Date(0) })])),
-        new Set([Value.makeUnsafe({ a: new Date(1) })])
+        modify(new Set([Value.make({ a: new Date(0) })])),
+        new Set([Value.make({ a: new Date(1) })])
       )
     })
 
@@ -358,8 +358,8 @@ describe("Optic generation", () => {
       const modify = optic.modify((entries) => entries.map(([key, value]) => entry.modify(addOne)([key, value])))
 
       deepStrictEqual(
-        modify(new Map([["a", Value.makeUnsafe({ a: new Date(0) })]])),
-        new Map([["a", Value.makeUnsafe({ a: new Date(1) })]])
+        modify(new Map([["a", Value.make({ a: new Date(0) })]])),
+        new Map([["a", Value.make({ a: new Date(1) })]])
       )
     })
 
@@ -370,8 +370,8 @@ describe("Optic generation", () => {
       const modify = optic.modify((entries) => entries.map(([key, value]) => entry.modify(addOne)([key, value])))
 
       deepStrictEqual(
-        HashMap.toEntries(modify(HashMap.make(["a", Value.makeUnsafe({ a: new Date(0) })]))),
-        HashMap.toEntries(HashMap.make(["a", Value.makeUnsafe({ a: new Date(1) })]))
+        HashMap.toEntries(modify(HashMap.make(["a", Value.make({ a: new Date(0) })]))),
+        HashMap.toEntries(HashMap.make(["a", Value.make({ a: new Date(1) })]))
       )
     })
 
@@ -381,7 +381,7 @@ describe("Optic generation", () => {
       })
       class Err extends Data.Error<typeof Props.Type> {
         constructor(props: typeof Props.Type) {
-          super(Props.makeUnsafe(props))
+          super(Props.make(props))
         }
       }
       const schema = SchemaUtils.getNativeClassSchema(Err, { encoding: Props })

@@ -37,8 +37,6 @@ export const isEventGroup = (u: unknown): u is Any => Predicate.hasProperty(u, T
 export interface EventGroup<
   out Events extends Event.Any = Event.Any
 > extends Pipeable {
-  readonly _?: symbol
-  readonly __type?: Events | undefined
   readonly [TypeId]: TypeId
   readonly events: Record.ReadonlyRecord<string, Events>
 
@@ -112,8 +110,6 @@ const makeProto = <
   const EventGroupClass = (_: never) => {}
   const group = Object.assign(EventGroupClass, {
     [TypeId]: TypeId,
-    _: Symbol.for("~effect/eventlog/EventGroup"),
-    __type: undefined,
     events: options.events,
     add<
       Tag extends string,

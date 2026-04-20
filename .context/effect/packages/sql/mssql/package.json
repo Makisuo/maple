@@ -1,6 +1,6 @@
 {
   "name": "@effect/sql-mssql",
-  "version": "4.0.0-beta.40",
+  "version": "4.0.0-beta.52",
   "type": "module",
   "license": "MIT",
   "description": "A Microsoft SQL Server toolkit for Effect",
@@ -65,6 +65,6 @@
     "effect": "workspace:^"
   },
   "dependencies": {
-    "tedious": "^19.2.0"
+    "tedious": "^19.2.1"
   }
 }

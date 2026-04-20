@@ -1,23 +1,4 @@
-## Alpha (current)
-
-Releases are snapshot only
-
-- [x] Port Channel apis
-- [x] Port worker modules
-- [x] Port command execution modules
-- [x] Port platform-browser
-- [x] Add CLI modules
-- [x] Port SubscriptionRef
-- [x] RateLimiter with persistence
-- [x] Reduce nesting of modules
-- [x] Effect.fn call site trace
-- [x] Port Stream / Sink apis
-- [x] Add opentelemetry package
-- [x] Add Atom package
-- [x] Use Predicate for filtering functions
-- [x] Add AI provider packages
-
-## Beta
+## Beta (Current)
 
 Pre-releases to npm from smol repo
 

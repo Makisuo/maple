@@ -1,12 +1,12 @@
 import * as Array from "effect/Array"
 import type * as Cause from "effect/Cause"
 import * as Console from "effect/Console"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import type * as Scope from "effect/Scope"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Terminal from "effect/Terminal"
 
 // =============================================================================
@@ -30,7 +30,7 @@ export declare namespace MockTerminal {
 // Service
 // =============================================================================
 
-export const MockTerminal = ServiceMap.Service<Terminal.Terminal, MockTerminal>()(
+export const MockTerminal = Context.Service<Terminal.Terminal, MockTerminal>()(
   Terminal.Terminal.key
 )
 

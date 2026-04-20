@@ -1,8 +1,8 @@
 import { Clock } from "../../../Clock.ts"
+import * as Context from "../../../Context.ts"
 import * as Effect from "../../../Effect.ts"
 import * as Latch from "../../../Latch.ts"
 import * as Layer from "../../../Layer.ts"
-import * as ServiceMap from "../../../ServiceMap.ts"
 import type { EntityNotAssignedToRunner } from "../ClusterError.ts"
 import type { EntityAddress } from "../EntityAddress.ts"
 import type { EntityId } from "../EntityId.ts"
@@ -10,7 +10,7 @@ import type { EntityState } from "./entityManager.ts"
 import type { ResourceMap } from "./resourceMap.ts"
 
 /** @internal */
-export class EntityReaper extends ServiceMap.Service<EntityReaper>()("effect/cluster/EntityReaper", {
+export class EntityReaper extends Context.Service<EntityReaper>()("effect/cluster/EntityReaper", {
   make: Effect.gen(function*() {
     let currentResolution = 30_000
     const registered: Array<{

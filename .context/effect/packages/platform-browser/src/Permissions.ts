@@ -1,10 +1,10 @@
 /**
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as ServiceMap from "effect/ServiceMap"
 
 const TypeId = "~@effect/platform-browser/Permissions"
 const ErrorTypeId = "~@effect/platform-browser/Permissions/PermissionsError"
@@ -87,7 +87,7 @@ export class PermissionsError extends Data.TaggedError("PermissionsError")<{
  * @since 1.0.0
  * @category Service
  */
-export const Permissions: ServiceMap.Service<Permissions, Permissions> = ServiceMap.Service<Permissions>(TypeId)
+export const Permissions: Context.Service<Permissions, Permissions> = Context.Service<Permissions>(TypeId)
 
 /**
  * A layer that directly interfaces with the `navigator.permissions` api

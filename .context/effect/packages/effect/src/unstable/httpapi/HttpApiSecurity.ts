@@ -1,10 +1,10 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import { dual } from "../../Function.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import type { Redacted } from "../../Redacted.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { Covariant } from "../../Types.ts"
 
 const TypeId = "~effect/httpapi/HttpApiSecurity"
@@ -28,7 +28,7 @@ export declare namespace HttpApiSecurity {
     readonly [TypeId]: {
       readonly _A: Covariant<A>
     }
-    readonly annotations: ServiceMap.ServiceMap<never>
+    readonly annotations: Context.Context<never>
   }
 
   /**
@@ -91,7 +91,7 @@ const Proto = {
  */
 export const bearer: Bearer = Object.assign(Object.create(Proto), {
   _tag: "Bearer",
-  annotations: ServiceMap.empty()
+  annotations: Context.empty()
 })
 
 /**
@@ -116,7 +116,7 @@ export const apiKey = (options: {
     _tag: "ApiKey",
     key: options.key,
     in: options.in ?? "header",
-    annotations: ServiceMap.empty()
+    annotations: Context.empty()
   })
 
 /**
@@ -125,7 +125,7 @@ export const apiKey = (options: {
  */
 export const basic: Basic = Object.assign(Object.create(Proto), {
   _tag: "Basic",
-  annotations: ServiceMap.empty()
+  annotations: Context.empty()
 })
 
 /**
@@ -133,14 +133,14 @@ export const basic: Basic = Object.assign(Object.create(Proto), {
  * @category annotations
  */
 export const annotateMerge: {
-  <I>(annotations: ServiceMap.ServiceMap<I>): <A extends HttpApiSecurity>(self: A) => A
-  <A extends HttpApiSecurity, I>(self: A, annotations: ServiceMap.ServiceMap<I>): A
+  <I>(annotations: Context.Context<I>): <A extends HttpApiSecurity>(self: A) => A
+  <A extends HttpApiSecurity, I>(self: A, annotations: Context.Context<I>): A
 } = dual(
   2,
-  <A extends HttpApiSecurity, I>(self: A, annotations: ServiceMap.ServiceMap<I>): A =>
+  <A extends HttpApiSecurity, I>(self: A, annotations: Context.Context<I>): A =>
     Object.assign(Object.create(Proto), {
       ...self,
-      annotations: ServiceMap.merge(self.annotations, annotations)
+      annotations: Context.merge(self.annotations, annotations)
     })
 )
 
@@ -149,13 +149,13 @@ export const annotateMerge: {
  * @category annotations
  */
 export const annotate: {
-  <I, S>(service: ServiceMap.Key<I, S>, value: S): <A extends HttpApiSecurity>(self: A) => A
-  <A extends HttpApiSecurity, I, S>(self: A, service: ServiceMap.Key<I, S>, value: S): A
+  <I, S>(service: Context.Key<I, S>, value: S): <A extends HttpApiSecurity>(self: A) => A
+  <A extends HttpApiSecurity, I, S>(self: A, service: Context.Key<I, S>, value: S): A
 } = dual(
   3,
-  <A extends HttpApiSecurity, I, S>(self: A, service: ServiceMap.Key<I, S>, value: S): A =>
+  <A extends HttpApiSecurity, I, S>(self: A, service: Context.Key<I, S>, value: S): A =>
     Object.assign(Object.create(Proto), {
       ...self,
-      annotations: ServiceMap.add(self.annotations, service, value)
+      annotations: Context.add(self.annotations, service, value)
     })
 )

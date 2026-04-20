@@ -5,10 +5,10 @@
  *
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
 import * as Layer from "effect/Layer"
-import * as ServiceMap from "effect/ServiceMap"
 import type { Simplify } from "effect/Types"
 import * as AiError from "effect/unstable/ai/AiError"
 import * as EmbeddingModel from "effect/unstable/ai/EmbeddingModel"
@@ -28,7 +28,7 @@ export type Model = string
  * @since 1.0.0
  * @category context
  */
-export class Config extends ServiceMap.Service<
+export class Config extends Context.Service<
   Config,
   Simplify<
     & Partial<
@@ -82,7 +82,7 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
   const client = yield* OpenAiClient
 
   const makeConfig = Effect.gen(function*() {
-    const services = yield* Effect.services<never>()
+    const services = yield* Effect.context<never>()
     return { model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
   })
 

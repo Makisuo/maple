@@ -100,6 +100,7 @@
  */
 import * as Array from "./Array.ts"
 import type * as Cause from "./Cause.ts"
+import type * as Context from "./Context.ts"
 import type * as Duration from "./Duration.ts"
 import type * as Effect from "./Effect.ts"
 import type * as Fiber from "./Fiber.ts"
@@ -115,7 +116,6 @@ import type { PlatformError } from "./PlatformError.ts"
 import * as Predicate from "./Predicate.ts"
 import { CurrentLogAnnotations, CurrentLogSpans } from "./References.ts"
 import type * as Scope from "./Scope.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 
 const TypeId = "~effect/Logger"
 
@@ -226,13 +226,13 @@ export const isLogger = (u: unknown): u is Logger<unknown, unknown> => Predicate
  * @since 4.0.0
  * @category references
  */
-export const CurrentLoggers: ServiceMap.Reference<ReadonlySet<Logger<unknown, any>>> = effect.CurrentLoggers
+export const CurrentLoggers: Context.Reference<ReadonlySet<Logger<unknown, any>>> = effect.CurrentLoggers
 
 /**
  * @since 4.0.0
  * @category references
  */
-export const LogToStderr: ServiceMap.Reference<boolean> = effect.LogToStderr
+export const LogToStderr: Context.Reference<boolean> = effect.LogToStderr
 
 /**
  * Transforms the output of a `Logger` using the provided function.

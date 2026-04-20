@@ -4,7 +4,7 @@
  * How to test Effect services that depend on other services.
  */
 import { assert, describe, it, layer } from "@effect/vitest"
-import { Array, Effect, Layer, Ref, ServiceMap } from "effect"
+import { Array, Context, Effect, Layer, Ref } from "effect"
 
 export interface Todo {
   readonly id: number
@@ -13,13 +13,11 @@ export interface Todo {
 
 // Create a test ref service that can be used to store and manipulate test data
 // in layers.
-export class TodoRepoTestRef
-  extends ServiceMap.Service<TodoRepoTestRef, Ref.Ref<Array<Todo>>>()("app/TodoRepoTestRef")
-{
+export class TodoRepoTestRef extends Context.Service<TodoRepoTestRef, Ref.Ref<Array<Todo>>>()("app/TodoRepoTestRef") {
   static readonly layer = Layer.effect(TodoRepoTestRef, Ref.make(Array.empty()))
 }
 
-class TodoRepo extends ServiceMap.Service<TodoRepo, {
+class TodoRepo extends Context.Service<TodoRepo, {
   create(title: string): Effect.Effect<Todo>
   readonly list: Effect.Effect<ReadonlyArray<Todo>>
 }>()("app/TodoRepo") {
@@ -50,7 +48,7 @@ class TodoRepo extends ServiceMap.Service<TodoRepo, {
   )
 }
 
-class TodoService extends ServiceMap.Service<TodoService, {
+class TodoService extends Context.Service<TodoService, {
   addAndCount(title: string): Effect.Effect<number>
   readonly titles: Effect.Effect<ReadonlyArray<string>>
 }>()("app/TodoService") {

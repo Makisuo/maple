@@ -2,9 +2,9 @@
  * @since 4.0.0
  */
 import type { NonEmptyReadonlyArray } from "../../Array.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as HttpApi from "../httpapi/HttpApi.ts"
 import * as HttpApiBuilder from "../httpapi/HttpApiBuilder.ts"
 import type * as HttpApiGroup from "../httpapi/HttpApiGroup.ts"
@@ -90,8 +90,8 @@ export const layerRpcHandlers = <
   never,
   WorkflowEngine | Workflow.RequirementsHandler<Workflows[number]>
 > =>
-  Layer.effectServices(Effect.gen(function*() {
-    const services = yield* Effect.services<never>()
+  Layer.effectContext(Effect.gen(function*() {
+    const services = yield* Effect.context<never>()
     const prefix = options?.prefix ?? ""
     const handlers = new Map<string, Rpc.Handler<string>>()
     for (const workflow_ of workflows) {
@@ -118,7 +118,7 @@ export const layerRpcHandlers = <
         handler: (payload: any) => workflow.resume(payload.executionId) as any
       } as any)
     }
-    return ServiceMap.makeUnsafe(handlers)
+    return Context.makeUnsafe(handlers)
   }))
 
 /**

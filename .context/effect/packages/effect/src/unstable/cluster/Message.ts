@@ -1,14 +1,15 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
 import * as Option from "../../Option.ts"
 import * as Schema from "../../Schema.ts"
-import type { ServiceMap } from "../../ServiceMap.ts"
 import * as Rpc from "../rpc/Rpc.ts"
 import type { PersistenceError } from "./ClusterError.ts"
 import { MalformedMessage } from "./ClusterError.ts"
+import * as ClusterSchema from "./ClusterSchema.ts"
 import type { EntityAddress } from "./EntityAddress.ts"
 import * as Envelope from "./Envelope.ts"
 import type * as Reply from "./Reply.ts"
@@ -35,6 +36,10 @@ export const incomingLocalFromOutgoing = <R extends Rpc.Any>(self: Outgoing<R>):
     return new IncomingEnvelope({ envelope: self.envelope })
   }
   return new IncomingRequestLocal({
+    annotations: Context.get(self.rpc.annotations, ClusterSchema.Dynamic)(
+      self.rpc.annotations,
+      self.envelope as any
+    ),
     envelope: self.envelope,
     respond: self.respond,
     lastSentReply: Option.none()
@@ -59,6 +64,7 @@ export class IncomingRequestLocal<R extends Rpc.Any> extends Data.TaggedClass("I
   readonly envelope: Envelope.Request<R>
   readonly lastSentReply: Option.Option<Reply.Reply<R>>
   readonly respond: (reply: Reply.Reply<R>) => Effect.Effect<void, MalformedMessage | PersistenceError>
+  readonly annotations: Context.Context<never>
 }> {}
 
 /**
@@ -82,10 +88,11 @@ export type Outgoing<R extends Rpc.Any> = OutgoingRequest<R> | OutgoingEnvelope
  */
 export class OutgoingRequest<R extends Rpc.Any> extends Data.TaggedClass("OutgoingRequest")<{
   readonly envelope: Envelope.Request<R>
-  readonly services: ServiceMap<Rpc.Services<R>>
+  readonly context: Context.Context<Rpc.Services<R>>
   readonly lastReceivedReply: Option.Option<Reply.Reply<R>>
   readonly rpc: R
   readonly respond: (reply: Reply.Reply<R>) => Effect.Effect<void>
+  readonly annotations: Context.Context<never>
 }> {
   /**
    * @since 4.0.0
@@ -160,7 +167,7 @@ export const serializeRequest = <Rpc extends Rpc.Any>(
 ): Effect.Effect<Envelope.PartialRequest, MalformedMessage> => {
   const rpc = self.rpc as any as Rpc.AnyWithProps
   return Schema.encodeEffect(Schema.toCodecJson(rpc.payloadSchema))(self.envelope.payload).pipe(
-    Effect.provideServices(self.services),
+    Effect.provideContext(self.context),
     MalformedMessage.refail,
     Effect.map((payload) => ({
       ...self.envelope,
@@ -189,17 +196,22 @@ export const deserializeLocal = <Rpc extends Rpc.Any>(
   }
   const rpc = self.rpc as any as Rpc.AnyWithProps
   return Schema.decodeEffect(Schema.toCodecJson(rpc.payloadSchema))(encoded.payload).pipe(
-    Effect.provideServices(self.services),
+    Effect.provideContext(self.context),
     MalformedMessage.refail,
-    Effect.map((payload) =>
-      new IncomingRequestLocal({
-        envelope: Envelope.makeRequest({
-          ...encoded,
-          payload
-        } as any),
+    Effect.map((payload) => {
+      const envelope = Envelope.makeRequest({
+        ...encoded,
+        payload
+      } as any) as Envelope.Request<Rpc>
+      return new IncomingRequestLocal({
+        envelope,
         lastSentReply: Option.none(),
-        respond: self.respond
+        respond: self.respond,
+        annotations: Context.get(rpc.annotations, ClusterSchema.Dynamic)(
+          rpc.annotations,
+          envelope as any
+        )
       })
-    )
+    })
   ) as Effect.Effect<IncomingRequestLocal<Rpc>, MalformedMessage>
 }

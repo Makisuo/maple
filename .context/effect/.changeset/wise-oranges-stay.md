@@ -2,4 +2,4 @@
 "effect": patch
 ---
 
-allow ServiceMap.Key to be covariant
+allow Context.Key to be covariant

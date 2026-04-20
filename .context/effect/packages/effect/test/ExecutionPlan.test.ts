@@ -1,9 +1,9 @@
 import { describe, it } from "@effect/vitest"
 import { assertTrue, deepStrictEqual } from "@effect/vitest/utils"
-import { Array, Effect, ExecutionPlan, Exit, Layer, ServiceMap, Stream } from "effect"
+import { Array, Context, Effect, ExecutionPlan, Exit, Layer, Stream } from "effect"
 
 describe("ExecutionPlan", () => {
-  class Service extends ServiceMap.Service<Service>()("Service", {
+  class Service extends Context.Service<Service>()("Service", {
     make: Effect.succeed({
       stream: Stream.fail("A") as Stream.Stream<number, string>
     })

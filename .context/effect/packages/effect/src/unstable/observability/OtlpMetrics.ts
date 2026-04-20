@@ -79,7 +79,7 @@ export const make: (options: {
     name: OtlpResource.serviceNameUnsafe(resource)
   }
 
-  const services = yield* Effect.services<never>()
+  const services = yield* Effect.context<never>()
 
   // State for delta temporality tracking
   let previousExportTimeNanos: bigint = startTimeNanos
@@ -124,7 +124,7 @@ export const make: (options: {
               if (typeof currentCount === "bigint" && typeof previousCount === "bigint") {
                 reportValue = currentCount - previousCount
                 // Handle reset: if current < previous, report current value
-                if (reportValue < 0n) {
+                if (reportValue < BigInt(0)) {
                   reportValue = currentCount
                 }
               } else {

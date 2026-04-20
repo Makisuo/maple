@@ -3,12 +3,12 @@
  *
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Match from "effect/Match"
-import * as ServiceMap from "effect/ServiceMap"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as Yaml from "yaml"
 import type { SpecSource } from "./Config.ts"
@@ -53,7 +53,7 @@ export interface SpecFetcher {
  * @since 1.0.0
  * @category tags
  */
-export const SpecFetcher: ServiceMap.Service<SpecFetcher, SpecFetcher> = ServiceMap.Service(
+export const SpecFetcher: Context.Service<SpecFetcher, SpecFetcher> = Context.Service(
   "@effect/ai-codegen/SpecFetcher"
 )
 

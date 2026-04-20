@@ -1,9 +1,11 @@
 /**
  * @since 4.0.0
  */
+import type * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Semaphore from "../../Semaphore.ts"
-import type * as ServiceMap from "../../ServiceMap.ts"
+import type { Protocol } from "./RpcClient.ts"
+import type { FromServerEncoded } from "./RpcMessage.ts"
 
 /**
  * @since 4.0.0
@@ -16,9 +18,9 @@ export const withRun = <
 <EX, RX>(f: (write: Parameters<A["run"]>[0]) => Effect.Effect<Omit<A, "run">, EX, RX>): Effect.Effect<A, EX, RX> =>
   Effect.suspend(() => {
     const semaphore = Semaphore.makeUnsafe(1)
-    let buffer: Array<[Array<any>, ServiceMap.ServiceMap<never>]> = []
+    let buffer: Array<[Array<any>, Context.Context<never>]> = []
     let write = (...args: Array<any>): Effect.Effect<void> =>
-      Effect.servicesWith((context) => {
+      Effect.contextWith((context) => {
         buffer.push([args, context])
         return Effect.void
       })
@@ -30,7 +32,7 @@ export const withRun = <
           write = f
 
           for (const [args, context] of buffer) {
-            yield* Effect.provideServices(Effect.suspend(() => f(...args)), context)
+            yield* Effect.provideContext(Effect.suspend(() => f(...args)), context)
           }
           buffer = []
 
@@ -41,4 +43,61 @@ export const withRun = <
         }))
       }
     } as A))
+  })
+
+/**
+ * @since 4.0.0
+ */
+export const withRunClient = <EX, RX>(
+  f: (
+    write: (clientId: number, response: FromServerEncoded) => Effect.Effect<void>,
+    clientIds: ReadonlySet<number>
+  ) => Effect.Effect<Omit<Protocol["Service"], "run">, EX, RX>
+): Effect.Effect<Protocol["Service"], EX, RX> =>
+  Effect.suspend(() => {
+    const clientIds = new Set<number>()
+    const clientBuffers = new Map<number, Array<[FromServerEncoded, Context.Context<never>]>>()
+    const clientWrites = new Map<number, (data: FromServerEncoded) => Effect.Effect<void>>()
+    let write = (clientId: number, data: FromServerEncoded): Effect.Effect<void> =>
+      Effect.contextWith((context) => {
+        let buffer = clientBuffers.get(clientId)
+        if (!buffer) {
+          buffer = []
+          clientBuffers.set(clientId, buffer)
+        }
+        buffer.push([data, context])
+        return Effect.void
+      })
+    return Effect.map(
+      f((clientId, data) => {
+        const clientWrite = clientWrites.get(clientId)
+        if (clientWrite) {
+          return clientWrite(data)
+        }
+        return write(clientId, data)
+      }, clientIds),
+      (a) => ({
+        ...a,
+        run(clientId, f) {
+          return Effect.gen(function*() {
+            clientIds.add(clientId)
+            clientWrites.set(clientId, f)
+
+            const buffer = clientBuffers.get(clientId)
+            if (buffer) {
+              clientBuffers.delete(clientId)
+              for (const [args, context] of buffer) {
+                yield* Effect.provideContext(Effect.suspend(() => f(args)), context)
+              }
+            }
+
+            return yield* Effect.onExit(Effect.never, () => {
+              clientIds.delete(clientId)
+              clientWrites.delete(clientId)
+              return Effect.void
+            })
+          })
+        }
+      } satisfies Protocol["Service"])
+    )
   })

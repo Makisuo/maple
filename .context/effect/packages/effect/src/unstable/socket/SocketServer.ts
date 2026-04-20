@@ -1,16 +1,16 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Data from "../../Data.ts"
 import type * as Effect from "../../Effect.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as Socket from "./Socket.ts"
 
 /**
  * @since 4.0.0
  * @category tags
  */
-export class SocketServer extends ServiceMap.Service<SocketServer, {
+export class SocketServer extends Context.Service<SocketServer, {
   readonly address: Address
   readonly run: <R, E, _>(
     handler: (socket: Socket.Socket) => Effect.Effect<_, E, R>

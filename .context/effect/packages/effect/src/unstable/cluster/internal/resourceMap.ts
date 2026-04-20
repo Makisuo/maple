@@ -1,3 +1,4 @@
+import * as Context from "../../../Context.ts"
 import * as Deferred from "../../../Deferred.ts"
 import * as Effect from "../../../Effect.ts"
 import * as Exit from "../../../Exit.ts"
@@ -5,7 +6,6 @@ import * as MutableHashMap from "../../../MutableHashMap.ts"
 import * as MutableRef from "../../../MutableRef.ts"
 import * as Option from "../../../Option.ts"
 import * as Scope from "../../../Scope.ts"
-import * as ServiceMap from "../../../ServiceMap.ts"
 
 /** @internal */
 export class ResourceMap<K, A, E> {
@@ -30,7 +30,7 @@ export class ResourceMap<K, A, E> {
 
   static make = Effect.fnUntraced(function*<K, A, E, R>(lookup: (key: K) => Effect.Effect<A, E, R>) {
     const scope = yield* Effect.scope
-    const services = yield* Effect.services<R>()
+    const services = yield* Effect.context<R>()
     const isClosed = MutableRef.make(false)
 
     const entries = MutableHashMap.empty<K, {
@@ -50,7 +50,7 @@ export class ResourceMap<K, A, E> {
     )
 
     return new ResourceMap(
-      (key, scope) => Effect.provide(lookup(key), ServiceMap.add(services, Scope.Scope, scope)),
+      (key, scope) => Effect.provide(lookup(key), Context.add(services, Scope.Scope, scope)),
       entries,
       isClosed
     )

@@ -140,6 +140,17 @@ export interface ParsedArgs {
 }
 
 /**
+ * Represents a fallback prompt that can either be provided directly or
+ * computed effectfully when the parameter is missing.
+ *
+ * @since 4.0.0
+ * @category models
+ */
+export type FallbackPrompt<A> =
+  | Prompt.Prompt<A>
+  | Effect.Effect<Prompt.Prompt<A>, CliError.CliError, Environment>
+
+/**
  * @since 4.0.0
  * @category models
  */
@@ -851,7 +862,7 @@ const FLAG_DASH_REGEXP = /^-+/
  *
  * const force = Param.boolean(Param.flagKind, "force").pipe(
  *   Param.withAlias("-f"),
- *   Param.withAlias("--no-prompt")
+ *   Param.withAlias("-F")
  * )
  *
  * // Also works on composed params:
@@ -1076,8 +1087,6 @@ export const mapTryCatch: {
  * ```ts
  * import * as Param from "effect/unstable/cli/Param"
  *
- * // @internal - this module is not exported publicly
- *
  * // Create an optional port option
  * // - When not provided: returns Option.none()
  * // - When provided: returns Option.some(parsedValue)
@@ -1090,15 +1099,29 @@ export const mapTryCatch: {
 export const optional = <Kind extends ParamKind, A>(
   param: Param<Kind, A>
 ): Param<Kind, Option.Option<A>> => {
-  const parse: Parse<Option.Option<A>> = (args) =>
-    param.parse(args).pipe(
-      Effect.map(
-        ([leftover, value]) => [leftover, Option.some(value)] as const
-      ),
+  const parse: Parse<Option.Option<A>> = Effect.fnUntraced(function*(args) {
+    const single = getUnderlyingSingleOrThrow(param)
+
+    // Handle boolean params that are explicitly marked as optional (i.e. the
+    // end user wants to return `Option.none()` instead of `false` when the
+    // flag (or its negated variant) are not present on the command line
+    if (
+      isFlagParam(single) &&
+      Primitive.isBoolean(single.primitiveType) &&
+      ![single.name, ...single.aliases].some((name) => (args.flags[name] ?? []).length > 0)
+    ) {
+      return [args.arguments, Option.none()] as const
+    }
+
+    return yield* param.parse(args).pipe(
+      Effect.map(([leftover, value]) => [leftover, Option.some(value)] as const),
       // Catch both MissingOption (for flags) and MissingArgument (for positional arguments)
-      Effect.catchTag("MissingOption", () => Effect.succeed([args.arguments, Option.none()] as const)),
-      Effect.catchTag("MissingArgument", () => Effect.succeed([args.arguments, Option.none()] as const))
+      Effect.catchTags({
+        MissingOption: () => Effect.succeed([args.arguments, Option.none()] as const),
+        MissingArgument: () => Effect.succeed([args.arguments, Option.none()] as const)
+      })
     )
+  })
   return Object.assign(Object.create(Proto), {
     _tag: "Optional",
     kind: param.kind,
@@ -1207,14 +1230,14 @@ export const withFallbackConfig: {
  * @category combinators
  */
 export const withFallbackPrompt: {
-  <B>(prompt: Prompt.Prompt<B>): <Kind extends ParamKind, A>(self: Param<Kind, A>) => Param<Kind, A | B>
-  <Kind extends ParamKind, A, B>(self: Param<Kind, A>, prompt: Prompt.Prompt<B>): Param<Kind, A | B>
+  <B>(prompt: FallbackPrompt<B>): <Kind extends ParamKind, A>(self: Param<Kind, A>) => Param<Kind, A | B>
+  <Kind extends ParamKind, A, B>(self: Param<Kind, A>, prompt: FallbackPrompt<B>): Param<Kind, A | B>
 } = dual(2, <Kind extends ParamKind, A, B>(
   self: Param<Kind, A>,
-  prompt: Prompt.Prompt<B>
+  prompt: FallbackPrompt<B>
 ): Param<Kind, A | B> => {
   const runPrompt = (error: CliError.MissingOption | CliError.MissingArgument, args: ParsedArgs) =>
-    Prompt.run(prompt).pipe(
+    Effect.flatMap(Prompt.isPrompt(prompt) ? Effect.succeed(prompt) : prompt, Prompt.run).pipe(
       Effect.map((value) => [args.arguments, value as A | B] as const),
       Effect.catchTag("QuitError", () => Effect.fail(error))
     )

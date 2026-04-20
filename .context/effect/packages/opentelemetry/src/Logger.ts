@@ -5,6 +5,7 @@ import * as Otel from "@opentelemetry/sdk-logs"
 import type { NonEmptyReadonlyArray } from "effect/Array"
 import * as Arr from "effect/Array"
 import * as Clock from "effect/Clock"
+import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -12,7 +13,6 @@ import * as Logger from "effect/Logger"
 import * as LogLevel from "effect/LogLevel"
 import * as Predicate from "effect/Predicate"
 import * as References from "effect/References"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Tracer from "effect/Tracer"
 import { nanosToHrTime, unknownToAttributeValue } from "./internal/attributes.ts"
 import { Resource } from "./Resource.ts"
@@ -21,7 +21,7 @@ import { Resource } from "./Resource.ts"
  * @since 1.0.0
  * @category Services
  */
-export class OtelLoggerProvider extends ServiceMap.Service<
+export class OtelLoggerProvider extends Context.Service<
   OtelLoggerProvider,
   Otel.LoggerProvider
 >()("@effect/opentelemetry/Logger/OtelLoggerProvider") {}
@@ -44,7 +44,7 @@ export const make: Effect.Effect<
       fiberId: options.fiber.id
     }
 
-    const span = ServiceMap.getOrUndefined(options.fiber.services, Tracer.ParentSpan)
+    const span = Context.getOrUndefined(options.fiber.context, Tracer.ParentSpan)
 
     if (Predicate.isNotUndefined(span)) {
       attributes.spanId = span.spanId

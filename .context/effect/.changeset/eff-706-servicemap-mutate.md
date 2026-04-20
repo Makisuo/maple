@@ -3,4 +3,4 @@
 "@effect/opentelemetry": patch
 ---
 
-Refactor call sites with multiple `ServiceMap` mutations to use `ServiceMap.mutate` for batched updates.
+Refactor call sites with multiple `Context` mutations to use `Context.mutate` for batched updates.

@@ -712,17 +712,17 @@ export const remainder: {
  *
  * @since 4.0.0
  */
-export const ReducerSum: Reducer.Reducer<bigint> = Reducer.make((a, b) => a + b, 0n)
+export const ReducerSum: Reducer.Reducer<bigint> = Reducer.make((a, b) => a + b, bigint0)
 
 /**
  * A `Reducer` for combining `bigint`s using multiplication.
  *
  * @since 4.0.0
  */
-export const ReducerMultiply: Reducer.Reducer<bigint> = Reducer.make((a, b) => a * b, 1n, (collection) => {
-  let acc = 1n
+export const ReducerMultiply: Reducer.Reducer<bigint> = Reducer.make((a, b) => a * b, bigint1, (collection) => {
+  let acc = bigint1
   for (const n of collection) {
-    if (n === 0n) return 0n
+    if (n === bigint0) return bigint0
     acc *= n
   }
   return acc

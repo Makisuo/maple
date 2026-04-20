@@ -6,13 +6,7 @@
  *
  * @internal
  */
-import type {
-  ArgumentDescriptor,
-  ArgumentType,
-  CommandDescriptor,
-  FlagDescriptor,
-  FlagType
-} from "./CommandDescriptor.ts"
+import type * as Completions from "../../Completions.ts"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,7 +19,7 @@ const sanitize = (s: string): string => s.replace(/[^a-zA-Z0-9_]/g, "_")
 /**
  * All forms of a flag (--name, -alias, --no-name) for the exclusion group.
  */
-const allForms = (flag: FlagDescriptor): Array<string> => {
+const allForms = (flag: Completions.FlagDescriptor): Array<string> => {
   const forms: Array<string> = [`--${flag.name}`]
   for (const alias of flag.aliases) {
     forms.push(alias.length === 1 ? `-${alias}` : `--${alias}`)
@@ -36,7 +30,7 @@ const allForms = (flag: FlagDescriptor): Array<string> => {
   return forms
 }
 
-const valueAction = (type: FlagType): string => {
+const valueAction = (type: Completions.FlagType): string => {
   switch (type._tag) {
     case "Boolean":
       return ""
@@ -55,7 +49,7 @@ const valueAction = (type: FlagType): string => {
   }
 }
 
-const argAction = (type: ArgumentType): string => {
+const argAction = (type: Completions.ArgumentType): string => {
   switch (type._tag) {
     case "Choice":
       return `(${type.values.join(" ")})`
@@ -70,7 +64,7 @@ const argAction = (type: ArgumentType): string => {
  * Produce _arguments optspecs for a single flag. Each spec is a complete,
  * single-quoted string — no brace expansion, no line continuations.
  */
-const flagSpecs = (flag: FlagDescriptor): Array<string> => {
+const flagSpecs = (flag: Completions.FlagDescriptor): Array<string> => {
   const specs: Array<string> = []
   const desc = flag.description ? `[${escapeZsh(flag.description)}]` : ""
   const action = valueAction(flag.type)
@@ -94,7 +88,7 @@ const flagSpecs = (flag: FlagDescriptor): Array<string> => {
   return specs
 }
 
-const argSpec = (arg: ArgumentDescriptor): string => {
+const argSpec = (arg: Completions.ArgumentDescriptor): string => {
   const desc = arg.description ? escapeZsh(arg.description) : arg.name
   const action = argAction(arg.type)
   const prefix = arg.variadic ? "*" : ""
@@ -106,7 +100,7 @@ const argSpec = (arg: ArgumentDescriptor): string => {
 // ---------------------------------------------------------------------------
 
 const generateFunction = (
-  descriptor: CommandDescriptor,
+  descriptor: Completions.CommandDescriptor,
   parentPath: ReadonlyArray<string>,
   lines: Array<string>
 ): void => {
@@ -196,7 +190,7 @@ const generateFunction = (
 /** @internal */
 export const generate = (
   executableName: string,
-  descriptor: CommandDescriptor
+  descriptor: Completions.CommandDescriptor
 ): string => {
   const lines: Array<string> = []
   const safeName = sanitize(executableName)

@@ -3,13 +3,13 @@
  */
 import * as Libsql from "@libsql/client"
 import * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as Client from "effect/unstable/sql/SqlClient"
@@ -47,9 +47,9 @@ export interface LibsqlClient extends Client.SqlClient {
  * @category tags
  * @since 1.0.0
  */
-export const LibsqlClient = ServiceMap.Service<LibsqlClient>("@effect/sql-libsql/LibsqlClient")
+export const LibsqlClient = Context.Service<LibsqlClient>("@effect/sql-libsql/LibsqlClient")
 
-const LibsqlTransaction = ServiceMap.Service<readonly [LibsqlConnection, counter: number]>(
+const LibsqlTransaction = Context.Service<readonly [LibsqlConnection, counter: number]>(
   "@effect/sql-libsql/LibsqlClient/LibsqlTransaction"
 )
 
@@ -308,12 +308,12 @@ export const layerConfig: (
 ) => Layer.Layer<LibsqlClient | Client.SqlClient, Config.ConfigError> = (
   config: Config.Wrap<LibsqlClientConfig>
 ): Layer.Layer<LibsqlClient | Client.SqlClient, Config.ConfigError> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Config.unwrap(config).asEffect().pipe(
       Effect.flatMap(make),
       Effect.map((client) =>
-        ServiceMap.make(LibsqlClient, client).pipe(
-          ServiceMap.add(Client.SqlClient, client)
+        Context.make(LibsqlClient, client).pipe(
+          Context.add(Client.SqlClient, client)
         )
       )
     )
@@ -326,9 +326,9 @@ export const layerConfig: (
 export const layer = (
   config: LibsqlClientConfig
 ): Layer.Layer<LibsqlClient | Client.SqlClient> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Effect.map(make(config), (client) =>
-      ServiceMap.make(LibsqlClient, client).pipe(
-        ServiceMap.add(Client.SqlClient, client)
+      Context.make(LibsqlClient, client).pipe(
+        Context.add(Client.SqlClient, client)
       ))
   ).pipe(Layer.provide(Reactivity.layer))

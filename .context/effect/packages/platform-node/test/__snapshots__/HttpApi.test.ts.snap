@@ -174,9 +174,6 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
             },
             "description": "Group",
           },
-          "400": {
-            "description": "BadRequest",
-          },
         },
         "security": [],
         "tags": [
@@ -239,9 +236,6 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
               },
             },
             "description": "Success",
-          },
-          "400": {
-            "description": "BadRequest",
           },
         },
         "security": [],
@@ -306,9 +300,6 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
             },
             "description": "Success",
           },
-          "400": {
-            "description": "BadRequest",
-          },
         },
         "security": [],
         "tags": [
@@ -340,9 +331,6 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
             },
             "description": "Group",
           },
-          "400": {
-            "description": "BadRequest",
-          },
           "418": {
             "description": "GroupError",
           },
@@ -360,9 +348,6 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
         "responses": {
           "204": {
             "description": "Empty",
-          },
-          "400": {
-            "description": "BadRequest",
           },
         },
         "security": [],
@@ -419,9 +404,6 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
               },
             },
             "description": "Success",
-          },
-          "400": {
-            "description": "BadRequest",
           },
           "500": {
             "content": {
@@ -516,7 +498,7 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
                 },
               },
             },
-            "description": "UserError | BadRequest",
+            "description": "UserError",
           },
         },
         "security": [
@@ -593,9 +575,6 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
             },
             "description": "Success",
           },
-          "400": {
-            "description": "BadRequest",
-          },
         },
         "security": [
           {
@@ -655,9 +634,6 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
             },
             "description": "Success",
           },
-          "400": {
-            "description": "BadRequest",
-          },
         },
         "security": [
           {
@@ -706,7 +682,7 @@ exports[`HttpApi > original tests > OpenAPI spec > fixture 1`] = `
                 },
               },
             },
-            "description": "UserError | BadRequest",
+            "description": "UserError",
           },
         },
         "security": [

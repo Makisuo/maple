@@ -1,8 +1,8 @@
 /**
  * @since 2.0.0
  */
+import * as Context from "./Context.ts"
 import type * as Fiber from "./Fiber.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 /**
  * A scheduler manages the execution of Effects by controlling when and how tasks
@@ -36,7 +36,7 @@ export interface SchedulerDispatcher {
  * @since 4.0.0
  * @category references
  */
-export const Scheduler: ServiceMap.Reference<Scheduler> = ServiceMap.Reference<Scheduler>("effect/Scheduler", {
+export const Scheduler: Context.Reference<Scheduler> = Context.Reference<Scheduler>("effect/Scheduler", {
   defaultValue: () => new MixedScheduler()
 })
 
@@ -188,7 +188,7 @@ class MixedSchedulerDispatcher implements SchedulerDispatcher {
  * @since 4.0.0
  * @category references
  */
-export const MaxOpsBeforeYield = ServiceMap.Reference<number>("effect/Scheduler/MaxOpsBeforeYield", {
+export const MaxOpsBeforeYield = Context.Reference<number>("effect/Scheduler/MaxOpsBeforeYield", {
   defaultValue: () => 2048
 })
 
@@ -200,6 +200,6 @@ export const MaxOpsBeforeYield = ServiceMap.Reference<number>("effect/Scheduler/
  * @since 4.0.0
  * @category references
  */
-export const PreventSchedulerYield = ServiceMap.Reference<boolean>("effect/Scheduler/PreventSchedulerYield", {
+export const PreventSchedulerYield = Context.Reference<boolean>("effect/Scheduler/PreventSchedulerYield", {
   defaultValue: () => false
 })

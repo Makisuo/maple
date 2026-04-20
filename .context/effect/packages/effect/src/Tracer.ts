@@ -1,13 +1,13 @@
 /**
  * @since 2.0.0
  */
+import * as Context from "./Context.ts"
 import type * as Exit from "./Exit.ts"
 import type { Fiber } from "./Fiber.ts"
 import { constFalse, type LazyArg } from "./Function.ts"
 import type * as core from "./internal/core.ts"
 import type { LogLevel } from "./LogLevel.ts"
 import * as Option from "./Option.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 /**
  * @since 2.0.0
@@ -17,7 +17,7 @@ export interface Tracer {
   span(this: Tracer, options: {
     readonly name: string
     readonly parent: Option.Option<AnySpan>
-    readonly annotations: ServiceMap.ServiceMap<never>
+    readonly annotations: Context.Context<never>
     readonly links: Array<SpanLink>
     readonly startTime: bigint
     readonly kind: SpanKind
@@ -101,7 +101,7 @@ export type AnySpan = Span | ExternalSpan
  * ```ts
  * import { Tracer } from "effect"
  *
- * // The key used to identify parent spans in the service map
+ * // The key used to identify parent spans in the context
  * console.log(Tracer.ParentSpanKey) // "effect/Tracer/ParentSpan"
  * ```
  */
@@ -121,7 +121,7 @@ export const ParentSpanKey = "effect/Tracer/ParentSpan"
  * })
  * ```
  */
-export class ParentSpan extends ServiceMap.Service<ParentSpan, AnySpan>()(ParentSpanKey) {}
+export class ParentSpan extends Context.Service<ParentSpan, AnySpan>()(ParentSpanKey) {}
 
 /**
  * @since 2.0.0
@@ -129,7 +129,7 @@ export class ParentSpan extends ServiceMap.Service<ParentSpan, AnySpan>()(Parent
  * @example
  * ```ts
  * import type { Tracer } from "effect"
- * import { ServiceMap } from "effect"
+ * import { Context } from "effect"
  *
  * // Create an external span from another tracing system
  * const externalSpan: Tracer.ExternalSpan = {
@@ -137,7 +137,7 @@ export class ParentSpan extends ServiceMap.Service<ParentSpan, AnySpan>()(Parent
  *   spanId: "span-abc-123",
  *   traceId: "trace-xyz-789",
  *   sampled: true,
- *   annotations: ServiceMap.empty()
+ *   annotations: Context.empty()
  * }
  *
  * console.log(`External span: ${externalSpan.spanId}`)
@@ -148,7 +148,7 @@ export interface ExternalSpan {
   readonly spanId: string
   readonly traceId: string
   readonly sampled: boolean
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 }
 
 /**
@@ -183,7 +183,7 @@ export interface SpanOptionsNoTrace {
   readonly links?: ReadonlyArray<SpanLink> | undefined
   readonly parent?: AnySpan | undefined
   readonly root?: boolean | undefined
-  readonly annotations?: ServiceMap.ServiceMap<never> | undefined
+  readonly annotations?: Context.Context<never> | undefined
   readonly kind?: SpanKind | undefined
   readonly sampled?: boolean | undefined
   readonly level?: LogLevel | undefined
@@ -243,7 +243,7 @@ export interface Span {
   readonly spanId: string
   readonly traceId: string
   readonly parent: Option.Option<AnySpan>
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly status: SpanStatus
   readonly attributes: ReadonlyMap<string, unknown>
   readonly links: ReadonlyArray<SpanLink>
@@ -314,14 +314,14 @@ export const externalSpan = (
     readonly spanId: string
     readonly traceId: string
     readonly sampled?: boolean | undefined
-    readonly annotations?: ServiceMap.ServiceMap<never> | undefined
+    readonly annotations?: Context.Context<never> | undefined
   }
 ): ExternalSpan => ({
   _tag: "ExternalSpan",
   spanId: options.spanId,
   traceId: options.traceId,
   sampled: options.sampled ?? true,
-  annotations: options.annotations ?? ServiceMap.empty()
+  annotations: options.annotations ?? Context.empty()
 })
 
 /**
@@ -339,7 +339,7 @@ export const externalSpan = (
  * )
  * ```
  */
-export const DisablePropagation = ServiceMap.Reference<boolean>(
+export const DisablePropagation = Context.Reference<boolean>(
   "effect/Tracer/DisablePropagation",
   { defaultValue: constFalse }
 )
@@ -350,7 +350,7 @@ export const DisablePropagation = ServiceMap.Reference<boolean>(
  * @category references
  * @since 4.0.0
  */
-export const CurrentTraceLevel: ServiceMap.Reference<LogLevel> = ServiceMap.Reference<LogLevel>(
+export const CurrentTraceLevel: Context.Reference<LogLevel> = Context.Reference<LogLevel>(
   "effect/Tracer/CurrentTraceLevel",
   { defaultValue: () => "Info" }
 )
@@ -363,7 +363,7 @@ export const CurrentTraceLevel: ServiceMap.Reference<LogLevel> = ServiceMap.Refe
  * @category references
  * @since 4.0.0
  */
-export const MinimumTraceLevel = ServiceMap.Reference<
+export const MinimumTraceLevel = Context.Reference<
   LogLevel
 >("effect/Tracer/MinimumTraceLevel", { defaultValue: () => "All" })
 
@@ -393,7 +393,7 @@ export const TracerKey = "effect/Tracer"
  * })
  * ```
  */
-export const Tracer: ServiceMap.Reference<Tracer> = ServiceMap.Reference<Tracer>(TracerKey, {
+export const Tracer: Context.Reference<Tracer> = Context.Reference<Tracer>(TracerKey, {
   defaultValue: () =>
     make({
       span: (options) => new NativeSpan(options)
@@ -412,7 +412,7 @@ export class NativeSpan implements Span {
 
   readonly name: string
   readonly parent: Option.Option<AnySpan>
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly links: Array<SpanLink>
   readonly startTime: bigint
   readonly kind: SpanKind
@@ -424,7 +424,7 @@ export class NativeSpan implements Span {
   constructor(options: {
     readonly name: string
     readonly parent: Option.Option<AnySpan>
-    readonly annotations: ServiceMap.ServiceMap<never>
+    readonly annotations: Context.Context<never>
     readonly links: Array<SpanLink>
     readonly startTime: bigint
     readonly kind: SpanKind

@@ -495,14 +495,24 @@ export const remainder: {
   (divisor: number): (self: number) => number
   (self: number, divisor: number): number
 } = dual(2, (self: number, divisor: number): number => {
-  // https://stackoverflow.com/questions/3966484/why-does-modulus-operator-return-fractional-number-in-javascript/31711034#31711034
-  const selfDecCount = (self.toString().split(".")[1] || "").length
-  const divisorDecCount = (divisor.toString().split(".")[1] || "").length
+  const selfDecCount = decimalCount(self)
+  const divisorDecCount = decimalCount(divisor)
   const decCount = selfDecCount > divisorDecCount ? selfDecCount : divisorDecCount
   const selfInt = parseInt(self.toFixed(decCount).replace(".", ""))
   const divisorInt = parseInt(divisor.toFixed(decCount).replace(".", ""))
   return (selfInt % divisorInt) / Math.pow(10, decCount)
 })
+
+function decimalCount(n: number): number {
+  const s = n.toString()
+  const eIndex = s.indexOf("e-")
+  if (eIndex !== -1) {
+    const exp = parseInt(s.slice(eIndex + 2))
+    const mantissaDecimals = (s.slice(0, eIndex).split(".")[1] || "").length
+    return mantissaDecimals + exp
+  }
+  return (s.split(".")[1] || "").length
+}
 
 /**
  * Returns the next power of 2 from the given number.

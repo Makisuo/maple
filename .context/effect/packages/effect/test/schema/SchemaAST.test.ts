@@ -32,6 +32,13 @@ describe("SchemaAST", () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular
     strictEqual(SchemaAST.isJson(circular), false)
+    // accepts DAGs
+    const shared = { a: 1 }
+    strictEqual(SchemaAST.isJson({ x: shared, y: shared }), true)
+    strictEqual(SchemaAST.isJson([shared, { nested: shared }]), true)
+    // Nested DAG
+    const deeper = { parent: { left: shared, right: shared } }
+    strictEqual(SchemaAST.isJson(deeper), true)
   })
 
   it("isStringTree", () => {

@@ -178,6 +178,37 @@ describe("LanguageModel", () => {
           strictEqual(error.reason.responseText, "{\"count\":\"oops\"}")
         }
       }))
+
+    it("resolves top-level $ref for class schemas in defaultCodecTransformer", () => {
+      class Person extends Schema.Class<Person>("Person")({
+        name: Schema.String
+      }) {}
+
+      const transformed = LanguageModel.defaultCodecTransformer(Person)
+
+      deepStrictEqual(transformed.jsonSchema, {
+        type: "object",
+        properties: {
+          name: {
+            type: "string"
+          }
+        },
+        required: ["name"],
+        additionalProperties: false,
+        $defs: {
+          Person: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string"
+              }
+            },
+            required: ["name"],
+            additionalProperties: false
+          }
+        }
+      })
+    })
   })
 
   describe("provider options", () => {

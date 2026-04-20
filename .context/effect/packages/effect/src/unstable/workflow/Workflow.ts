@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
@@ -16,7 +17,6 @@ import * as Issue from "../../SchemaIssue.ts"
 import * as Parser from "../../SchemaParser.ts"
 import * as Tranformation from "../../SchemaTransformation.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { ExitEncoded } from "../rpc/RpcMessage.ts"
 import { makeHashDigest } from "./internal/crypto.ts"
 import type { WorkflowEngine, WorkflowInstance } from "./WorkflowEngine.ts"
@@ -38,13 +38,13 @@ export interface Workflow<
   readonly payloadSchema: Payload
   readonly successSchema: Success
   readonly errorSchema: Error
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 
   /**
    * Add an annotation to the workflow.
    */
   annotate<I, S>(
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     value: S
   ): Workflow<Name, Payload, Success, Error>
 
@@ -52,7 +52,7 @@ export interface Workflow<
    * Merge multiple annotations into the workflow.
    */
   annotateMerge<I>(
-    annotations: ServiceMap.ServiceMap<I>
+    annotations: Context.Context<I>
   ): Workflow<Name, Payload, Success, Error>
 
   /**
@@ -191,7 +191,7 @@ export interface Any {
   readonly payloadSchema: AnyStructSchema
   readonly successSchema: Schema.Top
   readonly errorSchema: Schema.Top
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 }
 
 /**
@@ -256,11 +256,11 @@ export type RequirementsHandler<Workflows extends Any> = Workflows extends Workf
     | _Error["EncodingServices"]
   : never
 
-const EngineTag = ServiceMap.Service<WorkflowEngine, WorkflowEngine["Service"]>(
+const EngineTag = Context.Service<WorkflowEngine, WorkflowEngine["Service"]>(
   "effect/workflow/WorkflowEngine" satisfies typeof WorkflowEngine.key
 )
 
-const InstanceTag = ServiceMap.Service<
+const InstanceTag = Context.Service<
   WorkflowInstance,
   WorkflowInstance["Service"]
 >(
@@ -286,7 +286,7 @@ export const make = <
   readonly success?: Success
   readonly error?: Error
   readonly suspendedRetrySchedule?: Schedule.Schedule<any, unknown> | undefined
-  readonly annotations?: ServiceMap.ServiceMap<never>
+  readonly annotations?: Context.Context<never>
 }): Workflow<
   Name,
   Payload extends Schema.Struct.Fields ? Schema.Struct<Payload> : Payload,
@@ -302,22 +302,25 @@ export const make = <
       : Schema.Struct(options.payload as any),
     successSchema: options.success ?? (Schema.Void as any),
     errorSchema: options.error ?? (Schema.Never as any),
-    annotations: options.annotations ?? ServiceMap.empty(),
+    annotations: options.annotations ?? Context.empty(),
     annotate(tag, value) {
       return make({
         ...options,
-        annotations: ServiceMap.add(self.annotations, tag, value)
+        annotations: Context.add(self.annotations, tag, value)
       })
     },
     annotateMerge(context) {
       return make({
         ...options,
-        annotations: ServiceMap.merge(self.annotations, context)
+        annotations: Context.merge(self.annotations, context)
       })
     },
     execute: Effect.fnUntraced(
-      function*(fields: any, opts) {
-        const payload = self.payloadSchema.makeUnsafe(fields)
+      function*<const Discard extends boolean = false>(
+        fields: any,
+        opts?: { readonly discard?: Discard } | undefined
+      ) {
+        const payload = self.payloadSchema.make(fields)
         const engine = yield* EngineTag
         const executionId = yield* makeExecutionId(payload)
         yield* Effect.annotateCurrentSpan({ executionId })
@@ -376,7 +379,7 @@ export const make = <
       ),
     executionId: (payload) =>
       Effect.flatMap(
-        Effect.sync(() => self.payloadSchema.makeUnsafe(payload)),
+        Effect.orDie(self.payloadSchema.makeEffect(payload)),
         makeExecutionId
       ),
     withCompensation
@@ -551,10 +554,10 @@ export const intoResult = <A, E, R>(
   never,
   Exclude<R, Scope.Scope> | WorkflowInstance
 > =>
-  Effect.servicesWith((services: ServiceMap.ServiceMap<WorkflowInstance>) => {
-    const instance = ServiceMap.get(services, InstanceTag)
-    const captureDefects = ServiceMap.get(instance.workflow.annotations, CaptureDefects)
-    const suspendOnFailure = ServiceMap.get(instance.workflow.annotations, SuspendOnFailure)
+  Effect.contextWith((context: Context.Context<WorkflowInstance>) => {
+    const instance = Context.get(context, InstanceTag)
+    const captureDefects = Context.get(instance.workflow.annotations, CaptureDefects)
+    const suspendOnFailure = Context.get(instance.workflow.annotations, SuspendOnFailure)
     return effect.pipe(
       // so we can use external interruption to suspend the workflow
       Effect.forkChild({ startImmediately: true }),
@@ -601,8 +604,8 @@ export const wrapActivityResult = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   isSuspend: (value: A) => boolean
 ): Effect.Effect<A, E, R | WorkflowInstance> =>
-  Effect.servicesWith((services: ServiceMap.ServiceMap<WorkflowInstance>) => {
-    const instance = ServiceMap.get(services, InstanceTag)
+  Effect.contextWith((context: Context.Context<WorkflowInstance>) => {
+    const instance = Context.get(context, InstanceTag)
     const state = instance.activityState
     if (instance.suspended) {
       return waitForZero(instance).pipe(
@@ -691,8 +694,8 @@ export const addFinalizer: <R>(
   f: (exit: Exit.Exit<unknown, unknown>) => Effect.Effect<void, never, R>
 ) {
   const scope = (yield* InstanceTag).scope
-  const services = yield* Effect.services<R>()
-  yield* Scope.addFinalizerExit(scope, (exit) => Effect.provideServices(f(exit), services))
+  const services = yield* Effect.context<R>()
+  yield* Scope.addFinalizerExit(scope, (exit) => Effect.provideContext(f(exit), services))
 })
 
 /**
@@ -747,7 +750,7 @@ export const suspend = (instance: WorkflowInstance["Service"]): Effect.Effect<ne
  * @since 4.0.0
  * @category Annotations
  */
-export const CaptureDefects = ServiceMap.Reference<boolean>(
+export const CaptureDefects = Context.Reference<boolean>(
   "effect/workflow/Workflow/CaptureDefects",
   {
     defaultValue: constTrue
@@ -764,7 +767,7 @@ export const CaptureDefects = ServiceMap.Reference<boolean>(
  * @since 4.0.0
  * @category Annotations
  */
-export const SuspendOnFailure = ServiceMap.Reference<boolean>(
+export const SuspendOnFailure = Context.Reference<boolean>(
   "effect/workflow/Workflow/SuspendOnFailure",
   {
     defaultValue: constFalse

@@ -29,9 +29,9 @@ const encodeTag = (fieldNumber: number, wireType: WireType): number => (fieldNum
 export const encodeVarint = (value: number | bigint): Uint8Array => {
   const bytes: Array<number> = []
   let n = typeof value === "bigint" ? value : BigInt(value)
-  while (n > 0x7fn) {
-    bytes.push(Number(n & 0x7fn) | 0x80)
-    n >>= 7n
+  while (n > BigInt(127)) {
+    bytes.push(Number(n & BigInt(127)) | 0x80)
+    n >>= BigInt(7)
   }
   bytes.push(Number(n))
   return new Uint8Array(bytes)
@@ -44,7 +44,7 @@ export const encodeVarint = (value: number | bigint): Uint8Array => {
  */
 export const encodeSint = (value: number | bigint): Uint8Array => {
   const n = typeof value === "bigint" ? value : BigInt(value)
-  const zigzag = (n << 1n) ^ (n >> 63n)
+  const zigzag = (n << BigInt(1)) ^ (n >> BigInt(63))
   return encodeVarint(zigzag)
 }
 

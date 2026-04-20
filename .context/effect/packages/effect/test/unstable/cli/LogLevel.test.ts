@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Logger, Option, Path, ServiceMap, Stdio } from "effect"
+import { Context, Effect, FileSystem, Layer, Logger, Option, Path, Stdio } from "effect"
 import { CliOutput, Command, Flag, GlobalFlag } from "effect/unstable/cli"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import * as MockTerminal from "./services/MockTerminal.ts"
@@ -10,7 +10,7 @@ interface Log {
   readonly timestamp: Date
 }
 
-class MockLogger extends ServiceMap.Service<MockLogger, {
+class MockLogger extends Context.Service<MockLogger, {
   readonly logs: Effect.Effect<ReadonlyArray<Log>>
 }>()("MockLogger") {
   static logs = Effect.service(MockLogger).pipe(
@@ -34,8 +34,8 @@ const makeMockLogger = Effect.gen(function*() {
     })
   })
 
-  return ServiceMap.make(MockLogger, { logs: Effect.sync(() => logs) }).pipe(
-    ServiceMap.add(Logger.CurrentLoggers, new Set([mockLogger]))
+  return Context.make(MockLogger, { logs: Effect.sync(() => logs) }).pipe(
+    Context.add(Logger.CurrentLoggers, new Set([mockLogger]))
   )
 })
 
@@ -47,7 +47,7 @@ const SpawnerLayer = Layer.succeed(
   ChildProcessSpawner.ChildProcessSpawner,
   ChildProcessSpawner.make(() => Effect.die("Not implemented"))
 )
-const LoggerLayer = Layer.effectServices(makeMockLogger)
+const LoggerLayer = Layer.effectContext(makeMockLogger)
 
 const TestLayer = Layer.mergeAll(
   FileSystemLayer,

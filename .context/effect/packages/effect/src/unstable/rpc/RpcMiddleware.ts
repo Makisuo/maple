@@ -1,11 +1,11 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Schema from "../../Schema.ts"
 import { Scope } from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { Mutable, unhandled } from "../../Types.ts"
 import type { Headers } from "../http/Headers.ts"
 import type * as Rpc from "./Rpc.ts"
@@ -31,7 +31,7 @@ export interface RpcMiddleware<Provides, E, Requires> {
   (
     effect: Effect.Effect<SuccessValue, E | unhandled, Provides>,
     options: {
-      readonly clientId: number
+      readonly client: Rpc.ServerClient
       readonly requestId: RequestId
       readonly rpc: Rpc.AnyWithProps
       readonly payload: unknown
@@ -77,7 +77,7 @@ export interface Any {
   (
     effect: Effect.Effect<SuccessValue, any, any>,
     options: {
-      readonly clientId: number
+      readonly client: Rpc.ServerClient
       readonly requestId: RequestId
       readonly rpc: Rpc.AnyWithProps
       readonly payload: unknown
@@ -111,8 +111,8 @@ export interface ServiceClass<
   ClientError,
   Requires,
   RequiredForClient extends boolean
-> extends ServiceMap.Service<Self, RpcMiddleware<Provides, E["Type"], Requires>> {
-  new(_: never): ServiceMap.ServiceClass.Shape<Name, RpcMiddleware<Provides, E["Type"], Requires>> & {
+> extends Context.Service<Self, RpcMiddleware<Provides, E["Type"], Requires>> {
+  new(_: never): Context.ServiceClass.Shape<Name, RpcMiddleware<Provides, E["Type"], Requires>> & {
     readonly [TypeId]: {
       readonly error: E
       readonly provides: Provides
@@ -174,7 +174,7 @@ export type ErrorServicesDecode<A> = ErrorSchema<A>["DecodingServices"]
  * @since 4.0.0
  * @category models
  */
-export interface AnyService extends ServiceMap.Key<any, any> {
+export interface AnyService extends Context.Key<any, any> {
   readonly [TypeId]: typeof TypeId
   readonly error: Schema.Top
   readonly requiredForClient: boolean
@@ -185,7 +185,7 @@ export interface AnyService extends ServiceMap.Key<any, any> {
  * @since 4.0.0
  * @category models
  */
-export interface AnyServiceWithProps extends ServiceMap.Key<any, RpcMiddleware<any, any, any>> {
+export interface AnyServiceWithProps extends Context.Key<any, RpcMiddleware<any, any, any>> {
   readonly [TypeId]: typeof TypeId
   readonly error: Schema.Top
   readonly requiredForClient: boolean
@@ -241,7 +241,7 @@ export const Service = <
 
   function ServiceClass() {}
   const ServiceClass_ = ServiceClass as any as Mutable<AnyService>
-  Object.setPrototypeOf(ServiceClass, Object.getPrototypeOf(ServiceMap.Service<Self, any>(id)))
+  Object.setPrototypeOf(ServiceClass, Object.getPrototypeOf(Context.Service<Self, any>(id)))
   ServiceClass.key = id
   Object.defineProperty(ServiceClass, "stack", {
     get() {
@@ -259,23 +259,23 @@ export const Service = <
  * @category client
  */
 export const layerClient = <Id extends AnyId, S, R, EX = never, RX = never>(
-  tag: ServiceMap.Key<Id, S>,
+  tag: Context.Key<Id, S>,
   service:
     | RpcMiddlewareClient<Id[TypeId]["error"]["Type"], Id[TypeId]["clientError"], R>
     | Effect.Effect<RpcMiddlewareClient<Id[TypeId]["error"]["Type"], Id[TypeId]["clientError"], R>, EX, RX>
 ): Layer.Layer<ForClient<Id>, EX, R | Exclude<RX, Scope>> =>
-  Layer.effectServices(Effect.gen(function*() {
-    const services = (yield* Effect.services<R | Scope>()).pipe(
-      ServiceMap.omit(Scope)
-    ) as ServiceMap.ServiceMap<R>
+  Layer.effectContext(Effect.gen(function*() {
+    const services = (yield* Effect.context<R | Scope>()).pipe(
+      Context.omit(Scope)
+    ) as Context.Context<R>
     const middleware = Effect.isEffect(service) ? yield* service : service
-    return ServiceMap.makeUnsafe(
+    return Context.makeUnsafe(
       new Map([[
         `${tag.key}/Client`,
         (options: any) =>
-          Effect.updateServices(
+          Effect.updateContext(
             middleware(options),
-            (requestContext) => ServiceMap.merge(services, requestContext)
+            (requestContext) => Context.merge(services, requestContext)
           )
       ]])
     )

@@ -1,11 +1,11 @@
-import { Array as Arr, Effect, Layer, Ref, ServiceMap } from "effect"
+import { Array as Arr, Context, Effect, Layer, Ref } from "effect"
 
 export interface TestAction {
   readonly command: string
   readonly details: Record<string, unknown>
 }
 
-export class TestActions extends ServiceMap.Service<TestActions, {
+export class TestActions extends Context.Service<TestActions, {
   readonly log: (action: TestAction) => Effect.Effect<void>
   readonly getActions: Effect.Effect<ReadonlyArray<TestAction>>
 }>()("TestActions") {}

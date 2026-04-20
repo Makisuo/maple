@@ -3,13 +3,13 @@
  */
 import type * as Brand from "../../Brand.ts"
 import { Clock } from "../../Clock.ts"
+import * as Context from "../../Context.ts"
 import * as DateTime from "../../DateTime.ts"
 import * as Effect from "../../Effect.ts"
 import { identity } from "../../Function.ts"
 import * as Layer from "../../Layer.ts"
 import * as Schema from "../../Schema.ts"
 import * as Transformation from "../../SchemaTransformation.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { MachineId } from "./MachineId.ts"
 
 /**
@@ -192,7 +192,7 @@ export const makeGenerator: Effect.Effect<Snowflake.Generator> = Effect.gen(func
  * @since 4.0.0
  * @category Generator
  */
-export class Generator extends ServiceMap.Service<
+export class Generator extends Context.Service<
   Generator,
   Snowflake.Generator
 >()("effect/cluster/Snowflake/Generator") {}

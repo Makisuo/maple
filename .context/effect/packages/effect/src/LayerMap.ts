@@ -1,13 +1,13 @@
 /**
  * @since 3.14.0
  */
+import * as Context from "./Context.ts"
 import type * as Duration from "./Duration.ts"
 import * as Effect from "./Effect.ts"
 import { identity } from "./Function.ts"
 import * as Layer from "./Layer.ts"
 import * as RcMap from "./RcMap.ts"
 import * as Scope from "./Scope.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 import type { Mutable, NoExcessProperties } from "./Types.ts"
 
 const TypeId = "~effect/LayerMap"
@@ -19,10 +19,10 @@ type IdleTimeToLiveInput<K> = Duration.Input | ((key: K) => Duration.Input)
  * @category Models
  * @example
  * ```ts
- * import { Effect, Layer, LayerMap, ServiceMap } from "effect"
+ * import { Effect, Layer, LayerMap, Context } from "effect"
  *
  * // Define a service key
- * const DatabaseService = ServiceMap.Service<{
+ * const DatabaseService = Context.Service<{
  *   readonly query: (sql: string) => Effect.Effect<string>
  * }>("Database")
  *
@@ -40,8 +40,8 @@ type IdleTimeToLiveInput<K> = Duration.Input | ((key: K) => Duration.Input)
  *   // Get a layer for a specific environment
  *   const devLayer = layerMap.get("development")
  *
- *   // Get services directly
- *   const services = yield* layerMap.services("production")
+ *   // Get context directly
+ *   const context = yield* layerMap.contextEffect("production")
  *
  *   // Invalidate a cached layer
  *   yield* layerMap.invalidate("development")
@@ -54,7 +54,7 @@ export interface LayerMap<in out K, in out I, in out E = never> {
   /**
    * The internal RcMap that stores the resources.
    */
-  readonly rcMap: RcMap.RcMap<K, ServiceMap.ServiceMap<I>, E>
+  readonly rcMap: RcMap.RcMap<K, Context.Context<I>, E>
 
   /**
    * Retrieves a Layer for the resources associated with the key.
@@ -62,9 +62,9 @@ export interface LayerMap<in out K, in out I, in out E = never> {
   get(key: K): Layer.Layer<I, E>
 
   /**
-   * Retrieves the services associated with the key.
+   * Retrieves the context associated with the key.
    */
-  services(key: K): Effect.Effect<ServiceMap.ServiceMap<I>, E, Scope.Scope>
+  contextEffect(key: K): Effect.Effect<Context.Context<I>, E, Scope.Scope>
 
   /**
    * Invalidates the resource associated with the key.
@@ -81,10 +81,10 @@ export interface LayerMap<in out K, in out I, in out E = never> {
  *
  * @example
  * ```ts
- * import { Effect, Layer, LayerMap, ServiceMap } from "effect"
+ * import { Effect, Layer, LayerMap, Context } from "effect"
  *
  * // Define a service key
- * const DatabaseService = ServiceMap.Service<{
+ * const DatabaseService = Context.Service<{
  *   readonly query: (sql: string) => Effect.Effect<string>
  * }>("Database")
  *
@@ -134,13 +134,13 @@ export const make: <
     readonly idleTimeToLive?: IdleTimeToLiveInput<K> | undefined
   } | undefined
 ) {
-  const services = yield* Effect.services<never>()
-  const memoMap = Layer.CurrentMemoMap.getOrCreate(services)
+  const context = yield* Effect.context<never>()
+  const memoMap = Layer.CurrentMemoMap.getOrCreate(context)
 
   const rcMap = yield* RcMap.make({
     lookup: (key: K) =>
-      Effect.servicesWith((_: ServiceMap.ServiceMap<Scope.Scope>) =>
-        Layer.buildWithMemoMap(lookup(key), memoMap, ServiceMap.get(_, Scope.Scope))
+      Effect.contextWith((_: Context.Context<Scope.Scope>) =>
+        Layer.buildWithMemoMap(lookup(key), memoMap, Context.get(_, Scope.Scope))
       ),
     idleTimeToLive: options?.idleTimeToLive
   })
@@ -148,8 +148,8 @@ export const make: <
   return identity<LayerMap<K, I, any>>({
     [TypeId]: TypeId,
     rcMap,
-    get: (key) => Layer.effectServices(RcMap.get(rcMap, key)),
-    services: (key) => RcMap.get(rcMap, key),
+    get: (key) => Layer.effectContext(RcMap.get(rcMap, key)),
+    contextEffect: (key) => RcMap.get(rcMap, key),
     invalidate: (key) => RcMap.invalidate(rcMap, key)
   })
 })
@@ -159,14 +159,14 @@ export const make: <
  * @category Constructors
  * @example
  * ```ts
- * import { Effect, Layer, LayerMap, ServiceMap } from "effect"
+ * import { Effect, Layer, LayerMap, Context } from "effect"
  *
  * // Define service keys
- * const DevDatabase = ServiceMap.Service<{
+ * const DevDatabase = Context.Service<{
  *   readonly query: (sql: string) => Effect.Effect<string>
  * }>("DevDatabase")
  *
- * const ProdDatabase = ServiceMap.Service<{
+ * const ProdDatabase = Context.Service<{
  *   readonly query: (sql: string) => Effect.Effect<string>
  * }>("ProdDatabase")
  *
@@ -230,7 +230,7 @@ export interface TagClass<
   in out R,
   in out LE,
   in out Deps extends Layer.Layer<any, any, any>
-> extends ServiceMap.ServiceClass<Self, Id, LayerMap<K, I, E>> {
+> extends Context.ServiceClass<Self, Id, LayerMap<K, I, E>> {
   /**
    * A default layer for the `LayerMap` service.
    */
@@ -252,9 +252,9 @@ export interface TagClass<
   readonly get: (key: K) => Layer.Layer<I, E, Self>
 
   /**
-   * Retrieves the services associated with the key.
+   * Retrieves the context associated with the key.
    */
-  readonly services: (key: K) => Effect.Effect<ServiceMap.ServiceMap<I>, E, Scope.Scope | Self>
+  readonly contextEffect: (key: K) => Effect.Effect<Context.Context<I>, E, Scope.Scope | Self>
 
   /**
    * Invalidates the resource associated with the key.
@@ -271,10 +271,10 @@ export interface TagClass<
  *
  * @example
  * ```ts
- * import { Console, Effect, Layer, LayerMap, ServiceMap } from "effect"
+ * import { Console, Effect, Layer, LayerMap, Context } from "effect"
  *
  * // Define a service key
- * const Greeter = ServiceMap.Service<{
+ * const Greeter = Context.Service<{
  *   readonly greet: Effect.Effect<string>
  * }>("Greeter")
  *
@@ -348,7 +348,7 @@ export const Service = <Self>() =>
 
   function TagClass() {}
   const TagClass_ = TagClass as any as Mutable<TagClass<Self, Id, string, any, any, any, any, any>>
-  Object.setPrototypeOf(TagClass, Object.getPrototypeOf(ServiceMap.Service<Self, any>(id)))
+  Object.setPrototypeOf(TagClass, Object.getPrototypeOf(Context.Service<Self, any>(id)))
   TagClass.key = id
   Object.defineProperty(TagClass, "stack", {
     get() {
@@ -366,7 +366,8 @@ export const Service = <Self>() =>
     TagClass_.layerNoDeps
 
   TagClass_.get = (key: string) => Layer.unwrap(Effect.map(TagClass_.asEffect(), (layerMap) => layerMap.get(key)))
-  TagClass_.services = (key: string) => Effect.flatMap(TagClass_.asEffect(), (layerMap) => layerMap.services(key))
+  TagClass_.contextEffect = (key: string) =>
+    Effect.flatMap(TagClass_.asEffect(), (layerMap) => layerMap.contextEffect(key))
   TagClass_.invalidate = (key: string) => Effect.flatMap(TagClass_.asEffect(), (layerMap) => layerMap.invalidate(key))
 
   return TagClass as any

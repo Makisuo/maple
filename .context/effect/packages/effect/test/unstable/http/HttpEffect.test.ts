@@ -1,6 +1,6 @@
 import { describe, test } from "@effect/vitest"
 import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
-import { Effect, References, ServiceMap, Stream } from "effect"
+import { Context, Effect, References, Stream } from "effect"
 import * as Layer from "effect/Layer"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import {
@@ -86,7 +86,7 @@ describe("Http/App", () => {
       const handler = Effect.succeed(HttpServerResponse.stream(
         Stream.fromEffect(References.CurrentConcurrency.asEffect()).pipe(Stream.map(String), Stream.encodeText)
       )).pipe(
-        HttpEffect.toWebHandlerWith(References.CurrentConcurrency.serviceMap(420))
+        HttpEffect.toWebHandlerWith(References.CurrentConcurrency.context(420))
       )
       const response = await handler(new Request("http://localhost:3000/"))
       strictEqual(await response.text(), "420")
@@ -122,14 +122,14 @@ describe("Http/App", () => {
   })
 
   test("custom context", async () => {
-    const Env = ServiceMap.Reference<{ foo: string }>("Env", {
+    const Env = Context.Reference<{ foo: string }>("Env", {
       defaultValue: () => ({ foo: "bar" })
     })
     const handler = HttpEffect.toWebHandler(Effect.gen(function*() {
       const env = yield* Env
       return yield* HttpServerResponse.json(env)
     }))
-    const response = await handler(new Request("http://localhost:3000/"), Env.serviceMap({ foo: "baz" }))
+    const response = await handler(new Request("http://localhost:3000/"), Env.context({ foo: "baz" }))
     deepStrictEqual(await response.json(), {
       foo: "baz"
     })

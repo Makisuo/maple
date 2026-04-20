@@ -1,8 +1,8 @@
-import { Effect, Layer, Ref, ServiceMap } from "effect"
+import { Context, Effect, Layer, Ref } from "effect"
 import { User, UserId } from "../domain/User.ts"
 import { SearchQueryTooShort, UserNotFound, UsersError } from "../domain/UserErrors.ts"
 
-export class Users extends ServiceMap.Service<Users, {
+export class Users extends Context.Service<Users, {
   list(search: string | undefined): Effect.Effect<Array<User>, UsersError>
   getById(id: UserId): Effect.Effect<User, UsersError>
   create(input: { readonly name: string; readonly email: string }): Effect.Effect<User, UsersError>
@@ -14,7 +14,7 @@ export class Users extends ServiceMap.Service<Users, {
         [
           1,
           new User({
-            id: UserId.makeUnsafe(1),
+            id: UserId.make(1),
             name: "Admin",
             email: "admin@acme.dev"
           })
@@ -51,7 +51,7 @@ export class Users extends ServiceMap.Service<Users, {
 
       const create = Effect.fn("UsersRepo.create")(function*(input: { readonly name: string; readonly email: string }) {
         const id = yield* Ref.getAndUpdate(nextId, (current) => current + 1)
-        const user = new User({ id: UserId.makeUnsafe(id), ...input })
+        const user = new User({ id: UserId.make(id), ...input })
         users.set(user.id, user)
         return user
       })

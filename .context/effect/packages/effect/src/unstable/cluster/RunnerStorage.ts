@@ -2,15 +2,15 @@
  * @since 4.0.0
  */
 import { isArrayNonEmpty, type NonEmptyArray } from "../../Array.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as MutableHashMap from "../../MutableHashMap.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { PersistenceError } from "./ClusterError.ts"
 import * as MachineId from "./MachineId.ts"
 import { Runner } from "./Runner.ts"
 import type { RunnerAddress } from "./RunnerAddress.ts"
-import { ShardId } from "./ShardId.ts"
+import * as ShardId from "./ShardId.ts"
 
 /**
  * Represents a generic interface to the persistent storage required by the
@@ -19,7 +19,7 @@ import { ShardId } from "./ShardId.ts"
  * @since 4.0.0
  * @category models
  */
-export class RunnerStorage extends ServiceMap.Service<RunnerStorage, {
+export class RunnerStorage extends Context.Service<RunnerStorage, {
   /**
    * Register a new runner with the cluster.
    */
@@ -47,23 +47,23 @@ export class RunnerStorage extends ServiceMap.Service<RunnerStorage, {
    */
   readonly acquire: (
     address: RunnerAddress,
-    shardIds: Iterable<ShardId>
-  ) => Effect.Effect<Array<ShardId>, PersistenceError>
+    shardIds: Iterable<ShardId.ShardId>
+  ) => Effect.Effect<Array<ShardId.ShardId>, PersistenceError>
 
   /**
    * Refresh the locks owned by the given runner.
    */
   readonly refresh: (
     address: RunnerAddress,
-    shardIds: Iterable<ShardId>
-  ) => Effect.Effect<Array<ShardId>, PersistenceError>
+    shardIds: Iterable<ShardId.ShardId>
+  ) => Effect.Effect<Array<ShardId.ShardId>, PersistenceError>
 
   /**
    * Release the given shard ids.
    */
   readonly release: (
     address: RunnerAddress,
-    shardId: ShardId
+    shardId: ShardId.ShardId
   ) => Effect.Effect<void, PersistenceError>
 
   /**
@@ -181,7 +181,7 @@ export const makeEncoded = (encoded: Encoded) =>
  */
 export const makeMemory = Effect.gen(function*() {
   const runners = MutableHashMap.empty<RunnerAddress, Runner>()
-  let acquired: Array<ShardId> = []
+  let acquired: Array<ShardId.ShardId> = []
   let id = 0
 
   return RunnerStorage.of({

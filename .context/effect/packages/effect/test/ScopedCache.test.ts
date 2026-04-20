@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Clock, Data, Deferred, Duration, Effect, Exit, Fiber, Option, ScopedCache, ServiceMap } from "effect"
+import { Clock, Context, Data, Deferred, Duration, Effect, Exit, Fiber, Option, ScopedCache } from "effect"
 import { TestClock } from "effect/testing"
 
 describe("ScopedCache", () => {
@@ -46,7 +46,7 @@ describe("ScopedCache", () => {
 
       it.effect("lookup function context is preserved", () =>
         Effect.gen(function*() {
-          class TestService extends ServiceMap.Service<TestService, { value: number }>()("TestService") {}
+          class TestService extends Context.Service<TestService, { value: number }>()("TestService") {}
 
           const program = Effect.gen(function*() {
             const cache = yield* ScopedCache.make({
@@ -1974,14 +1974,14 @@ describe("ScopedCache", () => {
     })
   })
 
-  // TODO: Service context tests are commented out due to TypeScript issues with ServiceMap
+  // TODO: Service context tests are commented out due to TypeScript issues with Context
   // These tests are failing due to complex service dependency injection features
   // that may not be fully implemented in ScopedCache
   describe("service context", () => {
     describe("Service Dependency Injection", () => {
       it.effect("services are available in lookup functions", () =>
         Effect.gen(function*() {
-          class ConfigService extends ServiceMap.Service<ConfigService, { multiplier: number }>()("ConfigService") {}
+          class ConfigService extends Context.Service<ConfigService, { multiplier: number }>()("ConfigService") {}
 
           const cache = yield* ScopedCache.make({
             capacity: 10,
@@ -2001,7 +2001,7 @@ describe("ScopedCache", () => {
 
       it.effect("requireServicesAt: 'lookup' provides services at lookup time", () =>
         Effect.gen(function*() {
-          class CounterService extends ServiceMap.Service<CounterService, { value: number }>()("CounterService") {}
+          class CounterService extends Context.Service<CounterService, { value: number }>()("CounterService") {}
 
           const cache = yield* ScopedCache.make({
             capacity: 10,

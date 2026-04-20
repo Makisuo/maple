@@ -6,6 +6,7 @@ import * as Arr from "./Array.ts"
 import * as Cause from "./Cause.ts"
 import * as Channel from "./Channel.ts"
 import * as Clock from "./Clock.ts"
+import type * as Context from "./Context.ts"
 import * as Duration from "./Duration.ts"
 import * as Effect from "./Effect.ts"
 import * as Exit from "./Exit.ts"
@@ -22,7 +23,6 @@ import * as Pull from "./Pull.ts"
 import * as Queue from "./Queue.ts"
 import * as Result from "./Result.ts"
 import * as Scope from "./Scope.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 import type { Stream } from "./Stream.ts"
 import type * as Types from "./Types.ts"
 import type * as Unify from "./Unify.ts"
@@ -1639,21 +1639,21 @@ export const timed: Sink<Duration.Duration, unknown> = map(withDuration(drain), 
  * @since 4.0.0
  * @category Services
  */
-export const provideServices: {
+export const provideContext: {
   <Provided>(
-    services: ServiceMap.ServiceMap<Provided>
+    context: Context.Context<Provided>
   ): <A, In, L, E, R>(self: Sink<A, In, L, E, R>) => Sink<A, In, L, E, Exclude<R, Provided>>
   <A, In, L, E, R, Provided>(
     self: Sink<A, In, L, E, R>,
-    services: ServiceMap.ServiceMap<Provided>
+    context: Context.Context<Provided>
   ): Sink<A, In, L, E, Exclude<R, Provided>>
 } = dual(2, <A, In, L, E, R, Provided>(
   self: Sink<A, In, L, E, R>,
-  services: ServiceMap.ServiceMap<Provided>
+  context: Context.Context<Provided>
 ): Sink<A, In, L, E, Exclude<R, Provided>> =>
   fromTransform((upstream, scope) =>
     self.transform(upstream, scope).pipe(
-      Effect.provideServices(services)
+      Effect.provideContext(context)
     )
   ))
 
@@ -1663,17 +1663,17 @@ export const provideServices: {
  */
 export const provideService: {
   <I, S>(
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     value: Types.NoInfer<S>
   ): <A, In, L, E, R>(self: Sink<A, In, L, E, R>) => Sink<A, In, L, E, Exclude<R, I>>
   <A, In, L, E, R, I, S>(
     self: Sink<A, In, L, E, R>,
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     value: Types.NoInfer<S>
   ): Sink<A, In, L, E, Exclude<R, I>>
 } = dual(3, <A, In, L, E, R, I, S>(
   self: Sink<A, In, L, E, R>,
-  key: ServiceMap.Key<I, S>,
+  key: Context.Key<I, S>,
   value: Types.NoInfer<S>
 ): Sink<A, In, L, E, Exclude<R, I>> =>
   fromTransform((upstream, scope) =>

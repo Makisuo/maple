@@ -1,6 +1,6 @@
 {
   "name": "@effect/vitest",
-  "version": "4.0.0-beta.40",
+  "version": "4.0.0-beta.52",
   "type": "module",
   "license": "MIT",
   "description": "A set of helpers for testing Effects with vitest",
@@ -52,8 +52,8 @@
     "vitest": "^3.0.0 || ^4.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.2.0",
+    "@types/node": "^25.6.0",
     "effect": "workspace:^",
-    "vitest": "4.0.18"
+    "vitest": "4.1.4"
   }
 }

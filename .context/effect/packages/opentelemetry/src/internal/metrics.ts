@@ -11,8 +11,8 @@ import type {
 import { AggregationTemporality, DataPointType, InstrumentType } from "@opentelemetry/sdk-metrics"
 import type { InstrumentDescriptor } from "@opentelemetry/sdk-metrics/build/src/InstrumentDescriptor.js"
 import * as Arr from "effect/Array"
+import type * as Context from "effect/Context"
 import * as Metric from "effect/Metric"
-import type * as ServiceMap from "effect/ServiceMap"
 import type * as Metrics from "../Metrics.ts"
 
 const sdkName = "@effect/opentelemetry/Metrics"
@@ -37,7 +37,7 @@ interface PreviousSummaryState {
 /** @internal */
 export class MetricProducerImpl implements MetricProducer {
   resource: Resources.Resource
-  services: ServiceMap.ServiceMap<never>
+  context: Context.Context<never>
   temporality: Metrics.TemporalityPreference
   startTimes: Map<string, HrTime>
   startTimeNanos: HrTime
@@ -49,11 +49,11 @@ export class MetricProducerImpl implements MetricProducer {
 
   constructor(
     resource: Resources.Resource,
-    services: ServiceMap.ServiceMap<never>,
+    context: Context.Context<never>,
     temporality: Metrics.TemporalityPreference = "cumulative"
   ) {
     this.resource = resource
-    this.services = services
+    this.context = context
     this.temporality = temporality
     this.startTimes = new Map()
     this.startTimeNanos = currentHrTime()
@@ -73,7 +73,7 @@ export class MetricProducerImpl implements MetricProducer {
   }
 
   collect(_options?: MetricCollectOptions): Promise<CollectionResult> {
-    const snapshot = Metric.snapshotUnsafe(this.services)
+    const snapshot = Metric.snapshotUnsafe(this.context)
     const hrTimeNow = currentHrTime()
     const metricData: Array<MetricData> = []
     const metricDataByName = new Map<string, MetricData>()
@@ -111,7 +111,7 @@ export class MetricProducerImpl implements MetricProducer {
               if (typeof currentCount === "bigint" && typeof previousCount === "bigint") {
                 reportValue = currentCount - previousCount
                 // Handle reset: if current < previous, report current value
-                if (reportValue < 0n) {
+                if (reportValue < BigInt(0)) {
                   reportValue = currentCount
                 }
               } else {

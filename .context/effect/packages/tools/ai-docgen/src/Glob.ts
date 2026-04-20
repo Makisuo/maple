@@ -3,10 +3,10 @@
  *
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as ServiceMap from "effect/ServiceMap"
 import * as GlobLib from "glob"
 
 /**
@@ -24,7 +24,7 @@ export class GlobError extends Data.TaggedError("GlobError")<{
  * @since 1.0.0
  * @category tags
  */
-export class Glob extends ServiceMap.Service<Glob, {
+export class Glob extends Context.Service<Glob, {
   readonly glob: (
     pattern: string | ReadonlyArray<string>,
     options?: GlobLib.GlobOptions

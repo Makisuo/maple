@@ -2,12 +2,12 @@
  * @since 4.0.0
  */
 import type { NonEmptyReadonlyArray } from "../../Array.ts"
+import * as Context from "../../Context.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Record from "../../Record.ts"
 import type * as Schema from "../../Schema.ts"
 import type * as AST from "../../SchemaAST.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { Mutable } from "../../Types.ts"
 import type { PathInput } from "../http/HttpRouter.ts"
 import * as HttpApiEndpoint from "./HttpApiEndpoint.ts"
@@ -40,7 +40,7 @@ export interface HttpApi<
   readonly [TypeId]: typeof TypeId
   readonly identifier: Id
   readonly groups: Record.ReadonlyRecord<string, Groups>
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 
   /**
    * Add a `HttpApiGroup` to the `HttpApi`.
@@ -67,18 +67,18 @@ export interface HttpApi<
    * api is called.
    */
   middleware<I extends HttpApiMiddleware.AnyId, S>(
-    middleware: ServiceMap.Key<I, S>
+    middleware: Context.Key<I, S>
   ): HttpApi<Id, HttpApiGroup.AddMiddleware<Groups, I>>
 
   /**
    * Annotate the `HttpApi`.
    */
-  annotate<I, S>(tag: ServiceMap.Key<I, S>, value: S): HttpApi<Id, Groups>
+  annotate<I, S>(tag: Context.Key<I, S>, value: S): HttpApi<Id, Groups>
 
   /**
-   * Annotate the `HttpApi` with a ServiceMap.
+   * Annotate the `HttpApi` with a Context.
    */
-  annotateMerge<I>(context: ServiceMap.ServiceMap<I>): HttpApi<Id, Groups>
+  annotateMerge<I>(context: Context.Context<I>): HttpApi<Id, Groups>
 }
 
 /**
@@ -121,7 +121,7 @@ const Proto = {
     const newGroups = { ...this.groups }
     for (const key in api.groups) {
       const newGroup: Mutable<HttpApiGroup.AnyWithProps> = api.groups[key]
-      newGroup.annotations = ServiceMap.merge(api.annotations, newGroup.annotations)
+      newGroup.annotations = Context.merge(api.annotations, newGroup.annotations)
       newGroups[key] = newGroup as any
     }
     return makeProto({
@@ -144,18 +144,18 @@ const Proto = {
       annotations: this.annotations
     })
   },
-  annotate(this: AnyWithProps, key: ServiceMap.Key<any, any>, value: any) {
+  annotate(this: AnyWithProps, key: Context.Key<any, any>, value: any) {
     return makeProto({
       identifier: this.identifier,
       groups: this.groups,
-      annotations: ServiceMap.add(this.annotations, key, value)
+      annotations: Context.add(this.annotations, key, value)
     })
   },
-  annotateMerge(this: AnyWithProps, annotations: ServiceMap.ServiceMap<never>) {
+  annotateMerge(this: AnyWithProps, annotations: Context.Context<never>) {
     return makeProto({
       identifier: this.identifier,
       groups: this.groups,
-      annotations: ServiceMap.merge(this.annotations, annotations)
+      annotations: Context.merge(this.annotations, annotations)
     })
   }
 }
@@ -164,7 +164,7 @@ const makeProto = <Id extends string, Groups extends HttpApiGroup.Any>(
   options: {
     readonly identifier: Id
     readonly groups: Record.ReadonlyRecord<string, Groups>
-    readonly annotations: ServiceMap.ServiceMap<never>
+    readonly annotations: Context.Context<never>
   }
 ): HttpApi<Id, Groups> => {
   function HttpApi() {}
@@ -188,7 +188,7 @@ export const make = <const Id extends string>(identifier: Id): HttpApi<Id, never
   makeProto({
     identifier,
     groups: new Map() as any,
-    annotations: ServiceMap.empty()
+    annotations: Context.empty()
   })
 
 /**
@@ -206,12 +206,12 @@ export const reflect = <Id extends string, Groups extends HttpApiGroup.Any>(
       | undefined
     readonly onGroup: (options: {
       readonly group: HttpApiGroup.AnyWithProps
-      readonly mergedAnnotations: ServiceMap.ServiceMap<never>
+      readonly mergedAnnotations: Context.Context<never>
     }) => void
     readonly onEndpoint: (options: {
       readonly group: HttpApiGroup.AnyWithProps
       readonly endpoint: HttpApiEndpoint.AnyWithProps
-      readonly mergedAnnotations: ServiceMap.ServiceMap<never>
+      readonly mergedAnnotations: Context.Context<never>
       readonly middleware: ReadonlySet<HttpApiMiddleware.AnyService>
       readonly successes: ReadonlyMap<number, readonly [Schema.Top, ...Array<Schema.Top>]>
       readonly errors: ReadonlyMap<number, readonly [Schema.Top, ...Array<Schema.Top>]>
@@ -220,7 +220,7 @@ export const reflect = <Id extends string, Groups extends HttpApiGroup.Any>(
 ) => {
   const groups = Object.values(self.groups) as any as Array<HttpApiGroup.AnyWithProps>
   for (const group of groups) {
-    const groupAnnotations = ServiceMap.merge(self.annotations, group.annotations)
+    const groupAnnotations = Context.merge(self.annotations, group.annotations)
     options.onGroup({
       group,
       mergedAnnotations: groupAnnotations
@@ -238,7 +238,7 @@ export const reflect = <Id extends string, Groups extends HttpApiGroup.Any>(
         group,
         endpoint,
         middleware: endpoint.middlewares as any,
-        mergedAnnotations: ServiceMap.merge(groupAnnotations, endpoint.annotations),
+        mergedAnnotations: Context.merge(groupAnnotations, endpoint.annotations),
         successes: extractResponseContent(
           HttpApiEndpoint.getSuccessSchemas(endpoint),
           HttpApiSchema.getStatusSuccess
@@ -255,7 +255,7 @@ export const reflect = <Id extends string, Groups extends HttpApiGroup.Any>(
 // -------------------------------------------------------------------------------------
 
 const extractResponseContent = (
-  schemas: readonly [Schema.Top, ...Array<Schema.Top>],
+  schemas: Array<Schema.Top>,
   getStatus: (ast: AST.AST) => number
 ): ReadonlyMap<number, [Schema.Top, ...Array<Schema.Top>]> => {
   const map = new Map<number, [Schema.Top, ...Array<Schema.Top>]>()
@@ -283,7 +283,7 @@ const extractResponseContent = (
  * @since 4.0.0
  * @category tags
  */
-export class AdditionalSchemas extends ServiceMap.Service<
+export class AdditionalSchemas extends Context.Service<
   AdditionalSchemas,
   ReadonlyArray<Schema.Top>
 >()("effect/httpapi/HttpApi/AdditionalSchemas") {}

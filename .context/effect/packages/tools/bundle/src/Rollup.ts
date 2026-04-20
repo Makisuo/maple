@@ -2,13 +2,13 @@
  * @since 1.0.0
  */
 import * as NodeStream from "@effect/platform-node/NodeStream"
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FiberSet from "effect/FiberSet"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import { createGzip } from "node:zlib"
 import type { RollupOptions } from "rollup"
@@ -56,7 +56,7 @@ export interface BundleAllOptions {
  * @since 1.0.0
  * @category services
  */
-export class Rollup extends ServiceMap.Service<Rollup>()(
+export class Rollup extends Context.Service<Rollup>()(
   "@effect/bundle/Rollup",
   {
     make: Effect.gen(function*() {

@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
 import { assertInclude, assertNone, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
-import { Cause, Duration, Effect, Fiber, Layer, ServiceMap, Tracer } from "effect"
+import { Cause, Context, Duration, Effect, Fiber, Layer, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import type { Span } from "effect/Tracer"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
@@ -19,7 +19,7 @@ describe("Tracer", () => {
       Effect.gen(function*() {
         const cause = yield* Effect.die(new Error("boom")).pipe(
           Effect.withSpan("C", {
-            annotations: Tracer.DisablePropagation.serviceMap(true)
+            annotations: Tracer.DisablePropagation.context(true)
           }),
           Effect.sandbox,
           Effect.flip
@@ -59,7 +59,7 @@ describe("Tracer", () => {
               spanId: "000",
               traceId: "111",
               sampled: true,
-              annotations: ServiceMap.empty()
+              annotations: Context.empty()
             }
           })
         )
@@ -240,7 +240,7 @@ describe("Tracer", () => {
           traceId: "123",
           spanId: "456",
           sampled: true,
-          annotations: ServiceMap.empty()
+          annotations: Context.empty()
         })
       ))
   })
@@ -380,7 +380,7 @@ describe("Tracer", () => {
       Effect.gen(function*() {
         const span = yield* Effect.currentSpan.pipe(
           Effect.withSpan("A", {
-            annotations: Tracer.DisablePropagation.serviceMap(true)
+            annotations: Tracer.DisablePropagation.context(true)
           })
         )
         const spanB = yield* Effect.currentSpan.pipe(
@@ -397,7 +397,7 @@ describe("Tracer", () => {
         const span = yield* Effect.currentSpan.pipe(
           Effect.withSpan("child"),
           Effect.withSpan("disabled", {
-            annotations: Tracer.DisablePropagation.serviceMap(true)
+            annotations: Tracer.DisablePropagation.context(true)
           }),
           Effect.withSpan("parent")
         )

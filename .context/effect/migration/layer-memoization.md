@@ -13,9 +13,9 @@ deduplicated across `Effect.provide` calls.
 ## Example
 
 ```ts
-import { Console, Effect, Layer, ServiceMap } from "effect"
+import { Console, Context, Effect, Layer } from "effect"
 
-const MyService = ServiceMap.Service<{ readonly value: string }>("MyService")
+const MyService = Context.Service<{ readonly value: string }>("MyService")
 
 const MyServiceLayer = Layer.effect(
   MyService,

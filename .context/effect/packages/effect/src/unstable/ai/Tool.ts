@@ -26,6 +26,7 @@
  *
  * @since 1.0.0
  */
+import * as Context from "../../Context.ts"
 import type * as Effect from "../../Effect.ts"
 import { constFalse, constTrue, identity } from "../../Function.ts"
 import type * as JsonSchema from "../../JsonSchema.ts"
@@ -33,7 +34,6 @@ import { pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
 import * as AST from "../../SchemaAST.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as Struct from "../../Struct.ts"
 import type * as Types from "../../Types.ts"
 import type * as AiError from "./AiError.ts"
@@ -232,10 +232,10 @@ export interface Tool<
   readonly failureSchema: Config["failure"]
 
   /**
-   * A `ServiceMap` containing tool annotations which can store metadata about
+   * A `Context` containing tool annotations which can store metadata about
    * the tool.
    */
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 
   /**
    * Specifies whether user approval is required before executing this tool.
@@ -257,7 +257,7 @@ export interface Tool<
    * instead of being provided when creating the tool call handler layer.
    */
   addDependency<Identifier, Service>(
-    tag: ServiceMap.Key<Identifier, Service>
+    tag: Context.Key<Identifier, Service>
   ): Tool<Name, Config, Identifier | Requirements>
 
   /**
@@ -311,12 +311,12 @@ export interface Tool<
   /**
    * Add an annotation to the tool.
    */
-  annotate<I, S>(tag: ServiceMap.Key<I, S>, value: S): Tool<Name, Config, Requirements>
+  annotate<I, S>(tag: Context.Key<I, S>, value: S): Tool<Name, Config, Requirements>
 
   /**
    * Add many annotations to the tool.
    */
-  annotateMerge<I>(context: ServiceMap.ServiceMap<I>): Tool<Name, Config, Requirements>
+  annotateMerge<I>(context: Context.Context<I>): Tool<Name, Config, Requirements>
 }
 
 /**
@@ -893,7 +893,7 @@ export type ResultDecodingServices<T> = T extends Tool<
 export interface Handler<Name extends string> {
   readonly _: unique symbol
   readonly name: Name
-  readonly services: ServiceMap.ServiceMap<never>
+  readonly context: Context.Context<never>
   readonly handler: (params: any, ctx: any) => Effect.Effect<any, any>
 }
 
@@ -1006,16 +1006,16 @@ const Proto = {
   setFailure(this: Any, failureSchema: Schema.Top) {
     return userDefinedProto({ ...this, failureSchema })
   },
-  annotate<I, S>(this: Any, tag: ServiceMap.Key<I, S>, value: S) {
+  annotate<I, S>(this: Any, tag: Context.Key<I, S>, value: S) {
     return userDefinedProto({
       ...this,
-      annotations: ServiceMap.add(this.annotations, tag, value)
+      annotations: Context.add(this.annotations, tag, value)
     })
   },
-  annotateMerge<I>(this: Any, context: ServiceMap.ServiceMap<I>) {
+  annotateMerge<I>(this: Any, context: Context.Context<I>) {
     return userDefinedProto({
       ...this,
-      annotations: ServiceMap.merge(this.annotations, context)
+      annotations: Context.merge(this.annotations, context)
     })
   }
 }
@@ -1042,7 +1042,7 @@ const userDefinedProto = <
   readonly parametersSchema: Parameters
   readonly successSchema: Success
   readonly failureSchema: Failure
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly failureMode: Mode
   readonly needsApproval?: NeedsApproval<Parameters> | undefined
 }): Tool<
@@ -1104,7 +1104,7 @@ const dynamicProto = <
   readonly parametersSchema: Parameters
   readonly successSchema: Success
   readonly failureSchema: Failure
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly failureMode: Mode
   readonly needsApproval?: NeedsApproval<any> | undefined
   readonly jsonSchema: JsonSchema.JsonSchema | undefined
@@ -1153,7 +1153,7 @@ export const make = <
   Success extends Schema.Top = typeof Schema.Void,
   Failure extends Schema.Top = typeof Schema.Never,
   Mode extends FailureMode | undefined = undefined,
-  Dependencies extends Array<ServiceMap.Key<any, any> | ServiceMap.Key<never, any>> = []
+  Dependencies extends Array<Context.Key<any, any> | Context.Key<never, any>> = []
 >(name: Name, options?: {
   /**
    * An optional description explaining what the tool does.
@@ -1203,7 +1203,7 @@ export const make = <
     readonly failure: Failure
     readonly failureMode: Mode extends undefined ? "error" : Mode
   },
-  ServiceMap.Service.Identifier<Dependencies[number]>
+  Context.Service.Identifier<Dependencies[number]>
 > => {
   const successSchema = options?.success ?? Schema.Void
   const failureSchema = options?.failure ?? Schema.Never
@@ -1214,7 +1214,7 @@ export const make = <
     successSchema,
     failureSchema,
     failureMode: options?.failureMode ?? "error",
-    annotations: ServiceMap.empty(),
+    annotations: Context.empty(),
     needsApproval: options?.needsApproval as any
   }) as any
 }
@@ -1308,7 +1308,7 @@ export const dynamic: {
     successSchema,
     failureSchema,
     failureMode: options?.failureMode ?? "error",
-    annotations: ServiceMap.empty(),
+    annotations: Context.empty(),
     needsApproval: options?.needsApproval,
     jsonSchema
   })
@@ -1617,7 +1617,7 @@ export const getJsonSchemaFromSchema = <S extends Schema.Top>(schema: S, options
  * @since 1.0.0
  * @category annotations
  */
-export class Title extends ServiceMap.Service<Title, string>()("effect/ai/Tool/Title") {}
+export class Title extends Context.Service<Title, string>()("effect/ai/Tool/Title") {}
 
 /**
  * Annotation for providing tool metadata for MCP.
@@ -1632,7 +1632,7 @@ export class Title extends ServiceMap.Service<Title, string>()("effect/ai/Tool/T
  * @since 1.0.0
  * @category annotations
  */
-export class Meta extends ServiceMap.Service<Meta, Record<string, unknown>>()("effect/ai/Tool/Meta") {}
+export class Meta extends Context.Service<Meta, Record<string, unknown>>()("effect/ai/Tool/Meta") {}
 
 /**
  * Annotation indicating whether a tool only reads data without making changes.
@@ -1648,7 +1648,7 @@ export class Meta extends ServiceMap.Service<Meta, Record<string, unknown>>()("e
  * @since 1.0.0
  * @category annotations
  */
-export const Readonly = ServiceMap.Reference<boolean>("effect/ai/Tool/Readonly", {
+export const Readonly = Context.Reference<boolean>("effect/ai/Tool/Readonly", {
   defaultValue: constFalse
 })
 
@@ -1666,7 +1666,7 @@ export const Readonly = ServiceMap.Reference<boolean>("effect/ai/Tool/Readonly",
  * @since 1.0.0
  * @category annotations
  */
-export const Destructive = ServiceMap.Reference<boolean>("effect/ai/Tool/Destructive", {
+export const Destructive = Context.Reference<boolean>("effect/ai/Tool/Destructive", {
   defaultValue: constTrue
 })
 
@@ -1684,7 +1684,7 @@ export const Destructive = ServiceMap.Reference<boolean>("effect/ai/Tool/Destruc
  * @since 1.0.0
  * @category annotations
  */
-export const Idempotent = ServiceMap.Reference<boolean>("effect/ai/Tool/Idempotent", {
+export const Idempotent = Context.Reference<boolean>("effect/ai/Tool/Idempotent", {
   defaultValue: constFalse
 })
 
@@ -1702,7 +1702,7 @@ export const Idempotent = ServiceMap.Reference<boolean>("effect/ai/Tool/Idempote
  * @since 1.0.0
  * @category annotations
  */
-export const OpenWorld = ServiceMap.Reference<boolean>("effect/ai/Tool/OpenWorld", {
+export const OpenWorld = Context.Reference<boolean>("effect/ai/Tool/OpenWorld", {
   defaultValue: constTrue
 })
 
@@ -1728,7 +1728,7 @@ export const OpenWorld = ServiceMap.Reference<boolean>("effect/ai/Tool/OpenWorld
  * @since 1.0.0
  * @category annotations
  */
-export const Strict = ServiceMap.Reference<boolean | undefined>("effect/ai/Tool/Strict", {
+export const Strict = Context.Reference<boolean | undefined>("effect/ai/Tool/Strict", {
   defaultValue: () => undefined
 })
 
@@ -1738,7 +1738,7 @@ export const Strict = ServiceMap.Reference<boolean | undefined>("effect/ai/Tool/
  * @since 1.0.0
  * @category utilities
  */
-export const getStrictMode = <T extends Any>(tool: T): boolean | undefined => ServiceMap.get(tool.annotations, Strict)
+export const getStrictMode = <T extends Any>(tool: T): boolean | undefined => Context.get(tool.annotations, Strict)
 
 // Licensed under BSD-3-Clause (below code only)
 // Code adapted from https://github.com/fastify/secure-json-parse/blob/783fcb1b5434709466759847cec974381939673a/index.js

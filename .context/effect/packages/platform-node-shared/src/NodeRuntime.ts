@@ -29,10 +29,8 @@ export const runMain: {
   let receivedSignal = false
 
   fiber.addObserver((exit) => {
-    if (!receivedSignal) {
-      process.removeListener("SIGINT", onSigint)
-      process.removeListener("SIGTERM", onSigint)
-    }
+    process.removeListener("SIGINT", onSigint)
+    process.removeListener("SIGTERM", onSigint)
     teardown(exit, (code) => {
       if (receivedSignal || code !== 0) {
         process.exit(code)
@@ -42,8 +40,6 @@ export const runMain: {
 
   function onSigint() {
     receivedSignal = true
-    process.removeListener("SIGINT", onSigint)
-    process.removeListener("SIGTERM", onSigint)
     fiber.interruptUnsafe(fiber.id)
   }
 

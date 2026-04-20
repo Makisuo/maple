@@ -507,6 +507,9 @@ export const appendAll = <A>(self: MutableList<A>, messages: Iterable<A>): numbe
  * @category mutations
  */
 export const appendAllUnsafe = <A>(self: MutableList<A>, messages: ReadonlyArray<A>, mutable = false): number => {
+  if (messages.length === 0) {
+    return 0
+  }
   const chunk: MutableList.Bucket<A> = {
     array: messages as Array<A>,
     mutable,

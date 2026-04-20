@@ -4,6 +4,8 @@ import { Effect, Layer } from "effect"
 import * as McpSchema from "effect/unstable/ai/McpSchema"
 import * as McpServer from "effect/unstable/ai/McpServer"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import { RpcSerialization } from "effect/unstable/rpc"
 import * as RpcClient from "effect/unstable/rpc/RpcClient"
@@ -32,14 +34,18 @@ const makeTestClient = Effect.gen(function*() {
   }
 
   const clientLayer = RpcClient.layerProtocolHttp({ url: "http://localhost/mcp" }).pipe(
-    Layer.provide([FetchHttpClient.layer, RpcSerialization.layerJsonRpc()]),
+    Layer.provideMerge([FetchHttpClient.layer, RpcSerialization.layerJsonRpc()]),
     Layer.provide(Layer.succeed(FetchHttpClient.Fetch, customFetch))
   )
   const client = yield* RpcClient.make(McpSchema.ClientRpcs).pipe(
     Effect.provide(clientLayer)
   )
 
-  return { client, responses }
+  const httpClient = yield* HttpClient.HttpClient.asEffect().pipe(
+    Effect.provide(clientLayer)
+  )
+
+  return { client, responses, httpClient }
 })
 
 describe("McpServer", () => {
@@ -60,5 +66,17 @@ describe("McpServer", () => {
 
       strictEqual(responses.length, 2)
       strictEqual(responses[0].headers.get("Mcp-Protocol-Version"), "2025-06-18")
-    }).pipe(Effect.scoped))
+    }))
+
+  it.effect("no session id is 404", () =>
+    Effect.gen(function*() {
+      const { httpClient } = yield* makeTestClient
+
+      const response = yield* HttpClientRequest.post("http://locahost/mcp").pipe(
+        HttpClientRequest.bodyJsonUnsafe({ jsonrpc: "2.0", method: "ping", params: {}, id: 0 }),
+        httpClient.execute
+      )
+
+      strictEqual(response.status, 404)
+    }))
 })

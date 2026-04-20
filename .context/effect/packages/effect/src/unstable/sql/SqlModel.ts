@@ -3,15 +3,13 @@
  * @category models
  */
 import type * as Cause from "../../Cause.ts"
-import type { Input } from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
-import { identity } from "../../Function.ts"
 import * as RequestResolver from "../../RequestResolver.ts"
 import type * as Schema from "../../Schema.ts"
 import type { Scope } from "../../Scope.ts"
 import type * as Model from "../schema/Model.ts"
 import { SqlClient } from "./SqlClient.ts"
-import type { SqlError } from "./SqlError.ts"
+import type { ResultLengthMismatch, SqlError } from "./SqlError.ts"
 import * as SqlResolver from "./SqlResolver.ts"
 import * as SqlSchema from "./SqlSchema.ts"
 
@@ -201,7 +199,7 @@ select * from ${sql(options.tableName)} where ${sql(idColumn)} = ${request[idCol
  * @since 4.0.0
  * @category repository
  */
-export const makeDataLoaders = <
+export const makeResolvers = <
   S extends Model.Any,
   Id extends (keyof S["Type"]) & (keyof S["update"]["Type"]) & (keyof S["fields"])
 >(
@@ -210,31 +208,36 @@ export const makeDataLoaders = <
     readonly tableName: string
     readonly spanPrefix: string
     readonly idColumn: Id
-    readonly window: Input
-    readonly maxBatchSize?: number | undefined
   }
 ): Effect.Effect<
   {
-    readonly insert: (
-      insert: S["insert"]["Type"]
-    ) => Effect.Effect<
-      S["Type"],
-      SqlError | Schema.SchemaError,
-      S["DecodingServices"] | S["insert"]["EncodingServices"]
+    readonly insert: RequestResolver.RequestResolver<
+      SqlResolver.SqlRequest<
+        S["insert"]["Type"],
+        S["Type"],
+        ResultLengthMismatch | SqlError,
+        S["insert"]["EncodingServices"]
+      >
     >
-    readonly insertVoid: (
-      insert: S["insert"]["Type"]
-    ) => Effect.Effect<void, SqlError | Schema.SchemaError, S["insert"]["EncodingServices"]>
-    readonly findById: (
-      id: S["fields"][Id]["Type"]
-    ) => Effect.Effect<
-      S["Type"],
-      SqlError | Schema.SchemaError | Cause.NoSuchElementError,
-      S["DecodingServices"] | S["fields"][Id]["EncodingServices"]
+    readonly insertVoid: RequestResolver.RequestResolver<
+      SqlResolver.SqlRequest<S["insert"]["Type"], void, SqlError, S["insert"]["EncodingServices"]>
     >
-    readonly delete: (
-      id: S["fields"][Id]["Type"]
-    ) => Effect.Effect<void, SqlError | Schema.SchemaError, S["fields"][Id]["EncodingServices"]>
+    readonly findById: RequestResolver.RequestResolver<
+      SqlResolver.SqlRequest<
+        S["fields"][Id]["Type"],
+        S["Type"],
+        Cause.NoSuchElementError | SqlError,
+        S["DecodingServices"] | S["fields"][Id]["EncodingServices"]
+      >
+    >
+    readonly delete: RequestResolver.RequestResolver<
+      SqlResolver.SqlRequest<
+        S["fields"][Id]["Type"],
+        void,
+        SqlError,
+        S["fields"][Id]["EncodingServices"]
+      >
+    >
   },
   never,
   SqlClient | Scope
@@ -243,9 +246,15 @@ export const makeDataLoaders = <
     const sql = yield* SqlClient
     const idSchema = Model.fields[options.idColumn] as Schema.Top
     const idColumn = options.idColumn as string
-    const setMaxBatchSize = options.maxBatchSize ? RequestResolver.batchN(options.maxBatchSize) : identity
 
-    const insertResolver = SqlResolver.ordered({
+    const insert: RequestResolver.RequestResolver<
+      SqlResolver.SqlRequest<
+        S["insert"]["Type"],
+        S["Type"],
+        ResultLengthMismatch | SqlError,
+        S["DecodingServices"] | S["insert"]["EncodingServices"]
+      >
+    > = SqlResolver.ordered({
       Request: Model.insert,
       Result: Model,
       execute: (request: any) =>
@@ -259,44 +268,26 @@ select * from ${sql(options.tableName)} where ${sql(idColumn)} = LAST_INSERT_ID(
           orElse: () => sql`insert into ${sql(options.tableName)} ${sql.insert(request).returning("*")}`
         })
     }).pipe(
-      RequestResolver.setDelay(options.window),
-      setMaxBatchSize,
       RequestResolver.withSpan(`${options.spanPrefix}.insertResolver`)
     )
-    const insertExecute = SqlResolver.request(insertResolver)
-    const insert = (
-      insert: S["insert"]["Type"]
-    ): Effect.Effect<
-      S["Type"],
-      SqlError | Schema.SchemaError,
-      S["DecodingServices"] | S["insert"]["EncodingServices"]
-    > =>
-      insertExecute(insert).pipe(
-        Effect.catchTag("ResultLengthMismatch", Effect.die),
-        Effect.withSpan(`${options.spanPrefix}.insert`, {}, {
-          captureStackTrace: false
-        })
-      ) as any
 
-    const insertVoidResolver = SqlResolver.void({
+    const insertVoid: RequestResolver.RequestResolver<
+      SqlResolver.SqlRequest<S["insert"]["Type"], void, Schema.SchemaError | SqlError, S["insert"]["EncodingServices"]>
+    > = SqlResolver.void({
       Request: Model.insert,
       execute: (request: any) => sql`insert into ${sql(options.tableName)} ${sql.insert(request)}`
     }).pipe(
-      RequestResolver.setDelay(options.window),
-      setMaxBatchSize,
       RequestResolver.withSpan(`${options.spanPrefix}.insertVoidResolver`)
     )
-    const insertVoidExecute = SqlResolver.request(insertVoidResolver)
-    const insertVoid = (
-      insert: S["insert"]["Type"]
-    ): Effect.Effect<void, SqlError | Schema.SchemaError, S["insert"]["EncodingServices"]> =>
-      insertVoidExecute(insert).pipe(
-        Effect.withSpan(`${options.spanPrefix}.insertVoid`, {}, {
-          captureStackTrace: false
-        })
-      ) as any
 
-    const findByIdResolver = SqlResolver.findById({
+    const findById: RequestResolver.RequestResolver<
+      SqlResolver.SqlRequest<
+        S["fields"][Id]["Type"],
+        S["Type"],
+        Cause.NoSuchElementError | Schema.SchemaError | SqlError,
+        S["DecodingServices"] | S["fields"][Id]["EncodingServices"]
+      >
+    > = SqlResolver.findById({
       Id: idSchema,
       Result: Model,
       ResultId(request: any) {
@@ -304,41 +295,22 @@ select * from ${sql(options.tableName)} where ${sql(idColumn)} = LAST_INSERT_ID(
       },
       execute: (ids: any) => sql`select * from ${sql(options.tableName)} where ${sql.in(idColumn, ids)}`
     }).pipe(
-      RequestResolver.setDelay(options.window),
-      setMaxBatchSize,
       RequestResolver.withSpan(`${options.spanPrefix}.findByIdResolver`)
     )
-    const findByIdExecute = SqlResolver.request(findByIdResolver)
-    const findById = (
-      id: S["fields"][Id]["Type"]
-    ): Effect.Effect<
-      S["Type"],
-      Cause.NoSuchElementError | SqlError | Schema.SchemaError,
-      S["DecodingServices"] | S["fields"][Id]["EncodingServices"]
-    > =>
-      findByIdExecute(id).pipe(
-        Effect.withSpan(`${options.spanPrefix}.findById`, { attributes: { id } }, {
-          captureStackTrace: false
-        })
-      ) as any
 
-    const deleteResolver = SqlResolver.void({
+    const delete_: RequestResolver.RequestResolver<
+      SqlResolver.SqlRequest<
+        S["fields"][Id]["Type"],
+        void,
+        Schema.SchemaError | SqlError,
+        S["fields"][Id]["EncodingServices"]
+      >
+    > = SqlResolver.void({
       Request: idSchema,
       execute: (ids: any) => sql`delete from ${sql(options.tableName)} where ${sql.in(idColumn, ids)}`
     }).pipe(
-      RequestResolver.setDelay(options.window),
-      setMaxBatchSize,
       RequestResolver.withSpan(`${options.spanPrefix}.deleteResolver`)
     )
-    const deleteExecute = SqlResolver.request(deleteResolver)
-    const delete_ = (
-      id: S["fields"][Id]["Type"]
-    ): Effect.Effect<void, SqlError | Schema.SchemaError, S["fields"][Id]["EncodingServices"]> =>
-      deleteExecute(id).pipe(
-        Effect.withSpan(`${options.spanPrefix}.delete`, { attributes: { id } }, {
-          captureStackTrace: false
-        })
-      ) as any
 
     return { insert, insertVoid, findById, delete: delete_ } as const
   })

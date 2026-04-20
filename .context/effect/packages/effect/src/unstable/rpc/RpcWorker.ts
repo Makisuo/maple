@@ -2,10 +2,10 @@
  * @since 4.0.0
  */
 import type { NoSuchElementError } from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Transferable from "../workers/Transferable.ts"
 import type { Protocol } from "./RpcServer.ts"
 
@@ -13,7 +13,7 @@ import type { Protocol } from "./RpcServer.ts"
  * @since 4.0.0
  * @category initial message
  */
-export class InitialMessage extends ServiceMap.Service<
+export class InitialMessage extends Context.Service<
   InitialMessage,
   Effect.Effect<
     readonly [
@@ -38,7 +38,7 @@ export declare namespace InitialMessage {
   }
 }
 
-const ProtocolTag: typeof Protocol = ServiceMap.Service("@effect/rpc/RpcServer/Protocol") as any
+const ProtocolTag: typeof Protocol = Context.Service("@effect/rpc/RpcServer/Protocol") as any
 
 /**
  * @since 4.0.0
@@ -71,9 +71,9 @@ export const layerInitialMessage = <S extends Schema.Top, R2>(
   build: Effect.Effect<S["Type"], never, R2>
 ): Layer.Layer<InitialMessage, never, S["EncodingServices"] | R2> =>
   Layer.effect(InitialMessage)(
-    Effect.servicesWith((services: ServiceMap.ServiceMap<S["EncodingServices"] | R2>) =>
+    Effect.contextWith((context: Context.Context<S["EncodingServices"] | R2>) =>
       Effect.succeed(
-        Effect.provideServices(Effect.orDie(makeInitialMessage(schema, build)), services)
+        Effect.provideContext(Effect.orDie(makeInitialMessage(schema, build)), context)
       )
     )
   )

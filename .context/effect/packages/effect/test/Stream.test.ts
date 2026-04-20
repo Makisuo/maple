@@ -5,6 +5,7 @@ import {
   Array,
   Cause,
   Clock,
+  Context,
   Data,
   Deferred,
   Duration,
@@ -15,13 +16,15 @@ import {
   Logger,
   type LogLevel,
   Option,
+  type Pull,
   Queue,
   Ref,
   References,
   Result,
   Schedule,
   Sink,
-  Stream
+  Stream,
+  String as Str
 } from "effect"
 import { isReadonlyArrayNonEmpty, type NonEmptyArray } from "effect/Array"
 import { constTrue, constVoid, pipe } from "effect/Function"
@@ -131,10 +134,44 @@ describe("Stream", () => {
   })
 
   describe("constructors", () => {
+    class Greeter extends Context.Service<Greeter, {
+      readonly greet: (name: string) => string
+    }>()("Greeter") {}
+
     it.effect("range - min less than max", () =>
       Effect.gen(function*() {
         const result = yield* Stream.range(1, 3).pipe(Stream.runCollect)
         assert.deepStrictEqual(result, [1, 2, 3])
+      }))
+
+    it.effect("service", () =>
+      Effect.gen(function*() {
+        const result = yield* Stream.service(Greeter).pipe(
+          Stream.map((greeter) => greeter.greet("World")),
+          Stream.provideService(Greeter, {
+            greet: (name) => `Hello, ${name}!`
+          }),
+          Stream.runCollect
+        )
+        assert.deepStrictEqual(result, ["Hello, World!"])
+      }))
+
+    it.effect("serviceOption - some", () =>
+      Effect.gen(function*() {
+        const result = yield* Stream.serviceOption(Greeter).pipe(
+          Stream.map((option) => Option.map(option, (greeter) => greeter.greet("World"))),
+          Stream.provideService(Greeter, {
+            greet: (name) => `Hello, ${name}!`
+          }),
+          Stream.runCollect
+        )
+        assert.deepStrictEqual(result, [Option.some("Hello, World!")])
+      }))
+
+    it.effect("serviceOption - none", () =>
+      Effect.gen(function*() {
+        const result = yield* Stream.serviceOption(Greeter).pipe(Stream.runCollect)
+        assert.deepStrictEqual(result, [Option.none()])
       }))
 
     it.effect("range - min greater than max", () =>
@@ -189,6 +226,100 @@ describe("Stream", () => {
         )
         assert.strictEqual(result, "Hello 🌍!")
       }))
+
+    describe("splitLines", () => {
+      const splitLines = (chunks: ReadonlyArray<string>) =>
+        Stream.fromIterable(chunks).pipe(
+          Stream.splitLines,
+          Stream.runCollect
+        )
+
+      it.effect("handles an empty stream", () =>
+        Effect.gen(function*() {
+          const result = yield* splitLines([])
+          assert.deepStrictEqual(result, [])
+        }))
+
+      it.effect("handles empty chunks and repeated line feeds", () =>
+        Effect.gen(function*() {
+          const result = yield* splitLines(["", "a\n\n", "", "b\n", ""])
+          assert.deepStrictEqual(result, ["a", "", "b"])
+        }))
+
+      it.effect("handles line feeds across chunks", () =>
+        Effect.gen(function*() {
+          const result = yield* splitLines(["a\nb", "\nc\n", "d"])
+          assert.deepStrictEqual(result, ["a", "b", "c", "d"])
+        }))
+
+      it.effect("handles carriage return / line feed pairs across chunks", () =>
+        Effect.gen(function*() {
+          const result = yield* splitLines(["a\r", "\nb\r", "\nc"])
+          assert.deepStrictEqual(result, ["a", "b", "c"])
+        }))
+
+      it.effect("emits the final line when the stream does not end with a newline", () =>
+        Effect.gen(function*() {
+          const result = yield* splitLines(["a\nb\nc\n", "d\ne"])
+          assert.deepStrictEqual(result, ["a", "b", "c", "d", "e"])
+        }))
+
+      it.effect("does not pull upstream again after flushing the final line", () =>
+        Effect.gen(function*() {
+          let pulls = 0
+          const stream = Stream.fromPull(Effect.sync(() => {
+            const pull = Effect.suspend(
+              (): Pull.Pull<Array.NonEmptyReadonlyArray<string>, string> => {
+                pulls++
+                switch (pulls) {
+                  case 1:
+                    return Effect.succeed(Array.of("a"))
+                  case 2:
+                    return Cause.done()
+                  default:
+                    return Effect.fail("pulled after done")
+                }
+              }
+            )
+            return pull
+          }))
+
+          const result = yield* stream.pipe(
+            Stream.splitLines,
+            Stream.runCollect
+          )
+
+          assert.deepStrictEqual(result, ["a"])
+          assert.strictEqual(pulls, 2)
+        }))
+
+      it.effect("handles standalone carriage returns within a chunk", () =>
+        Effect.gen(function*() {
+          const result = yield* splitLines(["a\rb\rc"])
+          assert.deepStrictEqual(result, ["a", "b", "c"])
+        }))
+
+      it.effect("handles standalone carriage returns across chunk boundaries", () =>
+        Effect.gen(function*() {
+          const result = yield* splitLines(["a\r", "b\r", "c"])
+          assert.deepStrictEqual(result, ["a", "b", "c"])
+        }))
+
+      it.effect.prop(
+        "matches String.linesIterator regardless of chunk boundaries",
+        {
+          chunks: fc.array(
+            fc.array(fc.constantFrom("a", "b", "\n", "\r"), { maxLength: 8 }).map((chars) => chars.join("")),
+            { maxLength: 8 }
+          )
+        },
+        Effect.fnUntraced(function*({ chunks }) {
+          const result = yield* splitLines(chunks)
+          const expected = globalThis.Array.from(Str.linesIterator(chunks.join("")))
+          assert.deepStrictEqual(result, expected)
+        })
+      )
+    })
   })
 
   describe("filtering", () => {
@@ -1626,6 +1757,29 @@ describe("Stream", () => {
         )
         yield* TestClock.adjust("1 second")
         assert.isUndefined(fiber.pollUnsafe())
+      }))
+
+    it.effect("groupedWithin flushes final partial batch on upstream end without waiting for the schedule", () =>
+      Effect.gen(function*() {
+        const result = yield* Stream.make(1, 2, 3, 4, 5).pipe(
+          Stream.groupedWithin(3, "1 second"),
+          Stream.runCollect
+        )
+        deepStrictEqual(result, [[1, 2, 3], [4, 5]])
+      }))
+
+    it.effect("groupedWithin flushes partial batch when the schedule elapses while upstream is idle", () =>
+      Effect.gen(function*() {
+        const fiber = yield* Stream.make(1, 2, 3, 4, 5).pipe(
+          Stream.concat(Stream.never),
+          Stream.groupedWithin(3, "1 second"),
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* TestClock.adjust("1 second")
+        const result = yield* Fiber.join(fiber)
+        deepStrictEqual(result, [[1, 2, 3], [4, 5]])
       }))
 
     it.effect("simple example", () =>

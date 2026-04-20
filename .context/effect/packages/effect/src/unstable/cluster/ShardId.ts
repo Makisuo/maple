@@ -3,12 +3,46 @@
  */
 import * as Equal from "../../Equal.ts"
 import * as Hash from "../../Hash.ts"
+import { hasProperty } from "../../Predicate.ts"
 import * as PrimaryKey from "../../PrimaryKey.ts"
 import * as S from "../../Schema.ts"
+import * as Getter from "../../SchemaGetter.ts"
 
 const TypeId = "~effect/cluster/ShardId"
 
-const constDisableChecks = { disableChecks: true }
+/**
+ * @since 4.0.0
+ * @category Models
+ */
+export interface ShardId extends Equal.Equal, Hash.Hash, PrimaryKey.PrimaryKey {
+  readonly [TypeId]: typeof TypeId
+  readonly group: string
+  readonly id: number
+}
+
+/**
+ * @since 4.0.0
+ * @category Guards
+ */
+export const isShardId = (u: unknown): u is ShardId => hasProperty(u, TypeId)
+
+/**
+ * @since 4.0.0
+ * @category Schema
+ */
+export const ShardId = S.declare(isShardId, {
+  toCodecJson: () =>
+    S.link<ShardId>()(
+      S.Struct({
+        group: S.String,
+        id: S.Number
+      }),
+      {
+        decode: Getter.transform(({ group, id }) => make(group, id)),
+        encode: Getter.passthrough()
+      }
+    )
+})
 
 /**
  * @since 4.0.0
@@ -18,7 +52,7 @@ export const make = (group: string, id: number): ShardId => {
   const key = `${group}:${id}`
   let shardId = shardIdCache.get(key)
   if (!shardId) {
-    shardId = new ShardId({ group, id }, constDisableChecks)
+    shardId = makeProto(group, id)
     shardIdCache.set(key, shardId)
   }
   return shardId
@@ -26,86 +60,62 @@ export const make = (group: string, id: number): ShardId => {
 
 const shardIdCache = new Map<string, ShardId>()
 
-/**
- * @since 4.0.0
- * @category Models
- */
-export class ShardId extends S.Class<ShardId>(TypeId)({
-  group: S.String,
-  id: S.Int
-}) {
-  /**
-   * @since 4.0.0
-   */
-  static readonly make = make
+const makeProto = (group: string, id: number): ShardId => {
+  const self = Object.create(ShardIdProto)
+  self.group = group
+  self.id = id
+  return self
+}
 
-  /**
-   * @since 4.0.0
-   */
-  readonly [TypeId] = TypeId;
-
-  /**
-   * @since 4.0.0
-   */
-  [Equal.symbol](that: ShardId): boolean {
+const ShardIdProto = {
+  [TypeId]: TypeId,
+  [Equal.symbol](this: ShardId, that: ShardId): boolean {
     return this.group === that.group && this.id === that.id
-  }
-
-  /**
-   * @since 4.0.0
-   */
-  [Hash.symbol](): number {
+  },
+  [Hash.symbol](this: ShardId): number {
     return Hash.string(this.toString())
-  }
-
-  /**
-   * @since 4.0.0
-   */
-  [PrimaryKey.symbol](): string {
+  },
+  [PrimaryKey.symbol](this: ShardId): string {
     return this.toString()
-  }
-
-  /**
-   * @since 4.0.0
-   */
-  override toString(): string {
+  },
+  toString(this: ShardId): string {
     return `${this.group}:${this.id}`
   }
+}
 
-  /**
-   * @since 4.0.0
-   */
-  static override toString(shardId: {
-    readonly group: string
-    readonly id: number
-  }): string {
-    return `${shardId.group}:${shardId.id}`
+/**
+ * @since 4.0.0
+ * @category Conversions
+ */
+export const toString = (shardId: {
+  readonly group: string
+  readonly id: number
+}): string => {
+  return `${shardId.group}:${shardId.id}`
+}
+/**
+ * @since 4.0.0
+ */
+export function fromStringEncoded(s: string): {
+  readonly group: string
+  readonly id: number
+} {
+  const index = s.lastIndexOf(":")
+  if (index === -1) {
+    throw new Error(`Invalid ShardId format`)
   }
+  const group = s.substring(0, index)
+  const id = Number(s.substring(index + 1))
+  if (isNaN(id)) {
+    throw new Error(`ShardId id must be a number`)
+  }
+  return { group, id }
+}
 
-  /**
-   * @since 4.0.0
-   */
-  static fromStringEncoded(s: string): {
-    readonly group: string
-    readonly id: number
-  } {
-    const index = s.lastIndexOf(":")
-    if (index === -1) {
-      throw new Error(`Invalid ShardId format`)
-    }
-    const group = s.substring(0, index)
-    const id = Number(s.substring(index + 1))
-    if (isNaN(id)) {
-      throw new Error(`ShardId id must be a number`)
-    }
-    return { group, id }
-  }
-
-  /**
-   * @since 4.0.0
-   */
-  static fromString(s: string): ShardId {
-    const encoded = ShardId.fromStringEncoded(s)
-    return make(encoded.group, encoded.id)
-  }
+/**
+ * @since 4.0.0
+ */
+export function fromString(s: string): ShardId {
+  const encoded = fromStringEncoded(s)
+  return make(encoded.group, encoded.id)
 }

@@ -1,13 +1,13 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as FileSystem from "../../FileSystem.ts"
 import { identity } from "../../Function.ts"
 import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
 import type { PlatformError } from "../../PlatformError.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as Etag from "./Etag.ts"
 import * as Headers from "./Headers.ts"
@@ -18,7 +18,7 @@ import * as Response from "./HttpServerResponse.ts"
  * @since 4.0.0
  * @category tags
  */
-export class HttpPlatform extends ServiceMap.Service<HttpPlatform, {
+export class HttpPlatform extends Context.Service<HttpPlatform, {
   readonly fileResponse: (
     path: string,
     options?: Response.Options.WithContent & {

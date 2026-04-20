@@ -2,13 +2,13 @@
  * @since 4.0.0
  */
 import { Clock } from "../../Clock.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
 import * as Option from "../../Option.ts"
 import type * as Queue from "../../Queue.ts"
 import type { ReadonlyRecord } from "../../Record.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as Tracer from "../../Tracer.ts"
 import type { NoInfer } from "../../Types.ts"
@@ -69,7 +69,7 @@ export interface SqlClient extends Constructor {
  * @category models
  * @since 4.0.0
  */
-export const SqlClient = ServiceMap.Service<SqlClient>("effect/sql/SqlClient")
+export const SqlClient = Context.Service<SqlClient>("effect/sql/SqlClient")
 
 /**
  * @category models
@@ -180,7 +180,7 @@ export const make = Effect.fnUntraced(function*(options: SqlClient.MakeOptions) 
  * @category transactions
  */
 export const makeWithTransaction = <I, S>(options: {
-  readonly transactionService: ServiceMap.Key<I, readonly [conn: S, counter: number]>
+  readonly transactionService: Context.Key<I, readonly [conn: S, counter: number]>
   readonly spanAttributes: ReadonlyArray<readonly [string, unknown]>
   readonly acquireConnection: Effect.Effect<readonly [Scope.Closeable | undefined, S], SqlError>
   readonly begin: (conn: NoInfer<S>) => Effect.Effect<void, SqlError>
@@ -199,9 +199,9 @@ export const makeWithTransaction = <I, S>(options: {
           for (const [key, value] of options.spanAttributes) {
             span.attribute(key, value)
           }
-          const services = fiber.services
+          const services = fiber.context
           const clock = fiber.getRef(Clock)
-          const connOption = ServiceMap.getOption(services, options.transactionService)
+          const connOption = Context.getOption(services, options.transactionService)
           const conn = connOption._tag === "Some"
             ? Effect.succeed([undefined, connOption.value[0]] as const)
             : options.acquireConnection
@@ -213,12 +213,12 @@ export const makeWithTransaction = <I, S>(options: {
             ) =>
               (id === 0 ? options.begin(conn) : options.savepoint(conn, id)).pipe(
                 Effect.flatMap(() =>
-                  Effect.provideServices(
+                  Effect.provideContext(
                     restore(effect),
-                    ServiceMap.mutate(services, (services) =>
+                    Context.mutate(services, (services) =>
                       services.pipe(
-                        ServiceMap.add(options.transactionService, [conn, id]),
-                        ServiceMap.add(Tracer.ParentSpan, span)
+                        Context.add(options.transactionService, [conn, id]),
+                        Context.add(Tracer.ParentSpan, span)
                       ))
                   )
                 ),
@@ -254,7 +254,7 @@ export const makeWithTransaction = <I, S>(options: {
  * @since 4.0.0
  */
 export class TransactionConnection
-  extends ServiceMap.Service<TransactionConnection, readonly [conn: Connection.Connection, depth: number]>()(
+  extends Context.Service<TransactionConnection, readonly [conn: Connection.Connection, depth: number]>()(
     "effect/sql/SqlClient/TransactionConnection"
   )
 {}
@@ -262,6 +262,6 @@ export class TransactionConnection
 /**
  * @since 4.0.0
  */
-export const SafeIntegers = ServiceMap.Reference<boolean>("effect/sql/SqlClient/SafeIntegers", {
+export const SafeIntegers = Context.Reference<boolean>("effect/sql/SqlClient/SafeIntegers", {
   defaultValue: () => false
 })

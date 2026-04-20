@@ -1,16 +1,16 @@
 /**
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
-import * as ServiceMap from "effect/ServiceMap"
 import type { HttpClient } from "effect/unstable/http/HttpClient"
 
 /**
  * @since 1.0.0
  * @category services
  */
-export class OpenRouterConfig extends ServiceMap.Service<
+export class OpenRouterConfig extends Context.Service<
   OpenRouterConfig,
   OpenRouterConfig.Service
 >()("@effect/ai-openrouter/OpenRouterConfig") {
@@ -18,7 +18,7 @@ export class OpenRouterConfig extends ServiceMap.Service<
    * @since 1.0.0
    */
   static readonly getOrUndefined: Effect.Effect<typeof OpenRouterConfig.Service | undefined> = Effect.map(
-    Effect.services<never>(),
+    Effect.context<never>(),
     (services) => services.mapUnsafe.get(OpenRouterConfig.key)
   )
 }

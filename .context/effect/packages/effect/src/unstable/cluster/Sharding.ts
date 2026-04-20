@@ -4,6 +4,7 @@
 import * as Arr from "../../Array.ts"
 import * as Cause from "../../Cause.ts"
 import { Clock } from "../../Clock.ts"
+import * as Context from "../../Context.ts"
 import type { Input } from "../../Duration.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
@@ -25,7 +26,6 @@ import * as Result from "../../Result.ts"
 import * as Schedule from "../../Schedule.ts"
 import * as Scope from "../../Scope.ts"
 import * as Semaphore from "../../Semaphore.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import type * as Rpc from "../rpc/Rpc.ts"
 import * as RpcClient from "../rpc/RpcClient.ts"
@@ -65,7 +65,7 @@ import * as Snowflake from "./Snowflake.ts"
  * @since 4.0.0
  * @category models
  */
-export class Sharding extends ServiceMap.Service<Sharding, {
+export class Sharding extends Context.Service<Sharding, {
   /**
    * Returns a stream of events that occur when the runner registers entities or
    * singletons.
@@ -207,7 +207,7 @@ const make = Effect.gen(function*() {
   const snowflakeGen = yield* Snowflake.Generator
   const shardingScope = yield* Effect.scope
   const isShutdown = MutableRef.make(false)
-  const services = ServiceMap.omit(Scope.Scope)(yield* Effect.services<ShardingConfig>())
+  const services = Context.omit(Scope.Scope)(yield* Effect.context<ShardingConfig>())
   const runFork = flow(
     Effect.runForkWith(services),
     Fiber.runIn(shardingScope)
@@ -357,7 +357,7 @@ const make = Effect.gen(function*() {
           yield* Effect.forkIn(syncSingletons, shardingScope)
 
           // update metrics
-          ClusterMetrics.shards.updateUnsafe(BigInt(MutableHashSet.size(acquiredShards)), ServiceMap.empty())
+          ClusterMetrics.shards.updateUnsafe(BigInt(MutableHashSet.size(acquiredShards)), Context.empty())
         }
         yield* Effect.sleep(1000)
         activeShardsLatch.openUnsafe()
@@ -820,7 +820,10 @@ const make = Effect.gen(function*() {
     return Effect.catchFilter(
       Effect.suspend(() => {
         const address = message.envelope.address
-        const isPersisted = ServiceMap.get(message.rpc.annotations, Persisted)
+        const isPersisted = Context.get(
+          message._tag === "OutgoingRequest" ? message.annotations : message.rpc.annotations,
+          Persisted
+        )
         if (isPersisted && !storageEnabled) {
           return Effect.die("Sharding.sendOutgoing: Persisted messages require MessageStorage")
         }
@@ -878,8 +881,8 @@ const make = Effect.gen(function*() {
 
   // update metrics
   if (selfRunner) {
-    ClusterMetrics.runners.updateUnsafe(BigInt(1), ServiceMap.empty())
-    ClusterMetrics.runnersHealthy.updateUnsafe(BigInt(1), ServiceMap.empty())
+    ClusterMetrics.runners.updateUnsafe(BigInt(1), Context.empty())
+    ClusterMetrics.runnersHealthy.updateUnsafe(BigInt(1), Context.empty())
   }
 
   yield* Effect.gen(function*() {
@@ -970,7 +973,7 @@ const make = Effect.gen(function*() {
         if (selfRunner) {
           ClusterMetrics.runnersHealthy.updateUnsafe(
             BigInt(MutableHashSet.has(healthyRunners, selfRunner) ? 1 : 0),
-            ServiceMap.empty()
+            Context.empty()
           )
         }
       }
@@ -999,7 +1002,8 @@ const make = Effect.gen(function*() {
 
   type ClientRequestEntry = {
     readonly rpc: Rpc.AnyWithProps
-    readonly services: ServiceMap.ServiceMap<never>
+    readonly context: Context.Context<never>
+    readonly message: Message.OutgoingRequest<any>
     lastChunkId?: Snowflake.Snowflake
   }
   const clientRequests = new Map<Snowflake.Snowflake, ClientRequestEntry>()
@@ -1014,7 +1018,7 @@ const make = Effect.gen(function*() {
   > = yield* ResourceMap.make(Effect.fnUntraced(function*(entity: Entity<string, any>) {
     const client = yield* RpcClient.makeNoSerialization(entity.protocol, {
       spanPrefix: `${entity.type}.client`,
-      disableTracing: !ServiceMap.get(entity.protocol.annotations, ClusterSchema.ClientTracingEnabled),
+      disableTracing: !Context.get(entity.protocol.annotations, ClusterSchema.ClientTracingEnabled),
       supportsAck: true,
       generateRequestId: () => RequestId(snowflakeGen.nextUnsafe()),
       flatten: true,
@@ -1022,42 +1026,46 @@ const make = Effect.gen(function*() {
         void,
         MailboxFull | AlreadyProcessingMessage | PersistenceError
       > {
-        const address = ServiceMap.getUnsafe(options.context, ClientAddressTag)
+        const address = Context.getUnsafe(options.context, ClientAddressTag)
         switch (options.message._tag) {
           case "Request": {
             const fiber = Fiber.getCurrent()!
             const id = Snowflake.Snowflake(options.message.id)
             const rpc = entity.protocol.requests.get(options.message.tag)!
             let respond: (reply: Reply.Reply<any>) => Effect.Effect<void>
+            const envelope = Envelope.makeRequest<any>({
+              requestId: id,
+              address,
+              tag: options.message.tag,
+              payload: options.message.payload,
+              headers: options.message.headers,
+              traceId: options.message.traceId,
+              spanId: options.message.spanId,
+              sampled: options.message.sampled
+            })
+            const message = new Message.OutgoingRequest({
+              envelope,
+              lastReceivedReply: Option.none(),
+              rpc,
+              context: fiber.context as Context.Context<any>,
+              respond: (reply) => respond(reply),
+              annotations: Context.get(rpc.annotations, ClusterSchema.Dynamic)(
+                rpc.annotations,
+                envelope as any
+              )
+            })
             if (!options.discard) {
               const entry: ClientRequestEntry = {
                 rpc: rpc as any,
-                services: fiber.currentContext
+                context: fiber.currentContext,
+                message
               }
               clientRequests.set(id, entry)
               respond = makeClientRespond(entry, client.write)
             } else {
               respond = clientRespondDiscard
             }
-            return sendOutgoing(
-              new Message.OutgoingRequest({
-                envelope: Envelope.makeRequest({
-                  requestId: id,
-                  address,
-                  tag: options.message.tag,
-                  payload: options.message.payload,
-                  headers: options.message.headers,
-                  traceId: options.message.traceId,
-                  spanId: options.message.spanId,
-                  sampled: options.message.sampled
-                }),
-                lastReceivedReply: Option.none(),
-                rpc,
-                services: fiber.services as ServiceMap.ServiceMap<any>,
-                respond
-              }),
-              options.discard
-            )
+            return sendOutgoing(message, options.discard)
           }
           case "Ack": {
             const requestId = Snowflake.Snowflake(options.message.requestId)
@@ -1081,14 +1089,14 @@ const make = Effect.gen(function*() {
             const entry = clientRequests.get(requestId)!
             if (!entry) return Effect.void
             clientRequests.delete(requestId)
-            if (ClusterSchema.isUninterruptibleForClient(entry.rpc.annotations)) {
+            if (ClusterSchema.isUninterruptibleForClient(entry.message.annotations)) {
               return Effect.void
             }
             // for durable messages, we ignore interrupts on shutdown or as a
             // result of a shard being resassigned
             const isTransientInterrupt = MutableRef.get(isShutdown) ||
               options.message.interruptors.some((id) => internalInterruptors.has(id))
-            if (isTransientInterrupt && ServiceMap.get(entry.rpc.annotations, Persisted)) {
+            if (isTransientInterrupt && Context.get(entry.message.annotations, Persisted)) {
               return Effect.void
             }
             return Effect.ignore(sendOutgoing(
@@ -1119,15 +1127,15 @@ const make = Effect.gen(function*() {
 
     return (entityId: string) => {
       const id = makeEntityId(entityId)
-      const address = ClientAddressTag.serviceMap(makeEntityAddress({
+      const address = ClientAddressTag.context(makeEntityAddress({
         shardId: getShardId(id, entity.getShardGroup(entityId as EntityId)),
         entityId: id,
         entityType: entity.type
       }))
       const clientFn = function(tag: string, payload: any, options?: {
-        readonly context?: ServiceMap.ServiceMap<never>
+        readonly context?: Context.Context<never>
       }) {
-        const context = options?.context ? ServiceMap.merge(options.context, address) : address
+        const context = options?.context ? Context.merge(options.context, address) : address
         return client.client(tag, payload, {
           ...options,
           context
@@ -1208,12 +1216,12 @@ const make = Effect.gen(function*() {
         return yield* Effect.die(`Singleton '${name}' is already registered`)
       }
 
-      const services = yield* Effect.services<never>()
+      const services = yield* Effect.context<never>()
       const wrappedRun = run.pipe(
         Effect.andThen(Effect.never),
         Effect.scoped,
         Effect.provideService(CurrentLogAnnotations, {}),
-        Effect.provideServices(services),
+        Effect.provideContext(services),
         Effect.orDie,
         Effect.interruptible
       ) as Effect.Effect<never>
@@ -1253,7 +1261,7 @@ const make = Effect.gen(function*() {
     }
     ClusterMetrics.singletons.updateUnsafe(
       BigInt(yield* FiberMap.size(singletonFibers)),
-      ServiceMap.empty()
+      Context.empty()
     )
   }))
 
@@ -1279,11 +1287,11 @@ const make = Effect.gen(function*() {
         runnerAddress,
         sharding
       }).pipe(
-        Effect.provideServices(ServiceMap.mutate(services, (services) =>
+        Effect.provideContext(Context.mutate(services, (services) =>
           services.pipe(
-            ServiceMap.add(EntityReaper, reaper),
-            ServiceMap.add(Scope.Scope, scope),
-            ServiceMap.add(Snowflake.Generator, snowflakeGen)
+            Context.add(EntityReaper, reaper),
+            Context.add(Scope.Scope, scope),
+            Context.add(Snowflake.Generator, snowflakeGen)
           )))
       ) as Effect.Effect<EntityManager.EntityManager>
       const state: EntityManagerState = {
@@ -1435,4 +1443,4 @@ export const layer: Layer.Layer<
 
 // Utilities
 
-const ClientAddressTag = ServiceMap.Service<EntityAddress>("effect/cluster/Sharding/ClientAddress")
+const ClientAddressTag = Context.Service<EntityAddress>("effect/cluster/Sharding/ClientAddress")

@@ -1,6 +1,7 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import type * as FileSystem from "../../FileSystem.ts"
 import type * as Inspectable from "../../Inspectable.ts"
@@ -9,7 +10,6 @@ import { hasProperty } from "../../Predicate.ts"
 import { redact } from "../../Redactable.ts"
 import * as Schema from "../../Schema.ts"
 import type { ParseOptions } from "../../SchemaAST.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as Stream from "../../Stream.ts"
 import type * as Headers from "./Headers.ts"
 import * as UrlParams from "./UrlParams.ts"
@@ -46,10 +46,11 @@ export interface HttpIncomingMessage<E = unknown> extends Inspectable.Inspectabl
  * @category schema
  */
 export const schemaBodyJson = <S extends Schema.Top>(schema: S, options?: ParseOptions | undefined) => {
-  const decode = Schema.decodeEffect(Schema.toCodecJson(schema).annotate({ options }))
+  const decode = Schema.decodeEffect(Schema.toCodecJson(schema))
   return <E>(
     self: HttpIncomingMessage<E>
-  ): Effect.Effect<S["Type"], E | Schema.SchemaError, S["DecodingServices"]> => Effect.flatMap(self.json, decode)
+  ): Effect.Effect<S["Type"], E | Schema.SchemaError, S["DecodingServices"]> =>
+    Effect.flatMap(self.json, (u) => decode(u, options))
 }
 
 /**
@@ -67,11 +68,10 @@ export const schemaBodyUrlParams = <
 ) => {
   const decode = UrlParams.schemaRecord.pipe(
     Schema.decodeTo(schema),
-    Schema.annotate({ options }),
     Schema.decodeEffect
   )
   return <E>(self: HttpIncomingMessage<E>): Effect.Effect<A, E | Schema.SchemaError, RD> =>
-    Effect.flatMap(self.urlParamsBody, decode)
+    Effect.flatMap(self.urlParamsBody, (u) => decode(u, options))
 }
 
 /**
@@ -90,7 +90,7 @@ export const schemaHeaders = <A, I extends Readonly<Record<string, string | unde
  * @since 4.0.0
  * @category References
  */
-export const MaxBodySize = ServiceMap.Reference<FileSystem.Size | undefined>(
+export const MaxBodySize = Context.Reference<FileSystem.Size | undefined>(
   "effect/http/HttpIncomingMessage/MaxBodySize",
   { defaultValue: () => undefined }
 )

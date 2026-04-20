@@ -1,4 +1,4 @@
-import { Array as Arr, Schema, SchemaRepresentation } from "effect"
+import { Array as Arr, Option, Predicate, Schema, SchemaGetter, SchemaRepresentation } from "effect"
 import { describe, it } from "vitest"
 import { deepStrictEqual } from "../../utils/assert.ts"
 
@@ -435,27 +435,20 @@ describe("fromAST", () => {
       })
     })
 
-    it("should handle duplicate identifiers", () => {
+    it("should handle duplicate identifiers on different schemas with different representations", () => {
       assertFromAST(
-        Schema.Tuple([
+        Schema.Union([
           Schema.String.annotate({ identifier: "id", description: "a" }),
           Schema.String.annotate({ identifier: "id", description: "b" })
         ]),
         {
           representation: {
-            _tag: "Arrays",
-            elements: [
-              {
-                isOptional: false,
-                type: { _tag: "Reference", $ref: "id" }
-              },
-              {
-                isOptional: false,
-                type: { _tag: "Reference", $ref: "id1" }
-              }
-            ],
-            rest: [],
-            checks: []
+            _tag: "Union",
+            mode: "anyOf",
+            types: [
+              { _tag: "Reference", $ref: "id" },
+              { _tag: "Reference", $ref: "id1" }
+            ]
           },
           references: {
             id: {
@@ -467,6 +460,84 @@ describe("fromAST", () => {
               _tag: "String",
               checks: [],
               annotations: { identifier: "id", description: "b" }
+            }
+          }
+        }
+      )
+    })
+
+    it("should handle duplicate identifiers on different schemas with the same representation", () => {
+      const X = Schema.String.annotate({ title: "X", identifier: "X" })
+      assertFromAST(
+        Schema.Struct({
+          a: X,
+          b: Schema.NullOr(X),
+          c: Schema.optionalKey(X),
+          d: Schema.optionalKey(Schema.NullOr(X)),
+          e: Schema.NullOr(X).pipe(
+            Schema.encodeTo(Schema.optionalKey(X), {
+              decode: SchemaGetter.transformOptional(Option.orElseSome(() => null)),
+              encode: SchemaGetter.transformOptional(Option.filter(Predicate.isNotNull))
+            })
+          )
+        }),
+        {
+          representation: {
+            _tag: "Objects",
+            propertySignatures: [
+              {
+                name: "a",
+                type: { _tag: "Reference", $ref: "X" },
+                isOptional: false,
+                isMutable: false
+              },
+              {
+                name: "b",
+                type: {
+                  _tag: "Union",
+                  mode: "anyOf",
+                  types: [
+                    { _tag: "Reference", $ref: "X" },
+                    { _tag: "Null" }
+                  ]
+                },
+                isOptional: false,
+                isMutable: false
+              },
+              {
+                name: "c",
+                type: { _tag: "Reference", $ref: "X" },
+                isOptional: true,
+                isMutable: false
+              },
+              {
+                name: "d",
+                type: {
+                  _tag: "Union",
+                  mode: "anyOf",
+                  types: [
+                    { _tag: "Reference", $ref: "X" },
+                    { _tag: "Null" }
+                  ]
+                },
+                isOptional: true,
+                isMutable: false
+              },
+              {
+                name: "e",
+                type: { _tag: "Reference", $ref: "X" },
+                isOptional: true,
+                isMutable: false
+              }
+            ],
+            indexSignatures: [],
+            checks: []
+          },
+          references: {
+            X: {
+              _tag: "String",
+              checks: [],
+              annotations: { identifier: "X", title: "X" }
             }
           }
         }

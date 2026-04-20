@@ -27,10 +27,10 @@
  *
  * @since 4.0.0
  */
+import type * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Metric from "../../Metric.ts"
-import type * as ServiceMap from "../../ServiceMap.ts"
 import * as HttpRouter from "../http/HttpRouter.ts"
 import * as HttpServerResponse from "../http/HttpServerResponse.ts"
 
@@ -114,7 +114,7 @@ export interface HttpOptions extends FormatOptions {
  */
 export const format: (options?: FormatOptions | undefined) => Effect.Effect<string> = Effect.fnUntraced(
   function*(options) {
-    const services = yield* Effect.services<never>()
+    const services = yield* Effect.context<never>()
     return formatUnsafe(services, options)
   }
 )
@@ -122,17 +122,17 @@ export const format: (options?: FormatOptions | undefined) => Effect.Effect<stri
 /**
  * Synchronously format all metrics in the registry to Prometheus exposition format.
  *
- * This is a low-level function that requires access to the service map.
+ * This is a low-level function that requires access to the context.
  * Most users should use `format` instead.
  *
  * @since 4.0.0
  * @category Formatting
  */
 export const formatUnsafe = (
-  services: ServiceMap.ServiceMap<never>,
+  context: Context.Context<never>,
   options?: FormatOptions | undefined
 ): string => {
-  const snapshot = Metric.snapshotUnsafe(services)
+  const snapshot = Metric.snapshotUnsafe(context)
   const prefix = options?.prefix ? sanitizeMetricName(options.prefix) + "_" : ""
   const mapper = options?.metricNameMapper ?? ((name: string) => name)
   const lines: Array<string> = []

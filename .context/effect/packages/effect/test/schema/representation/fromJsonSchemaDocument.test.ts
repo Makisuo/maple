@@ -243,6 +243,53 @@ describe("fromJsonSchemaDocument", () => {
     )
   })
 
+  it("anyOf with siblings", () => {
+    assertFromJsonSchema(
+      {
+        schema: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+          anyOf: [
+            { properties: { a: { type: "string" } }, required: ["a"] },
+            { properties: { b: { type: "number" } }, required: ["b"] }
+          ]
+        }
+      },
+      {
+        representation: {
+          _tag: "Union",
+          types: [
+            {
+              _tag: "Objects",
+              propertySignatures: [
+                { name: "a", isOptional: false, isMutable: false, type: { _tag: "String", checks: [] } },
+                { name: "id", isOptional: false, isMutable: false, type: { _tag: "String", checks: [] } }
+              ],
+              indexSignatures: [{ parameter: { _tag: "String", checks: [] }, type: { _tag: "Unknown" } }],
+              checks: []
+            },
+            {
+              _tag: "Objects",
+              propertySignatures: [
+                {
+                  name: "b",
+                  isOptional: false,
+                  isMutable: false,
+                  type: { _tag: "Number", checks: [{ _tag: "Filter", meta: { _tag: "isFinite" } }] }
+                },
+                { name: "id", isOptional: false, isMutable: false, type: { _tag: "String", checks: [] } }
+              ],
+              indexSignatures: [{ parameter: { _tag: "String", checks: [] }, type: { _tag: "Unknown" } }],
+              checks: []
+            }
+          ],
+          mode: "anyOf"
+        }
+      }
+    )
+  })
+
   it("oneOf", () => {
     assertFromJsonSchema(
       { schema: { oneOf: [{ const: "a" }, { enum: [1, 2] }] } },
@@ -264,6 +311,53 @@ describe("fromJsonSchemaDocument", () => {
         }
       },
       `Schema.Union([Schema.Literal("a"), Schema.Literals([1, 2])], { mode: "oneOf" })`
+    )
+  })
+
+  it("oneOf with siblings", () => {
+    assertFromJsonSchema(
+      {
+        schema: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+          oneOf: [
+            { properties: { a: { type: "string" } }, required: ["a"] },
+            { properties: { b: { type: "number" } }, required: ["b"] }
+          ]
+        }
+      },
+      {
+        representation: {
+          _tag: "Union",
+          types: [
+            {
+              _tag: "Objects",
+              propertySignatures: [
+                { name: "a", isOptional: false, isMutable: false, type: { _tag: "String", checks: [] } },
+                { name: "id", isOptional: false, isMutable: false, type: { _tag: "String", checks: [] } }
+              ],
+              indexSignatures: [{ parameter: { _tag: "String", checks: [] }, type: { _tag: "Unknown" } }],
+              checks: []
+            },
+            {
+              _tag: "Objects",
+              propertySignatures: [
+                {
+                  name: "b",
+                  isOptional: false,
+                  isMutable: false,
+                  type: { _tag: "Number", checks: [{ _tag: "Filter", meta: { _tag: "isFinite" } }] }
+                },
+                { name: "id", isOptional: false, isMutable: false, type: { _tag: "String", checks: [] } }
+              ],
+              indexSignatures: [{ parameter: { _tag: "String", checks: [] }, type: { _tag: "Unknown" } }],
+              checks: []
+            }
+          ],
+          mode: "oneOf"
+        }
+      }
     )
   })
 

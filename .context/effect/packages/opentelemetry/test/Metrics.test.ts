@@ -11,7 +11,7 @@ const findMetric = (metrics: any, name: string) =>
 describe("Metrics", () => {
   it.effect("gauge", () =>
     Effect.gen(function*() {
-      const services = yield* Effect.services<never>()
+      const services = yield* Effect.context<never>()
       const resource = resourceFromAttributes({
         name: "test",
         version: "1.0.0"
@@ -73,7 +73,7 @@ describe("Metrics", () => {
 
   it.effect("gauge bigint", () =>
     Effect.gen(function*() {
-      const services = yield* Effect.services<never>()
+      const services = yield* Effect.context<never>()
       const producer = new internal.MetricProducerImpl(
         resourceFromAttributes({
           name: "test",
@@ -137,7 +137,7 @@ describe("Metrics", () => {
 
   it.effect("counter", () =>
     Effect.gen(function*() {
-      const services = yield* Effect.services<never>()
+      const services = yield* Effect.context<never>()
       const producer = new internal.MetricProducerImpl(
         resourceFromAttributes({
           name: "test",
@@ -202,7 +202,7 @@ describe("Metrics", () => {
 
   it.effect("counter-inc", () =>
     Effect.gen(function*() {
-      const services = yield* Effect.services<never>()
+      const services = yield* Effect.context<never>()
       const producer = new internal.MetricProducerImpl(
         resourceFromAttributes({
           name: "test",
@@ -270,7 +270,7 @@ describe("Metrics", () => {
 
   it.effect("counter-bigint", () =>
     Effect.gen(function*() {
-      const services = yield* Effect.services<never>()
+      const services = yield* Effect.context<never>()
       const producer = new internal.MetricProducerImpl(
         resourceFromAttributes({
           name: "test",

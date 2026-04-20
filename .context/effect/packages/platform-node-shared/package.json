@@ -1,7 +1,7 @@
 {
   "name": "@effect/platform-node-shared",
   "type": "module",
-  "version": "4.0.0-beta.40",
+  "version": "4.0.0-beta.52",
   "license": "MIT",
   "description": "Unified interfaces for common platform-specific services",
   "homepage": "https://effect.website",
@@ -64,12 +64,12 @@
     "effect": "workspace:^"
   },
   "devDependencies": {
-    "@types/node": "^25.2.0",
+    "@types/node": "^25.6.0",
     "effect": "workspace:^",
-    "tar": "^7.5.7"
+    "tar": "^7.5.13"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",
-    "ws": "^8.19.0"
+    "ws": "^8.20.0"
   }
 }

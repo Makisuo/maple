@@ -1,6 +1,6 @@
 {
   "name": "@effect/sql-mysql2",
-  "version": "4.0.0-beta.40",
+  "version": "4.0.0-beta.52",
   "type": "module",
   "license": "MIT",
   "description": "A MySQL toolkit for Effect",
@@ -59,13 +59,13 @@
     "coverage": "vitest --coverage"
   },
   "devDependencies": {
-    "@testcontainers/mysql": "^11.11.0",
+    "@testcontainers/mysql": "^11.14.0",
     "effect": "workspace:^"
   },
   "peerDependencies": {
     "effect": "workspace:^"
   },
   "dependencies": {
-    "mysql2": "^3.16.2"
+    "mysql2": "^3.22.0"
   }
 }
