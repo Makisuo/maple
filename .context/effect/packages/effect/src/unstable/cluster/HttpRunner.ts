@@ -116,7 +116,7 @@ export const toHttpEffect: Effect.Effect<
   return yield* RpcServer.toHttpEffect(Runners.Rpcs, {
     spanPrefix: "RunnerServer",
     disableTracing: true
-  }).pipe(Effect.provideServices(handlers))
+  }).pipe(Effect.provideContext(handlers))
 })
 
 /**
@@ -132,7 +132,7 @@ export const toHttpEffectWebsocket: Effect.Effect<
   return yield* RpcServer.toHttpEffectWebsocket(Runners.Rpcs, {
     spanPrefix: "RunnerServer",
     disableTracing: true
-  }).pipe(Effect.provideServices(handlers))
+  }).pipe(Effect.provideContext(handlers))
 })
 
 /**

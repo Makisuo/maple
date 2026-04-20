@@ -647,7 +647,7 @@ export const taggedEnum: {
         } else if (tag === "$match") {
           return taggedMatch
         }
-        return (props: any) => ({ _tag: tag, ...props })
+        return (props: any) => ({ ...props, _tag: tag })
       }
     }
   ) as any

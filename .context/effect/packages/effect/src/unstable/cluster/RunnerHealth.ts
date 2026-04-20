@@ -1,11 +1,11 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Schedule from "../../Schedule.ts"
 import type * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as K8s from "./K8sHttpClient.ts"
 import type { RunnerAddress } from "./RunnerAddress.ts"
 import * as Runners from "./Runners.ts"
@@ -20,7 +20,7 @@ import * as Runners from "./Runners.ts"
  * @since 4.0.0
  * @category models
  */
-export class RunnerHealth extends ServiceMap.Service<
+export class RunnerHealth extends Context.Service<
   RunnerHealth,
   {
     readonly isAlive: (address: RunnerAddress) => Effect.Effect<boolean>

@@ -51,7 +51,7 @@ export const TypeId: TypeId = "~@effect/atom-react/ScopedAtom"
 export interface ScopedAtom<A extends Atom.Atom<any>, Input = never> {
   readonly [TypeId]: TypeId
   use(): A
-  Provider: Input extends never ? React.FC<{ readonly children?: React.ReactNode | undefined }>
+  Provider: [Input] extends [never] ? React.FC<{ readonly children?: React.ReactNode | undefined }>
     : React.FC<{ readonly children?: React.ReactNode | undefined; readonly value: Input }>
   Context: React.Context<A>
 }

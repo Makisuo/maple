@@ -70,12 +70,12 @@
  *
  * @since 2.0.0
  */
+import type * as Context from "./Context.ts"
 import type * as Effect from "./Effect.ts"
 import { dual } from "./Function.ts"
 import * as core from "./internal/core.ts"
 import * as effect from "./internal/effect.ts"
 import type { Scope } from "./Scope.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 
 /**
  * Represents a console interface for logging and debugging operations.
@@ -128,7 +128,7 @@ export interface Console {
  * @since 4.0.0
  * @category references
  */
-export const Console: ServiceMap.Reference<Console> = effect.ConsoleRef
+export const Console: Context.Reference<Console> = effect.ConsoleRef
 
 /**
  * Creates an Effect that provides access to the current console instance.

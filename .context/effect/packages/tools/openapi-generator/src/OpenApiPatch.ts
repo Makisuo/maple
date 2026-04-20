@@ -47,7 +47,7 @@ import * as Yaml from "yaml"
  * @since 1.0.0
  * @category errors
  */
-export class JsonPatchParseError extends Schema.ErrorClass("JsonPatchParseError")({
+export class JsonPatchParseError extends Schema.ErrorClass<JsonPatchParseError>("JsonPatchParseError")({
   _tag: Schema.tag("JsonPatchParseError"),
   source: Schema.String,
   reason: Schema.String
@@ -82,7 +82,7 @@ export class JsonPatchParseError extends Schema.ErrorClass("JsonPatchParseError"
  * @since 1.0.0
  * @category errors
  */
-export class JsonPatchValidationError extends Schema.ErrorClass("JsonPatchValidationError")({
+export class JsonPatchValidationError extends Schema.ErrorClass<JsonPatchValidationError>("JsonPatchValidationError")({
   _tag: Schema.tag("JsonPatchValidationError"),
   source: Schema.String,
   reason: Schema.String
@@ -119,14 +119,16 @@ export class JsonPatchValidationError extends Schema.ErrorClass("JsonPatchValida
  * @since 1.0.0
  * @category errors
  */
-export class JsonPatchApplicationError extends Schema.ErrorClass("JsonPatchApplicationError")({
-  _tag: Schema.tag("JsonPatchApplicationError"),
-  source: Schema.String,
-  operationIndex: Schema.Number,
-  operation: Schema.String,
-  path: Schema.String,
-  reason: Schema.String
-}) {
+export class JsonPatchApplicationError
+  extends Schema.ErrorClass<JsonPatchApplicationError>("JsonPatchApplicationError")({
+    _tag: Schema.tag("JsonPatchApplicationError"),
+    source: Schema.String,
+    operationIndex: Schema.Number,
+    operation: Schema.String,
+    path: Schema.String,
+    reason: Schema.String
+  })
+{
   override get message() {
     return `Failed to apply patch from ${this.source}: operation ${this.operationIndex} ` +
       `(${this.operation} at ${this.path}): ${this.reason}`
@@ -169,7 +171,7 @@ export class JsonPatchApplicationError extends Schema.ErrorClass("JsonPatchAppli
  * @since 1.0.0
  * @category errors
  */
-export class JsonPatchAggregateError extends Schema.ErrorClass("JsonPatchAggregateError")({
+export class JsonPatchAggregateError extends Schema.ErrorClass<JsonPatchAggregateError>("JsonPatchAggregateError")({
   _tag: Schema.tag("JsonPatchAggregateError"),
   errors: Schema.Array(Schema.Unknown)
 }) {

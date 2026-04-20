@@ -4,13 +4,13 @@
 import * as Clickhouse from "@clickhouse/client"
 import * as NodeStream from "@effect/platform-node/NodeStream"
 import * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { dual } from "effect/Function"
 import * as Layer from "effect/Layer"
 import type * as Scope from "effect/Scope"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as Client from "effect/unstable/sql/SqlClient"
@@ -118,7 +118,7 @@ export interface ClickhouseClient extends Client.SqlClient {
  * @category tags
  * @since 1.0.0
  */
-export const ClickhouseClient = ServiceMap.Service<ClickhouseClient>("@effect/sql-clickhouse/ClickhouseClient")
+export const ClickhouseClient = Context.Service<ClickhouseClient>("@effect/sql-clickhouse/ClickhouseClient")
 
 /**
  * @category constructors
@@ -364,7 +364,7 @@ export const make = (
  * @category References
  * @since 1.0.0
  */
-export const ClientMethod = ServiceMap.Reference<"query" | "command" | "insert">(
+export const ClientMethod = Context.Reference<"query" | "command" | "insert">(
   "@effect/sql-clickhouse/ClickhouseClient/ClientMethod",
   {
     defaultValue: () => "query"
@@ -375,7 +375,7 @@ export const ClientMethod = ServiceMap.Reference<"query" | "command" | "insert">
  * @category References
  * @since 1.0.0
  */
-export const QueryId = ServiceMap.Reference<string | undefined>(
+export const QueryId = Context.Reference<string | undefined>(
   "@effect/sql-clickhouse/ClickhouseClient/QueryId",
   { defaultValue: () => undefined }
 )
@@ -384,9 +384,9 @@ export const QueryId = ServiceMap.Reference<string | undefined>(
  * @category References
  * @since 1.0.0
  */
-export const ClickhouseSettings: ServiceMap.Reference<
+export const ClickhouseSettings: Context.Reference<
   NonNullable<Clickhouse.BaseQueryParams["clickhouse_settings"]>
-> = ServiceMap.Reference("@effect/sql-clickhouse/ClickhouseClient/ClickhouseSettings", {
+> = Context.Reference("@effect/sql-clickhouse/ClickhouseClient/ClickhouseSettings", {
   defaultValue: () => ({})
 })
 
@@ -399,12 +399,12 @@ export const layerConfig: (
 ) => Layer.Layer<ClickhouseClient | Client.SqlClient, Config.ConfigError | SqlError> = (
   config: Config.Wrap<ClickhouseClientConfig>
 ): Layer.Layer<ClickhouseClient | Client.SqlClient, Config.ConfigError | SqlError> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Config.unwrap(config).asEffect().pipe(
       Effect.flatMap(make),
       Effect.map((client) =>
-        ServiceMap.make(ClickhouseClient, client).pipe(
-          ServiceMap.add(Client.SqlClient, client)
+        Context.make(ClickhouseClient, client).pipe(
+          Context.add(Client.SqlClient, client)
         )
       )
     )
@@ -417,10 +417,10 @@ export const layerConfig: (
 export const layer = (
   config: ClickhouseClientConfig
 ): Layer.Layer<ClickhouseClient | Client.SqlClient, Config.ConfigError | SqlError> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Effect.map(make(config), (client) =>
-      ServiceMap.make(ClickhouseClient, client).pipe(
-        ServiceMap.add(Client.SqlClient, client)
+      Context.make(ClickhouseClient, client).pipe(
+        Context.add(Client.SqlClient, client)
       ))
   ).pipe(Layer.provide(Reactivity.layer))
 

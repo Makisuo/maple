@@ -5,7 +5,7 @@
  *
  * Accessed values are tracked by the transaction in order to detect conflicts and to track changes.
  * A transaction will retry whenever a conflict is detected or whenever the transaction explicitly
- * calls `Effect.retryTransaction` and any of the accessed TxChunk values change.
+ * calls `Effect.txRetry` and any of the accessed TxChunk values change.
  *
  * @since 4.0.0
  */
@@ -28,7 +28,7 @@ const TypeId = "~effect/transactions/TxChunk"
  *
  * Accessed values are tracked by the transaction in order to detect conflicts and to track changes.
  * A transaction will retry whenever a conflict is detected or whenever the transaction explicitly
- * calls `Effect.retryTransaction` and any of the accessed TxChunk values change.
+ * calls `Effect.txRetry` and any of the accessed TxChunk values change.
  *
  * @example
  * ```ts
@@ -48,7 +48,7 @@ const TypeId = "~effect/transactions/TxChunk"
  *   console.log(Chunk.toReadonlyArray(result)) // [1, 2, 3, 4]
  *
  *   // Multi-step atomic operation - use explicit transaction
- *   yield* Effect.transaction(
+ *   yield* Effect.tx(
  *     Effect.gen(function*() {
  *       yield* TxChunk.prepend(txChunk, 0)
  *       yield* TxChunk.append(txChunk, 5)
@@ -109,7 +109,7 @@ const TxChunkProto = {
  * })
  * ```
  */
-export const make = <A>(initial: Chunk.Chunk<A>): Effect.Effect<TxChunk<A>, never, Effect.Transaction> =>
+export const make = <A>(initial: Chunk.Chunk<A>): Effect.Effect<TxChunk<A>> =>
   Effect.map(TxRef.make(initial), (ref) => makeUnsafe(ref))
 
 /**
@@ -140,7 +140,7 @@ export const make = <A>(initial: Chunk.Chunk<A>): Effect.Effect<TxChunk<A>, neve
  * })
  * ```
  */
-export const empty = <A = never>(): Effect.Effect<TxChunk<A>, never, Effect.Transaction> =>
+export const empty = <A = never>(): Effect.Effect<TxChunk<A>> =>
   Effect.map(TxRef.make(Chunk.empty<A>()), (ref) => makeUnsafe(ref))
 
 /**
@@ -164,7 +164,7 @@ export const empty = <A = never>(): Effect.Effect<TxChunk<A>, never, Effect.Tran
  *   console.log(Chunk.toReadonlyArray(chunk)) // [1, 2, 3, 4, 5]
  *
  *   // Multi-step atomic modification - use explicit transaction
- *   yield* Effect.transaction(
+ *   yield* Effect.tx(
  *     Effect.gen(function*() {
  *       yield* TxChunk.append(txChunk, 6)
  *       yield* TxChunk.prepend(txChunk, 0)
@@ -176,7 +176,7 @@ export const empty = <A = never>(): Effect.Effect<TxChunk<A>, never, Effect.Tran
  * })
  * ```
  */
-export const fromIterable = <A>(iterable: Iterable<A>): Effect.Effect<TxChunk<A>, never, Effect.Transaction> =>
+export const fromIterable = <A>(iterable: Iterable<A>): Effect.Effect<TxChunk<A>> =>
   Effect.map(TxRef.make(Chunk.fromIterable(iterable)), (ref) => makeUnsafe(ref))
 
 /**
@@ -233,19 +233,19 @@ export const makeUnsafe = <A>(ref: TxRef.TxRef<Chunk.Chunk<A>>): TxChunk<A> => {
  * ```
  */
 export const modify: {
-  <A, R>(f: (current: Chunk.Chunk<NoInfer<A>>) => [returnValue: R, newValue: Chunk.Chunk<A>]): (
-    self: TxChunk<A>
-  ) => Effect.Effect<R, never, Effect.Transaction>
+  <A, R>(
+    f: (current: Chunk.Chunk<NoInfer<A>>) => [returnValue: R, newValue: Chunk.Chunk<A>]
+  ): (self: TxChunk<A>) => Effect.Effect<R>
   <A, R>(
     self: TxChunk<A>,
     f: (current: Chunk.Chunk<A>) => [returnValue: R, newValue: Chunk.Chunk<A>]
-  ): Effect.Effect<R, never, Effect.Transaction>
+  ): Effect.Effect<R>
 } = dual(
   2,
   <A, R>(
     self: TxChunk<A>,
     f: (current: Chunk.Chunk<A>) => [returnValue: R, newValue: Chunk.Chunk<A>]
-  ): Effect.Effect<R, never, Effect.Transaction> => TxRef.modify(self.ref, f)
+  ): Effect.Effect<R> => TxRef.modify(self.ref, f)
 )
 
 /**
@@ -274,16 +274,14 @@ export const modify: {
  * @category combinators
  */
 export const update: {
-  <A>(
-    f: (current: Chunk.Chunk<NoInfer<A>>) => Chunk.Chunk<A>
-  ): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, f: (current: Chunk.Chunk<A>) => Chunk.Chunk<A>): Effect.Effect<void, never, Effect.Transaction>
+  <A>(f: (current: Chunk.Chunk<NoInfer<A>>) => Chunk.Chunk<A>): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, f: (current: Chunk.Chunk<A>) => Chunk.Chunk<A>): Effect.Effect<void>
 } = dual(
   2,
   <A>(
     self: TxChunk<A>,
     f: (current: Chunk.Chunk<A>) => Chunk.Chunk<A>
-  ): Effect.Effect<void, never, Effect.Transaction> => TxRef.update(self.ref, f)
+  ): Effect.Effect<void> => TxRef.update(self.ref, f)
 )
 
 /**
@@ -309,8 +307,7 @@ export const update: {
  * @since 4.0.0
  * @category combinators
  */
-export const get = <A>(self: TxChunk<A>): Effect.Effect<Chunk.Chunk<A>, never, Effect.Transaction> =>
-  TxRef.get(self.ref)
+export const get = <A>(self: TxChunk<A>): Effect.Effect<Chunk.Chunk<A>> => TxRef.get(self.ref)
 
 /**
  * Sets the value of the `TxChunk`.
@@ -338,12 +335,11 @@ export const get = <A>(self: TxChunk<A>): Effect.Effect<Chunk.Chunk<A>, never, E
  * @category combinators
  */
 export const set: {
-  <A>(chunk: Chunk.Chunk<A>): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, chunk: Chunk.Chunk<A>): Effect.Effect<void, never, Effect.Transaction>
+  <A>(chunk: Chunk.Chunk<A>): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, chunk: Chunk.Chunk<A>): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, chunk: Chunk.Chunk<A>): Effect.Effect<void, never, Effect.Transaction> =>
-    TxRef.set(self.ref, chunk)
+  <A>(self: TxChunk<A>, chunk: Chunk.Chunk<A>): Effect.Effect<void> => TxRef.set(self.ref, chunk)
 )
 
 /**
@@ -371,12 +367,11 @@ export const set: {
  * @category combinators
  */
 export const append: {
-  <A>(element: A): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, element: A): Effect.Effect<void, never, Effect.Transaction>
+  <A>(element: A): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, element: A): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, element: A): Effect.Effect<void, never, Effect.Transaction> =>
-    update(self, (current) => Chunk.append(current, element))
+  <A>(self: TxChunk<A>, element: A): Effect.Effect<void> => update(self, (current) => Chunk.append(current, element))
 )
 
 /**
@@ -404,12 +399,11 @@ export const append: {
  * @category combinators
  */
 export const prepend: {
-  <A>(element: A): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, element: A): Effect.Effect<void, never, Effect.Transaction>
+  <A>(element: A): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, element: A): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, element: A): Effect.Effect<void, never, Effect.Transaction> =>
-    update(self, (current) => Chunk.prepend(current, element))
+  <A>(self: TxChunk<A>, element: A): Effect.Effect<void> => update(self, (current) => Chunk.prepend(current, element))
 )
 
 /**
@@ -436,7 +430,7 @@ export const prepend: {
  * @since 4.0.0
  * @category combinators
  */
-export const size = <A>(self: TxChunk<A>): Effect.Effect<number, never, Effect.Transaction> =>
+export const size = <A>(self: TxChunk<A>): Effect.Effect<number> =>
   modify(self, (current) => [Chunk.size(current), current])
 
 /**
@@ -462,7 +456,7 @@ export const size = <A>(self: TxChunk<A>): Effect.Effect<number, never, Effect.T
  * @since 4.0.0
  * @category combinators
  */
-export const isEmpty = <A>(self: TxChunk<A>): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const isEmpty = <A>(self: TxChunk<A>): Effect.Effect<boolean> =>
   modify(self, (current) => [Chunk.isEmpty(current), current])
 
 /**
@@ -488,7 +482,7 @@ export const isEmpty = <A>(self: TxChunk<A>): Effect.Effect<boolean, never, Effe
  * @since 4.0.0
  * @category combinators
  */
-export const isNonEmpty = <A>(self: TxChunk<A>): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const isNonEmpty = <A>(self: TxChunk<A>): Effect.Effect<boolean> =>
   modify(self, (current) => [Chunk.isNonEmpty(current), current])
 
 /**
@@ -516,12 +510,11 @@ export const isNonEmpty = <A>(self: TxChunk<A>): Effect.Effect<boolean, never, E
  * @category combinators
  */
 export const take: {
-  (n: number): <A>(self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, n: number): Effect.Effect<void, never, Effect.Transaction>
+  (n: number): <A>(self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, n: number): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, n: number): Effect.Effect<void, never, Effect.Transaction> =>
-    update(self, (current) => Chunk.take(current, n))
+  <A>(self: TxChunk<A>, n: number): Effect.Effect<void> => update(self, (current) => Chunk.take(current, n))
 )
 
 /**
@@ -549,12 +542,11 @@ export const take: {
  * @category combinators
  */
 export const drop: {
-  (n: number): <A>(self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, n: number): Effect.Effect<void, never, Effect.Transaction>
+  (n: number): <A>(self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, n: number): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, n: number): Effect.Effect<void, never, Effect.Transaction> =>
-    update(self, (current) => Chunk.drop(current, n))
+  <A>(self: TxChunk<A>, n: number): Effect.Effect<void> => update(self, (current) => Chunk.drop(current, n))
 )
 
 /**
@@ -582,11 +574,11 @@ export const drop: {
  * @category combinators
  */
 export const slice: {
-  (start: number, end: number): <A>(self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, start: number, end: number): Effect.Effect<void, never, Effect.Transaction>
+  (start: number, end: number): <A>(self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, start: number, end: number): Effect.Effect<void>
 } = dual(
   3,
-  <A>(self: TxChunk<A>, start: number, end: number): Effect.Effect<void, never, Effect.Transaction> =>
+  <A>(self: TxChunk<A>, start: number, end: number): Effect.Effect<void> =>
     update(self, (current) => Chunk.take(Chunk.drop(current, start), end - start))
 )
 
@@ -617,12 +609,11 @@ export const slice: {
  * @category combinators
  */
 export const map: {
-  <A>(f: (a: NoInfer<A>) => A): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, f: (a: A) => A): Effect.Effect<void, never, Effect.Transaction>
+  <A>(f: (a: NoInfer<A>) => A): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, f: (a: A) => A): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, f: (a: A) => A): Effect.Effect<void, never, Effect.Transaction> =>
-    update(self, (current) => Chunk.map(current, f))
+  <A>(self: TxChunk<A>, f: (a: A) => A): Effect.Effect<void> => update(self, (current) => Chunk.map(current, f))
 )
 
 /**
@@ -651,13 +642,13 @@ export const map: {
  * @category combinators
  */
 export const filter: {
-  <A, B extends A>(refinement: (a: A) => a is B): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(predicate: (a: A) => boolean): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A, B extends A>(self: TxChunk<A>, refinement: (a: A) => a is B): Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, predicate: (a: A) => boolean): Effect.Effect<void, never, Effect.Transaction>
+  <A, B extends A>(refinement: (a: A) => a is B): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(predicate: (a: A) => boolean): (self: TxChunk<A>) => Effect.Effect<void>
+  <A, B extends A>(self: TxChunk<A>, refinement: (a: A) => a is B): Effect.Effect<void>
+  <A>(self: TxChunk<A>, predicate: (a: A) => boolean): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, predicate: (a: A) => boolean): Effect.Effect<void, never, Effect.Transaction> =>
+  <A>(self: TxChunk<A>, predicate: (a: A) => boolean): Effect.Effect<void> =>
     update(self, (current) => Chunk.filter(current, predicate))
 )
 
@@ -688,11 +679,11 @@ export const filter: {
  * @category combinators
  */
 export const appendAll: {
-  <A>(other: Chunk.Chunk<A>): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, other: Chunk.Chunk<A>): Effect.Effect<void, never, Effect.Transaction>
+  <A>(other: Chunk.Chunk<A>): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, other: Chunk.Chunk<A>): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, other: Chunk.Chunk<A>): Effect.Effect<void, never, Effect.Transaction> =>
+  <A>(self: TxChunk<A>, other: Chunk.Chunk<A>): Effect.Effect<void> =>
     update(self, (current) => Chunk.appendAll(current, other))
 )
 
@@ -723,11 +714,11 @@ export const appendAll: {
  * @category combinators
  */
 export const prependAll: {
-  <A>(other: Chunk.Chunk<A>): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, other: Chunk.Chunk<A>): Effect.Effect<void, never, Effect.Transaction>
+  <A>(other: Chunk.Chunk<A>): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, other: Chunk.Chunk<A>): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, other: Chunk.Chunk<A>): Effect.Effect<void, never, Effect.Transaction> =>
+  <A>(self: TxChunk<A>, other: Chunk.Chunk<A>): Effect.Effect<void> =>
     update(self, (current) => Chunk.prependAll(current, other))
 )
 
@@ -760,13 +751,13 @@ export const prependAll: {
  * ```
  */
 export const concat: {
-  <A>(other: TxChunk<A>): (self: TxChunk<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxChunk<A>, other: TxChunk<A>): Effect.Effect<void, never, Effect.Transaction>
+  <A>(other: TxChunk<A>): (self: TxChunk<A>) => Effect.Effect<void>
+  <A>(self: TxChunk<A>, other: TxChunk<A>): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxChunk<A>, other: TxChunk<A>): Effect.Effect<void, never, Effect.Transaction> =>
+  <A>(self: TxChunk<A>, other: TxChunk<A>): Effect.Effect<void> =>
     Effect.gen(function*() {
       const otherChunk = yield* get(other)
       yield* appendAll(self, otherChunk)
-    })
+    }).pipe(Effect.tx)
 )

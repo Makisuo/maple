@@ -14,10 +14,10 @@
  * @since 2.0.0
  */
 
+import type * as Context from "./Context.ts"
 import type { Effect } from "./Effect.ts"
 import type { Exit } from "./Exit.ts"
 import * as effect from "./internal/effect.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 
 const TypeId = effect.ScopeTypeId
 const CloseableTypeId = effect.ScopeCloseableTypeId
@@ -208,7 +208,7 @@ export namespace State {
  * @since 2.0.0
  * @category tags
  */
-export const Scope: ServiceMap.Service<Scope, Scope> = effect.scopeTag
+export const Scope: Context.Service<Scope, Scope> = effect.scopeTag
 
 /**
  * Creates a new `Scope` with the specified finalizer strategy.

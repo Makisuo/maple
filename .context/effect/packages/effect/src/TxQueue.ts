@@ -5,7 +5,7 @@
  *
  * Accessed values are tracked by the transaction in order to detect conflicts and to track changes.
  * A transaction will retry whenever a conflict is detected or whenever the transaction explicitly
- * calls `Effect.retryTransaction` and any of the accessed TxQueue values change.
+ * calls `Effect.txRetry` and any of the accessed TxQueue values change.
  *
  * @since 4.0.0
  */
@@ -405,7 +405,7 @@ const TxQueueProto = {
  */
 export const bounded = <A = never, E = never>(
   capacity: number
-): Effect.Effect<TxQueue<A, E>, never, Effect.Transaction> =>
+): Effect.Effect<TxQueue<A, E>> =>
   Effect.gen(function*() {
     const items = yield* TxChunk.empty<A>()
     const stateRef = yield* TxRef.make<State<A, E>>({ _tag: "Open" })
@@ -416,7 +416,7 @@ export const bounded = <A = never, E = never>(
     txQueue.items = items
     txQueue.stateRef = stateRef
     return txQueue
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Creates a new unbounded `TxQueue` with unlimited capacity.
@@ -447,7 +447,7 @@ export const bounded = <A = never, E = never>(
  * @since 4.0.0
  * @category constructors
  */
-export const unbounded = <A = never, E = never>(): Effect.Effect<TxQueue<A, E>, never, Effect.Transaction> =>
+export const unbounded = <A = never, E = never>(): Effect.Effect<TxQueue<A, E>> =>
   Effect.gen(function*() {
     const items = yield* TxChunk.empty<A>()
     const stateRef = yield* TxRef.make<State<A, E>>({ _tag: "Open" })
@@ -458,7 +458,7 @@ export const unbounded = <A = never, E = never>(): Effect.Effect<TxQueue<A, E>, 
     txQueue.items = items
     txQueue.stateRef = stateRef
     return txQueue
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Creates a new dropping `TxQueue` with the specified capacity that drops new items when full.
@@ -489,7 +489,7 @@ export const unbounded = <A = never, E = never>(): Effect.Effect<TxQueue<A, E>, 
  */
 export const dropping = <A = never, E = never>(
   capacity: number
-): Effect.Effect<TxQueue<A, E>, never, Effect.Transaction> =>
+): Effect.Effect<TxQueue<A, E>> =>
   Effect.gen(function*() {
     const items = yield* TxChunk.empty<A>()
     const stateRef = yield* TxRef.make<State<A, E>>({ _tag: "Open" })
@@ -500,7 +500,7 @@ export const dropping = <A = never, E = never>(
     txQueue.items = items
     txQueue.stateRef = stateRef
     return txQueue
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Creates a new sliding `TxQueue` with the specified capacity that evicts old items when full.
@@ -533,7 +533,7 @@ export const dropping = <A = never, E = never>(
  */
 export const sliding = <A = never, E = never>(
   capacity: number
-): Effect.Effect<TxQueue<A, E>, never, Effect.Transaction> =>
+): Effect.Effect<TxQueue<A, E>> =>
   Effect.gen(function*() {
     const items = yield* TxChunk.empty<A>()
     const stateRef = yield* TxRef.make<State<A, E>>({ _tag: "Open" })
@@ -544,7 +544,7 @@ export const sliding = <A = never, E = never>(
     txQueue.items = items
     txQueue.stateRef = stateRef
     return txQueue
-  })
+  }).pipe(Effect.tx)
 
 // =============================================================================
 // Core Queue Operations
@@ -573,11 +573,11 @@ export const sliding = <A = never, E = never>(
  * @category combinators
  */
 export const offer: {
-  <A, E>(value: A): (self: TxEnqueue<A, E>) => Effect.Effect<boolean, never, Effect.Transaction>
-  <A, E>(self: TxEnqueue<A, E>, value: A): Effect.Effect<boolean, never, Effect.Transaction>
+  <A, E>(value: A): (self: TxEnqueue<A, E>) => Effect.Effect<boolean>
+  <A, E>(self: TxEnqueue<A, E>, value: A): Effect.Effect<boolean>
 } = dual(
   2,
-  <A, E>(self: TxEnqueue<A, E>, value: A): Effect.Effect<boolean, never, Effect.Transaction> =>
+  <A, E>(self: TxEnqueue<A, E>, value: A): Effect.Effect<boolean> =>
     Effect.gen(function*() {
       const state = yield* TxRef.get(self.stateRef)
       if (state._tag === "Done" || state._tag === "Closing") {
@@ -610,8 +610,8 @@ export const offer: {
       }
 
       // bounded strategy - block until space is available
-      return yield* Effect.retryTransaction
-    })
+      return yield* Effect.txRetry
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -640,11 +640,11 @@ export const offer: {
  * @category combinators
  */
 export const offerAll: {
-  <A, E>(values: Iterable<A>): (self: TxEnqueue<A, E>) => Effect.Effect<Array<A>, never, Effect.Transaction>
-  <A, E>(self: TxEnqueue<A, E>, values: Iterable<A>): Effect.Effect<Array<A>, never, Effect.Transaction>
+  <A, E>(values: Iterable<A>): (self: TxEnqueue<A, E>) => Effect.Effect<Array<A>>
+  <A, E>(self: TxEnqueue<A, E>, values: Iterable<A>): Effect.Effect<Array<A>>
 } = dual(
   2,
-  <A, E>(self: TxEnqueue<A, E>, values: Iterable<A>): Effect.Effect<Array<A>, never, Effect.Transaction> =>
+  <A, E>(self: TxEnqueue<A, E>, values: Iterable<A>): Effect.Effect<Array<A>> =>
     Effect.gen(function*() {
       const rejected: Array<A> = []
 
@@ -656,7 +656,7 @@ export const offerAll: {
       }
 
       return rejected
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -687,7 +687,7 @@ export const offerAll: {
  * @since 4.0.0
  * @category combinators
  */
-export const take = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E, Effect.Transaction> =>
+export const take = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E> =>
   Effect.gen(function*() {
     const state = yield* TxRef.get(self.stateRef)
 
@@ -698,14 +698,14 @@ export const take = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E, Effect.Tr
 
     // If no items available, retry transaction
     if (yield* isEmpty(self)) {
-      return yield* Effect.retryTransaction
+      return yield* Effect.txRetry
     }
 
     // Take item from queue
     const chunk = yield* TxChunk.get(self.items)
     const head = Chunk.head(chunk)
     if (Option.isNone(head)) {
-      return yield* Effect.retryTransaction
+      return yield* Effect.txRetry
     }
 
     yield* TxChunk.drop(self.items, 1)
@@ -716,7 +716,7 @@ export const take = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E, Effect.Tr
     }
 
     return head.value
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Tries to take an item from the queue without blocking.
@@ -741,7 +741,7 @@ export const take = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E, Effect.Tr
  * @since 4.0.0
  * @category combinators
  */
-export const poll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Option.Option<A>, never, Effect.Transaction> =>
+export const poll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Option.Option<A>> =>
   Effect.gen(function*() {
     const state = yield* TxRef.get(self.stateRef)
     if (state._tag === "Done") {
@@ -756,7 +756,7 @@ export const poll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Option.Option<A
 
     yield* TxChunk.drop(self.items, 1)
     return Option.some(head.value)
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Takes all items from the queue. Blocks if the queue is empty.
@@ -798,7 +798,7 @@ export const poll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Option.Option<A
  * @since 4.0.0
  * @category combinators
  */
-export const takeAll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Arr.NonEmptyArray<A>, E, Effect.Transaction> =>
+export const takeAll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Arr.NonEmptyArray<A>, E> =>
   Effect.gen(function*() {
     const state = yield* TxRef.get(self.stateRef)
 
@@ -809,7 +809,7 @@ export const takeAll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Arr.NonEmpty
 
     // Wait if empty - same pattern as take()
     if (yield* isEmpty(self)) {
-      return yield* Effect.retryTransaction
+      return yield* Effect.txRetry
     }
 
     const chunk = yield* TxChunk.get(self.items)
@@ -824,7 +824,7 @@ export const takeAll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Arr.NonEmpty
     }
 
     return items
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Takes exactly N items from the queue in a single atomic transaction.
@@ -862,11 +862,11 @@ export const takeAll = <A, E>(self: TxDequeue<A, E>): Effect.Effect<Arr.NonEmpty
  * @category combinators
  */
 export const takeN: {
-  (n: number): <A, E>(self: TxDequeue<A, E>) => Effect.Effect<Array<A>, E, Effect.Transaction>
-  <A, E>(self: TxDequeue<A, E>, n: number): Effect.Effect<Array<A>, E, Effect.Transaction>
+  (n: number): <A, E>(self: TxDequeue<A, E>) => Effect.Effect<Array<A>, E>
+  <A, E>(self: TxDequeue<A, E>, n: number): Effect.Effect<Array<A>, E>
 } = dual(
   2,
-  <A, E>(self: TxDequeue<A, E>, n: number): Effect.Effect<Array<A>, E, Effect.Transaction> =>
+  <A, E>(self: TxDequeue<A, E>, n: number): Effect.Effect<Array<A>, E> =>
     Effect.gen(function*() {
       const state = yield* TxRef.get(self.stateRef)
 
@@ -903,7 +903,7 @@ export const takeN: {
         }
 
         // Queue is still open but not enough items - retry transaction
-        return yield* Effect.retryTransaction
+        return yield* Effect.txRetry
       }
 
       // Take the determined number of items
@@ -918,7 +918,7 @@ export const takeN: {
       }
 
       return Chunk.toArray(taken)
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -950,11 +950,11 @@ export const takeN: {
  * @category taking
  */
 export const takeBetween: {
-  (min: number, max: number): <A, E>(self: TxDequeue<A, E>) => Effect.Effect<Array<A>, E, Effect.Transaction>
-  <A, E>(self: TxDequeue<A, E>, min: number, max: number): Effect.Effect<Array<A>, E, Effect.Transaction>
+  (min: number, max: number): <A, E>(self: TxDequeue<A, E>) => Effect.Effect<Array<A>, E>
+  <A, E>(self: TxDequeue<A, E>, min: number, max: number): Effect.Effect<Array<A>, E>
 } = dual(
   3,
-  <A, E>(self: TxDequeue<A, E>, min: number, max: number): Effect.Effect<Array<A>, E, Effect.Transaction> =>
+  <A, E>(self: TxDequeue<A, E>, min: number, max: number): Effect.Effect<Array<A>, E> =>
     Effect.gen(function*() {
       const state = yield* TxRef.get(self.stateRef)
 
@@ -987,7 +987,7 @@ export const takeBetween: {
         }
 
         // Queue is still open but not enough items - retry transaction
-        return yield* Effect.retryTransaction
+        return yield* Effect.txRetry
       }
 
       // We have at least the minimum, take up to the maximum
@@ -1002,7 +1002,7 @@ export const takeBetween: {
       }
 
       return Chunk.toArray(taken)
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -1040,7 +1040,7 @@ export const takeBetween: {
  * @since 4.0.0
  * @category combinators
  */
-export const peek = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E, Effect.Transaction> =>
+export const peek = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E> =>
   Effect.gen(function*() {
     const state = yield* TxRef.get(self.stateRef)
     if (state._tag === "Done") {
@@ -1050,11 +1050,11 @@ export const peek = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E, Effect.Tr
     const chunk = yield* TxChunk.get(self.items)
     const head = Chunk.head(chunk)
     if (Option.isNone(head)) {
-      return yield* Effect.retryTransaction
+      return yield* Effect.txRetry
     }
 
     return head.value
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Gets the current size of the queue.
@@ -1075,7 +1075,7 @@ export const peek = <A, E>(self: TxDequeue<A, E>): Effect.Effect<A, E, Effect.Tr
  * @since 4.0.0
  * @category combinators
  */
-export const size = (self: TxQueueState): Effect.Effect<number, never, Effect.Transaction> => TxChunk.size(self.items)
+export const size = (self: TxQueueState): Effect.Effect<number> => TxChunk.size(self.items)
 
 /**
  * Checks if the queue is empty.
@@ -1099,8 +1099,7 @@ export const size = (self: TxQueueState): Effect.Effect<number, never, Effect.Tr
  * @since 4.0.0
  * @category combinators
  */
-export const isEmpty = (self: TxQueueState): Effect.Effect<boolean, never, Effect.Transaction> =>
-  TxChunk.isEmpty(self.items)
+export const isEmpty = (self: TxQueueState): Effect.Effect<boolean> => TxChunk.isEmpty(self.items)
 
 /**
  * Checks if the queue is at capacity.
@@ -1124,14 +1123,10 @@ export const isEmpty = (self: TxQueueState): Effect.Effect<boolean, never, Effec
  * @since 4.0.0
  * @category combinators
  */
-export const isFull = (self: TxQueueState): Effect.Effect<boolean, never, Effect.Transaction> =>
-  Effect.gen(function*() {
-    if (self.capacity === Number.POSITIVE_INFINITY) {
-      return false
-    }
-    const currentSize = yield* size(self)
-    return currentSize >= self.capacity
-  })
+export const isFull = (self: TxQueueState): Effect.Effect<boolean> =>
+  self.capacity === Number.POSITIVE_INFINITY
+    ? Effect.succeed(false)
+    : Effect.map(size(self), (currentSize) => currentSize >= self.capacity)
 
 /**
  * Interrupts the queue, transitioning it to a closing state.
@@ -1156,7 +1151,7 @@ export const isFull = (self: TxQueueState): Effect.Effect<boolean, never, Effect
  * @since 4.0.0
  * @category combinators
  */
-export const interrupt = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const interrupt = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean> =>
   Effect.withFiber((fiber) => failCause(self, Cause.interrupt(fiber.id)))
 
 /**
@@ -1182,11 +1177,11 @@ export const interrupt = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean, n
  * @category combinators
  */
 export const fail: {
-  <E>(error: E): <A>(self: TxEnqueue<A, E>) => Effect.Effect<boolean, never, Effect.Transaction>
-  <A, E>(self: TxEnqueue<A, E>, error: E): Effect.Effect<boolean, never, Effect.Transaction>
+  <E>(error: E): <A>(self: TxEnqueue<A, E>) => Effect.Effect<boolean>
+  <A, E>(self: TxEnqueue<A, E>, error: E): Effect.Effect<boolean>
 } = dual(
   2,
-  <A, E>(self: TxEnqueue<A, E>, error: E): Effect.Effect<boolean, never, Effect.Transaction> =>
+  <A, E>(self: TxEnqueue<A, E>, error: E): Effect.Effect<boolean> =>
     Effect.gen(function*() {
       const state = yield* TxRef.get(self.stateRef)
 
@@ -1199,7 +1194,7 @@ export const fail: {
       yield* TxRef.set(self.stateRef, { _tag: "Done", cause: Cause.fail(error) })
 
       return true
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -1226,11 +1221,11 @@ export const fail: {
  * @category combinators
  */
 export const failCause: {
-  <E>(cause: Cause.Cause<E>): <A>(self: TxEnqueue<A, E>) => Effect.Effect<boolean, never, Effect.Transaction>
-  <A, E>(self: TxEnqueue<A, E>, cause: Cause.Cause<E>): Effect.Effect<boolean, never, Effect.Transaction>
+  <E>(cause: Cause.Cause<E>): <A>(self: TxEnqueue<A, E>) => Effect.Effect<boolean>
+  <A, E>(self: TxEnqueue<A, E>, cause: Cause.Cause<E>): Effect.Effect<boolean>
 } = dual(
   2,
-  <A, E>(self: TxEnqueue<A, E>, cause: Cause.Cause<E>): Effect.Effect<boolean, never, Effect.Transaction> =>
+  <A, E>(self: TxEnqueue<A, E>, cause: Cause.Cause<E>): Effect.Effect<boolean> =>
     Effect.gen(function*() {
       const state = yield* TxRef.get(self.stateRef)
 
@@ -1247,7 +1242,7 @@ export const failCause: {
       }
 
       return true
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -1284,7 +1279,7 @@ export const failCause: {
  * @since 4.0.0
  * @category combinators
  */
-export const end = <A, E>(self: TxEnqueue<A, E | Cause.Done>): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const end = <A, E>(self: TxEnqueue<A, E | Cause.Done>): Effect.Effect<boolean> =>
   failCause(self, Cause.fail(Cause.Done()))
 
 /**
@@ -1316,7 +1311,7 @@ export const end = <A, E>(self: TxEnqueue<A, E | Cause.Done>): Effect.Effect<boo
  * @since 4.0.0
  * @category combinators
  */
-export const clear = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<Array<A>, ExcludeDone<E>, Effect.Transaction> =>
+export const clear = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<Array<A>, ExcludeDone<E>> =>
   Effect.gen(function*() {
     const state = yield* TxRef.get(self.stateRef)
     if (state._tag === "Done") {
@@ -1329,7 +1324,7 @@ export const clear = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<Array<A>, Excl
     const chunk = yield* TxChunk.get(self.items)
     yield* TxChunk.set(self.items, Chunk.empty())
     return Chunk.toArray(chunk)
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Shuts down the queue immediately by clearing all items and interrupting it (legacy compatibility).
@@ -1365,11 +1360,11 @@ export const clear = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<Array<A>, Excl
  * @since 4.0.0
  * @category combinators
  */
-export const shutdown = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const shutdown = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean> =>
   Effect.gen(function*() {
     yield* Effect.ignore(clear(self))
     return yield* interrupt(self)
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Checks if the queue is in the open state.
@@ -1393,11 +1388,8 @@ export const shutdown = <A, E>(self: TxEnqueue<A, E>): Effect.Effect<boolean, ne
  * @since 4.0.0
  * @category combinators
  */
-export const isOpen = (self: TxQueueState): Effect.Effect<boolean, never, Effect.Transaction> =>
-  Effect.gen(function*() {
-    const state = yield* TxRef.get(self.stateRef)
-    return state._tag === "Open"
-  })
+export const isOpen = (self: TxQueueState): Effect.Effect<boolean> =>
+  Effect.map(TxRef.get(self.stateRef), (state) => state._tag === "Open")
 
 /**
  * Checks if the queue is in the closing state.
@@ -1422,11 +1414,8 @@ export const isOpen = (self: TxQueueState): Effect.Effect<boolean, never, Effect
  * @since 4.0.0
  * @category combinators
  */
-export const isClosing = (self: TxQueueState): Effect.Effect<boolean, never, Effect.Transaction> =>
-  Effect.gen(function*() {
-    const state = yield* TxRef.get(self.stateRef)
-    return state._tag === "Closing"
-  })
+export const isClosing = (self: TxQueueState): Effect.Effect<boolean> =>
+  Effect.map(TxRef.get(self.stateRef), (state) => state._tag === "Closing")
 
 /**
  * Checks if the queue is done (completed or failed).
@@ -1450,11 +1439,8 @@ export const isClosing = (self: TxQueueState): Effect.Effect<boolean, never, Eff
  * @since 4.0.0
  * @category combinators
  */
-export const isDone = (self: TxQueueState): Effect.Effect<boolean, never, Effect.Transaction> =>
-  Effect.gen(function*() {
-    const state = yield* TxRef.get(self.stateRef)
-    return state._tag === "Done"
-  })
+export const isDone = (self: TxQueueState): Effect.Effect<boolean> =>
+  Effect.map(TxRef.get(self.stateRef), (state) => state._tag === "Done")
 
 /**
  * Checks if the queue is shutdown (legacy compatibility).
@@ -1478,7 +1464,7 @@ export const isDone = (self: TxQueueState): Effect.Effect<boolean, never, Effect
  * @since 4.0.0
  * @category combinators
  */
-export const isShutdown = (self: TxQueueState): Effect.Effect<boolean, never, Effect.Transaction> => isDone(self)
+export const isShutdown = (self: TxQueueState): Effect.Effect<boolean> => isDone(self)
 
 /**
  * Waits for the queue to complete (either successfully or with failure).
@@ -1502,7 +1488,7 @@ export const isShutdown = (self: TxQueueState): Effect.Effect<boolean, never, Ef
  * @since 4.0.0
  * @category combinators
  */
-export const awaitCompletion = (self: TxQueueState): Effect.Effect<void, never, Effect.Transaction> =>
+export const awaitCompletion = (self: TxQueueState): Effect.Effect<void> =>
   Effect.gen(function*() {
     const state = yield* TxRef.get(self.stateRef)
 
@@ -1511,5 +1497,5 @@ export const awaitCompletion = (self: TxQueueState): Effect.Effect<void, never, 
     }
 
     // Not done yet, retry transaction
-    return yield* Effect.retryTransaction
-  })
+    return yield* Effect.txRetry
+  }).pipe(Effect.tx)

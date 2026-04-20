@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import * as Cause from "../../Cause.ts"
+import type * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import type * as Exit from "../../Exit.ts"
@@ -9,7 +10,6 @@ import { flow } from "../../Function.ts"
 import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
 import type * as Scope from "../../Scope.ts"
-import type * as ServiceMap from "../../ServiceMap.ts"
 import * as Tracer from "../../Tracer.ts"
 import type { ExtractTag, Mutable } from "../../Types.ts"
 import type * as Headers from "../http/Headers.ts"
@@ -152,7 +152,7 @@ type RemainingSpanImpl = Omit<Tracer.Span, (keyof typeof SpanProto) | "traceId" 
 const makeSpan = (options: {
   readonly name: string
   readonly parent: Option.Option<Tracer.AnySpan>
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
   readonly status: Tracer.SpanStatus
   readonly attributes: ReadonlyMap<string, unknown>
   readonly links: ReadonlyArray<Tracer.SpanLink>

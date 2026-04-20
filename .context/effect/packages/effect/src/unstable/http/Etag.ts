@@ -1,11 +1,11 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import type * as FileSystem from "../../FileSystem.ts"
 import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as Body from "./HttpBody.ts"
 
 /**
@@ -49,7 +49,7 @@ export const toString = (self: Etag): string => {
  * @since 4.0.0
  * @category models
  */
-export class Generator extends ServiceMap.Service<Generator, {
+export class Generator extends Context.Service<Generator, {
   readonly fromFileInfo: (info: FileSystem.File.Info) => Effect.Effect<Etag>
   readonly fromFileWeb: (file: Body.HttpBody.FileLike) => Effect.Effect<Etag>
 }>()("effect/http/Etag/Generator") {}

@@ -67,6 +67,7 @@
  * @since 4.0.0
  */
 import * as assert from "node:assert"
+import type * as Context from "../Context.ts"
 import * as Effect from "../Effect.ts"
 import * as Record from "../Record.ts"
 import * as Result from "../Result.ts"
@@ -74,7 +75,6 @@ import * as Schema from "../Schema.ts"
 import * as AST from "../SchemaAST.ts"
 import type * as Issue from "../SchemaIssue.ts"
 import * as Parser from "../SchemaParser.ts"
-import type * as ServiceMap from "../ServiceMap.ts"
 import * as FastCheck from "../testing/FastCheck.ts"
 
 /**
@@ -438,7 +438,7 @@ export class Decoding<S extends Schema.Top> {
    * @see {@link Encoding.provide}
    */
   provide<Id, Service>(
-    service: ServiceMap.Key<Id, Service>,
+    service: Context.Key<Id, Service>,
     implementation: Service
   ): Decoding<Schema.middlewareDecoding<S, Exclude<S["DecodingServices"], Id>>> {
     return new Decoding(
@@ -573,7 +573,7 @@ class Encoding<S extends Schema.Top> {
    * @see {@link Decoding.provide}
    */
   provide<Id, Service>(
-    service: ServiceMap.Key<Id, Service>,
+    service: Context.Key<Id, Service>,
     implementation: Service
   ): Encoding<Schema.middlewareEncoding<S, Exclude<S["EncodingServices"], Id>>> {
     return new Encoding(

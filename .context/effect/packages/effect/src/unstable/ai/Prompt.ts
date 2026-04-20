@@ -53,7 +53,7 @@
  */
 import * as Arr from "../../Array.ts"
 import * as Effect from "../../Effect.ts"
-import { constFalse, dual } from "../../Function.ts"
+import { dual } from "../../Function.ts"
 import * as Option from "../../Option.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
@@ -62,8 +62,6 @@ import * as SchemaIssue from "../../SchemaIssue.ts"
 import * as Parser from "../../SchemaParser.ts"
 import * as SchemaTransformation from "../../SchemaTransformation.ts"
 import type * as Response from "./Response.ts"
-
-const constEmptyObject = () => ({})
 
 // =============================================================================
 // Options
@@ -102,8 +100,6 @@ export type ProviderOptions = typeof ProviderOptions.Type
 // =============================================================================
 
 const PartTypeId = "~effect/ai/Prompt/Part" as const
-
-const constPartTypeId = () => PartTypeId
 
 /**
  * Type guard to check if a value is a Part.
@@ -185,9 +181,9 @@ export interface BasePartEncoded<Type extends string, Options extends ProviderOp
 
 const BasePart = Schema.Struct({
   [PartTypeId]: Schema.Literal(PartTypeId).pipe(
-    Schema.withDecodingDefaultKey(constPartTypeId, { encodingStrategy: "omit" })
+    Schema.withDecodingDefaultKey(Effect.succeed(PartTypeId), { encodingStrategy: "omit" })
   ),
-  options: ProviderOptions.pipe(Schema.withDecodingDefault(constEmptyObject))
+  options: ProviderOptions.pipe(Schema.withDecodingDefault(Effect.succeed({})))
 })
 
 /**
@@ -618,7 +614,7 @@ export const ToolCallPart: Schema.Struct<{
   id: Schema.String,
   name: Schema.String,
   params: Schema.Unknown,
-  providerExecuted: Schema.Boolean.pipe(Schema.withDecodingDefault(constFalse))
+  providerExecuted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false)))
 }).annotate({ identifier: "ToolCallPart" })
 
 /**
@@ -970,8 +966,6 @@ export const toolApprovalRequestPart = (
 
 const MessageTypeId = "~effect/ai/Prompt/Message" as const
 
-const constMessageTypeId = () => MessageTypeId
-
 /**
  * Type guard to check if a value is a Message.
  *
@@ -1021,9 +1015,9 @@ export interface BaseMessageEncoded<Role extends string, Options extends Provide
 
 const BaseMessage = Schema.Struct({
   [MessageTypeId]: Schema.Literal(MessageTypeId).pipe(
-    Schema.withDecodingDefaultKey(constMessageTypeId, { encodingStrategy: "omit" })
+    Schema.withDecodingDefaultKey(Effect.succeed(MessageTypeId), { encodingStrategy: "omit" })
   ),
-  options: ProviderOptions.pipe(Schema.withDecodingDefault(constEmptyObject))
+  options: ProviderOptions.pipe(Schema.withDecodingDefault(Effect.succeed({})))
 })
 
 /**

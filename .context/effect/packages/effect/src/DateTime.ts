@@ -2,6 +2,7 @@
  * @since 3.6.0
  */
 import type { IllegalArgumentError } from "./Cause.ts"
+import * as Context from "./Context.ts"
 import type * as Duration from "./Duration.ts"
 import * as Effect from "./Effect.ts"
 import type * as Equ from "./Equivalence.ts"
@@ -13,7 +14,6 @@ import * as Layer from "./Layer.ts"
 import type * as Option from "./Option.ts"
 import type * as order from "./Order.ts"
 import type { Pipeable } from "./Pipeable.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 const TypeId = Internal.TypeId
 const TimeZoneTypeId = Internal.TimeZoneTypeId
@@ -1509,7 +1509,7 @@ export const setPartsUtc: {
  * @since 3.11.0
  * @category current time zone
  */
-export class CurrentTimeZone extends ServiceMap.Service<CurrentTimeZone, TimeZone>()(
+export class CurrentTimeZone extends Context.Service<CurrentTimeZone, TimeZone>()(
   "effect/DateTime/CurrentTimeZone"
 ) {}
 

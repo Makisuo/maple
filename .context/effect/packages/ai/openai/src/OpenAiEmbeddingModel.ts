@@ -5,16 +5,16 @@
  *
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
 import * as Layer from "effect/Layer"
-import * as ServiceMap from "effect/ServiceMap"
 import type { Simplify } from "effect/Types"
 import * as AiError from "effect/unstable/ai/AiError"
 import * as EmbeddingModel from "effect/unstable/ai/EmbeddingModel"
 import * as AiModel from "effect/unstable/ai/Model"
-import type * as Generated from "./Generated.ts"
 import { OpenAiClient } from "./OpenAiClient.ts"
+import type * as OpenAiSchema from "./OpenAiSchema.ts"
 
 /**
  * @since 1.0.0
@@ -28,12 +28,12 @@ export type Model = "text-embedding-ada-002" | "text-embedding-3-small" | "text-
  * @since 1.0.0
  * @category services
  */
-export class Config extends ServiceMap.Service<
+export class Config extends Context.Service<
   Config,
   Simplify<
     & Partial<
       Omit<
-        typeof Generated.CreateEmbeddingRequest.Encoded,
+        typeof OpenAiSchema.CreateEmbeddingRequest.Encoded,
         "input"
       >
     >
@@ -82,7 +82,7 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
   const client = yield* OpenAiClient
 
   const makeConfig = Effect.gen(function*() {
-    const services = yield* Effect.services<never>()
+    const services = yield* Effect.context<never>()
     return { model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
   })
 
@@ -133,7 +133,7 @@ export const withConfigOverride: {
 
 const mapProviderResponse = (
   inputLength: number,
-  response: typeof Generated.CreateEmbeddingResponse.Type
+  response: typeof OpenAiSchema.CreateEmbeddingResponse.Type
 ): Effect.Effect<EmbeddingModel.ProviderResponse, AiError.AiError> => {
   if (response.data.length !== inputLength) {
     return Effect.fail(
@@ -150,6 +150,9 @@ const mapProviderResponse = (
     }
     if (seen.has(entry.index)) {
       return Effect.fail(invalidOutput("Provider returned duplicate embedding index: " + entry.index))
+    }
+    if (!Array.isArray(entry.embedding)) {
+      return Effect.fail(invalidOutput("Provider returned non-vector embedding at index " + entry.index))
     }
 
     seen.add(entry.index)

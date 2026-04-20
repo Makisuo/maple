@@ -3,6 +3,7 @@
  */
 import type * as Arr from "../../Array.ts"
 import * as Channel from "../../Channel.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import type * as FileSystem from "../../FileSystem.ts"
 import * as Inspectable from "../../Inspectable.ts"
@@ -13,7 +14,6 @@ import * as Result from "../../Result.ts"
 import * as Schema from "../../Schema.ts"
 import type { ParseOptions } from "../../SchemaAST.ts"
 import type * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as Socket from "../socket/Socket.ts"
 import * as Cookies from "./Cookies.ts"
@@ -74,7 +74,7 @@ export interface HttpServerRequest extends HttpIncomingMessage.HttpIncomingMessa
  * @since 4.0.0
  * @category context
  */
-export const HttpServerRequest: ServiceMap.Service<HttpServerRequest, HttpServerRequest> = ServiceMap.Service(
+export const HttpServerRequest: Context.Service<HttpServerRequest, HttpServerRequest> = Context.Service(
   "effect/http/HttpServerRequest"
 )
 
@@ -82,7 +82,7 @@ export const HttpServerRequest: ServiceMap.Service<HttpServerRequest, HttpServer
  * @since 4.0.0
  * @category search params
  */
-export class ParsedSearchParams extends ServiceMap.Service<
+export class ParsedSearchParams extends Context.Service<
   ParsedSearchParams,
   ReadonlyRecord<string, string | Array<string>>
 >()("effect/http/ParsedSearchParams") {}
@@ -897,7 +897,7 @@ export const toURL = (self: HttpServerRequest): Option.Option<URL> => {
  */
 export const toWebResult = (self: HttpServerRequest, options?: {
   readonly signal?: AbortSignal | undefined
-  readonly services?: ServiceMap.ServiceMap<never> | undefined
+  readonly context?: Context.Context<never> | undefined
 }): Result.Result<Request, RequestError> => {
   if (self.source instanceof Request) {
     return Result.succeed(self.source)
@@ -919,7 +919,7 @@ export const toWebResult = (self: HttpServerRequest, options?: {
     requestInit.signal = options.signal
   }
   if (hasBody(self.method)) {
-    requestInit.body = Stream.toReadableStreamWith(self.stream, options?.services ?? ServiceMap.empty())
+    requestInit.body = Stream.toReadableStreamWith(self.stream, options?.context ?? Context.empty())
     ;(requestInit as any).duplex = "half"
   }
   return Result.succeed(new Request(url.value, requestInit))
@@ -932,9 +932,9 @@ export const toWebResult = (self: HttpServerRequest, options?: {
 export const toWeb = (self: HttpServerRequest, options?: {
   readonly signal?: AbortSignal | undefined
 }): Effect.Effect<Request, RequestError> =>
-  Effect.servicesWith((services) =>
+  Effect.contextWith((context) =>
     toWebResult(self, {
-      services,
+      context,
       signal: options?.signal
     }).asEffect()
   )

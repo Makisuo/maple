@@ -1,11 +1,11 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "./Context.ts"
 import * as Effect from "./Effect.ts"
 import { identity } from "./Function.ts"
 import * as Layer from "./Layer.ts"
 import { BadArgument } from "./PlatformError.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 /**
  * @since 4.0.0
@@ -191,7 +191,7 @@ export declare namespace Path {
  * const result = Effect.provide(program, customPathLayer)
  * ```
  */
-export const Path: ServiceMap.Service<Path, Path> = ServiceMap.Service("effect/Path")
+export const Path: Context.Service<Path, Path> = Context.Service("effect/Path")
 
 /**
  * The following functions are adapted from the Node.js source code:

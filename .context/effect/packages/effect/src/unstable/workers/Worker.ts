@@ -1,20 +1,20 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import type * as Deferred from "../../Deferred.ts"
 import * as Effect from "../../Effect.ts"
 import * as FiberSet from "../../FiberSet.ts"
 import * as Latch from "../../Latch.ts"
 import * as Layer from "../../Layer.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import { WorkerError, WorkerSendError } from "./WorkerError.ts"
 
 /**
  * @since 4.0.0
  * @category models
  */
-export class WorkerPlatform extends ServiceMap.Service<WorkerPlatform, {
+export class WorkerPlatform extends Context.Service<WorkerPlatform, {
   readonly spawn: <O = unknown, I = unknown>(
     id: number
   ) => Effect.Effect<Worker<O, I>, WorkerError, Spawner>
@@ -80,10 +80,10 @@ export interface Spawner {
  * @since 4.0.0
  * @category tags
  */
-export const Spawner: ServiceMap.Service<
+export const Spawner: Context.Service<
   Spawner,
   SpawnerFn<unknown>
-> = ServiceMap.Service("effect/workers/Worker/Spawner")
+> = Context.Service("effect/workers/Worker/Spawner")
 
 /**
  * @since 4.0.0

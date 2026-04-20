@@ -4,7 +4,7 @@
  * Configure Otlp tracing + log export with a reusable observability layer.
  */
 import { NodeRuntime } from "@effect/platform-node"
-import { Effect, Layer, ServiceMap } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpLogger, OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
 
@@ -38,7 +38,7 @@ export const ObservabilityLayer = Layer.merge(OtlpTracingLayer, OtlpLoggingLayer
   Layer.provide(FetchHttpClient.layer)
 )
 
-export class Checkout extends ServiceMap.Service<Checkout, {
+export class Checkout extends Context.Service<Checkout, {
   processCheckout(orderId: string): Effect.Effect<void>
 }>()("acme/Checkout") {
   static readonly layer = Layer.effect(

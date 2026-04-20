@@ -72,4 +72,100 @@ describe("RpcSerialization", () => {
       }
     ])
   })
+
+  it("jsonRpc preserves id 0 across decode and encode", () => {
+    const parser = RpcSerialization.jsonRpc().makeUnsafe()
+    const decoded = parser.decode("{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"users.get\"}")
+    assert.deepStrictEqual(decoded, [{
+      _tag: "Request",
+      id: "0",
+      tag: "users.get",
+      payload: null,
+      headers: []
+    }])
+
+    const encoded = parser.encode({
+      _tag: "Request",
+      id: "0",
+      tag: "users.get",
+      payload: null,
+      headers: []
+    })
+    assert.strictEqual(
+      encoded,
+      "{\"jsonrpc\":\"2.0\",\"method\":\"users.get\",\"params\":null,\"id\":0,\"headers\":[]}"
+    )
+  })
+
+  it("jsonRpc maps null id to internal notification sentinel", () => {
+    const parser = RpcSerialization.jsonRpc().makeUnsafe()
+    const decoded = parser.decode("{\"jsonrpc\":\"2.0\",\"id\":null,\"method\":\"users.get\"}")
+    assert.deepStrictEqual(decoded, [{
+      _tag: "Request",
+      id: "",
+      tag: "users.get",
+      payload: null,
+      headers: []
+    }])
+  })
+
+  it("jsonRpc preserves empty string id across decode and encode", () => {
+    const parser = RpcSerialization.jsonRpc().makeUnsafe()
+    const decoded = parser.decode("{\"jsonrpc\":\"2.0\",\"id\":\"\",\"method\":\"users.get\"}")
+    assert.deepStrictEqual(decoded, [{
+      _tag: "Request",
+      id: "",
+      tag: "users.get",
+      payload: null,
+      headers: []
+    }])
+
+    const encoded = parser.encode({
+      _tag: "Request",
+      id: "",
+      tag: "users.get",
+      payload: null,
+      headers: []
+    })
+    assert.strictEqual(
+      encoded,
+      "{\"jsonrpc\":\"2.0\",\"method\":\"users.get\",\"params\":null,\"id\":\"\",\"headers\":[]}"
+    )
+  })
+
+  it("msgPack encodes and decodes a payload", () => {
+    const parser = RpcSerialization.msgPack.makeUnsafe()
+    const payload = { _tag: "Request", id: 1, method: "echo" }
+    const encoded = parser.encode(payload)
+    const decoded = parser.decode(encoded as Uint8Array)
+    assert.strictEqual(decoded.length, 1)
+    assert.deepStrictEqual(decoded[0], payload)
+  })
+
+  it("makeMsgPack with useRecords false encodes and decodes a payload", () => {
+    const parser = RpcSerialization.makeMsgPack({ useRecords: false }).makeUnsafe()
+    const payload = { _tag: "Request", id: 1, method: "echo" }
+    const encoded = parser.encode(payload)
+    const decoded = parser.decode(encoded as Uint8Array)
+    assert.strictEqual(decoded.length, 1)
+    assert.deepStrictEqual(decoded[0], payload)
+  })
+
+  it("makeMsgPack with useRecords false handles nested objects with repeated structures", () => {
+    const parser = RpcSerialization.makeMsgPack({ useRecords: false }).makeUnsafe()
+    const payload = {
+      _tag: "Chunk",
+      requestId: "1",
+      values: [
+        responseExitSuccess("1", { _tag: "Ok", data: "a" }),
+        responseExitSuccess("2", { _tag: "Ok", data: "b" }),
+        responseExitSuccess("3", { _tag: "Ok", data: "c" }),
+        responseExitSuccess("4", { _tag: "Ok", data: "d" })
+      ]
+    }
+    const encoded = parser.encode(payload)
+    const decoded = parser.decode(encoded as Uint8Array)
+    assert.strictEqual(decoded.length, 1)
+    assert.deepStrictEqual(decoded[0], payload)
+  })
 })

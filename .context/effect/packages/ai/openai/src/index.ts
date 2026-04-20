@@ -22,6 +22,11 @@ export * as OpenAiClient from "./OpenAiClient.ts"
 /**
  * @since 1.0.0
  */
+export * as OpenAiClientGenerated from "./OpenAiClientGenerated.ts"
+
+/**
+ * @since 1.0.0
+ */
 export * as OpenAiConfig from "./OpenAiConfig.ts"
 
 /**
@@ -52,6 +57,13 @@ export * as OpenAiError from "./OpenAiError.ts"
  * @since 1.0.0
  */
 export * as OpenAiLanguageModel from "./OpenAiLanguageModel.ts"
+
+/**
+ * Minimal local OpenAI schemas used by the handwritten Responses client path.
+ *
+ * @since 1.0.0
+ */
+export * as OpenAiSchema from "./OpenAiSchema.ts"
 
 /**
  * OpenAI telemetry attributes for OpenTelemetry integration.

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 describe("TxChunk", () => {
   describe("constructors", () => {
     it("make should create a TxChunk with initial chunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const chunk = Chunk.fromIterable([1, 2, 3])
         const txChunk = yield* TxChunk.make(chunk)
         const result = yield* TxChunk.get(txChunk)
@@ -16,7 +16,7 @@ describe("TxChunk", () => {
     })
 
     it("empty should create an empty TxChunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.empty<number>()
         const result = yield* TxChunk.get(txChunk)
         return result
@@ -27,7 +27,7 @@ describe("TxChunk", () => {
     })
 
     it("fromIterable should create a TxChunk from an iterable", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([4, 5, 6])
         const result = yield* TxChunk.get(txChunk)
         return result
@@ -40,7 +40,7 @@ describe("TxChunk", () => {
 
   describe("basic operations", () => {
     it("get should read the current chunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
         const result = yield* TxChunk.get(txChunk)
         return result
@@ -51,7 +51,7 @@ describe("TxChunk", () => {
     })
 
     it("set should replace the entire chunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
         const newChunk = Chunk.fromIterable([7, 8, 9])
 
@@ -66,7 +66,7 @@ describe("TxChunk", () => {
     })
 
     it("append should add element to the end", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
 
         yield* TxChunk.append(txChunk, 4)
@@ -80,7 +80,7 @@ describe("TxChunk", () => {
     })
 
     it("prepend should add element to the beginning", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([2, 3, 4])
 
         yield* TxChunk.prepend(txChunk, 1)
@@ -94,7 +94,7 @@ describe("TxChunk", () => {
     })
 
     it("size should return the chunk size", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
         const size = yield* TxChunk.size(txChunk)
         return size
@@ -105,7 +105,7 @@ describe("TxChunk", () => {
     })
 
     it("isEmpty should return true for empty chunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.empty<number>()
         const isEmpty = yield* TxChunk.isEmpty(txChunk)
         return isEmpty
@@ -116,7 +116,7 @@ describe("TxChunk", () => {
     })
 
     it("isEmpty should return false for non-empty chunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
         const isEmpty = yield* TxChunk.isEmpty(txChunk)
         return isEmpty
@@ -127,7 +127,7 @@ describe("TxChunk", () => {
     })
 
     it("isNonEmpty should return false for empty chunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.empty<number>()
         const isNonEmpty = yield* TxChunk.isNonEmpty(txChunk)
         return isNonEmpty
@@ -138,7 +138,7 @@ describe("TxChunk", () => {
     })
 
     it("isNonEmpty should return true for non-empty chunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
         const isNonEmpty = yield* TxChunk.isNonEmpty(txChunk)
         return isNonEmpty
@@ -151,7 +151,7 @@ describe("TxChunk", () => {
 
   describe("transactional semantics", () => {
     it("should perform atomic operations within a transaction", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
 
         yield* Effect.gen(function*() {
@@ -168,7 +168,7 @@ describe("TxChunk", () => {
     })
 
     it("modify should transform and return a value atomically", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
 
         const oldSize = yield* TxChunk.modify(txChunk, (chunk) => [
@@ -186,7 +186,7 @@ describe("TxChunk", () => {
     })
 
     it("update should transform the chunk", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
 
         yield* TxChunk.update(txChunk, (chunk) => Chunk.map(chunk, (x) => x * 2))
@@ -202,7 +202,7 @@ describe("TxChunk", () => {
 
   describe("slice operations", () => {
     it("take should keep first n elements", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3, 4, 5])
 
         yield* TxChunk.take(txChunk, 3)
@@ -216,7 +216,7 @@ describe("TxChunk", () => {
     })
 
     it("drop should remove first n elements", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3, 4, 5])
 
         yield* TxChunk.drop(txChunk, 2)
@@ -230,7 +230,7 @@ describe("TxChunk", () => {
     })
 
     it("slice should extract elements from start to end", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3, 4, 5])
 
         yield* TxChunk.slice(txChunk, 1, 4)
@@ -246,7 +246,7 @@ describe("TxChunk", () => {
 
   describe("transform operations", () => {
     it("map should transform each element", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
 
         yield* TxChunk.map(txChunk, (x) => x * 2)
@@ -260,7 +260,7 @@ describe("TxChunk", () => {
     })
 
     it("filter should keep elements that satisfy predicate", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3, 4, 5])
 
         yield* TxChunk.filter(txChunk, (x) => x % 2 === 0)
@@ -276,7 +276,7 @@ describe("TxChunk", () => {
 
   describe("concatenation operations", () => {
     it("appendAll should concatenate chunk to the end", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([1, 2, 3])
         const other = Chunk.fromIterable([4, 5, 6])
 
@@ -291,7 +291,7 @@ describe("TxChunk", () => {
     })
 
     it("prependAll should concatenate chunk to the beginning", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk = yield* TxChunk.fromIterable([4, 5, 6])
         const other = Chunk.fromIterable([1, 2, 3])
 
@@ -306,7 +306,7 @@ describe("TxChunk", () => {
     })
 
     it("concat should concatenate another TxChunk to the end", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk1 = yield* TxChunk.fromIterable([1, 2, 3])
         const txChunk2 = yield* TxChunk.fromIterable([4, 5, 6])
 
@@ -321,7 +321,7 @@ describe("TxChunk", () => {
     })
 
     it("concat should work atomically within transactions", async () => {
-      const program = Effect.transaction(Effect.gen(function*() {
+      const program = Effect.tx(Effect.gen(function*() {
         const txChunk1 = yield* TxChunk.fromIterable([1, 2])
         const txChunk2 = yield* TxChunk.fromIterable([3, 4])
         const txChunk3 = yield* TxChunk.fromIterable([5, 6])

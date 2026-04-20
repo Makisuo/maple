@@ -38,6 +38,7 @@
 import * as Arr from "./Array.ts"
 import * as Brand from "./Brand.ts"
 import * as Cause from "./Cause.ts"
+import * as Context from "./Context.ts"
 import * as Effect from "./Effect.ts"
 import { pipe } from "./Function.ts"
 import * as Layer from "./Layer.ts"
@@ -46,7 +47,6 @@ import { badArgument, type PlatformError, systemError } from "./PlatformError.ts
 import { hasProperty } from "./Predicate.ts"
 import type * as Pull from "./Pull.ts"
 import type { Scope } from "./Scope.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 import * as Sink from "./Sink.ts"
 import * as Stream from "./Stream.ts"
 
@@ -711,7 +711,7 @@ export type OpenFlag =
  * @since 4.0.0
  * @category tag
  */
-export const FileSystem: ServiceMap.Service<FileSystem, FileSystem> = ServiceMap.Service("effect/platform/FileSystem")
+export const FileSystem: Context.Service<FileSystem, FileSystem> = Context.Service("effect/platform/FileSystem")
 
 /**
  * Creates a FileSystem implementation from a partial implementation.
@@ -1258,6 +1258,6 @@ export declare namespace WatchEvent {
  * @since 4.0.0
  * @category file watcher
  */
-export class WatchBackend extends ServiceMap.Service<WatchBackend, {
+export class WatchBackend extends Context.Service<WatchBackend, {
   readonly register: (path: string, stat: File.Info) => Option.Option<Stream.Stream<WatchEvent, PlatformError>>
 }>()("effect/platform/FileSystem/WatchBackend") {}

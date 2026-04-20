@@ -55,7 +55,7 @@ export interface Semaphore {
    * If insufficient permits are available, the function will wait until they
    * are released by other tasks.
    */
-  withPermit<A, E, R>(this: Semaphore, self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
+  withPermit<A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
 
   /**
    * Runs an effect only if the specified number of permits are immediately
@@ -220,9 +220,7 @@ class SemaphoreImpl implements Semaphore {
       )
   }
 
-  get withPermit(): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R> {
-    return this.withPermits(1)
-  }
+  readonly withPermit = this.withPermits(1)
 
   withPermitsIfAvailable(n: number) {
     return <A, E, R>(self: Effect.Effect<A, E, R>) =>

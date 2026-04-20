@@ -111,21 +111,12 @@ import { Env } from "./Env"
 import { QueryEngineService, type GroupedAlertObservation } from "./QueryEngineService"
 import { TinybirdService } from "./TinybirdService"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
-
-
-interface DestinationPublicConfig {
-  readonly summary: string
-  readonly channelLabel: string | null
-}
-
-type DestinationSecretConfig =
-  | { readonly type: "slack"; readonly webhookUrl: string }
-  | { readonly type: "pagerduty"; readonly integrationKey: string }
-  | {
-      readonly type: "webhook"
-      readonly url: string
-      readonly signingSecret: string | null
-    }
+import {
+  PublicConfigFromJson,
+  SecretConfigFromJson,
+  type DestinationPublicConfig,
+  type DestinationSecretConfig,
+} from "./AlertDestinationHydration"
 
 interface NormalizedRule {
   readonly id: AlertRuleId
@@ -230,27 +221,6 @@ type DatabaseExecutor = DatabaseClient | DatabaseTransaction
 /*  Schemas for stored JSON formats                                           */
 /* -------------------------------------------------------------------------- */
 
-const DestinationPublicConfigSchema = Schema.Struct({
-  summary: Schema.String,
-  channelLabel: Schema.NullOr(Schema.String),
-})
-
-const DestinationSecretConfigSchema = Schema.Union([
-  Schema.Struct({
-    type: Schema.Literal("slack"),
-    webhookUrl: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("pagerduty"),
-    integrationKey: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("webhook"),
-    url: Schema.String,
-    signingSecret: Schema.NullOr(Schema.String),
-  }),
-])
-
 const StoredDeliveryPayloadSchema = Schema.Struct({
   eventType: Schema.optional(Schema.String),
   incidentId: Schema.optional(Schema.NullOr(Schema.String)),
@@ -275,8 +245,6 @@ const StoredDeliveryPayloadSchema = Schema.Struct({
 const StringArraySchema = Schema.Array(Schema.String)
 const DestinationIdArraySchema = Schema.Array(AlertDestinationDocument.fields.id)
 
-const PublicConfigFromJson = Schema.fromJsonString(DestinationPublicConfigSchema)
-const SecretConfigFromJson = Schema.fromJsonString(DestinationSecretConfigSchema)
 const DeliveryPayloadFromJson = Schema.fromJsonString(StoredDeliveryPayloadSchema)
 const StringArrayFromJson = Schema.fromJsonString(StringArraySchema)
 const DestinationIdArrayFromJson = Schema.fromJsonString(DestinationIdArraySchema)

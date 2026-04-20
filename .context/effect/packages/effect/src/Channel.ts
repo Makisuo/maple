@@ -60,6 +60,7 @@
 import * as Arr from "./Array.ts"
 import * as Cause from "./Cause.ts"
 import * as Chunk from "./Chunk.ts"
+import * as Context from "./Context.ts"
 import * as Effect from "./Effect.ts"
 import * as Exit from "./Exit.ts"
 import * as Fiber from "./Fiber.ts"
@@ -85,7 +86,6 @@ import * as Result from "./Result.ts"
 import * as Schedule from "./Schedule.ts"
 import * as Scope from "./Scope.ts"
 import * as Semaphore from "./Semaphore.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 import * as String from "./String.ts"
 import * as Take from "./Take.ts"
 import { ParentSpan, type SpanOptions } from "./Tracer.ts"
@@ -1874,7 +1874,7 @@ const mapEffectConcurrent = <
       const queue = yield* Queue.bounded<OutElem2, OutErr | EX | Cause.Done<OutDone>>(0)
       yield* Scope.addFinalizer(forkedScope, Queue.shutdown(queue))
 
-      const runFork = Effect.runForkWith(yield* Effect.services<RX>())
+      const runFork = Effect.runForkWith(yield* Effect.context<RX>())
       const trackFiber = Fiber.runIn(forkedScope)
 
       if (options.unordered) {
@@ -5895,6 +5895,29 @@ export const mergeEffect: {
   ) as any)
 
 /**
+ * Splits upstream string chunks into lines, recognizing `\n`, `\r\n`, and
+ * standalone `\r` as line terminators. The behavior matches
+ * `String.linesIterator` regardless of how the input is chunked.
+ *
+ * A line terminator at the very end of the stream does **not** produce a
+ * trailing empty line (consistent with `String.linesIterator`). Conversely,
+ * if the stream ends without a terminator the final partial line is still
+ * emitted.
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Stream } from "effect"
+ *
+ * Effect.runPromise(Effect.gen(function*() {
+ *   const result = yield* Stream.runCollect(
+ *     Stream.splitLines(Stream.make("hel", "lo\r\nwor", "ld\n"))
+ *   )
+ *   console.log(result)
+ *   // [ 'hello', 'world' ]
+ * }))
+ * ```
+ *
  * @since 2.0.0
  * @category String manipulation
  */
@@ -5908,11 +5931,30 @@ export const splitLines = <Err, Done>(): Channel<
 > =>
   fromTransform((upstream, _scope) =>
     Effect.sync(() => {
+      // Accumulates text that has not yet been terminated by a line break.
+      // Content is carried across chunks until a terminator is found.
       let stringBuilder = ""
+      // Set when a chunk ends with \r so the next chunk can check whether
+      // the following character is \n (completing a \r\n pair) or not
+      // (standalone \r, which is itself a line terminator).
       let midCRLF = false
+      // Remembers the upstream Done value after the first time the upstream
+      // signals completion, so subsequent pulls return Done immediately
+      // without pulling upstream again.
+      let done = Option.none<Done>()
 
-      const splitLinesArray = (chunk: Arr.NonEmptyReadonlyArray<string>): Arr.NonEmptyReadonlyArray<string> | null => {
+      function splitLinesArray(chunk: Arr.NonEmptyReadonlyArray<string>): Arr.NonEmptyReadonlyArray<string> | null {
         const chunkBuilder: Array<string> = []
+
+        function pushLine(segment: string): void {
+          if (stringBuilder.length === 0) {
+            chunkBuilder.push(segment)
+          } else {
+            chunkBuilder.push(stringBuilder + segment)
+            stringBuilder = ""
+          }
+        }
+
         for (let i = 0; i < chunk.length; i++) {
           const str = chunk[i]
           if (str.length !== 0) {
@@ -5921,23 +5963,17 @@ export const splitLines = <Err, Done>(): Channel<
             let indexOfLF = str.indexOf("\n")
             if (midCRLF) {
               if (indexOfLF === 0) {
-                chunkBuilder.push(stringBuilder)
-                stringBuilder = ""
+                pushLine("")
                 from = 1
                 indexOfLF = str.indexOf("\n", from)
               } else {
-                stringBuilder = stringBuilder + "\r"
+                pushLine("")
               }
               midCRLF = false
             }
             while (indexOfCR !== -1 || indexOfLF !== -1) {
               if (indexOfCR === -1 || (indexOfLF !== -1 && indexOfLF < indexOfCR)) {
-                if (stringBuilder.length === 0) {
-                  chunkBuilder.push(str.substring(from, indexOfLF))
-                } else {
-                  chunkBuilder.push(stringBuilder + str.substring(from, indexOfLF))
-                  stringBuilder = ""
-                }
+                pushLine(str.substring(from, indexOfLF))
                 from = indexOfLF + 1
                 indexOfLF = str.indexOf("\n", from)
               } else {
@@ -5945,40 +5981,45 @@ export const splitLines = <Err, Done>(): Channel<
                   midCRLF = true
                   indexOfCR = -1
                 } else {
-                  if (indexOfLF === indexOfCR + 1) {
-                    if (stringBuilder.length === 0) {
-                      chunkBuilder.push(str.substring(from, indexOfCR))
-                    } else {
-                      stringBuilder = stringBuilder + str.substring(from, indexOfCR)
-                      chunkBuilder.push(stringBuilder)
-                      stringBuilder = ""
-                    }
-                    from = indexOfCR + 2
-                    indexOfCR = str.indexOf("\r", from)
-                    indexOfLF = str.indexOf("\n", from)
-                  } else {
-                    indexOfCR = str.indexOf("\r", indexOfCR + 1)
-                  }
+                  pushLine(str.substring(from, indexOfCR))
+                  from = indexOfCR + (indexOfLF === indexOfCR + 1 ? 2 : 1)
+                  indexOfCR = str.indexOf("\r", from)
+                  indexOfLF = str.indexOf("\n", from)
                 }
               }
             }
-            if (midCRLF) {
-              stringBuilder = stringBuilder + str.substring(from, str.length - 1)
-            } else {
-              stringBuilder = stringBuilder + str.substring(from, str.length)
-            }
+            stringBuilder = stringBuilder + str.substring(from, str.length - (midCRLF ? 1 : 0))
           }
         }
         return Arr.isReadonlyArrayNonEmpty(chunkBuilder) ? chunkBuilder : null
       }
 
-      return Effect.flatMap(
-        upstream,
-        function loop(chunk): Pull.Pull<Arr.NonEmptyReadonlyArray<string>, Err, Done> {
-          const lines = splitLinesArray(chunk)
-          return lines !== null ? Effect.succeed(lines) : Effect.flatMap(upstream, loop)
+      const pullOrFlush: Pull.Pull<Arr.NonEmptyReadonlyArray<string>, Err, Done> = Effect.suspend(() => {
+        if (done._tag === "Some") {
+          return Cause.done(done.value)
         }
-      )
+        return Pull.matchEffect(upstream, {
+          onSuccess: loop,
+          onFailure: Effect.failCause,
+          onDone: (leftover) => {
+            done = Option.some(leftover)
+            if (stringBuilder.length > 0 || midCRLF) {
+              const last = stringBuilder
+              stringBuilder = ""
+              midCRLF = false
+              return Effect.succeed([last] as Arr.NonEmptyReadonlyArray<string>)
+            }
+            return Cause.done(leftover)
+          }
+        })
+      })
+
+      function loop(chunk: Arr.NonEmptyReadonlyArray<string>): Pull.Pull<Arr.NonEmptyReadonlyArray<string>, Err, Done> {
+        const lines = splitLinesArray(chunk)
+        return lines !== null ? Effect.succeed(lines) : pullOrFlush
+      }
+
+      return pullOrFlush
     })
   )
 
@@ -6601,39 +6642,39 @@ const runWith = <
  * @since 2.0.0
  * @category Services
  */
-export const servicesWith = <Env, OutElem, OutErr, OutDone, InElem, InErr, InDone, Env2>(
-  f: (services: ServiceMap.ServiceMap<Env>) => Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env2>
+export const contextWith = <Env, OutElem, OutErr, OutDone, InElem, InErr, InDone, Env2>(
+  f: (context: Context.Context<Env>) => Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env2>
 ): Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env | Env2> =>
   fromTransform((upstream, scope) =>
-    Effect.servicesWith((services: ServiceMap.ServiceMap<Env>) => toTransform(f(services))(upstream, scope))
+    Effect.contextWith((context: Context.Context<Env>) => toTransform(f(context))(upstream, scope))
   )
 
 /**
- * Provides a layer or service map to the channel, removing the corresponding
+ * Provides a layer or context to the channel, removing the corresponding
  * service requirements. Use `options.local` to build the layer every time; by
  * default, layers are shared between provide calls.
  *
  * @since 4.0.0
  * @category Services
  */
-export const provideServices: {
+export const provideContext: {
   <R2>(
-    services: ServiceMap.ServiceMap<R2>
+    context: Context.Context<R2>
   ): <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>(
     self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>
   ) => Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Exclude<Env, R2>>
   <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, R2>(
     self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>,
-    services: ServiceMap.ServiceMap<R2>
+    context: Context.Context<R2>
   ): Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Exclude<Env, R2>>
 } = dual(2, <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, R2>(
   self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>,
-  services: ServiceMap.ServiceMap<R2>
+  context: Context.Context<R2>
 ): Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Exclude<Env, R2>> =>
   fromTransform((upstream, scope) =>
     Effect.map(
-      Effect.provideServices(toTransform(self)(upstream, scope), services),
-      Effect.provideServices(services)
+      Effect.provideContext(toTransform(self)(upstream, scope), context),
+      Effect.provideContext(context)
     )
   ))
 
@@ -6643,19 +6684,19 @@ export const provideServices: {
  */
 export const provideService: {
   <I, S>(
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     service: NoInfer<S>
   ): <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>(
     self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>
   ) => Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Exclude<Env, I>>
   <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, I, S>(
     self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>,
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     service: NoInfer<S>
   ): Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Exclude<Env, I>>
 } = dual(3, <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, I, S>(
   self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>,
-  key: ServiceMap.Key<I, S>,
+  key: Context.Key<I, S>,
   service: NoInfer<S>
 ): Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Exclude<Env, I>> =>
   fromTransform((upstream, scope) =>
@@ -6671,19 +6712,19 @@ export const provideService: {
  */
 export const provideServiceEffect: {
   <I, S, ES, RS>(
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     service: Effect.Effect<NoInfer<S>, ES, RS>
   ): <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>(
     self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>
   ) => Channel<OutElem, OutErr | ES, OutDone, InElem, InErr, InDone, Exclude<Env, I> | RS>
   <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, I, S, ES, RS>(
     self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>,
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     service: Effect.Effect<NoInfer<S>, ES, RS>
   ): Channel<OutElem, OutErr | ES, OutDone, InElem, InErr, InDone, Exclude<Env, I> | RS>
 } = dual(3, <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, I, S, ES, RS>(
   self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>,
-  key: ServiceMap.Key<I, S>,
+  key: Context.Key<I, S>,
   service: Effect.Effect<NoInfer<S>, ES, RS>
 ): Channel<OutElem, OutErr | ES, OutDone, InElem, InErr, InDone, Exclude<Env, I> | RS> =>
   fromTransform((upstream, scope) =>
@@ -6699,7 +6740,7 @@ export const provideServiceEffect: {
  */
 export const provide: {
   <A, E = never, R = never>(
-    layer: Layer.Layer<A, E, R> | ServiceMap.ServiceMap<A>,
+    layer: Layer.Layer<A, E, R> | Context.Context<A>,
     options?: {
       readonly local?: boolean | undefined
     } | undefined
@@ -6708,27 +6749,27 @@ export const provide: {
   ) => Channel<OutElem, OutErr | E, OutDone, InElem, InErr, InDone, Exclude<Env, A> | R>
   <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, A, E = never, R = never>(
     self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>,
-    layer: Layer.Layer<A, E, R> | ServiceMap.ServiceMap<A>,
+    layer: Layer.Layer<A, E, R> | Context.Context<A>,
     options?: {
       readonly local?: boolean | undefined
     } | undefined
   ): Channel<OutElem, OutErr | E, OutDone, InElem, InErr, InDone, Exclude<Env, A> | R>
 } = dual((args) => isChannel(args[0]), <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, A, E = never, R = never>(
   self: Channel<OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>,
-  layer: Layer.Layer<A, E, R> | ServiceMap.ServiceMap<A>,
+  layer: Layer.Layer<A, E, R> | Context.Context<A>,
   options?: {
     readonly local?: boolean | undefined
   } | undefined
 ): Channel<OutElem, OutErr | E, OutDone, InElem, InErr, InDone, Exclude<Env, A> | R> =>
-  ServiceMap.isServiceMap(layer) ? provideServices(self, layer) : fromTransform((upstream, scope) =>
+  Context.isContext(layer) ? provideContext(self, layer) : fromTransform((upstream, scope) =>
     Effect.flatMap(
       options?.local
         ? Layer.buildWithMemoMap(layer, Layer.makeMemoMapUnsafe(), scope)
         : Layer.buildWithScope(layer, scope),
-      (services) =>
+      (context) =>
         Effect.map(
-          Effect.provideServices(toTransform(self)(upstream, scope), services),
-          Effect.provideServices(services)
+          Effect.provideContext(toTransform(self)(upstream, scope), context),
+          Effect.provideContext(context)
         )
     )
   ))
@@ -6737,24 +6778,24 @@ export const provide: {
  * @since 2.0.0
  * @category Services
  */
-export const updateServices: {
+export const updateContext: {
   <Env, R2>(
-    f: (services: ServiceMap.ServiceMap<R2>) => ServiceMap.ServiceMap<Env>
+    f: (context: Context.Context<R2>) => Context.Context<Env>
   ): <OutElem, OutErr, OutDone, InElem, InErr, InDone>(
     self: Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env>
   ) => Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, R2>
   <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, R2>(
     self: Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env>,
-    f: (services: ServiceMap.ServiceMap<R2>) => ServiceMap.ServiceMap<Env>
+    f: (context: Context.Context<R2>) => Context.Context<Env>
   ): Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, R2>
 } = dual(2, <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, R2>(
   self: Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env>,
-  f: (services: ServiceMap.ServiceMap<R2>) => ServiceMap.ServiceMap<Env>
+  f: (context: Context.Context<R2>) => Context.Context<Env>
 ): Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, R2> =>
   fromTransform((upstream, scope) =>
-    Effect.servicesWith((services) => {
-      const toProvide = f(services)
-      return toTransform(provideServices(self, toProvide))(upstream, scope)
+    Effect.contextWith((context) => {
+      const toProvide = f(context)
+      return toTransform(provideContext(self, toProvide))(upstream, scope)
     })
   ))
 
@@ -6764,26 +6805,26 @@ export const updateServices: {
  */
 export const updateService: {
   <I, S>(
-    key: ServiceMap.Key<I, S>,
+    key: Context.Key<I, S>,
     f: (service: NoInfer<S>) => S
   ): <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env>(
     self: Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env>
   ) => Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env | I>
   <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, I, S>(
     self: Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env>,
-    service: ServiceMap.Key<I, S>,
+    service: Context.Key<I, S>,
     f: (service: NoInfer<S>) => S
   ): Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env | I>
 } = dual(3, <OutElem, OutErr, OutDone, InElem, InErr, InDone, Env, I, S>(
   self: Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env>,
-  service: ServiceMap.Key<I, S>,
+  service: Context.Key<I, S>,
   f: (service: NoInfer<S>) => S
 ): Channel<OutElem, InElem, OutErr, InErr, OutDone, InDone, Env | I> =>
-  updateServices(self, (services) =>
-    ServiceMap.add(
-      services,
+  updateContext(self, (context) =>
+    Context.add(
+      context,
       service,
-      f(ServiceMap.get(services, service))
+      f(Context.get(context, service))
     )))
 
 /**
@@ -7367,11 +7408,11 @@ export const toPull: <OutElem, OutErr, OutDone, Env>(
     self: Channel<OutElem, OutErr, OutDone, unknown, unknown, unknown, Env>
   ) {
     const semaphore = Semaphore.makeUnsafe(1)
-    const context = yield* Effect.services<Env | Scope.Scope>()
-    const scope = ServiceMap.get(context, Scope.Scope)
+    const context = yield* Effect.context<Env | Scope.Scope>()
+    const scope = Context.get(context, Scope.Scope)
     const pull = yield* toTransform(self)(Cause.done(), scope)
     return pull.pipe(
-      Effect.provideServices(context),
+      Effect.provideContext(context),
       semaphore.withPermits(1)
     )
   },

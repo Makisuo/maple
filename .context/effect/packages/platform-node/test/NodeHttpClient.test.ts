@@ -1,10 +1,10 @@
 import * as NodeClient from "@effect/platform-node/NodeHttpClient"
 import { describe, expect, it } from "@effect/vitest"
 import { Struct } from "effect"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 
@@ -35,7 +35,7 @@ const makeJsonPlaceholder = Effect.gen(function*() {
   } as const
 })
 interface JsonPlaceholder extends Effect.Success<typeof makeJsonPlaceholder> {}
-const JsonPlaceholder = ServiceMap.Service<JsonPlaceholder>("test/JsonPlaceholder")
+const JsonPlaceholder = Context.Service<JsonPlaceholder>("test/JsonPlaceholder")
 const JsonPlaceholderLive = Layer.effect(JsonPlaceholder)(makeJsonPlaceholder)
 ;[
   {

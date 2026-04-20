@@ -75,6 +75,7 @@ import * as internalEffect from "./internal/effect.ts"
 import * as Option from "./Option.ts"
 import type { Pipeable } from "./Pipeable.ts"
 import { pipeArguments } from "./Pipeable.ts"
+import { hasProperty } from "./Predicate.ts"
 import type * as Types from "./Types.ts"
 
 const TypeId = "~effect/Deferred"
@@ -128,6 +129,12 @@ export interface Deferred<in out A, in out E = never> extends Deferred.Variance<
   effect?: Effect<A, E>
   resumes?: Array<(effect: Effect<A, E>) => void> | undefined
 }
+
+/**
+ * @since 2.0.0
+ * @category Guards
+ */
+export const isDeferred = <A, E>(u: unknown): u is Deferred<A, E> => hasProperty(u, TypeId)
 
 /**
  * @since 2.0.0

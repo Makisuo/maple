@@ -2,4 +2,4 @@
 "effect": patch
 ---
 
-add ServiceMap.mutate
+add Context.mutate

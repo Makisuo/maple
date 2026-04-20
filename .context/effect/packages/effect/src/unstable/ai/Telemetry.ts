@@ -31,9 +31,9 @@
  *
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import { dual } from "../../Function.ts"
 import * as Predicate from "../../Predicate.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as String from "../../String.ts"
 import type * as Struct from "../../Struct.ts"
 import type { Span } from "../../Tracer.ts"
@@ -491,6 +491,6 @@ export interface SpanTransformer {
  * @since 4.0.0
  * @category services
  */
-export class CurrentSpanTransformer extends ServiceMap.Service<CurrentSpanTransformer, SpanTransformer>()(
+export class CurrentSpanTransformer extends Context.Service<CurrentSpanTransformer, SpanTransformer>()(
   "effect/ai/Telemetry/CurrentSpanTransformer"
 ) {}

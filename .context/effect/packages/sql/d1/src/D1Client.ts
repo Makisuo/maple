@@ -4,12 +4,12 @@
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types"
 import * as Cache from "effect/Cache"
 import * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { identity } from "effect/Function"
 import * as Layer from "effect/Layer"
 import type * as Scope from "effect/Scope"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as Client from "effect/unstable/sql/SqlClient"
@@ -50,7 +50,7 @@ export interface D1Client extends Client.SqlClient {
  * @category tags
  * @since 1.0.0
  */
-export const D1Client = ServiceMap.Service<D1Client>("@effect/sql-d1/D1Client")
+export const D1Client = Context.Service<D1Client>("@effect/sql-d1/D1Client")
 
 /**
  * @category models
@@ -193,12 +193,12 @@ export const make = (
 export const layerConfig = (
   config: Config.Wrap<D1ClientConfig>
 ): Layer.Layer<D1Client | Client.SqlClient, Config.ConfigError> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Config.unwrap(config).asEffect().pipe(
       Effect.flatMap(make),
       Effect.map((client) =>
-        ServiceMap.make(D1Client, client).pipe(
-          ServiceMap.add(Client.SqlClient, client)
+        Context.make(D1Client, client).pipe(
+          Context.add(Client.SqlClient, client)
         )
       )
     )
@@ -211,9 +211,9 @@ export const layerConfig = (
 export const layer = (
   config: D1ClientConfig
 ): Layer.Layer<D1Client | Client.SqlClient, Config.ConfigError> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Effect.map(make(config), (client) =>
-      ServiceMap.make(D1Client, client).pipe(
-        ServiceMap.add(Client.SqlClient, client)
+      Context.make(D1Client, client).pipe(
+        Context.add(Client.SqlClient, client)
       ))
   ).pipe(Layer.provide(Reactivity.layer))

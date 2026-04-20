@@ -3,9 +3,12 @@ import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -209,14 +212,19 @@ describe("NodeChildProcessSpawner", () => {
 
         it.effect("should handle array interpolation", () =>
           Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const path = yield* Path.Path
+            const dir = yield* fs.makeTempDirectoryScoped()
+            const file = path.join(dir, "array-interpolation.txt")
             const args = ["-l", "-a"]
-            const handle = yield* ChildProcess.make`ls ${args} /tmp`
+            yield* fs.writeFile(file, new TextEncoder().encode("test"))
+
+            const handle = yield* ChildProcess.make`ls ${args} ${dir}`
             const exitCode = yield* handle.exitCode
             const output = yield* decodeByteStream(handle.stdout)
 
             assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(0))
-            // Should list files in /tmp with -l -a flags
-            assert.isTrue(output.length > 0)
+            assert.isTrue(output.includes("array-interpolation.txt"))
           }).pipe(Effect.scoped))
 
         it.effect("should handle multiple interpolations", () =>
@@ -800,6 +808,30 @@ describe("NodeChildProcessSpawner", () => {
     })
 
     describe("process supervision", () => {
+      const countMatchingProcesses = (pattern: string) =>
+        Effect.gen(function*() {
+          const handle = yield* ChildProcess.make("bash", [
+            "-c",
+            `ps aux | grep '${pattern}' | grep -v grep | wc -l`
+          ])
+          const output = yield* decodeByteStream(handle.stdout)
+          return Number.parseInt(output.trim())
+        }).pipe(Effect.orElseSucceed(() => 0))
+
+      const killMatchingProcesses = (pattern: string) =>
+        Effect.gen(function*() {
+          const escaped = `[${pattern[0]}]${pattern.slice(1)}`
+          const handle = yield* ChildProcess.make("bash", ["-c", `pkill -f '${escaped}' || true`])
+          yield* Effect.ignore(handle.exitCode)
+        }).pipe(Effect.asVoid)
+
+      const longRunningCommand = () =>
+        ChildProcess.make("node", ["-e", "setTimeout(() => {}, 30000)"], {
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore"
+        })
+
       it.effect("should kill all child processes in process group", () =>
         Effect.gen(function*() {
           const path = yield* Path.Path
@@ -886,6 +918,118 @@ describe("NodeChildProcessSpawner", () => {
           // Child processes should be cleaned up after non-zero exit
           assert.strictEqual(afterExit, 0)
         }).pipe(Effect.scoped))
+
+      it.effect("should not kill an unrefed process when scope closes", () =>
+        Effect.gen(function*() {
+          const scope = yield* Scope.make()
+          const handle = yield* Scope.provide(scope)(Effect.gen(function*() {
+            return yield* longRunningCommand()
+          })).pipe(
+            Effect.provide(NodeServices)
+          )
+
+          yield* Scope.provide(scope)(handle.unref).pipe(Effect.provide(NodeServices))
+          yield* Scope.close(scope, Exit.void)
+          yield* TestClock.withLive(Effect.sleep("100 millis"))
+
+          const isRunning = yield* handle.isRunning
+          assert.isTrue(isRunning)
+
+          yield* handle.kill({ killSignal: "SIGKILL" })
+        }).pipe(Effect.provide(NodeServices)))
+
+      it.effect("should kill a restored process when scope closes", () =>
+        Effect.gen(function*() {
+          const scope = yield* Scope.make()
+          const handle = yield* Scope.provide(scope)(Effect.gen(function*() {
+            return yield* longRunningCommand()
+          })).pipe(
+            Effect.provide(NodeServices)
+          )
+
+          const reref = yield* Scope.provide(scope)(handle.unref).pipe(Effect.provide(NodeServices))
+          yield* reref
+          yield* Scope.close(scope, Exit.void)
+          yield* TestClock.withLive(Effect.sleep("100 millis"))
+
+          const isRunning = yield* handle.isRunning
+          assert.isFalse(isRunning)
+        }).pipe(Effect.provide(NodeServices)))
+
+      it.effect("should resolve exitCode after closing the original scope of an unrefed process", () =>
+        Effect.gen(function*() {
+          const scope = yield* Scope.make()
+          const handle = yield* Scope.provide(scope)(Effect.gen(function*() {
+            return yield* ChildProcess.make("node", ["-e", "setTimeout(() => process.exit(0), 50)"], {
+              stdin: "ignore",
+              stdout: "ignore",
+              stderr: "ignore"
+            })
+          })).pipe(Effect.provide(NodeServices))
+
+          yield* Scope.provide(scope)(handle.unref).pipe(Effect.provide(NodeServices))
+          yield* Scope.close(scope, Exit.void)
+
+          const exitCode = yield* handle.exitCode
+          assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(0))
+        }).pipe(Effect.provide(NodeServices)))
+
+      it.effect("should cleanup descendants after an unrefed parent exits non-zero", () =>
+        Effect.gen(function*() {
+          const path = yield* Path.Path
+          const cwd = path.join(...TEST_BASH_SCRIPTS_PATH)
+          const scope = yield* Scope.make()
+
+          const handle = yield* Scope.provide(scope)(Effect.gen(function*() {
+            return yield* ChildProcess.make({ cwd })`./parent-exits-early.sh`
+          })).pipe(Effect.provide(NodeServices))
+
+          yield* Scope.provide(scope)(handle.unref).pipe(Effect.provide(NodeServices))
+          yield* Scope.close(scope, Exit.void)
+
+          const exitCode = yield* handle.exitCode
+          assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(1))
+
+          yield* TestClock.withLive(Effect.sleep("100 millis"))
+
+          const remaining = yield* countMatchingProcesses("sleep 30")
+          assert.strictEqual(remaining, 0)
+        }).pipe(Effect.provide(NodeServices)))
+
+      it.effect("should unref every process in a pipeline", () =>
+        Effect.gen(function*() {
+          const scope = yield* Scope.make()
+          const rootMarker = "pipeline-unref-root"
+          const tailMarker = "pipeline-unref-tail"
+
+          const handle = yield* Scope.provide(scope)(Effect.gen(function*() {
+            return yield* ChildProcess.make("node", ["-e", "setTimeout(() => {}, 30000)", rootMarker], {
+              stdin: "ignore",
+              stdout: "pipe",
+              stderr: "ignore"
+            }).pipe(
+              ChildProcess.pipeTo(
+                ChildProcess.make("node", ["-e", "setTimeout(() => {}, 30000)", tailMarker], {
+                  stdin: "pipe",
+                  stdout: "ignore",
+                  stderr: "ignore"
+                })
+              )
+            )
+          })).pipe(Effect.provide(NodeServices))
+
+          yield* Scope.provide(scope)(handle.unref).pipe(Effect.provide(NodeServices))
+          yield* Scope.close(scope, Exit.void)
+          yield* TestClock.withLive(Effect.sleep("100 millis"))
+
+          const rootCount = yield* countMatchingProcesses(rootMarker)
+          const tailCount = yield* countMatchingProcesses(tailMarker)
+          assert.strictEqual(rootCount, 1)
+          assert.strictEqual(tailCount, 1)
+
+          yield* killMatchingProcesses(rootMarker)
+          yield* killMatchingProcesses(tailMarker)
+        }).pipe(Effect.provide(NodeServices)))
     })
 
     it.effect("should not deadlock on large stdout output", () =>

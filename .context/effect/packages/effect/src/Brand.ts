@@ -8,6 +8,7 @@
 import * as Arr from "./Array.ts"
 import * as Option from "./Option.ts"
 import * as Result from "./Result.ts"
+import type * as Schema from "./Schema.ts"
 import * as AST from "./SchemaAST.ts"
 import type * as Issue from "./SchemaIssue.ts"
 import type * as Types from "./Types.ts"
@@ -192,10 +193,7 @@ export function nominal<A extends Brand<any>>(): Constructor<A> {
  * @since 2.0.0
  */
 export function make<A extends Brand<any>>(
-  filter: (unbranded: Brand.Unbranded<A>) => undefined | boolean | string | Issue.Issue | {
-    readonly path: ReadonlyArray<PropertyKey>
-    readonly message: string
-  }
+  filter: (unbranded: Brand.Unbranded<A>) => Schema.FilterOutput
 ): Constructor<A> {
   return check(AST.makeFilter(filter))
 }

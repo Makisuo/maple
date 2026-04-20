@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@libsql/client": "0.15.15",
+    "@maple/domain": "workspace:*",
     "drizzle-orm": "^0.45.1",
     "effect": "catalog:effect"
   },

@@ -17,6 +17,17 @@ import { registerInspectTraceTool } from "./inspect-trace"
 import { registerListAlertChecksTool } from "./list-alert-checks"
 import { registerListAlertIncidentsTool } from "./list-alert-incidents"
 import { registerListAlertRulesTool } from "./list-alert-rules"
+import { registerClaimErrorIssueTool } from "./claim-error-issue"
+import { registerCommentOnErrorIssueTool } from "./comment-on-error-issue"
+import { registerHeartbeatErrorIssueTool } from "./heartbeat-error-issue"
+import { registerListErrorIncidentsTool } from "./list-error-incidents"
+import { registerListErrorIssueEventsTool } from "./list-error-issue-events"
+import { registerListErrorIssuesTool } from "./list-error-issues"
+import { registerProposeFixTool } from "./propose-fix"
+import { registerRegisterAgentTool } from "./register-agent"
+import { registerReleaseErrorIssueTool } from "./release-error-issue"
+import { registerTransitionErrorIssueTool } from "./transition-error-issue"
+import { registerUpdateErrorNotificationPolicyTool } from "./update-error-notification-policy"
 import { registerListDashboardsTool } from "./list-dashboards"
 import { registerListMetricsTool } from "./list-metrics"
 import { registerListServicesTool } from "./list-services"
@@ -30,11 +41,19 @@ import type { McpToolError, McpToolRegistrar, McpToolResult } from "./types"
 import { registerUpdateDashboardTool } from "./update-dashboard"
 import { registerUpdateDashboardWidgetTool } from "./update-dashboard-widget"
 
+// `R` is intentionally `any` here: MapleToolDefinition is the type-erased
+// boundary between heterogeneous tool implementations (each with its own
+// service requirements) and the McpServer.addTool API (which expects
+// McpServerClient). The runtime layer wires the actual services; we accept the
+// loose `any` here to let both sides typecheck.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface MapleToolDefinition {
   readonly name: string
   readonly description: string
   readonly schema: Schema.Decoder<unknown, never>
-  readonly handler: (params: unknown) => Effect.Effect<McpToolResult, McpToolError, any>
+  readonly handler: (
+    params: unknown,
+  ) => Effect.Effect<McpToolResult, McpToolError, any>
 }
 
 export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
@@ -52,7 +71,7 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
         name,
         description,
         schema,
-        handler: handler as (params: unknown) => Effect.Effect<McpToolResult, McpToolError>,
+        handler: handler as MapleToolDefinition["handler"],
       })
     },
   }
@@ -86,6 +105,17 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
   registerExploreAttributesTool(registrar)
   registerListServicesTool(registrar)
   registerGetServiceTopOperationsTool(registrar)
+  registerListErrorIssuesTool(registrar)
+  registerTransitionErrorIssueTool(registrar)
+  registerClaimErrorIssueTool(registrar)
+  registerReleaseErrorIssueTool(registrar)
+  registerHeartbeatErrorIssueTool(registrar)
+  registerCommentOnErrorIssueTool(registrar)
+  registerProposeFixTool(registrar)
+  registerListErrorIssueEventsTool(registrar)
+  registerRegisterAgentTool(registrar)
+  registerListErrorIncidentsTool(registrar)
+  registerUpdateErrorNotificationPolicyTool(registrar)
 
   return definitions
 }

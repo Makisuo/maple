@@ -11,7 +11,6 @@ import type * as Schema from "../../Schema.ts"
 import type * as CliError from "./CliError.ts"
 import * as Param from "./Param.ts"
 import type * as Primitive from "./Primitive.ts"
-import type * as Prompt from "./Prompt.ts"
 
 // -------------------------------------------------------------------------------------
 // models
@@ -535,9 +534,9 @@ export const withFallbackConfig: {
  * @category combinators
  */
 export const withFallbackPrompt: {
-  <B>(prompt: Prompt.Prompt<B>): <A>(self: Flag<A>) => Flag<A | B>
-  <A, B>(self: Flag<A>, prompt: Prompt.Prompt<B>): Flag<A | B>
-} = dual(2, <A, B>(self: Flag<A>, prompt: Prompt.Prompt<B>) => Param.withFallbackPrompt(self, prompt))
+  <B>(prompt: Param.FallbackPrompt<B>): <A>(self: Flag<A>) => Flag<A | B>
+  <A, B>(self: Flag<A>, prompt: Param.FallbackPrompt<B>): Flag<A | B>
+} = dual(2, <A, B>(self: Flag<A>, prompt: Param.FallbackPrompt<B>) => Param.withFallbackPrompt(self, prompt))
 
 /**
  * Transforms the parsed value of a flag using a mapping function.

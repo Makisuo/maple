@@ -1,17 +1,17 @@
 /**
  * @since 1.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import { dual } from "../../Function.ts"
 import * as Schema from "../../Schema.ts"
 import * as Getter from "../../SchemaGetter.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 
 /**
  * @since 1.0.0
  * @category models
  */
-export class Collector extends ServiceMap.Service<Collector, {
+export class Collector extends Context.Service<Collector, {
   readonly addAll: (
     _: Iterable<globalThis.Transferable>
   ) => Effect.Effect<void>
@@ -60,8 +60,8 @@ export const makeCollector: Effect.Effect<Collector["Service"]> = Effect.sync(ma
 export const addAll = (
   tranferables: Iterable<globalThis.Transferable>
 ): Effect.Effect<void> =>
-  Effect.servicesWith((services) => {
-    const collector = ServiceMap.getOrUndefined(services, Collector)
+  Effect.contextWith((services) => {
+    const collector = Context.getOrUndefined(services, Collector)
     if (!collector) return Effect.void
     collector.addAllUnsafe(tranferables)
     return Effect.void
@@ -75,8 +75,8 @@ export const getterAddAll = <A>(
   f: (_: A) => Iterable<globalThis.Transferable>
 ): Getter.Getter<A, A> =>
   Getter.transformOrFail((e: A) =>
-    Effect.servicesWith((services) => {
-      const collector = ServiceMap.getOrUndefined(services, Collector)
+    Effect.contextWith((services) => {
+      const collector = Context.getOrUndefined(services, Collector)
       if (!collector) return Effect.succeed(e)
       collector.addAllUnsafe(f(e))
       return Effect.succeed(e)
@@ -89,8 +89,8 @@ export const getterAddAll = <A>(
  */
 export interface Transferable<S extends Schema.Top> extends
   Schema.decodeTo<
-    Schema.toType<S["~rebuild.out"]>,
-    S["~rebuild.out"]
+    Schema.toType<S["Rebuild"]>,
+    S["Rebuild"]
   >
 {}
 
@@ -112,16 +112,14 @@ export const schema: {
     self: S,
     f: (_: S["Encoded"]) => Iterable<globalThis.Transferable>
   ): Transferable<S> =>
-    self
-      .annotate({
-        serializerJson: () => passthroughLink
+    self.annotate({
+      toCodecJson: () => passthroughLink
+    }).pipe(
+      Schema.decode({
+        decode: Getter.passthrough(),
+        encode: getterAddAll(f)
       })
-      .pipe(
-        Schema.decode({
-          decode: Getter.passthrough(),
-          encode: getterAddAll(f)
-        })
-      )
+    )
 )
 
 const passthroughLink = Schema.link()(Schema.Any, {
@@ -151,7 +149,7 @@ export const MessagePort: Transferable<Schema.declare<MessagePort>> = schema(
  * @since 1.0.0
  * @category schema
  */
-export const Uint8Array: Transferable<Schema.Uint8Array> = schema(
-  Schema.Uint8Array,
+export const Uint8Array: Transferable<Schema.instanceOf<globalThis.Uint8Array<ArrayBuffer>>> = schema(
+  Schema.Uint8Array as any,
   (_) => [_.buffer]
 )

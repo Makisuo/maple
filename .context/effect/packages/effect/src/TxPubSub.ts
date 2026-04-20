@@ -118,12 +118,12 @@ const makeTxPubSub = <A>(
  * @since 4.0.0
  * @category constructors
  */
-export const bounded = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>, never, Effect.Transaction> =>
+export const bounded = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>> =>
   Effect.gen(function*() {
     const subscribersRef = yield* TxRef.make<Array<TxQueue.TxQueue<A>>>([])
     const shutdownRef = yield* TxRef.make(false)
     return makeTxPubSub(subscribersRef, shutdownRef, "bounded", capacity)
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Creates a dropping TxPubSub with the specified capacity. When a subscriber's
@@ -153,12 +153,12 @@ export const bounded = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>,
  * @since 4.0.0
  * @category constructors
  */
-export const dropping = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>, never, Effect.Transaction> =>
+export const dropping = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>> =>
   Effect.gen(function*() {
     const subscribersRef = yield* TxRef.make<Array<TxQueue.TxQueue<A>>>([])
     const shutdownRef = yield* TxRef.make(false)
     return makeTxPubSub(subscribersRef, shutdownRef, "dropping", capacity)
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Creates a sliding TxPubSub with the specified capacity. When a subscriber's
@@ -187,12 +187,12 @@ export const dropping = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>
  * @since 4.0.0
  * @category constructors
  */
-export const sliding = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>, never, Effect.Transaction> =>
+export const sliding = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>> =>
   Effect.gen(function*() {
     const subscribersRef = yield* TxRef.make<Array<TxQueue.TxQueue<A>>>([])
     const shutdownRef = yield* TxRef.make(false)
     return makeTxPubSub(subscribersRef, shutdownRef, "sliding", capacity)
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Creates an unbounded TxPubSub with unlimited capacity. Messages are always accepted.
@@ -218,12 +218,12 @@ export const sliding = <A = never>(capacity: number): Effect.Effect<TxPubSub<A>,
  * @since 4.0.0
  * @category constructors
  */
-export const unbounded = <A = never>(): Effect.Effect<TxPubSub<A>, never, Effect.Transaction> =>
+export const unbounded = <A = never>(): Effect.Effect<TxPubSub<A>> =>
   Effect.gen(function*() {
     const subscribersRef = yield* TxRef.make<Array<TxQueue.TxQueue<A>>>([])
     const shutdownRef = yield* TxRef.make(false)
     return makeTxPubSub(subscribersRef, shutdownRef, "unbounded", Number.POSITIVE_INFINITY)
-  })
+  }).pipe(Effect.tx)
 
 // =============================================================================
 // Getters
@@ -272,7 +272,7 @@ export const capacity = <A>(self: TxPubSub<A>): number => self.capacity
  * @since 4.0.0
  * @category getters
  */
-export const size = <A>(self: TxPubSub<A>): Effect.Effect<number, never, Effect.Transaction> =>
+export const size = <A>(self: TxPubSub<A>): Effect.Effect<number> =>
   Effect.gen(function*() {
     const subscribers = yield* TxRef.get(self.subscribersRef)
     let maxSize = 0
@@ -281,7 +281,7 @@ export const size = <A>(self: TxPubSub<A>): Effect.Effect<number, never, Effect.
       if (s > maxSize) maxSize = s
     }
     return maxSize
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Checks if the TxPubSub has no pending messages (all subscriber queues are empty).
@@ -300,8 +300,7 @@ export const size = <A>(self: TxPubSub<A>): Effect.Effect<number, never, Effect.
  * @since 4.0.0
  * @category getters
  */
-export const isEmpty = <A>(self: TxPubSub<A>): Effect.Effect<boolean, never, Effect.Transaction> =>
-  Effect.map(size(self), (s) => s === 0)
+export const isEmpty = <A>(self: TxPubSub<A>): Effect.Effect<boolean> => Effect.map(size(self), (s) => s === 0)
 
 /**
  * Checks if any subscriber queue is at capacity.
@@ -320,7 +319,7 @@ export const isEmpty = <A>(self: TxPubSub<A>): Effect.Effect<boolean, never, Eff
  * @since 4.0.0
  * @category getters
  */
-export const isFull = <A>(self: TxPubSub<A>): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const isFull = <A>(self: TxPubSub<A>): Effect.Effect<boolean> =>
   Effect.gen(function*() {
     if (self.capacity === Number.POSITIVE_INFINITY) return false
     const subscribers = yield* TxRef.get(self.subscribersRef)
@@ -328,7 +327,7 @@ export const isFull = <A>(self: TxPubSub<A>): Effect.Effect<boolean, never, Effe
       if (yield* TxQueue.isFull(queue)) return true
     }
     return false
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Checks if the TxPubSub has been shut down.
@@ -348,8 +347,7 @@ export const isFull = <A>(self: TxPubSub<A>): Effect.Effect<boolean, never, Effe
  * @since 4.0.0
  * @category getters
  */
-export const isShutdown = <A>(self: TxPubSub<A>): Effect.Effect<boolean, never, Effect.Transaction> =>
-  TxRef.get(self.shutdownRef)
+export const isShutdown = <A>(self: TxPubSub<A>): Effect.Effect<boolean> => TxRef.get(self.shutdownRef)
 
 // =============================================================================
 // Mutations
@@ -391,11 +389,11 @@ export const isShutdown = <A>(self: TxPubSub<A>): Effect.Effect<boolean, never, 
  * @category mutations
  */
 export const publish: {
-  <A>(value: A): (self: TxPubSub<A>) => Effect.Effect<boolean, never, Effect.Transaction>
-  <A>(self: TxPubSub<A>, value: A): Effect.Effect<boolean, never, Effect.Transaction>
+  <A>(value: A): (self: TxPubSub<A>) => Effect.Effect<boolean>
+  <A>(self: TxPubSub<A>, value: A): Effect.Effect<boolean>
 } = dual(
   2,
-  <A>(self: TxPubSub<A>, value: A): Effect.Effect<boolean, never, Effect.Transaction> =>
+  <A>(self: TxPubSub<A>, value: A): Effect.Effect<boolean> =>
     Effect.gen(function*() {
       if (yield* TxRef.get(self.shutdownRef)) return false
 
@@ -408,7 +406,7 @@ export const publish: {
       }
 
       return allAccepted
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -440,11 +438,11 @@ export const publish: {
  * @category mutations
  */
 export const publishAll: {
-  <A>(values: Iterable<A>): (self: TxPubSub<A>) => Effect.Effect<boolean, never, Effect.Transaction>
-  <A>(self: TxPubSub<A>, values: Iterable<A>): Effect.Effect<boolean, never, Effect.Transaction>
+  <A>(values: Iterable<A>): (self: TxPubSub<A>) => Effect.Effect<boolean>
+  <A>(self: TxPubSub<A>, values: Iterable<A>): Effect.Effect<boolean>
 } = dual(
   2,
-  <A>(self: TxPubSub<A>, values: Iterable<A>): Effect.Effect<boolean, never, Effect.Transaction> =>
+  <A>(self: TxPubSub<A>, values: Iterable<A>): Effect.Effect<boolean> =>
     Effect.gen(function*() {
       if (yield* TxRef.get(self.shutdownRef)) return false
 
@@ -454,7 +452,7 @@ export const publishAll: {
         if (!accepted) allAccepted = false
       }
       return allAccepted
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
@@ -489,8 +487,8 @@ export const publishAll: {
  */
 export const subscribe = <A>(self: TxPubSub<A>): Effect.Effect<TxQueue.TxQueue<A>, never, Scope.Scope> =>
   Effect.acquireRelease(
-    Effect.transaction(acquireSubscriber(self)),
-    (queue) => Effect.transaction(releaseSubscriber(self, queue))
+    Effect.tx(acquireSubscriber(self)),
+    (queue) => Effect.tx(releaseSubscriber(self, queue))
   )
 
 /**
@@ -539,7 +537,7 @@ export const releaseSubscriber: {
 const makeSubscriberQueue = <A>(
   strategy: "bounded" | "unbounded" | "dropping" | "sliding",
   cap: number
-): Effect.Effect<TxQueue.TxQueue<A>, never, Effect.Transaction> => {
+): Effect.Effect<TxQueue.TxQueue<A>> => {
   switch (strategy) {
     case "bounded":
       return TxQueue.bounded<A>(cap)
@@ -575,7 +573,7 @@ const makeSubscriberQueue = <A>(
  * @since 4.0.0
  * @category mutations
  */
-export const shutdown = <A>(self: TxPubSub<A>): Effect.Effect<void, never, Effect.Transaction> =>
+export const shutdown = <A>(self: TxPubSub<A>): Effect.Effect<void> =>
   Effect.gen(function*() {
     const alreadyShutdown = yield* TxRef.get(self.shutdownRef)
     if (alreadyShutdown) return
@@ -585,7 +583,7 @@ export const shutdown = <A>(self: TxPubSub<A>): Effect.Effect<void, never, Effec
     for (const queue of subscribers) {
       yield* TxQueue.shutdown(queue)
     }
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Waits for the TxPubSub to be shut down.
@@ -606,12 +604,12 @@ export const shutdown = <A>(self: TxPubSub<A>): Effect.Effect<void, never, Effec
  * @since 4.0.0
  * @category mutations
  */
-export const awaitShutdown = <A>(self: TxPubSub<A>): Effect.Effect<void, never, Effect.Transaction> =>
+export const awaitShutdown = <A>(self: TxPubSub<A>): Effect.Effect<void> =>
   Effect.gen(function*() {
     const shut = yield* TxRef.get(self.shutdownRef)
     if (shut) return
-    return yield* Effect.retryTransaction
-  })
+    return yield* Effect.txRetry
+  }).pipe(Effect.tx)
 
 // =============================================================================
 // Guards

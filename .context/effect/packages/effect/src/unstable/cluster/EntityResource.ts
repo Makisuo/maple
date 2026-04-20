@@ -2,12 +2,12 @@
  * @since 4.0.0
  */
 import type * as v1 from "kubernetes-types/core/v1.d.ts"
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import { identity } from "../../Function.ts"
 import * as RcRef from "../../RcRef.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Entity from "./Entity.ts"
 import * as K8sHttpClient from "./K8sHttpClient.ts"
 import type { Sharding } from "./Sharding.ts"
@@ -42,7 +42,7 @@ export interface EntityResource<out A, out E = never> {
  * @since 4.0.0
  * @category Scope
  */
-export class CloseScope extends ServiceMap.Service<
+export class CloseScope extends Context.Service<
   CloseScope,
   Scope.Scope
 >()("effect/cluster/EntityResource/CloseScope") {}

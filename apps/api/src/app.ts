@@ -5,6 +5,7 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { McpLive } from "./mcp/app"
 import { AutumnRouter } from "./routes/autumn.http"
 import { HttpAlertsLive } from "./routes/alerts.http"
+import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpCloudflareLogpushLive } from "./routes/cloudflare-logpush.http"
@@ -17,6 +18,8 @@ import { HttpQueryEngineLive } from "./routes/query-engine.http"
 import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http"
 import { HttpServiceDiscoveryLive } from "./routes/sd.http"
 import { AlertRuntime, AlertsService } from "./services/AlertsService"
+import { ErrorsService } from "./services/ErrorsService"
+import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthService } from "./services/AuthService"
 import { AuthorizationLive } from "./services/AuthorizationLive"
@@ -78,6 +81,16 @@ export const AlertsServiceLive = AlertsService.layer.pipe(
   ),
 )
 
+export const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
+  Layer.provideMerge(CoreServicesLive),
+)
+
+export const ErrorsServiceLive = ErrorsService.layer.pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(CoreServicesLive, TinybirdServiceLive, NotificationDispatcherLive),
+  ),
+)
+
 export const EmailServiceLive = EmailService.Default.pipe(
   Layer.provide(Env.Default),
 )
@@ -93,6 +106,7 @@ export const MainLive = Layer.mergeAll(
   TinybirdServiceLive,
   QueryEngineServiceLive,
   AlertsServiceLive,
+  ErrorsServiceLive,
   DigestServiceLive,
 )
 
@@ -101,6 +115,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
   Layer.provide(HttpAuthLive),
   Layer.provide(HttpApiKeysLive),
   Layer.provide(HttpAlertsLive),
+  Layer.provide(HttpErrorsLive),
   Layer.provide(HttpCloudflareLogpushLive),
   Layer.provide(HttpDashboardsLive),
   Layer.provide(HttpDigestLive),

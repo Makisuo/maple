@@ -4,6 +4,7 @@
 import * as Arr from "effect/Array"
 import * as Cause from "effect/Cause"
 import * as Channel from "effect/Channel"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -13,7 +14,6 @@ import * as Latch from "effect/Latch"
 import * as MutableRef from "effect/MutableRef"
 import * as Pull from "effect/Pull"
 import * as Scope from "effect/Scope"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import type { Duplex } from "node:stream"
 import { Readable } from "node:stream"
@@ -159,7 +159,7 @@ export const pipeThroughSimple: {
  */
 export const toReadable = <E, R>(stream: Stream.Stream<string | Uint8Array, E, R>): Effect.Effect<Readable, never, R> =>
   Effect.map(
-    Effect.services<R>(),
+    Effect.context<R>(),
     (context) => new StreamAdapter(context, stream)
   )
 
@@ -169,7 +169,7 @@ export const toReadable = <E, R>(stream: Stream.Stream<string | Uint8Array, E, R
  */
 export const toReadableNever = <E>(stream: Stream.Stream<string | Uint8Array, E, never>): Readable =>
   new StreamAdapter(
-    ServiceMap.empty(),
+    Context.empty(),
     stream
   )
 
@@ -350,7 +350,7 @@ class StreamAdapter<E, R> extends Readable {
   private fiber: Fiber.Fiber<void, E> | undefined = undefined
 
   constructor(
-    context: ServiceMap.ServiceMap<R>,
+    context: Context.Context<R>,
     stream: Stream.Stream<Uint8Array | string, E, R>
   ) {
     super({})
@@ -368,7 +368,7 @@ class StreamAdapter<E, R> extends Readable {
         }
       }))).pipe(
         this.readLatch.whenOpen,
-        Effect.provideServices(context),
+        Effect.provideContext(context),
         Effect.runFork
       )
     this.fiber.addObserver((exit) => {

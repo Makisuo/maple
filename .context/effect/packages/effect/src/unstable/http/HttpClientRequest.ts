@@ -1,6 +1,7 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import type * as FileSystem from "../../FileSystem.ts"
 import { dual } from "../../Function.ts"
@@ -15,7 +16,6 @@ import type * as Redacted from "../../Redacted.ts"
 import * as Result from "../../Result.ts"
 import type * as Schema from "../../Schema.ts"
 import type { ParseOptions } from "../../SchemaAST.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as Headers from "./Headers.ts"
 import * as HttpBody from "./HttpBody.ts"
@@ -789,7 +789,7 @@ const parseContentLength = (contentLength: string | null): number | undefined =>
  */
 export const toWebResult = (self: HttpClientRequest, options?: {
   readonly signal?: AbortSignal | undefined
-  readonly services?: ServiceMap.ServiceMap<never> | undefined
+  readonly context?: Context.Context<never> | undefined
 }): Result.Result<Request, UrlParams.UrlParamsError> => {
   const url = UrlParams.makeUrl(self.url, self.urlParams, Option.getOrUndefined(self.hash))
   if (Result.isFailure(url)) {
@@ -823,7 +823,7 @@ export const toWebResult = (self: HttpClientRequest, options?: {
         break
       }
       case "Stream": {
-        requestInit.body = Stream.toReadableStreamWith(self.body.stream, options?.services ?? ServiceMap.empty())
+        requestInit.body = Stream.toReadableStreamWith(self.body.stream, options?.context ?? Context.empty())
         ;(requestInit as any).duplex = "half"
         break
       }
@@ -845,9 +845,9 @@ const isReadableStream = (u: unknown): u is ReadableStream<Uint8Array> =>
 export const toWeb = (self: HttpClientRequest, options?: {
   readonly signal?: AbortSignal | undefined
 }): Effect.Effect<Request, UrlParams.UrlParamsError> =>
-  Effect.servicesWith((services) =>
+  Effect.contextWith((context) =>
     toWebResult(self, {
-      services,
+      context: context,
       signal: options?.signal
     }).asEffect()
   )

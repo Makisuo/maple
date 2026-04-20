@@ -1,6 +1,7 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
 import * as Encoding from "../../Encoding.ts"
@@ -13,8 +14,9 @@ import type { PlatformError } from "../../PlatformError.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Result from "../../Result.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as UndefinedOr from "../../UndefinedOr.ts"
+import * as SqlClient from "../sql/SqlClient.ts"
+import type { SqlError } from "../sql/SqlError.ts"
 
 const TypeId = "~effect/persistence/KeyValueStore" as const
 
@@ -170,10 +172,10 @@ export class KeyValueStoreError extends Data.TaggedError("KeyValueStoreError")<{
  * @since 4.0.0
  * @category tags
  */
-export const KeyValueStore: ServiceMap.Service<
+export const KeyValueStore: Context.Service<
   KeyValueStore,
   KeyValueStore
-> = ServiceMap.Service("effect/persistence/KeyValueStore")
+> = Context.Service("effect/persistence/KeyValueStore")
 
 /**
  * @since 4.0.0
@@ -382,6 +384,227 @@ export const layerFileSystem = (
       )
     })
   }))
+
+/**
+ * @since 4.0.0
+ * @category layers
+ */
+export interface LayerSqlOptions {
+  /**
+   * The SQL table name used to store values.
+   *
+   * @default "effect_key_value_store"
+   */
+  readonly table?: string
+}
+
+/**
+ * @since 4.0.0
+ * @category layers
+ */
+export const layerSql = (
+  options: LayerSqlOptions = {}
+): Layer.Layer<KeyValueStore, never, SqlClient.SqlClient> =>
+  Layer.effect(KeyValueStore)(
+    Effect.gen(function*() {
+      const sql = (yield* SqlClient.SqlClient).withoutTransforms()
+      const table = sql(options.table ?? "effect_key_value_store")
+
+      yield* sql.onDialectOrElse({
+        mysql: () =>
+          sql`
+          CREATE TABLE IF NOT EXISTS ${table} (
+            id VARCHAR(191) PRIMARY KEY,
+            value BLOB NOT NULL,
+            value_type SMALLINT NOT NULL
+          )
+        `,
+        pg: () =>
+          sql`
+          CREATE TABLE IF NOT EXISTS ${table} (
+            id TEXT PRIMARY KEY,
+            value BYTEA NOT NULL,
+            value_type SMALLINT NOT NULL
+          )
+        `,
+        mssql: () =>
+          sql`
+          IF NOT EXISTS (SELECT * FROM sysobjects WHERE name=${table} AND xtype='U')
+          CREATE TABLE ${table} (
+            id NVARCHAR(450) PRIMARY KEY,
+            value VARBINARY(MAX) NOT NULL,
+            value_type SMALLINT NOT NULL
+          )
+        `,
+        // sqlite
+        orElse: () =>
+          sql`
+          CREATE TABLE IF NOT EXISTS ${table} (
+            id TEXT PRIMARY KEY,
+            value BLOB NOT NULL,
+            value_type INTEGER NOT NULL
+          )
+        `
+      }).pipe(Effect.orDie)
+
+      type UpsertFn = (entry: {
+        id: string
+        value: Uint8Array
+        value_type: number
+      }) => Effect.Effect<unknown, SqlError>
+
+      const upsert = sql.onDialectOrElse({
+        pg: (): UpsertFn => (entry) =>
+          sql`
+          INSERT INTO ${table} (id, value, value_type) VALUES (${entry.id}, ${entry.value}, ${entry.value_type})
+          ON CONFLICT (id) DO UPDATE SET value=EXCLUDED.value, value_type=EXCLUDED.value_type
+        `.unprepared,
+        mysql: (): UpsertFn => (entry) =>
+          sql`
+          INSERT INTO ${table} (id, value, value_type) VALUES (${entry.id}, ${entry.value}, ${entry.value_type})
+          ON DUPLICATE KEY UPDATE value=VALUES(value), value_type=VALUES(value_type)
+        `,
+        mssql: (): UpsertFn => (entry) =>
+          sql`
+          MERGE ${table} AS target
+          USING (SELECT ${entry.id} AS id, ${entry.value} AS value, ${entry.value_type} AS value_type) AS source
+          ON target.id = source.id
+          WHEN MATCHED THEN UPDATE SET value = source.value, value_type = source.value_type
+          WHEN NOT MATCHED THEN INSERT (id, value, value_type)
+          VALUES (source.id, source.value, source.value_type);
+        `,
+        // sqlite
+        orElse: (): UpsertFn => (entry) =>
+          sql`
+          INSERT INTO ${table} (id, value, value_type) VALUES (${entry.id}, ${entry.value}, ${entry.value_type})
+          ON CONFLICT(id) DO UPDATE SET value=excluded.value, value_type=excluded.value_type
+        `.unprepared
+      })
+
+      const encoder = new TextEncoder()
+      const decoder = new TextDecoder()
+      const ValueTypeString = 0
+      const ValueTypeUint8Array = 1
+
+      type Row = {
+        value: Uint8Array
+        value_type: number
+      }
+
+      return make({
+        get: (key: string) =>
+          sql<Row>`SELECT value, value_type FROM ${table} WHERE id = ${key}`.pipe(
+            Effect.mapError((cause) =>
+              new KeyValueStoreError({
+                method: "get",
+                key,
+                message: `Unable to get item with key ${key}`,
+                cause
+              })
+            ),
+            Effect.flatMap((rows) => {
+              if (rows.length === 0) {
+                return Effect.undefined
+              }
+              const row = rows[0]
+              switch (row.value_type) {
+                case ValueTypeString:
+                  return Effect.succeed(decoder.decode(row.value))
+                case ValueTypeUint8Array:
+                  return Effect.succeed(Encoding.encodeBase64(row.value))
+                default:
+                  return Effect.fail(
+                    new KeyValueStoreError({
+                      method: "get",
+                      key,
+                      message: `Invalid stored value type for key ${key}: ${row.value_type}`
+                    })
+                  )
+              }
+            })
+          ),
+        getUint8Array: (key: string) =>
+          sql<Row>`SELECT value, value_type FROM ${table} WHERE id = ${key}`.pipe(
+            Effect.mapError((cause) =>
+              new KeyValueStoreError({
+                method: "getUint8Array",
+                key,
+                message: `Unable to get item with key ${key}`,
+                cause
+              })
+            ),
+            Effect.flatMap((rows) => {
+              if (rows.length === 0) {
+                return Effect.undefined
+              }
+              const row = rows[0]
+              switch (row.value_type) {
+                case ValueTypeString:
+                  return Effect.succeed(row.value)
+                case ValueTypeUint8Array:
+                  return Effect.succeed(row.value)
+                default:
+                  return Effect.fail(
+                    new KeyValueStoreError({
+                      method: "getUint8Array",
+                      key,
+                      message: `Invalid stored value type for key ${key}: ${row.value_type}`
+                    })
+                  )
+              }
+            })
+          ),
+        set: (key: string, value: string | Uint8Array) =>
+          upsert({
+            id: key,
+            value: typeof value === "string" ? encoder.encode(value) : value,
+            value_type: typeof value === "string" ? ValueTypeString : ValueTypeUint8Array
+          }).pipe(
+            Effect.mapError((cause) =>
+              new KeyValueStoreError({
+                method: "set",
+                key,
+                message: `Unable to set item with key ${key}`,
+                cause
+              })
+            ),
+            Effect.asVoid
+          ),
+        remove: (key: string) =>
+          sql`DELETE FROM ${table} WHERE id = ${key}`.pipe(
+            Effect.mapError((cause) =>
+              new KeyValueStoreError({
+                method: "remove",
+                key,
+                message: `Unable to remove item with key ${key}`,
+                cause
+              })
+            ),
+            Effect.asVoid
+          ),
+        clear: sql`DELETE FROM ${table}`.pipe(
+          Effect.mapError((cause) =>
+            new KeyValueStoreError({
+              method: "clear",
+              message: `Unable to clear storage`,
+              cause
+            })
+          ),
+          Effect.asVoid
+        ),
+        size: sql<{ count: number }>`SELECT COUNT(*) as count FROM ${table}`.pipe(
+          Effect.mapError((cause) =>
+            new KeyValueStoreError({
+              method: "size",
+              message: `Unable to get size`,
+              cause
+            })
+          ),
+          Effect.map((rows) => rows.length === 0 ? 0 : Number(rows[0].count))
+        )
+      })
+    })
+  )
 
 const SchemaStoreTypeId = "~effect/persistence/KeyValueStore/SchemaStore" as const
 

@@ -359,6 +359,44 @@ export const errorSpans = defineDatasource("error_spans", {
 export type ErrorSpansRow = InferRow<typeof errorSpans>;
 
 /**
+ * Pre-materialized error events for the errors-as-issues triage system.
+ * Populated from traces where StatusCode='Error'. Unwraps the first OTel
+ * `exception` event (if any) to surface exception.type / message / stacktrace,
+ * normalizes the top stack frame, and hashes (OrgId, ServiceName, ExceptionType,
+ * TopFrame) with cityHash64 to produce a stable per-issue FingerprintHash.
+ * Sorted by (OrgId, FingerprintHash, Timestamp) so queries grouping by issue
+ * and scanning recent activity stay on the sort-key prefix.
+ */
+export const errorEvents = defineDatasource("error_events", {
+  description:
+    "Per-error-occurrence rows for the triageable-errors system. Unwraps OTel exception events and computes a stable FingerprintHash for grouping into issues. Populated by materialized view.",
+  jsonPaths: false,
+  schema: {
+    OrgId: t.string().lowCardinality(),
+    Timestamp: t.dateTime(),
+    TraceId: t.string(),
+    SpanId: t.string(),
+    ParentSpanId: t.string().default("__unset__"),
+    ServiceName: t.string().lowCardinality(),
+    DeploymentEnv: t.string().lowCardinality(),
+    ExceptionType: t.string().lowCardinality(),
+    ExceptionMessage: t.string(),
+    ExceptionStacktrace: t.string(),
+    TopFrame: t.string(),
+    FingerprintHash: t.uint64(),
+    StatusMessage: t.string(),
+    Duration: t.uint64(),
+  },
+  engine: engine.mergeTree({
+    partitionKey: "toDate(Timestamp)",
+    sortingKey: ["OrgId", "FingerprintHash", "Timestamp"],
+    ttl: "Timestamp + INTERVAL 90 DAY",
+  }),
+});
+
+export type ErrorEventsRow = InferRow<typeof errorEvents>;
+
+/**
  * Pre-materialized root spans for the trace list view.
  * Extracts HTTP attributes and normalizes span names at write time
  * so the trace list query avoids scanning heavy Map columns and GROUP BY.

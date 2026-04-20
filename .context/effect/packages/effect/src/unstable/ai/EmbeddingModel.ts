@@ -14,12 +14,12 @@
  *
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
 import * as Request from "../../Request.ts"
 import * as RequestResolver from "../../RequestResolver.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as AiError from "./AiError.ts"
 
 /**
@@ -28,7 +28,7 @@ import * as AiError from "./AiError.ts"
  * @since 4.0.0
  * @category services
  */
-export class EmbeddingModel extends ServiceMap.Service<EmbeddingModel, Service>()(
+export class EmbeddingModel extends Context.Service<EmbeddingModel, Service>()(
   "effect/unstable/ai/EmbeddingModel"
 ) {}
 
@@ -38,7 +38,7 @@ export class EmbeddingModel extends ServiceMap.Service<EmbeddingModel, Service>(
  * @since 4.0.0
  * @category services
  */
-export class Dimensions extends ServiceMap.Service<Dimensions, number>()(
+export class Dimensions extends Context.Service<Dimensions, number>()(
   "effect/unstable/ai/EmbeddingModel/Dimensions"
 ) {}
 

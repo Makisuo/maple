@@ -1,6 +1,7 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
 import * as Fiber from "../../Fiber.ts"
@@ -12,7 +13,6 @@ import * as Queue from "../../Queue.ts"
 import type { Scheduler, SchedulerDispatcher } from "../../Scheduler.ts"
 import { MixedScheduler } from "../../Scheduler.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as Result from "./AsyncResult.ts"
 import type * as Atom from "./Atom.ts"
@@ -96,7 +96,7 @@ export const make = (
  * @since 4.0.0
  * @category Tags
  */
-export const AtomRegistry = ServiceMap.Service<AtomRegistry>(TypeId)
+export const AtomRegistry = Context.Service<AtomRegistry>(TypeId)
 
 /**
  * @since 4.0.0
@@ -144,7 +144,7 @@ export const toStream: {
     Stream.callback<A>((queue) =>
       Effect.suspend(() => {
         const fiber = Fiber.getCurrent()!
-        const scope = ServiceMap.getUnsafe(fiber.services, Scope.Scope)
+        const scope = Context.getUnsafe(fiber.context, Scope.Scope)
         const cancel = self.subscribe(atom, (value) => Queue.offerUnsafe(queue, value), {
           immediate: true
         })
@@ -754,7 +754,7 @@ function childrenAreActive(children: Array<NodeImpl<any>>): boolean {
   return false
 }
 
-interface Lifetime<A> extends Atom.Context {
+interface Lifetime<A> extends Atom.AtomContext {
   isFn: boolean
   readonly node: NodeImpl<A>
   finalizers: Array<() => void> | undefined

@@ -16,7 +16,7 @@
  * @since 1.0.0
  */
 import * as Arr from "../../Array.ts"
-import type * as JsonSchema from "../../JsonSchema.ts"
+import * as JsonSchema from "../../JsonSchema.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
@@ -58,8 +58,8 @@ export function toCodecAnthropic<T, E, RD, RE>(
   const to = schema.ast
   const from = recur(AST.toEncoded(to))
   const codec = from === to ? schema : Schema.make<typeof schema>(AST.decodeTo(from, to, Transformation.passthrough()))
-  const document = Schema.toJsonSchemaDocument(codec)
-  const jsonSchema = document.schema
+  const document = JsonSchema.resolveTopLevel$ref(Schema.toJsonSchemaDocument(codec))
+  const jsonSchema = { ...document.schema }
   if (Object.keys(document.definitions).length > 0) {
     jsonSchema.$defs = document.definitions
   }

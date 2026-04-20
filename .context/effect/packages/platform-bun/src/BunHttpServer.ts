@@ -4,6 +4,7 @@
 import type { Server as BunServer, ServerWebSocket } from "bun"
 import * as Config from "effect/Config"
 import type { ConfigError } from "effect/Config"
+import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -20,7 +21,6 @@ import type * as Record from "effect/Record"
 import type * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Cookies from "effect/unstable/http/Cookies"
 import * as Etag from "effect/unstable/http/Etag"
@@ -112,8 +112,8 @@ export const make = Effect.fnUntraced(
       address: { _tag: "TcpAddress", port: server.port!, hostname: server.hostname! },
       serve: Effect.fnUntraced(function*(httpApp, middleware) {
         const parent = yield* Effect.fiber
-        const services = parent.services
-        const serveScope = ServiceMap.getUnsafe(services, Scope.Scope)
+        const services = parent.context
+        const serveScope = Context.getUnsafe(services, Scope.Scope)
         const scope = Scope.forkUnsafe(serveScope, "parallel")
 
         const httpEffect = HttpEffect.toHandled(httpApp, (request, response) =>
@@ -128,7 +128,7 @@ export const make = Effect.fnUntraced(
               ServerRequest.HttpServerRequest.key,
               new BunServerRequest(request, resolve, removeHost(request.url), server)
             )
-            const fiber = Fiber.runIn(Effect.runForkWith(ServiceMap.makeUnsafe<any>(map))(httpEffect), scope)
+            const fiber = Fiber.runIn(Effect.runForkWith(Context.makeUnsafe<any>(map))(httpEffect), scope)
             request.signal.addEventListener("abort", () => {
               fiber.interruptUnsafe(parent.id, Error.ClientAbort.annotation)
             }, { once: true })
@@ -150,7 +150,7 @@ export const make = Effect.fnUntraced(
 const makeResponse = (
   request: ServerRequest.HttpServerRequest,
   response: ServerResponse.HttpServerResponse,
-  services: ServiceMap.ServiceMap<never>,
+  context: Context.Context<never>,
   scope: Scope.Scope
 ): Response => {
   const fields: {
@@ -201,7 +201,7 @@ const makeResponse = (
             Fiber.runIn(fiber, scope)
             return Effect.succeed(body.stream)
           })),
-          services
+          context
         ),
         fields
       )
@@ -374,7 +374,7 @@ class BunServerRequest extends Inspectable.Class implements ServerRequest.HttpSe
   get stream(): Stream.Stream<Uint8Array, Error.HttpServerError> {
     return this.source.body
       ? BunStream.fromReadableStream({
-        evaluate: () => this.source.body as any,
+        evaluate: () => this.source.body ?? emptyReadbleStream,
         onError: (cause) =>
           new Error.HttpServerError({
             reason: new Error.RequestParseError({
@@ -565,6 +565,13 @@ class BunServerRequest extends Inspectable.Class implements ServerRequest.HttpSe
     })
   }
 }
+
+const emptyReadbleStream = new ReadableStream({
+  start(controller) {
+    controller.enqueue(new Uint8Array())
+    controller.close()
+  }
+})
 
 const removeHost = (url: string) => {
   if (url[0] === "/") {

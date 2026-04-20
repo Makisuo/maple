@@ -5,11 +5,12 @@ import {
   useAtomRef,
   useAtomRefProp,
   useAtomRefPropValue,
+  useAtomResource,
   useAtomValue
 } from "@effect/atom-solid"
 import { assert, describe, it } from "@effect/vitest"
-import { Atom, AtomRef, AtomRegistry } from "effect/unstable/reactivity"
-import { type Accessor, createComponent, createEffect, createRoot } from "solid-js"
+import { AsyncResult, Atom, AtomRef, AtomRegistry } from "effect/unstable/reactivity"
+import { type Accessor, createComponent, createEffect, createRoot, type Resource } from "solid-js"
 
 describe("atom-solid", () => {
   describe("useAtomValue", () => {
@@ -63,7 +64,7 @@ describe("atom-solid", () => {
       const atom = Atom.make(0)
       let observed: number | undefined
       const dispose = createRoot((dispose) => {
-        const [value, setValue] = useAtom(atom)
+        const [value, setValue] = useAtom(() => atom)
         createEffect(() => {
           observed = value()
         })
@@ -115,9 +116,9 @@ describe("atom-solid", () => {
 
     it("updates when AtomRef prop changes", () => {
       const ref = AtomRef.make({ count: 0, label: "a" })
-      const propRef = useAtomRefProp(ref, "count")
+      const propRef = useAtomRefProp(() => ref, "count")
       let observed: number | undefined
-      const dispose = renderAtomRef(propRef, (value) => {
+      const dispose = renderAtomRef(propRef(), (value) => {
         observed = value
       })
       assert.strictEqual(observed, 0)
@@ -129,7 +130,7 @@ describe("atom-solid", () => {
     it("updates when AtomRef prop value changes", () => {
       const ref = AtomRef.make({ count: 0, label: "a" })
       let observed: number | undefined
-      const dispose = renderAccessor(() => useAtomRefPropValue(ref, "count"), (value) => {
+      const dispose = renderAccessor(() => useAtomRefPropValue(() => ref, "count"), (value) => {
         observed = value
       })
       assert.strictEqual(observed, 0)
@@ -139,14 +140,16 @@ describe("atom-solid", () => {
     })
   })
 
-  // describe("useAtomResource", () => {
-  //   it("suspends on Initial result", () => {
-  //     const atom = Atom.make(AsyncResult.initial<number, Error>())
-  //     const { resource, dispose } = renderAtomResource(atom)
-  //     assert.strictEqual(resource.loading, true)
-  //     assert.strictEqual(resource(), undefined)
-  //     dispose()
-  //   })
+  describe("useAtomResource", () => {
+    it("suspends on Initial result", () => {
+      const atom = Atom.make(AsyncResult.initial<number, Error>())
+      const { resource, dispose } = renderAtomResource(() => atom)
+      assert.strictEqual(resource.loading, true)
+      assert.strictEqual(resource(), undefined)
+      dispose()
+    })
+  })
+
   //
   //   it("suspends on waiting when suspendOnWaiting is true", () => {
   //     const atom = Atom.make(AsyncResult.success(1, { waiting: true }))
@@ -226,7 +229,7 @@ describe("atom-solid", () => {
 
 const renderAtomRef = function<A>(ref: AtomRef.ReadonlyRef<A>, onValue: (_: A) => void) {
   return createRoot((dispose) => {
-    const accessor = useAtomRef(ref)
+    const accessor = useAtomRef(() => ref)
     createEffect(() => {
       onValue(accessor())
     })
@@ -251,7 +254,7 @@ const renderAtomValue = function<A, B = A>(
 ) {
   return createRoot((dispose) => {
     const run = () => {
-      const accessor = options?.map ? useAtomValue(atom, options.map) : useAtomValue(atom)
+      const accessor = options?.map ? useAtomValue(() => atom, options.map) : useAtomValue(() => atom)
       createEffect(() => {
         onValue(accessor() as B)
       })
@@ -273,22 +276,21 @@ const renderAtomValue = function<A, B = A>(
   })
 }
 
-// const renderAtomResource = function<A, E, const Preserve extends boolean = false>(
-//   atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
-//   options?: {
-//     readonly suspendOnWaiting?: boolean | undefined
-//     readonly preserveResult?: Preserve | undefined
-//   }
-// ) {
-//   let resource:
-//     | Resource<Preserve extends true ? (AsyncResult.Success<A, E> | AsyncResult.Failure<A, E>) : A>
-//     | undefined
-//   const dispose = createRoot((dispose) => {
-//     ;[resource] = useAtomResource(atom, options)
-//     createEffect(() => {
-//       resource?.()
-//     })
-//     return dispose
-//   })
-//   return { resource: resource!, dispose }
-// }
+const renderAtomResource = function<A, E>(
+  atom: () => Atom.Atom<AsyncResult.AsyncResult<A, E>>,
+  options?: {
+    readonly suspendOnWaiting?: boolean | undefined
+  }
+) {
+  let resource:
+    | Resource<A>
+    | undefined
+  const dispose = createRoot((dispose) => {
+    ;[resource] = useAtomResource(atom, options)
+    createEffect(() => {
+      resource?.()
+    })
+    return dispose
+  })
+  return { resource: resource!, dispose }
+}

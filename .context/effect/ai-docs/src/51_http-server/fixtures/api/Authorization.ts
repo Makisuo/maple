@@ -1,8 +1,8 @@
-import { Schema, ServiceMap } from "effect"
+import { Context, Schema } from "effect"
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 import type { User } from "../domain/User.ts"
 
-export class CurrentUser extends ServiceMap.Service<CurrentUser, User>()("acme/HttpApi/Authorization/CurrentUser") {}
+export class CurrentUser extends Context.Service<CurrentUser, User>()("acme/HttpApi/Authorization/CurrentUser") {}
 
 export class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
   "Unauthorized",

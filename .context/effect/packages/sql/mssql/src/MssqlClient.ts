@@ -2,6 +2,7 @@
  * @since 1.0.0
  */
 import * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { identity } from "effect/Function"
@@ -9,7 +10,6 @@ import * as Layer from "effect/Layer"
 import * as Pool from "effect/Pool"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as Client from "effect/unstable/sql/SqlClient"
@@ -130,7 +130,7 @@ export interface MssqlClient extends Client.SqlClient {
  * @category tags
  * @since 1.0.0
  */
-export const MssqlClient = ServiceMap.Service<MssqlClient>("@effect/sql-mssql/MssqlClient")
+export const MssqlClient = Context.Service<MssqlClient>("@effect/sql-mssql/MssqlClient")
 
 /**
  * @category models
@@ -173,7 +173,7 @@ interface MssqlConnection extends Connection {
   readonly rollback: (name?: string) => Effect.Effect<void, SqlError>
 }
 
-const TransactionConnection = Client.TransactionConnection as unknown as ServiceMap.Service<
+const TransactionConnection = Client.TransactionConnection as unknown as Context.Service<
   readonly [conn: MssqlConnection, counter: number],
   readonly [conn: MssqlConnection, counter: number]
 >
@@ -529,12 +529,12 @@ export const layerConfig: (
 ) => Layer.Layer<Client.SqlClient | MssqlClient, Config.ConfigError | SqlError> = (
   config: Config.Wrap<MssqlClientConfig>
 ): Layer.Layer<Client.SqlClient | MssqlClient, Config.ConfigError | SqlError> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Config.unwrap(config).asEffect().pipe(
       Effect.flatMap(make),
       Effect.map((client) =>
-        ServiceMap.make(MssqlClient, client).pipe(
-          ServiceMap.add(Client.SqlClient, client)
+        Context.make(MssqlClient, client).pipe(
+          Context.add(Client.SqlClient, client)
         )
       )
     )
@@ -547,10 +547,10 @@ export const layerConfig: (
 export const layer = (
   config: MssqlClientConfig
 ): Layer.Layer<Client.SqlClient | MssqlClient, never | SqlError> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Effect.map(make(config), (client) =>
-      ServiceMap.make(MssqlClient, client).pipe(
-        ServiceMap.add(Client.SqlClient, client)
+      Context.make(MssqlClient, client).pipe(
+        Context.add(Client.SqlClient, client)
       ))
   ).pipe(Layer.provide(Reactivity.layer))
 

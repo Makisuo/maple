@@ -3,6 +3,7 @@
  */
 import type * as Arr from "../../Array.ts"
 import * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import * as Data from "../../Data.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
@@ -17,7 +18,6 @@ import * as RcMap from "../../RcMap.ts"
 import * as Schedule from "../../Schedule.ts"
 import * as Schema from "../../Schema.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as SqlClient from "../sql/SqlClient.ts"
 import type { SqlError } from "../sql/SqlError.ts"
 import * as Redis from "./Redis.ts"
@@ -75,7 +75,7 @@ export interface PersistedQueue<in out A, out R = never> {
  * @since 4.0.0
  * @category Factory
  */
-export class PersistedQueueFactory extends ServiceMap.Service<
+export class PersistedQueueFactory extends Context.Service<
   PersistedQueueFactory,
   {
     readonly make: <S extends Schema.Top>(options: {
@@ -195,7 +195,7 @@ export class PersistedQueueError extends Schema.ErrorClass<PersistedQueueError>(
  * @since 4.0.0
  * @category Store
  */
-export class PersistedQueueStore extends ServiceMap.Service<
+export class PersistedQueueStore extends Context.Service<
   PersistedQueueStore,
   {
     readonly offer: (

@@ -1,12 +1,12 @@
 import { PgClient } from "@effect/sql-pg"
 import { PostgreSqlContainer } from "@testcontainers/postgresql"
-import { Data, Effect, Layer, Redacted, ServiceMap, String } from "effect"
+import { Context, Data, Effect, Layer, Redacted, String } from "effect"
 
 export class ContainerError extends Data.TaggedError("ContainerError")<{
   cause: unknown
 }> {}
 
-export class PgContainer extends ServiceMap.Service<PgContainer>()("test/PgContainer", {
+export class PgContainer extends Context.Service<PgContainer>()("test/PgContainer", {
   make: Effect.acquireRelease(
     Effect.tryPromise({
       try: () => new PostgreSqlContainer("postgres:alpine").start(),

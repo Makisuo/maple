@@ -1,13 +1,13 @@
 import type { D1Database } from "@cloudflare/workers-types"
 import { D1Client } from "@effect/sql-d1"
-import { Data, Effect, Layer, ServiceMap } from "effect"
+import { Context, Data, Effect, Layer } from "effect"
 import { Miniflare } from "miniflare"
 
 export class MiniflareError extends Data.TaggedError("MiniflareError")<{
   cause: unknown
 }> {}
 
-export class D1Miniflare extends ServiceMap.Service<
+export class D1Miniflare extends Context.Service<
   D1Miniflare,
   Miniflare
 >()("test/D1Miniflare") {

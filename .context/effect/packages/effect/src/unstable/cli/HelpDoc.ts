@@ -3,8 +3,8 @@
  */
 
 import type { NonEmptyReadonlyArray } from "../../Array.ts"
+import type * as Context from "../../Context.ts"
 import type * as Option from "../../Option.ts"
-import type * as ServiceMap from "../../ServiceMap.ts"
 
 /**
  * Structured representation of help documentation for a command.
@@ -13,13 +13,13 @@ import type * as ServiceMap from "../../ServiceMap.ts"
  *
  * @example
  * ```ts
- * import { Option as O, ServiceMap } from "effect"
+ * import { Option as O, Context } from "effect"
  * import type * as HelpDoc from "effect/unstable/cli/HelpDoc"
  *
  * const deployCommandHelp: HelpDoc.HelpDoc = {
  *   description: "Deploy your application to the cloud",
  *   usage: "myapp deploy [options] <target>",
- *   annotations: ServiceMap.empty(),
+ *   annotations: Context.empty(),
  *   flags: [
  *     {
  *       name: "verbose",
@@ -76,7 +76,7 @@ export interface HelpDoc {
   /**
    * Custom command annotations.
    */
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 
   /**
    * List of positional arguments for this command
@@ -172,7 +172,7 @@ export interface FlagDoc {
  *
  * @example
  * ```ts
- * import { Option as O, ServiceMap } from "effect"
+ * import { Option as O, Context } from "effect"
  * import type { HelpDoc } from "effect/unstable/cli"
  *
  * const deploySubcommand: HelpDoc.SubcommandDoc = {
@@ -193,7 +193,7 @@ export interface FlagDoc {
  * const mainCommandHelp: HelpDoc.HelpDoc = {
  *   description: "Cloud deployment tool",
  *   usage: "myapp <command> [options]",
- *   annotations: ServiceMap.empty(),
+ *   annotations: Context.empty(),
  *   flags: [],
  *   subcommands: [{
  *     group: undefined,
@@ -251,7 +251,7 @@ export interface SubcommandGroupDoc {
  *
  * @example
  * ```ts
- * import { Option as O, ServiceMap } from "effect"
+ * import { Option as O, Context } from "effect"
  * import type { HelpDoc } from "effect/unstable/cli"
  *
  * const sourceArg: HelpDoc.ArgDoc = {
@@ -274,7 +274,7 @@ export interface SubcommandGroupDoc {
  * const copyCommandHelp: HelpDoc.HelpDoc = {
  *   description: "Copy files from source to destination",
  *   usage: "copy <source> [files...]",
- *   annotations: ServiceMap.empty(),
+ *   annotations: Context.empty(),
  *   flags: [],
  *   args: [sourceArg, filesArg]
  * }

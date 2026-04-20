@@ -3,6 +3,7 @@
  */
 import * as Arr from "../../Array.ts"
 import * as Clock from "../../Clock.ts"
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
@@ -11,7 +12,6 @@ import * as Layer from "../../Layer.ts"
 import * as PrimaryKey from "../../PrimaryKey.ts"
 import * as Schema from "../../Schema.ts"
 import type * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as SqlClient from "../sql/SqlClient.ts"
 import type { SqlError } from "../sql/SqlError.ts"
 import * as KeyValueStore from "./KeyValueStore.ts"
@@ -24,7 +24,7 @@ const ErrorTypeId = "~effect/persistence/Persistence/PersistenceError" as const
  * @since 4.0.0
  * @category errors
  */
-export class PersistenceError extends Schema.ErrorClass(ErrorTypeId)({
+export class PersistenceError extends Schema.ErrorClass<PersistenceError>(ErrorTypeId)({
   _tag: Schema.tag("PersistenceError"),
   message: Schema.String,
   cause: Schema.optional(Schema.Defect)
@@ -39,7 +39,7 @@ export class PersistenceError extends Schema.ErrorClass(ErrorTypeId)({
  * @since 4.0.0
  * @category Models
  */
-export class Persistence extends ServiceMap.Service<Persistence, {
+export class Persistence extends Context.Service<Persistence, {
   readonly make: (options: {
     readonly storeId: string
     readonly timeToLive?: (exit: Exit.Exit<unknown, unknown>, key: Persistable.Any) => Duration.Input
@@ -82,7 +82,7 @@ export interface PersistenceStore {
  * @since 4.0.0
  * @category BackingPersistence
  */
-export class BackingPersistence extends ServiceMap.Service<BackingPersistence, {
+export class BackingPersistence extends Context.Service<BackingPersistence, {
   readonly make: (storeId: string) => Effect.Effect<BackingPersistenceStore, never, Scope.Scope>
 }>()("effect/persistence/BackingPersistence") {}
 

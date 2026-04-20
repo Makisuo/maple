@@ -14,6 +14,7 @@
  * @since 2.0.0
  */
 import type * as Cause from "./Cause.ts"
+import type * as Context from "./Context.ts"
 import type * as Effect from "./Effect.ts"
 import * as Equal from "./Equal.ts"
 import type * as Exit from "./Exit.ts"
@@ -21,7 +22,6 @@ import { dual } from "./Function.ts"
 import * as core from "./internal/core.ts"
 import * as internalEffect from "./internal/effect.ts"
 import { hasProperty } from "./Predicate.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 import type * as Types from "./Types.ts"
 
 const TypeId = "~effect/Request"
@@ -309,10 +309,10 @@ export const tagged = <R extends Request<any, any, any> & { _tag: string }>(
  * @since 2.0.0
  * @category constructors
  */
-export const Class: new<A extends Record<string, any>, Success, Error = never, ServiceMap = never>(
+export const Class: new<A extends Record<string, any>, Success, Error = never, Context = never>(
   args: Types.Equals<Omit<A, keyof Request<unknown, unknown>>, {}> extends true ? void
     : { readonly [P in keyof A as P extends keyof Request<any, any, any> ? never : P]: A[P] }
-) => Request<Success, Error, ServiceMap> & Readonly<A> = (function() {
+) => Request<Success, Error, Context> & Readonly<A> = (function() {
   function Class(this: any, args: any) {
     if (args) {
       Object.assign(this, args)
@@ -426,7 +426,7 @@ export const succeed: {
  */
 export interface Entry<out R> {
   readonly request: R
-  readonly services: ServiceMap.ServiceMap<
+  readonly context: Context.Context<
     [R] extends [Request<infer _A, infer _E, infer _R>] ? _R : never
   >
   uninterruptible: boolean
@@ -444,7 +444,7 @@ export interface Entry<out R> {
  */
 export const makeEntry = <R>(options: {
   readonly request: R
-  readonly services: ServiceMap.ServiceMap<
+  readonly context: Context.Context<
     [R] extends [Request<infer _A, infer _E, infer _R>] ? _R : never
   >
   readonly uninterruptible: boolean

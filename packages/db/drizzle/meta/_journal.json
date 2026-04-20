@@ -15,6 +15,13 @@
       "when": 1776644022082,
       "tag": "0001_purple_big_bertha",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776723447868,
+      "tag": "0002_errors_workflow",
+      "breakpoints": true
     }
   ]
 }

@@ -2,18 +2,18 @@
  * @since 4.0.0
  */
 import * as Cache from "../../Cache.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Equal from "../../Equal.ts"
 import { constant, identity } from "../../Function.ts"
 import * as Hash from "../../Hash.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 
 /**
  * @since 4.0.0
  * @category Service
  */
-export class Redis extends ServiceMap.Service<Redis, {
+export class Redis extends Context.Service<Redis, {
   readonly send: <A = unknown>(command: string, ...args: ReadonlyArray<string>) => Effect.Effect<A, RedisError>
 
   readonly eval: <

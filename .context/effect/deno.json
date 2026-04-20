@@ -17,7 +17,7 @@
     "examples/",
     "scripts/",
     "scratchpad/",
-    "packages/*/dtslint/",
+    "packages/*/typetest/",
     "packages/*/benchmark/",
     "packages/ai",
     "packages/atom",

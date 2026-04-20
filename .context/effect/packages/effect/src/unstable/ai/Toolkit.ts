@@ -39,6 +39,7 @@
  * @since 1.0.0
  */
 import type * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Fiber from "../../Fiber.ts"
 import { identity } from "../../Function.ts"
@@ -50,7 +51,6 @@ import * as Predicate from "../../Predicate.ts"
 import * as Queue from "../../Queue.ts"
 import * as Schema from "../../Schema.ts"
 import type * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as AiError from "./AiError.ts"
 import type * as Tool from "./Tool.ts"
@@ -122,12 +122,12 @@ export interface Toolkit<in out Tools extends Record<string, Tool.Any>> extends
   of<Handlers extends HandlersFrom<Tools>>(handlers: Handlers): Handlers
 
   /**
-   * Converts a toolkit into a `ServiceMap` containing handlers for each tool
+   * Converts a toolkit into a `Context` containing handlers for each tool
    * in the toolkit.
    */
   toHandlers<Handlers extends HandlersFrom<Tools>, EX = never, RX = never>(
     build: Handlers | Effect.Effect<Handlers, EX, RX>
-  ): Effect.Effect<ServiceMap.ServiceMap<Tool.HandlersFor<Tools>>, EX, RX>
+  ): Effect.Effect<Context.Context<Tool.HandlersFor<Tools>>, EX, RX>
 
   /**
    * Converts a toolkit into a `Layer` containing handlers for each tool in the
@@ -266,30 +266,30 @@ const Proto = {
     build: Record<string, (params: any) => any> | Effect.Effect<Record<string, (params: any) => any>>
   ) {
     return Effect.gen({ self: this }, function*() {
-      const services = yield* Effect.services<never>()
+      const services = yield* Effect.context<never>()
       const handlers = Effect.isEffect(build) ? yield* build : build
-      const serviceMap = new Map<string, unknown>()
+      const context = new Map<string, unknown>()
       for (const [name, handler] of Object.entries(handlers)) {
         const tool = this.tools[name]!
-        serviceMap.set(tool.id, { name, handler, services })
+        context.set(tool.id, { name, handler, context: services })
       }
-      return ServiceMap.makeUnsafe(serviceMap)
+      return Context.makeUnsafe(context)
     })
   },
   toLayer(
     this: Toolkit<Record<string, Tool.Any>>,
     build: Record<string, (params: any) => any> | Effect.Effect<Record<string, (params: any) => any>>
   ) {
-    return Layer.effectServices(this.toHandlers(build))
+    return Layer.effectContext(this.toHandlers(build))
   },
   asEffect(this: Toolkit<Record<string, Tool.Any>>) {
     return Effect.gen({ self: this }, function*() {
       const tools = this.tools
 
-      const services = yield* Effect.services<never>()
+      const services = yield* Effect.context<never>()
 
       const schemasCache = new WeakMap<any, {
-        readonly services: ServiceMap.ServiceMap<never>
+        readonly context: Context.Context<never>
         readonly handler: Tool.Handler<any>["handler"]
         readonly decodeParameters: (u: unknown) => Effect.Effect<unknown, Schema.SchemaError>
         readonly decodeResult: (u: unknown) => Effect.Effect<unknown, Schema.SchemaError>
@@ -309,7 +309,7 @@ const Proto = {
           const decodeResult = Schema.decodeUnknownEffect(resultSchema) as any
           const encodeResult = Schema.encodeUnknownEffect(resultSchema) as any
           schemas = {
-            services: handler.services,
+            context: handler.context,
             handler: handler.handler,
             decodeParameters,
             decodeResult,
@@ -375,7 +375,7 @@ const Proto = {
 
         const fiber = yield* schemas.handler(decodedParams, context).pipe(
           Effect.flatMap((result) => Queue.offer(queue, { result, isFailure: false, preliminary: false })),
-          Effect.updateServices((input) => ServiceMap.merge(schemas.services, input)),
+          Effect.updateContext((input) => Context.merge(schemas.context, input)),
           Effect.matchCauseEffect({
             onFailure: (cause) => Queue.failCause(queue, cause),
             onSuccess: () => Queue.end(queue)

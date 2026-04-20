@@ -4,6 +4,7 @@
 import * as Arr from "../../Array.ts"
 import * as Cause from "../../Cause.ts"
 import * as Channel from "../../Channel.ts"
+import * as Context from "../../Context.ts"
 import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
@@ -18,7 +19,6 @@ import * as Schema from "../../Schema.ts"
 import type { ParseOptions } from "../../SchemaAST.ts"
 import * as Transformation from "../../SchemaTransformation.ts"
 import type * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as UndefinedOr from "../../UndefinedOr.ts"
 import * as IncomingMessage from "./HttpIncomingMessage.ts"
@@ -260,7 +260,7 @@ export const makeConfig = (
   headers: Record<string, string>
 ): Effect.Effect<MP.BaseConfig> =>
   Effect.withFiber((fiber) => {
-    const mimeTypes = ServiceMap.get(fiber.services, FieldMimeTypes)
+    const mimeTypes = Context.get(fiber.context, FieldMimeTypes)
     return Effect.succeed<MP.BaseConfig>({
       headers,
       maxParts: fiber.getRef(MaxParts),
@@ -569,7 +569,7 @@ export const limitsServices = (options: {
   readonly maxFileSize?: FileSystem.SizeInput | undefined
   readonly maxTotalSize?: FileSystem.SizeInput | undefined
   readonly fieldMimeTypes?: ReadonlyArray<string> | undefined
-}): ServiceMap.ServiceMap<never> => {
+}): Context.Context<never> => {
   const map = new Map<string, unknown>()
   if (options.maxParts !== undefined) {
     map.set(MaxParts.key, options.maxParts)
@@ -586,7 +586,7 @@ export const limitsServices = (options: {
   if (options.fieldMimeTypes !== undefined) {
     map.set(FieldMimeTypes.key, options.fieldMimeTypes)
   }
-  return ServiceMap.makeUnsafe(map)
+  return Context.makeUnsafe(map)
 }
 
 /**
@@ -611,7 +611,7 @@ export declare namespace withLimits {
  * @since 4.0.0
  * @category References
  */
-export const MaxParts = ServiceMap.Reference<number | undefined>("effect/http/Multipart/MaxParts", {
+export const MaxParts = Context.Reference<number | undefined>("effect/http/Multipart/MaxParts", {
   defaultValue: () => undefined
 })
 
@@ -619,7 +619,7 @@ export const MaxParts = ServiceMap.Reference<number | undefined>("effect/http/Mu
  * @since 4.0.0
  * @category References
  */
-export const MaxFieldSize = ServiceMap.Reference<FileSystem.SizeInput>("effect/http/Multipart/MaxFieldSize", {
+export const MaxFieldSize = Context.Reference<FileSystem.SizeInput>("effect/http/Multipart/MaxFieldSize", {
   defaultValue: constant(FileSystem.Size(10 * 1024 * 1024))
 })
 
@@ -627,7 +627,7 @@ export const MaxFieldSize = ServiceMap.Reference<FileSystem.SizeInput>("effect/h
  * @since 4.0.0
  * @category References
  */
-export const MaxFileSize = ServiceMap.Reference<FileSystem.SizeInput | undefined>(
+export const MaxFileSize = Context.Reference<FileSystem.SizeInput | undefined>(
   "effect/http/Multipart/MaxFileSize",
   { defaultValue: () => undefined }
 )
@@ -636,6 +636,6 @@ export const MaxFileSize = ServiceMap.Reference<FileSystem.SizeInput | undefined
  * @since 4.0.0
  * @category References
  */
-export const FieldMimeTypes = ServiceMap.Reference<ReadonlyArray<string>>("effect/http/Multipart/FieldMimeTypes", {
+export const FieldMimeTypes = Context.Reference<ReadonlyArray<string>>("effect/http/Multipart/FieldMimeTypes", {
   defaultValue: constant(["application/json"])
 })

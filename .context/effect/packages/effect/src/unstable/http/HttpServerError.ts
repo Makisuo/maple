@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
 import * as ErrorReporter from "../../ErrorReporter.ts"
@@ -9,7 +10,6 @@ import type * as Exit from "../../Exit.ts"
 import { constUndefined } from "../../Function.ts"
 import * as Option from "../../Option.ts"
 import { hasProperty } from "../../Predicate.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as Request from "./HttpServerRequest.ts"
 import * as Respondable from "./HttpServerRespondable.ts"
 import * as Response from "./HttpServerResponse.ts"
@@ -189,9 +189,9 @@ export class ServeError extends Data.TaggedError("ServeError")<{
  * @since 4.0.0
  * @category Annotations
  */
-export class ClientAbort extends ServiceMap.Service<ClientAbort, true>()("effect/http/HttpServerError/ClientAbort") {
-  static annotation = this.serviceMap(true).pipe(
-    ServiceMap.add(Cause.StackTrace, {
+export class ClientAbort extends Context.Service<ClientAbort, true>()("effect/http/HttpServerError/ClientAbort") {
+  static annotation = this.context(true).pipe(
+    Context.add(Cause.StackTrace, {
       name: "ClientAbort",
       stack: constUndefined,
       parent: undefined

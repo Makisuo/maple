@@ -46,11 +46,11 @@
  * @since 4.0.0
  */
 import * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Random from "../../Random.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 
 /**
  * The `IdGenerator` service tag for dependency injection.
@@ -74,7 +74,7 @@ import * as ServiceMap from "../../ServiceMap.ts"
  * @since 4.0.0
  * @category models
  */
-export class IdGenerator extends ServiceMap.Service<IdGenerator, Service>()(
+export class IdGenerator extends Context.Service<IdGenerator, Service>()(
   "@effect/ai/IdGenerator"
 ) {}
 

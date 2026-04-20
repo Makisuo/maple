@@ -116,6 +116,23 @@ export const ErrorSpans = table("error_spans", {
   DeploymentEnv: T.string,
 })
 
+export const ErrorEvents = table("error_events", {
+  OrgId: T.string,
+  Timestamp: T.dateTime,
+  TraceId: T.string,
+  SpanId: T.string,
+  ParentSpanId: T.string,
+  ServiceName: T.string,
+  DeploymentEnv: T.string,
+  ExceptionType: T.string,
+  ExceptionMessage: T.string,
+  ExceptionStacktrace: T.string,
+  TopFrame: T.string,
+  FingerprintHash: T.uint64,
+  StatusMessage: T.string,
+  Duration: T.uint64,
+})
+
 export const MetricsSum = table("metrics_sum", {
   OrgId: T.string,
   ResourceAttributes: T.map(T.string, T.string),

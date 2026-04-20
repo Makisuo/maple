@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import * as Arr from "../../Array.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import { compose, dual, identity } from "../../Function.ts"
 import * as Layer from "../../Layer.ts"
@@ -10,7 +11,6 @@ import type { ReadonlyRecord } from "../../Record.ts"
 import * as Schema from "../../Schema.ts"
 import type { ParseOptions } from "../../SchemaAST.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Tracer from "../../Tracer.ts"
 import type * as Types from "../../Types.ts"
 import * as FindMyWay from "./FindMyWay.ts"
@@ -80,7 +80,7 @@ export interface HttpRouter {
  * @since 4.0.0
  * @category HttpRouter
  */
-export const HttpRouter: ServiceMap.Service<HttpRouter, HttpRouter> = ServiceMap.Service<HttpRouter>(
+export const HttpRouter: Context.Service<HttpRouter, HttpRouter> = Context.Service<HttpRouter>(
   "effect/http/HttpRouter"
 )
 
@@ -100,8 +100,8 @@ export const make = Effect.gen(function*() {
     | Request.From<"Requires", Exclude<Route.Context<Routes[number]>, Provided>>
     | Request.From<"Error", Route.Error<Routes[number]>>
   > =>
-    Effect.servicesWith((services: ServiceMap.ServiceMap<never>) => {
-      const middleware = getMiddleware(services)
+    Effect.contextWith((context: Context.Context<never>) => {
+      const middleware = getMiddleware(context)
       const applyMiddleware = (effect: Effect.Effect<HttpServerResponse.HttpServerResponse>) => {
         for (let i = 0; i < middleware.length; i++) {
           effect = middleware[i](effect)
@@ -163,7 +163,7 @@ export const make = Effect.gen(function*() {
       }),
     asHttpEffect() {
       let handler = Effect.withFiber<HttpServerResponse.HttpServerResponse, unknown>((fiber) => {
-        const contextMap = new Map(fiber.services.mapUnsafe)
+        const contextMap = new Map(fiber.context.mapUnsafe)
         const request = contextMap.get(HttpServerRequest.HttpServerRequest.key) as HttpServerRequest.HttpServerRequest
         let result = router.find(request.method, request.url)
         if (result === undefined && request.method === "HEAD") {
@@ -190,14 +190,14 @@ export const make = Effect.gen(function*() {
         if (span && span._tag === "Span") {
           span.attribute("http.route", route.path)
         }
-        return Effect.provideServices(
+        return Effect.provideContext(
           (route.uninterruptible ?
             route.handler :
             Effect.interruptible(route.handler)) as Effect.Effect<
               HttpServerResponse.HttpServerResponse,
               unknown
             >,
-          ServiceMap.makeUnsafe(contextMap)
+          Context.makeUnsafe(contextMap)
         )
       })
       if (middleware.size === 0) return handler
@@ -218,7 +218,7 @@ function sliceRequestUrl(request: HttpServerRequest.HttpServerRequest, prefix: s
  * @since 4.0.0
  * @category Configuration
  */
-export const RouterConfig = ServiceMap.Reference<Partial<FindMyWay.RouterConfig>>(
+export const RouterConfig = Context.Reference<Partial<FindMyWay.RouterConfig>>(
   "effect/http/HttpRouter/RouterConfig",
   { defaultValue: () => ({}) }
 )
@@ -227,7 +227,7 @@ export const RouterConfig = ServiceMap.Reference<Partial<FindMyWay.RouterConfig>
  * @since 4.0.0
  * @category RouteContext
  */
-export class RouteContext extends ServiceMap.Service<RouteContext, {
+export class RouteContext extends Context.Service<RouteContext, {
   readonly params: Readonly<Record<string, string | undefined>>
   readonly route: Route<unknown, unknown>
 }>()("effect/http/HttpRouter/RouteContext") {}
@@ -268,15 +268,15 @@ export const schemaJson = <
   HttpServerRequest.HttpServerRequest | HttpServerRequest.ParsedSearchParams | RouteContext | RD
 > => {
   const parse = Schema.decodeUnknownEffect(schema)
-  return Effect.servicesWith(
+  return Effect.contextWith(
     (
-      services: ServiceMap.ServiceMap<
+      context: Context.Context<
         HttpServerRequest.HttpServerRequest | HttpServerRequest.ParsedSearchParams | RouteContext
       >
     ) => {
-      const request = ServiceMap.get(services, HttpServerRequest.HttpServerRequest)
-      const searchParams = ServiceMap.get(services, HttpServerRequest.ParsedSearchParams)
-      const routeContext = ServiceMap.get(services, RouteContext)
+      const request = Context.get(context, HttpServerRequest.HttpServerRequest)
+      const searchParams = Context.get(context, HttpServerRequest.ParsedSearchParams)
+      const routeContext = Context.get(context, RouteContext)
       return Effect.flatMap(request.json, (body) =>
         parse({
           method: request.method,
@@ -316,15 +316,15 @@ export const schemaNoBody = <
   HttpServerRequest.HttpServerRequest | HttpServerRequest.ParsedSearchParams | RouteContext | RD
 > => {
   const parse = Schema.decodeUnknownEffect(schema)
-  return Effect.servicesWith(
+  return Effect.contextWith(
     (
-      services: ServiceMap.ServiceMap<
+      context: Context.Context<
         HttpServerRequest.HttpServerRequest | HttpServerRequest.ParsedSearchParams | RouteContext
       >
     ) => {
-      const request = ServiceMap.get(services, HttpServerRequest.HttpServerRequest)
-      const searchParams = ServiceMap.get(services, HttpServerRequest.ParsedSearchParams)
-      const routeContext = ServiceMap.get(services, RouteContext)
+      const request = Context.get(context, HttpServerRequest.HttpServerRequest)
+      const searchParams = Context.get(context, HttpServerRequest.ParsedSearchParams)
+      const routeContext = Context.get(context, RouteContext)
       return parse({
         method: request.method,
         url: request.url,
@@ -346,9 +346,9 @@ export const schemaParams = <A, I extends Readonly<Record<string, string | Reado
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, HttpServerRequest.ParsedSearchParams | RouteContext | RD> => {
   const parse = Schema.decodeUnknownEffect(schema)
-  return Effect.servicesWith((services: ServiceMap.ServiceMap<HttpServerRequest.ParsedSearchParams | RouteContext>) => {
-    const searchParams = ServiceMap.get(services, HttpServerRequest.ParsedSearchParams)
-    const routeContext = ServiceMap.get(services, RouteContext)
+  return Effect.contextWith((context: Context.Context<HttpServerRequest.ParsedSearchParams | RouteContext>) => {
+    const searchParams = Context.get(context, HttpServerRequest.ParsedSearchParams)
+    const routeContext = Context.get(context, RouteContext)
     return parse({ ...searchParams, ...routeContext.params }, options)
   })
 }
@@ -484,7 +484,7 @@ export const toHttpEffect = <A, E, R>(
 > =>
   Effect.gen(function*() {
     const context = yield* Layer.build(Layer.provideMerge(appLayer, layer))
-    const router = ServiceMap.get(context, HttpRouter)
+    const router = Context.get(context, HttpRouter)
     // @effect-diagnostics effect/returnEffectInGen:off
     return router.asHttpEffect()
   }) as any
@@ -721,7 +721,7 @@ export interface Middleware<
  * ```ts
  * import { Effect } from "effect"
  * import * as Layer from "effect/Layer"
- * import * as ServiceMap from "effect/ServiceMap"
+ * import * as Context from "effect/Context"
  * import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware"
  * import * as HttpRouter from "effect/unstable/http/HttpRouter"
  * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
@@ -730,7 +730,7 @@ export interface Middleware<
  * const CorsMiddleware = HttpRouter.middleware(HttpMiddleware.cors()).layer
  * // You can also use HttpRouter.cors() to create a CORS middleware
  *
- * class CurrentSession extends ServiceMap.Service<CurrentSession, {
+ * class CurrentSession extends Context.Service<CurrentSession, {
  *   readonly token: string
  * }>()("CurrentSession") {}
  *
@@ -799,8 +799,8 @@ const makeMiddleware = (middleware: any, options?: {
     }))
     : new MiddlewareImpl(
       Effect.isEffect(middleware) ?
-        Layer.effectServices(Effect.map(middleware, (fn) => ServiceMap.makeUnsafe(new Map([[fnContextKey, fn]])))) :
-        Layer.succeedServices(ServiceMap.makeUnsafe(new Map([[fnContextKey, middleware]]))) as any
+        Layer.effectContext(Effect.map(middleware, (fn) => Context.makeUnsafe(new Map([[fnContextKey, fn]])))) :
+        Layer.succeedContext(Context.makeUnsafe(new Map([[fnContextKey, middleware]]))) as any
     )
 
 let middlewareId = 0
@@ -828,16 +828,16 @@ class MiddlewareImpl<
     this.layerFn = layerFn
     this.dependencies = dependencies
     const contextKey = `effect/http/HttpRouter/Middleware-${++middlewareId}` as const
-    this.layer = Layer.effectServices(Effect.gen({ self: this }, function*() {
-      const context = yield* Effect.services<Scope.Scope>()
+    this.layer = Layer.effectContext(Effect.gen({ self: this }, function*() {
+      const context = yield* Effect.context<Scope.Scope>()
       const stack = [context.mapUnsafe.get(fnContextKey)]
       if (this.dependencies) {
         const memoMap = yield* Layer.CurrentMemoMap
-        const scope = ServiceMap.get(context, Scope.Scope)
+        const scope = Context.get(context, Scope.Scope)
         const depsContext = yield* Layer.buildWithMemoMap(this.dependencies, memoMap, scope)
         stack.push(...getMiddleware(depsContext))
       }
-      return ServiceMap.makeUnsafe<never>(new Map([[contextKey, stack]]))
+      return Context.makeUnsafe<never>(new Map([[contextKey, stack]]))
     })).pipe(Layer.provide(this.layerFn))
   }
 
@@ -860,8 +860,8 @@ class MiddlewareImpl<
   }
 }
 
-const middlewareCache = new WeakMap<ServiceMap.ServiceMap<never>, any>()
-const getMiddleware = (context: ServiceMap.ServiceMap<never>): Array<middleware.Fn> => {
+const middlewareCache = new WeakMap<Context.Context<never>, any>()
+const getMiddleware = (context: Context.Context<never>): Array<middleware.Fn> => {
   let arr = middlewareCache.get(context)
   if (arr) return arr
   const topLevel = Arr.empty<Array<middleware.Fn>>()
@@ -1046,7 +1046,7 @@ export const provideRequest =
       middleware<{ provides: A2 }>()(Effect.gen(function*() {
         const services = yield* Layer.build(layer as Layer.Layer<A2>)
         return (effect) =>
-          Effect.provideServices(effect, services) as Effect.Effect<
+          Effect.provideContext(effect, services) as Effect.Effect<
             HttpServerResponse.HttpServerResponse,
             Types.unhandled
           >
@@ -1156,8 +1156,8 @@ export const toWebHandler = <
   }
 ): {
   readonly handler: [HR] extends [never]
-    ? ((request: globalThis.Request, context?: ServiceMap.ServiceMap<never> | undefined) => Promise<Response>)
-    : ((request: globalThis.Request, context: ServiceMap.ServiceMap<HR>) => Promise<Response>)
+    ? ((request: globalThis.Request, context?: Context.Context<never> | undefined) => Promise<Response>)
+    : ((request: globalThis.Request, context: Context.Context<HR>) => Promise<Response>)
   readonly dispose: () => Promise<void>
 } => {
   let middleware: any = options?.middleware
@@ -1168,7 +1168,7 @@ export const toWebHandler = <
     ? Layer.provide(layer, Layer.succeed(RouterConfig)(options.routerConfig))
     : layer
   return HttpEffect.toWebHandlerLayerWith(Layer.provideMerge(appLayer, RouterLayer) as Layer.Layer<A | HttpRouter, E>, {
-    toHandler: (s) => Effect.succeed(ServiceMap.get(s, HttpRouter).asHttpEffect()),
+    toHandler: (s) => Effect.succeed(Context.get(s, HttpRouter).asHttpEffect()),
     middleware,
     memoMap: options?.memoMap
   })

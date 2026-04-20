@@ -142,8 +142,11 @@ export type ignoreSymbol = typeof ignoreSymbol
 
 type MaybeReturn<F> = F extends () => infer R ? R : NonNullable<F>
 
+type Keys<X extends [any, any]> = X extends [infer A, infer Ignore] ? Exclude<keyof A, Ignore>
+  : never
+
 type Values<X extends [any, any]> = X extends [infer A, infer Ignore]
-  ? Exclude<keyof A, Ignore> extends infer k ? k extends keyof A ? MaybeReturn<A[k]> : never : never
+  ? Keys<[A, Ignore]> extends infer K ? K extends keyof A ? MaybeReturn<A[K]> : never : never
   : never
 
 type Ignore<X> = X extends { [ignoreSymbol]?: infer Obj } ? keyof NonNullable<Obj>
@@ -158,6 +161,13 @@ type ExtractTypes<
   : never
 
 type FilterIn<A> = A extends any ? typeSymbol extends keyof A ? A : never : never
+
+type FilterInUnmatched<A, K> = A extends any
+  ? typeSymbol extends keyof A
+    ? A extends { [unifySymbol]?: infer U } ? [Extract<keyof NonNullable<U>, K>] extends [never] ? A : never
+    : A
+  : never
+  : never
 
 type FilterOut<A> = A extends any ? typeSymbol extends keyof A ? never : A : never
 
@@ -201,7 +211,21 @@ export type Unify<A> = Values<
       & { [typeSymbol]: A }
     )
   >
-> extends infer Z ? Z | Exclude<A, Z> | FilterOut<A> : never
+> extends infer Z ?
+    | Z
+    | FilterInUnmatched<
+      A,
+      Keys<
+        ExtractTypes<
+          (
+            & FilterIn<A>
+            & { [typeSymbol]: A }
+          )
+        >
+      >
+    >
+    | FilterOut<A>
+  : never
 
 /**
  * Unifies the return type of a function or value.

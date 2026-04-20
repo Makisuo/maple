@@ -2,6 +2,7 @@
  * @since 4.0.0
  */
 import * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import * as Deferred from "../../Deferred.ts"
 import * as Effect from "../../Effect.ts"
 import * as Fiber from "../../Fiber.ts"
@@ -10,7 +11,6 @@ import * as Metric from "../../Metric.ts"
 import * as Queue from "../../Queue.ts"
 import * as Schema from "../../Schema.ts"
 import type * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as Tracer from "../../Tracer.ts"
 import * as Ndjson from "../encoding/Ndjson.ts"
@@ -24,7 +24,7 @@ const ResponseSchema = Schema.toCodecJson(DevToolsSchema.Response)
  * @since 4.0.0
  * @category tags
  */
-export class DevToolsClient extends ServiceMap.Service<
+export class DevToolsClient extends Context.Service<
   DevToolsClient,
   {
     readonly sendUnsafe: (
@@ -35,7 +35,7 @@ export class DevToolsClient extends ServiceMap.Service<
 
 const makeEffect = Effect.gen(function*() {
   const socket = yield* Socket.Socket
-  const services = yield* Effect.services<never>()
+  const services = yield* Effect.context<never>()
   const requests = yield* Queue.unbounded<DevToolsSchema.Request>()
   const connected = yield* Deferred.make<void>()
 
@@ -96,10 +96,10 @@ const makeEffect = Effect.gen(function*() {
 })
 
 const toMetricsSnapshot = (
-  services: ServiceMap.ServiceMap<never>
+  context: Context.Context<never>
 ): DevToolsSchema.MetricsSnapshot => ({
   _tag: "MetricsSnapshot",
-  metrics: Metric.snapshotUnsafe(services)
+  metrics: Metric.snapshotUnsafe(context)
 })
 
 /**

@@ -52,10 +52,10 @@
     "@effect/openapi-generator": "workspace:^",
     "@effect/platform-node": "workspace:^",
     "effect": "workspace:^",
-    "glob": "^13.0.0",
-    "yaml": "^2.8.0"
+    "glob": "^13.0.6",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
-    "@types/node": "^25.2.0"
+    "@types/node": "^25.6.0"
   }
 }

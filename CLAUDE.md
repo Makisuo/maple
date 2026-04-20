@@ -63,31 +63,31 @@ src/
 ### Auto-Generated Files (do not edit manually)
 - `src/routeTree.gen.ts` - Generated from route files
 
-### Tinybird SDK Pattern
+### Tinybird Query Pattern
 
-**IMPORTANT:** Always use the Tinybird SDK with typed endpoints instead of raw SQL queries.
+**IMPORTANT:** Maple no longer uses Tinybird pipes/endpoints. All backend queries go through the ClickHouse DSL in `@maple/query-engine` and execute via `TinybirdService.sqlQuery()`. The deployed Tinybird project contains only datasources and materialized views — zero pipes.
 
-1. **Define endpoints** in `src/tinybird/endpoints.ts` using `defineEndpoint()` from `@tinybirdco/sdk`
-2. **Register endpoints** in `src/lib/tinybird.ts` in the `pipes` configuration
-3. **Export types** from `src/lib/tinybird.ts` for use in API files
-4. **Use typed queries** in `src/api/tinybird/*.ts` via `getTinybird().query.<endpoint_name>()`
+Pattern (see `apps/api/src/routes/query-engine.http.ts` and `apps/api/src/services/QueryEngineService.ts` for examples):
 
-Example endpoint definition:
-```typescript
-export const myEndpoint = defineEndpoint("my_endpoint", {
-  params: {
-    start_time: p.dateTime().optional(),
-  },
-  nodes: [
-    node({ name: "my_node", sql: `SELECT ... WHERE Timestamp >= {{DateTime(start_time)}}` }),
-  ],
-  output: {
-    fieldName: t.string(),
-  },
-});
-```
+1. **Define the query** as a DSL function in `packages/query-engine/src/ch/queries/*.ts` using `from(Table).select(...).where(...)` and `param.string/int/dateTime(name)` placeholders.
+2. **Export it** from `packages/query-engine/src/ch/index.ts` so it's reachable via `import { CH } from "@maple/query-engine"`.
+3. **Call it** from a service or route handler:
+   ```typescript
+   const compiled = CH.compile(CH.myQuery({ limit: 50 }), {
+     orgId,
+     startTime,   // ISO or Tinybird datetime string — resolveParam() quotes it
+     endTime,
+   })
+   const rows = yield* tinybird
+     .sqlQuery(tenant, compiled.sql)
+     .pipe(Effect.mapError(mapTinybirdError))
+   const typedRows = compiled.castRows(rows)
+   ```
+4. **`sqlQuery` enforces `OrgId` scoping** — every query must include an `OrgId` filter (enforced by `TinybirdService`). DSL queries satisfy this via `$.OrgId.eq(param.string("orgId"))` in their `.where()`.
 
-Never use raw `fetch()` calls to `/v0/sql` - always define typed endpoints for type safety and consistency.
+`packages/domain/src/tinybird/endpoints.ts` is **type-only** — it holds `*Output` / `*Params` shapes for consumers that want to reference query result types. Do not add `defineEndpoint()` calls; they won't be deployed.
+
+Never use raw `fetch()` calls to `/v0/sql` — always go through `tinybird.sqlQuery()` with a DSL-compiled query.
 
 ## Environment Variables
 

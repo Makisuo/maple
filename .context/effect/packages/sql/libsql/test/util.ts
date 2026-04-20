@@ -1,5 +1,5 @@
 import { LibsqlClient } from "@effect/sql-libsql"
-import { Effect, Layer, ServiceMap } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { GenericContainer, type StartedTestContainer } from "testcontainers"
 
 const waitForServer = async (container: StartedTestContainer) => {
@@ -19,7 +19,7 @@ const waitForServer = async (container: StartedTestContainer) => {
   throw error
 }
 
-export class LibsqlContainer extends ServiceMap.Service<
+export class LibsqlContainer extends Context.Service<
   LibsqlContainer,
   StartedTestContainer
 >()("test/LibsqlContainer") {

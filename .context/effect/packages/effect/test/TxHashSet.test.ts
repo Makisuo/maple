@@ -20,7 +20,7 @@ class TestValue implements Equal.Equal {
 describe("TxHashSet", () => {
   describe("constructors", () => {
     it.effect("empty creates an empty TxHashSet", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.empty<string>()
         const size = yield* TxHashSet.size(txSet)
         const isEmpty = yield* TxHashSet.isEmpty(txSet)
@@ -30,7 +30,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("make creates TxHashSet from values", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make("a", "b", "c")
         const size = yield* TxHashSet.size(txSet)
 
@@ -42,7 +42,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("make removes duplicates", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make("a", "b", "a", "c", "b")
         const size = yield* TxHashSet.size(txSet)
 
@@ -50,7 +50,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("fromIterable creates TxHashSet from iterable", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.fromIterable(["x", "y", "z", "x", "y"])
         const size = yield* TxHashSet.size(txSet)
 
@@ -61,7 +61,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("fromHashSet creates TxHashSet from HashSet", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const hashSet = HashSet.make("foo", "bar", "baz")
         const txSet = yield* TxHashSet.fromHashSet(hashSet)
         const size = yield* TxHashSet.size(txSet)
@@ -75,7 +75,7 @@ describe("TxHashSet", () => {
 
   describe("type guards", () => {
     it.effect("isTxHashSet identifies TxHashSet instances", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make(1, 2, 3)
         const hashSet = HashSet.make(1, 2, 3)
         const array = [1, 2, 3]
@@ -90,7 +90,7 @@ describe("TxHashSet", () => {
 
   describe("basic operations", () => {
     it.effect("add adds values to TxHashSet", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make("a", "b")
 
         yield* TxHashSet.add(txSet, "c")
@@ -103,7 +103,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("remove removes values from TxHashSet", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make("a", "b", "c")
 
         const removed = yield* TxHashSet.remove(txSet, "b")
@@ -118,7 +118,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("has checks for value existence", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make("apple", "banana", "cherry")
 
         assert.strictEqual(yield* TxHashSet.has(txSet, "apple"), true)
@@ -126,7 +126,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("size returns correct count", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const empty = yield* TxHashSet.empty<string>()
         assert.strictEqual(yield* TxHashSet.size(empty), 0)
 
@@ -138,7 +138,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("isEmpty checks if set is empty", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const empty = yield* TxHashSet.empty<string>()
         assert.strictEqual(yield* TxHashSet.isEmpty(empty), true)
 
@@ -147,7 +147,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("clear removes all values", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make("a", "b", "c")
         assert.strictEqual(yield* TxHashSet.size(txSet), 3)
 
@@ -159,7 +159,7 @@ describe("TxHashSet", () => {
 
   describe("set operations", () => {
     it.effect("union combines two sets", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const set1 = yield* TxHashSet.make("a", "b")
         const set2 = yield* TxHashSet.make("b", "c")
         const combined = yield* TxHashSet.union(set1, set2)
@@ -171,7 +171,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("intersection finds common elements", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const set1 = yield* TxHashSet.make("a", "b", "c")
         const set2 = yield* TxHashSet.make("b", "c", "d")
         const common = yield* TxHashSet.intersection(set1, set2)
@@ -183,7 +183,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("difference finds elements only in first set", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const set1 = yield* TxHashSet.make("a", "b", "c")
         const set2 = yield* TxHashSet.make("b", "d")
         const diff = yield* TxHashSet.difference(set1, set2)
@@ -195,7 +195,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("isSubset checks subset relationship", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const small = yield* TxHashSet.make("a", "b")
         const large = yield* TxHashSet.make("a", "b", "c", "d")
         const other = yield* TxHashSet.make("x", "y")
@@ -209,7 +209,7 @@ describe("TxHashSet", () => {
 
   describe("query operations", () => {
     it.effect("some tests if any element satisfies predicate", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const numbers = yield* TxHashSet.make(1, 2, 3, 4, 5)
 
         assert.strictEqual(yield* TxHashSet.some(numbers, (n) => n > 3), true)
@@ -220,7 +220,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("every tests if all elements satisfy predicate", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const numbers = yield* TxHashSet.make(2, 4, 6, 8)
 
         assert.strictEqual(yield* TxHashSet.every(numbers, (n) => n % 2 === 0), true)
@@ -233,7 +233,7 @@ describe("TxHashSet", () => {
 
   describe("functional operations", () => {
     it.effect("map transforms values", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const numbers = yield* TxHashSet.make(1, 2, 3)
         const doubled = yield* TxHashSet.map(numbers, (n) => n * 2)
 
@@ -244,7 +244,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("map can reduce size with duplicate results", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const strings = yield* TxHashSet.make("apple", "banana", "cherry")
         const lengths = yield* TxHashSet.map(strings, (s) => s.length)
 
@@ -254,7 +254,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("filter keeps only matching values", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const numbers = yield* TxHashSet.make(1, 2, 3, 4, 5, 6)
         const evens = yield* TxHashSet.filter(numbers, (n) => n % 2 === 0)
 
@@ -265,7 +265,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("reduce accumulates values", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const numbers = yield* TxHashSet.make(1, 2, 3, 4, 5)
         const sum = yield* TxHashSet.reduce(numbers, 0, (acc, n) => acc + n)
 
@@ -284,7 +284,7 @@ describe("TxHashSet", () => {
 
   describe("conversions", () => {
     it.effect("toHashSet creates immutable snapshot", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make("x", "y", "z")
         const hashSet = yield* TxHashSet.toHashSet(txSet)
 
@@ -300,7 +300,7 @@ describe("TxHashSet", () => {
 
   describe("custom Equal objects", () => {
     it.effect("works with custom Equal implementations", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make(
           new TestValue("alice"),
           new TestValue("bob"),
@@ -325,7 +325,7 @@ describe("TxHashSet", () => {
 
   describe("transactional behavior", () => {
     it.effect("operations are atomic within transactions", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.make("a", "b", "c")
 
         const hasCherry = yield* TxHashSet.has(txSet, "c")
@@ -342,7 +342,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("multiple set operations work together", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const set1 = yield* TxHashSet.make("a", "b", "c")
         const set2 = yield* TxHashSet.make("c", "d", "e")
 
@@ -366,7 +366,7 @@ describe("TxHashSet", () => {
 
   describe("stress testing", () => {
     it.effect("handles large number of operations", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const txSet = yield* TxHashSet.empty<number>()
 
         // Add 1000 numbers
@@ -392,7 +392,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("functional operations work with large sets", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const numbers = yield* TxHashSet.fromIterable(Array.from({ length: 100 }, (_, i) => i))
 
         const evens = yield* TxHashSet.filter(numbers, (n) => n % 2 === 0)
@@ -408,7 +408,7 @@ describe("TxHashSet", () => {
 
   describe("edge cases", () => {
     it.effect("handles empty set operations correctly", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const empty1 = yield* TxHashSet.empty<string>()
         const empty2 = yield* TxHashSet.empty<string>()
         const nonEmpty = yield* TxHashSet.make("a", "b")
@@ -427,7 +427,7 @@ describe("TxHashSet", () => {
       })))
 
     it.effect("handles single element sets", () =>
-      Effect.transaction(Effect.gen(function*() {
+      Effect.tx(Effect.gen(function*() {
         const single = yield* TxHashSet.make("only")
 
         assert.strictEqual(yield* TxHashSet.size(single), 1)

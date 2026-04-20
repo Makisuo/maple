@@ -1,11 +1,11 @@
-# Services: `Context.Tag` → `ServiceMap.Service`
+# Services: `Context.Tag` → `Context.Service`
 
 In v3, services were defined using `Context.Tag`, `Context.GenericTag`,
 `Effect.Tag`, or `Effect.Service`. In v4, all of these have been replaced by
-`ServiceMap.Service`.
+`Context.Service`.
 
-The underlying data structure has also changed: `Context` has been replaced by
-`ServiceMap` — a typed map from service identifiers to their implementations.
+The underlying runtime data structure is a typed map from service identifiers to
+their implementations.
 
 ## Defining Services
 
@@ -21,16 +21,16 @@ interface Database {
 const Database = Context.GenericTag<Database>("Database")
 ```
 
-**v4: `ServiceMap.Service` (function syntax)**
+**v4: `Context.Service` (function syntax)**
 
 ```ts
-import { ServiceMap } from "effect"
+import { Context } from "effect"
 
 interface Database {
   readonly query: (sql: string) => string
 }
 
-const Database = ServiceMap.Service<Database>("Database")
+const Database = Context.Service<Database>("Database")
 ```
 
 ## Class-Based Services
@@ -45,22 +45,22 @@ class Database extends Context.Tag("Database")<Database, {
 }>() {}
 ```
 
-**v4: `ServiceMap.Service` class syntax**
+**v4: `Context.Service` class syntax**
 
 ```ts
-import { ServiceMap } from "effect"
+import { Context } from "effect"
 
-class Database extends ServiceMap.Service<Database, {
+class Database extends Context.Service<Database, {
   readonly query: (sql: string) => string
 }>()("Database") {}
 ```
 
 Note the difference in argument order: in v3, the identifier string is passed to
 `Context.Tag(id)` before the type parameters. In v4, the type parameters come
-first via `ServiceMap.Service<Self, Shape>()` and the identifier string is
+first via `Context.Service<Self, Shape>()` and the identifier string is
 passed to the returned constructor `(id)`.
 
-## `Effect.Tag` Accessors → `ServiceMap.Service` with `use`
+## `Effect.Tag` Accessors → `Context.Service` with `use`
 
 v3's `Effect.Tag` provided proxy access to service methods as static properties
 on the tag class (accessors). This allowed calling service methods directly
@@ -97,9 +97,9 @@ const program = Notifications.notify("hello")
 **v4 — `use`**
 
 ```ts
-import { Effect, ServiceMap } from "effect"
+import { Context, Effect } from "effect"
 
-class Notifications extends ServiceMap.Service<Notifications, {
+class Notifications extends Context.Service<Notifications, {
   readonly notify: (message: string) => Effect.Effect<void>
 }>()("Notifications") {}
 
@@ -139,10 +139,10 @@ const program = Effect.gen(function*() {
 })
 ```
 
-## `Effect.Service` → `ServiceMap.Service` with `make`
+## `Effect.Service` → `Context.Service` with `make`
 
 v3's `Effect.Service` allowed defining a service with an effectful constructor
-and dependencies inline. In v4, use `ServiceMap.Service` with a `make` option.
+and dependencies inline. In v4, use `Context.Service` with a `make` option.
 
 **v3**
 
@@ -170,14 +170,14 @@ const program = Effect.gen(function*() {
 
 **v4**
 
-In v4, `ServiceMap.Service` with `make` stores the constructor effect on the
+In v4, `Context.Service` with `make` stores the constructor effect on the
 class but does **not** auto-generate a layer. Define layers explicitly using
 `Layer.effect`:
 
 ```ts
-import { Effect, Layer, ServiceMap } from "effect"
+import { Context, Effect, Layer } from "effect"
 
-class Logger extends ServiceMap.Service<Logger>()("Logger", {
+class Logger extends Context.Service<Logger>()("Logger", {
   make: Effect.gen(function*() {
     const config = yield* Config
     return { log: (msg: string) => Effect.log(`[${config.prefix}] ${msg}`) }
@@ -210,26 +210,26 @@ class LogLevel extends Context.Reference<LogLevel>()("LogLevel", {
 }) {}
 ```
 
-**v4: `ServiceMap.Reference`**
+**v4: `Context.Reference`**
 
 ```ts
-import { ServiceMap } from "effect"
+import { Context } from "effect"
 
-const LogLevel = ServiceMap.Reference<"info" | "warn" | "error">("LogLevel", {
+const LogLevel = Context.Reference<"info" | "warn" | "error">("LogLevel", {
   defaultValue: () => "info" as const
 })
 ```
 
 ## Quick Reference
 
-| v3                                    | v4                                         |
-| ------------------------------------- | ------------------------------------------ |
-| `Context.GenericTag<T>(id)`           | `ServiceMap.Service<T>(id)`                |
-| `Context.Tag(id)<Self, Shape>()`      | `ServiceMap.Service<Self, Shape>()(id)`    |
-| `Effect.Tag(id)<Self, Shape>()`       | `ServiceMap.Service<Self, Shape>()(id)`    |
-| `Effect.Service<Self>()(id, opts)`    | `ServiceMap.Service<Self>()(id, { make })` |
-| `Context.Reference<Self>()(id, opts)` | `ServiceMap.Reference<T>(id, opts)`        |
-| `Context.make(tag, impl)`             | `ServiceMap.make(tag, impl)`               |
-| `Context.get(ctx, tag)`               | `ServiceMap.get(map, tag)`                 |
-| `Context.add(ctx, tag, impl)`         | `ServiceMap.add(map, tag, impl)`           |
-| `Context.mergeAll(...)`               | `ServiceMap.mergeAll(...)`                 |
+| v3                                    | v4                                      |
+| ------------------------------------- | --------------------------------------- |
+| `Context.GenericTag<T>(id)`           | `Context.Service<T>(id)`                |
+| `Context.Tag(id)<Self, Shape>()`      | `Context.Service<Self, Shape>()(id)`    |
+| `Effect.Tag(id)<Self, Shape>()`       | `Context.Service<Self, Shape>()(id)`    |
+| `Effect.Service<Self>()(id, opts)`    | `Context.Service<Self>()(id, { make })` |
+| `Context.Reference<Self>()(id, opts)` | `Context.Reference<T>(id, opts)`        |
+| `Context.make(tag, impl)`             | `Context.make(tag, impl)`               |
+| `Context.get(ctx, tag)`               | `Context.get(map, tag)`                 |
+| `Context.add(ctx, tag, impl)`         | `Context.add(map, tag, impl)`           |
+| `Context.mergeAll(...)`               | `Context.mergeAll(...)`                 |

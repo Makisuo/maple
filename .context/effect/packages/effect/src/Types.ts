@@ -1001,3 +1001,11 @@ export type OmitReason<E, K extends string> = E extends { readonly reason: infer
 export type ExcludeReason<E, K extends string> = E extends { readonly reason: infer R }
   ? Exclude<R, { readonly _tag: K }>
   : never
+
+/**
+ * Extracts the required keys from a type.
+ *
+ * @since 4.0.0
+ * @category types
+ */
+export type RequiredKeys<T> = { [K in keyof T]-?: {} extends Pick<T, K> ? never : K }[keyof T]

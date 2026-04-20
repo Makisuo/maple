@@ -1198,6 +1198,12 @@ describe("Equal - Structural Equality Behavior", () => {
       expect(Equal.equals(arr1, arr2)).toBe(true)
     })
 
+    it("should handle Uint8Array", () => {
+      const arr1: Uint8Array = new Uint8Array([1, 2, 3])
+      const arr2: Uint8Array = new Uint8Array([1, 2, 3])
+      expect(Equal.equals(arr1, arr2)).toBe(true)
+    })
+
     it("should handle mixed circular references between objects and arrays", () => {
       // Create complex circular structure
       const obj1: any = { type: "object", items: [] }

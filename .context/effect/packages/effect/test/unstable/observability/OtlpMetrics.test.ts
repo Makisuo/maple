@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Array, Effect, Layer, Metric, Predicate, Ref, ServiceMap } from "effect"
+import { Array, Context, Effect, Layer, Metric, Predicate, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { HttpClient, type HttpClientError, HttpClientResponse } from "effect/unstable/http"
 import { OtlpMetrics, OtlpSerialization } from "effect/unstable/observability"
@@ -449,7 +449,7 @@ interface OtlpHistogramDataPoint {
   readonly max?: number | undefined
 }
 
-class MockHttpClient extends ServiceMap.Service<MockHttpClient, {
+class MockHttpClient extends Context.Service<MockHttpClient, {
   readonly requests: Effect.Effect<ReadonlyArray<OtlpExportRequest>>
 }>()("MockHttpClient") {
   static requests = Effect.service(MockHttpClient).pipe(
@@ -472,12 +472,12 @@ const makeHttpClient = Effect.gen(function*() {
     Effect.succeed as HttpClient.HttpClient.Preprocess<HttpClientError.HttpClientError, never>
   )
 
-  return ServiceMap.make(HttpClient.HttpClient, httpClient).pipe(
-    ServiceMap.add(MockHttpClient, MockHttpClient.of({ requests: Ref.get(capturedRequests) }))
+  return Context.make(HttpClient.HttpClient, httpClient).pipe(
+    Context.add(MockHttpClient, MockHttpClient.of({ requests: Ref.get(capturedRequests) }))
   )
 })
 
-const HttpClientLayer = Layer.effectServices(makeHttpClient)
+const HttpClientLayer = Layer.effectContext(makeHttpClient)
 
 const OtlpCumulativeMetricsLayer = OtlpMetrics.layer({
   url: "http://localhost:4318/v1/metrics",

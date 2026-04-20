@@ -1,13 +1,15 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Redacted from "../../Redacted.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
+import * as Transferable from "../workers/Transferable.ts"
 import { Entry, EntryId, RemoteEntry } from "./EventJournal.ts"
 import type { Identity } from "./EventLog.ts"
+import { makeGetIdentityRootSecretMaterial } from "./internal/identityRootSecretDerivation.ts"
 
 /**
  * @since 4.0.0
@@ -15,7 +17,7 @@ import type { Identity } from "./EventLog.ts"
  */
 export const EncryptedEntry = Schema.Struct({
   entryId: EntryId,
-  encryptedEntry: Schema.Uint8Array
+  encryptedEntry: Transferable.Uint8Array
 })
 
 /**
@@ -30,9 +32,9 @@ export interface EncryptedRemoteEntry extends Schema.Schema.Type<typeof Encrypte
  */
 export const EncryptedRemoteEntry = Schema.Struct({
   sequence: Schema.Number,
-  iv: Schema.Uint8Array,
+  iv: Transferable.Uint8Array,
   entryId: EntryId,
-  encryptedEntry: Schema.Uint8Array
+  encryptedEntry: Transferable.Uint8Array
 })
 
 const toArrayBuffer = (data: Uint8Array): ArrayBuffer => {
@@ -47,13 +49,13 @@ const toBufferSource = (data: Uint8Array): ArrayBufferView<ArrayBuffer> => new U
  * @since 4.0.0
  * @category services
  */
-export class EventLogEncryption extends ServiceMap.Service<EventLogEncryption, {
+export class EventLogEncryption extends Context.Service<EventLogEncryption, {
   readonly encrypt: (
     identity: Identity["Service"],
     entries: ReadonlyArray<Entry>
   ) => Effect.Effect<{
-    readonly iv: Uint8Array
-    readonly encryptedEntries: ReadonlyArray<Uint8Array>
+    readonly iv: Uint8Array<ArrayBuffer>
+    readonly encryptedEntries: ReadonlyArray<Uint8Array<ArrayBuffer>>
   }>
   readonly decrypt: (
     identity: Identity["Service"],
@@ -61,6 +63,7 @@ export class EventLogEncryption extends ServiceMap.Service<EventLogEncryption, {
   ) => Effect.Effect<Array<RemoteEntry>>
   readonly sha256String: (data: Uint8Array) => Effect.Effect<string>
   readonly sha256: (data: Uint8Array) => Effect.Effect<Uint8Array>
+  readonly generateIdentity: Effect.Effect<Identity["Service"]>
 }>()("effect/eventlog/EventLogEncryption") {}
 
 /**
@@ -69,33 +72,12 @@ export class EventLogEncryption extends ServiceMap.Service<EventLogEncryption, {
  */
 export const makeEncryptionSubtle = (crypto: Crypto): Effect.Effect<EventLogEncryption["Service"]> =>
   Effect.sync(() => {
-    const keyCache = new WeakMap<Identity["Service"], CryptoKey>()
-    const getKey = (identity: Identity["Service"]) =>
-      Effect.suspend(() => {
-        if (keyCache.has(identity)) {
-          return Effect.succeed(keyCache.get(identity)!)
-        }
-        return Effect.promise(() =>
-          crypto.subtle.importKey(
-            "raw",
-            toArrayBuffer(Redacted.value(identity.privateKey)),
-            "AES-GCM",
-            true,
-            ["encrypt", "decrypt"]
-          )
-        ).pipe(
-          Effect.tap((key) =>
-            Effect.sync(() => {
-              keyCache.set(identity, key)
-            })
-          )
-        )
-      })
+    const getIdentityRootSecretMaterial = makeGetIdentityRootSecretMaterial(crypto)
 
     return EventLogEncryption.of({
       encrypt: Effect.fnUntraced(function*(identity, entries) {
         const data = yield* Effect.orDie(Entry.encodeArray(entries))
-        const key = yield* getKey(identity)
+        const key = (yield* getIdentityRootSecretMaterial(identity)).encryptionKey
         const iv = crypto.getRandomValues(new Uint8Array(12))
         const encryptedEntries = yield* Effect.promise(() =>
           Promise.all(
@@ -114,7 +96,7 @@ export const makeEncryptionSubtle = (crypto: Crypto): Effect.Effect<EventLogEncr
         }
       }),
       decrypt: Effect.fnUntraced(function*(identity, entries) {
-        const key = yield* getKey(identity)
+        const key = (yield* getIdentityRootSecretMaterial(identity)).encryptionKey
         const decryptedData = (yield* Effect.promise(() =>
           Promise.all(entries.map((data) =>
             crypto.subtle.decrypt(
@@ -141,7 +123,11 @@ export const makeEncryptionSubtle = (crypto: Crypto): Effect.Effect<EventLogEncr
               .join("")
             return hashHex
           }
-        )
+        ),
+      generateIdentity: Effect.sync(() => ({
+        publicKey: crypto.randomUUID(),
+        privateKey: Redacted.make(crypto.getRandomValues(new Uint8Array(32)))
+      }))
     })
   })
 

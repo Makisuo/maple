@@ -29,6 +29,7 @@
  * @since 2.0.0
  */
 import * as Arr from "./Array.ts"
+import * as Context from "./Context.ts"
 import * as Deferred from "./Deferred.ts"
 import * as Effect from "./Effect.ts"
 import * as Exit from "./Exit.ts"
@@ -41,7 +42,6 @@ import { nextPow2 } from "./Number.ts"
 import * as Option from "./Option.ts"
 import { type Pipeable, pipeArguments } from "./Pipeable.ts"
 import * as Scope from "./Scope.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 import type { Covariant, Invariant } from "./Types.ts"
 
 const TypeId = "~effect/PubSub"
@@ -973,8 +973,8 @@ export const publishAll: {
  */
 export const subscribe = <A>(self: PubSub<A>): Effect.Effect<Subscription<A>, never, Scope.Scope> =>
   Effect.uninterruptible(
-    Effect.servicesWith((services) => {
-      const localScope = ServiceMap.get(services, Scope.Scope)
+    Effect.contextWith((services) => {
+      const localScope = Context.get(services, Scope.Scope)
       const scope = Scope.forkUnsafe(self.scope)
       const subscription = makeSubscriptionUnsafe(self.pubsub, self.subscribers, self.strategy)
       return Scope.addFinalizer(scope, unsubscribe(subscription)).pipe(

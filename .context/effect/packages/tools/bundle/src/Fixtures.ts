@@ -2,17 +2,17 @@
  * @since 1.0.0
  */
 import * as Array from "effect/Array"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Order from "effect/Order"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Glob from "glob"
 
 /**
  * @since 1.0.0
  * @category services
  */
-export class Fixtures extends ServiceMap.Service<Fixtures>()(
+export class Fixtures extends Context.Service<Fixtures>()(
   "@effect/bundle/Fixtures",
   {
     make: Effect.gen(function*() {

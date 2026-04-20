@@ -317,6 +317,11 @@ function compareObjects(self: object, that: object): boolean {
         return false
       }
       return compareArrays(self, that)
+    } else if (ArrayBuffer.isView(self)) {
+      if (!ArrayBuffer.isView(that) || self.byteLength !== that.byteLength) {
+        return false
+      }
+      return compareTypedArrays(self as Uint8Array, that as Uint8Array)
     } else if (self instanceof Map) {
       if (!(that instanceof Map) || self.size !== that.size) {
         return false
@@ -367,6 +372,18 @@ function compareArrays(self: Array<unknown>, that: Array<unknown>): boolean {
     }
   }
 
+  return true
+}
+
+function compareTypedArrays(self: Uint8Array, that: Uint8Array): boolean {
+  if (self.length !== that.length) {
+    return false
+  }
+  for (let i = 0; i < self.length; i++) {
+    if (self[i] !== that[i]) {
+      return false
+    }
+  }
   return true
 }
 

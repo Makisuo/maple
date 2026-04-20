@@ -6,15 +6,15 @@ import * as Resources from "@opentelemetry/resources"
 import * as OtelSemConv from "@opentelemetry/semantic-conventions"
 import * as Arr from "effect/Array"
 import * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as ServiceMap from "effect/ServiceMap"
 
 /**
  * @since 1.0.0
  * @category Services
  */
-export class Resource extends ServiceMap.Service<
+export class Resource extends Context.Service<
   Resource,
   Resources.Resource
 >()("@effect/opentelemetry/Resource") {}

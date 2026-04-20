@@ -2,10 +2,10 @@
  * @since 4.0.0
  */
 import type { NonEmptyReadonlyArray } from "../../Array.ts"
+import * as Context from "../../Context.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Record from "../../Record.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { PathInput } from "../http/HttpRouter.ts"
 import type * as HttpApiEndpoint from "./HttpApiEndpoint.ts"
 import type * as HttpApiMiddleware from "./HttpApiMiddleware.ts"
@@ -38,7 +38,7 @@ export interface HttpApiGroup<
   readonly key: string
   readonly topLevel: TopLevel
   readonly endpoints: Record.ReadonlyRecord<string, Endpoints>
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 
   /**
    * Add an `HttpApiEndpoint` to an `HttpApiGroup`.
@@ -61,7 +61,7 @@ export interface HttpApiGroup<
    * Endpoints added after this api is called **will not** have the middleware
    * applied.
    */
-  middleware<I extends HttpApiMiddleware.AnyId, S>(middleware: ServiceMap.Key<I, S>): HttpApiGroup<
+  middleware<I extends HttpApiMiddleware.AnyId, S>(middleware: Context.Key<I, S>): HttpApiGroup<
     Id,
     HttpApiEndpoint.AddMiddleware<Endpoints, I>,
     TopLevel
@@ -70,20 +70,20 @@ export interface HttpApiGroup<
   /**
    * Merge the annotations of an `HttpApiGroup` with the provided annotations.
    */
-  annotateMerge<I>(annotations: ServiceMap.ServiceMap<I>): HttpApiGroup<Id, Endpoints, TopLevel>
+  annotateMerge<I>(annotations: Context.Context<I>): HttpApiGroup<Id, Endpoints, TopLevel>
 
   /**
    * Add an annotation to an `HttpApiGroup`.
    */
-  annotate<I, S>(key: ServiceMap.Key<I, S>, value: S): HttpApiGroup<Id, Endpoints, TopLevel>
+  annotate<I, S>(key: Context.Key<I, S>, value: S): HttpApiGroup<Id, Endpoints, TopLevel>
 
   /**
    * For each endpoint in an `HttpApiGroup`, update the annotations with a new
-   * ServiceMap.
+   * Context.
    *
    * Note that this will only update the annotations before this api is called.
    */
-  annotateEndpointsMerge<I>(annotations: ServiceMap.ServiceMap<I>): HttpApiGroup<Id, Endpoints, TopLevel>
+  annotateEndpointsMerge<I>(annotations: Context.Context<I>): HttpApiGroup<Id, Endpoints, TopLevel>
 
   /**
    * For each endpoint in an `HttpApiGroup`, add an annotation.
@@ -91,7 +91,7 @@ export interface HttpApiGroup<
    * Note that this will only add the annotation to the endpoints before this api
    * is called.
    */
-  annotateEndpoints<I, S>(key: ServiceMap.Key<I, S>, value: S): HttpApiGroup<Id, Endpoints, TopLevel>
+  annotateEndpoints<I, S>(key: Context.Key<I, S>, value: S): HttpApiGroup<Id, Endpoints, TopLevel>
 }
 
 /**
@@ -247,23 +247,23 @@ const Proto = {
       annotations: this.annotations
     })
   },
-  annotateMerge<I>(this: AnyWithProps, annotations: ServiceMap.ServiceMap<I>) {
+  annotateMerge<I>(this: AnyWithProps, annotations: Context.Context<I>) {
     return makeProto({
       identifier: this.identifier,
       topLevel: this.topLevel,
       endpoints: this.endpoints,
-      annotations: ServiceMap.merge(this.annotations, annotations)
+      annotations: Context.merge(this.annotations, annotations)
     })
   },
-  annotate<I, S>(this: AnyWithProps, annotation: ServiceMap.Key<I, S>, value: S) {
+  annotate<I, S>(this: AnyWithProps, annotation: Context.Key<I, S>, value: S) {
     return makeProto({
       identifier: this.identifier,
       topLevel: this.topLevel,
       endpoints: this.endpoints,
-      annotations: ServiceMap.add(this.annotations, annotation, value)
+      annotations: Context.add(this.annotations, annotation, value)
     })
   },
-  annotateEndpointsMerge<I>(this: AnyWithProps, annotations: ServiceMap.ServiceMap<I>) {
+  annotateEndpointsMerge<I>(this: AnyWithProps, annotations: Context.Context<I>) {
     return makeProto({
       identifier: this.identifier,
       topLevel: this.topLevel,
@@ -271,7 +271,7 @@ const Proto = {
       annotations: this.annotations
     })
   },
-  annotateEndpoints<I, S>(this: AnyWithProps, annotation: ServiceMap.Key<I, S>, value: S) {
+  annotateEndpoints<I, S>(this: AnyWithProps, annotation: Context.Key<I, S>, value: S) {
     return makeProto({
       identifier: this.identifier,
       topLevel: this.topLevel,
@@ -292,7 +292,7 @@ const makeProto = <
   readonly identifier: Id
   readonly topLevel: TopLevel
   readonly endpoints: Record.ReadonlyRecord<string, Endpoints>
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly annotations: Context.Context<never>
 }): HttpApiGroup<Id, Endpoints, TopLevel> => {
   function HttpApiGroup() {}
   Object.setPrototypeOf(HttpApiGroup, Proto)
@@ -316,5 +316,5 @@ export const make = <const Id extends string, const TopLevel extends boolean = f
     identifier,
     topLevel: options?.topLevel ?? false as any,
     endpoints: Record.empty(),
-    annotations: ServiceMap.empty()
+    annotations: Context.empty()
   }) as any

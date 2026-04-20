@@ -4,7 +4,7 @@
  * @since 1.0.0
  */
 import * as Arr from "../../Array.ts"
-import type * as JsonSchema from "../../JsonSchema.ts"
+import * as JsonSchema from "../../JsonSchema.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Rec from "../../Record.ts"
@@ -49,7 +49,7 @@ export function toCodecOpenAI<T, E, RD, RE>(
   const to = schema.ast
   const from = recurOpenAI(AST.toEncoded(to))
   const codec = from === to ? schema : Schema.make<typeof schema>(AST.decodeTo(from, to, Transformation.passthrough()))
-  const document = Schema.toJsonSchemaDocument(codec)
+  const document = JsonSchema.resolveTopLevel$ref(Schema.toJsonSchemaDocument(codec))
   const jsonSchema = rewriteOpenAI(document.schema)
   if (Object.keys(document.definitions).length > 0) {
     jsonSchema.$defs = Rec.map(document.definitions, rewriteOpenAI)
@@ -81,6 +81,9 @@ function rewriteOpenAI(schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema {
     } else {
       out[k] = v
     }
+  }
+  if (out.type === "object" && out.properties === undefined && out.additionalProperties === false) {
+    out.properties = {}
   }
   return out
 }

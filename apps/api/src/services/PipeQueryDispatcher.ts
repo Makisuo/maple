@@ -10,6 +10,8 @@ import type { TracesMetric } from "@maple/query-engine"
 import type { OrgId } from "@maple/domain"
 import { Array as A, Match, Result } from "effect"
 
+type CompileTarget = Parameters<typeof CH.compile>[0]
+
 export interface PipeCompiledQuery {
   readonly sql: string
   readonly castRows: (rows: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<unknown>
@@ -37,13 +39,15 @@ export function compilePipeQuery(
   const int = (key: string, def?: number) => params[key] != null ? Number(params[key]) : def
   const bool = (key: string) => params[key] === true || params[key] === "1" || params[key] === "true"
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const compileCompare = (query: any, ranges: {
-    currentStart: string
-    currentEnd: string
-    previousStart: string
-    previousEnd: string
-  }): PipeCompiledQuery => {
+  const compileCompare = (
+    query: CompileTarget,
+    ranges: {
+      currentStart: string
+      currentEnd: string
+      previousStart: string
+      previousEnd: string
+    },
+  ): PipeCompiledQuery => {
     const currentSql = CH.compile(
       query,
       { orgId, startTime: ranges.currentStart, endTime: ranges.currentEnd },
@@ -239,6 +243,32 @@ export function compilePipeQuery(
         errorType: String(params.error_type), rootOnly: bool("root_only"),
         services: str("services")?.split(",").filter(Boolean), limit: int("limit", 10),
       }), { orgId, startTime, endTime })),
+    ),
+    Match.when("error_issues", () =>
+      eraseType(CH.compile(CH.errorIssuesQuery({
+        services: str("services")?.split(",").filter(Boolean),
+        deploymentEnvs: str("deployment_envs")?.split(",").filter(Boolean),
+        fingerprintHashes: str("fingerprint_hashes")?.split(",").filter(Boolean),
+        exceptionTypes: str("exception_types")?.split(",").filter(Boolean),
+        limit: int("limit", 50),
+      }), { orgId, startTime, endTime })),
+    ),
+    Match.when("error_issue_timeseries", () =>
+      eraseType(CH.compile(CH.errorIssueTimeseriesQuery(), {
+        orgId,
+        startTime,
+        endTime,
+        fingerprintHash: String(params.fingerprint_hash),
+        bucketSeconds: int("bucket_seconds", 3600)!,
+      })),
+    ),
+    Match.when("error_issue_sample_traces", () =>
+      eraseType(CH.compile(CH.errorIssueSampleTracesQuery({ limit: int("limit", 25) }), {
+        orgId,
+        startTime,
+        endTime,
+        fingerprintHash: String(params.fingerprint_hash),
+      })),
     ),
     // ----- Metrics -----
     Match.when("list_metrics", () =>

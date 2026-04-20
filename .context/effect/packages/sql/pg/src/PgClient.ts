@@ -5,6 +5,7 @@ import * as Arr from "effect/Array"
 import * as Cause from "effect/Cause"
 import * as Channel from "effect/Channel"
 import * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -16,7 +17,6 @@ import * as RcRef from "effect/RcRef"
 import * as Redacted from "effect/Redacted"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as Client from "effect/unstable/sql/SqlClient"
@@ -71,7 +71,7 @@ export interface PgClient extends Client.SqlClient {
  * @category tags
  * @since 1.0.0
  */
-export const PgClient = ServiceMap.Service<PgClient>("@effect/sql-pg/PgClient")
+export const PgClient = Context.Service<PgClient>("@effect/sql-pg/PgClient")
 
 /**
  * @category constructors
@@ -321,11 +321,14 @@ export const fromPool = Effect.fnUntraced(function*(
 
   const reserveRaw = Effect.callback<Pg.PoolClient, SqlError, Scope.Scope>((resume) => {
     const fiber = Fiber.getCurrent()!
-    const scope = ServiceMap.getUnsafe(fiber.services, Scope.Scope)
+    const scope = Context.getUnsafe(fiber.context, Scope.Scope)
     let cause: Error | undefined = undefined
+    function onError(cause_: Error) {
+      cause = cause_
+    }
     pool.connect((err, client, release) => {
       if (err) {
-        resume(
+        return resume(
           Effect.fail(
             new SqlError({
               reason: classifyError(
@@ -336,22 +339,30 @@ export const fromPool = Effect.fnUntraced(function*(
             })
           )
         )
-      } else {
-        resume(Effect.as(
-          Scope.addFinalizer(
-            scope,
-            Effect.sync(() => {
-              client!.off("error", onError)
-              release(cause)
+      } else if (!client) {
+        return resume(
+          Effect.fail(
+            new SqlError({
+              reason: new ConnectionError({
+                message: "Failed to acquire connection for transaction",
+                cause: new Error("No client returned"),
+                operation: "acquireConnection"
+              })
             })
-          ),
-          client!
-        ))
+          )
+        )
       }
-      function onError(cause_: Error) {
-        cause = cause_
-      }
-      client!.on("error", onError)
+      client.on("error", onError)
+      resume(Effect.as(
+        Scope.addFinalizer(
+          scope,
+          Effect.sync(() => {
+            client.off("error", onError)
+            release(cause)
+          })
+        ),
+        client
+      ))
     })
   })
   const reserve = Effect.map(reserveRaw, makeConection)
@@ -718,10 +729,10 @@ const makeCancel = (pool: Pg.Pool, client: Pg.PoolClient) => {
 export const layerFrom = <E, R>(
   acquire: Effect.Effect<PgClient, E, R>
 ): Layer.Layer<PgClient | Client.SqlClient, E, Exclude<R, Scope.Scope | Reactivity.Reactivity>> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Effect.map(acquire, (client) =>
-      ServiceMap.make(PgClient, client).pipe(
-        ServiceMap.add(Client.SqlClient, client)
+      Context.make(PgClient, client).pipe(
+        Context.add(Client.SqlClient, client)
       ))
   ).pipe(Layer.provide(Reactivity.layer)) as any
 

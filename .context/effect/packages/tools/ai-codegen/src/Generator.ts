@@ -5,6 +5,7 @@
  */
 import * as OpenApiGenerator from "@effect/openapi-generator/OpenApiGenerator"
 import * as OpenApiPatch from "@effect/openapi-generator/OpenApiPatch"
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
@@ -12,7 +13,6 @@ import type * as JsonSchema from "effect/JsonSchema"
 import * as Layer from "effect/Layer"
 import * as Path_ from "effect/Path"
 import type * as Schema from "effect/Schema"
-import * as ServiceMap from "effect/ServiceMap"
 import type { DiscoveredProvider } from "./Discovery.ts"
 
 /**
@@ -74,7 +74,7 @@ export interface CodeGenerator {
  * @since 1.0.0
  * @category tags
  */
-export const CodeGenerator: ServiceMap.Service<CodeGenerator, CodeGenerator> = ServiceMap.Service(
+export const CodeGenerator: Context.Service<CodeGenerator, CodeGenerator> = Context.Service(
   "@effect/ai-codegen/CodeGenerator"
 )
 
@@ -147,7 +147,7 @@ export const layer: Layer.Layer<
     return yield* openApiGen
       .generate(patchedSpec as unknown as Parameters<typeof openApiGen.generate>[0], {
         name: provider.config.clientName,
-        typeOnly: provider.config.isTypeOnly,
+        format: provider.config.isTypeOnly ? "httpclient-type-only" : "httpclient",
         onEnter
       })
       .pipe(

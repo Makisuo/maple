@@ -6,11 +6,12 @@
  * Public API is in ../Command.ts
  */
 import * as Arr from "../../../Array.ts"
+import * as Context from "../../../Context.ts"
 import * as Effect from "../../../Effect.ts"
 import { YieldableProto } from "../../../internal/core.ts"
+import * as Option from "../../../Option.ts"
 import { pipeArguments } from "../../../Pipeable.ts"
 import * as Predicate from "../../../Predicate.ts"
-import * as ServiceMap from "../../../ServiceMap.ts"
 import * as CliError from "../CliError.ts"
 import type * as GlobalFlag from "../GlobalFlag.ts"
 import type { ArgDoc, ExampleDoc, FlagDoc, HelpDoc, SubcommandGroupDoc } from "../HelpDoc.ts"
@@ -38,8 +39,8 @@ export interface CommandInternal<Name extends string, Input, E, R, ContextInput>
 {
   readonly config: ConfigInternal
   readonly contextConfig: ConfigInternal
-  readonly service: ServiceMap.Key<CommandContext<Name>, ContextInput>
-  readonly annotations: ServiceMap.ServiceMap<never>
+  readonly service: Context.Key<CommandContext<Name>, ContextInput>
+  readonly annotations: Context.Context<never>
   readonly globalFlags: ReadonlyArray<GlobalFlag.GlobalFlag<any>>
   readonly parse: (input: ParsedTokens) => Effect.Effect<Input, CliError.CliError, Environment>
   readonly parseContext: (input: ParsedTokens) => Effect.Effect<ContextInput, CliError.CliError, Environment>
@@ -93,8 +94,8 @@ export const makeCommand = <const Name extends string, Input, E, R, ContextInput
   readonly name: Name
   readonly config: ConfigInternal
   readonly contextConfig?: ConfigInternal | undefined
-  readonly service?: ServiceMap.Key<CommandContext<Name>, ContextInput> | undefined
-  readonly annotations?: ServiceMap.ServiceMap<never> | undefined
+  readonly service?: Context.Key<CommandContext<Name>, ContextInput> | undefined
+  readonly annotations?: Context.Context<never> | undefined
   readonly globalFlags?: ReadonlyArray<GlobalFlag.GlobalFlag<any>> | undefined
   readonly description?: string | undefined
   readonly shortDescription?: string | undefined
@@ -111,8 +112,8 @@ export const makeCommand = <const Name extends string, Input, E, R, ContextInput
 }): Command<Name, Input, ContextInput, E, R> => {
   const config = options.config
   const contextConfig = options.contextConfig ?? emptyConfig
-  const service = options.service ?? ServiceMap.Service<CommandContext<Name>, ContextInput>(`${TypeId}/${options.name}`)
-  const annotations = options.annotations ?? ServiceMap.empty()
+  const service = options.service ?? Context.Service<CommandContext<Name>, ContextInput>(`${TypeId}/${options.name}`)
+  const annotations = options.annotations ?? Context.empty()
   const globalFlags = options.globalFlags ?? []
   const subcommands = options.subcommands ?? []
 
@@ -228,9 +229,23 @@ export const toFlagDoc = (single: Param.Single<typeof Param.flagKind, unknown>):
     name: single.name,
     aliases: formattedAliases,
     type: single.typeName ?? Primitive.getTypeName(single.primitiveType),
-    description: single.description,
+    description: appendChoiceKeys(single.description, Primitive.getChoiceKeys(single.primitiveType)),
     required: single.primitiveType._tag !== "Boolean"
   }
+}
+
+const appendChoiceKeys = (
+  description: Option.Option<string>,
+  choiceKeys: ReadonlyArray<string> | undefined
+): Option.Option<string> => {
+  if (choiceKeys === undefined || choiceKeys.length === 0) {
+    return description
+  }
+  const choiceSuffix = `(choices: ${choiceKeys.join(", ")})`
+  return Option.match(description, {
+    onNone: () => Option.some(choiceSuffix),
+    onSome: (value) => Option.some(`${value} ${choiceSuffix}`)
+  })
 }
 
 /**

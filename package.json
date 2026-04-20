@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260414.1",
-    "@effect/vitest": "4.0.0-beta.47",
+    "@effect/vitest": "4.0.0-beta.52",
     "@maple/db": "workspace:*",
     "@maple/infra": "workspace:*",
     "@tinybirdco/sdk": "catalog:tinybird",
@@ -43,11 +43,11 @@
   },
   "catalogs": {
     "effect": {
-      "@effect/atom-react": "4.0.0-beta.47",
+      "@effect/atom-react": "4.0.0-beta.52",
       "@effect/language-service": "^0.85.1",
-      "@effect/opentelemetry": "4.0.0-beta.47",
-      "@effect/platform-bun": "4.0.0-beta.47",
-      "effect": "4.0.0-beta.47"
+      "@effect/opentelemetry": "4.0.0-beta.52",
+      "@effect/platform-bun": "4.0.0-beta.52",
+      "effect": "4.0.0-beta.52"
     },
     "react": {
       "@types/react": "^19.2.14",

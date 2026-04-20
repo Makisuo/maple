@@ -6,7 +6,7 @@
  *
  * @internal
  */
-import type { ArgumentType, CommandDescriptor, FlagDescriptor, FlagType } from "./CommandDescriptor.ts"
+import type * as Completions from "../../Completions.ts"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,7 +16,7 @@ const escapeForBash = (s: string): string => s.replace(/'/g, "'\\''")
 
 const sanitizeFunctionName = (s: string): string => s.replace(/[^a-zA-Z0-9_]/g, "_")
 
-const flagNamesForWordlist = (flag: FlagDescriptor): Array<string> => {
+const flagNamesForWordlist = (flag: Completions.FlagDescriptor): Array<string> => {
   const names: Array<string> = [`--${flag.name}`]
   for (const alias of flag.aliases) {
     names.push(alias.length === 1 ? `-${alias}` : `--${alias}`)
@@ -33,7 +33,7 @@ const flagNamesForWordlist = (flag: FlagDescriptor): Array<string> => {
  * all forms in that group are removed from the candidate list.
  */
 const buildFlagGroupDeclarations = (
-  flags: ReadonlyArray<FlagDescriptor>,
+  flags: ReadonlyArray<Completions.FlagDescriptor>,
   lines: Array<string>
 ): void => {
   if (flags.length === 0) return
@@ -60,7 +60,7 @@ const buildFlagGroupDeclarations = (
   lines.push(``)
 }
 
-const flagValueCompletion = (type: FlagType): string | undefined => {
+const flagValueCompletion = (type: Completions.FlagType): string | undefined => {
   switch (type._tag) {
     case "Boolean":
       return undefined
@@ -74,7 +74,7 @@ const flagValueCompletion = (type: FlagType): string | undefined => {
   }
 }
 
-const argCompletion = (type: ArgumentType): string | undefined => {
+const argCompletion = (type: Completions.ArgumentType): string | undefined => {
   switch (type._tag) {
     case "Choice":
       return `COMPREPLY=( $(compgen -W '${type.values.join(" ")}' -- "$cur") )`
@@ -91,7 +91,7 @@ const argCompletion = (type: ArgumentType): string | undefined => {
 // ---------------------------------------------------------------------------
 
 const generateFunction = (
-  descriptor: CommandDescriptor,
+  descriptor: Completions.CommandDescriptor,
   parentPath: ReadonlyArray<string>,
   lines: Array<string>
 ): void => {
@@ -184,7 +184,7 @@ const generateFunction = (
 /** @internal */
 export const generate = (
   executableName: string,
-  descriptor: CommandDescriptor
+  descriptor: Completions.CommandDescriptor
 ): string => {
   const lines: Array<string> = []
   const safeName = sanitizeFunctionName(executableName)

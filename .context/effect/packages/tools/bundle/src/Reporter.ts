@@ -1,11 +1,11 @@
 /**
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
-import * as ServiceMap from "effect/ServiceMap"
 import { Fixtures } from "./Fixtures.ts"
 import type { BundleStats } from "./Rollup.ts"
 import { Rollup } from "./Rollup.ts"
@@ -47,7 +47,7 @@ export interface ReportSelectedOptions {
  * @since 1.0.0
  * @category services
  */
-export class Reporter extends ServiceMap.Service<Reporter>()(
+export class Reporter extends Context.Service<Reporter>()(
   "@effect/bundle/Reporter",
   {
     make: Effect.gen(function*() {

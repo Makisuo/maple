@@ -1,10 +1,10 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "./Context.ts"
 import * as Effect from "./Effect.ts"
 import * as Layer from "./Layer.ts"
 import type { PlatformError } from "./PlatformError.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 import * as Sink from "./Sink.ts"
 import * as Stream from "./Stream.ts"
 
@@ -39,7 +39,7 @@ export interface Stdio {
  * @since 4.0.0
  * @category Services
  */
-export const Stdio: ServiceMap.Service<Stdio, Stdio> = ServiceMap.Service<Stdio>(TypeId)
+export const Stdio: Context.Service<Stdio, Stdio> = Context.Service<Stdio>(TypeId)
 
 /**
  * @since 4.0.0

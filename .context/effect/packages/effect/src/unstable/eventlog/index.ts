@@ -32,6 +32,11 @@ export * as EventLogEncryption from "./EventLogEncryption.ts"
 /**
  * @since 4.0.0
  */
+export * as EventLogMessage from "./EventLogMessage.ts"
+
+/**
+ * @since 4.0.0
+ */
 export * as EventLogRemote from "./EventLogRemote.ts"
 
 /**
@@ -42,9 +47,29 @@ export * as EventLogServer from "./EventLogServer.ts"
 /**
  * @since 4.0.0
  */
-export * as SqlEventLogJournal from "./SqlEventLogJournal.ts"
+export * as EventLogServerEncrypted from "./EventLogServerEncrypted.ts"
 
 /**
  * @since 4.0.0
  */
-export * as SqlEventLogServer from "./SqlEventLogServer.ts"
+export * as EventLogServerUnencrypted from "./EventLogServerUnencrypted.ts"
+
+/**
+ * @since 4.0.0
+ */
+export * as EventLogSessionAuth from "./EventLogSessionAuth.ts"
+
+/**
+ * @since 4.0.0
+ */
+export * as SqlEventJournal from "./SqlEventJournal.ts"
+
+/**
+ * @since 4.0.0
+ */
+export * as SqlEventLogServerEncrypted from "./SqlEventLogServerEncrypted.ts"
+
+/**
+ * @since 4.0.0
+ */
+export * as SqlEventLogServerUnencrypted from "./SqlEventLogServerUnencrypted.ts"

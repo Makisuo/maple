@@ -536,7 +536,8 @@ export const make = Effect.fnUntraced(function*(options: {
         shardIds.length > 0 ?
           Effect.andThen(refreshShards(address, shardIds)) :
           Effect.as([]),
-        PersistenceError.refail
+        PersistenceError.refail,
+        withTracerDisabled
       ),
 
     release: sql.onDialectOrElse({
@@ -544,7 +545,8 @@ export const make = Effect.fnUntraced(function*(options: {
         if (disableAdvisoryLocks) {
           return (address: string, shardId: string) =>
             sql`DELETE FROM ${locksTableSql} WHERE address = ${address} AND shard_id = ${shardId}`.pipe(
-              PersistenceError.refail
+              PersistenceError.refail,
+              withTracerDisabled
             )
         }
         return Effect.fnUntraced(
@@ -564,14 +566,16 @@ export const make = Effect.fnUntraced(function*(options: {
           },
           Effect.onError(() => lockConn!.rebuildUnsafe()),
           Effect.asVoid,
-          PersistenceError.refail
+          PersistenceError.refail,
+          withTracerDisabled
         )
       },
       mysql: () => {
         if (disableAdvisoryLocks) {
           return (address: string, shardId: string) =>
             sql`DELETE FROM ${locksTableSql} WHERE address = ${address} AND shard_id = ${shardId}`.pipe(
-              PersistenceError.refail
+              PersistenceError.refail,
+              withTracerDisabled
             )
         }
         return Effect.fnUntraced(
@@ -589,12 +593,14 @@ export const make = Effect.fnUntraced(function*(options: {
           },
           Effect.onError(() => lockConn!.rebuildUnsafe()),
           Effect.asVoid,
-          PersistenceError.refail
+          PersistenceError.refail,
+          withTracerDisabled
         )
       },
       orElse: () => (address, shardId) =>
         sql`DELETE FROM ${locksTableSql} WHERE address = ${address} AND shard_id = ${shardId}`.pipe(
-          PersistenceError.refail
+          PersistenceError.refail,
+          withTracerDisabled
         )
     }),
 

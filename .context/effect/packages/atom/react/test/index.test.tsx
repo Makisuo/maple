@@ -1,6 +1,6 @@
-/// <reference types="@testing-library/jest-dom" />
+// <reference types="@testing-library/jest-dom" />
 import { act, render, screen, waitFor } from "@testing-library/react"
-import { Cause, Effect, Latch, Layer, ServiceMap } from "effect"
+import { Cause, Context, Effect, Latch, Layer } from "effect"
 import * as Schema from "effect/Schema"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
@@ -23,7 +23,7 @@ describe("atom-react", () => {
 
   describe("runtime", () => {
     test("can inject test layers", () => {
-      class TheNumber extends ServiceMap.Service<TheNumber>()("TheNumber", {
+      class TheNumber extends Context.Service<TheNumber>()("TheNumber", {
         make: Effect.succeed({ n: 42 as number })
       }) {
         static readonly layer = Layer.effect(this, this.make)
@@ -325,29 +325,29 @@ describe("atom-react", () => {
 
       function Result1() {
         const value = useAtomValue(atomResult1)
-        return AsyncResult.match({
+        return AsyncResult.match(value, {
           onSuccess: (result) => <div data-testid="value-1">{result.value}</div>,
           onFailure: () => <div data-testid="error-1">Error</div>,
           onInitial: () => <div data-testid="loading-1">Loading...</div>
-        })(value)
+        })
       }
 
       function Result2() {
         const value = useAtomValue(atomResult2)
-        return AsyncResult.match({
+        return AsyncResult.match(value, {
           onSuccess: (result) => <div data-testid="value-2">{result.value}</div>,
           onFailure: () => <div data-testid="error-2">Error</div>,
           onInitial: () => <div data-testid="loading-2">Loading...</div>
-        })(value)
+        })
       }
 
       function Result3() {
         const value = useAtomValue(atomResult3)
-        return AsyncResult.match({
+        return AsyncResult.match(value, {
           onSuccess: (result) => <div data-testid="value-3">{result.value}</div>,
           onFailure: () => <div data-testid="error-3">Error</div>,
           onInitial: () => <div data-testid="loading-3">Loading...</div>
-        })(value)
+        })
       }
 
       render(

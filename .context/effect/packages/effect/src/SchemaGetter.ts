@@ -38,6 +38,7 @@
  * - Parse/stringify JSON → {@link parseJson}, {@link stringifyJson}
  * - Encode/decode Base64 → {@link encodeBase64}, {@link decodeBase64}, {@link decodeBase64String}
  * - Encode/decode Hex → {@link encodeHex}, {@link decodeHex}, {@link decodeHexString}
+ * - Encode/decode URI components → {@link encodeUriComponent}, {@link decodeUriComponent}
  * - Parse DateTime → {@link dateTimeUtcFromInput}
  * - Decode/encode FormData → {@link decodeFormData}, {@link encodeFormData}
  * - Decode/encode URLSearchParams → {@link decodeURLSearchParams}, {@link encodeURLSearchParams}
@@ -482,7 +483,8 @@ export function onSome<T, E, R = never>(
  *   - `undefined` or `true` — value is valid, passes through.
  *   - `false` or a `string` — value is invalid, fails with an `Issue`.
  *   - An `Issue` object — fails with that issue directly.
- *   - `{ path, message }` — fails with a nested path issue.
+ *   - `{ path, issue }` — fails with a nested path issue (`issue` may be a
+ *     message string or a full {@link Issue.Issue}).
  * - Does not transform the value — input and output types are the same.
  *
  * **Example** (Effectful validation)
@@ -504,17 +506,14 @@ export function onSome<T, E, R = never>(
  */
 export function checkEffect<T, R = never>(
   f: (input: T, options: AST.ParseOptions) => Effect.Effect<
-    undefined | boolean | string | Issue.Issue | {
-      readonly path: ReadonlyArray<PropertyKey>
-      readonly message: string
-    },
+    undefined | boolean | Schema.FilterIssue,
     never,
     R
   >
 ): Getter<T, T, R> {
   return onSome((t, options) => {
     return f(t, options).pipe(Effect.flatMapEager((out) => {
-      const issue = Issue.make(t, out)
+      const issue = Issue.makeSingle(t, out)
       return issue ?
         Effect.fail(issue) :
         Effect.succeed(Option.some(t))
@@ -670,16 +669,16 @@ export function omit<T>(): Getter<never, T> {
  * - A field may be `undefined` in the encoded input and should have a fallback.
  *
  * Behavior:
- * - If the input is `Some(undefined)` or `None`, produces `Some(defaultValue())`.
+ * - If the input is `Some(undefined)` or `None`, produces `Some(T)`.
  * - If the input is `Some(value)` where value is not `undefined`, passes it through.
- * - `defaultValue` is called lazily each time a default is needed.
+ * - `defaultValue` is an `Effect` that will be executed each time a default is needed.
  *
  * **Example** (Default value for optional field)
  *
  * ```ts
- * import { SchemaGetter } from "effect"
+ * import { Effect, SchemaGetter } from "effect"
  *
- * const withZero = SchemaGetter.withDefault(() => 0)
+ * const withZero = SchemaGetter.withDefault(Effect.succeed(0))
  * // Getter<number, number | undefined>
  * ```
  *
@@ -690,13 +689,11 @@ export function omit<T>(): Getter<never, T> {
  * @category Constructors
  * @since 4.0.0
  */
-export function withDefault<T>(defaultValue: () => T): Getter<T, T | undefined> {
-  return transformOptional((o) =>
-    o.pipe(
-      Option.filter(Predicate.isNotUndefined),
-      Option.orElseSome(defaultValue)
-    )
-  )
+export function withDefault<T>(defaultValue: Effect.Effect<T>): Getter<T, T | undefined> {
+  return new Getter((o) => {
+    const filtered = Option.filter(o, Predicate.isNotUndefined)
+    return Option.isSome(filtered) ? Effect.succeed(filtered) : Effect.map(defaultValue, Option.some)
+  })
 }
 
 /**
@@ -1454,6 +1451,65 @@ export function decodeHexString<E extends string>(): Getter<string, E> {
       onSuccess: Effect.succeed
     })
   )
+}
+
+/**
+ * Encodes a string using `encodeURIComponent`.
+ *
+ * Behavior:
+ * - Pure, never fails.
+ *
+ * **Example** (Encode a URI component)
+ *
+ * ```ts
+ * import { SchemaGetter } from "effect"
+ *
+ * const encode = SchemaGetter.encodeUriComponent<string>()
+ * ```
+ *
+ * See also:
+ * - {@link decodeUriComponent} - inverse operation
+ *
+ * @category URI
+ * @since 4.0.0
+ */
+export function encodeUriComponent<E extends string>(): Getter<string, E> {
+  return transform(encodeURIComponent)
+}
+
+/**
+ * Decodes a URI component encoded string using `decodeURIComponent`.
+ *
+ * Behavior:
+ * - Fails with `Issue.InvalidValue` if the input contains malformed percent-encoding sequences.
+ *
+ * **Example** (Decode a URI component)
+ *
+ * ```ts
+ * import { SchemaGetter } from "effect"
+ *
+ * const decode = SchemaGetter.decodeUriComponent<string>()
+ * // Getter<string, string>
+ * ```
+ *
+ * See also:
+ * - {@link encodeUriComponent} - inverse operation
+ *
+ * @category URI
+ * @since 4.0.0
+ */
+export function decodeUriComponent<E extends string>(): Getter<string, E> {
+  return transformOrFail((input) => {
+    try {
+      return Effect.succeed(globalThis.decodeURIComponent(input))
+    } catch (e) {
+      return Effect.fail(
+        new Issue.InvalidValue(Option.some(input), {
+          message: e instanceof URIError ? e.message : "Invalid URI component"
+        })
+      )
+    }
+  })
 }
 
 /**

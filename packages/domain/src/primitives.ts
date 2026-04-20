@@ -76,6 +76,24 @@ export type AlertDeliveryEventId = Schema.Schema.Type<
   typeof AlertDeliveryEventId
 >
 
+export const ErrorIssueId = MapleUuidId("@maple/ErrorIssueId", "Error Issue ID")
+export type ErrorIssueId = Schema.Schema.Type<typeof ErrorIssueId>
+
+export const ErrorIncidentId = MapleUuidId(
+  "@maple/ErrorIncidentId",
+  "Error Incident ID",
+)
+export type ErrorIncidentId = Schema.Schema.Type<typeof ErrorIncidentId>
+
+export const ActorId = MapleUuidId("@maple/ActorId", "Actor ID")
+export type ActorId = Schema.Schema.Type<typeof ActorId>
+
+export const ErrorIssueEventId = MapleUuidId(
+  "@maple/ErrorIssueEventId",
+  "Error Issue Event ID",
+)
+export type ErrorIssueEventId = Schema.Schema.Type<typeof ErrorIssueEventId>
+
 export const AuthMode = Schema.Literals(["clerk", "self_hosted"]).annotate({
   identifier: "@maple/AuthMode",
   title: "Auth Mode",

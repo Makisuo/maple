@@ -21,11 +21,11 @@
  *
  * @since 4.0.0
  */
+import type * as Context from "./Context.ts"
 import * as Effect from "./Effect.ts"
 import { dual } from "./Function.ts"
 import * as random from "./internal/random.ts"
 import * as Predicate from "./Predicate.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 
 /**
  * Represents a service for generating random numbers.
@@ -50,7 +50,7 @@ import type * as ServiceMap from "./ServiceMap.ts"
  * @since 4.0.0
  * @category Random Number Generators
  */
-export const Random: ServiceMap.Reference<{
+export const Random: Context.Reference<{
   nextIntUnsafe(): number
   nextDoubleUnsafe(): number
 }> = random.Random

@@ -5,7 +5,7 @@
  * middleware, serve it over HTTP, and call it using a generated typed client.
  */
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
-import { Effect, flow, Layer, Schedule, ServiceMap } from "effect"
+import { Context, Effect, flow, Layer, Schedule } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiClient, HttpApiMiddleware, HttpApiScalar } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
@@ -77,7 +77,7 @@ export const AuthorizationClient = HttpApiMiddleware.layerClient(
 
 // Define the HttpApiClient service, which will be used to make requests to the
 // API.
-export class ApiClient extends ServiceMap.Service<ApiClient, HttpApiClient.ForApi<typeof Api>>()("acme/ApiClient") {
+export class ApiClient extends Context.Service<ApiClient, HttpApiClient.ForApi<typeof Api>>()("acme/ApiClient") {
   static readonly layer = Layer.effect(
     ApiClient,
     HttpApiClient.make(Api, {

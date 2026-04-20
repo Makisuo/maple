@@ -60,11 +60,11 @@ export const toRpcGroup = <Type extends string, Rpcs extends Rpc.Any>(
       entityId: Schema.String,
       payload: parentRpc.payloadSchema
     })
-    const oldMake = payloadSchema.makeUnsafe
-    payloadSchema.makeUnsafe = (input: any, options?: Schema.MakeOptions) => {
+    const oldMake = payloadSchema.make
+    payloadSchema.make = (input: any, options?: Schema.MakeOptions) => {
       return oldMake({
         entityId: input.entityId,
-        payload: parentRpc.payloadSchema.makeUnsafe(input.payload, options)
+        payload: parentRpc.payloadSchema.make(input.payload, options)
       }, options)
     }
     const rpc = Rpc.make(`${entity.type}.${parentRpc._tag}`, {

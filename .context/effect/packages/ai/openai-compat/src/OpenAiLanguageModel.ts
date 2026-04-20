@@ -6,6 +6,7 @@
  *
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
@@ -16,7 +17,6 @@ import * as Predicate from "effect/Predicate"
 import * as Redactable from "effect/Redactable"
 import type * as Schema from "effect/Schema"
 import * as AST from "effect/SchemaAST"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import type { Span } from "effect/Tracer"
 import type { DeepMutable, Simplify } from "effect/Types"
@@ -64,7 +64,7 @@ type ImageDetail = "auto" | "low" | "high"
  * @since 1.0.0
  * @category context
  */
-export class Config extends ServiceMap.Service<
+export class Config extends Context.Service<
   Config,
   Simplify<
     & Partial<
@@ -344,7 +344,7 @@ export const make = Effect.fnUntraced(function*({ model, config: providerConfig 
   const client = yield* OpenAiClient
 
   const makeConfig = Effect.gen(function*() {
-    const services = yield* Effect.services<never>()
+    const services = yield* Effect.context<never>()
     return { model, ...providerConfig, ...services.mapUnsafe.get(Config.key) }
   })
 
@@ -1149,7 +1149,7 @@ const prepareTools = Effect.fnUntraced(function*<Tools extends ReadonlyArray<Too
 
   // Convert the tools in the toolkit to the provider-defined format
   for (const tool of allowedTools) {
-    if (Tool.isUserDefined(tool)) {
+    if (Tool.isUserDefined(tool) || Tool.isDynamic(tool)) {
       const strict = Tool.getStrictMode(tool) ?? config.strictJsonSchema ?? true
       const parameters = yield* tryToolJsonSchema(tool, "prepareTools")
       tools.push({

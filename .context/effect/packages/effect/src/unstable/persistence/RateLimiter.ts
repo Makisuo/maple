@@ -2,12 +2,12 @@
  * @since 4.0.0
  */
 import * as Config from "../../Config.ts"
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import { flow, identity } from "../../Function.ts"
 import * as Layer from "../../Layer.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Redis from "./Redis.ts"
 
 /**
@@ -43,7 +43,7 @@ export interface RateLimiter {
  * @since 4.0.0
  * @category Tags
  */
-export const RateLimiter: ServiceMap.Service<RateLimiter, RateLimiter> = ServiceMap.Service<RateLimiter>(TypeId)
+export const RateLimiter: Context.Service<RateLimiter, RateLimiter> = Context.Service<RateLimiter>(TypeId)
 
 /**
  * @since 4.0.0
@@ -413,7 +413,7 @@ export interface ConsumeResult {
  * @since 4.0.0
  * @category RateLimiterStore
  */
-export class RateLimiterStore extends ServiceMap.Service<
+export class RateLimiterStore extends Context.Service<
   RateLimiterStore,
   {
     /**

@@ -6,7 +6,7 @@
  */
 import { AnthropicClient, AnthropicLanguageModel } from "@effect/ai-anthropic"
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai"
-import { Config, Effect, ExecutionPlan, Layer, Schema, ServiceMap, Stream } from "effect"
+import { Config, Context, Effect, ExecutionPlan, Layer, Schema, Stream } from "effect"
 import { AiError, LanguageModel, Model, type Response } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import { LaunchPlan } from "./fixtures/domain/LaunchPlan.ts"
@@ -55,7 +55,7 @@ const DraftPlan = ExecutionPlan.make(
   }
 )
 
-export class AiWriter extends ServiceMap.Service<AiWriter, {
+export class AiWriter extends Context.Service<AiWriter, {
   draftAnnouncement(product: string): Effect.Effect<{
     readonly provider: string
     readonly text: string

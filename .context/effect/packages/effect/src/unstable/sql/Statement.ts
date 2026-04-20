@@ -2,16 +2,14 @@
  * @since 4.0.0
  */
 import { Clock } from "../../Clock.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
+import * as Effectable from "../../Effectable.ts"
 import type * as Fiber from "../../Fiber.ts"
 import { constUndefined } from "../../Function.ts"
-import type { Inspectable } from "../../Inspectable.ts"
-import * as core from "../../internal/core.ts"
 import * as internalEffect from "../../internal/effect.ts"
-import type { Pipeable } from "../../Pipeable.ts"
 import { hasProperty } from "../../Predicate.ts"
 import { TracerTimingEnabled } from "../../References.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import type * as Tracer from "../../Tracer.ts"
 import type { Acquirer, Connection, Row } from "./SqlConnection.ts"
@@ -49,7 +47,7 @@ export type Dialect = "sqlite" | "pg" | "mysql" | "mssql" | "clickhouse"
  * @category model
  * @since 4.0.0
  */
-export interface Statement<A> extends Fragment, Effect.Effect<ReadonlyArray<A>, SqlError>, Pipeable, Inspectable {
+export interface Statement<A> extends Fragment, Effect.Effect<ReadonlyArray<A>, SqlError> {
   readonly raw: Effect.Effect<unknown, SqlError>
   readonly withoutTransform: Effect.Effect<ReadonlyArray<A>, SqlError>
   readonly stream: Stream.Stream<A, SqlError>
@@ -76,7 +74,7 @@ export type Transformer = (
  * @category transformer
  * @since 4.0.0
  */
-export const CurrentTransformer = ServiceMap.Reference<Transformer | undefined>("effect/sql/CurrentTransformer", {
+export const CurrentTransformer = Context.Reference<Transformer | undefined>("effect/sql/CurrentTransformer", {
   defaultValue: constUndefined
 })
 
@@ -1120,8 +1118,23 @@ const StatementProto: Omit<
   StatementImpl<any>,
   "segments" | "acquirer" | "compiler" | "spanAttributes" | "transformRows"
 > = {
-  ...core.EffectProto,
-  [core.identifier as any]: "Statement",
+  ...Effectable.Prototype<StatementImpl<any>>({
+    label: "Statement",
+    evaluate(fiber) {
+      const span = internalEffect.makeSpanUnsafe(fiber, "sql.execute", { kind: "client" })
+      const clock = fiber.getRef(Clock)
+      const timingEnabled = fiber.getRef(TracerTimingEnabled)
+      return Effect.onExit(
+        this.withConnectionSpan(
+          "execute",
+          (connection, sql, params) => connection.execute(sql, params, this.transformRows),
+          false,
+          span
+        ),
+        (exit) => internalEffect.endSpan(span, exit, clock, timingEnabled)
+      )
+    }
+  }),
   [FragmentTypeId]: FragmentTypeId,
   withConnection<XA, E>(
     this: StatementImpl<any>,
@@ -1220,23 +1233,6 @@ const StatementProto: Omit<
     withoutTransform?: boolean | undefined
   ) {
     return this.compiler.compile(this, withoutTransform ?? false)
-  },
-  [core.evaluate as any](
-    this: StatementImpl<any>,
-    fiber: Fiber.Fiber<any, any>
-  ): Effect.Effect<ReadonlyArray<any>, SqlError> {
-    const span = internalEffect.makeSpanUnsafe(fiber, "sql.execute", { kind: "client" })
-    const clock = fiber.getRef(Clock)
-    const timingEnabled = fiber.getRef(TracerTimingEnabled)
-    return Effect.onExit(
-      this.withConnectionSpan(
-        "execute",
-        (connection, sql, params) => connection.execute(sql, params, this.transformRows),
-        false,
-        span
-      ),
-      (exit) => internalEffect.endSpan(span, exit, clock, timingEnabled)
-    )
   },
   toJSON(this: StatementImpl<any>) {
     const [sql, params] = this.compile()

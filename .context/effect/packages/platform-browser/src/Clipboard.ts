@@ -1,10 +1,10 @@
 /**
  * @since 1.0.0
  */
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as ServiceMap from "effect/ServiceMap"
 
 const TypeId = "~@effect/platform-browser/Clipboard"
 const ErrorTypeId = "~@effect/platform-browser/Clipboard/ClipboardError"
@@ -38,7 +38,7 @@ export class ClipboardError extends Data.TaggedError("ClipboardError")<{
  * @since 1.0.0
  * @category Service
  */
-export const Clipboard: ServiceMap.Service<Clipboard, Clipboard> = ServiceMap.Service<Clipboard>(TypeId)
+export const Clipboard: Context.Service<Clipboard, Clipboard> = Context.Service<Clipboard>(TypeId)
 
 /**
  * @since 1.0.0

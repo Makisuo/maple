@@ -3,13 +3,13 @@
  *
  * Build a layer dynamically from an Effect / Config with `Layer.unwrap`.
  */
-import { Config, Effect, Layer, Schema, ServiceMap } from "effect"
+import { Config, Context, Effect, Layer, Schema } from "effect"
 
 export class MessageStoreError extends Schema.TaggedErrorClass<MessageStoreError>()("MessageStoreError", {
   cause: Schema.Defect
 }) {}
 
-export class MessageStore extends ServiceMap.Service<MessageStore, {
+export class MessageStore extends Context.Service<MessageStore, {
   append(message: string): Effect.Effect<void>
   readonly all: Effect.Effect<ReadonlyArray<string>>
 }>()("myapp/MessageStore") {

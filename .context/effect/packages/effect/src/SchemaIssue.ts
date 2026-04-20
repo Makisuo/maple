@@ -79,6 +79,7 @@
  * @since 4.0.0
  */
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import * as Arr from "./Array.ts"
 import { format, formatPath, type Formatter as FormatterI } from "./Formatter.ts"
 import * as InternalAnnotations from "./internal/schema/annotations.ts"
 import * as Option from "./Option.ts"
@@ -867,30 +868,42 @@ export function getActual(issue: Issue): Option.Option<unknown> {
   }
 }
 
+function makeFilterIssue(input: unknown, entry: Schema.FilterIssue): Issue {
+  if (isIssue(entry)) {
+    return entry
+  }
+  if (typeof entry === "string") {
+    return new InvalidValue(Option.some(input), { message: entry })
+  }
+  const inner = typeof entry.issue === "string"
+    ? new InvalidValue(Option.some(input), { message: entry.issue })
+    : entry.issue
+  return new Pointer(entry.path, inner)
+}
+
 /** @internal */
-export function make(
-  input: unknown,
-  out: undefined | boolean | string | Issue | {
-    readonly path: ReadonlyArray<PropertyKey>
-    readonly message: string
-  }
-) {
-  if (isIssue(out)) {
-    return out
-  }
+export function makeSingle(input: unknown, out: undefined | boolean | Schema.FilterIssue): Issue | undefined {
   if (out === undefined) {
     return undefined
   }
   if (typeof out === "boolean") {
     return out ? undefined : new InvalidValue(Option.some(input))
   }
-  if (typeof out === "string") {
-    return new InvalidValue(Option.some(input), { message: out })
+  return makeFilterIssue(input, out)
+}
+
+/** @internal */
+export function make(input: unknown, ast: AST.AST, out: Schema.FilterOutput): Issue | undefined {
+  if (Array.isArray(out)) {
+    if (Arr.isReadonlyArrayNonEmpty(out)) {
+      if (out.length === 1) {
+        return makeFilterIssue(input, out[0])
+      }
+      return new Composite(ast, Option.some(input), Arr.map(out, (entry) => makeFilterIssue(input, entry)))
+    }
+    return undefined
   }
-  return new Pointer(
-    out.path,
-    new InvalidValue(Option.some(input), { message: out.message })
-  )
+  return makeSingle(input, out as undefined | boolean | Schema.FilterIssue)
 }
 
 /**

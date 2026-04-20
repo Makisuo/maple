@@ -142,8 +142,13 @@ export const makeNormalizedUnsafe = (value: bigint, scale: number): BigDecimal =
 
 const bigint0 = BigInt(0)
 const bigint1 = BigInt(1)
+const bigint_1 = BigInt(-1)
+const bigint2 = BigInt(2)
+const bigint5 = BigInt(5)
+const bigint_5 = BigInt(-5)
 const bigint10 = BigInt(10)
 const zero = makeNormalizedUnsafe(bigint0, 0)
+const one = makeNormalizedUnsafe(bigint1, 0)
 
 /**
  * Normalizes a given `BigDecimal` by removing trailing zeros.
@@ -275,6 +280,31 @@ export const sum: {
 })
 
 /**
+ * Takes an `Iterable` of `BigDecimal`s and returns their sum as a single `BigDecimal`.
+ *
+ * @example
+ * ```ts
+ * import { fromStringUnsafe, sumAll } from "effect/BigDecimal"
+ * import * as assert from "node:assert"
+ *
+ * assert.deepStrictEqual(
+ *   sumAll([fromStringUnsafe("2"), fromStringUnsafe("3"), fromStringUnsafe("4")]),
+ *   fromStringUnsafe("9")
+ * )
+ * ```
+ *
+ * @since 4.0.0
+ * @category math
+ */
+export const sumAll = (collection: Iterable<BigDecimal>): BigDecimal => {
+  let out: BigDecimal = zero
+  for (const n of collection) {
+    out = sum(out, n)
+  }
+  return out
+}
+
+/**
  * Provides a multiplication operation on `BigDecimal`s.
  *
  * @example
@@ -301,6 +331,34 @@ export const multiply: {
 
   return make(self.value * that.value, self.scale + that.scale)
 })
+
+/**
+ * Takes an `Iterable` of `BigDecimal`s and returns their multiplication as a single `BigDecimal`.
+ *
+ * @example
+ * ```ts
+ * import { fromStringUnsafe, multiplyAll } from "effect/BigDecimal"
+ * import * as assert from "node:assert"
+ *
+ * assert.deepStrictEqual(
+ *   multiplyAll([fromStringUnsafe("2"), fromStringUnsafe("3"), fromStringUnsafe("4")]),
+ *   fromStringUnsafe("24")
+ * )
+ * ```
+ *
+ * @since 4.0.0
+ * @category math
+ */
+export const multiplyAll = (collection: Iterable<BigDecimal>): BigDecimal => {
+  let out: BigDecimal = one
+  for (const n of collection) {
+    if (n.value === bigint0) {
+      return zero
+    }
+    out = multiply(out, n)
+  }
+  return out
+}
 
 /**
  * Provides a subtraction operation on `BigDecimal`s.
@@ -1394,32 +1452,32 @@ export const round: {
       return (isPositive(self) ? ceil(self, scale) : floor(self, scale))
 
     case "half-ceil":
-      return floor(sum(self, make(5n, scale + 1)), scale)
+      return floor(sum(self, make(bigint5, scale + 1)), scale)
 
     case "half-floor":
-      return ceil(sum(self, make(-5n, scale + 1)), scale)
+      return ceil(sum(self, make(bigint_5, scale + 1)), scale)
 
     case "half-to-zero":
       return isNegative(self)
-        ? floor(sum(self, make(5n, scale + 1)), scale)
-        : ceil(sum(self, make(-5n, scale + 1)), scale)
+        ? floor(sum(self, make(bigint5, scale + 1)), scale)
+        : ceil(sum(self, make(bigint_5, scale + 1)), scale)
 
     case "half-from-zero":
       return isNegative(self)
-        ? ceil(sum(self, make(-5n, scale + 1)), scale)
-        : floor(sum(self, make(5n, scale + 1)), scale)
+        ? ceil(sum(self, make(bigint_5, scale + 1)), scale)
+        : floor(sum(self, make(bigint5, scale + 1)), scale)
   }
 
-  const halfCeil = floor(sum(self, make(5n, scale + 1)), scale)
-  const halfFloor = ceil(sum(self, make(-5n, scale + 1)), scale)
+  const halfCeil = floor(sum(self, make(bigint5, scale + 1)), scale)
+  const halfFloor = ceil(sum(self, make(bigint_5, scale + 1)), scale)
   const digit = digitAt(halfCeil, scale)
 
   switch (mode) {
     case "half-even":
-      return equals(halfCeil, halfFloor) ? halfCeil : (digit % 2n === 0n) ? halfCeil : halfFloor
+      return equals(halfCeil, halfFloor) ? halfCeil : (digit % bigint2 === bigint0) ? halfCeil : halfFloor
 
     case "half-odd":
-      return equals(halfCeil, halfFloor) ? halfCeil : (digit % 2n === 0n) ? halfFloor : halfCeil
+      return equals(halfCeil, halfFloor) ? halfCeil : (digit % bigint2 === bigint0) ? halfFloor : halfCeil
   }
 })
 
@@ -1453,7 +1511,7 @@ export const truncate: {
   }
 
   // BigInt division truncates towards zero
-  return make(self.value / (10n ** BigInt(self.scale - scale)), scale)
+  return make(self.value / (bigint10 ** BigInt(self.scale - scale)), scale)
 })
 
 /**
@@ -1481,7 +1539,7 @@ export const ceil: {
   const truncated = truncate(self, scale)
 
   if (isPositive(self) && isLessThan(truncated, self)) {
-    return sum(truncated, make(1n, scale))
+    return sum(truncated, make(bigint1, scale))
   }
 
   return truncated
@@ -1499,11 +1557,11 @@ export const digitAt: {
   (self: BigDecimal, scale: number): bigint
 } = dual(2, (self: BigDecimal, scale: number): bigint => {
   if (self.scale < scale) {
-    return 0n
+    return bigint0
   }
 
-  const scaled = self.value / (10n ** BigInt(self.scale - scale))
-  return scaled % 10n
+  const scaled = self.value / (bigint10 ** BigInt(self.scale - scale))
+  return scaled % bigint10
 })
 
 /**
@@ -1534,7 +1592,7 @@ export const floor: {
   const truncated = truncate(self, scale)
 
   if (isNegative(self) && isGreaterThan(truncated, self)) {
-    return sum(truncated, make(-1n, scale))
+    return sum(truncated, make(bigint_1, scale))
   }
 
   return truncated

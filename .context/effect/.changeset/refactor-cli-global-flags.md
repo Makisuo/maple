@@ -4,7 +4,7 @@
 
 Refactor CLI built-in options to use Effect services with `GlobalFlag`
 
-Built-in CLI flags (`--help`, `--version`, `--completions`, `--log-level`) are now implemented as Effect services using `ServiceMap.Reference`. This provides:
+Built-in CLI flags (`--help`, `--version`, `--completions`, `--log-level`) are now implemented as Effect services using `Context.Reference`. This provides:
 
 - **Visibility**: Built-in flags now appear in help output's "GLOBAL FLAGS" section
 - **Extensibility**: Users can register custom global flags via `GlobalFlag.add`

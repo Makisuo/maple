@@ -297,6 +297,20 @@ describe("remainder", () => {
   it("returns NaN when the divisor is zero", () => {
     assertNaN(N.remainder(5, 0))
   })
+
+  it("handles small floats / scientific notation", () => {
+    const divisor = 1e-7
+
+    // Valid multiples (integer * 1e-7)
+    assert.strictEqual(N.remainder(0, divisor), 0)
+    assert.strictEqual(N.remainder(1e-7, divisor), 0)
+    assert.strictEqual(N.remainder(2e-7, divisor), 0)
+    assert.strictEqual(N.remainder(3e-7, divisor), 0)
+
+    // Invalid — 2.5 and 1.5 are not integers
+    assert.notStrictEqual(N.remainder(2.5e-7, divisor), 0)
+    assert.notStrictEqual(N.remainder(1.5e-7, divisor), 0)
+  })
 })
 
 describe("nextPow2", () => {

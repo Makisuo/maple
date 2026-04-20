@@ -1,7 +1,7 @@
 import { Generated, OpenAiClient, OpenAiLanguageModel, OpenAiTool } from "@effect/ai-openai"
 import { assert, describe, it } from "@effect/vitest"
 import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
-import { Array, Effect, Layer, Redacted, Ref, Schema, ServiceMap, Stream } from "effect"
+import { Array, Context, Effect, Layer, Redacted, Ref, Schema, Stream } from "effect"
 import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai"
 import { HttpClient, type HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 
@@ -414,6 +414,96 @@ describe("OpenAiLanguageModel", () => {
           strictEqual(tool.description, "A test tool")
           strictEqual(tool.strict, true)
         }).pipe(Effect.provide([makeTestLayer(), TestToolkitLayer])))
+
+      it.effect("empty object on properties for empty parameters", () =>
+        Effect.gen(function*() {
+          const EmptyTool = Tool.make("EmptyParamsTool", {
+            description: "Empty params tool",
+            parameters: Tool.EmptyParams,
+            success: Schema.String
+          })
+          const toolkit = Toolkit.make(EmptyTool)
+          const toolkitLayer = toolkit.toLayer({
+            EmptyParamsTool: () => Effect.succeed("ok")
+          })
+
+          yield* LanguageModel.generateText({
+            prompt: "Use the tool",
+            toolkit
+          }).pipe(Effect.provide([OpenAiLanguageModel.model("gpt-4o-mini"), toolkitLayer]))
+
+          const requests = yield* MockHttpClient.requests
+          const body = yield* getRequestBody(requests[0])
+
+          const tool = body.tools?.find((t: any) => t.type === "function" && t.name === "EmptyParamsTool")
+          assert.isDefined(tool)
+          deepStrictEqual(tool.parameters, {
+            type: "object",
+            properties: {},
+            additionalProperties: false
+          })
+        }).pipe(Effect.provide(makeTestLayer())))
+
+      it.effect("converts dynamic tools to function type", () =>
+        Effect.gen(function*() {
+          const inputSchema = {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+              limit: { type: "number" }
+            },
+            required: ["query"],
+            additionalProperties: false
+          } as const
+
+          const DynamicTool = Tool.dynamic("DynamicTool", {
+            description: "A dynamic tool",
+            parameters: inputSchema
+          })
+
+          yield* LanguageModel.generateText({
+            prompt: "Use the dynamic tool",
+            toolkit: Toolkit.make(DynamicTool),
+            disableToolCallResolution: true
+          }).pipe(Effect.provide(OpenAiLanguageModel.model("gpt-4o-mini")))
+
+          const requests = yield* MockHttpClient.requests
+          const body = yield* getRequestBody(requests[0])
+
+          const tool = body.tools?.find((entry: any) => entry.type === "function" && entry.name === "DynamicTool")
+          assert.isDefined(tool)
+          strictEqual(tool.description, "A dynamic tool")
+          deepStrictEqual(tool.parameters, inputSchema)
+        }).pipe(Effect.provide(makeTestLayer())))
+
+      it.effect("empty object on properties for empty parameters", () =>
+        Effect.gen(function*() {
+          const EmptyTool = Tool.make("EmptyParamsTool", {
+            description: "Empty params tool",
+            parameters: Tool.EmptyParams,
+            success: Schema.String
+          })
+          const toolkit = Toolkit.make(EmptyTool)
+          const toolkitLayer = toolkit.toLayer({
+            EmptyParamsTool: () => Effect.succeed("ok")
+          })
+
+          yield* LanguageModel.generateText({
+            prompt: "Use the tool",
+            toolkit
+          }).pipe(Effect.provide([OpenAiLanguageModel.model("gpt-4o-mini"), toolkitLayer]))
+
+          const requests = yield* MockHttpClient.requests
+          const body = yield* getRequestBody(requests[0])
+
+          const tool = body.tools?.find((t: any) => t.type === "function" && t.name === "EmptyParamsTool")
+          assert.isDefined(tool)
+          deepStrictEqual(tool.parameters, {
+            type: "object",
+            properties: {},
+            additionalProperties: false
+          })
+        }).pipe(Effect.provide(makeTestLayer())))
 
       it.effect("handles tool choice auto", () =>
         Effect.gen(function*() {
@@ -1010,13 +1100,13 @@ describe("OpenAiLanguageModel", () => {
 // Test Infrastructure
 // =============================================================================
 
-class MockOpenAiResponse extends ServiceMap.Service<MockOpenAiResponse, {
+class MockOpenAiResponse extends Context.Service<MockOpenAiResponse, {
   readonly status: number
   readonly body: Generated.Response
   readonly headers?: Record<string, string> | undefined
 }>()("MockOpenAiResponse") {}
 
-class MockHttpClient extends ServiceMap.Service<MockHttpClient, {
+class MockHttpClient extends Context.Service<MockHttpClient, {
   readonly requests: Effect.Effect<ReadonlyArray<HttpClientRequest.HttpClientRequest>>
 }>()("MockHttpClient") {
   static requests = Effect.service(MockHttpClient).pipe(
@@ -1046,12 +1136,12 @@ const makeHttpClient = Effect.gen(function*() {
     Effect.succeed as HttpClient.HttpClient.Preprocess<HttpClientError.HttpClientError, never>
   )
 
-  return ServiceMap.make(HttpClient.HttpClient, httpClient).pipe(
-    ServiceMap.add(MockHttpClient, MockHttpClient.of({ requests: Ref.get(capturedRequests) }))
+  return Context.make(HttpClient.HttpClient, httpClient).pipe(
+    Context.add(MockHttpClient, MockHttpClient.of({ requests: Ref.get(capturedRequests) }))
   )
 })
 
-const HttpClientLayer = Layer.effectServices(makeHttpClient)
+const HttpClientLayer = Layer.effectContext(makeHttpClient)
 
 const makeStreamTestLayer = (events: ReadonlyArray<typeof Generated.ResponseStreamEvent.Type>) => {
   const response = HttpClientResponse.fromWeb(

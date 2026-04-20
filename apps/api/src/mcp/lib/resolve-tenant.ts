@@ -4,15 +4,34 @@ import type { TenantContext as McpTenantContext } from "@/lib/tenant-context"
 import { AuthService } from "@/services/AuthService"
 import { ApiKeysService } from "@/services/ApiKeysService"
 import { Env } from "@/services/Env"
-import { OrgId, RoleName, UserId } from "@maple/domain/http"
+import { ActorId, OrgId, RoleName, UserId } from "@maple/domain/http"
 import { API_KEY_PREFIX } from "@maple/db"
 import { McpAuthMissingError, McpAuthInvalidError, McpInvalidTenantError, McpTenantError } from "../tools/types"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
 const decodeUserId = Schema.decodeUnknownEffect(UserId)
+const decodeActorIdOption = Schema.decodeUnknownOption(ActorId)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const apiKeyDefaultRoles = [decodeRoleNameSync("root")]
+
+const AGENT_ACTOR_HEADER = "x-maple-agent-id"
+
+const extractAgentActorIdFromMetadata = (
+  metadataJson: string | null,
+): string | null => {
+  if (!metadataJson) return null
+  try {
+    const parsed = JSON.parse(metadataJson)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const candidate = (parsed as Record<string, unknown>).agentActorId
+      return typeof candidate === "string" ? candidate : null
+    }
+  } catch {
+    // fall through
+  }
+  return null
+}
 
 const toHeaderRecord = (headers: Headers): Record<string, string> => {
   const record: Record<string, string> = {}
@@ -121,7 +140,28 @@ export const resolveMcpTenantContext = (
           field: "userId",
         })),
       )
-      return { orgId: validOrgId, userId: validUserId, roles: apiKeyDefaultRoles, authMode: "self_hosted" } as McpTenantContext
+
+      // Actor resolution: prefer an explicit agent override header, else the
+      // key's pinned agentActorId metadata. Both must be a valid ActorId; we
+      // silently drop malformed values rather than failing the request.
+      const keyActorId = extractAgentActorIdFromMetadata(
+        resolved.value.metadataJson,
+      )
+      const headerActorId = request.headers.get(AGENT_ACTOR_HEADER)
+      const actorIdCandidate = headerActorId ?? keyActorId
+      const actorIdOpt =
+        actorIdCandidate == null
+          ? Option.none<ReturnType<typeof decodeActorIdOption> extends Option.Option<infer A> ? A : never>()
+          : decodeActorIdOption(actorIdCandidate)
+      const actorId = Option.getOrUndefined(actorIdOpt)
+
+      return {
+        orgId: validOrgId,
+        userId: validUserId,
+        roles: apiKeyDefaultRoles,
+        authMode: "self_hosted",
+        ...(actorId ? { actorId } : {}),
+      } as McpTenantContext
     }
   }
 

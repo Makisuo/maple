@@ -1,9 +1,9 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Option from "../../Option.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Prompt from "./Prompt.ts"
 
 /**
@@ -29,9 +29,7 @@ export interface Service {
  * @since 4.0.0
  * @category Services
  */
-export class ResponseIdTracker
-  extends ServiceMap.Service<ResponseIdTracker, Service>()("effect/ai/ResponseIdTracker")
-{}
+export class ResponseIdTracker extends Context.Service<ResponseIdTracker, Service>()("effect/ai/ResponseIdTracker") {}
 
 /**
  * @since 4.0.0

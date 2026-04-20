@@ -1,14 +1,13 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
-import * as Hash from "../../Hash.ts"
 import * as Layer from "../../Layer.ts"
 import type { ReadonlyRecord } from "../../Record.ts"
 import * as Schema from "../../Schema.ts"
 import type { Scope } from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import type { Mutable, NoInfer } from "../../Types.ts"
 import * as Headers from "../http/Headers.ts"
@@ -27,17 +26,16 @@ import * as Reactivity from "./Reactivity.ts"
  * @category Models
  */
 export interface AtomRpcClient<Self, Id extends string, Rpcs extends Rpc.Any> extends
-  ServiceMap.Service<
+  Context.Service<
     Self,
     RpcClient.RpcClient.Flat<Rpcs, RpcClientError>
   >
 {
-  new(_: never): ServiceMap.ServiceClass.Shape<
+  new(_: never): Context.ServiceClass.Shape<
     Id,
     RpcClient.RpcClient.Flat<Rpcs, RpcClientError>
   >
 
-  readonly layer: Layer.Layer<Self>
   readonly runtime: Atom.AtomRuntime<Self>
 
   readonly mutation: <Tag extends Rpc.Tag<Rpcs>>(
@@ -74,6 +72,7 @@ export interface AtomRpcClient<Self, Id extends string, Rpcs extends Rpc.Any> ex
         | ReadonlyRecord<string, ReadonlyArray<unknown>>
         | undefined
       readonly timeToLive?: Duration.Input | undefined
+      readonly serializationKey?: string | undefined
     }
   ) => Rpc.ExtractTag<Rpcs, Tag> extends Rpc.Rpc<
     infer _Tag,
@@ -120,7 +119,9 @@ export const Service = <Self>() =>
   id: Id,
   options: {
     readonly group: RpcGroup.RpcGroup<Rpcs>
-    readonly protocol: Layer.Layer<Exclude<NoInfer<RM>, Scope>, ER>
+    readonly protocol:
+      | Layer.Layer<Exclude<NoInfer<RM>, Scope>, ER>
+      | ((get: Atom.AtomContext) => Layer.Layer<Exclude<NoInfer<RM>, Scope>, ER>)
     readonly spanPrefix?: string | undefined
     readonly spanAttributes?: Record<string, unknown> | undefined
     readonly generateRequestId?: (() => RequestId) | undefined
@@ -135,12 +136,12 @@ export const Service = <Self>() =>
     readonly runtime?: Atom.RuntimeFactory | undefined
   }
 ): AtomRpcClient<Self, Id, Rpcs> => {
-  const self: Mutable<AtomRpcClient<Self, Id, Rpcs>> = ServiceMap.Service<
+  const self: Mutable<AtomRpcClient<Self, Id, Rpcs>> = Context.Service<
     Self,
     RpcClient.RpcClient.Flat<Rpcs, RpcClientError>
   >()(id) as any
 
-  self.layer = Layer.effect(
+  const layer = Layer.effect(
     self,
     options.makeEffect ??
       (RpcClient.make(options.group, {
@@ -151,9 +152,19 @@ export const Service = <Self>() =>
         never,
         RM
       >)
-  ).pipe(Layer.provide(Layer.orDie(options.protocol)))
+  )
   const runtimeFactory = options.runtime ?? Atom.runtime
-  self.runtime = runtimeFactory(self.layer)
+  self.runtime = runtimeFactory(
+    typeof options.protocol === "function" ?
+      (get) =>
+        Layer.provide(
+          layer,
+          Layer.orDie(
+            (options.protocol as ((get: Atom.AtomContext) => Layer.Layer<Exclude<NoInfer<RM>, Scope>, ER>))(get)
+          )
+        ) :
+      Layer.provide(layer, Layer.orDie(options.protocol))
+  )
 
   self.mutation = Atom.family(<Tag extends Rpc.Tag<Rpcs>>(tag: Tag) => {
     const rpc = options.group.requests.get(tag)! as any as Rpc.AnyWithProps
@@ -168,10 +179,10 @@ export const Service = <Self>() =>
       Effect.fnUntraced(function*({ headers, payload, reactivityKeys }) {
         const client = yield* self
         const effect = client(tag, payload, { headers } as any)
-        return yield* reactivityKeys
-          ? Reactivity.mutation(effect, reactivityKeys)
-          : effect
-      }) as any
+        return yield* (reactivityKeys
+          ? Reactivity.mutation(effect, reactivityKeys) as Effect.Effect<any>
+          : effect as any as Effect.Effect<any>)
+      })
     ).pipe(
       Atom.serializable({
         key: `AtomRpc:mutation:${tag}`,
@@ -201,9 +212,9 @@ export const Service = <Self>() =>
         : self.runtime.atom(
           self.use((client) => client(tag, payload, { headers } as any)) as any
         )
-      if (!isStream) {
+      if (!isStream && key.serializationKey) {
         atom = Atom.serializable(atom, {
-          key: makeSerializableKey(key),
+          key: `AtomRpc:${key.tag}:${key.serializationKey}`,
           schema: AsyncResult.Schema({
             success: rpc.successSchema,
             error: makeErrorSchema(rpc)
@@ -231,9 +242,10 @@ export const Service = <Self>() =>
         | ReadonlyRecord<string, ReadonlyArray<unknown>>
         | undefined
       readonly timeToLive?: Duration.Input | undefined
+      readonly serializationKey?: string | undefined
     }
-  ) =>
-    queryFamily({
+  ) => {
+    const key: QueryKey = {
       tag,
       payload,
       headers: options?.headers
@@ -242,8 +254,11 @@ export const Service = <Self>() =>
       reactivityKeys: options?.reactivityKeys,
       timeToLive: options?.timeToLive
         ? Duration.fromInputUnsafe(options.timeToLive)
-        : undefined
-    }) as any
+        : undefined,
+      serializationKey: options?.serializationKey
+    }
+    return queryFamily(key) as any
+  }
 
   return self as AtomRpcClient<Self, Id, Rpcs>
 }
@@ -251,12 +266,13 @@ export const Service = <Self>() =>
 interface QueryKey {
   tag: string
   payload: any
-  headers?: Headers.Headers | undefined
-  reactivityKeys?:
+  headers: Headers.Headers | undefined
+  reactivityKeys:
     | ReadonlyArray<unknown>
     | ReadonlyRecord<string, ReadonlyArray<unknown>>
     | undefined
-  timeToLive?: Duration.Duration | undefined
+  timeToLive: Duration.Duration | undefined
+  serializationKey: string | undefined
 }
 
 const makeErrorSchema = (rpc: Rpc.AnyWithProps): Schema.Top =>
@@ -265,5 +281,3 @@ const makeErrorSchema = (rpc: Rpc.AnyWithProps): Schema.Top =>
     ...Array.from(rpc.middlewares, (middleware) => middleware.error),
     RpcClientError
   ])
-
-const makeSerializableKey = (key: QueryKey): string => `AtomRpc:${key.tag}:${Hash.hash(key)}`

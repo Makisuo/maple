@@ -11,7 +11,6 @@ import type * as Schema from "../../Schema.ts"
 import type * as CliError from "./CliError.ts"
 import * as Param from "./Param.ts"
 import type * as Primitive from "./Primitive.ts"
-import type * as Prompt from "./Prompt.ts"
 
 // -------------------------------------------------------------------------------------
 // models
@@ -353,9 +352,9 @@ export const withFallbackConfig: {
  * @category combinators
  */
 export const withFallbackPrompt: {
-  <B>(prompt: Prompt.Prompt<B>): <A>(self: Argument<A>) => Argument<A | B>
-  <A, B>(self: Argument<A>, prompt: Prompt.Prompt<B>): Argument<A | B>
-} = dual(2, <A, B>(self: Argument<A>, prompt: Prompt.Prompt<B>) => Param.withFallbackPrompt(self, prompt))
+  <B>(prompt: Param.FallbackPrompt<B>): <A>(self: Argument<A>) => Argument<A | B>
+  <A, B>(self: Argument<A>, prompt: Param.FallbackPrompt<B>): Argument<A | B>
+} = dual(2, <A, B>(self: Argument<A>, prompt: Param.FallbackPrompt<B>) => Param.withFallbackPrompt(self, prompt))
 
 /**
  * Creates a variadic positional argument that accepts multiple values.

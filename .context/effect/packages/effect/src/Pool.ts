@@ -3,6 +3,7 @@
  */
 import type * as Cause from "./Cause.ts"
 import { Clock } from "./Clock.ts"
+import * as Context from "./Context.ts"
 import * as Duration from "./Duration.ts"
 import * as Effect from "./Effect.ts"
 import type * as Exit from "./Exit.ts"
@@ -16,7 +17,6 @@ import * as Queue from "./Queue.ts"
 import { UnhandledLogLevel } from "./References.ts"
 import * as Scope from "./Scope.ts"
 import * as Semaphore from "./Semaphore.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 const TypeId = "~effect/Pool"
 
@@ -195,11 +195,11 @@ export const makeWithStrategy = <A, E, R>(options: {
   readonly strategy: Strategy<A, E>
 }): Effect.Effect<Pool<A, E>, never, Scope.Scope | R> =>
   Effect.uninterruptibleMask(Effect.fnUntraced(function*(restore) {
-    const services = yield* Effect.services<R | Scope.Scope>()
-    const scope = ServiceMap.get(services, Scope.Scope)
-    const acquire = Effect.updateServices(
+    const services = yield* Effect.context<R | Scope.Scope>()
+    const scope = Context.get(services, Scope.Scope)
+    const acquire = Effect.updateContext(
       options.acquire,
-      (input) => ServiceMap.merge(services, input)
+      (input) => Context.merge(services, input)
     ) as Effect.Effect<A, E, Scope.Scope>
     const concurrency = options.concurrency ?? 1
 

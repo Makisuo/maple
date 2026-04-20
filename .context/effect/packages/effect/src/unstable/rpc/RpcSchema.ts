@@ -2,12 +2,12 @@
  * @since 4.0.0
  */
 import * as Cause from "../../Cause.ts"
+import * as Context from "../../Context.ts"
 import { constUndefined } from "../../Function.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
 import type * as AST from "../../SchemaAST.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream_ from "../../Stream.ts"
 
 const StreamSchemaTypeId = "~effect/rpc/RpcSchema/StreamSchema"
@@ -47,7 +47,7 @@ export interface Stream<A extends Schema.Top, E extends Schema.Top> extends
     Stream<A, E>
   >
 {
-  readonly "~rebuild.out": this
+  readonly "Rebuild": Stream<A, E>
   readonly [StreamSchemaTypeId]: typeof StreamSchemaTypeId
   readonly success: A
   readonly error: E
@@ -67,9 +67,9 @@ export function Stream<A extends Schema.Top, E extends Schema.Top>(success: A, e
  * @since 4.0.0
  * @category Cause annotations
  */
-export class ClientAbort extends ServiceMap.Service<ClientAbort, true>()("effect/rpc/RpcSchema/ClientAbort") {
-  static annotation = this.serviceMap(true).pipe(
-    ServiceMap.add(Cause.StackTrace, {
+export class ClientAbort extends Context.Service<ClientAbort, true>()("effect/rpc/RpcSchema/ClientAbort") {
+  static annotation = this.context(true).pipe(
+    Context.add(Cause.StackTrace, {
       name: "ClientAbort",
       stack: constUndefined,
       parent: undefined

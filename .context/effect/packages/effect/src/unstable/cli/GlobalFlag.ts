@@ -3,15 +3,15 @@
  */
 
 import * as Console from "../../Console.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import type { LogLevel as LogLevelType } from "../../LogLevel.ts"
 import * as Option from "../../Option.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as CliOutput from "./CliOutput.ts"
 import type * as Command from "./Command.ts"
 import * as Completions_ from "./Completions.ts"
 import * as Flag from "./Flag.ts"
-import * as CommandDescriptor from "./internal/completions/CommandDescriptor.ts"
+import * as CommandDescriptor from "./internal/completions/descriptor.ts"
 import * as HelpInternal from "./internal/help.ts"
 
 /* ========================================================================== */
@@ -51,7 +51,7 @@ export interface Action<A> {
  * @since 4.0.0
  * @category models
  */
-export interface Setting<Id extends string, A> extends ServiceMap.Service<Setting.Identifier<Id>, A> {
+export interface Setting<Id extends string, A> extends Context.Service<Setting.Identifier<Id>, A> {
   readonly _tag: "Setting"
   readonly id: Id
   readonly flag: Flag.Flag<A>
@@ -111,7 +111,7 @@ export const setting = <const Id extends string>(
   readonly flag: Flag.Flag<A>
 }): Setting<Id, A> => {
   settingIdCounter += 1
-  const ref = ServiceMap.Service<Setting.Identifier<Id>, A>(
+  const ref = Context.Service<Setting.Identifier<Id>, A>(
     `effect/unstable/cli/GlobalFlag/${id}/${settingIdCounter}`
   )
   return Object.assign(ref, {

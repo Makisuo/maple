@@ -1,10 +1,10 @@
 /**
- * @title ServiceMap.Reference
+ * @title Context.Reference
  *
  * For defining configuration values, feature flags, or any other service that has a default value.
  */
-import { ServiceMap } from "effect"
+import { Context } from "effect"
 
-export const FeatureFlag = ServiceMap.Reference<boolean>("myapp/FeatureFlag", {
+export const FeatureFlag = Context.Reference<boolean>("myapp/FeatureFlag", {
   defaultValue: () => false
 })

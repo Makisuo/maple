@@ -1,9 +1,9 @@
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type { PlatformError } from "effect/PlatformError"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Glob from "./Glob.ts"
 
 const findAnnotation = (content: string): { pattern: string; offset: number } | undefined => {
@@ -67,7 +67,7 @@ export interface BarrelGenerator {
  * @since 1.0.0
  * @category tags
  */
-export const BarrelGenerator: ServiceMap.Service<BarrelGenerator, BarrelGenerator> = ServiceMap.Service(
+export const BarrelGenerator: Context.Service<BarrelGenerator, BarrelGenerator> = Context.Service(
   "@effect/utils/BarrelGenerator"
 )
 

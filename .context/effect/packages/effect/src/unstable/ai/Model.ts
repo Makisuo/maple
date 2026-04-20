@@ -28,11 +28,11 @@
  *
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import { identity } from "../../Function.ts"
 import { PipeInspectableProto, YieldableProto } from "../../internal/core.ts"
 import * as Layer from "../../Layer.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 
 const TypeId = "~effect/ai/Model" as const
 
@@ -80,7 +80,7 @@ export interface Model<in out Provider, in out Provides, in out Requires>
  * @since 4.0.0
  * @category services
  */
-export class ProviderName extends ServiceMap.Service<ProviderName, string>()(
+export class ProviderName extends Context.Service<ProviderName, string>()(
   "effect/unstable/ai/Model/ProviderName"
 ) {}
 
@@ -94,7 +94,7 @@ export class ProviderName extends ServiceMap.Service<ProviderName, string>()(
  * @since 4.0.0
  * @category services
  */
-export class ModelName extends ServiceMap.Service<ModelName, string>()(
+export class ModelName extends Context.Service<ModelName, string>()(
   "effect/unstable/ai/Model/ModelName"
 ) {}
 
@@ -108,8 +108,8 @@ const Proto = {
     _RIn: identity
   },
   asEffect(this: Model<any, any, any>) {
-    return Effect.servicesWith((services: ServiceMap.ServiceMap<never>) =>
-      Effect.succeed(Layer.provide(this, Layer.succeedServices(services)))
+    return Effect.contextWith((context: Context.Context<never>) =>
+      Effect.succeed(Layer.provide(this, Layer.succeedContext(context)))
     )
   },
   toJSON(this: Model<any, any, any>): unknown {
@@ -171,9 +171,9 @@ export const make = <const Provider extends string, const Name extends string, P
     { provider },
     Layer.merge(
       layer,
-      Layer.succeedServices(
-        ProviderName.serviceMap(provider).pipe(
-          ServiceMap.add(ModelName, modelName)
+      Layer.succeedContext(
+        ProviderName.context(provider).pipe(
+          Context.add(ModelName, modelName)
         )
       )
     )

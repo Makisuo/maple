@@ -56,10 +56,10 @@
  *
  * @since 2.0.0
  */
+import type * as Context from "./Context.ts"
 import type * as Duration from "./Duration.ts"
 import type { Effect } from "./Effect.ts"
 import * as effect from "./internal/effect.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 
 /**
  * Represents a time-based clock which provides functionality related to time
@@ -120,7 +120,7 @@ export interface Clock {
  * @category references
  * @since 4.0.0
  */
-export const Clock: ServiceMap.Reference<Clock> = effect.ClockRef
+export const Clock: Context.Reference<Clock> = effect.ClockRef
 
 /**
  * Accesses the current Clock service and uses it to run the provided function.

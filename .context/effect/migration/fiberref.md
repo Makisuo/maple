@@ -1,12 +1,12 @@
-# FiberRef: `FiberRef` → `ServiceMap.Reference`
+# FiberRef: `FiberRef` → `Context.Reference`
 
 In v4, `FiberRef`, `FiberRefs`, `FiberRefsPatch`, and `Differ` have been removed.
-Fiber-local state is now handled by `ServiceMap.Reference` — the same mechanism
+Fiber-local state is now handled by `Context.Reference` — the same mechanism
 used for services with default values.
 
 ## Built-in References
 
-v3's built-in `FiberRef` values are now `ServiceMap.Reference` values exported
+v3's built-in `FiberRef` values are now `Context.Reference` values exported
 from `References` and related modules.
 
 | v3 FiberRef                         | v4 Reference                       |

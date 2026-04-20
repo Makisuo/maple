@@ -1,16 +1,15 @@
 import type * as Generated from "@effect/ai-openai/Generated"
 import * as Errors from "@effect/ai-openai/internal/errors"
 import * as OpenAiClient from "@effect/ai-openai/OpenAiClient"
+import * as OpenAiClientGenerated from "@effect/ai-openai/OpenAiClientGenerated"
+import * as OpenAiConfig from "@effect/ai-openai/OpenAiConfig"
 import { assert, describe, it } from "@effect/vitest"
 import { Config, ConfigProvider, Effect, Layer, Redacted, Schema, Stream } from "effect"
-import * as Fiber from "effect/Fiber"
 import type * as AiError from "effect/unstable/ai/AiError"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import * as Socket from "effect/unstable/socket/Socket"
-import { WS } from "vitest-websocket-mock"
 
 // =============================================================================
 // Mock Helpers
@@ -202,6 +201,157 @@ describe("OpenAiClient", () => {
 
         yield* client.createResponse({ model: "gpt-4o", input: "test" }).pipe(Effect.ignore)
         assert.isTrue(transformApplied)
+      }))
+
+    it.effect("exposes transformed HttpClient via client field", () =>
+      Effect.gen(function*() {
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+        const mockClient = makeMockHttpClient((request) => {
+          capturedRequest = request
+          return Effect.succeed(makeMockResponse({ status: 200, body: {}, request }))
+        })
+
+        const client = yield* OpenAiClient.make({
+          apiKey: Redacted.make("test-key"),
+          transformClient: (client) =>
+            client.pipe(HttpClient.mapRequest(HttpClientRequest.setHeader("x-client-field", "enabled")))
+        }).pipe(Effect.provide(Layer.succeed(HttpClient.HttpClient, mockClient)))
+
+        yield* client.client.execute(HttpClientRequest.get("/responses")).pipe(Effect.ignore)
+
+        assert.isDefined(capturedRequest)
+        assert.isTrue(capturedRequest!.url.startsWith("https://api.openai.com/v1"))
+        assert.strictEqual(capturedRequest!.headers["authorization"], "Bearer test-key")
+        assert.strictEqual(capturedRequest!.headers["x-client-field"], "enabled")
+      }))
+
+    it.effect("applies OpenAiConfig transformClient after options transformClient", () =>
+      Effect.gen(function*() {
+        let optionsTransformApplied = false
+        let configTransformApplied = false
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+
+        const mockClient = makeMockHttpClient((request) => {
+          capturedRequest = request
+          return Effect.succeed(makeMockResponse({ status: 200, body: makeResponseBody(), request }))
+        })
+
+        const client = yield* OpenAiClient.make({
+          apiKey: Redacted.make("test-key"),
+          transformClient: (client) => {
+            optionsTransformApplied = true
+            return client.pipe(
+              HttpClient.mapRequest(HttpClientRequest.setHeader("x-openai-transform", "options"))
+            )
+          }
+        }).pipe(Effect.provide(Layer.succeed(HttpClient.HttpClient, mockClient)))
+
+        yield* client.createResponse({
+          model: "gpt-4o",
+          input: "test"
+        }).pipe(
+          OpenAiConfig.withClientTransform((client) => {
+            configTransformApplied = true
+            return client.pipe(
+              HttpClient.mapRequest(HttpClientRequest.setHeader("x-openai-transform", "config"))
+            )
+          })
+        )
+
+        assert.isTrue(optionsTransformApplied)
+        assert.isTrue(configTransformApplied)
+        assert.isDefined(capturedRequest)
+        assert.strictEqual(capturedRequest!.headers["x-openai-transform"], "config")
+      }))
+  })
+
+  describe("OpenAiClientGenerated", () => {
+    it.effect("sets Bearer token from apiKey", () =>
+      Effect.gen(function*() {
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+        const mockClient = makeMockHttpClient((request) => {
+          capturedRequest = request
+          return Effect.succeed(makeMockResponse({ status: 200, body: makeResponseBody(), request }))
+        })
+
+        const client = yield* OpenAiClientGenerated.make({
+          apiKey: Redacted.make("sk-generated-test")
+        }).pipe(Effect.provide(Layer.succeed(HttpClient.HttpClient, mockClient)))
+
+        yield* client.createResponse({
+          payload: {
+            model: "gpt-4o",
+            input: "test"
+          }
+        })
+
+        assert.isDefined(capturedRequest)
+        assert.strictEqual(capturedRequest!.headers["authorization"], "Bearer sk-generated-test")
+      }))
+
+    it.effect("prepends custom apiUrl", () =>
+      Effect.gen(function*() {
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+        const mockClient = makeMockHttpClient((request) => {
+          capturedRequest = request
+          return Effect.succeed(makeMockResponse({ status: 200, body: makeResponseBody(), request }))
+        })
+
+        const client = yield* OpenAiClientGenerated.make({
+          apiKey: Redacted.make("test-key"),
+          apiUrl: "https://generated.example.test/v2"
+        }).pipe(Effect.provide(Layer.succeed(HttpClient.HttpClient, mockClient)))
+
+        yield* client.createResponse({
+          payload: {
+            model: "gpt-4o",
+            input: "test"
+          }
+        })
+
+        assert.isDefined(capturedRequest)
+        assert.isTrue(capturedRequest!.url.startsWith("https://generated.example.test/v2"))
+      }))
+
+    it.effect("applies OpenAiConfig transformClient after options transformClient", () =>
+      Effect.gen(function*() {
+        let optionsTransformApplied = false
+        let configTransformApplied = false
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+
+        const mockClient = makeMockHttpClient((request) => {
+          capturedRequest = request
+          return Effect.succeed(makeMockResponse({ status: 200, body: makeResponseBody(), request }))
+        })
+
+        const client = yield* OpenAiClientGenerated.make({
+          apiKey: Redacted.make("test-key"),
+          transformClient: (client) => {
+            optionsTransformApplied = true
+            return client.pipe(
+              HttpClient.mapRequest(HttpClientRequest.setHeader("x-openai-transform", "options"))
+            )
+          }
+        }).pipe(Effect.provide(Layer.succeed(HttpClient.HttpClient, mockClient)))
+
+        yield* client.createResponse({
+          payload: {
+            model: "gpt-4o",
+            input: "test"
+          }
+        }).pipe(
+          OpenAiConfig.withClientTransform((client) => {
+            configTransformApplied = true
+            return client.pipe(
+              HttpClient.mapRequest(HttpClientRequest.setHeader("x-openai-transform", "config"))
+            )
+          })
+        )
+
+        assert.isTrue(optionsTransformApplied)
+        assert.isTrue(configTransformApplied)
+        assert.isDefined(capturedRequest)
+        assert.strictEqual(capturedRequest!.headers["x-openai-transform"], "config")
       }))
   })
 
@@ -593,13 +743,23 @@ describe("OpenAiClient", () => {
         assert.strictEqual(parts.length, 3)
         const keepAlive = parts[1]
         assert.strictEqual(keepAlive.type, "keepalive")
-        if (keepAlive.type === "keepalive") {
+        if (keepAlive.type === "keepalive" && "sequence_number" in keepAlive) {
           assert.strictEqual(keepAlive.sequence_number, 2)
         }
 
-        assert.strictEqual(parts[2].type, "response.completed")
-        if (parts[2].type === "response.completed") {
-          assert.strictEqual(parts[2].response.id, "resp_stream")
+        const completed = parts[2]
+        assert.isTrue(typeof completed === "object" && completed !== null && "type" in completed)
+        if (typeof completed === "object" && completed !== null && "type" in completed) {
+          assert.strictEqual(completed.type, "response.completed")
+          if (
+            completed.type === "response.completed" &&
+            "response" in completed &&
+            typeof completed.response === "object" &&
+            completed.response !== null &&
+            "id" in completed.response
+          ) {
+            assert.strictEqual(completed.response.id, "resp_stream")
+          }
         }
       }).pipe(Effect.provide(MainLayer))
     })
@@ -633,57 +793,6 @@ describe("OpenAiClient", () => {
         assert.strictEqual(result._tag, "AiError")
         assert.strictEqual(result.reason._tag, "InternalProviderError")
       }).pipe(Effect.provide(MainLayer))
-    })
-
-    it.effect("sends response.cancel on interrupt in websocket mode", () => {
-      const port = 42345
-      const apiUrl = `http://localhost:${port}/v1`
-      const serverUrl = `ws://localhost:${port}/v1/responses`
-
-      const HttpClientLayer = Layer.succeed(
-        HttpClient.HttpClient,
-        makeMockHttpClient((request) => Effect.succeed(makeMockResponse({ status: 200, body: {}, request })))
-      )
-
-      const MainLayer = OpenAiClient.layer({
-        apiKey: Redacted.make("test-key"),
-        apiUrl
-      }).pipe(Layer.provide(HttpClientLayer))
-
-      return Effect.gen(function*() {
-        const server = yield* Effect.acquireRelease(
-          Effect.sync(() => new WS(serverUrl, { jsonProtocol: true })),
-          (server) =>
-            Effect.sync(() => {
-              server.close()
-              WS.clean()
-            })
-        )
-
-        const client = yield* OpenAiClient.OpenAiClient
-        const fiber = yield* Effect.forkScoped(
-          OpenAiClient.withWebSocketMode(
-            client.createResponseStream({
-              model: "gpt-4o",
-              input: "test"
-            }).pipe(
-              Effect.andThen(([_, stream]) => Stream.runDrain(stream))
-            )
-          ),
-          { startImmediately: true }
-        )
-
-        const createEvent = yield* Effect.promise(() => server.nextMessage as Promise<any>)
-        assert.strictEqual(createEvent.type, "response.create")
-
-        yield* Fiber.interrupt(fiber)
-
-        const cancelEvent = yield* Effect.promise(() => server.nextMessage as Promise<any>)
-        assert.deepStrictEqual(cancelEvent, { type: "response.cancel" })
-      }).pipe(
-        Effect.provide(MainLayer),
-        Effect.provideService(Socket.WebSocketConstructor, (url) => new globalThis.WebSocket(url))
-      )
     })
   })
 })

@@ -6,6 +6,7 @@ import {
   serviceMapEdgesHourly,
   serviceOverviewSpans,
   errorSpans,
+  errorEvents,
   traceDetailSpans,
   traceListMv,
   attributeKeysHourly,
@@ -404,6 +405,82 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
           StatusMessage,
           Duration,
           ResourceAttributes['deployment.environment'] AS DeploymentEnv
+        FROM traces
+        WHERE StatusCode = 'Error'
+      `,
+    }),
+  ],
+});
+
+/**
+ * Materialized view populating error_events from traces where StatusCode='Error'.
+ * Unwraps the first OTel `exception` event and computes a cityHash64
+ * FingerprintHash used to group occurrences into Issues.
+ *
+ * Fingerprint inputs: (OrgId, ServiceName, ExceptionType, top-3 normalized frames, msg fallback).
+ * - Stack lines are filtered to frame-shaped ones (must contain `:NUMBER`), which
+ *   skips language-specific headers like Python's "Traceback..." or Java's
+ *   "Exception: message" that would otherwise leak dynamic message text into the hash.
+ * - Line numbers (`:123`) and hex pointers (`0x...`) are stripped so minor code
+ *   moves don't rotate the fingerprint.
+ * - Top 3 frames are hashed (not just 1) so errors raised inside shared library
+ *   code still distinguish between different call sites.
+ * - When there is no exception event AND no frame-shaped stack lines, falls back
+ *   to a normalized prefix of StatusMessage (IDs/numbers/hex runs redacted) so
+ *   status-only errors don't all collapse into a single issue.
+ *
+ * DeploymentEnv is intentionally NOT part of the hash: the same bug across
+ * staging/prod should stay one issue; filter by env at query/triage time.
+ *
+ * The normalization below is mirrored in `./fingerprint.ts` (TS) for unit tests
+ * across Node/Python/Java/Go stack shapes. If you change one, change both.
+ */
+export const errorEventsMv = defineMaterializedView("error_events_mv", {
+  description:
+    "Materializes per-occurrence error events from traces. Unwraps the first OTel exception event and computes a cityHash64 FingerprintHash for issue grouping.",
+  datasource: errorEvents,
+  nodes: [
+    node({
+      name: "error_events_mv_node",
+      sql: `
+        WITH
+          arrayFirstIndex(n -> n = 'exception', EventsName) AS _ei,
+          if(_ei > 0, EventsAttributes[_ei]['exception.type'], '') AS _exType,
+          if(_ei > 0, EventsAttributes[_ei]['exception.message'], StatusMessage) AS _exMsg,
+          if(_ei > 0, EventsAttributes[_ei]['exception.stacktrace'], '') AS _exStack,
+          arraySlice(
+            arrayFilter(
+              line -> match(line, ':[0-9]+|line [0-9]+'),
+              splitByChar('\\n', _exStack)
+            ),
+            1, 3
+          ) AS _rawFrames,
+          arrayMap(
+            line -> replaceRegexpAll(line, ':[0-9]+|line [0-9]+|0x[0-9a-fA-F]+', ''),
+            _rawFrames
+          ) AS _topFrames,
+          if(length(_topFrames) > 0, _topFrames[1], '') AS _topFrame,
+          arrayStringConcat(_topFrames, '\\n') AS _fpFrames,
+          if(
+            _exType = '' AND _fpFrames = '',
+            replaceRegexpAll(substring(StatusMessage, 1, 200), '[0-9a-fA-F]{8,}|[0-9]+', '#'),
+            ''
+          ) AS _msgFallback
+        SELECT
+          OrgId,
+          toDateTime(Timestamp) AS Timestamp,
+          TraceId,
+          SpanId,
+          ParentSpanId,
+          ServiceName,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          _exType AS ExceptionType,
+          _exMsg AS ExceptionMessage,
+          _exStack AS ExceptionStacktrace,
+          _topFrame AS TopFrame,
+          cityHash64(OrgId, ServiceName, _exType, _fpFrames, _msgFallback) AS FingerprintHash,
+          StatusMessage,
+          Duration
         FROM traces
         WHERE StatusCode = 'Error'
       `,

@@ -2,6 +2,7 @@
  * @since 2.0.0
  */
 import * as Cause from "./Cause.ts"
+import type { Context } from "./Context.ts"
 import * as Deferred from "./Deferred.ts"
 import * as Effect from "./Effect.ts"
 import * as Exit from "./Exit.ts"
@@ -14,7 +15,6 @@ import * as Iterable from "./Iterable.ts"
 import type { Pipeable } from "./Pipeable.ts"
 import * as Predicate from "./Predicate.ts"
 import type * as Scope from "./Scope.ts"
-import type { ServiceMap } from "./ServiceMap.ts"
 
 const TypeId = "~effect/FiberSet"
 
@@ -446,7 +446,7 @@ const runImpl = <A, E, R, XE extends E, XA extends A>(
     if (self.state._tag === "Closed") {
       return Effect.sync(constInterruptedFiber)
     }
-    const fiber = Effect.runForkWith(parent.services as ServiceMap<R>)(effect)
+    const fiber = Effect.runForkWith(parent.context as Context<R>)(effect)
     addUnsafe(self, fiber, options)
     return Effect.succeed(fiber)
   })
@@ -456,12 +456,12 @@ const runImpl = <A, E, R, XE extends E, XA extends A>(
  *
  * @example
  * ```ts
- * import { Effect, FiberSet, ServiceMap } from "effect"
+ * import { Effect, FiberSet, Context } from "effect"
  *
  * interface Users {
  *   readonly _: unique symbol
  * }
- * const Users = ServiceMap.Service<Users, {
+ * const Users = Context.Service<Users, {
  *   getAll: Effect.Effect<Array<unknown>>
  * }>("Users")
  *
@@ -492,7 +492,7 @@ export const runtime: <A, E>(
   R
 > = <A, E>(self: FiberSet<A, E>) => <R>() =>
   Effect.map(
-    Effect.services<R>(),
+    Effect.context<R>(),
     (services) => {
       const runFork = Effect.runForkWith(services)
       return <XE extends E, XA extends A>(

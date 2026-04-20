@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Fiber, Latch, Layer, Option, Schema, ServiceMap } from "effect"
+import { Context, Effect, Exit, Fiber, Latch, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import {
   EntityAddress,
@@ -39,13 +39,13 @@ describe("MessageStorage", () => {
         yield* storage.saveRequest(
           yield* makeRequest({
             rpc: PrimaryKeyTest,
-            payload: PrimaryKeyTest.payloadSchema.makeUnsafe({ id: 123 })
+            payload: PrimaryKeyTest.payloadSchema.make({ id: 123 })
           })
         )
         const result = yield* storage.saveRequest(
           yield* makeRequest({
             rpc: PrimaryKeyTest,
-            payload: PrimaryKeyTest.payloadSchema.makeUnsafe({ id: 123 })
+            payload: PrimaryKeyTest.payloadSchema.make({ id: 123 })
           })
         )
         expect(result._tag).toEqual("Duplicate")
@@ -119,7 +119,8 @@ export const makeRequest = Effect.fnUntraced(function*(options?: {
       sampled: false,
       headers: Headers.empty
     }),
-    services: ServiceMap.empty() as any,
+    annotations: rpc.annotations,
+    context: Context.empty() as any,
     rpc,
     lastReceivedReply: Option.none(),
     respond() {
@@ -151,7 +152,7 @@ export const makeReply = Effect.fnUntraced(function*(request: Message.OutgoingRe
       requestId: request.envelope.requestId,
       exit: Exit.void as any
     }),
-    services: request.services,
+    context: request.context,
     rpc: request.rpc
   })
 })
@@ -181,7 +182,7 @@ export const makeChunkReply = Effect.fnUntraced(function*(request: Message.Outgo
       sequence,
       values: [undefined]
     }),
-    services: request.services,
+    context: request.context,
     rpc: request.rpc
   })
 })
@@ -189,7 +190,7 @@ export const makeChunkReply = Effect.fnUntraced(function*(request: Message.Outgo
 export const makeEmptyReply = (request: Message.OutgoingRequest<any>) => {
   return new Reply.ReplyWithContext({
     reply: Reply.Chunk.emptyFrom(request.envelope.requestId),
-    services: request.services,
+    context: request.context,
     rpc: request.rpc
   })
 }

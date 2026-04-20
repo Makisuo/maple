@@ -2,6 +2,7 @@
  * @since 1.0.0
  */
 import type { Cause } from "effect/Cause"
+import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -11,7 +12,6 @@ import * as Function from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as References from "effect/References"
 import * as Scope from "effect/Scope"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Socket from "effect/unstable/socket/Socket"
 import * as SocketServer from "effect/unstable/socket/SocketServer"
 import type * as Http from "node:http"
@@ -23,7 +23,7 @@ import { NodeWS } from "./NodeSocket.ts"
  * @since 1.0.0
  * @category tags
  */
-export class IncomingMessage extends ServiceMap.Service<
+export class IncomingMessage extends Context.Service<
   IncomingMessage,
   Http.IncomingMessage
 >()("@effect/platform-node-shared/NodeSocketServer/IncomingMessage") {}
@@ -69,7 +69,7 @@ export const make = Effect.fnUntraced(function*(
 
   const run = Effect.fnUntraced(function*<R, E, _>(handler: (socket: Socket.Socket) => Effect.Effect<_, E, R>) {
     const scope = yield* Scope.make()
-    const services = ServiceMap.omit(Scope.Scope)(yield* Effect.services<R>()) as ServiceMap.ServiceMap<R>
+    const services = Context.omit(Scope.Scope)(yield* Effect.context<R>()) as Context.Context<R>
     const trackFiber = Fiber.runIn(scope)
     const prevOnConnection = onConnection
     onConnection = function(conn: Net.Socket) {
@@ -109,7 +109,7 @@ export const make = Effect.fnUntraced(function*(
         ),
         Effect.flatMap(handler),
         Effect.catchCause(reportUnhandledError),
-        Effect.runForkWith(ServiceMap.add(services, NodeSocket.NetSocket, conn)),
+        Effect.runForkWith(Context.add(services, NodeSocket.NetSocket, conn)),
         trackFiber
       )
     }
@@ -202,7 +202,7 @@ export const makeWebSocket: (
 
   const run = Effect.fnUntraced(function*<R, E, _>(handler: (socket: Socket.Socket) => Effect.Effect<_, E, R>) {
     const scope = yield* Scope.make()
-    const services = ServiceMap.omit(Scope.Scope)(yield* Effect.services<R>()) as ServiceMap.ServiceMap<R>
+    const services = Context.omit(Scope.Scope)(yield* Effect.context<R>()) as Context.Context<R>
     const trackFiber = Fiber.runIn(scope)
     const prevOnConnection = onConnection
     onConnection = function(conn: globalThis.WebSocket, req: Http.IncomingMessage) {
@@ -221,7 +221,7 @@ export const makeWebSocket: (
         ),
         Effect.flatMap(handler),
         Effect.catchCause(reportUnhandledError),
-        Effect.runForkWith(ServiceMap.makeUnsafe(map)),
+        Effect.runForkWith(Context.makeUnsafe(map)),
         trackFiber
       )
     }

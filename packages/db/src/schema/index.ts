@@ -3,6 +3,7 @@ export * from "./api-keys";
 export * from "./cloudflare-logpush-connectors";
 export * from "./dashboards";
 export * from "./digest";
+export * from "./errors";
 export * from "./org-ingest-keys";
 export * from "./org-tinybird-settings";
 export * from "./org-tinybird-sync-runs";

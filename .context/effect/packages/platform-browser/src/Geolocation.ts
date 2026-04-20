@@ -2,11 +2,11 @@
  * @since 1.0.0
  */
 import * as Cause from "effect/Cause"
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 
 const TypeId = "~@effect/platform-browser/Geolocation"
@@ -34,7 +34,7 @@ export interface Geolocation {
  * @since 1.0.0
  * @category Service
  */
-export const Geolocation: ServiceMap.Service<Geolocation, Geolocation> = ServiceMap.Service<Geolocation>(TypeId)
+export const Geolocation: Context.Service<Geolocation, Geolocation> = Context.Service<Geolocation>(TypeId)
 
 /**
  * @since 1.0.0

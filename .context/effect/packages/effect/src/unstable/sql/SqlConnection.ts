@@ -1,9 +1,9 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import type { Effect } from "../../Effect.ts"
 import type { Scope } from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type { Stream } from "../../Stream.ts"
 import type { SqlError } from "./SqlError.ts"
 
@@ -55,7 +55,7 @@ export type Acquirer = Effect<Connection, SqlError, Scope>
  * @category tag
  * @since 4.0.0
  */
-export const Connection = ServiceMap.Service<Connection>("effect/sql/SqlConnection")
+export const Connection = Context.Service<Connection>("effect/sql/SqlConnection")
 
 /**
  * @category model

@@ -2,6 +2,7 @@
  * @since 1.0.0
  */
 import * as Cause from "effect/Cause"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import type { LazyArg } from "effect/Function"
 import * as Inspectable from "effect/Inspectable"
@@ -10,7 +11,6 @@ import * as Option from "effect/Option"
 import { type Pipeable, pipeArguments } from "effect/Pipeable"
 import * as Queue from "effect/Queue"
 import type * as Schema from "effect/Schema"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Cookies from "effect/unstable/http/Cookies"
 import * as Headers from "effect/unstable/http/Headers"
@@ -58,7 +58,7 @@ export type XHRResponseType = "arraybuffer" | "text"
  * @since 1.0.0
  * @category References
  */
-export const CurrentXHRResponseType: ServiceMap.Reference<XHRResponseType> = ServiceMap.Reference(
+export const CurrentXHRResponseType: Context.Reference<XHRResponseType> = Context.Reference(
   "@effect/platform-browser/BrowserHttpClient/CurrentXHRResponseType",
   { defaultValue: (): XHRResponseType => "text" }
 )
@@ -80,7 +80,7 @@ export const withXHRArrayBuffer = <A, E, R>(
  * @since 1.0.0
  * @category Services
  */
-export class XMLHttpRequest extends ServiceMap.Service<
+export class XMLHttpRequest extends Context.Service<
   XMLHttpRequest,
   LazyArg<globalThis.XMLHttpRequest>
 >()("@effect/platform-browser/BrowserHttpClient/XMLHttpRequest") {}
@@ -90,8 +90,8 @@ const makeXhrRequest = () => new globalThis.XMLHttpRequest()
 const makeXmlHttpRequest = HttpClient.make(
   (request, url, signal, fiber) =>
     Effect.suspend(() => {
-      const xhr = ServiceMap.getOrElse(
-        fiber.services,
+      const xhr = Context.getOrElse(
+        fiber.context,
         XMLHttpRequest,
         () => makeXhrRequest
       )()
@@ -387,6 +387,6 @@ class ClientResponseImpl extends IncomingMessageImpl<HttpClientError.HttpClientE
  * @since 1.0.0
  * @category Layers
  */
-export const layerXMLHttpRequest: Layer.Layer<HttpClient.HttpClient> = HttpClient.layerMergedServices(
+export const layerXMLHttpRequest: Layer.Layer<HttpClient.HttpClient> = HttpClient.layerMergedContext(
   Effect.succeed(makeXmlHttpRequest)
 )

@@ -41,9 +41,8 @@ export const make: <
   K extends Persistable.Any,
   R = never,
   ServiceMode extends "lookup" | "construction" = never
->(options: {
+>(lookup: (key: K) => Effect.Effect<Persistable.Success<K>, Persistable.Error<K>, R>, options: {
   readonly storeId: string
-  readonly lookup: (key: K) => Effect.Effect<Persistable.Success<K>, Persistable.Error<K>, R>
   readonly timeToLive: Persistable.TimeToLiveFn<K>
   readonly inMemoryCapacity?: number | undefined
   readonly inMemoryTTL?: Persistable.TimeToLiveFn<K> | undefined
@@ -56,32 +55,36 @@ export const make: <
   K extends Persistable.Any,
   R = never,
   ServiceMode extends "lookup" | "construction" = never
->(options: {
-  readonly storeId: string
-  readonly lookup: (key: K) => Effect.Effect<Persistable.Success<K>, Persistable.Error<K>, R>
-  readonly timeToLive: Persistable.TimeToLiveFn<K>
-  readonly inMemoryCapacity?: number | undefined
-  readonly inMemoryTTL?: Persistable.TimeToLiveFn<K> | undefined
-  readonly requireServicesAt?: ServiceMode | undefined
-}) {
+>(
+  lookup: (key: K) => Effect.Effect<Persistable.Success<K>, Persistable.Error<K>, R>,
+  options: {
+    readonly storeId: string
+    readonly timeToLive: Persistable.TimeToLiveFn<K>
+    readonly inMemoryCapacity?: number | undefined
+    readonly inMemoryTTL?: Persistable.TimeToLiveFn<K> | undefined
+    readonly requireServicesAt?: ServiceMode | undefined
+  }
+) {
   const store = yield* (yield* Persistence.Persistence).make({
     storeId: options.storeId,
     timeToLive: options.timeToLive as any
   })
-  const inMemory = yield* Cache.makeWith({
-    lookup: Effect.fnUntraced(function*(key: K) {
+  const inMemory = yield* Cache.makeWith(
+    Effect.fnUntraced(function*(key: K) {
       const exit = yield* (store.get(key) as Effect.Effect<Exit<Persistable.Success<K>, Persistable.Error<K>>>)
       if (exit) {
         return yield* exit
       }
-      const result = yield* Effect.exit(options.lookup(key))
+      const result = yield* Effect.exit(lookup(key))
       yield* (store.set(key, result) as Effect.Effect<void>)
       return yield* result
     }),
-    timeToLive: options.inMemoryTTL ?? constant(Duration.seconds(10)),
-    capacity: options.inMemoryCapacity ?? 1024,
-    requireServicesAt: options.requireServicesAt
-  })
+    {
+      timeToLive: options.inMemoryTTL ?? constant(Duration.seconds(10)),
+      capacity: options.inMemoryCapacity ?? 1024,
+      requireServicesAt: options.requireServicesAt
+    }
+  )
   return identity<PersistedCache<K, "lookup" extends ServiceMode ? R : never>>({
     [TypeId]: TypeId,
     inMemory,

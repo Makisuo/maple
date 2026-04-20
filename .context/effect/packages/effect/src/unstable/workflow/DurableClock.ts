@@ -1,10 +1,10 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import type * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Activity from "./Activity.ts"
 import * as DurableDeferred from "./DurableDeferred.ts"
 import type { WorkflowEngine, WorkflowInstance } from "./WorkflowEngine.ts"
@@ -36,11 +36,11 @@ export const make = (options: {
   deferred: DurableDeferred.make(`DurableClock/${options.name}`)
 })
 
-const EngineTag = ServiceMap.Service<WorkflowEngine, WorkflowEngine["Service"]>(
+const EngineTag = Context.Service<WorkflowEngine, WorkflowEngine["Service"]>(
   "effect/workflow/WorkflowEngine" satisfies typeof WorkflowEngine.key
 )
 
-const InstanceTag = ServiceMap.Service<
+const InstanceTag = Context.Service<
   WorkflowInstance,
   WorkflowInstance["Service"]
 >(

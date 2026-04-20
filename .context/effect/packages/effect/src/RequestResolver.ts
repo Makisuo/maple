@@ -4,6 +4,7 @@
 import type { NonEmptyArray } from "./Array.ts"
 import * as Arr from "./Array.ts"
 import * as Cache from "./Cache.ts"
+import * as Context from "./Context.ts"
 import type * as Duration from "./Duration.ts"
 import * as Effect from "./Effect.ts"
 import * as Exit from "./Exit.ts"
@@ -18,7 +19,6 @@ import { hasProperty } from "./Predicate.ts"
 import type * as Request from "./Request.ts"
 import type * as Schema from "./Schema.ts"
 import type { Scope } from "./Scope.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 import * as Tracer from "./Tracer.ts"
 import type * as Types from "./Types.ts"
 import type * as Persistable from "./unstable/persistence/Persistable.ts"
@@ -870,7 +870,7 @@ export const withSpan: {
         const links = opts?.links ? opts.links.slice() : []
         const seen = new Set<Tracer.AnySpan>()
         for (const entry of entries) {
-          const span = ServiceMap.getOption(entry.services, Tracer.ParentSpan)
+          const span = Context.getOption(entry.context, Tracer.ParentSpan)
           if (span._tag === "None" || seen.has(span.value)) continue
           seen.add(span.value)
           links.push({ span: span.value, attributes: {} })
@@ -945,11 +945,10 @@ export const asCache: {
   never,
   "construction" extends ServiceMode ? Request.Services<A> : never
 > =>
-  Cache.makeWith({
+  Cache.makeWith((req: A) => internal.request(req, self), {
     capacity: options.capacity,
     timeToLive: options.timeToLive as any,
-    requireServicesAt: options.requireServicesAt ?? "lookup" as ServiceMode,
-    lookup: (req: A) => internal.request(req, self)
+    requireServicesAt: options.requireServicesAt ?? "lookup" as ServiceMode
   }) as any)
 
 /**
@@ -1071,7 +1070,7 @@ export const persisted: {
       ...self,
       runAll: Effect.fnUntraced(function*(entries, key) {
         const results = yield* (store.getMany(Iterable.map(entries, (_) => _.request)).pipe(
-          Effect.provideServices(entries[0].services)
+          Effect.provideContext(entries[0].context)
         ) as Effect.Effect<
           Array<Exit.Exit<unknown, unknown> | undefined>,
           Request.Error<A>
@@ -1107,7 +1106,7 @@ export const persisted: {
           return Effect.void
         })
         yield* (store.setMany(toPersist).pipe(
-          Effect.provideServices(entries[0].services)
+          Effect.provideContext(entries[0].context)
         ) as Effect.Effect<void, Request.Error<A>>)
       })
     })

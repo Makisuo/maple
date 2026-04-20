@@ -1237,7 +1237,7 @@ There is no `cookies` option on endpoints. Instead, validated cookie access goes
 
 ```ts
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
-import { Effect, Layer, Redacted, Schema, ServiceMap } from "effect"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import {
   HttpApi,
@@ -1252,7 +1252,7 @@ import { createServer } from "node:http"
 
 // Define the service providing the current user
 class CurrentUser
-  extends ServiceMap.Service<CurrentUser, { readonly id: number; readonly name: string }>()("CurrentUser")
+  extends Context.Service<CurrentUser, { readonly id: number; readonly name: string }>()("CurrentUser")
 {}
 
 // Define the security scheme: read the "session" cookie
@@ -1814,14 +1814,14 @@ const GroupLive = HttpApiBuilder.group(
       .handle("getUser", (ctx) => {
         const id = ctx.params.id
         if (id === 1) {
-          return Effect.fail(UserNotFound.makeUnsafe({ message: "User not found" }))
+          return Effect.fail(UserNotFound.make({ message: "User not found" }))
         }
         return Effect.succeed({ id, name: `User ${id}` })
       })
       .handle("deleteUser", (ctx) => {
         const id = ctx.params.id
         if (id === 1) {
-          return Effect.fail(UserNotFound.makeUnsafe({ message: "User not found" }))
+          return Effect.fail(UserNotFound.make({ message: "User not found" }))
         }
         return Effect.succeed(void 0)
       })
@@ -1998,6 +1998,103 @@ const ApiLive = HttpApiBuilder.layer(Api).pipe(
 Layer.launch(ApiLive).pipe(NodeRuntime.runMain)
 ```
 
+## Customizing Schema Error Responses
+
+By default, when a request fails schema validation (e.g., an invalid query parameter or a malformed path parameter), the framework responds with an empty `400 Bad Request`. If you want to replace that response with a custom error, use `HttpApiMiddleware.layerSchemaErrorTransform`.
+
+This function creates a [middleware](#middlewares) layer that intercepts any `SchemaError` thrown during request decoding and lets you return your own error instead.
+
+**Example** (Returning a Custom Error on Validation Failure)
+
+In this example, if a client sends a non-integer `id` query parameter, the API responds with a `422` status and a JSON body describing the problem, instead of the default empty `400`.
+
+```ts
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import { Effect, Layer, Schema } from "effect"
+import { HttpRouter } from "effect/unstable/http"
+import {
+  HttpApi,
+  HttpApiBuilder,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiMiddleware,
+  HttpApiScalar,
+  HttpApiSchema
+} from "effect/unstable/httpapi"
+import { createServer } from "node:http"
+
+// Define a custom error for validation failures
+class ValidationError extends Schema.TaggedErrorClass<ValidationError>()(
+  "ValidationError",
+  {
+    message: Schema.String
+  }
+) {}
+
+// Define the middleware service, declaring the error it can produce
+class SchemaErrorHandler extends HttpApiMiddleware.Service<SchemaErrorHandler>()(
+  "api/SchemaErrorHandler",
+  {
+    error: ValidationError.pipe(HttpApiSchema.status(422))
+  }
+) {}
+
+// Implement the middleware layer
+const SchemaErrorHandlerLive = HttpApiMiddleware.layerSchemaErrorTransform(
+  SchemaErrorHandler,
+  (schemaError) =>
+    Effect.fail(
+      new ValidationError({
+        message: `Invalid request: ${schemaError.message}`
+      })
+    )
+)
+
+const User = Schema.Struct({
+  id: Schema.Int,
+  name: Schema.String
+})
+
+const Api = HttpApi.make("MyApi").add(
+  HttpApiGroup.make("Users").add(
+    HttpApiEndpoint.get("getUser", "/user", {
+      query: {
+        id: Schema.Int
+      },
+      success: User
+    })
+      // Attach the middleware to this endpoint only
+      .middleware(SchemaErrorHandler)
+  )
+)
+
+const GroupLive = HttpApiBuilder.group(
+  Api,
+  "Users",
+  (handlers) => handlers.handle("getUser", (ctx) => Effect.succeed({ id: ctx.query.id, name: `User ${ctx.query.id}` }))
+)
+
+const ApiLive = HttpApiBuilder.layer(Api).pipe(
+  Layer.provide(GroupLive),
+  Layer.provide(SchemaErrorHandlerLive),
+  Layer.provide(HttpApiScalar.layer(Api)),
+  HttpRouter.serve,
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 }))
+)
+
+Layer.launch(ApiLive).pipe(NodeRuntime.runMain)
+
+// Test:
+// curl "http://localhost:3000/user?id=1"    # 200 OK
+// curl "http://localhost:3000/user?id=abc"  # 422 with ValidationError JSON
+```
+
+The middleware can be attached at different scopes:
+
+- **Endpoint**: `.middleware(SchemaErrorHandler)` on a single endpoint (as shown above).
+- **Group**: `.middleware(SchemaErrorHandler)` on a group to cover all its endpoints.
+- **API**: `.middleware(SchemaErrorHandler)` on the API to cover every endpoint.
+
 # Middlewares
 
 Middleware lets you run shared logic — like logging or authentication — before (or around) your handlers. Define a middleware as a class extending `HttpApiMiddleware.Service`, implement it as a `Layer`, and attach it to an endpoint, a group, or the entire API.
@@ -2102,7 +2199,7 @@ Attach a security scheme to an endpoint, group, or the entire API via `HttpApiMi
 **Example** (Defining Security Middleware)
 
 ```ts
-import { Schema, ServiceMap } from "effect"
+import { Context, Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 
 // Define a schema for the "User"
@@ -2117,7 +2214,7 @@ class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
 ) {}
 
 // Define a Context.Tag for the authenticated user
-class CurrentUser extends ServiceMap.Service<CurrentUser, User>()("CurrentUser") {}
+class CurrentUser extends Context.Service<CurrentUser, User>()("CurrentUser") {}
 
 // Create the Authorization middleware
 class Authorization extends HttpApiMiddleware.Service<Authorization, {
@@ -2163,7 +2260,7 @@ To enforce a security scheme, implement its middleware as a `Layer`. The layer r
 **Example** (Implementing Bearer Token Authentication Middleware)
 
 ```ts
-import { Effect, Layer, Redacted, Schema, ServiceMap } from "effect"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 
 class User extends Schema.Class<User>("User")({ id: Schema.Finite }) {}
@@ -2175,7 +2272,7 @@ class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
   { httpApiStatus: 401 }
 ) {}
 
-class CurrentUser extends ServiceMap.Service<CurrentUser, User>()("CurrentUser") {}
+class CurrentUser extends Context.Service<CurrentUser, User>()("CurrentUser") {}
 
 class Authorization extends HttpApiMiddleware.Service<Authorization, {
   provides: CurrentUser
@@ -2219,7 +2316,7 @@ Use `HttpApiSecurity.annotate` to attach metadata — like a description — to 
 **Example** (Adding a Description to a Bearer Token Security Definition)
 
 ```ts
-import { Schema, ServiceMap } from "effect"
+import { Context, Schema } from "effect"
 import { HttpApiMiddleware, HttpApiSecurity, OpenApi } from "effect/unstable/httpapi"
 
 class User extends Schema.Class<User>("User")({ id: Schema.Finite }) {}
@@ -2231,7 +2328,7 @@ class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
   { httpApiStatus: 401 }
 ) {}
 
-class CurrentUser extends ServiceMap.Service<CurrentUser, User>()("CurrentUser") {}
+class CurrentUser extends Context.Service<CurrentUser, User>()("CurrentUser") {}
 
 class Authorization extends HttpApiMiddleware.Service<Authorization, {
   provides: CurrentUser
@@ -2293,7 +2390,7 @@ Handlers can access any Effect service. Because `HttpApiBuilder.group` returns a
 
 ```ts
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
-import { Effect, Layer, Schema, ServiceMap } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpApiScalar } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
@@ -2304,7 +2401,7 @@ const User = Schema.Struct({
 })
 
 // Define the UsersRepository service
-class UsersRepository extends ServiceMap.Service<UsersRepository, {
+class UsersRepository extends Context.Service<UsersRepository, {
   readonly findById: (id: number) => Effect.Effect<typeof User.Type>
 }>()("UsersRepository") {}
 

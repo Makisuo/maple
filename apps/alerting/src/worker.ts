@@ -6,7 +6,9 @@ import {
   EdgeCacheService,
   EmailService,
   Env,
+  ErrorsService,
   makeTelemetryLayer,
+  NotificationDispatcher,
   OrgTinybirdSettingsService,
   QueryEngineService,
   TinybirdService,
@@ -17,10 +19,7 @@ import { Cause, ConfigProvider, Effect, Layer, ManagedRuntime } from "effect"
 
 const buildLayer = (env: Record<string, unknown>) => {
   const ConfigLive = ConfigProvider.layer(ConfigProvider.fromUnknown(env))
-  const WorkerEnvLive = Layer.succeed(
-    WorkerEnvironment,
-    env as Record<string, any>,
-  )
+  const WorkerEnvLive = Layer.succeed(WorkerEnvironment, env)
   const EnvLive = Env.Default.pipe(Layer.provide(ConfigLive))
 
   const DatabaseLive = DatabaseD1Live.pipe(Layer.provide(WorkerEnvLive))
@@ -48,6 +47,16 @@ const buildLayer = (env: Record<string, unknown>) => {
     ),
   )
 
+  const NotificationDispatcherLive = NotificationDispatcher.Live.pipe(
+    Layer.provide(BaseLive),
+  )
+
+  const ErrorsServiceLive = ErrorsService.Live.pipe(
+    Layer.provide(
+      Layer.mergeAll(BaseLive, TinybirdServiceLive, NotificationDispatcherLive),
+    ),
+  )
+
   const EmailServiceLive = EmailService.Default.pipe(Layer.provide(EnvLive))
 
   const DigestServiceLive = DigestService.Default.pipe(
@@ -58,16 +67,16 @@ const buildLayer = (env: Record<string, unknown>) => {
     Layer.provide(ConfigLive),
   )
 
-  return Layer.mergeAll(AlertsServiceLive, DigestServiceLive).pipe(
+  return Layer.mergeAll(AlertsServiceLive, DigestServiceLive, ErrorsServiceLive).pipe(
     Layer.provideMerge(TelemetryLive),
     Layer.provideMerge(ConfigLive),
   )
 }
 
-type AlertingRuntime = ManagedRuntime.ManagedRuntime<
-  AlertsService | DigestService,
-  never
->
+type AlertingRuntime = ReturnType<typeof buildAlertingRuntime>
+
+const buildAlertingRuntime = (env: Record<string, unknown>) =>
+  ManagedRuntime.make(buildLayer(env))
 
 // Intentionally NOT cached across invocations. A cached runtime's scope never
 // closes on CF Workers, which means OtlpExporter's `Scope.addFinalizer` (the
@@ -94,6 +103,30 @@ const alertTick = Effect.gen(function* () {
   Effect.withSpan("alerting.scheduler_tick"),
   Effect.catchCause((cause) =>
     Effect.logError("Alerting worker tick failed").pipe(
+      Effect.annotateLogs({ error: Cause.pretty(cause) }),
+    ),
+  ),
+)
+
+const errorTick = Effect.gen(function* () {
+  const errors = yield* ErrorsService
+  const result = yield* errors.runTick()
+  yield* Effect.logInfo("Errors worker tick complete").pipe(
+    Effect.annotateLogs({
+      orgsProcessed: result.orgsProcessed,
+      issuesTouched: result.issuesTouched,
+      incidentsOpened: result.incidentsOpened,
+      incidentsResolved: result.incidentsResolved,
+      issuesReopened: result.issuesReopened,
+      issuesArchived: result.issuesArchived,
+      issuesDeleted: result.issuesDeleted,
+      retentionRan: result.retentionRan,
+    }),
+  )
+}).pipe(
+  Effect.withSpan("alerting.error_tick"),
+  Effect.catchCause((cause) =>
+    Effect.logError("Errors worker tick failed").pipe(
       Effect.annotateLogs({ error: Cause.pretty(cause) }),
     ),
   ),
@@ -133,7 +166,10 @@ export default {
     ctx: ExecutionContextLike,
   ): Promise<void> {
     const runtime = makeRuntime(env)
-    const program = event.cron === "*/15 * * * *" ? digestTick : alertTick
+    const program =
+      event.cron === "*/15 * * * *"
+        ? digestTick
+        : Effect.all([alertTick, errorTick], { concurrency: 2, discard: true })
     const done = runtime
       .runPromise(program)
       .finally(() =>

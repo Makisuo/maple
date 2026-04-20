@@ -558,6 +558,130 @@ export interface InspectChartDataData {
   notes: string[]
 }
 
+export interface ActorSummary {
+  id: string
+  type: "user" | "agent"
+  userId: string | null
+  agentName: string | null
+  model: string | null
+  capabilities: ReadonlyArray<string>
+}
+
+export interface ErrorIssueRow {
+  id: string
+  fingerprintHash: string
+  workflowState: string
+  priority: number
+  serviceName: string
+  exceptionType: string
+  exceptionMessage: string
+  topFrame: string
+  occurrenceCount: number
+  firstSeenAt: string
+  lastSeenAt: string
+  assignedActor: ActorSummary | null
+  leaseHolder: ActorSummary | null
+  leaseExpiresAt: string | null
+  notes: string | null
+  hasOpenIncident: boolean
+}
+
+export interface ListErrorIssuesData {
+  issues: ErrorIssueRow[]
+  total: number
+}
+
+export interface TransitionErrorIssueData {
+  id: string
+  workflowState: string
+  fromState: string
+  toState: string
+  assignedActorId: string | null
+  leaseHolderActorId: string | null
+  snoozeUntil: string | null
+}
+
+export interface ClaimErrorIssueData {
+  id: string
+  workflowState: string
+  leaseHolderActorId: string
+  leaseExpiresAt: string
+  claimedAt: string
+}
+
+export interface ReleaseErrorIssueData {
+  id: string
+  workflowState: string
+  previousLeaseHolderActorId: string | null
+}
+
+export interface HeartbeatErrorIssueData {
+  id: string
+  leaseExpiresAt: string
+}
+
+export interface CommentOnErrorIssueData {
+  eventId: string
+  issueId: string
+  type: "comment" | "agent_note"
+  actorId: string | null
+}
+
+export interface ProposeFixData {
+  issueId: string
+  workflowState: string
+  eventId: string
+  prUrl: string | null
+}
+
+export interface ListErrorIssueEventsData {
+  issueId: string
+  events: Array<{
+    id: string
+    type: string
+    fromState: string | null
+    toState: string | null
+    actorId: string | null
+    createdAt: string
+    payload: Record<string, unknown>
+  }>
+  total: number
+}
+
+export interface RegisterAgentData {
+  id: string
+  agentName: string | null
+  model: string | null
+  capabilities: ReadonlyArray<string>
+}
+
+export interface ErrorIncidentRow {
+  id: string
+  issueId: string
+  status: string
+  reason: string
+  firstTriggeredAt: string
+  lastTriggeredAt: string
+  resolvedAt: string | null
+  occurrenceCount: number
+}
+
+export interface ListErrorIncidentsData {
+  incidents: ErrorIncidentRow[]
+  total: number
+  openCount: number
+}
+
+export interface UpdateErrorNotificationPolicyData {
+  enabled: boolean
+  destinationIds: ReadonlyArray<string>
+  notifyOnFirstSeen: boolean
+  notifyOnRegression: boolean
+  notifyOnResolve: boolean
+  minOccurrenceCount: number
+  severity: string
+}
+
 export type StructuredToolOutput =
   | { tool: "search_traces"; data: SearchTracesData }
   | { tool: "find_slow_traces"; data: FindSlowTracesData }
@@ -588,3 +712,17 @@ export type StructuredToolOutput =
   | { tool: "get_service_top_operations"; data: GetServiceTopOperationsData }
   | { tool: "get_incident_timeline"; data: GetIncidentTimelineData }
   | { tool: "inspect_chart_data"; data: InspectChartDataData }
+  | { tool: "list_error_issues"; data: ListErrorIssuesData }
+  | { tool: "transition_error_issue"; data: TransitionErrorIssueData }
+  | { tool: "claim_error_issue"; data: ClaimErrorIssueData }
+  | { tool: "release_error_issue"; data: ReleaseErrorIssueData }
+  | { tool: "heartbeat_error_issue"; data: HeartbeatErrorIssueData }
+  | { tool: "comment_on_error_issue"; data: CommentOnErrorIssueData }
+  | { tool: "propose_fix"; data: ProposeFixData }
+  | { tool: "list_error_issue_events"; data: ListErrorIssueEventsData }
+  | { tool: "register_agent"; data: RegisterAgentData }
+  | { tool: "list_error_incidents"; data: ListErrorIncidentsData }
+  | {
+      tool: "update_error_notification_policy"
+      data: UpdateErrorNotificationPolicyData
+    }

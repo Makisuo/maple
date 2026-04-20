@@ -499,6 +499,32 @@ describe.concurrent("Sharding", () => {
       expect(result).toEqual(new User({ id: 123, name: "User 123" }))
       expect(state.layerBuilds.current).toEqual(2)
     }).pipe(Effect.provide(TestSharding)))
+
+  it.effect("WithTransaction is propagated to the entity handler", () =>
+    Effect.gen(function*() {
+      let isTransaction = false
+      yield* Effect.gen(function*() {
+        const makeClient = yield* TestEntity.client
+        yield* TestClock.adjust(1)
+        const client = makeClient("1")
+
+        const result = yield* client.WithTransaction({ id: 1 })
+        assert.strictEqual(result, true)
+        assert.strictEqual(isTransaction, true)
+      }).pipe(Effect.provide(TestShardingWithoutStorage.pipe(
+        Layer.updateService(MessageStorage.MessageStorage, (storage) => ({
+          ...storage,
+          saveReply(reply) {
+            return MessageStorage.MemoryTransaction.use((isTransaction_) => {
+              isTransaction = isTransaction_
+              return storage.saveReply(reply)
+            })
+          }
+        })),
+        Layer.provide(MessageStorage.layerMemory),
+        Layer.provide(TestShardingConfig)
+      )))
+    }))
 })
 
 const TestShardingConfig = ShardingConfig.layer({

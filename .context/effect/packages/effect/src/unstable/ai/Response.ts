@@ -27,7 +27,8 @@
  * @since 1.0.0
  */
 import type * as DateTime from "../../DateTime.ts"
-import { constFalse, identity } from "../../Function.ts"
+import * as Effect from "../../Effect.ts"
+import { identity } from "../../Function.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
 import * as SchemaTransformation from "../../SchemaTransformation.ts"
@@ -35,9 +36,6 @@ import type * as Tool from "./Tool.ts"
 import type * as Toolkit from "./Toolkit.ts"
 
 const PartTypeId = "~effect/ai/Content/Part" as const
-
-const constEmptyObject = () => ({})
-const constPartTypeId = () => PartTypeId
 
 // =============================================================================
 // All Parts
@@ -503,10 +501,10 @@ export interface BasePartEncoded<Type extends string, Metadata extends ProviderM
 
 const BasePart = Schema.Struct({
   [PartTypeId]: Schema.tag(PartTypeId).pipe(
-    Schema.withDecodingDefaultKey(constPartTypeId, { encodingStrategy: "omit" })
+    Schema.withDecodingDefaultKey(Effect.succeed(PartTypeId), { encodingStrategy: "omit" })
   ),
   metadata: ProviderMetadata.pipe(
-    Schema.withDecodingDefault(constEmptyObject)
+    Schema.withDecodingDefault(Effect.succeed({}))
   )
 })
 
@@ -1166,7 +1164,7 @@ export const ToolParamsStartPart: Schema.Struct<{
   type: Schema.tag("tool-params-start"),
   id: Schema.String,
   name: Schema.String,
-  providerExecuted: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(constFalse))
+  providerExecuted: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false)))
 }).annotate({ identifier: "ToolParamsStartPart" }) satisfies Schema.Codec<
   ToolParamsStartPart,
   ToolParamsStartPartEncoded
@@ -1427,7 +1425,7 @@ export const ToolCallPart: <const Name extends string, Params extends Schema.Top
     id: Schema.String,
     name: Schema.Literal(name),
     params,
-    providerExecuted: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(constFalse))
+    providerExecuted: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false)))
   }).annotate({ identifier: "ToolCallPart" }) as any
 
 /**

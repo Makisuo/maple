@@ -49,7 +49,9 @@ describe("Socket", () => {
     it.effect("messages", () =>
       Effect.gen(function*() {
         const server = yield* makeServer
-        const socket = yield* Socket.makeWebSocket(Effect.succeed(url))
+        const socket = yield* Socket.makeWebSocket(Effect.succeed(url), {
+          closeCodeIsError: () => false
+        })
         const messages = yield* Queue.unbounded<Uint8Array>()
         const fiber = yield* Effect.forkChild(socket.run((_) => Queue.offer(messages, _)))
         yield* Effect.gen(function*() {
@@ -64,15 +66,41 @@ describe("Socket", () => {
 
         server.send("Right back at you!")
         let message = yield* Queue.take(messages)
-        expect(message).toEqual(new TextEncoder().encode("Right back at you!"))
+        assert.deepStrictEqual(message, new TextEncoder().encode("Right back at you!"))
 
         server.send(new Blob(["A Blob message"]))
         message = yield* Queue.take(messages)
-        expect(message).toEqual(new TextEncoder().encode("A Blob message"))
+        assert.deepStrictEqual(message, new TextEncoder().encode("A Blob message"))
 
         server.close()
         const exit = yield* Fiber.await(fiber)
-        expect(exit._tag).toEqual("Success")
+        assert.strictEqual(exit._tag, "Success")
+      }).pipe(
+        Effect.provideService(Socket.WebSocketConstructor, (url) => new globalThis.WebSocket(url))
+      ))
+
+    it.effect("close codes are errors by default", () =>
+      Effect.gen(function*() {
+        const server = yield* makeServer
+        const socket = yield* Socket.makeWebSocket(Effect.succeed(url))
+        const fiber = yield* Effect.forkChild(socket.run(() => {}))
+
+        yield* Effect.promise(() => server.connected)
+        server.close({ code: 1000, reason: "done", wasClean: true })
+
+        const exit = yield* Effect.exit(Fiber.join(fiber))
+        assert.isTrue(exit._tag === "Failure")
+        if (exit._tag === "Failure") {
+          const failure = exit.cause.reasons[0]
+          if (failure._tag === "Fail") {
+            assert.isTrue(failure.error instanceof Socket.SocketError)
+            assert.strictEqual(failure.error.reason._tag, "SocketCloseError")
+            if (failure.error.reason._tag === "SocketCloseError") {
+              assert.strictEqual(failure.error.reason.code, 1000)
+              assert.strictEqual(failure.error.reason.closeReason, "done")
+            }
+          }
+        }
       }).pipe(
         Effect.provideService(Socket.WebSocketConstructor, (url) => new globalThis.WebSocket(url))
       ))
@@ -93,10 +121,15 @@ describe("Socket", () => {
           }
         })
 
-        const socket = yield* Socket.fromTransformStream(Effect.succeed({
-          readable,
-          writable
-        }))
+        const socket = yield* Socket.fromTransformStream(
+          Effect.succeed({
+            readable,
+            writable
+          }),
+          {
+            closeCodeIsError: () => false
+          }
+        )
         yield* socket.writer.pipe(
           Effect.tap((write) =>
             write("Hello").pipe(

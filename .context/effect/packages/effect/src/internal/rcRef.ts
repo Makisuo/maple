@@ -1,3 +1,4 @@
+import * as Context from "../Context.ts"
 import * as Duration from "../Duration.ts"
 import * as Effect from "../Effect.ts"
 import * as Exit from "../Exit.ts"
@@ -7,7 +8,6 @@ import { pipeArguments } from "../Pipeable.ts"
 import type * as RcRef from "../RcRef.ts"
 import * as Scope from "../Scope.ts"
 import * as Semaphore from "../Semaphore.ts"
-import * as ServiceMap from "../ServiceMap.ts"
 
 const TypeId = "~effect/RcRef"
 
@@ -50,18 +50,18 @@ class RcRefImpl<A, E> implements RcRef.RcRef<A, E> {
   state: State<A> = stateEmpty
   readonly semaphore = Semaphore.makeUnsafe(1)
   readonly acquire: Effect.Effect<A, E>
-  readonly services: ServiceMap.ServiceMap<never>
+  readonly context: Context.Context<never>
   readonly scope: Scope.Scope
   readonly idleTimeToLive: Duration.Duration | undefined
 
   constructor(
     acquire: Effect.Effect<A, E>,
-    services: ServiceMap.ServiceMap<never>,
+    context: Context.Context<never>,
     scope: Scope.Scope,
     idleTimeToLive: Duration.Duration | undefined
   ) {
     this.acquire = acquire
-    this.services = services
+    this.context = context
     this.scope = scope
     this.idleTimeToLive = idleTimeToLive
   }
@@ -73,11 +73,11 @@ export const make = <A, E, R>(options: {
   readonly idleTimeToLive?: Duration.Input | undefined
 }) =>
   Effect.withFiber<RcRef.RcRef<A, E>, never, R | Scope.Scope>((fiber) => {
-    const services = fiber.services as ServiceMap.ServiceMap<R | Scope.Scope>
-    const scope = ServiceMap.get(services, Scope.Scope)
+    const context = fiber.context as Context.Context<R | Scope.Scope>
+    const scope = Context.get(context, Scope.Scope)
     const ref = new RcRefImpl<A, E>(
       options.acquire as Effect.Effect<A, E>,
-      services,
+      context,
       scope,
       options.idleTimeToLive ? Duration.fromInputUnsafe(options.idleTimeToLive) : undefined
     )
@@ -108,9 +108,9 @@ const getState = <A, E>(self: RcRefImpl<A, E>) =>
       case "Empty": {
         const scope = Scope.makeUnsafe()
         return self.semaphore.withPermits(1)(
-          restore(Effect.provideServices(
+          restore(Effect.provideContext(
             self.acquire as Effect.Effect<A, E>,
-            ServiceMap.add(self.services, Scope.Scope, scope)
+            Context.add(self.context, Scope.Scope, scope)
           )).pipe(Effect.map((value) => {
             const state: State.Acquired<A> = {
               _tag: "Acquired",
@@ -160,7 +160,7 @@ export const get = Effect.fnUntraced(function*<A, E>(
       Effect.ensuring(Effect.sync(() => {
         state.fiber = undefined
       })),
-      Effect.runForkWith(self.services),
+      Effect.runForkWith(self.context),
       Fiber.runIn(self.scope)
     )
     return Effect.void

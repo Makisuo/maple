@@ -73,6 +73,7 @@
  * @since 2.0.0
  */
 import type * as Arr from "./Array.ts"
+import type * as Context from "./Context.ts"
 import type { Effect } from "./Effect.ts"
 import type { Exit } from "./Exit.ts"
 import * as effect from "./internal/effect.ts"
@@ -83,7 +84,6 @@ import { hasProperty } from "./Predicate.ts"
 import type { StackFrame } from "./References.ts"
 import type { Scheduler, SchedulerDispatcher } from "./Scheduler.ts"
 import type { Scope } from "./Scope.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 import type { AnySpan } from "./Tracer.ts"
 import type { Covariant } from "./Types.ts"
 
@@ -119,9 +119,9 @@ export interface Fiber<out A, out E = never> extends Pipeable {
 
   readonly id: number
   readonly currentOpCount: number
-  readonly getRef: <A>(ref: ServiceMap.Reference<A>) => A
-  readonly services: ServiceMap.ServiceMap<never>
-  setServices(services: ServiceMap.ServiceMap<never>): void
+  readonly getRef: <A>(ref: Context.Reference<A>) => A
+  readonly context: Context.Context<never>
+  setContext(context: Context.Context<never>): void
   readonly currentScheduler: Scheduler
   readonly currentDispatcher: SchedulerDispatcher
   readonly currentSpan?: AnySpan | undefined
@@ -133,7 +133,7 @@ export interface Fiber<out A, out E = never> extends Pipeable {
   readonly addObserver: (cb: (exit: Exit<A, E>) => void) => () => void
   readonly interruptUnsafe: (
     fiberId?: number | undefined,
-    annotations?: ServiceMap.ServiceMap<never> | undefined
+    annotations?: Context.Context<never> | undefined
   ) => void
   readonly pollUnsafe: () => Exit<A, E> | undefined
 }
@@ -320,12 +320,12 @@ export const interrupt: <A, E>(self: Fiber<A, E>) => Effect<void> = effect.fiber
 export const interruptAs: {
   (
     fiberId: number | undefined,
-    annotations?: ServiceMap.ServiceMap<never> | undefined
+    annotations?: Context.Context<never> | undefined
   ): <A, E>(self: Fiber<A, E>) => Effect<void>
   <A, E>(
     self: Fiber<A, E>,
     fiberId: number | undefined,
-    annotations?: ServiceMap.ServiceMap<never> | undefined
+    annotations?: Context.Context<never> | undefined
   ): Effect<void>
 } = effect.fiberInterruptAs
 

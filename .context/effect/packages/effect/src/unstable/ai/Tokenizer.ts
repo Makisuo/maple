@@ -35,9 +35,9 @@
  *
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Predicate from "../../Predicate.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import type * as AiError from "./AiError.ts"
 import * as Prompt from "./Prompt.ts"
 
@@ -62,7 +62,7 @@ import * as Prompt from "./Prompt.ts"
  * @since 4.0.0
  * @category services
  */
-export class Tokenizer extends ServiceMap.Service<Tokenizer, Service>()(
+export class Tokenizer extends Context.Service<Tokenizer, Service>()(
   "effect/ai/Tokenizer"
 ) {}
 

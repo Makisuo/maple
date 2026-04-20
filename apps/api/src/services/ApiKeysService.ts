@@ -25,6 +25,7 @@ export interface ResolvedApiKey {
   readonly orgId: OrgId
   readonly userId: UserId
   readonly keyId: ApiKeyId
+  readonly metadataJson: string | null
 }
 
 const decodeApiKeyIdSync = Schema.decodeUnknownSync(ApiKeyId)
@@ -187,6 +188,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()(
           orgId: decodeOrgIdSync(row.value.orgId),
           userId: decodeUserIdSync(row.value.createdBy),
           keyId: decodeApiKeyIdSync(row.value.id),
+          metadataJson: row.value.metadataJson ?? null,
         } satisfies ResolvedApiKey)
       })
 

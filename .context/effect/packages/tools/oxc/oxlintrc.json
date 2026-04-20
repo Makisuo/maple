@@ -8,6 +8,7 @@
   },
   "rules": {
     // Effect custom rules
+    "effect/no-bigint-literals": "error",
     "effect/no-import-from-barrel-package": ["error", {
       "checkPatterns": [
         "^effect$",

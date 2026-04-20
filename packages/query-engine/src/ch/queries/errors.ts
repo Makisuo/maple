@@ -10,7 +10,7 @@ import { from, fromQuery, type CHQuery, type ColumnAccessor } from "../query"
 import type { ColumnDefs } from "../types"
 import { unionAll, type CHUnionQuery } from "../union"
 import { compileCH } from "../compile"
-import { ErrorSpans, ServiceUsage, TraceDetailSpans, TraceListMv, Traces } from "../tables"
+import { ErrorEvents, ErrorSpans, ServiceUsage, TraceDetailSpans, TraceListMv, Traces } from "../tables"
 
 // ---------------------------------------------------------------------------
 // Shared: Error fingerprint expression (typed DSL)
@@ -594,6 +594,124 @@ export function errorsSummaryQuery(
         opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
       ]),
   )
+}
+
+// ---------------------------------------------------------------------------
+// Error Issues — fingerprint-grouped aggregate from error_events
+// ---------------------------------------------------------------------------
+
+export interface ErrorIssuesOpts {
+  services?: readonly string[]
+  deploymentEnvs?: readonly string[]
+  fingerprintHashes?: readonly string[]
+  exceptionTypes?: readonly string[]
+  limit?: number
+}
+
+export interface ErrorIssuesOutput {
+  readonly fingerprintHash: string
+  readonly serviceName: string
+  readonly exceptionType: string
+  readonly exceptionMessage: string
+  readonly topFrame: string
+  readonly count: number
+  readonly affectedServicesCount: number
+  readonly firstSeen: string
+  readonly lastSeen: string
+}
+
+export function errorIssuesQuery(opts: ErrorIssuesOpts) {
+  return from(ErrorEvents)
+    .select(($) => ({
+      fingerprintHash: CH.toString_($.FingerprintHash),
+      serviceName: CH.any_($.ServiceName),
+      exceptionType: CH.any_($.ExceptionType),
+      exceptionMessage: CH.any_($.ExceptionMessage),
+      topFrame: CH.any_($.TopFrame),
+      count: CH.count(),
+      affectedServicesCount: CH.uniq($.ServiceName),
+      firstSeen: CH.min_($.Timestamp),
+      lastSeen: CH.max_($.Timestamp),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+      opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+      opts.deploymentEnvs?.length
+        ? CH.inList($.DeploymentEnv, opts.deploymentEnvs)
+        : undefined,
+      opts.fingerprintHashes?.length
+        ? CH.inList(CH.toString_($.FingerprintHash), opts.fingerprintHashes)
+        : undefined,
+      opts.exceptionTypes?.length
+        ? CH.inList($.ExceptionType, opts.exceptionTypes)
+        : undefined,
+    ])
+    .groupBy("fingerprintHash")
+    .orderBy(["count", "desc"])
+    .limit(opts.limit ?? 50)
+    .format("JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Error Issue timeseries — per-fingerprint occurrence bucket
+// ---------------------------------------------------------------------------
+
+export interface ErrorIssueTimeseriesOutput {
+  readonly bucket: string
+  readonly count: number
+}
+
+export function errorIssueTimeseriesQuery() {
+  return from(ErrorEvents)
+    .select(($) => ({
+      bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+      count: CH.count(),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      CH.toString_($.FingerprintHash).eq(param.string("fingerprintHash")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+    ])
+    .groupBy("bucket")
+    .orderBy(["bucket", "asc"])
+    .format("JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Error Issue sample traces — most recent occurrences for one issue
+// ---------------------------------------------------------------------------
+
+export interface ErrorIssueSampleTracesOutput {
+  readonly traceId: string
+  readonly spanId: string
+  readonly serviceName: string
+  readonly timestamp: string
+  readonly exceptionMessage: string
+  readonly durationMicros: number
+}
+
+export function errorIssueSampleTracesQuery(opts: { limit?: number }) {
+  return from(ErrorEvents)
+    .select(($) => ({
+      traceId: $.TraceId,
+      spanId: $.SpanId,
+      serviceName: $.ServiceName,
+      timestamp: $.Timestamp,
+      exceptionMessage: $.ExceptionMessage,
+      durationMicros: CH.intDiv($.Duration, 1000),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      CH.toString_($.FingerprintHash).eq(param.string("fingerprintHash")),
+      $.Timestamp.gte(param.dateTime("startTime")),
+      $.Timestamp.lte(param.dateTime("endTime")),
+    ])
+    .orderBy(["timestamp", "desc"])
+    .limit(opts.limit ?? 25)
+    .format("JSON")
 }
 
 // ---------------------------------------------------------------------------

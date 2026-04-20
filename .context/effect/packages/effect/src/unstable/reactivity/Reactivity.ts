@@ -1,6 +1,7 @@
 /**
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import type * as Exit from "../../Exit.ts"
 import * as Fiber from "../../Fiber.ts"
@@ -10,14 +11,13 @@ import * as Layer from "../../Layer.ts"
 import * as Queue from "../../Queue.ts"
 import type { ReadonlyRecord } from "../../Record.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 
 /**
  * @since 4.0.0
  * @category tags
  */
-export class Reactivity extends ServiceMap.Service<
+export class Reactivity extends Context.Service<
   Reactivity,
   {
     readonly invalidateUnsafe: (keys: ReadonlyArray<unknown> | ReadonlyRecord<string, ReadonlyArray<unknown>>) => void
@@ -62,7 +62,7 @@ export const make = Effect.sync(() => {
   const invalidate = (
     keys: ReadonlyArray<unknown> | ReadonlyRecord<string, ReadonlyArray<unknown>>
   ): Effect.Effect<void> =>
-    Effect.servicesWith((services) => {
+    Effect.contextWith((services) => {
       const pending = services.mapUnsafe.get(PendingInvalidation.key) as Set<string | number> | undefined
       if (pending) {
         keysToHashes(keys, (hash) => {
@@ -109,8 +109,8 @@ export const make = Effect.sync(() => {
     effect: Effect.Effect<A, E, R>
   ): Effect.Effect<Queue.Dequeue<A, E>, never, R | Scope.Scope> =>
     Effect.gen(function*() {
-      const services = yield* Effect.services<Scope.Scope | R>()
-      const scope = ServiceMap.get(services, Scope.Scope)
+      const services = yield* Effect.context<Scope.Scope | R>()
+      const scope = Context.get(services, Scope.Scope)
       const results = yield* Queue.make<A, E>()
       const runFork = flow(Effect.runForkWith(services), Fiber.runIn(scope))
 
@@ -183,7 +183,7 @@ export const make = Effect.sync(() => {
   })
 })
 
-class PendingInvalidation extends ServiceMap.Service<PendingInvalidation, Set<string | number>>()(
+class PendingInvalidation extends Context.Service<PendingInvalidation, Set<string | number>>()(
   "effect/reactivity/Reactivity/PendingInvalidation"
 ) {}
 

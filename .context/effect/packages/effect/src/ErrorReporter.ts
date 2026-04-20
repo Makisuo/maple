@@ -49,6 +49,7 @@
  * @since 4.0.0
  */
 import type * as Cause from "./Cause.ts"
+import type * as Context from "./Context.ts"
 import * as Effect from "./Effect.ts"
 import type * as Fiber from "./Fiber.ts"
 import * as effect from "./internal/effect.ts"
@@ -58,7 +59,6 @@ import * as LogLevel from "./LogLevel.ts"
 import type { Severity } from "./LogLevel.ts"
 import type { ReadonlyRecord } from "./Record.ts"
 import type * as Scope from "./Scope.ts"
-import type * as ServiceMap from "./ServiceMap.ts"
 
 /**
  * @since 4.0.0
@@ -155,7 +155,7 @@ export const make = (
 }
 
 /**
- * A `ServiceMap.Reference` holding the set of active `ErrorReporter`s for the
+ * A `Context.Reference` holding the set of active `ErrorReporter`s for the
  * current fiber. Defaults to an empty set (no reporting).
  *
  * Prefer {@link layer} to configure reporters via the `Layer` API. Use this
@@ -165,7 +165,7 @@ export const make = (
  * @since 4.0.0
  * @category References
  */
-export const CurrentErrorReporters: ServiceMap.Reference<ReadonlySet<ErrorReporter>> = references.CurrentErrorReporters
+export const CurrentErrorReporters: Context.Reference<ReadonlySet<ErrorReporter>> = references.CurrentErrorReporters
 
 /**
  * Creates a `Layer` that registers one or more `ErrorReporter`s.

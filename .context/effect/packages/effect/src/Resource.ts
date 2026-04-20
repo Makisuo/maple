@@ -1,6 +1,7 @@
 /**
  * @since 2.0.0
  */
+import * as Context from "./Context.ts"
 import * as Effect from "./Effect.ts"
 import * as Exit from "./Exit.ts"
 import { identity } from "./Function.ts"
@@ -10,7 +11,6 @@ import { hasProperty } from "./Predicate.ts"
 import type * as Schedule from "./Schedule.ts"
 import type * as Scope from "./Scope.ts"
 import * as ScopedRef from "./ScopedRef.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 const TypeId = "~effect/Resource" as const
 
@@ -64,10 +64,10 @@ const makeUnsafe = <A, E>(
 export const manual = <A, E, R>(
   acquire: Effect.Effect<A, E, R>
 ): Effect.Effect<Resource<A, E>, never, Scope.Scope | R> =>
-  Effect.servicesWith((services: ServiceMap.ServiceMap<R>) => {
-    const providedAcquire = Effect.updateServices(
+  Effect.contextWith((context: Context.Context<R>) => {
+    const providedAcquire = Effect.updateContext(
       acquire,
-      (input: ServiceMap.ServiceMap<never>) => ServiceMap.merge(services, input)
+      (input: Context.Context<never>) => Context.merge(context, input)
     )
     return Effect.map(
       ScopedRef.fromAcquire(Effect.exit(providedAcquire)),

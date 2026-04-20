@@ -1,6 +1,7 @@
-import { type Cause, Effect, Layer, MutableRef, Option, Queue, Schedule, Schema, ServiceMap, Stream } from "effect"
+import { type Cause, Context, Effect, Layer, MutableRef, Option, Queue, Schedule, Schema, Stream } from "effect"
 import type { Envelope } from "effect/unstable/cluster"
 import { ClusterSchema, Entity } from "effect/unstable/cluster"
+import { MemoryTransaction } from "effect/unstable/cluster/MessageStorage"
 import type { RpcGroup } from "effect/unstable/rpc"
 import { Rpc, RpcSchema } from "effect/unstable/rpc"
 
@@ -36,10 +37,14 @@ export const TestEntity = Entity.make("TestEntity", [
     success: User,
     payload: { ids: Schema.Array(Schema.Number) },
     stream: true
-  })
+  }),
+  Rpc.make("WithTransaction", {
+    success: Schema.Boolean,
+    payload: { id: Schema.Number }
+  }).annotate(ClusterSchema.Dynamic, Context.add(ClusterSchema.WithTransaction, true))
 ]).annotateRpcs(ClusterSchema.Persisted, true)
 
-export class TestEntityState extends ServiceMap.Service<TestEntityState>()("TestEntityState", {
+export class TestEntityState extends Context.Service<TestEntityState>()("TestEntityState", {
   make: Effect.gen(function*() {
     const messages = yield* Queue.make<void>()
     const streamMessages = yield* Queue.make<void, Cause.Done>()
@@ -117,7 +122,8 @@ export const TestEntityNoState = TestEntity.toLayer(
         return Stream.fromIterable(envelope.payload.ids.map((id) => new User({ id, name: `User ${id}` }))).pipe(
           Stream.rechunk(1)
         )
-      }
+      },
+      WithTransaction: () => MemoryTransaction.asEffect()
     })
   }),
   { defectRetryPolicy: Schedule.forever }

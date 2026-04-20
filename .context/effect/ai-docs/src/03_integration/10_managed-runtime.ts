@@ -3,7 +3,7 @@
  *
  * Use `ManagedRuntime` to run Effect programs from external frameworks while keeping your domain logic in services and Layers.
  */
-import { Effect, Layer, ManagedRuntime, Ref, Schema, ServiceMap } from "effect"
+import { Context, Effect, Layer, ManagedRuntime, Ref, Schema } from "effect"
 import { Hono } from "hono"
 
 class Todo extends Schema.Class<Todo>("Todo")({
@@ -20,7 +20,7 @@ class TodoNotFound extends Schema.TaggedErrorClass<TodoNotFound>()("TodoNotFound
   id: Schema.Number
 }) {}
 
-export class TodoRepo extends ServiceMap.Service<TodoRepo, {
+export class TodoRepo extends Context.Service<TodoRepo, {
   readonly getAll: Effect.Effect<ReadonlyArray<Todo>>
   getById(id: number): Effect.Effect<Todo, TodoNotFound>
   create(payload: CreateTodoPayload): Effect.Effect<Todo>
