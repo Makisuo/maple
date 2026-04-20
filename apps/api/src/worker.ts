@@ -1,11 +1,11 @@
-import { ConfigProvider, Context, FileSystem, Layer, Path } from "effect"
+import { ConfigProvider, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
-import { flushTelemetry } from "./services/Telemetry"
+import { buildRequestTelemetry } from "./services/Telemetry"
 import { WorkerEnvironment } from "./services/WorkerEnvironment"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
@@ -73,10 +73,20 @@ const getHandler = (env: Record<string, unknown>) => {
 export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"
 
 export default {
-  fetch(request: Request, env: Record<string, unknown>, ctx: ExecutionContext) {
+  async fetch(
+    request: Request,
+    env: Record<string, unknown>,
+    ctx: ExecutionContext,
+  ) {
     const context = getHandler(env)
-    const response = context.handler(request, Context.makeUnsafe<any>(new Map()))
-    ctx.waitUntil(response.then(flushTelemetry))
+    // Build a fresh OTLP tracer/logger scope per request. Closing that scope
+    // (via ctx.waitUntil below) runs OtlpExporter's finalizer, which is the
+    // only path that reliably flushes buffered spans/logs on CF Workers — the
+    // exporter's background interval fiber doesn't progress between requests.
+    const telemetry = buildRequestTelemetry("maple-api", env)
+    const services = await telemetry.services
+    const response = context.handler(request, services as any)
+    ctx.waitUntil(response.then(telemetry.dispose, telemetry.dispose))
     return response
   },
 }

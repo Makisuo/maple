@@ -32,7 +32,6 @@ import { QueryEngineService } from "./services/QueryEngineService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { TinybirdService } from "./services/TinybirdService"
 import { TinybirdSyncClient } from "./services/TinybirdSyncClient"
-import { TracerLive } from "./services/Telemetry"
 
 export const HealthRouter = HttpRouter.use((router) =>
   router.add("GET", "/health", HttpServerResponse.text("OK")),
@@ -135,15 +134,16 @@ export const ApiAuthLive = AuthorizationLive.pipe(
   Layer.provideMerge(Env.Default),
 )
 
-export const ApiObservabilityLive = Layer.mergeAll(
-  TracerLive,
-  Layer.succeed(
-    HttpMiddleware.TracerDisabledWhen,
-    (request: { url: string; method: string }) =>
-      request.url === "/health" ||
-      request.method === "OPTIONS" ||
-      /\.(png|ico|jpg|jpeg|gif|css|js|svg|webp|woff2?)(\?.*)?$/i.test(
-        request.url,
-      ),
-  ),
+// The OTLP tracer/logger is built per-request in worker.ts and injected via
+// `handler(request, services)`. The shared layer only installs the
+// `TracerDisabledWhen` filter, which is a ServiceMap.Reference read by
+// HttpMiddleware regardless of which Tracer is active.
+export const ApiObservabilityLive = Layer.succeed(
+  HttpMiddleware.TracerDisabledWhen,
+  (request: { url: string; method: string }) =>
+    request.url === "/health" ||
+    request.method === "OPTIONS" ||
+    /\.(png|ico|jpg|jpeg|gif|css|js|svg|webp|woff2?)(\?.*)?$/i.test(
+      request.url,
+    ),
 )
