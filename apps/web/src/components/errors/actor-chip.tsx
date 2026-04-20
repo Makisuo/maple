@@ -54,19 +54,7 @@ export function ActorAvatar({
   actor: ActorDocument | null
   className?: string
 }) {
-  if (!actor) {
-    return (
-      <span
-        aria-hidden
-        className={cn(
-          "inline-flex size-5 items-center justify-center rounded-full border border-dashed border-border text-[10px] text-muted-foreground",
-          className,
-        )}
-      >
-        ·
-      </span>
-    )
-  }
+  if (!actor) return null
 
   const label = actorLabel(actor)
   const isAgent = actor.type === "agent"

@@ -9,7 +9,8 @@ import { WorkflowStatePopover } from "./workflow-state-popover"
 import type { IssueMutations } from "./use-issue-mutations"
 import { PriorityBarsIcon, WorkflowRingIcon } from "@/components/icons"
 import type { PriorityLevel } from "@/components/icons"
-import { formatRelativeTime } from "@/lib/format"
+import { formatNumber } from "@/lib/format"
+import { getServiceColorClass } from "@maple/ui/lib/colors"
 
 function clampPriority(value: number): PriorityLevel {
   if (!Number.isFinite(value)) return 0
@@ -23,11 +24,17 @@ function shortIssueId(id: string): string {
   return id.replace(/-/g, "").slice(0, 7).toUpperCase()
 }
 
-function formatShortDate(iso: string): string {
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+function formatLastSeen(iso: string): string {
   const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return formatRelativeTime(iso)
-  const now = new Date()
-  const sameYear = d.getFullYear() === now.getFullYear()
+  if (Number.isNaN(d.getTime())) return iso
+  const diffMs = Date.now() - d.getTime()
+  if (diffMs < 60_000) return "now"
+  if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m`
+  if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h`
+  if (diffMs < WEEK_MS) return `${Math.floor(diffMs / 86_400_000)}d`
+  const sameYear = d.getFullYear() === new Date().getFullYear()
   return d.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
@@ -167,25 +174,38 @@ export function IssueRow({
         ) : null}
 
         <span
-          className="relative z-10 hidden shrink-0 truncate text-xs text-muted-foreground md:inline-block md:max-w-[120px]"
+          className={cn(
+            "relative z-10 hidden h-5 shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background px-2",
+            "text-[11px] text-muted-foreground md:inline-flex",
+          )}
           title={issue.serviceName}
         >
-          {issue.serviceName}
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              getServiceColorClass(issue.serviceName),
+            )}
+          />
+          <span className="max-w-[120px] truncate">{issue.serviceName}</span>
         </span>
 
         <span
-          className="relative z-10 hidden shrink-0 text-right text-xs tabular-nums text-muted-foreground md:inline-block md:w-[56px]"
+          className="relative z-10 hidden shrink-0 text-right text-xs tabular-nums text-muted-foreground md:inline-block md:w-[88px]"
           title={`${issue.occurrenceCount.toLocaleString()} events`}
         >
-          {issue.occurrenceCount.toLocaleString()}
+          {formatNumber(issue.occurrenceCount)} events
         </span>
 
         <span className="relative z-10 shrink-0">
           <ActorAvatar actor={holderOrAssignee} />
         </span>
 
-        <span className="relative z-10 w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-          {formatShortDate(issue.lastSeenAt)}
+        <span
+          className="relative z-10 w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
+          title={`Last seen ${new Date(issue.lastSeenAt).toLocaleString()}`}
+        >
+          {formatLastSeen(issue.lastSeenAt)}
         </span>
       </div>
     </IssueContextMenu>

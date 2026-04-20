@@ -111,10 +111,15 @@ function IssuesPage() {
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const anchorRef = useRef<string | null>(null)
 
+  const totalCount = Result.isSuccess(issuesResult)
+    ? issuesResult.value.issues.length
+    : undefined
+
   const toolbar = (
     <IssuesToolbar
       tabs={TOOLBAR_TABS}
       active={activeFilter}
+      totalCount={totalCount}
       onChange={(value) => {
         setSelectedIds(new Set())
         navigate({
@@ -132,7 +137,7 @@ function IssuesPage() {
       <DashboardLayout
         breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
         title="Issues"
-        description="Workflow-tracked errors, grouped by fingerprint."
+        description="Errors grouped into triage, in-progress, and resolved work."
       >
         <div>
           {toolbar}
@@ -150,7 +155,7 @@ function IssuesPage() {
       <DashboardLayout
         breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
         title="Issues"
-        description="Workflow-tracked errors, grouped by fingerprint."
+        description="Errors grouped into triage, in-progress, and resolved work."
       >
         <div>
           {toolbar}
@@ -354,7 +359,7 @@ function IssuesPageBody({
     <DashboardLayout
       breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
       title="Issues"
-      description="Workflow-tracked errors, grouped by fingerprint."
+      description="Errors grouped into triage, in-progress, and resolved work."
     >
       <div
         className={isRefreshing ? "opacity-60 transition-opacity" : undefined}

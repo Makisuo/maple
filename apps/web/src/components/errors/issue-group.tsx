@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import type { ErrorIssueDocument, WorkflowState } from "@maple/domain/http"
 import { cn } from "@maple/ui/lib/utils"
 
-import { ChevronDownIcon, ChevronRightIcon, DotsIcon, PlusIcon } from "@/components/icons"
+import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
 import { WORKFLOW_LABEL, WorkflowRingIcon } from "@/components/icons/workflow-ring"
 import { IssueRow, type SelectToggleEvent } from "./issue-row"
 import type { IssueMutations } from "./use-issue-mutations"
@@ -70,51 +70,34 @@ export function IssueGroup({
 
   return (
     <section>
-      <div
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={isOpen}
+        aria-controls={`issue-group-${state}`}
         className={cn(
-          "group/header sticky top-0 z-10 flex h-8 items-center gap-2 border-b border-border/60 bg-muted/40 pr-2 pl-2",
+          "sticky top-0 z-10 flex h-8 w-full items-center gap-2 border-b border-border/60 bg-muted/40 pr-2 pl-2 text-left outline-none",
           "backdrop-blur supports-[backdrop-filter]:bg-muted/60",
+          "hover:bg-muted/60",
         )}
       >
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={isOpen}
-          aria-controls={`issue-group-${state}`}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
-        >
-          <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-            {isOpen ? (
-              <ChevronDownIcon size={14} />
-            ) : (
-              <ChevronRightIcon size={14} />
-            )}
-          </span>
-          <span className="flex shrink-0 items-center">
-            <WorkflowRingIcon state={state} size={14} />
-          </span>
-          <span className="shrink-0 text-sm font-medium text-foreground">
-            {label}
-          </span>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {issues.length}
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-label="Add issue"
-          className="flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground group-hover/header:opacity-100 focus-visible:opacity-100"
-        >
-          <PlusIcon size={14} />
-        </button>
-        <button
-          type="button"
-          aria-label="Group options"
-          className="flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground group-hover/header:opacity-100 focus-visible:opacity-100"
-        >
-          <DotsIcon size={14} />
-        </button>
-      </div>
+        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+          {isOpen ? (
+            <ChevronDownIcon size={14} />
+          ) : (
+            <ChevronRightIcon size={14} />
+          )}
+        </span>
+        <span className="flex shrink-0 items-center">
+          <WorkflowRingIcon state={state} size={14} />
+        </span>
+        <span className="shrink-0 text-sm font-medium text-foreground">
+          {label}
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {issues.length}
+        </span>
+      </button>
       {isOpen ? (
         <div
           id={`issue-group-${state}`}
