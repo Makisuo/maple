@@ -66,7 +66,7 @@ import {
   sql,
 } from "drizzle-orm"
 import { CH } from "@maple/query-engine"
-import { Cause, Context, Effect, Layer, Schema } from "effect"
+import { Array as Arr, Cause, Context, Effect, Layer, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import { Database, DatabaseError, type DatabaseClient } from "./DatabaseLive"
 import { Env } from "./Env"
@@ -96,6 +96,7 @@ const RETENTION_PHASE_EVERY_N_TICKS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = "system-errors-tick"
+const D1_INARRAY_CHUNK_SIZE = 90
 
 // ---------------------------------------------------------------------------
 // Transition matrix. Rows = from, values = set of allowed "to" states.
@@ -663,15 +664,21 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
         )
         if (filtered.length === 0)
           return Effect.succeed(new Map<ActorId, ActorDocument>())
-        return dbExecute((db) =>
-          db
-            .select()
-            .from(actors)
-            .where(and(eq(actors.orgId, orgId), inArray(actors.id, filtered))),
+        return Effect.forEach(
+          Arr.chunksOf(filtered, D1_INARRAY_CHUNK_SIZE),
+          (chunk) =>
+            dbExecute((db) =>
+              db
+                .select()
+                .from(actors)
+                .where(and(eq(actors.orgId, orgId), inArray(actors.id, chunk))),
+            ),
         ).pipe(
-          Effect.map((rows) => {
+          Effect.map((groups) => {
             const map = new Map<ActorId, ActorDocument>()
-            for (const row of rows) map.set(row.id, rowToActor(row))
+            for (const rows of groups) {
+              for (const row of rows) map.set(row.id, rowToActor(row))
+            }
             return map
           }),
         )
@@ -780,10 +787,13 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
       const issuesWithOpenIncidents = (
         orgId: OrgId,
         issueIds: ReadonlyArray<ErrorIssueId>,
-      ) =>
-        issueIds.length === 0
-          ? Effect.succeed(new Set<ErrorIssueId>())
-          : dbExecute((db) =>
+      ) => {
+        if (issueIds.length === 0)
+          return Effect.succeed(new Set<ErrorIssueId>())
+        return Effect.forEach(
+          Arr.chunksOf(issueIds, D1_INARRAY_CHUNK_SIZE),
+          (chunk) =>
+            dbExecute((db) =>
               db
                 .select({ issueId: errorIncidents.issueId })
                 .from(errorIncidents)
@@ -791,10 +801,16 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
                   and(
                     eq(errorIncidents.orgId, orgId),
                     eq(errorIncidents.status, "open"),
-                    inArray(errorIncidents.issueId, issueIds),
+                    inArray(errorIncidents.issueId, chunk),
                   ),
                 ),
-            ).pipe(Effect.map((rows) => new Set(rows.map((r) => r.issueId))))
+            ),
+        ).pipe(
+          Effect.map(
+            (groups) => new Set(groups.flatMap((rows) => rows.map((r) => r.issueId))),
+          ),
+        )
+      }
 
       const hydrateIssue = Effect.fn("ErrorsService.hydrateIssue")(function* (
         orgId: OrgId,
@@ -2274,45 +2290,66 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
           )
           if (toDelete.length > 0) {
             const ids = toDelete.map((r) => r.id)
-            yield* dbExecute((db) =>
-              db
-                .delete(errorIncidents)
-                .where(
-                  and(
-                    eq(errorIncidents.orgId, orgId),
-                    inArray(errorIncidents.issueId, ids),
-                  ),
+            const idChunks = Arr.chunksOf(ids, D1_INARRAY_CHUNK_SIZE)
+            yield* Effect.forEach(
+              idChunks,
+              (chunk) =>
+                dbExecute((db) =>
+                  db
+                    .delete(errorIncidents)
+                    .where(
+                      and(
+                        eq(errorIncidents.orgId, orgId),
+                        inArray(errorIncidents.issueId, chunk),
+                      ),
+                    ),
                 ),
+              { discard: true },
             )
-            yield* dbExecute((db) =>
-              db
-                .delete(errorIssueStates)
-                .where(
-                  and(
-                    eq(errorIssueStates.orgId, orgId),
-                    inArray(errorIssueStates.issueId, ids),
-                  ),
+            yield* Effect.forEach(
+              idChunks,
+              (chunk) =>
+                dbExecute((db) =>
+                  db
+                    .delete(errorIssueStates)
+                    .where(
+                      and(
+                        eq(errorIssueStates.orgId, orgId),
+                        inArray(errorIssueStates.issueId, chunk),
+                      ),
+                    ),
                 ),
+              { discard: true },
             )
-            yield* dbExecute((db) =>
-              db
-                .delete(errorIssueEvents)
-                .where(
-                  and(
-                    eq(errorIssueEvents.orgId, orgId),
-                    inArray(errorIssueEvents.issueId, ids),
-                  ),
+            yield* Effect.forEach(
+              idChunks,
+              (chunk) =>
+                dbExecute((db) =>
+                  db
+                    .delete(errorIssueEvents)
+                    .where(
+                      and(
+                        eq(errorIssueEvents.orgId, orgId),
+                        inArray(errorIssueEvents.issueId, chunk),
+                      ),
+                    ),
                 ),
+              { discard: true },
             )
-            yield* dbExecute((db) =>
-              db
-                .delete(errorIssues)
-                .where(
-                  and(
-                    eq(errorIssues.orgId, orgId),
-                    inArray(errorIssues.id, ids),
-                  ),
+            yield* Effect.forEach(
+              idChunks,
+              (chunk) =>
+                dbExecute((db) =>
+                  db
+                    .delete(errorIssues)
+                    .where(
+                      and(
+                        eq(errorIssues.orgId, orgId),
+                        inArray(errorIssues.id, chunk),
+                      ),
+                    ),
                 ),
+              { discard: true },
             )
             issuesDeleted = ids.length
           }
