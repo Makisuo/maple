@@ -10,6 +10,7 @@ import {
   OrgTinybirdSettingsService,
   QueryEngineService,
   TinybirdService,
+  TinybirdSyncClient,
   WorkerEnvironment,
 } from "@maple/api/alerting"
 import { Cause, ConfigProvider, Effect, Layer, ManagedRuntime } from "effect"
@@ -26,8 +27,10 @@ const buildLayer = (env: Record<string, unknown>) => {
 
   const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 
+  const TinybirdSyncClientLive = TinybirdSyncClient.Default
+
   const OrgTinybirdSettingsLive = OrgTinybirdSettingsService.Live.pipe(
-    Layer.provide(BaseLive),
+    Layer.provide(Layer.mergeAll(BaseLive, TinybirdSyncClientLive)),
   )
 
   const TinybirdServiceLive = TinybirdService.Live.pipe(
