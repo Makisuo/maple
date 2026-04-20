@@ -6,17 +6,13 @@ import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { IssueActionsBar } from "@/components/errors/issue-actions-bar"
 import { IssueCommentComposer } from "@/components/errors/issue-comment-composer"
 import { IssueHero } from "@/components/errors/issue-hero"
 import { IssueIncidentsTable } from "@/components/errors/issue-incidents-table"
-import { IssueMetadataRail } from "@/components/errors/issue-metadata-rail"
-import { IssueNotesCallout } from "@/components/errors/issue-notes-callout"
 import { IssueOccurrenceSparkline } from "@/components/errors/issue-occurrence-sparkline"
 import { IssueOccurrencesTable } from "@/components/errors/issue-occurrences-table"
-import { IssueStatRibbon } from "@/components/errors/issue-stat-ribbon"
+import { IssueSidebar } from "@/components/errors/issue-sidebar"
 import { IssueTimeline } from "@/components/errors/issue-timeline"
-import { LeaseHud } from "@/components/errors/lease-hud"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -261,34 +257,23 @@ function IssueDetailPage() {
               ) : null}
             </div>
           }
-        >
-          <div className="space-y-8">
-            <section className="space-y-4">
-              <IssueHero issue={issue} />
-              <IssueOccurrenceSparkline data={timeseries} />
-              <IssueMetadataRail issue={issue} />
-            </section>
-
-            <IssueActionsBar
+          rightSidebar={
+            <IssueSidebar
               issue={issue}
+              totalInWindow={totalInWindow}
               busy={busy}
               onTransition={transitionTo}
               onClaim={claim}
               onHeartbeat={heartbeat}
               onRelease={release}
             />
-
-            {issue.leaseHolder && issue.leaseExpiresAt ? (
-              <LeaseHud
-                leaseExpiresAt={issue.leaseExpiresAt}
-                claimedAt={issue.claimedAt}
-                leaseHolder={issue.leaseHolder}
-              />
-            ) : null}
-
-            <IssueStatRibbon issue={issue} totalInWindow={totalInWindow} />
-
-            {issue.notes ? <IssueNotesCallout notes={issue.notes} /> : null}
+          }
+        >
+          <div className="space-y-8">
+            <section className="space-y-4">
+              <IssueHero issue={issue} />
+              <IssueOccurrenceSparkline data={timeseries} />
+            </section>
 
             <section aria-labelledby="activity-heading">
               <SectionHeader id="activity-heading" label="Activity" />

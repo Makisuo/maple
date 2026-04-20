@@ -53,7 +53,7 @@ export function StateSelect({
       onValueChange={(v) => onChange(v as WorkflowState)}
       disabled={disabled}
     >
-      <SelectTrigger className="w-44">
+      <SelectTrigger className="w-full">
         <SelectValue placeholder="State" />
       </SelectTrigger>
       <SelectContent>
