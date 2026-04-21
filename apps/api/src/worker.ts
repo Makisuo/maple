@@ -86,7 +86,22 @@ export default {
     const telemetry = buildRequestTelemetry("maple-api", env)
     const services = await telemetry.services
     const response = context.handler(request, services as any)
-    ctx.waitUntil(response.then(telemetry.dispose, telemetry.dispose))
+    // The HTTP tracer middleware ends the root Server span via
+    // `scheduleTask(0)` on the fiber's dispatcher. If we dispose the
+    // runtime the moment the response promise resolves, that scheduled
+    // span.end loses the race to the microtask firing dispose — the root
+    // span never lands in the exporter buffer and the request appears
+    // parentless in Tinybird. Yielding one macrotask drains the
+    // dispatcher so span.end runs before flush.
+    ctx.waitUntil(
+      (async () => {
+        try {
+          await response
+        } catch {}
+        await new Promise<void>((r) => setTimeout(r, 0))
+        await telemetry.dispose()
+      })(),
+    )
     return response
   },
 }
