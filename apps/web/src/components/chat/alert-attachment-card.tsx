@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router"
 import { cn } from "@maple/ui/utils"
 import { Button } from "@maple/ui/components/ui/button"
-import type { AlertContext } from "./alert-context"
+import { signalLabel, type AlertContext } from "./alert-context"
 
 interface AlertAttachmentCardProps {
   alert: AlertContext
@@ -20,14 +20,7 @@ const eventMeta: Record<string, { label: string; dot: string; text: string }> = 
   test:     { label: "Test",        dot: "bg-sky-500",     text: "text-sky-500"     },
 }
 
-const signalLabels: Record<string, string> = {
-  error_rate:  "Error rate",
-  p95_latency: "P95 latency",
-  p99_latency: "P99 latency",
-  apdex:       "Apdex",
-  throughput:  "Throughput",
-  metric:      "Metric",
-}
+const capitalize = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1))
 
 const comparatorGlyph = (c: string): string => {
   switch (c) {
@@ -72,7 +65,7 @@ export function AlertAttachmentCard({ alert, className }: AlertAttachmentCardPro
     dot:   "bg-muted-foreground",
     text:  "text-muted-foreground",
   }
-  const signalLabel = signalLabels[alert.signalType] ?? alert.signalType
+  const signal = capitalize(signalLabel(alert.signalType))
   const observed = formatValue(alert.value, alert.signalType)
   const threshold = formatValue(alert.threshold, alert.signalType)
 
@@ -112,7 +105,7 @@ export function AlertAttachmentCard({ alert, className }: AlertAttachmentCardPro
               {alert.ruleName}
             </div>
             <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5">
-              <AttachmentField label="Signal" value={signalLabel} />
+              <AttachmentField label="Signal" value={signal} />
               <AttachmentField
                 label="Observed"
                 value={
