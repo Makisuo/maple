@@ -553,7 +553,59 @@ class ChatAgent extends AIChatAgent<Env> {
     onFinish: Parameters<AIChatAgent<Env>["onChatMessage"]>[0],
     options?: Parameters<AIChatAgent<Env>["onChatMessage"]>[1],
   ) {
-    const body = options?.body as Record<string, unknown> | undefined
+    const latestUserText = extractLatestUserText(this.messages)
+    if (!latestUserText) {
+      return createErrorResponse("A user text message is required")
+    }
+    return this.runChatTurn({
+      body: options?.body as Record<string, unknown> | undefined,
+      userText: latestUserText,
+      requestId: options?.requestId,
+      abortSignal: options?.abortSignal,
+      onFinish: onFinish as StreamTextOnFinishCallback<ToolSet>,
+    })
+  }
+
+  async onRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+    const last = url.pathname.split("/").pop()
+
+    if (request.method === "POST" && last === "mobile-chat") {
+      try {
+        const body = (await request.json()) as {
+          orgId?: string
+          userText?: string
+          mode?: string
+          alertContext?: AlertContext
+          dashboardContext?: DashboardContext
+        }
+        const userText = (body.userText ?? "").trim()
+        if (!userText) return createErrorResponse("userText is required")
+        return this.runChatTurn({
+          body: body as Record<string, unknown>,
+          userText,
+          abortSignal: request.signal,
+          onFinish: async () => {},
+        })
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        console.error("[chat-agent] Error in /mobile-chat:", errorMessage)
+        return createErrorResponse(errorMessage)
+      }
+    }
+
+    return new Response("Not Found", { status: 404 })
+  }
+
+  private async runChatTurn(input: {
+    body: Record<string, unknown> | undefined
+    userText: string
+    requestId?: string
+    abortSignal?: AbortSignal
+    onFinish: StreamTextOnFinishCallback<ToolSet>
+  }): Promise<Response> {
+    const { body, userText, abortSignal, onFinish } = input
+
     const orgId = body?.orgId as string | undefined
     if (!orgId) {
       return createErrorResponse("orgId is required in the request body")
@@ -568,7 +620,7 @@ class ChatAgent extends AIChatAgent<Env> {
       )
     }
     const isByok = orgApiKey !== undefined
-    const turnId = options?.requestId ?? crypto.randomUUID()
+    const turnId = input.requestId ?? crypto.randomUUID()
     const env = this.env
     const ctx = this.ctx
     const trackUsage = (
@@ -611,13 +663,8 @@ class ChatAgent extends AIChatAgent<Env> {
         ? { ...directTools, ...createDashboardBuilderTools(directTools as unknown as McpToolSet) }
         : directTools
 
-      const latestUserText = extractLatestUserText(this.messages)
-      if (!latestUserText) {
-        return createErrorResponse("A user text message is required")
-      }
-
       const wrappedOnFinish: StreamTextOnFinishCallback<ToolSet> = async (event) => {
-        await (onFinish as unknown as StreamTextOnFinishCallback<ToolSet>)(event)
+        await onFinish(event)
         trackUsage(event.totalUsage, "chat", turnId)
       }
 
@@ -627,10 +674,10 @@ class ChatAgent extends AIChatAgent<Env> {
             trackUsage(usage, "compaction", `${turnId}:compact:${crypto.randomUUID().slice(0, 8)}`)
           },
         }).prompt({
-          text: latestUserText,
+          text: userText,
           turnId,
           system: systemPrompt,
-          abortSignal: options?.abortSignal,
+          abortSignal,
           tools: allTools as ToolSet,
           onFinish: wrappedOnFinish,
         }),
@@ -639,7 +686,7 @@ class ChatAgent extends AIChatAgent<Env> {
       return result.toUIMessageStreamResponse()
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      console.error("[chat-agent] Error in onChatMessage:", errorMessage)
+      console.error("[chat-agent] Error in runChatTurn:", errorMessage)
 
       return createErrorResponse(errorMessage)
     }

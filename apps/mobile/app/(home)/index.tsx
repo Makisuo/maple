@@ -2,9 +2,11 @@ import { useState } from "react"
 import { Pressable, Text, View } from "react-native"
 import { useOrganization } from "@clerk/expo"
 import { UserButton } from "@clerk/expo/native"
+import { useRouter } from "expo-router"
 import { useDashboardData } from "../../hooks/use-dashboard-data"
 import type { TimeRangeKey } from "../../lib/time-utils"
 import { colors } from "../../lib/theme"
+import { hapticMedium } from "../../lib/haptics"
 import { SparklineBars } from "../../components/SparklineBars"
 import { StackedBarChart } from "../../components/StackedBarChart"
 import { Screen } from "../../components/ui/screen"
@@ -15,6 +17,7 @@ import { TimeRangePicker } from "../../components/ui/time-range-picker"
 import { ErrorView } from "../../components/ui/state-view"
 import { SkeletonBlock, TelemetrySkeleton } from "../../components/ui/skeleton"
 import { OrgSwitcherModal } from "../../components/org-switcher-modal"
+import { SparklesIcon } from "../../components/icons/sparkles-icon"
 
 const TIME_OPTIONS: TimeRangeKey[] = ["1h", "24h", "7d", "30d"]
 
@@ -87,11 +90,17 @@ function TelemetryRow({
 }
 
 export default function DashboardScreen() {
+	const router = useRouter()
 	const [selectedIndex, setSelectedIndex] = useState(1)
 	const [orgModalVisible, setOrgModalVisible] = useState(false)
 	const timeKey = TIME_OPTIONS[selectedIndex]
 	const { state, refresh, isRefreshing } = useDashboardData(timeKey)
 	const { organization } = useOrganization()
+
+	const askAi = () => {
+		hapticMedium()
+		router.push("/ask/new")
+	}
 
 	return (
 		<Screen scroll>
@@ -122,7 +131,24 @@ export default function DashboardScreen() {
 				</View>
 			</View>
 
-			<ScreenHeader title="Overview" isRefreshing={isRefreshing} />
+			<ScreenHeader
+				title="Overview"
+				isRefreshing={isRefreshing}
+				right={
+					<Pressable
+						onPress={askAi}
+						className="flex-row items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5"
+					>
+						<SparklesIcon size={12} color={colors.primary} />
+						<Text
+							className="font-mono text-[11px] font-bold text-primary"
+							style={{ letterSpacing: 0.5 }}
+						>
+							ASK AI
+						</Text>
+					</Pressable>
+				}
+			/>
 
 			<TimeRangePicker
 				selectedIndex={selectedIndex}
