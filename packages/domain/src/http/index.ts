@@ -8,6 +8,7 @@ export * from "./dashboards";
 export * from "./digest";
 export * from "./errors";
 export * from "./ingest-keys";
+export * from "./org-openrouter-settings";
 export * from "./org-tinybird-settings";
 export * from "../primitives";
 export * from "./query-engine";

@@ -1,5 +1,6 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
+import { useOrganization } from "@clerk/clerk-react"
 import { useCustomer } from "autumn-js/react"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
@@ -15,6 +16,7 @@ import { ApiKeysSection } from "@/components/settings/api-keys-section"
 import { McpSection } from "@/components/settings/mcp-section"
 import { ConnectorsSection } from "@/components/settings/connectors-section"
 import { NotificationsSection } from "@/components/settings/notifications-section"
+import { OrgOpenRouterSettingsSection } from "@/components/settings/org-openrouter-settings-section"
 import { OrgTinybirdSettingsSection } from "@/components/settings/org-tinybird-settings-section"
 import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -26,11 +28,12 @@ import {
   CreditCardIcon,
   DatabaseIcon,
   CodeIcon,
+  ChatBubbleSparkleIcon,
   type IconComponent,
 } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 
-const tabValues = ["members", "ingestion", "api-keys", "mcp", "connectors", "notifications", "billing", "data-platform"] as const
+const tabValues = ["members", "ingestion", "api-keys", "mcp", "connectors", "notifications", "ai", "billing", "data-platform"] as const
 type SettingsTab = (typeof tabValues)[number]
 
 const SettingsSearch = Schema.Struct({
@@ -56,6 +59,7 @@ const allNavItems: NavItem[] = [
   { id: "mcp", label: "MCP", icon: CodeIcon },
   { id: "connectors", label: "Connectors", icon: DatabaseIcon },
   { id: "notifications", label: "Notifications", icon: BellIcon },
+  { id: "ai", label: "AI", icon: ChatBubbleSparkleIcon },
   { id: "billing", label: "Billing", icon: CreditCardIcon },
   { id: "data-platform", label: "Data Platform", icon: DatabaseIcon },
 ]
@@ -100,6 +104,7 @@ const tabLabels: Record<SettingsTab, string> = {
   mcp: "MCP",
   connectors: "Connectors",
   notifications: "Notifications",
+  ai: "AI",
   billing: "Billing",
   "data-platform": "Data Platform",
 }
@@ -109,6 +114,7 @@ export function SettingsPage() {
   const navigate = useNavigate({ from: Route.fullPath })
   const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
   const { data: customer, isLoading: isCustomerLoading } = useCustomer()
+  const { organization } = useOrganization()
 
   const isAdmin = Result.builder(sessionResult)
     .onSuccess((session) =>
@@ -116,11 +122,14 @@ export function SettingsPage() {
     )
     .orElse(() => false)
   const canAccessDataPlatform = isAdmin && hasBringYourOwnCloudAddOn(customer)
+  const hasAiMetadataFlag = organization?.publicMetadata?.bringyourownai === true
+  const canAccessAi = isAdmin && hasAiMetadataFlag
 
   // Build visible nav items based on permissions
   const visibleItems = allNavItems.filter((item) => {
     if (item.id === "members" || item.id === "billing" || item.id === "notifications") return isClerkAuthEnabled
     if (item.id === "data-platform") return canAccessDataPlatform
+    if (item.id === "ai") return canAccessAi
     return true
   })
 
@@ -184,6 +193,9 @@ export function SettingsPage() {
       {activeTab === "mcp" && <McpSection />}
       {activeTab === "connectors" && <ConnectorsSection />}
       {activeTab === "notifications" && <NotificationsSection />}
+      {activeTab === "ai" && (
+        <OrgOpenRouterSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessAi} />
+      )}
       {activeTab === "billing" && <BillingSection />}
       {activeTab === "data-platform" && (
         <OrgTinybirdSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessDataPlatform} />

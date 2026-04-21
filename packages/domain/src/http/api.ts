@@ -8,6 +8,7 @@ import { DigestApiGroup } from "./digest";
 import { ErrorsApiGroup } from "./errors";
 import { IngestKeysApiGroup } from "./ingest-keys";
 import { ObservabilityApiGroup } from "./observability";
+import { OrgOpenrouterSettingsApiGroup } from "./org-openrouter-settings";
 import { OrgTinybirdSettingsApiGroup } from "./org-tinybird-settings";
 import { QueryEngineApiGroup } from "./query-engine";
 import { ScrapeTargetsApiGroup } from "./scrape-targets";
@@ -23,6 +24,7 @@ export class MapleApi extends HttpApi.make("MapleApi")
   .add(ErrorsApiGroup)
   .add(IngestKeysApiGroup)
   .add(ObservabilityApiGroup)
+  .add(OrgOpenrouterSettingsApiGroup)
   .add(OrgTinybirdSettingsApiGroup)
   .add(QueryEngineApiGroup)
   .add(ScrapeTargetsApiGroup)

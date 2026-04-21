@@ -1,4 +1,6 @@
-import { ConfigProvider, Layer, ManagedRuntime, type Schema } from "effect"
+import { ConfigProvider, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
+import { OrgId } from "@maple/domain/http"
+import { OrgOpenRouterSettingsService } from "./services/OrgOpenRouterSettingsService"
 
 type MapleAgentRuntime = ManagedRuntime.ManagedRuntime<any, never>
 
@@ -48,4 +50,20 @@ export const getMapleAgentSetup = (
   const built = buildSetup(env)
   setupCache.set(key, built)
   return built
+}
+
+const decodeOrgId = Schema.decodeUnknownSync(OrgId)
+
+export const resolveOrgOpenrouterKey = async (
+  env: Record<string, unknown>,
+  orgId: string,
+): Promise<string | undefined> => {
+  const { runtime } = await getMapleAgentSetup(env)
+  const decodedOrgId = decodeOrgId(orgId)
+  const result = await runtime.runPromise(
+    OrgOpenRouterSettingsService.resolveApiKey(decodedOrgId).pipe(
+      Effect.catch(() => Effect.succeed(Option.none<string>())),
+    ),
+  )
+  return Option.getOrUndefined(result)
 }

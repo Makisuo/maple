@@ -13,6 +13,7 @@ import { HttpDashboardsLive } from "./routes/dashboards.http"
 import { HttpDigestLive } from "./routes/digest.http"
 import { HttpIngestKeysLive } from "./routes/ingest-keys.http"
 import { HttpObservabilityLive } from "./routes/observability.http"
+import { HttpOrgOpenRouterSettingsLive } from "./routes/org-openrouter-settings.http"
 import { HttpOrgTinybirdSettingsLive } from "./routes/org-tinybird-settings.http"
 import { HttpQueryEngineLive } from "./routes/query-engine.http"
 import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http"
@@ -30,6 +31,7 @@ import { EdgeCacheService } from "./services/EdgeCacheService"
 import { EmailService } from "./services/EmailService"
 import { Env } from "./services/Env"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
+import { OrgOpenRouterSettingsService } from "./services/OrgOpenRouterSettingsService"
 import { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
@@ -56,6 +58,7 @@ export const CoreServicesLive = Layer.mergeAll(
   CloudflareLogpushService.layer,
   DashboardPersistenceService.layer,
   OrgIngestKeysService.layer,
+  OrgOpenRouterSettingsService.layer,
   OrgTinybirdSettingsService.layer.pipe(Layer.provide(TinybirdSyncClient.layer)),
   ScrapeTargetsService.layer,
 ).pipe(
@@ -121,6 +124,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
   Layer.provide(HttpDigestLive),
   Layer.provide(HttpIngestKeysLive),
   Layer.provide(HttpObservabilityLive),
+  Layer.provide(HttpOrgOpenRouterSettingsLive),
   Layer.provide(HttpOrgTinybirdSettingsLive),
   Layer.provide(HttpScrapeTargetsLive),
   Layer.provide(HttpServiceDiscoveryLive),
