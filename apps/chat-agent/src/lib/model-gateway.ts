@@ -1,4 +1,4 @@
-import { generateText, stepCountIs, streamText, type ModelMessage, type StreamTextOnFinishCallback, type ToolSet } from "ai"
+import { generateText, stepCountIs, streamText, type LanguageModelUsage, type ModelMessage, type StreamTextOnFinishCallback, type ToolSet } from "ai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { Effect } from "effect"
 import {
@@ -36,7 +36,14 @@ const parseCompactionSummary = (raw: string) => {
   }
 }
 
-export const createModelGateway = (apiKey: string): AgentModelGatewayShape => {
+export interface CreateModelGatewayOptions {
+  readonly onCompactionUsage?: (usage: LanguageModelUsage) => void
+}
+
+export const createModelGateway = (
+  apiKey: string,
+  options: CreateModelGatewayOptions = {},
+): AgentModelGatewayShape => {
   const openrouter = createOpenAICompatible({
     name: "openrouter",
     baseURL: "https://openrouter.ai/api/v1",
@@ -62,6 +69,8 @@ export const createModelGateway = (apiKey: string): AgentModelGatewayShape => {
             ].join(" "),
             prompt: renderCompactionPrompt(snapshot, preparation),
           })
+
+          options.onCompactionUsage?.(result.usage)
 
           return parseCompactionSummary(result.text)
         },

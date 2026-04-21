@@ -87,6 +87,7 @@ export const createChatAgentWorker = async ({
       ...optionalPlain("CLERK_PUBLISHABLE_KEY"),
       ...optionalSecret("CLERK_JWT_KEY"),
       ...optionalSecret("AUTUMN_SECRET_KEY"),
+      ...optionalPlain("AUTUMN_API_URL", "https://api.useautumn.com"),
       ...optionalSecret("SD_INTERNAL_TOKEN"),
       ...optionalSecret("RESEND_API_KEY"),
       RESEND_FROM_EMAIL:

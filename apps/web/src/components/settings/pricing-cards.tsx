@@ -43,6 +43,8 @@ const FEATURE_ICONS: Record<string, IconComponent> = {
   metrics: ChartLineIcon,
 }
 
+const HIDDEN_FEATURE_IDS = new Set<string>(["ai_input_tokens", "ai_output_tokens"])
+
 function getPlanSlug(plan: Plan): string {
   if (plan.autoEnable) return "starter"
   const id = plan.id?.toLowerCase()
@@ -80,7 +82,7 @@ function normalizeDetailText(text: string): string {
 
 function getFeatureRows(plan: Plan) {
   return plan.items
-    .filter((item) => item.featureId)
+    .filter((item) => item.featureId && !HIDDEN_FEATURE_IDS.has(item.featureId))
     .map((item) => ({
       featureId: item.featureId,
       label: item.feature?.name ?? item.featureId,

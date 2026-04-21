@@ -2,6 +2,8 @@
 import { Autumn } from "autumn-js"
 import * as m from "../paraglide/messages";
 
+const HIDDEN_FEATURE_IDS = new Set<string>(["ai_input_tokens", "ai_output_tokens"])
+
 const PLAN_FEATURES: Record<string, { label: string; value: string }[]> = {
     starter: [
         { label: m.pricing_14day_retention(), value: "" },
@@ -58,7 +60,7 @@ try {
             const interval = product.price?.interval
 
             const dataFeatures = product.items
-                .filter((item) => item.featureId)
+                .filter((item) => item.featureId && !HIDDEN_FEATURE_IDS.has(item.featureId))
                 .map((item) => ({
                     label: item.feature?.name ?? item.featureId ?? "",
                     value: item.unlimited ? "Unlimited" : `${Number(item.included ?? 0)} GB`,

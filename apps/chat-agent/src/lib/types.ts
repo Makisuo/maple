@@ -18,6 +18,7 @@ export interface Env {
   CLERK_SECRET_KEY?: string
   CLERK_JWT_KEY?: string
   AUTUMN_SECRET_KEY?: string
+  AUTUMN_API_URL?: string
   SD_INTERNAL_TOKEN?: string
   RESEND_API_KEY?: string
   RESEND_FROM_EMAIL?: string

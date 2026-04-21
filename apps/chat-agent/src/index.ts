@@ -1,11 +1,12 @@
 import { AIChatAgent } from "@cloudflare/ai-chat"
-import { tool, createUIMessageStream, createUIMessageStreamResponse, type StreamTextOnFinishCallback, type ToolSet } from "ai"
+import { tool, createUIMessageStream, createUIMessageStreamResponse, type LanguageModelUsage, type StreamTextOnFinishCallback, type ToolSet } from "ai"
 import { Effect } from "effect"
 import { routeAgentRequest } from "agents"
 import { makeAgentHarnessRuntime, type AgentHarnessRuntime } from "@maple/agent-harness"
 import { z } from "zod"
 import type { Env } from "./lib/types"
 import { resolveOrgOpenrouterKey } from "@maple/api/agent"
+import { trackTokenUsage } from "./lib/autumn-tracker"
 import { createMapleAiTools } from "./lib/direct-tools"
 import { createModelGateway } from "./lib/model-gateway"
 import { createDurableObjectSessionStore, type DurableSqlClient } from "./lib/session-store"
@@ -536,11 +537,14 @@ function extractLatestUserText(
 export { ChatAgent }
 
 class ChatAgent extends AIChatAgent<Env> {
-  private buildHarness(apiKey: string): AgentHarnessRuntime {
+  private buildHarness(
+    apiKey: string,
+    options: { onCompactionUsage?: (usage: LanguageModelUsage) => void } = {},
+  ): AgentHarnessRuntime {
     return makeAgentHarnessRuntime(
       "default",
       createDurableObjectSessionStore(this.sql.bind(this) as DurableSqlClient),
-      createModelGateway(apiKey),
+      createModelGateway(apiKey, { onCompactionUsage: options.onCompactionUsage }),
       { definitions: [] },
     )
   }
@@ -562,6 +566,25 @@ class ChatAgent extends AIChatAgent<Env> {
       return createErrorResponse(
         "No OpenRouter API key configured. An admin must add one in Settings → AI.",
       )
+    }
+    const isByok = orgApiKey !== undefined
+    const turnId = options?.requestId ?? crypto.randomUUID()
+    const env = this.env
+    const ctx = this.ctx
+    const trackUsage = (
+      usage: LanguageModelUsage,
+      source: "chat" | "compaction",
+      idempotencyKey: string,
+    ) => {
+      if (isByok || !env.AUTUMN_SECRET_KEY) return
+      const promise = trackTokenUsage(env, {
+        orgId,
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        idempotencyKey,
+        source,
+      })
+      ctx.waitUntil(promise)
     }
 
     const mode = (body?.mode as string) ?? "default"
@@ -593,14 +616,23 @@ class ChatAgent extends AIChatAgent<Env> {
         return createErrorResponse("A user text message is required")
       }
 
+      const wrappedOnFinish: StreamTextOnFinishCallback<ToolSet> = async (event) => {
+        await (onFinish as unknown as StreamTextOnFinishCallback<ToolSet>)(event)
+        trackUsage(event.totalUsage, "chat", turnId)
+      }
+
       const { result } = await Effect.runPromise(
-        this.buildHarness(apiKey).prompt({
+        this.buildHarness(apiKey, {
+          onCompactionUsage: (usage) => {
+            trackUsage(usage, "compaction", `${turnId}:compact:${crypto.randomUUID().slice(0, 8)}`)
+          },
+        }).prompt({
           text: latestUserText,
-          turnId: options?.requestId ?? crypto.randomUUID(),
+          turnId,
           system: systemPrompt,
           abortSignal: options?.abortSignal,
           tools: allTools as ToolSet,
-          onFinish: onFinish as unknown as StreamTextOnFinishCallback<ToolSet>,
+          onFinish: wrappedOnFinish,
         }),
       )
 

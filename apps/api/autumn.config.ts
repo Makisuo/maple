@@ -22,6 +22,26 @@ export const traces = feature({
 	consumable: true,
 });
 
+export const aiInputTokens = feature({
+	id: 'ai_input_tokens',
+	name: 'AI Input Tokens',
+	type: 'metered',
+	consumable: true,
+});
+
+export const aiOutputTokens = feature({
+	id: 'ai_output_tokens',
+	name: 'AI Output Tokens',
+	type: 'metered',
+	consumable: true,
+});
+
+export const bringYourOwnCloud = feature({
+	id: 'bringyourowncloud',
+	name: 'Bring Your Own Cloud',
+	type: 'boolean',
+});
+
 
 export const starter = plan({
 	id: 'starter',
@@ -98,6 +118,21 @@ export const startup = plan({
 				billingMethod: 'usage_based',
 				interval: 'month',
 			},
+		}),
+	],
+});
+
+export const bringYourOwnCloudAddOn = plan({
+	id: 'bringyourowncloud',
+	name: 'Bring Your Own Cloud',
+	addOn: true,
+	price: {
+		amount: 99,
+		interval: 'month',
+	},
+	items: [
+		({
+			featureId: 'bringyourowncloud',
 		}),
 	],
 });

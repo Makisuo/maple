@@ -29,6 +29,7 @@
     }
   ],
   "vars": {
-    "MAPLE_API_URL": "http://localhost:3472"
+    "MAPLE_API_URL": "http://localhost:3472",
+    "AUTUMN_API_URL": "https://api.useautumn.com"
   }
 }
