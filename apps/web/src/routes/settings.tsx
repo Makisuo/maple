@@ -49,50 +49,94 @@ interface NavItem {
   id: SettingsTab
   label: string
   icon: IconComponent
-
 }
 
-const allNavItems: NavItem[] = [
-  { id: "members", label: "Members", icon: UserIcon },
-  { id: "ingestion", label: "Ingestion", icon: ServerIcon },
-  { id: "api-keys", label: "API Keys", icon: KeyIcon },
-  { id: "mcp", label: "MCP", icon: CodeIcon },
-  { id: "connectors", label: "Connectors", icon: DatabaseIcon },
-  { id: "notifications", label: "Notifications", icon: BellIcon },
-  { id: "ai", label: "AI", icon: ChatBubbleSparkleIcon },
-  { id: "billing", label: "Billing", icon: CreditCardIcon },
-  { id: "data-platform", label: "Data Platform", icon: DatabaseIcon },
+interface NavSection {
+  id: "workspace" | "data" | "behavior" | "infra"
+  title: string
+  items: NavItem[]
+}
+
+const navSections: NavSection[] = [
+  {
+    id: "workspace",
+    title: "Workspace",
+    items: [
+      { id: "members", label: "Members", icon: UserIcon },
+      { id: "billing", label: "Billing", icon: CreditCardIcon },
+    ],
+  },
+  {
+    id: "data",
+    title: "Data",
+    items: [
+      { id: "ingestion", label: "Ingestion", icon: ServerIcon },
+      { id: "api-keys", label: "API Keys", icon: KeyIcon },
+      { id: "mcp", label: "MCP", icon: CodeIcon },
+      { id: "connectors", label: "Connectors", icon: DatabaseIcon },
+    ],
+  },
+  {
+    id: "behavior",
+    title: "Behavior",
+    items: [
+      { id: "notifications", label: "Notifications", icon: BellIcon },
+      { id: "ai", label: "AI", icon: ChatBubbleSparkleIcon },
+    ],
+  },
+  {
+    id: "infra",
+    title: "Infrastructure",
+    items: [
+      { id: "data-platform", label: "Data Platform", icon: DatabaseIcon },
+    ],
+  },
 ]
 
 function SettingsNav({
-  items,
+  sections,
   activeTab,
   onSelect,
 }: {
-  items: NavItem[]
+  sections: NavSection[]
   activeTab: SettingsTab
   onSelect: (tab: SettingsTab) => void
 }) {
   return (
-    <nav className="flex flex-col gap-0.5">
-      {items.map((item) => {
-        const isActive = item.id === activeTab
-        return (
-          <button
-            key={item.id}
-            onClick={() => onSelect(item.id)}
-            className={cn(
-              "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors text-left",
-              isActive
-                ? "bg-accent text-accent-foreground font-medium"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-            )}
-          >
-            <item.icon size={16} className="shrink-0" />
-            {item.label}
-          </button>
-        )
-      })}
+    <nav className="flex flex-col gap-5">
+      {sections.map((section) => (
+        <div key={section.id} className="flex flex-col gap-1">
+          <div className="px-2.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/60">
+            {section.title}
+          </div>
+          <div className="flex flex-col gap-0.5">
+            {section.items.map((item) => {
+              const isActive = item.id === activeTab
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onSelect(item.id)}
+                  className={cn(
+                    "group relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors text-left",
+                    isActive
+                      ? "bg-accent text-accent-foreground font-medium"
+                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  )}
+                >
+                  {isActive && (
+                    <span
+                      aria-hidden
+                      className="absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-primary"
+                    />
+                  )}
+                  <item.icon size={16} className="shrink-0" />
+                  {item.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </nav>
   )
 }
@@ -125,13 +169,20 @@ export function SettingsPage() {
   const hasAiMetadataFlag = organization?.publicMetadata?.bringyourownai === true
   const canAccessAi = isAdmin && hasAiMetadataFlag
 
-  // Build visible nav items based on permissions
-  const visibleItems = allNavItems.filter((item) => {
-    if (item.id === "members" || item.id === "billing" || item.id === "notifications") return isClerkAuthEnabled
-    if (item.id === "data-platform") return canAccessDataPlatform
-    if (item.id === "ai") return canAccessAi
-    return true
-  })
+  // Build visible sections based on permissions
+  const visibleSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (item.id === "members" || item.id === "billing" || item.id === "notifications") return isClerkAuthEnabled
+        if (item.id === "data-platform") return canAccessDataPlatform
+        if (item.id === "ai") return canAccessAi
+        return true
+      }),
+    }))
+    .filter((section) => section.items.length > 0)
+
+  const visibleItems = visibleSections.flatMap((s) => s.items)
 
   const activeTab: SettingsTab = (
     visibleItems.some((i) => i.id === search.tab)
@@ -181,7 +232,7 @@ export function SettingsPage() {
       title={tabLabels[activeTab]}
       filterSidebar={
         <SettingsNav
-          items={visibleItems}
+          sections={visibleSections}
           activeTab={activeTab}
           onSelect={handleTabSelect}
         />

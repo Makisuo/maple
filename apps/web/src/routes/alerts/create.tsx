@@ -9,6 +9,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { AlertPreviewChart } from "@/components/alerts/alert-preview-chart"
 import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
+import { RuleSentenceBuilder } from "@/components/alerts/rule-sentence-builder"
 import {
   AlertSegmentedSelect,
   AlertMultiSegmentedSelect,
@@ -32,11 +33,8 @@ import {
 import {
   AlertDestinationDocument,
   AlertRuleDocument,
-  type AlertComparator,
   type AlertMetricAggregation,
   type AlertMetricType,
-  type AlertSeverity,
-  type AlertSignalType,
 } from "@maple/domain/http"
 import {
   EyeIcon,
@@ -90,11 +88,6 @@ function AlertCreatePageWrapper() {
     </AutocompleteValuesProvider>
   )
 }
-
-const signalTypes = Object.entries(signalLabels).map(([value, label]) => ({
-  value: value as AlertSignalType,
-  label,
-}))
 
 function AlertCreatePage() {
   const search = Route.useSearch()
@@ -217,59 +210,8 @@ function AlertCreatePage() {
       <div className="flex gap-6">
         {/* ─── Left Column: Form ─── */}
         <div className="flex-1 min-w-0 space-y-6">
-          {/* Signal Type */}
-          <div>
-            <Label className="mb-2 block">Signal type</Label>
-            <AlertSegmentedSelect<AlertSignalType>
-              options={signalTypes}
-              value={ruleForm.signalType}
-              onChange={(value) => setRuleForm((c) => ({ ...c, signalType: value }))}
-              aria-label="Signal type"
-              className="flex-wrap"
-            />
-          </div>
-
-          {/* Condition - inline builder */}
-          <div>
-            <Label className="mb-2 block">Condition</Label>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="shrink-0 text-sm py-1.5 px-3">
-                {ruleForm.signalType === "query"
-                  ? `${ruleForm.queryDataSource}.${ruleForm.queryAggregation}`
-                  : signalLabels[ruleForm.signalType]}
-              </Badge>
-              <Select
-                items={comparatorLabels}
-                value={ruleForm.comparator}
-                onValueChange={(value) => setRuleForm((c) => ({ ...c, comparator: value as AlertComparator }))}
-              >
-                <SelectTrigger className="w-[70px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(comparatorLabels).map(([val, label]) => (
-                    <SelectItem key={val} value={val}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                type="number"
-                value={ruleForm.threshold}
-                onChange={(e) => setRuleForm((c) => ({ ...c, threshold: e.target.value }))}
-                className="w-[100px]"
-                placeholder="5"
-              />
-              <span className="text-muted-foreground text-sm shrink-0">over</span>
-              <Input
-                type="number"
-                value={ruleForm.windowMinutes}
-                onChange={(e) => setRuleForm((c) => ({ ...c, windowMinutes: e.target.value }))}
-                className="w-[80px]"
-                placeholder="5"
-              />
-              <span className="text-muted-foreground text-sm shrink-0">min</span>
-            </div>
-          </div>
+          {/* Sentence builder — hero rule statement */}
+          <RuleSentenceBuilder form={ruleForm} onChange={setRuleForm} />
 
           {/* Metric-specific fields */}
           {ruleForm.signalType === "metric" && (
@@ -476,35 +418,6 @@ function AlertCreatePage() {
                   </div>
                 </>
               )}
-            </div>
-          </div>
-
-          {/* Severity + Consecutive Breaches */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Severity</Label>
-              <AlertSegmentedSelect<AlertSeverity>
-                options={[
-                  { value: "warning", label: "Warning" },
-                  { value: "critical", label: "Critical" },
-                ]}
-                value={ruleForm.severity}
-                onChange={(value) => setRuleForm((c) => ({ ...c, severity: value }))}
-                aria-label="Severity"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="rule-breaches">Consecutive Breaches</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="rule-breaches"
-                  type="number"
-                  value={ruleForm.consecutiveBreachesRequired}
-                  onChange={(e) => setRuleForm((c) => ({ ...c, consecutiveBreachesRequired: e.target.value }))}
-                  className="w-[80px]"
-                />
-                <span className="text-sm text-muted-foreground">times before alerting</span>
-              </div>
             </div>
           </div>
 

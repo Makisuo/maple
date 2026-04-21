@@ -8,7 +8,7 @@ import { toast } from "sonner"
 import { DestinationDialog } from "@/components/alerts/destination-dialog"
 import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
 import { AlertSeverityBadge } from "@/components/alerts/alert-severity-badge"
-import { AlertStatCard } from "@/components/alerts/alert-stat-card"
+import { AlertStatCard, AlertFiringHero } from "@/components/alerts/alert-stat-card"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { formatRelativeTime } from "@/lib/format"
@@ -175,35 +175,36 @@ function MonitorTab({
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Skeleton className="h-[110px]" />
-          <Skeleton className="h-[110px]" />
-          <Skeleton className="h-[110px]" />
-          <Skeleton className="h-[110px]" />
+        <Skeleton className="h-[112px] w-full" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Skeleton className="h-[88px]" />
+          <Skeleton className="h-[88px]" />
+          <Skeleton className="h-[88px]" />
         </div>
         <Skeleton className="h-48" />
       </div>
     )
   }
 
-  const firingHint =
-    openIncidents.length === 0
-      ? "all clear"
-      : [criticalCount && `${criticalCount} critical`, warningCount && `${warningCount} warning`]
-          .filter(Boolean)
-          .join(", ")
+  const lastEvaluatedHint =
+    deliveryEvents[0]?.scheduledAt
+      ? `Last evaluated ${formatRelativeTime(deliveryEvents[0].scheduledAt)}`
+      : undefined
 
   return (
     <div className="space-y-8">
-      {/* Stats strip */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <AlertStatCard
-          label="Firing now"
-          value={openIncidents.length}
-          tone={openIncidents.length > 0 ? "critical" : "default"}
-          hint={firingHint}
-          indicator={openIncidents.length > 0 ? <span className="size-2 rounded-full bg-destructive" /> : null}
-        />
+      {/* Hero firing card */}
+      <AlertFiringHero
+        openCount={openIncidents.length}
+        criticalCount={criticalCount}
+        warningCount={warningCount}
+        rulesEnabled={enabledRules}
+        rulesTotal={rules.length}
+        lastEvaluatedHint={lastEvaluatedHint}
+      />
+
+      {/* Slim stats row */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <AlertStatCard
           label="Triggered (24h)"
           value={triggered24h}
@@ -221,19 +222,11 @@ function MonitorTab({
         />
       </div>
 
-      {/* All clear empty state */}
+      {/* No-activity hint — the hero already covers the "all clear" feeling */}
       {openIncidents.length === 0 && deliveryEvents.length === 0 && (
-        <Empty className="py-12">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <CheckIcon size={18} />
-            </EmptyMedia>
-            <EmptyTitle>All clear</EmptyTitle>
-            <EmptyDescription>
-              No active incidents or recent notifications. Rules are evaluating normally.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <div className="rounded-md border border-dashed border-border/60 py-8 text-center text-muted-foreground text-sm">
+          No recent notifications. Quiet is good.
+        </div>
       )}
 
       {/* Active Incidents */}
