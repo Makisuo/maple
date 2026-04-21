@@ -28,7 +28,7 @@ export {
 // Worker env + config (from alchemy-effect)
 // ---------------------------------------------------------------------------
 export { default as cloudflareWorkers } from "./cloudflare-workers.ts"
-export { WorkerConfigProvider } from "./config-provider.ts"
+export { WorkerConfigProvider, WorkerConfigProviderLive } from "./config-provider.ts"
 export {
   WorkerEnvironment,
   WorkerEnvironmentLive,

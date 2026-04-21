@@ -1,7 +1,7 @@
 import {
-  layerFromEnv,
   logTelemetryConfigOnce,
   makeTelemetryLayer,
+  WorkerConfigProviderLive,
   WorkerEnvironmentLive,
   withRequestRuntime,
 } from "@maple/effect-cloudflare"
@@ -48,7 +48,7 @@ const WorkerPlatformLive = Layer.mergeAll(
 // installed. Remove this once upstream fixes it.
 const passthroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
 
-const buildHandler = (env: Record<string, unknown>) =>
+const buildHandler = (_env: Record<string, unknown>) =>
   HttpRouter.toWebHandler(
     AllRoutes.pipe(
       Layer.provideMerge(MainLive),
@@ -57,7 +57,7 @@ const buildHandler = (env: Record<string, unknown>) =>
       Layer.provideMerge(WorkerPlatformLive),
       Layer.provideMerge(DatabaseD1Live),
       Layer.provideMerge(WorkerEnvironmentLive),
-      Layer.provideMerge(layerFromEnv(env)),
+      Layer.provideMerge(WorkerConfigProviderLive),
     ),
     { middleware: passthroughMiddleware },
   )
@@ -75,7 +75,9 @@ const getHandler = (env: Record<string, unknown>) => {
 
 const makeRequestTelemetryLayer = (env: Record<string, unknown>) => {
   logTelemetryConfigOnce(env)
-  return makeTelemetryLayer("maple-api").pipe(Layer.provide(layerFromEnv(env)))
+  return makeTelemetryLayer("maple-api").pipe(
+    Layer.provide(WorkerConfigProviderLive),
+  )
 }
 
 export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"

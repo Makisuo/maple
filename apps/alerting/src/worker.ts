@@ -14,15 +14,15 @@ import {
   TinybirdSyncClient,
 } from "@maple/api/alerting"
 import {
-  layerFromEnv,
   makeTelemetryLayer,
   runScheduledEffect,
+  WorkerConfigProviderLive,
   WorkerEnvironmentLive,
 } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer } from "effect"
 
-const buildLayer = (env: Record<string, unknown>) => {
-  const ConfigLive = layerFromEnv(env)
+const buildLayer = (_env: Record<string, unknown>) => {
+  const ConfigLive = WorkerConfigProviderLive
   const EnvLive = Env.Default.pipe(Layer.provide(ConfigLive))
 
   const DatabaseLive = DatabaseD1Live.pipe(Layer.provide(WorkerEnvironmentLive))
