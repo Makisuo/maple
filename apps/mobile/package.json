@@ -11,6 +11,8 @@
   "dependencies": {
     "@tanstack/react-query": "^5.95.2",
     "@clerk/expo": "^3.1.8",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "ai": "^6.0.146",
     "@expo-google-fonts/geist-mono": "^0.4.1",
     "@expo/metro-runtime": "^55.0.9",
     "@expo/ui": "~55.0.10",
