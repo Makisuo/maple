@@ -73,7 +73,7 @@ function Header({ children, title, titleContent, description, className }: Heade
     <div data-slot="page-header" className={cn("flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4", className)}>
       <div className="min-w-0 flex-1">
         {titleContent ?? (
-          title && <h1 className="text-2xl font-bold tracking-tight truncate" title={title}>{title}</h1>
+          title && <h1 className="font-display text-3xl font-semibold tracking-tight truncate leading-[1.1]" title={title}>{title}</h1>
         )}
         {description && (
           <p className="text-muted-foreground">{description}</p>

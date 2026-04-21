@@ -16,6 +16,7 @@
     "@cloudflare/ai-chat": "^0.3.2",
     "@effect-router/core": "workspace:*",
     "@effect/atom-react": "catalog:effect",
+    "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
     "@hugeicons/react": "^1.1.6",
     "@json-render/core": "^0.16.0",
