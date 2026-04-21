@@ -11,6 +11,7 @@ import {
 import { and, eq, inArray } from "drizzle-orm"
 import { Context, Effect, Layer, Redacted } from "effect"
 import {
+  buildAlertChatUrl,
   dispatchDelivery as dispatchDeliveryImpl,
   type DispatchContext,
 } from "./AlertDeliveryDispatch"
@@ -96,6 +97,7 @@ export class NotificationDispatcher extends Context.Service<
           value: request.value,
           sampleCount: request.sampleCount,
         }
+        const chatUrl = buildAlertChatUrl(env.MAPLE_APP_BASE_URL, request)
         const payloadJson = JSON.stringify({
           eventType: request.eventType,
           incidentId: request.incidentId,
@@ -116,6 +118,7 @@ export class NotificationDispatcher extends Context.Service<
             sampleCount: request.sampleCount,
           },
           linkUrl: request.linkUrl,
+          chatUrl,
           sentAt: new Date().toISOString(),
         })
         return yield* dispatchDeliveryImpl(
@@ -124,6 +127,7 @@ export class NotificationDispatcher extends Context.Service<
           globalThis.fetch,
           DELIVERY_TIMEOUT_MS,
           request.linkUrl,
+          chatUrl,
         )
       })
 

@@ -98,6 +98,23 @@ export function useChatTabs(initialTabId?: string) {
     })
   }, [])
 
+  const ensureTab = useCallback((id: string, title: string) => {
+    setState((prev) => {
+      const existing = prev.tabs.find((t) => t.id === id)
+      if (existing) {
+        if (prev.activeTabId === id) return prev
+        const next = { ...prev, activeTabId: id }
+        saveState(next)
+        return next
+      }
+      const newTab: ChatTab = { id, title, createdAt: Date.now() }
+      const next = { tabs: [...prev.tabs, newTab], activeTabId: id }
+      saveState(next)
+      return next
+    })
+    return id
+  }, [])
+
   return {
     tabs: state.tabs,
     activeTabId: state.activeTabId,
@@ -105,5 +122,6 @@ export function useChatTabs(initialTabId?: string) {
     closeTab,
     setActiveTab,
     renameTab,
+    ensureTab,
   }
 }

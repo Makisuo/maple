@@ -101,6 +101,7 @@ import {
 } from "./Crypto"
 import { Database, type DatabaseClient } from "./DatabaseLive"
 import {
+  buildAlertChatUrl,
   dispatchDelivery as dispatchDeliveryImpl,
   formatComparator,
   formatSignalLabel,
@@ -1382,6 +1383,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
       ) =>
         composeLinkUrl(resolveServiceLinkName(rule, groupKey))
 
+      const composeChatUrl = (context: DispatchContext): string =>
+        buildAlertChatUrl(env.MAPLE_APP_BASE_URL, context)
+
       const dispatchDelivery = (
         context: DispatchContext,
         payloadJson: string,
@@ -1392,6 +1396,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
           runtime.fetch,
           deliveryTimeoutMs(),
           context.linkUrl,
+          composeChatUrl(context),
         )
 
       const buildPayload = (context: DeliveryPayloadContext) => ({
@@ -1414,6 +1419,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
           sampleCount: context.sampleCount,
         },
         linkUrl: context.linkUrl,
+        chatUrl: buildAlertChatUrl(env.MAPLE_APP_BASE_URL, context),
         sentAt: new Date(now()).toISOString(),
       })
 

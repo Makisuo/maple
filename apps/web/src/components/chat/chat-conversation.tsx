@@ -1,9 +1,11 @@
-import { useRef } from "react"
+import { useMemo, useRef } from "react"
 import { useAgent } from "agents/react"
 import { useAgentChat } from "@cloudflare/ai-chat/react"
 import { useAuth } from "@clerk/clerk-react"
 import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
+import { alertPromptSuggestions, type AlertContext } from "./alert-context"
+import { AlertAttachmentCard } from "./alert-attachment-card"
 import {
   Conversation,
   ConversationContent,
@@ -36,7 +38,6 @@ function shouldShowThinkingIndicator(
   const parts = message.parts
   if (parts.length === 0) return true
   const lastPart = parts[parts.length - 1]
-  // If text is actively streaming, user already sees content appearing
   if (
     lastPart.type === "text" &&
     (lastPart as { state?: string }).state === "streaming"
@@ -45,7 +46,7 @@ function shouldShowThinkingIndicator(
   return true
 }
 
-const PROMPT_SUGGESTIONS = [
+const DEFAULT_SUGGESTIONS = [
   "What's the overall system health?",
   "Show me the slowest traces",
   "Are there any errors right now?",
@@ -56,9 +57,17 @@ interface ChatConversationProps {
   tabId: string
   isActive: boolean
   onFirstMessage?: (tabId: string, text: string) => void
+  mode?: "alert"
+  alertContext?: AlertContext
 }
 
-export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConversationProps) {
+export function ChatConversation({
+  tabId,
+  isActive,
+  onFirstMessage,
+  mode,
+  alertContext,
+}: ChatConversationProps) {
   const { orgId } = useAuth()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   useTypeAnywhereFocus(textareaRef, isActive)
@@ -69,12 +78,23 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
     host: chatAgentUrl,
   })
 
-  const { messages, sendMessage, status } = useAgentChat({
-    agent,
-    body: { orgId },
-  })
+  const body = useMemo<Record<string, unknown>>(() => {
+    const base: Record<string, unknown> = { orgId }
+    if (mode === "alert" && alertContext) {
+      base.mode = "alert"
+      base.alertContext = alertContext
+    }
+    return base
+  }, [orgId, mode, alertContext])
+
+  const { messages, sendMessage, status } = useAgentChat({ agent, body })
 
   const isLoading = status === "streaming" || status === "submitted"
+  const isAlertMode = mode === "alert" && !!alertContext
+  const suggestions = useMemo(
+    () => (isAlertMode ? alertPromptSuggestions(alertContext!) : DEFAULT_SUGGESTIONS),
+    [isAlertMode, alertContext],
+  )
 
   const handleSend = (text: string) => {
     if (!text.trim() || isLoading) return
@@ -86,31 +106,44 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 
   return (
     <div className="flex h-full flex-col">
+      {isAlertMode && <AlertAttachmentCard alert={alertContext!} />}
       <Conversation className="flex-1 min-h-0">
         <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
           {messages.length === 0 ? (
-            <ConversationEmptyState
-              title="Maple AI"
-              description="Ask me about your traces, logs, errors, and services."
-            >
-              <div className="mt-4 flex flex-col items-center gap-3">
-                <div className="space-y-1 text-center">
-                  <h3 className="text-sm font-medium">Maple AI</h3>
-                  <p className="text-muted-foreground text-sm">
-                    Ask me about your traces, logs, errors, and services.
-                  </p>
-                </div>
-                <Suggestions className="mt-2 justify-center">
-                  {PROMPT_SUGGESTIONS.map((s) => (
-                    <Suggestion
-                      key={s}
-                      suggestion={s}
-                      onClick={() => handleSend(s)}
-                    />
-                  ))}
-                </Suggestions>
+            isAlertMode ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
+                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
+                  Ready to investigate
+                </p>
+                <p className="max-w-sm text-sm text-muted-foreground">
+                  The alert above is attached to every message in this thread. Start with a
+                  suggestion or ask your own question.
+                </p>
               </div>
-            </ConversationEmptyState>
+            ) : (
+              <ConversationEmptyState
+                title="Maple AI"
+                description="Ask me about your traces, logs, errors, and services."
+              >
+                <div className="mt-4 flex flex-col items-center gap-3">
+                  <div className="space-y-1 text-center">
+                    <h3 className="text-sm font-medium">Maple AI</h3>
+                    <p className="text-muted-foreground text-sm">
+                      Ask me about your traces, logs, errors, and services.
+                    </p>
+                  </div>
+                  <Suggestions className="mt-2 justify-center">
+                    {suggestions.map((s) => (
+                      <Suggestion
+                        key={s}
+                        suggestion={s}
+                        onClick={() => handleSend(s)}
+                      />
+                    ))}
+                  </Suggestions>
+                </div>
+              </ConversationEmptyState>
+            )
           ) : (
             <>
               {messages.map((message, messageIndex) => {
@@ -170,9 +203,9 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
       </Conversation>
 
       <div className="mx-auto w-full max-w-3xl px-4 pb-4">
-        {messages.length > 0 && (
+        {(messages.length > 0 || isAlertMode) && (
           <Suggestions className="mb-3">
-            {PROMPT_SUGGESTIONS.map((s) => (
+            {suggestions.map((s) => (
               <Suggestion
                 key={s}
                 suggestion={s}
@@ -187,7 +220,9 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
         >
           <PromptInputTextarea
             ref={textareaRef}
-            placeholder="Ask about your system..."
+            placeholder={
+              isAlertMode ? "Ask about this alert..." : "Ask about your system..."
+            }
             disabled={isLoading}
           />
           <PromptInputFooter>

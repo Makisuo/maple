@@ -5,6 +5,7 @@ import { routeAgentRequest } from "agents"
 import { makeAgentHarnessRuntime, type AgentHarnessRuntime } from "@maple/agent-harness"
 import { z } from "zod"
 import type { Env } from "./lib/types"
+import { resolveOrgOpenrouterKey } from "@maple/api/agent"
 import { createMapleAiTools } from "./lib/direct-tools"
 import { createModelGateway } from "./lib/model-gateway"
 import { createDurableObjectSessionStore, type DurableSqlClient } from "./lib/session-store"
@@ -13,6 +14,88 @@ import { SYSTEM_PROMPT, DASHBOARD_BUILDER_SYSTEM_PROMPT } from "./lib/system-pro
 interface DashboardContext {
   dashboardName: string
   existingWidgets: Array<{ title: string; visualization: string }>
+}
+
+interface AlertContext {
+  ruleId: string
+  ruleName: string
+  incidentId: string | null
+  eventType: string
+  signalType: string
+  severity: string
+  comparator: string
+  threshold: number
+  value: number | null
+  windowMinutes: number
+  groupKey: string | null
+  sampleCount: number | null
+}
+
+const formatAlertComparator = (c: string) => {
+  switch (c) {
+    case "gt":
+      return ">"
+    case "gte":
+      return ">="
+    case "lt":
+      return "<"
+    case "lte":
+      return "<="
+    default:
+      return c
+  }
+}
+
+const SIGNAL_TOOL_HINTS: Record<string, string> = {
+  error_rate:
+    "- Prefer `find_errors` and `list_error_issues` for the affected service.\n- Use `search_logs` to surface exception messages in the alert window.",
+  p95_latency:
+    "- Prefer `find_slow_traces` and `get_service_top_operations` for the affected service.\n- Use `inspect_trace` on the slowest representative traces.",
+  p99_latency:
+    "- Prefer `find_slow_traces` and `get_service_top_operations` for the affected service.\n- Use `inspect_trace` on the slowest representative traces.",
+  apdex:
+    "- Investigate both latency and errors: `find_slow_traces`, `find_errors`, and `get_service_top_operations`.",
+  throughput:
+    "- Use `compare_periods` to contrast the alert window against the prior equivalent window.\n- `service_map` can reveal upstream dependencies that dropped or surged.",
+  metric:
+    "- Use `query_data` or `inspect_chart_data` to pull the raw metric values across the window.",
+}
+
+const formatAlertContextBlock = (alert: AlertContext): string => {
+  const observedRaw = alert.value === null ? "n/a" : String(alert.value)
+  const thresholdExpr = `${formatAlertComparator(alert.comparator)} ${alert.threshold}`
+  const toolHints =
+    SIGNAL_TOOL_HINTS[alert.signalType] ??
+    "- Use `diagnose_service` and `explore_attributes` on the affected service."
+
+  const lines = [
+    "",
+    "## Attached Alert",
+    "The on-call engineer is investigating an alert that has been attached to this conversation as structured context. It is visible to them as a pinned card above the message thread, and it remains attached to every message in this thread.",
+    "",
+    "```yaml",
+    `rule_id: ${alert.ruleId}`,
+    `rule_name: ${JSON.stringify(alert.ruleName)}`,
+    `incident_id: ${alert.incidentId ?? "null"}`,
+    `event_type: ${alert.eventType}`,
+    `severity: ${alert.severity}`,
+    `signal: ${alert.signalType}`,
+    `threshold: ${thresholdExpr}`,
+    `observed: ${observedRaw}`,
+    `sample_count: ${alert.sampleCount ?? "null"}`,
+    `window_minutes: ${alert.windowMinutes}`,
+    `group_key: ${alert.groupKey === null ? "null" : JSON.stringify(alert.groupKey)}`,
+    "```",
+    "",
+    "### Investigation guidance",
+    `- Scope every query to service/group \`${alert.groupKey ?? "all"}\` unless the engineer explicitly broadens it.`,
+    `- Default time range: the alert window (${alert.windowMinutes}m ending at the event time) with ~15m of surrounding context. Widen if needed.`,
+    `- Treat the attachment as authoritative — do not ask the engineer to repeat values it already contains. Reference the rule by name, not by ID.`,
+    toolHints,
+    "- When you recommend dashboards or links, prefer existing Maple routes (services, traces, errors, alerts). Use `get_alert_rule`/`list_alert_incidents` if you need deeper rule history.",
+    "- If the event is `resolve`, focus on root-cause and prevention rather than immediate mitigation.",
+  ]
+  return lines.join("\n")
 }
 
 const METRIC_TYPES = ["sum", "gauge", "histogram", "exponential_histogram"] as const
@@ -453,19 +536,13 @@ function extractLatestUserText(
 export { ChatAgent }
 
 class ChatAgent extends AIChatAgent<Env> {
-  private harness?: AgentHarnessRuntime
-
-  private getHarness(): AgentHarnessRuntime {
-    if (!this.harness) {
-      this.harness = makeAgentHarnessRuntime(
-        "default",
-        createDurableObjectSessionStore(this.sql.bind(this) as DurableSqlClient),
-        createModelGateway(this.env.OPENROUTER_API_KEY),
-        { definitions: [] },
-      )
-    }
-
-    return this.harness
+  private buildHarness(apiKey: string): AgentHarnessRuntime {
+    return makeAgentHarnessRuntime(
+      "default",
+      createDurableObjectSessionStore(this.sql.bind(this) as DurableSqlClient),
+      createModelGateway(apiKey),
+      { definitions: [] },
+    )
   }
 
   async onChatMessage(
@@ -478,12 +555,23 @@ class ChatAgent extends AIChatAgent<Env> {
       return createErrorResponse("orgId is required in the request body")
     }
 
+    const envRecord = this.env as unknown as Record<string, unknown>
+    const orgApiKey = await resolveOrgOpenrouterKey(envRecord, orgId)
+    const apiKey = orgApiKey ?? this.env.OPENROUTER_API_KEY
+    if (!apiKey) {
+      return createErrorResponse(
+        "No OpenRouter API key configured. An admin must add one in Settings → AI.",
+      )
+    }
+
     const mode = (body?.mode as string) ?? "default"
     const dashboardContext = body?.dashboardContext as DashboardContext | undefined
+    const alertContext = body?.alertContext as AlertContext | undefined
 
     try {
-      const directTools = await createMapleAiTools(this.env as unknown as Record<string, unknown>, orgId)
+      const directTools = await createMapleAiTools(envRecord, orgId)
       const isDashboardMode = mode === "dashboard_builder"
+      const isAlertMode = mode === "alert"
 
       let systemPrompt = isDashboardMode ? DASHBOARD_BUILDER_SYSTEM_PROMPT : SYSTEM_PROMPT
       if (isDashboardMode && dashboardContext) {
@@ -491,6 +579,9 @@ class ChatAgent extends AIChatAgent<Env> {
           ? dashboardContext.existingWidgets.map((w) => `- "${w.title}" (${w.visualization})`).join("\n")
           : "(none)"
         systemPrompt += `\n\n## Current Dashboard Context\nDashboard: "${dashboardContext.dashboardName}"\nExisting widgets:\n${widgetList}`
+      }
+      if (isAlertMode && alertContext) {
+        systemPrompt += `\n${formatAlertContextBlock(alertContext)}`
       }
 
       const allTools = isDashboardMode
@@ -503,7 +594,7 @@ class ChatAgent extends AIChatAgent<Env> {
       }
 
       const { result } = await Effect.runPromise(
-        this.getHarness().prompt({
+        this.buildHarness(apiKey).prompt({
           text: latestUserText,
           turnId: options?.requestId ?? crypto.randomUUID(),
           system: systemPrompt,

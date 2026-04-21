@@ -56,6 +56,60 @@ export interface DispatchResult {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Chat deep-link helper                                                     */
+/* -------------------------------------------------------------------------- */
+
+export interface ChatUrlContext {
+  readonly ruleId: string
+  readonly ruleName: string
+  readonly incidentId: string | null
+  readonly dedupeKey: string
+  readonly eventType: AlertEventType
+  readonly signalType: AlertSignalType
+  readonly severity: AlertSeverity
+  readonly comparator: AlertComparator
+  readonly threshold: number
+  readonly value: number | null
+  readonly windowMinutes: number
+  readonly groupKey: string | null
+  readonly sampleCount: number | null
+}
+
+const toBase64Url = (raw: string): string =>
+  Buffer.from(raw, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "")
+
+export const buildAlertChatUrl = (
+  baseUrl: string,
+  context: ChatUrlContext,
+): string => {
+  const alertJson = JSON.stringify({
+    ruleId: context.ruleId,
+    ruleName: context.ruleName,
+    incidentId: context.incidentId,
+    eventType: context.eventType,
+    signalType: context.signalType,
+    severity: context.severity,
+    comparator: context.comparator,
+    threshold: context.threshold,
+    value: context.value,
+    windowMinutes: context.windowMinutes,
+    groupKey: context.groupKey,
+    sampleCount: context.sampleCount,
+  })
+  const tabId = `alert-${context.incidentId ?? context.dedupeKey}`
+  const params = new URLSearchParams({
+    mode: "alert",
+    tab: tabId,
+    alert: toBase64Url(alertJson),
+  })
+  return `${baseUrl}/chat?${params.toString()}`
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Formatting helpers                                                        */
 /* -------------------------------------------------------------------------- */
 
@@ -171,7 +225,11 @@ const runTimedFetch = <A>(
     }),
   )
 
-const buildSlackBlocks = (context: DispatchContext, linkUrl: string) => [
+const buildSlackBlocks = (
+  context: DispatchContext,
+  linkUrl: string,
+  chatUrl: string,
+) => [
   {
     type: "header",
     text: {
@@ -203,6 +261,12 @@ const buildSlackBlocks = (context: DispatchContext, linkUrl: string) => [
         url: linkUrl,
         ...(context.eventType !== "resolve" && { style: "danger" }),
       },
+      {
+        type: "button",
+        text: { type: "plain_text", text: "Ask Maple AI", emoji: true },
+        url: chatUrl,
+        style: "primary",
+      },
     ],
   },
   {
@@ -217,6 +281,7 @@ export const dispatchDelivery = (
   fetchFn: typeof fetch,
   timeoutMs: number,
   linkUrl: string,
+  chatUrl: string,
 ): Effect.Effect<DispatchResult, AlertDeliveryError> =>
   Effect.gen(function* () {
     return yield* Match.value(context.secretConfig).pipe(
@@ -232,7 +297,7 @@ export const dispatchDelivery = (
                   attachments: [
                     {
                       color: slackAttachmentColor(context.eventType, context.severity),
-                      blocks: buildSlackBlocks(context, linkUrl),
+                      blocks: buildSlackBlocks(context, linkUrl, chatUrl),
                     },
                   ],
                 }),
@@ -263,9 +328,13 @@ export const dispatchDelivery = (
                   comparator: context.comparator,
                   groupKey: context.groupKey,
                   linkUrl,
+                  chatUrl,
                 },
               },
-              links: [{ href: linkUrl, text: "Open in Maple" }],
+              links: [
+                { href: linkUrl, text: "Open in Maple" },
+                { href: chatUrl, text: "Ask Maple AI" },
+              ],
             }
             const response = yield* runTimedFetch("pagerduty", "PagerDuty", fetchFn, timeoutMs, () =>
               fetchFn("https://events.pagerduty.com/v2/enqueue", {
