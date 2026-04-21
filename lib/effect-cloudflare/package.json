@@ -1,0 +1,20 @@
+{
+  "name": "@maple/effect-cloudflare",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "catalog:effect"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260405.0",
+    "@effect/language-service": "catalog:effect",
+    "@types/node": "catalog:tooling",
+    "typescript": "catalog:tooling"
+  }
+}

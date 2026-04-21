@@ -12,6 +12,7 @@
     "@maple/api": "workspace:*",
     "@maple/db": "workspace:*",
     "@maple/domain": "workspace:*",
+    "@maple/effect-cloudflare": "workspace:*",
     "effect": "catalog:effect"
   },
   "devDependencies": {

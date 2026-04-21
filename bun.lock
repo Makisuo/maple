@@ -23,6 +23,7 @@
         "@maple/api": "workspace:*",
         "@maple/db": "workspace:*",
         "@maple/domain": "workspace:*",
+        "@maple/effect-cloudflare": "workspace:*",
         "effect": "catalog:effect",
       },
       "devDependencies": {
@@ -41,6 +42,7 @@
         "@libsql/client": "0.15.15",
         "@maple/db": "workspace:*",
         "@maple/domain": "workspace:*",
+        "@maple/effect-cloudflare": "workspace:*",
         "@maple/email": "workspace:*",
         "@maple/infra": "workspace:*",
         "@maple/query-engine": "workspace:*",
@@ -254,6 +256,18 @@
         "typescript": "catalog:tooling",
         "vite": "catalog:",
         "vitest": "catalog:",
+      },
+    },
+    "lib/effect-cloudflare": {
+      "name": "@maple/effect-cloudflare",
+      "dependencies": {
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "^4.20260405.0",
+        "@effect/language-service": "catalog:effect",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
       },
     },
     "lib/effect-sdk": {
@@ -1188,6 +1202,8 @@
     "@maple/db": ["@maple/db@workspace:packages/db"],
 
     "@maple/domain": ["@maple/domain@workspace:packages/domain"],
+
+    "@maple/effect-cloudflare": ["@maple/effect-cloudflare@workspace:lib/effect-cloudflare"],
 
     "@maple/email": ["@maple/email@workspace:packages/email"],
 

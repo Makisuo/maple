@@ -1,11 +1,16 @@
-import { ConfigProvider, FileSystem, Layer, Path } from "effect"
+import {
+  layerFromEnv,
+  logTelemetryConfigOnce,
+  makeTelemetryLayer,
+  withRequestRuntime,
+} from "@maple/effect-cloudflare"
+import { FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
-import { buildRequestTelemetry } from "./services/Telemetry"
 import { WorkerEnvironment } from "./services/WorkerEnvironment"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
@@ -52,9 +57,7 @@ const buildHandler = (env: Record<string, unknown>) =>
       Layer.provideMerge(WorkerPlatformLive),
       Layer.provideMerge(DatabaseD1Live),
       Layer.provideMerge(Layer.succeed(WorkerEnvironment, env)),
-      Layer.provideMerge(
-        ConfigProvider.layer(ConfigProvider.fromUnknown(env)),
-      ),
+      Layer.provideMerge(layerFromEnv(env)),
     ),
     { middleware: passthroughMiddleware },
   )
@@ -70,38 +73,19 @@ const getHandler = (env: Record<string, unknown>) => {
   return built
 }
 
+const makeRequestTelemetryLayer = (env: Record<string, unknown>) => {
+  logTelemetryConfigOnce(env)
+  return makeTelemetryLayer("maple-api").pipe(Layer.provide(layerFromEnv(env)))
+}
+
 export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"
 
 export default {
-  async fetch(
-    request: Request,
-    env: Record<string, unknown>,
-    ctx: ExecutionContext,
-  ) {
-    const context = getHandler(env)
-    // Build a fresh OTLP tracer/logger scope per request. Closing that scope
-    // (via ctx.waitUntil below) runs OtlpExporter's finalizer, which is the
-    // only path that reliably flushes buffered spans/logs on CF Workers — the
-    // exporter's background interval fiber doesn't progress between requests.
-    const telemetry = buildRequestTelemetry("maple-api", env)
-    const services = await telemetry.services
-    const response = context.handler(request, services as any)
-    // The HTTP tracer middleware ends the root Server span via
-    // `scheduleTask(0)` on the fiber's dispatcher. If we dispose the
-    // runtime the moment the response promise resolves, that scheduled
-    // span.end loses the race to the microtask firing dispose — the root
-    // span never lands in the exporter buffer and the request appears
-    // parentless in Tinybird. Yielding one macrotask drains the
-    // dispatcher so span.end runs before flush.
-    ctx.waitUntil(
-      (async () => {
-        try {
-          await response
-        } catch {}
-        await new Promise<void>((r) => setTimeout(r, 0))
-        await telemetry.dispose()
-      })(),
-    )
-    return response
-  },
+  fetch: withRequestRuntime(
+    makeRequestTelemetryLayer,
+    (request, services, env) => {
+      const { handler } = getHandler(env)
+      return handler(request, services as any)
+    },
+  ),
 }

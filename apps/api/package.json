@@ -23,6 +23,7 @@
     "@libsql/client": "0.15.15",
     "@maple/db": "workspace:*",
     "@maple/domain": "workspace:*",
+    "@maple/effect-cloudflare": "workspace:*",
     "@maple/email": "workspace:*",
     "@maple/infra": "workspace:*",
     "@maple/query-engine": "workspace:*",
