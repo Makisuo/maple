@@ -16,6 +16,8 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "paths": {
       "@/mcp/*": ["../api/src/mcp/*"],
       "@/services/*": ["../api/src/services/*"],

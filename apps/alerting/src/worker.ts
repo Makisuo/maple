@@ -12,21 +12,20 @@ import {
   QueryEngineService,
   TinybirdService,
   TinybirdSyncClient,
-  WorkerEnvironment,
 } from "@maple/api/alerting"
 import {
   layerFromEnv,
   makeTelemetryLayer,
   runScheduledEffect,
+  WorkerEnvironmentLive,
 } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer } from "effect"
 
 const buildLayer = (env: Record<string, unknown>) => {
   const ConfigLive = layerFromEnv(env)
-  const WorkerEnvLive = Layer.succeed(WorkerEnvironment, env)
   const EnvLive = Env.Default.pipe(Layer.provide(ConfigLive))
 
-  const DatabaseLive = DatabaseD1Live.pipe(Layer.provide(WorkerEnvLive))
+  const DatabaseLive = DatabaseD1Live.pipe(Layer.provide(WorkerEnvironmentLive))
 
   const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 

@@ -1,4 +1,5 @@
 import { createMapleD1Client, type CloudflareD1Database } from "@maple/db/client"
+import { D1Database as D1DatabaseToken } from "@maple/effect-cloudflare"
 import { Effect, Layer } from "effect"
 import {
   Database,
@@ -6,17 +7,19 @@ import {
   type DatabaseShape,
   toDatabaseError,
 } from "./DatabaseLive"
-import { WorkerEnvironment } from "./WorkerEnvironment"
+
+const MAPLE_DB = D1DatabaseToken("MAPLE_DB")
 
 const makeD1Database = Effect.gen(function* () {
-  const env = yield* WorkerEnvironment
-
-  const binding = env.MAPLE_DB as CloudflareD1Database | undefined
+  const conn = yield* D1DatabaseToken.bind(MAPLE_DB)
+  const binding = yield* conn.raw
   if (!binding) {
     return yield* Effect.die(new Error("Missing worker D1 binding: MAPLE_DB"))
   }
 
-  const client = createMapleD1Client(binding) as unknown as DatabaseClient
+  const client = createMapleD1Client(
+    binding as unknown as CloudflareD1Database,
+  ) as unknown as DatabaseClient
 
   return {
     client,

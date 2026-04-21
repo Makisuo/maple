@@ -15,7 +15,7 @@ import cloudflareWorkers from "./cloudflare-workers.ts"
 export class WorkerEnvironment extends Context.Service<
   WorkerEnvironment,
   Record<string, unknown>
->()("Cloudflare.WorkerEnvironment") {}
+>()("Cloudflare.Workers.WorkerEnvironment") {}
 
 /**
  * Read the worker env from the `cloudflare:workers` global import. This is the

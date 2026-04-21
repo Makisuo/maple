@@ -2,6 +2,7 @@ import {
   layerFromEnv,
   logTelemetryConfigOnce,
   makeTelemetryLayer,
+  WorkerEnvironmentLive,
   withRequestRuntime,
 } from "@maple/effect-cloudflare"
 import { FileSystem, Layer, Path } from "effect"
@@ -11,7 +12,6 @@ import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
-import { WorkerEnvironment } from "./services/WorkerEnvironment"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
 
@@ -56,7 +56,7 @@ const buildHandler = (env: Record<string, unknown>) =>
       Layer.provideMerge(ApiObservabilityLive),
       Layer.provideMerge(WorkerPlatformLive),
       Layer.provideMerge(DatabaseD1Live),
-      Layer.provideMerge(Layer.succeed(WorkerEnvironment, env)),
+      Layer.provideMerge(WorkerEnvironmentLive),
       Layer.provideMerge(layerFromEnv(env)),
     ),
     { middleware: passthroughMiddleware },
