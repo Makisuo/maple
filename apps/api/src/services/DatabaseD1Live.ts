@@ -1,5 +1,5 @@
 import { createMapleD1Client, type CloudflareD1Database } from "@maple/db/client"
-import { D1Database as D1DatabaseToken } from "@maple/effect-cloudflare"
+import { D1Database as D1DatabaseToken } from "@maple/effect-cloudflare/d1-connection"
 import { Effect, Layer } from "effect"
 import {
   Database,

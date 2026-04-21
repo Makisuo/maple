@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./worker-environment": "./src/worker-environment.ts",
+    "./d1-connection": "./src/d1-connection.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
