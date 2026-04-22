@@ -155,14 +155,53 @@ describe("error fingerprint normalization", () => {
       expect(a.msgFallback).toBe(b.msgFallback)
     })
 
-    it("does not use the fallback when an exception type is present", () => {
+    it("still computes the fallback when only an exception type is present (no frames)", () => {
+      // Previously the fallback was gated on exceptionType === "", which let
+      // generic types like "HttpServerError" or "Error" monopolize one bucket
+      // per service. With frames absent, the normalized message must
+      // differentiate occurrences regardless of whether a type was set.
       const result = computeFingerprintInputs({
         exceptionType: "TimeoutError",
         exceptionStacktrace: "",
         statusMessage: "db timeout 12345",
       })
 
-      expect(result.msgFallback).toBe("")
+      expect(result.msgFallback).toBe("db timeout #")
+    })
+
+    it("splits a generic ExceptionType bucket by normalized StatusMessage", () => {
+      const a = computeFingerprintInputs({
+        exceptionType: "HttpServerError",
+        exceptionStacktrace: "",
+        statusMessage: "RouteNotFound (GET /robots.txt)",
+      })
+      const b = computeFingerprintInputs({
+        exceptionType: "HttpServerError",
+        exceptionStacktrace: "",
+        statusMessage: "RouteNotFound (GET /.env)",
+      })
+
+      expect(a.msgFallback).not.toBe(b.msgFallback)
+      expect(a.msgFallback).toContain("/robots.txt")
+      expect(b.msgFallback).toContain("/.env")
+    })
+
+    it("splits a malformed-ExceptionType bucket (JSON-prefix leak) by message", () => {
+      // Regression guard: if upstream instrumentation ever leaks a truncated
+      // JSON prefix like `{ "type"` into exception.type, distinct underlying
+      // errors must still produce distinct msgFallbacks.
+      const a = computeFingerprintInputs({
+        exceptionType: '{ "type"',
+        exceptionStacktrace: "",
+        statusMessage: 'StripeCardError: card_declined for customer cus_abc',
+      })
+      const b = computeFingerprintInputs({
+        exceptionType: '{ "type"',
+        exceptionStacktrace: "",
+        statusMessage: 'StripeInvalidRequestError: No such price: price_xyz',
+      })
+
+      expect(a.msgFallback).not.toBe(b.msgFallback)
     })
 
     it("does not use the fallback when there are frames", () => {

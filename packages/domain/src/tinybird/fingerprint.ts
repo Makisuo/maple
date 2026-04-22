@@ -17,9 +17,10 @@ export interface FingerprintInputs {
   /** Top 3 normalized frames joined by newline — the stack portion of the hash. */
   readonly fpFrames: string
   /**
-   * Fallback signal used only when there is no exception event and no
-   * frame-shaped stack lines. Prevents status-only errors from all collapsing
-   * into a single issue per service.
+   * Normalized StatusMessage prefix, folded into the hash whenever there are no
+   * frame-shaped stack lines (regardless of whether ExceptionType is present).
+   * Prevents status-only errors — and errors with generic or malformed
+   * ExceptionType values — from all collapsing into a single issue per service.
    */
   readonly msgFallback: string
 }
@@ -46,7 +47,7 @@ export function computeFingerprintInputs(args: {
   const fpFrames = topFrames.join("\n")
 
   const msgFallback =
-    args.exceptionType === "" && fpFrames === ""
+    fpFrames === ""
       ? args.statusMessage.slice(0, 200).replace(MSG_REDACT_RE, "#")
       : ""
 

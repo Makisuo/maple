@@ -425,9 +425,11 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
  *   moves don't rotate the fingerprint.
  * - Top 3 frames are hashed (not just 1) so errors raised inside shared library
  *   code still distinguish between different call sites.
- * - When there is no exception event AND no frame-shaped stack lines, falls back
- *   to a normalized prefix of StatusMessage (IDs/numbers/hex runs redacted) so
- *   status-only errors don't all collapse into a single issue.
+ * - Whenever there are no frame-shaped stack lines, a normalized prefix of
+ *   StatusMessage (IDs/numbers/hex runs redacted) is folded into the hash — even
+ *   when ExceptionType is present. This prevents generic types (e.g.
+ *   "HttpServerError", "Error") or malformed types (e.g. a stringified JSON
+ *   prefix) from monopolizing a single bucket per service.
  *
  * DeploymentEnv is intentionally NOT part of the hash: the same bug across
  * staging/prod should stay one issue; filter by env at query/triage time.
@@ -462,7 +464,7 @@ export const errorEventsMv = defineMaterializedView("error_events_mv", {
           if(length(_topFrames) > 0, _topFrames[1], '') AS _topFrame,
           arrayStringConcat(_topFrames, '\\n') AS _fpFrames,
           if(
-            _exType = '' AND _fpFrames = '',
+            _fpFrames = '',
             replaceRegexpAll(substring(StatusMessage, 1, 200), '[0-9a-fA-F]{8,}|[0-9]+', '#'),
             ''
           ) AS _msgFallback
