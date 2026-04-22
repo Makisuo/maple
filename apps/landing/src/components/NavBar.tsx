@@ -167,7 +167,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 
         <a
           href="https://app.maple.dev"
-          className="bg-accent text-accent-foreground px-4 py-1.5 text-xs font-medium hover:opacity-90 transition-opacity"
+          className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80"
         >
           <CTAButton />
         </a>
@@ -258,7 +258,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
                 GitHub
               </a>
               <a href="https://app.maple.dev"
-                className="bg-accent text-accent-foreground px-4 py-2.5 text-xs font-medium text-center hover:opacity-90 transition-opacity">
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80">
                 <CTAButton />
               </a>
             </div>

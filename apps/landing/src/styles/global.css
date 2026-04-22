@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @source "../../../../packages/ui/src";
 @import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/geist";
 
 :root {
     --background: oklch(0.207 0.008 67);
@@ -68,8 +69,9 @@
 }
 
 @theme inline {
-    --font-sans: 'Geist Mono Variable', monospace;
-    --font-mono: 'Geist Mono Variable', monospace;
+    --font-sans: 'Geist Mono Variable', ui-monospace, monospace;
+    --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+    --font-display: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
     /* Landing-specific aliases */
     --color-bg: var(--background);
     --color-fg: var(--foreground);

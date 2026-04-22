@@ -201,11 +201,11 @@ if (plans.length === 0) {
 
                         <div class="mt-auto pt-8 space-y-2">
                             {plan.ctaStyle === "accent" ? (
-                                <a href="https://app.maple.dev" class="block w-full bg-accent text-accent-foreground px-6 py-2.5 text-sm font-medium text-center hover:opacity-90 transition-opacity">
+                                <a href="https://app.maple.dev" class="flex h-9 w-full items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80">
                                     {plan.ctaLabel}
                                 </a>
                             ) : (
-                                <a href="https://app.maple.dev" class="block w-full border border-border px-6 py-2.5 text-sm font-medium text-fg text-center hover:opacity-90 transition-opacity">
+                                <a href="https://app.maple.dev" class="flex h-9 w-full items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50">
                                     {plan.ctaLabel}
                                 </a>
                             )}
@@ -228,7 +228,7 @@ if (plans.length === 0) {
                         <span class="text-[11px] uppercase tracking-widest text-fg-muted">{m.pricing_enterprise()}</span>
                         <div class="mt-2 text-4xl font-semibold text-fg">{m.pricing_custom()}</div>
                         <p class="mt-2 text-sm text-fg-muted leading-relaxed">{m.pricing_enterprise_desc()}</p>
-                        <a href="https://cal.com/david-granzin/30min?overlayCalendar=true" class="mt-6 inline-block border border-border px-6 py-2.5 text-sm font-medium text-fg hover:opacity-90 transition-opacity">
+                        <a href="https://cal.com/david-granzin/30min?overlayCalendar=true" class="mt-6 inline-flex h-9 items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50">
                             {m.pricing_talk_to_founder()}
                         </a>
                     </div>

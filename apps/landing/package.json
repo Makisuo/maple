@@ -7,6 +7,7 @@
     "@astrojs/sitemap": "^3.7.0",
     "@base-ui/react": "catalog:ui",
     "@clerk/clerk-react": "^5.61.3",
+    "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
     "@inlang/paraglide-astro": "^0.4.1",
     "@inlang/paraglide-js": "^2.14.0",

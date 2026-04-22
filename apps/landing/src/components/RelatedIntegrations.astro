@@ -17,7 +17,7 @@ const filtered = integrations.filter(i => i.slug !== current).slice(0, 3);
 <section class="py-24 md:py-32">
     <div class="mx-auto max-w-6xl px-6">
         <span class="text-[11px] text-accent uppercase tracking-wider">Explore more</span>
-        <h2 class="mt-3 text-2xl md:text-3xl font-bold text-fg mb-12">Other integrations</h2>
+        <h2 class="mt-3 font-display text-2xl md:text-3xl font-bold text-fg mb-12 tracking-tight">Other integrations</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-border border border-border">
             {filtered.map(i => (
                 <a href={`/integrations/${i.slug}`} class="bg-bg p-6 md:p-8 hover:bg-muted/10 transition-colors group">
