@@ -4,7 +4,8 @@ import {
   type McpToolRegistrar,
 } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
-import { resolveTimeRange } from "../lib/time"
+import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { clampLimit, clampOffset } from "../lib/limits"
 import { formatNumber, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Array as Arr, Effect, Schema } from "effect"
@@ -24,9 +25,10 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
       limit: optionalNumberParam("Max results (default 50)"),
     }),
     Effect.fn("McpTool.listMetrics")(function* ({ start_time, end_time, service, search, metric_type, offset, limit }) {
-        const { st, et } = resolveTimeRange(start_time, end_time)
-        const lim = limit ?? 50
-        const off = offset ?? 0
+        const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 30 })
+        const { st, et } = range
+        const lim = clampLimit(limit, { defaultValue: 50, max: 500 })
+        const off = clampOffset(offset, { max: 10_000 })
 
         const [metricsResult, summaryResult] = yield* Effect.all(
           [
@@ -53,7 +55,7 @@ export function registerListMetricsTool(server: McpToolRegistrar) {
 
         const lines: string[] = [
           `## Available Metrics`,
-          `Time range: ${st} — ${et}`,
+          `Time range: ${st} — ${et}${formatClampNote(range)}`,
         ]
 
         // Summary counts by type

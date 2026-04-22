@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeTime, resolveTimeRange } from "./time"
+import { formatClampNote, normalizeTime, resolveTimeRange } from "./time"
 
 describe("normalizeTime", () => {
   it("passes through already-correct format", () => {
@@ -64,5 +64,51 @@ describe("resolveTimeRange", () => {
     const { st, et } = resolveTimeRange(undefined, "2026-03-30T16:00:00Z")
     expect(st).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
     expect(et).toBe("2026-03-30 16:00:00")
+  })
+
+  it("preserves numeric third-arg as defaultHours (back-compat)", () => {
+    const { st, et } = resolveTimeRange(undefined, undefined, 1)
+    const startMs = new Date(st.replace(" ", "T") + "Z").getTime()
+    const endMs = new Date(et.replace(" ", "T") + "Z").getTime()
+    expect((endMs - startMs) / 3600_000).toBeCloseTo(1, 0)
+  })
+
+  it("clamps start when range exceeds maxHours", () => {
+    const result = resolveTimeRange(
+      "2026-03-01T00:00:00Z",
+      "2026-03-30T00:00:00Z",
+      { maxHours: 24 * 7 },
+    )
+    expect(result.clamped).toBe(true)
+    expect(result.et).toBe("2026-03-30 00:00:00")
+    expect(result.st).toBe("2026-03-23 00:00:00")
+    expect(result.maxHours).toBe(24 * 7)
+  })
+
+  it("does not clamp when range is within maxHours", () => {
+    const result = resolveTimeRange(
+      "2026-03-29T00:00:00Z",
+      "2026-03-30T00:00:00Z",
+      { maxHours: 24 * 7 },
+    )
+    expect(result.clamped).toBe(false)
+    expect(result.st).toBe("2026-03-29 00:00:00")
+    expect(result.et).toBe("2026-03-30 00:00:00")
+  })
+})
+
+describe("formatClampNote", () => {
+  it("returns empty string when not clamped", () => {
+    expect(formatClampNote({ clamped: false, maxHours: 24 })).toBe("")
+  })
+
+  it("formats whole-day windows as days", () => {
+    expect(formatClampNote({ clamped: true, maxHours: 24 })).toBe(" (range clamped to 1 day)")
+    expect(formatClampNote({ clamped: true, maxHours: 24 * 7 })).toBe(" (range clamped to 7 days)")
+  })
+
+  it("formats sub-day windows as hours", () => {
+    expect(formatClampNote({ clamped: true, maxHours: 6 })).toBe(" (range clamped to 6 hours)")
+    expect(formatClampNote({ clamped: true, maxHours: 1 })).toBe(" (range clamped to 1 hour)")
   })
 })

@@ -5,7 +5,8 @@ import {
   type McpToolRegistrar,
 } from "./types"
 import { resolveTenant } from "../lib/query-tinybird"
-import { resolveTimeRange } from "../lib/time"
+import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { clampLimit, clampOffset } from "../lib/limits"
 import { truncate, formatNumber } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Effect, Schema } from "effect"
@@ -29,9 +30,10 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
       limit: optionalNumberParam("Max results (default 30)"),
     }),
     Effect.fn("McpTool.searchLogs")(function* ({ start_time, end_time, service, severity, search, trace_id, span_id, offset, limit }) {
-        const { st, et } = resolveTimeRange(start_time, end_time)
-        const lim = limit ?? 30
-        const off = offset ?? 0
+        const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+        const { st, et } = range
+        const lim = clampLimit(limit, { defaultValue: 30, max: 200 })
+        const off = clampOffset(offset, { max: 10_000 })
         const tenant = yield* resolveTenant
 
         const result = yield* searchLogs({
@@ -53,7 +55,7 @@ export function registerSearchLogsTool(server: McpToolRegistrar) {
 
         const lines: string[] = [
           `## Logs (${formatNumber(result.total)} total, showing ${result.logs.length})`,
-          `Time range: ${st} — ${et}`,
+          `Time range: ${st} — ${et}${formatClampNote(range)}`,
         ]
 
         const filters: string[] = []

@@ -7,7 +7,8 @@ import {
   type McpToolRegistrar,
 } from "./types"
 import { withTenantExecutor } from "../lib/query-tinybird"
-import { resolveTimeRange } from "../lib/time"
+import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { clampLimit, clampOffset } from "../lib/limits"
 import { formatDurationFromMs, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Array as Arr, Effect, Schema, pipe } from "effect"
@@ -35,9 +36,10 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
       limit: optionalNumberParam("Max results (default 20)"),
     }),
     Effect.fn("McpTool.searchTraces")(function* (params) {
-        const { st, et } = resolveTimeRange(params.start_time, params.end_time)
-        const lim = params.limit ?? 20
-        const off = params.offset ?? 0
+        const range = resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 7 })
+        const { st, et } = range
+        const lim = clampLimit(params.limit, { defaultValue: 20, max: 200 })
+        const off = clampOffset(params.offset, { max: 10_000 })
 
         if (params.attribute_value && !params.attribute_key) {
           return validationError(
@@ -78,7 +80,7 @@ export function registerSearchTracesTool(server: McpToolRegistrar) {
 
         const lines: string[] = [
           `## ${isSpanLevel ? "Matching Spans" : "Traces"} (showing ${off + 1}–${off + spans.length})`,
-          `Time range: ${st} — ${et}`,
+          `Time range: ${st} — ${et}${formatClampNote(range)}`,
           ``,
         ]
 

@@ -5,7 +5,8 @@ import {
   type McpToolRegistrar,
 } from "./types"
 import { withTenantExecutor } from "../lib/query-tinybird"
-import { resolveTimeRange } from "../lib/time"
+import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { clampLimit } from "../lib/limits"
 import { formatDurationMs, formatDurationFromMs, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { Array as Arr, Effect, Schema, pipe } from "effect"
@@ -24,13 +25,15 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
       limit: optionalNumberParam("Max results (default 10)"),
     }),
     Effect.fn("McpTool.findSlowTraces")(function* ({ start_time, end_time, service, environment, limit }) {
-        const { st, et } = resolveTimeRange(start_time, end_time)
+        const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+        const { st, et } = range
+        const lim = clampLimit(limit, { defaultValue: 10, max: 100 })
 
         const result = yield* withTenantExecutor(findSlowTraces({
           timeRange: { startTime: st, endTime: et },
           service: service ?? undefined,
           environment: environment ?? undefined,
-          limit: limit ?? 10,
+          limit: lim,
         })).pipe(
           Effect.catchTag("@maple/query-engine/errors/ObservabilityError", (e) =>
             Effect.fail(new McpQueryError({ message: e.message, pipe: e.pipe ?? "find_slow_traces", cause: e })),
@@ -41,7 +44,7 @@ export function registerFindSlowTracesTool(server: McpToolRegistrar) {
           return { content: [{ type: "text" as const, text: `No traces found in ${st} — ${et}` }] }
         }
 
-        const lines: string[] = [`## Slowest Traces`, `Time range: ${st} — ${et}`]
+        const lines: string[] = [`## Slowest Traces`, `Time range: ${st} — ${et}${formatClampNote(range)}`]
 
         if (result.stats) {
           lines.push(

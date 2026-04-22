@@ -6,7 +6,8 @@ import {
 } from "./types"
 import { resolveTenant } from "../lib/query-tinybird"
 import { queryTinybird } from "../lib/query-tinybird"
-import { resolveTimeRange } from "../lib/time"
+import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { clampLimit } from "../lib/limits"
 import { formatNumber, formatTable } from "../lib/format"
 import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
@@ -34,8 +35,9 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
       limit: optionalNumberParam("Max results (default 50)"),
     }),
     Effect.fn("McpTool.exploreAttributes")(function* (params) {
-        const { st, et } = resolveTimeRange(params.start_time, params.end_time)
-        const lim = params.limit ?? 50
+        const range = resolveTimeRange(params.start_time, params.end_time, { maxHours: 24 * 30 })
+        const { st, et } = range
+        const lim = clampLimit(params.limit, { defaultValue: 50, max: 500 })
         const scope = (params.scope ?? "span") as "span" | "resource"
         const tenant = yield* resolveTenant
         const executorLayer = makeTinybirdExecutorFromTenant(tenant)
@@ -59,7 +61,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
           const lines: string[] = [
             `## Attribute Values: ${params.key}`,
             `Source: ${params.source} (${scope})`,
-            `Time range: ${st} — ${et}`,
+            `Time range: ${st} — ${et}${formatClampNote(range)}`,
             ``,
           ]
 
@@ -88,7 +90,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
           const environments = Arr.filter(result.data, (r: any) => r.facetType === "environment")
           const commitShas = Arr.filter(result.data, (r: any) => r.facetType === "commit_sha")
 
-          const lines: string[] = [`## Available Environments & Deployments`, `Time range: ${st} — ${et}`, ``]
+          const lines: string[] = [`## Available Environments & Deployments`, `Time range: ${st} — ${et}${formatClampNote(range)}`, ``]
 
           if (environments.length > 0) {
             lines.push(`### Environments`)
@@ -128,7 +130,7 @@ export function registerExploreAttributesTool(server: McpToolRegistrar) {
         const lines: string[] = [
           `## Attribute Keys`,
           `Source: ${params.source} (${scope})`,
-          `Time range: ${st} — ${et}`,
+          `Time range: ${st} — ${et}${formatClampNote(range)}`,
           ``,
         ]
 

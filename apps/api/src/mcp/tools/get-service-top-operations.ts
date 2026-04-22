@@ -6,7 +6,8 @@ import {
   type McpToolRegistrar,
 } from "./types"
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
-import { resolveTimeRange } from "../lib/time"
+import { resolveTimeRange, formatClampNote } from "../lib/time"
+import { clampLimit } from "../lib/limits"
 import { formatTable } from "../lib/format"
 import { formatMetricValue } from "../lib/format-query-result"
 import { formatNextSteps } from "../lib/next-steps"
@@ -30,9 +31,10 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
       limit: optionalNumberParam("Max operations to return (default 20)"),
     }),
     Effect.fn("McpTool.getServiceTopOperations")(function* ({ service_name, metric, start_time, end_time, limit }) {
-        const { st, et } = resolveTimeRange(start_time, end_time)
+        const range = resolveTimeRange(start_time, end_time, { maxHours: 24 * 7 })
+        const { st, et } = range
         const resolvedMetric = (metric ?? "count") as TracesMetric
-        const resolvedLimit = limit ?? 20
+        const resolvedLimit = clampLimit(limit, { defaultValue: 20, max: 500 })
         const tenant = yield* resolveTenant
 
         const operations = yield* topOperations({
@@ -47,7 +49,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 
         const lines: string[] = [
           `## Top Operations: ${service_name}`,
-          `Time range: ${st} — ${et}`,
+          `Time range: ${st} — ${et}${formatClampNote(range)}`,
           `Metric: ${resolvedMetric}`,
           ``,
         ]
