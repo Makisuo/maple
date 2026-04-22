@@ -260,6 +260,27 @@ export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
   UnsampledSpanCount: T.uint64,
 })
 
+export const AlertChecks = table("alert_checks", {
+  OrgId: T.string,
+  RuleId: T.string,
+  GroupKey: T.string,
+  Timestamp: T.dateTime64,
+  Status: T.string,
+  SignalType: T.string,
+  Comparator: T.string,
+  Threshold: T.float64,
+  ObservedValue: T.nullable(T.float64),
+  SampleCount: T.uint32,
+  WindowMinutes: T.uint16,
+  WindowStart: T.dateTime64,
+  WindowEnd: T.dateTime64,
+  ConsecutiveBreaches: T.uint16,
+  ConsecutiveHealthy: T.uint16,
+  IncidentId: T.nullable(T.string),
+  IncidentTransition: T.string,
+  EvaluationDurationMs: T.uint32,
+})
+
 export const MetricsExpHistogram = table("metrics_exponential_histogram", {
   OrgId: T.string,
   ResourceAttributes: T.map(T.string, T.string),

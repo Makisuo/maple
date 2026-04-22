@@ -1,5 +1,5 @@
 import { makeExpr } from "../expr"
-import { raw, compile } from "../../sql/sql-fragment"
+import { raw, str, compile } from "../../sql/sql-fragment"
 import type { Expr } from "../expr"
 
 // ---------------------------------------------------------------------------
@@ -20,4 +20,14 @@ export function intervalSub(
 ): Expr<string> {
   const secStr = typeof seconds === "number" ? String(Math.round(seconds)) : compile((seconds as Expr<number>).toFragment())
   return makeExpr<string>(raw(`${compile(col.toFragment())} - INTERVAL ${secStr} SECOND`))
+}
+
+/** `formatDateTime(expr, 'format')` — format a DateTime/DateTime64 as a string. */
+export function formatDateTime(
+  col: Expr<string>,
+  format: string,
+): Expr<string> {
+  return makeExpr<string>(
+    raw(`formatDateTime(${compile(col.toFragment())}, ${compile(str(format))})`),
+  )
 }

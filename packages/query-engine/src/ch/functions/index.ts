@@ -42,6 +42,7 @@ export {
 export {
   toStartOfInterval,
   intervalSub,
+  formatDateTime,
 } from "./date-time"
 
 export {

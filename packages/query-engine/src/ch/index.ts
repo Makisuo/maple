@@ -87,6 +87,7 @@ export {
   // Date/time
   toStartOfInterval,
   intervalSub,
+  formatDateTime,
   // Conditional
   if_,
   multiIf,
@@ -258,3 +259,10 @@ export {
 // timeseries queries (tracesTimeseriesQuery / logsTimeseriesQuery /
 // metricsTimeseriesQuery) so dashboards and alerts share the same grouping
 // and filter semantics. See QueryEngineService.makeQueryEngineEvaluate.
+
+// Queries — Alert Checks (historical rule evaluations)
+export {
+  listRuleChecksQuery,
+  type ListRuleChecksOpts,
+  type ListRuleChecksOutput,
+} from "./queries/alert-checks"

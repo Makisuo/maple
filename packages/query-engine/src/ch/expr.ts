@@ -274,6 +274,7 @@ export {
   greatest_,
   toStartOfInterval,
   intervalSub,
+  formatDateTime,
   if_,
   multiIf,
   coalesce,

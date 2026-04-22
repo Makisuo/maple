@@ -589,18 +589,24 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
               `/v0/sql?q=${encodeURIComponent(`${sql} FORMAT JSON`)}`,
             )
 
+          // Raw SQL against Tinybird's `tinybird.*` admin schema — fixed strings,
+          // no interpolation. Kept raw because @maple/domain cannot depend on
+          // @maple/query-engine (the DSL) without inverting the existing
+          // query-engine → domain dependency. These three queries have no
+          // dynamic input, so there's no injection surface to protect.
+          const DATASOURCES_STORAGE_SQL =
+            "SELECT datasource_name, bytes, rows FROM tinybird.datasources_storage WHERE timestamp = (SELECT max(timestamp) FROM tinybird.datasources_storage) ORDER BY bytes DESC"
+          const ENDPOINT_ERRORS_24H_SQL =
+            "SELECT count() as cnt FROM tinybird.endpoint_errors WHERE start_datetime >= now() - interval 1 day"
+          const PIPE_LATENCY_24H_SQL =
+            "SELECT avg(duration) as avg_ms FROM tinybird.pipe_stats_rt WHERE start_datetime >= now() - interval 1 day"
+
           const [workspace, datasourcesResult, errorsResult, latencyResult] = yield* Effect.all(
             [
               requestJsonBestEffort(WorkspaceProbeSchema, "/v1/workspace"),
-              querySql(
-                "SELECT datasource_name, bytes, rows FROM tinybird.datasources_storage WHERE timestamp = (SELECT max(timestamp) FROM tinybird.datasources_storage) ORDER BY bytes DESC",
-              ),
-              querySql(
-                "SELECT count() as cnt FROM tinybird.endpoint_errors WHERE start_datetime >= now() - interval 1 day",
-              ),
-              querySql(
-                "SELECT avg(duration) as avg_ms FROM tinybird.pipe_stats_rt WHERE start_datetime >= now() - interval 1 day",
-              ),
+              querySql(DATASOURCES_STORAGE_SQL),
+              querySql(ENDPOINT_ERRORS_24H_SQL),
+              querySql(PIPE_LATENCY_24H_SQL),
             ],
             { concurrency: "unbounded" },
           )

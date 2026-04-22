@@ -5,6 +5,7 @@ import {
   type QueryEngineSampleCountStrategy,
   QuerySpec,
 } from "@maple/query-engine"
+import * as CH from "@maple/query-engine/ch"
 import { resolveGroupBy } from "@maple/query-engine/query-builder"
 import {
   buildAlertQueryFilterSet,
@@ -2092,7 +2093,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         })
       })
 
-      const escapeSqlLiteral = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
       const toTinybirdSqlDateTime64 = (iso: string) => {
         const d = new Date(iso)
         if (Number.isNaN(d.getTime())) return null
@@ -2132,53 +2132,30 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         }
         const limit = clamp(options.limit, 1, 2000, 500)
 
-        const predicates: string[] = [
-          `OrgId = '${escapeSqlLiteral(orgId)}'`,
-          `RuleId = '${escapeSqlLiteral(ruleId)}'`,
-        ]
-        if (options.groupKey != null && options.groupKey !== "") {
-          predicates.push(`GroupKey = '${escapeSqlLiteral(options.groupKey)}'`)
-        }
-        if (options.since != null) {
-          const since = toTinybirdSqlDateTime64(options.since)
-          if (since != null) {
-            predicates.push(`Timestamp >= toDateTime64('${since}', 3)`)
-          }
-        }
-        if (options.until != null) {
-          const until = toTinybirdSqlDateTime64(options.until)
-          if (until != null) {
-            predicates.push(`Timestamp <= toDateTime64('${until}', 3)`)
-          }
-        }
+        const since =
+          options.since != null ? toTinybirdSqlDateTime64(options.since) : null
+        const until =
+          options.until != null ? toTinybirdSqlDateTime64(options.until) : null
+        const hasGroupKey = options.groupKey != null && options.groupKey !== ""
 
-        const sql = `
-          SELECT
-            formatDateTime(Timestamp, '%Y-%m-%dT%H:%i:%S.%fZ') AS timestamp,
-            GroupKey AS groupKey,
-            Status AS status,
-            SignalType AS signalType,
-            Comparator AS comparator,
-            Threshold AS threshold,
-            ObservedValue AS observedValue,
-            SampleCount AS sampleCount,
-            WindowMinutes AS windowMinutes,
-            formatDateTime(WindowStart, '%Y-%m-%dT%H:%i:%S.%fZ') AS windowStart,
-            formatDateTime(WindowEnd, '%Y-%m-%dT%H:%i:%S.%fZ') AS windowEnd,
-            ConsecutiveBreaches AS consecutiveBreaches,
-            ConsecutiveHealthy AS consecutiveHealthy,
-            IncidentId AS incidentId,
-            IncidentTransition AS incidentTransition,
-            EvaluationDurationMs AS evaluationDurationMs
-          FROM alert_checks
-          WHERE ${predicates.join(" AND ")}
-          ORDER BY Timestamp DESC
-          LIMIT ${limit}
-          FORMAT JSON
-        `.trim()
+        const compiled = CH.compile(
+          CH.listRuleChecksQuery({
+            limit,
+            groupKey: hasGroupKey ? options.groupKey : undefined,
+            since: since ?? undefined,
+            until: until ?? undefined,
+          }),
+          {
+            orgId,
+            ruleId,
+            ...(hasGroupKey ? { groupKey: options.groupKey } : {}),
+            ...(since != null ? { since } : {}),
+            ...(until != null ? { until } : {}),
+          },
+        )
 
         const tenant = systemTenant(orgId)
-        const rows = yield* tinybird.sqlQuery(tenant, sql).pipe(
+        const rawRows = yield* tinybird.sqlQuery(tenant, compiled.sql).pipe(
           Effect.mapError(
             (error) =>
               new AlertPersistenceError({
@@ -2186,11 +2163,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
               }),
           ),
         )
+        const rows = compiled.castRows(rawRows)
 
         const checks = yield* Effect.try({
           try: () =>
-            rows.map((row) => {
-              const r = row as Record<string, unknown>
+            rows.map((r) => {
               const rawTransition =
                 r.incidentTransition == null || r.incidentTransition === ""
                   ? "none"
