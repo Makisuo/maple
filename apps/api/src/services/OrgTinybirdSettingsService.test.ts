@@ -383,6 +383,128 @@ describe("OrgTinybirdSettingsService", () => {
     expect(result.currentRun?.deploymentStatus).toBe("live")
   })
 
+  it("refreshes the stored deploymentStatus from Tinybird on every read", async () => {
+    const { url, dbPath } = createTempDbUrl()
+    const encrypted = await Effect.runPromise(
+      encryptAes256Gcm("token-a", encryptionKey, (message) => new Error(message)),
+    )
+
+    const dataReady: TinybirdDeploymentReadiness = {
+      deploymentId: "dep-1",
+      status: "data_ready",
+      isTerminal: false,
+      isReady: true,
+      errorMessage: null,
+    }
+
+    const layer = makeLayer(url, {
+      getDeploymentStatus: async () => dataReady,
+      getProjectRevision: async () => "rev-1",
+    })
+
+    await Effect.runPromiseExit(
+      OrgTinybirdSettingsService.get(asOrgId("org_bootstrap"), adminRoles).pipe(Effect.provide(layer)),
+    )
+
+    await insertSyncRun(dbPath, {
+      orgId: "org_a",
+      requestedBy: "user_a",
+      targetHost: "https://customer.tinybird.co",
+      targetTokenCiphertext: encrypted.ciphertext,
+      targetTokenIv: encrypted.iv,
+      targetTokenTag: encrypted.tag,
+      targetProjectRevision: "rev-1",
+      runStatus: "running",
+      phase: "deploying",
+      deploymentId: "dep-1",
+      deploymentStatus: "creating_schema",
+      errorMessage: null,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+      finishedAt: null,
+    })
+
+    const result = await Effect.runPromise(
+      OrgTinybirdSettingsService.use((service) =>
+        service.getDeploymentStatus(asOrgId("org_a"), adminRoles),
+      ).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.deploymentStatus).toBe("data_ready")
+    expect(result.phase).toBe("setting_live")
+    expect(result.runStatus).toBe("running")
+    expect(result.isTerminal).toBe(false)
+
+    const row = await getTableRow<{ deployment_status: string | null; phase: string }>(
+      dbPath,
+      "SELECT deployment_status, phase FROM org_tinybird_sync_runs WHERE org_id = ?",
+      "org_a",
+    )
+    expect(row?.deployment_status).toBe("data_ready")
+    expect(row?.phase).toBe("setting_live")
+  })
+
+  it("fails stuck non-terminal runs past the workflow timeout", async () => {
+    const { url, dbPath } = createTempDbUrl()
+    const encrypted = await Effect.runPromise(
+      encryptAes256Gcm("token-a", encryptionKey, (message) => new Error(message)),
+    )
+
+    const stuckStatus: TinybirdDeploymentReadiness = {
+      deploymentId: "dep-1",
+      status: "creating_schema",
+      isTerminal: false,
+      isReady: false,
+      errorMessage: null,
+    }
+
+    const layer = makeLayer(url, {
+      getDeploymentStatus: async () => stuckStatus,
+      getProjectRevision: async () => "rev-1",
+    })
+
+    await Effect.runPromiseExit(
+      OrgTinybirdSettingsService.get(asOrgId("org_bootstrap"), adminRoles).pipe(Effect.provide(layer)),
+    )
+
+    const wellPastTimeout = Date.now() - 30 * 60 * 60 * 1000 // 30h > 24h timeout
+    await insertSyncRun(dbPath, {
+      orgId: "org_a",
+      requestedBy: "user_a",
+      targetHost: "https://customer.tinybird.co",
+      targetTokenCiphertext: encrypted.ciphertext,
+      targetTokenIv: encrypted.iv,
+      targetTokenTag: encrypted.tag,
+      targetProjectRevision: "rev-1",
+      runStatus: "running",
+      phase: "deploying",
+      deploymentId: "dep-1",
+      deploymentStatus: "creating_schema",
+      errorMessage: null,
+      startedAt: wellPastTimeout,
+      updatedAt: wellPastTimeout,
+      finishedAt: null,
+    })
+
+    const result = await Effect.runPromise(
+      OrgTinybirdSettingsService.use((service) =>
+        service.getDeploymentStatus(asOrgId("org_a"), adminRoles),
+      ).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.runStatus).toBe("failed")
+    expect(result.isTerminal).toBe(true)
+    expect(result.errorMessage).toMatch(/stuck in "creating_schema"/)
+
+    const row = await getTableRow<{ run_status: string; phase: string }>(
+      dbPath,
+      "SELECT run_status, phase FROM org_tinybird_sync_runs WHERE org_id = ?",
+      "org_a",
+    )
+    expect(row?.run_status).toBe("failed")
+    expect(row?.phase).toBe("failed")
+  })
+
   it("returns the last live deployment when the org is idle", async () => {
     const { url, dbPath } = createTempDbUrl()
     const layer = makeLayer(url, {

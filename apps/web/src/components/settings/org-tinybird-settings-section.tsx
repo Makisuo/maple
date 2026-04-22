@@ -103,7 +103,10 @@ function formatDeploymentStatus(value: string | null | undefined): string {
     case "deleting":
       return "Failed"
     default:
-      return value.replace(/_/g, " ")
+      // Any intermediate Tinybird status (e.g. creating_schema, populating) is
+      // still part of the deploy pipeline — show "Deploying" rather than leak
+      // the raw backend string.
+      return "Deploying"
   }
 }
 

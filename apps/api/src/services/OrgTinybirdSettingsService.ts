@@ -30,7 +30,7 @@ import {
 } from "@maple/domain/tinybird"
 import { orgTinybirdSettings, orgTinybirdSyncRuns } from "@maple/db"
 import { eq } from "drizzle-orm"
-import { Effect, Layer, Option, Redacted, Schema, Semaphore, Context } from "effect"
+import { Duration, Effect, Layer, Option, Redacted, Schema, Semaphore, Context } from "effect"
 import {
   decryptAes256Gcm,
   encryptAes256Gcm,
@@ -53,6 +53,12 @@ type SyncRunUpdate = Partial<Omit<typeof orgTinybirdSyncRuns.$inferInsert, "orgI
 
 const NON_TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["queued", "running"])
 const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["failed", "succeeded"])
+// Longest a deployment can legitimately stay non-terminal. Large Tinybird
+// schema deploys (new datasources, heavy backfills) can sit in an intermediate
+// state for many hours — anecdotally up to ~12h. Past one day without Tinybird
+// advancing, the sync-run row is treated as a dead workflow and failed so the
+// user can retry instead of watching the UI poll forever.
+const STUCK_WORKFLOW_TIMEOUT = Duration.hours(24)
 const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 const decodeUserId = Schema.decodeUnknownSync(UserId)
 const decodeRunStatus = Schema.decodeUnknownSync(OrgTinybirdSyncRunStatus)
@@ -496,11 +502,16 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
             ? "succeeded"
             : null
           : decodeRunStatus(syncRun.runStatus)
-        const phase = syncRun?.phase == null
-          ? deploymentStatus == null
+        // Tinybird is the source of truth for the deployment state. Whenever
+        // we have a deploymentStatus, derive phase from it directly instead of
+        // trusting the workflow's last DB write (which may be stale if the
+        // workflow died mid-run). Fall back to the stored phase only for
+        // pre-deployment steps where Tinybird hasn't reported a status yet.
+        const phase = deploymentStatus != null
+          ? inferPhaseFromDeploymentStatus(deploymentStatus)
+          : syncRun?.phase == null
             ? null
-            : inferPhaseFromDeploymentStatus(deploymentStatus)
-          : decodePhase(syncRun.phase)
+            : decodePhase(syncRun.phase)
         const syncedAt = activeRow?.lastSyncAt ?? null
 
         return new OrgTinybirdDeploymentStatusResponse({
@@ -678,9 +689,32 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
               statusCode: null,
             }),
           )
+        } else {
+          // Non-terminal Tinybird status — Tinybird is the source of truth, so
+          // reflect its current status (and a matching phase) in our DB before
+          // deciding whether the workflow itself is dead.
+          const nowMs = Date.now()
+          const stalenessMs = nowMs - syncRun.updatedAt
+          const isStale = stalenessMs > Duration.toMillis(STUCK_WORKFLOW_TIMEOUT)
+
+          if (isStale) {
+            const stalenessHours = Math.max(1, Math.round(stalenessMs / 3_600_000))
+            yield* markRunFailed(
+              orgId,
+              new OrgTinybirdSettingsUpstreamUnavailableError({
+                message:
+                  `Deployment stuck in "${status.status}" — the background sync workflow did not `
+                  + `progress for ${stalenessHours}h. Retry the sync.`,
+                statusCode: null,
+              }),
+            )
+          } else if (status.status !== syncRun.deploymentStatus) {
+            yield* updateSyncRun(orgId, {
+              deploymentStatus: status.status,
+              phase: inferPhaseFromDeploymentStatus(status.status),
+            })
+          }
         }
-        // Otherwise: workflow is still running — leave the row as it is; the
-        // workflow's step DB writes are the source of truth.
 
         const refreshed = yield* selectSyncRunRow(orgId)
         return Option.getOrUndefined(refreshed) ?? syncRun
