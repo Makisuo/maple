@@ -1,6 +1,6 @@
 # Maple Kubernetes Infra Collector
 
-This chart deploys Maple's Kubernetes infrastructure collector using the upstream OpenTelemetry Collector Contrib image. It follows the SigNoz-style split collector shape:
+This chart deploys Maple's Kubernetes infrastructure collector using the upstream OpenTelemetry Collector Contrib image. It uses a split collector architecture:
 
 - a DaemonSet for node-local OTLP, host metrics, kubelet metrics, and optional pod logs
 - a single-replica Deployment for cluster-wide metrics and optional Kubernetes events
