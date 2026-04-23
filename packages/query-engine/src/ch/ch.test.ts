@@ -203,7 +203,8 @@ describe("tracesTimeseriesQuery", () => {
     const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("SELECT")
-    expect(sql).toContain("FROM traces")
+    // With no span-level filters/groupBy, routes to the MV.
+    expect(sql).toContain("FROM service_overview_spans")
     expect(sql).toContain("OrgId = 'org_123'")
     expect(sql).toContain("count() AS count")
     expect(sql).toContain("INTERVAL 3600 SECOND")
@@ -283,28 +284,29 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("SpanAttributes['http.route']")
   })
 
-  it("uses traces table when rootOnly (MV disabled)", () => {
+  it("routes rootOnly to service_overview_spans_mv (MV pre-filters entry-point spans)", () => {
     const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false, rootOnly: true })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("FROM traces")
-    expect(sql).toContain("SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''")
+    expect(sql).toContain("FROM service_overview_spans")
+    // Filter is redundant on the MV and is dropped.
+    expect(sql).not.toContain("SpanKind")
+    expect(sql).not.toContain("ParentSpanId")
   })
 
-  it("uses traces table when not rootOnly", () => {
+  it("routes default (no filters) to service_overview_spans_mv", () => {
     const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("FROM service_overview_spans")
   })
 
-  it("includes commitShas filter with rootOnly", () => {
+  it("uses pre-extracted CommitSha column when routing to MV", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       rootOnly: true, commitShas: ["abc123"],
     })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("FROM traces")
-    expect(sql).toContain("SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''")
-    expect(sql).toContain("deployment.commit_sha")
+    expect(sql).toContain("FROM service_overview_spans")
+    expect(sql).toContain("CommitSha IN ('abc123')")
   })
 
   it("filters by serviceName", () => {
@@ -331,22 +333,24 @@ describe("tracesTimeseriesQuery", () => {
     expect(sql).toContain("StatusCode = 'Error'")
   })
 
-  it("filters by environments", () => {
+  it("filters by environments (MV path uses pre-extracted DeploymentEnv)", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       environments: ["production", "staging"],
     })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("ResourceAttributes['deployment.environment'] IN ('production', 'staging')")
+    expect(sql).toContain("FROM service_overview_spans")
+    expect(sql).toContain("DeploymentEnv IN ('production', 'staging')")
   })
 
-  it("filters by environments with rootOnly", () => {
+  it("filters by environments with rootOnly (MV path uses pre-extracted DeploymentEnv)", () => {
     const q = tracesTimeseriesQuery({
       metric: "count", needsSampling: false,
       rootOnly: true, environments: ["production"],
     })
     const { sql } = compileCH(q, baseParams)
-    expect(sql).toContain("deployment.environment") // raw table uses ResourceAttributes
+    expect(sql).toContain("FROM service_overview_spans")
+    expect(sql).toContain("DeploymentEnv IN ('production')")
   })
 
   it("filters by attribute filters (equals)", () => {
@@ -403,6 +407,34 @@ describe("tracesTimeseriesQuery", () => {
     const { sql } = compileCH(q, baseParams)
     expect(sql).toContain("FROM traces")
     expect(sql).toContain("SpanAttributes['http.method'] = 'GET'")
+  })
+
+  it("falls back to raw traces when groupBy includes span_name", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      groupBy: ["span_name"],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("FROM traces")
+  })
+
+  it("falls back to raw traces when spanName filter is set", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      spanName: "GET /users",
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("FROM traces")
+  })
+
+  it("falls back to raw traces when resourceAttributeFilters are set", () => {
+    const q = tracesTimeseriesQuery({
+      metric: "count", needsSampling: false,
+      resourceAttributeFilters: [{ key: "host.name", value: "server-1", mode: "equals" }],
+    })
+    const { sql } = compileCH(q, baseParams)
+    expect(sql).toContain("FROM traces")
+    expect(sql).toContain("ResourceAttributes['host.name'] = 'server-1'")
   })
 
   it("escapes special characters in filter values", () => {

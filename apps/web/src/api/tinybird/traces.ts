@@ -54,6 +54,12 @@ export type ListTracesInput = Schema.Schema.Type<typeof ListTracesInputSchema>
 const DEFAULT_LIMIT = 100
 const DEFAULT_OFFSET = 0
 
+const LIST_PROJECTED_COLUMNS = [
+  "spanAttributes.http.method",
+  "spanAttributes.http.route",
+  "spanAttributes.http.status_code",
+] as const
+
 export interface TraceRootSpanSummary {
   name: string
   kind: string
@@ -187,6 +193,10 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({
       source: "traces" as const,
       limit,
       offset,
+      // Only project the span attributes the list UI actually renders
+      // (via transformSpanListRow → getHttpInfo). Avoids reading the full
+      // SpanAttributes / ResourceAttributes maps — large win on wide traces.
+      columns: LIST_PROJECTED_COLUMNS,
       filters: {
         serviceName: input.service,
         spanName: input.spanName,

@@ -7,17 +7,34 @@
 import type { TracesMetric } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
-import { from, type ColumnAccessor } from "../query"
-import { Traces } from "../tables"
+import { from, type CHQuery, type ColumnAccessor } from "../query"
+import { ServiceOverviewSpans, Traces } from "../tables"
 import { METRIC_NEEDS } from "../../traces-shared"
-import { apdexExprs, tracesBaseWhereConditions, type TracesBaseWhereOpts } from "./query-helpers"
+import type { ColumnDefs } from "../types"
+import {
+  apdexExprs,
+  canUseServiceOverviewMv,
+  serviceOverviewWhereConditions,
+  tracesBaseWhereConditions,
+  type TracesBaseWhereOpts,
+} from "./query-helpers"
 
 // ---------------------------------------------------------------------------
 // Metric SELECT expressions
 // ---------------------------------------------------------------------------
 
+/**
+ * Minimal column shape the metric SELECT exprs need — satisfied by both
+ * `Traces` and `ServiceOverviewSpans` (the MV pre-projects these three).
+ */
+interface MetricCols {
+  Duration: CH.Expr<number>
+  StatusCode: CH.Expr<string>
+  TraceState: CH.Expr<string>
+}
+
 function metricSelectExprs(
-  $: ColumnAccessor<typeof Traces.columns>,
+  $: MetricCols,
   metric: TracesMetric,
   apdexThresholdMs: number,
   needsSampling: boolean,
@@ -116,6 +133,41 @@ function buildGroupNameExpr(
   )
 }
 
+/**
+ * Variant of buildGroupNameExpr for service_overview_spans_mv — only supports
+ * dimensions whose source columns exist on the MV (service, status_code).
+ * Caller must have already filtered incompatible groupBy keys via
+ * `canUseServiceOverviewMv`.
+ */
+function buildMvGroupNameExpr(
+  $: ColumnAccessor<typeof ServiceOverviewSpans.columns>,
+  groupBy: readonly string[] | undefined,
+): CH.Expr<string> {
+  if (!groupBy || groupBy.length === 0) return CH.lit("all")
+
+  const parts: CH.Expr<string>[] = []
+  for (const g of groupBy) {
+    switch (g) {
+      case "service":
+        parts.push(CH.toString_($.ServiceName))
+        break
+      case "status_code":
+        parts.push(CH.toString_($.StatusCode))
+        break
+      case "none":
+        break
+    }
+  }
+
+  if (parts.length === 0) return CH.lit("all")
+  if (parts.length === 1) return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
+  const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
+  return CH.coalesce(
+    CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""),
+    CH.lit("all"),
+  )
+}
+
 function buildBreakdownGroupExpr(
   $: ColumnAccessor<typeof Traces.columns>,
   groupBy: string,
@@ -189,10 +241,30 @@ export interface TracesTimeseriesOutput {
 
 export function tracesTimeseriesQuery(
   opts: TracesTimeseriesOpts,
-) {
+): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
 
-  return from(Traces)
+  // Fast path: when no filter or groupBy references span-level columns
+  // (span name, attributes, http method), route the query to
+  // service_overview_spans_mv. The MV pre-filters at write time to the same
+  // span set that tracesBaseWhereConditions applies when rootOnly is set
+  // (Server/Consumer OR root), and has Duration/StatusCode/TraceState ready,
+  // so the query reads orders of magnitude fewer rows and bytes.
+  if (canUseServiceOverviewMv(opts, opts.groupBy)) {
+    const mv = from(ServiceOverviewSpans)
+      .select(($) => ({
+        bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+        groupName: buildMvGroupNameExpr($, opts.groupBy),
+        ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
+      }))
+      .where(($) => serviceOverviewWhereConditions($, opts))
+      .groupBy("bucket", "groupName")
+      .orderBy(["bucket", "asc"], ["groupName", "asc"])
+      .format("JSON")
+    return mv as unknown as CHQuery<ColumnDefs, TracesTimeseriesOutput, {}>
+  }
+
+  const raw = from(Traces)
     .select(($) => ({
       bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
       groupName: buildGroupNameExpr($, opts.groupBy, opts.groupByAttributeKeys),
@@ -202,6 +274,7 @@ export function tracesTimeseriesQuery(
     .groupBy("bucket", "groupName")
     .orderBy(["bucket", "asc"], ["groupName", "asc"])
     .format("JSON")
+  return raw as unknown as CHQuery<ColumnDefs, TracesTimeseriesOutput, {}>
 }
 
 // ---------------------------------------------------------------------------

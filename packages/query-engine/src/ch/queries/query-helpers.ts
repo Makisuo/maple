@@ -9,7 +9,7 @@ import type { AttributeFilter, MetricType } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
 import type { ColumnAccessor } from "../query"
-import type { Traces } from "../tables"
+import type { ServiceOverviewSpans, Traces } from "../tables"
 import {
   MetricsSum,
   MetricsGauge,
@@ -136,6 +136,79 @@ export function tracesBaseWhereConditions(
     for (const rf of opts.resourceAttributeFilters) {
       conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes"))
     }
+  }
+
+  return conditions
+}
+
+// ---------------------------------------------------------------------------
+// ServiceOverviewSpans MV compatibility
+//
+// The service_overview_spans MV pre-filters traces at write time to
+// `SpanKind IN ('Server','Consumer') OR ParentSpanId = ''` and pre-extracts
+// `DeploymentEnv` / `CommitSha` from ResourceAttributes. It is ~20-100x cheaper
+// to scan than raw `traces` for dashboard timeseries that don't break down by
+// span name or attributes.
+//
+// Checks whether a set of filters/groupBy can be satisfied purely from the
+// MV's column set. The MV lacks SpanName, SpanKind, ParentSpanId,
+// SpanAttributes, and ResourceAttributes.
+// ---------------------------------------------------------------------------
+
+/** Returns true iff the opts + groupBy can be served by service_overview_spans_mv. */
+export function canUseServiceOverviewMv(
+  opts: TracesBaseWhereOpts,
+  groupBy?: readonly string[],
+): boolean {
+  if (opts.spanName) return false
+  if (opts.attributeFilters?.length) return false
+  if (opts.resourceAttributeFilters?.length) return false
+  if (groupBy) {
+    for (const g of groupBy) {
+      if (g === "span_name" || g === "http_method" || g === "attribute") return false
+    }
+  }
+  return true
+}
+
+/**
+ * Build the WHERE conditions for queries against service_overview_spans.
+ * Mirrors the subset of tracesBaseWhereConditions that the MV can serve.
+ * `rootOnly` is a no-op here: the MV already pre-filters to entry-point spans.
+ */
+export function serviceOverviewWhereConditions(
+  $: ColumnAccessor<typeof ServiceOverviewSpans.columns>,
+  opts: TracesBaseWhereOpts,
+): Array<CH.Condition | undefined> {
+  const mm = opts.matchModes
+  const conditions: Array<CH.Condition | undefined> = [
+    $.OrgId.eq(param.string("orgId")),
+    $.Timestamp.gte(param.dateTime("startTime")),
+    $.Timestamp.lte(param.dateTime("endTime")),
+    CH.when(opts.serviceName, (v: string) =>
+      mm?.serviceName === "contains"
+        ? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
+        : $.ServiceName.eq(v),
+    ),
+    CH.whenTrue(!!opts.errorsOnly, () => $.StatusCode.eq("Error")),
+  ]
+
+  if (opts.minDurationMs != null) {
+    conditions.push($.Duration.gte(opts.minDurationMs * 1000000))
+  }
+  if (opts.maxDurationMs != null) {
+    conditions.push($.Duration.lte(opts.maxDurationMs * 1000000))
+  }
+
+  if (opts.environments?.length) {
+    if (mm?.deploymentEnv === "contains" && opts.environments.length === 1) {
+      conditions.push(CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(opts.environments[0])).gt(0))
+    } else {
+      conditions.push(CH.inList($.DeploymentEnv, opts.environments))
+    }
+  }
+  if (opts.commitShas?.length) {
+    conditions.push(CH.inList($.CommitSha, opts.commitShas))
   }
 
   return conditions
