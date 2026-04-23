@@ -1,0 +1,105 @@
+{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "maple-k8s-infra.cluster.fullname" . }}
+  labels:
+    {{- include "maple-k8s-infra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-collector
+data:
+  config.yaml: |-
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      {{- if .Values.presets.clusterMetrics.enabled }}
+      k8s_cluster:
+        collection_interval: {{ .Values.presets.clusterMetrics.collectionInterval }}
+        node_conditions_to_report:
+          {{- toYaml .Values.presets.clusterMetrics.nodeConditionsToReport | nindent 10 }}
+        allocatable_types_to_report:
+          {{- toYaml .Values.presets.clusterMetrics.allocatableTypesToReport | nindent 10 }}
+        resource_attributes:
+          {{- toYaml .Values.presets.clusterMetrics.resourceAttributes | nindent 10 }}
+        metrics:
+          {{- toYaml .Values.presets.clusterMetrics.metrics | nindent 10 }}
+      {{- end }}
+      {{- if .Values.presets.k8sEvents.enabled }}
+      k8sobjects/events:
+        auth_type: serviceAccount
+        objects:
+          - name: events
+            mode: watch
+            group: events.k8s.io
+            {{- if .Values.presets.k8sEvents.namespaces }}
+            namespaces:
+              {{- toYaml .Values.presets.k8sEvents.namespaces | nindent 14 }}
+            {{- end }}
+      {{- end }}
+
+    processors:
+      memory_limiter:
+        check_interval: {{ .Values.processors.memoryLimiter.checkInterval }}
+        limit_mib: {{ .Values.processors.memoryLimiter.limitMiB }}
+        spike_limit_mib: {{ .Values.processors.memoryLimiter.spikeLimitMiB }}
+      {{- if .Values.processors.kubernetesAttributes.enabled }}
+      k8sattributes:
+        passthrough: false
+        pod_association:
+          {{- toYaml .Values.processors.kubernetesAttributes.podAssociation | nindent 10 }}
+        extract:
+          metadata:
+            {{- toYaml .Values.processors.kubernetesAttributes.extract.metadata | nindent 12 }}
+      {{- end }}
+      {{- if .Values.processors.resourceDetection.enabled }}
+      resourcedetection:
+        detectors:
+          {{- if eq .Values.global.cloud "aws" }}
+          - eks
+          - ec2
+          {{- end }}
+          {{- if hasPrefix "gcp" .Values.global.cloud }}
+          - gcp
+          {{- end }}
+          {{- if eq .Values.global.cloud "azure" }}
+          - azure
+          {{- end }}
+          - env
+        timeout: {{ .Values.processors.resourceDetection.timeout }}
+        override: {{ .Values.processors.resourceDetection.override }}
+      {{- end }}
+      batch:
+        timeout: {{ .Values.processors.batch.timeout }}
+        send_batch_size: {{ .Values.processors.batch.sendBatchSize }}
+        send_batch_max_size: {{ .Values.processors.batch.sendBatchMaxSize }}
+
+    exporters:
+      otlphttp/maple:
+        endpoint: "${env:MAPLE_INGEST_ENDPOINT}"
+        compression: {{ .Values.maple.ingest.compression }}
+        tls:
+          insecure: {{ .Values.maple.ingest.tls.insecure }}
+          insecure_skip_verify: {{ .Values.maple.ingest.tls.insecureSkipVerify }}
+        headers:
+          x-maple-ingest-key: "${env:MAPLE_INGEST_KEY}"
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        {{- if .Values.presets.clusterMetrics.enabled }}
+        metrics:
+          receivers: [k8s_cluster]
+          processors: {{ include "maple-k8s-infra.baseProcessors" . }}
+          exporters: [otlphttp/maple]
+        {{- end }}
+        {{- if .Values.presets.k8sEvents.enabled }}
+        logs:
+          receivers: [k8sobjects/events]
+          processors: {{ include "maple-k8s-infra.baseProcessors" . }}
+          exporters: [otlphttp/maple]
+        {{- end }}
+      telemetry:
+        logs:
+          level: {{ .Values.config.serviceTelemetry.logs.level }}
+{{- end -}}

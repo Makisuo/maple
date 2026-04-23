@@ -1,0 +1,29 @@
+name: Publish Kubernetes Infra Chart
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "k8s-infra-v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/setup-helm@v4
+
+      - name: Package chart
+        run: ./scripts/package-k8s-infra-chart.sh
+
+      - name: Publish chart to GHCR
+        env:
+          HELM_REGISTRY_USERNAME: ${{ github.actor }}
+          HELM_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          HELM_REGISTRY_OWNER: ${{ github.repository_owner }}
+        run: ./scripts/publish-k8s-infra-chart.sh

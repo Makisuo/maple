@@ -1,0 +1,159 @@
+{{- if .Values.agent.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "maple-k8s-infra.agent.fullname" . }}
+  labels:
+    {{- include "maple-k8s-infra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+data:
+  config.yaml: |-
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      {{- if .Values.presets.otlpReceiver.enabled }}
+      otlp:
+        protocols:
+          {{- if .Values.presets.otlpReceiver.grpc.enabled }}
+          grpc:
+            endpoint: 0.0.0.0:{{ .Values.presets.otlpReceiver.grpc.containerPort }}
+          {{- end }}
+          {{- if .Values.presets.otlpReceiver.http.enabled }}
+          http:
+            endpoint: 0.0.0.0:{{ .Values.presets.otlpReceiver.http.containerPort }}
+          {{- end }}
+      {{- end }}
+      {{- if .Values.presets.hostMetrics.enabled }}
+      hostmetrics:
+        collection_interval: {{ .Values.presets.hostMetrics.collectionInterval }}
+        {{- if .Values.presets.hostMetrics.rootPath }}
+        root_path: {{ .Values.presets.hostMetrics.rootPath | quote }}
+        {{- end }}
+        scrapers:
+          {{- toYaml .Values.presets.hostMetrics.scrapers | nindent 10 }}
+      {{- end }}
+      {{- if .Values.presets.kubeletMetrics.enabled }}
+      kubeletstats:
+        collection_interval: {{ .Values.presets.kubeletMetrics.collectionInterval }}
+        auth_type: {{ .Values.presets.kubeletMetrics.authType | quote }}
+        endpoint: {{ .Values.presets.kubeletMetrics.endpoint | quote }}
+        insecure_skip_verify: {{ .Values.presets.kubeletMetrics.insecureSkipVerify }}
+        node: "${env:K8S_NODE_NAME}"
+        k8s_api_config:
+          auth_type: serviceAccount
+        extra_metadata_labels:
+          {{- toYaml .Values.presets.kubeletMetrics.extraMetadataLabels | nindent 10 }}
+        metric_groups:
+          {{- toYaml .Values.presets.kubeletMetrics.metricGroups | nindent 10 }}
+        metrics:
+          {{- toYaml .Values.presets.kubeletMetrics.metrics | nindent 10 }}
+      {{- end }}
+      {{- if .Values.presets.podLogs.enabled }}
+      filelog/k8s:
+        include:
+          {{- tpl (toYaml .Values.presets.podLogs.include) . | nindent 10 }}
+        exclude:
+          {{- tpl (toYaml .Values.presets.podLogs.exclude) . | nindent 10 }}
+        start_at: {{ .Values.presets.podLogs.startAt }}
+        include_file_path: {{ .Values.presets.podLogs.includeFilePath }}
+        include_file_name: {{ .Values.presets.podLogs.includeFileName }}
+        {{- if .Values.presets.podLogs.multiline }}
+        multiline:
+          {{- toYaml .Values.presets.podLogs.multiline | nindent 10 }}
+        {{- end }}
+        operators:
+          {{- toYaml .Values.presets.podLogs.operators | nindent 10 }}
+      {{- end }}
+
+    processors:
+      memory_limiter:
+        check_interval: {{ .Values.processors.memoryLimiter.checkInterval }}
+        limit_mib: {{ .Values.processors.memoryLimiter.limitMiB }}
+        spike_limit_mib: {{ .Values.processors.memoryLimiter.spikeLimitMiB }}
+      {{- if .Values.processors.kubernetesAttributes.enabled }}
+      k8sattributes:
+        passthrough: {{ .Values.processors.kubernetesAttributes.passthrough }}
+        filter:
+          {{- toYaml .Values.processors.kubernetesAttributes.filter | nindent 10 }}
+        pod_association:
+          {{- toYaml .Values.processors.kubernetesAttributes.podAssociation | nindent 10 }}
+        extract:
+          metadata:
+            {{- toYaml .Values.processors.kubernetesAttributes.extract.metadata | nindent 12 }}
+          labels:
+            {{- toYaml .Values.processors.kubernetesAttributes.extract.labels | nindent 12 }}
+          annotations:
+            {{- toYaml .Values.processors.kubernetesAttributes.extract.annotations | nindent 12 }}
+      {{- end }}
+      {{- if .Values.processors.resourceDetection.enabled }}
+      resourcedetection:
+        detectors:
+          {{- if eq .Values.global.cloud "aws" }}
+          - eks
+          - ec2
+          {{- end }}
+          {{- if hasPrefix "gcp" .Values.global.cloud }}
+          - gcp
+          {{- end }}
+          {{- if eq .Values.global.cloud "azure" }}
+          - azure
+          {{- end }}
+          - k8snode
+          - env
+          - system
+        k8snode:
+          auth_type: serviceAccount
+          node_from_env_var: K8S_NODE_NAME
+        timeout: {{ .Values.processors.resourceDetection.timeout }}
+        override: {{ .Values.processors.resourceDetection.override }}
+        system:
+          resource_attributes:
+            host.name:
+              enabled: false
+            host.id:
+              enabled: false
+            os.type:
+              enabled: true
+      {{- end }}
+      batch:
+        timeout: {{ .Values.processors.batch.timeout }}
+        send_batch_size: {{ .Values.processors.batch.sendBatchSize }}
+        send_batch_max_size: {{ .Values.processors.batch.sendBatchMaxSize }}
+
+    exporters:
+      otlphttp/maple:
+        endpoint: "${env:MAPLE_INGEST_ENDPOINT}"
+        compression: {{ .Values.maple.ingest.compression }}
+        tls:
+          insecure: {{ .Values.maple.ingest.tls.insecure }}
+          insecure_skip_verify: {{ .Values.maple.ingest.tls.insecureSkipVerify }}
+        headers:
+          x-maple-ingest-key: "${env:MAPLE_INGEST_KEY}"
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        {{- if .Values.presets.otlpReceiver.enabled }}
+        traces:
+          receivers: [otlp]
+          processors: {{ include "maple-k8s-infra.baseProcessors" . }}
+          exporters: [otlphttp/maple]
+        {{- end }}
+        {{- if or .Values.presets.otlpReceiver.enabled .Values.presets.podLogs.enabled }}
+        logs:
+          receivers: {{ include "maple-k8s-infra.agentLogReceivers" . }}
+          processors: {{ include "maple-k8s-infra.baseProcessors" . }}
+          exporters: [otlphttp/maple]
+        {{- end }}
+        {{- if or .Values.presets.otlpReceiver.enabled .Values.presets.hostMetrics.enabled .Values.presets.kubeletMetrics.enabled }}
+        metrics:
+          receivers: {{ include "maple-k8s-infra.agentMetricReceivers" . }}
+          processors: {{ include "maple-k8s-infra.baseProcessors" . }}
+          exporters: [otlphttp/maple]
+        {{- end }}
+      telemetry:
+        logs:
+          level: {{ .Values.config.serviceTelemetry.logs.level }}
+{{- end -}}

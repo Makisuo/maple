@@ -1,0 +1,59 @@
+{{- if and .Values.agent.enabled .Values.agent.service.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "maple-k8s-infra.agent.fullname" . }}
+  labels:
+    {{- include "maple-k8s-infra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+  {{- with .Values.agent.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.agent.service.type }}
+  selector:
+    {{- include "maple-k8s-infra.agent.selectorLabels" . | nindent 4 }}
+  ports:
+    {{- if and .Values.presets.otlpReceiver.enabled .Values.presets.otlpReceiver.grpc.enabled }}
+    - name: otlp-grpc
+      port: {{ .Values.presets.otlpReceiver.grpc.containerPort }}
+      targetPort: otlp-grpc
+      protocol: TCP
+    {{- end }}
+    {{- if and .Values.presets.otlpReceiver.enabled .Values.presets.otlpReceiver.http.enabled }}
+    - name: otlp-http
+      port: {{ .Values.presets.otlpReceiver.http.containerPort }}
+      targetPort: otlp-http
+      protocol: TCP
+    {{- end }}
+    - name: health
+      port: 13133
+      targetPort: health
+      protocol: TCP
+{{- end }}
+{{- if and .Values.agent.enabled .Values.agent.service.enabled .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled) .Values.clusterCollector.service.enabled }}
+---
+{{- end }}
+{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled) .Values.clusterCollector.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "maple-k8s-infra.cluster.fullname" . }}
+  labels:
+    {{- include "maple-k8s-infra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-collector
+  {{- with .Values.clusterCollector.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.clusterCollector.service.type }}
+  selector:
+    {{- include "maple-k8s-infra.cluster.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: health
+      port: 13133
+      targetPort: health
+      protocol: TCP
+{{- end }}

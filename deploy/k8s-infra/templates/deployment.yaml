@@ -1,0 +1,103 @@
+{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "maple-k8s-infra.cluster.fullname" . }}
+  labels:
+    {{- include "maple-k8s-infra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-collector
+spec:
+  replicas: {{ .Values.clusterCollector.replicaCount }}
+  minReadySeconds: {{ .Values.clusterCollector.minReadySeconds }}
+  progressDeadlineSeconds: {{ .Values.clusterCollector.progressDeadlineSeconds }}
+  selector:
+    matchLabels:
+      {{- include "maple-k8s-infra.cluster.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/cluster-configmap.yaml") . | sha256sum }}
+        {{- with .Values.clusterCollector.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "maple-k8s-infra.cluster.selectorLabels" . | nindent 8 }}
+        {{- with .Values.clusterCollector.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "maple-k8s-infra.cluster.serviceAccountName" . }}
+      {{- if .Values.clusterCollector.priorityClassName }}
+      priorityClassName: {{ .Values.clusterCollector.priorityClassName | quote }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.clusterCollector.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.clusterCollector.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.clusterCollector.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.clusterCollector.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: otel-collector
+          image: {{ include "maple-k8s-infra.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config=/conf/config.yaml
+          env:
+            {{- include "maple-k8s-infra.commonEnv" . | nindent 12 }}
+            {{- include "maple-k8s-infra.k8sEnv" . | nindent 12 }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ include "maple-k8s-infra.resourceAttributes.cluster" . | quote }}
+            {{- with .Values.clusterCollector.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.clusterCollector.resources | nindent 12 }}
+          {{- with .Values.clusterCollector.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+            {{- with .Values.clusterCollector.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "maple-k8s-infra.cluster.fullname" . }}
+        {{- with .Values.clusterCollector.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end -}}

@@ -1,0 +1,306 @@
+global:
+  clusterName: ""
+  deploymentEnvironment: ""
+  cloud: ""
+
+maple:
+  ingest:
+    # OTLP HTTP base endpoint. The collector appends /v1/{traces,logs,metrics}.
+    endpoint: "http://maple-ingest:3474"
+    tls:
+      insecure: false
+      insecureSkipVerify: false
+    compression: gzip
+  ingestKey:
+    # Prefer existingSecret in production.
+    value: ""
+    existingSecret:
+      name: ""
+      key: ""
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: "0.141.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+presets:
+  otlpReceiver:
+    enabled: true
+    grpc:
+      enabled: true
+      containerPort: 4317
+      hostPort: 4317
+    http:
+      enabled: true
+      containerPort: 4318
+      hostPort: 4318
+  hostMetrics:
+    enabled: true
+    rootPath: /hostfs
+    collectionInterval: 30s
+    scrapers:
+      cpu: {}
+      load: {}
+      memory: {}
+      disk:
+        exclude:
+          devices:
+            - ^ram\d+$
+            - ^zram\d+$
+            - ^loop\d+$
+            - ^fd\d+$
+            - ^hd[a-z]\d+$
+            - ^sd[a-z]\d+$
+            - ^vd[a-z]\d+$
+            - ^xvd[a-z]\d+$
+            - ^nvme\d+n\d+p\d+$
+          match_type: regexp
+      filesystem:
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - binfmt_misc
+            - bpf
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - fusectl
+            - hugetlbfs
+            - iso9660
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - procfs
+            - pstore
+            - rpc_pipefs
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tracefs
+          match_type: strict
+        exclude_mount_points:
+          mount_points:
+            - /dev/*
+            - /proc/*
+            - /sys/*
+            - /run/credentials/*
+            - /run/k3s/containerd/*
+            - /var/lib/docker/*
+            - /var/lib/containers/storage/*
+            - /var/lib/kubelet/*
+            - /snap/*
+          match_type: regexp
+      network:
+        exclude:
+          interfaces:
+            - ^veth.*$
+            - ^docker.*$
+            - ^br-.*$
+            - ^flannel.*$
+            - ^cali.*$
+            - ^cbr.*$
+            - ^cni.*$
+            - ^dummy.*$
+            - ^tailscale.*$
+            - ^lo$
+          match_type: regexp
+  kubeletMetrics:
+    enabled: true
+    collectionInterval: 30s
+    authType: serviceAccount
+    endpoint: https://${env:K8S_HOST_IP}:10250
+    insecureSkipVerify: true
+    extraMetadataLabels:
+      - container.id
+      - k8s.volume.type
+    metricGroups:
+      - container
+      - pod
+      - node
+      - volume
+    metrics:
+      k8s.node.cpu.usage:
+        enabled: true
+      k8s.node.uptime:
+        enabled: true
+      k8s.pod.cpu.usage:
+        enabled: true
+      k8s.pod.cpu_limit_utilization:
+        enabled: true
+      k8s.pod.cpu_request_utilization:
+        enabled: true
+      k8s.pod.memory_limit_utilization:
+        enabled: true
+      k8s.pod.memory_request_utilization:
+        enabled: true
+      container.cpu.usage:
+        enabled: true
+      k8s.container.cpu_limit_utilization:
+        enabled: true
+      k8s.container.cpu_request_utilization:
+        enabled: true
+      k8s.container.memory_limit_utilization:
+        enabled: true
+      k8s.container.memory_request_utilization:
+        enabled: true
+  clusterMetrics:
+    enabled: true
+    collectionInterval: 30s
+    nodeConditionsToReport:
+      - Ready
+      - MemoryPressure
+      - DiskPressure
+      - PIDPressure
+      - NetworkUnavailable
+    allocatableTypesToReport:
+      - cpu
+      - memory
+    resourceAttributes:
+      k8s.pod.qos_class:
+        enabled: true
+      k8s.kubelet.version:
+        enabled: true
+      container.runtime:
+        enabled: true
+      container.runtime.version:
+        enabled: true
+      k8s.container.status.last_terminated_reason:
+        enabled: true
+    metrics:
+      k8s.node.condition:
+        enabled: true
+      k8s.pod.status_reason:
+        enabled: true
+  podLogs:
+    enabled: false
+    startAt: end
+    includeFilePath: true
+    includeFileName: false
+    include:
+      - /var/log/pods/*/*/*.log
+    exclude:
+      - /var/log/pods/*_kube-system_*/*/*.log
+      - /var/log/pods/*_{{ include "maple-k8s-infra.fullname" . }}-*/*/*.log
+    multiline: null
+    operators:
+      - id: container-parser
+        type: container
+  k8sEvents:
+    enabled: false
+    namespaces: []
+
+processors:
+  memoryLimiter:
+    checkInterval: 1s
+    limitMiB: 512
+    spikeLimitMiB: 128
+  batch:
+    timeout: 1s
+    sendBatchSize: 8192
+    sendBatchMaxSize: 10000
+  kubernetesAttributes:
+    enabled: true
+    passthrough: false
+    filter:
+      node_from_env_var: K8S_NODE_NAME
+    podAssociation:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+      - sources:
+          - from: connection
+    extract:
+      metadata:
+        - k8s.namespace.name
+        - k8s.deployment.name
+        - k8s.statefulset.name
+        - k8s.daemonset.name
+        - k8s.cronjob.name
+        - k8s.job.name
+        - k8s.node.name
+        - k8s.node.uid
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.pod.start_time
+      labels: []
+      annotations: []
+  resourceDetection:
+    enabled: true
+    timeout: 2s
+    override: false
+
+agent:
+  enabled: true
+  replicaCount: 1
+  hostNetwork: false
+  minReadySeconds: 5
+  serviceAccount:
+    create: true
+    name: ""
+  service:
+    enabled: true
+    type: ClusterIP
+    annotations: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  securityContext: {}
+  podSecurityContext: {}
+  extraEnv: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+clusterCollector:
+  enabled: true
+  replicaCount: 1
+  minReadySeconds: 5
+  progressDeadlineSeconds: 120
+  serviceAccount:
+    create: true
+    name: ""
+  service:
+    enabled: true
+    type: ClusterIP
+    annotations: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+  securityContext: {}
+  podSecurityContext: {}
+  extraEnv: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+config:
+  serviceTelemetry:
+    logs:
+      level: info

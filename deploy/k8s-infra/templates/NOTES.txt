@@ -1,0 +1,15 @@
+Maple Kubernetes infra collector has been rendered.
+
+Collector endpoints:
+  OTLP gRPC: {{ include "maple-k8s-infra.agent.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.presets.otlpReceiver.grpc.containerPort }}
+  OTLP HTTP: {{ include "maple-k8s-infra.agent.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.presets.otlpReceiver.http.containerPort }}
+  Health:    {{ include "maple-k8s-infra.agent.fullname" . }}.{{ .Release.Namespace }}.svc:13133
+
+The collector exports to:
+  {{ .Values.maple.ingest.endpoint }}
+
+{{- if not (or .Values.maple.ingestKey.value .Values.maple.ingestKey.existingSecret.name) }}
+
+WARNING: no Maple ingest key was configured. Set maple.ingestKey.value or
+maple.ingestKey.existingSecret before using this chart for real ingestion.
+{{- end }}

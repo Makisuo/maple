@@ -1,0 +1,141 @@
+{{- if .Values.agent.enabled -}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "maple-k8s-infra.agent.fullname" . }}
+  labels:
+    {{- include "maple-k8s-infra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  minReadySeconds: {{ .Values.agent.minReadySeconds }}
+  selector:
+    matchLabels:
+      {{- include "maple-k8s-infra.agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/agent-configmap.yaml") . | sha256sum }}
+        {{- with .Values.agent.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "maple-k8s-infra.agent.selectorLabels" . | nindent 8 }}
+        {{- with .Values.agent.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "maple-k8s-infra.agent.serviceAccountName" . }}
+      hostNetwork: {{ .Values.agent.hostNetwork }}
+      {{- if .Values.agent.priorityClassName }}
+      priorityClassName: {{ .Values.agent.priorityClassName | quote }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: otel-collector
+          image: {{ include "maple-k8s-infra.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config=/conf/config.yaml
+          env:
+            {{- include "maple-k8s-infra.commonEnv" . | nindent 12 }}
+            {{- include "maple-k8s-infra.k8sEnv" . | nindent 12 }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ include "maple-k8s-infra.resourceAttributes.agent" . | quote }}
+            {{- with .Values.agent.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            {{- if and .Values.presets.otlpReceiver.enabled .Values.presets.otlpReceiver.grpc.enabled }}
+            - name: otlp-grpc
+              containerPort: {{ .Values.presets.otlpReceiver.grpc.containerPort }}
+              protocol: TCP
+              {{- if .Values.presets.otlpReceiver.grpc.hostPort }}
+              hostPort: {{ .Values.presets.otlpReceiver.grpc.hostPort }}
+              {{- end }}
+            {{- end }}
+            {{- if and .Values.presets.otlpReceiver.enabled .Values.presets.otlpReceiver.http.enabled }}
+            - name: otlp-http
+              containerPort: {{ .Values.presets.otlpReceiver.http.containerPort }}
+              protocol: TCP
+              {{- if .Values.presets.otlpReceiver.http.hostPort }}
+              hostPort: {{ .Values.presets.otlpReceiver.http.hostPort }}
+              {{- end }}
+            {{- end }}
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+          {{- with .Values.agent.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            {{- if and .Values.presets.hostMetrics.enabled .Values.presets.hostMetrics.rootPath }}
+            - name: hostfs
+              mountPath: {{ .Values.presets.hostMetrics.rootPath }}
+              readOnly: true
+              mountPropagation: HostToContainer
+            {{- end }}
+            {{- with .Values.agent.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "maple-k8s-infra.agent.fullname" . }}
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+        {{- if and .Values.presets.hostMetrics.enabled .Values.presets.hostMetrics.rootPath }}
+        - name: hostfs
+          hostPath:
+            path: /
+        {{- end }}
+        {{- with .Values.agent.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end -}}
