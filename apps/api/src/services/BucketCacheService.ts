@@ -361,6 +361,10 @@ export class BucketCacheService extends Context.Service<
           fluxBoundaryMs,
         )
 
+        yield* Effect.log(
+          `[bucket-cache] fp=${fingerprint.slice(0, 8)} bucketSeconds=${request.bucketSeconds} cachedBuckets=${existingBuckets.length} missing=${missing.length}`,
+        )
+
         if (missing.length === 0) {
           return {
             points: slicePointsFromBuckets(

@@ -18,6 +18,9 @@ import { getLogsFacets, listLogs } from "@/api/tinybird/logs"
 import { getMetricAttributeKeys, getMetricTimeSeries, getMetricsSummary, listMetrics } from "@/api/tinybird/metrics"
 import {
   fleetUtilizationTimeseries,
+  getNodeFacets,
+  getPodFacets,
+  getWorkloadFacets,
   hostDetailSummary,
   hostInfraTimeseries,
   listHosts,
@@ -217,6 +220,18 @@ export const workloadDetailSummaryResultAtom = makeQueryAtomFamily(workloadDetai
 })
 
 export const workloadInfraTimeseriesResultAtom = makeQueryAtomFamily(workloadInfraTimeseries, {
+  staleTime: 30_000,
+})
+
+export const podFacetsResultAtom = makeQueryAtomFamily(getPodFacets, {
+  staleTime: 30_000,
+})
+
+export const nodeFacetsResultAtom = makeQueryAtomFamily(getNodeFacets, {
+  staleTime: 30_000,
+})
+
+export const workloadFacetsResultAtom = makeQueryAtomFamily(getWorkloadFacets, {
   staleTime: 30_000,
 })
 

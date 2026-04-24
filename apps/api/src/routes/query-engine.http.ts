@@ -26,12 +26,15 @@ import {
   ListPodsResponse,
   PodDetailSummaryResponse,
   PodInfraTimeseriesResponse,
+  PodFacetsResponse,
   ListNodesResponse,
   NodeDetailSummaryResponse,
   NodeInfraTimeseriesResponse,
+  NodeFacetsResponse,
   ListWorkloadsResponse,
   WorkloadDetailSummaryResponse,
   WorkloadInfraTimeseriesResponse,
+  WorkloadFacetsResponse,
 } from "@maple/domain/http"
 import { Effect } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
@@ -544,8 +547,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
           const compiled = CH.compile(
             CH.listPodsQuery({
               search: payload.search,
-              namespace: payload.namespace,
-              nodeName: payload.nodeName,
+              podNames: payload.podNames,
+              namespaces: payload.namespaces,
+              nodeNames: payload.nodeNames,
+              clusters: payload.clusters,
+              deployments: payload.deployments,
+              statefulsets: payload.statefulsets,
+              daemonsets: payload.daemonsets,
+              jobs: payload.jobs,
+              environments: payload.environments,
               workloadKind: payload.workloadKind,
               workloadName: payload.workloadName,
               limit: payload.limit,
@@ -560,15 +570,20 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               podName: row.podName,
               namespace: row.namespace,
               nodeName: row.nodeName,
+              clusterName: row.clusterName,
+              environment: row.environment,
               deploymentName: row.deploymentName,
               statefulsetName: row.statefulsetName,
               daemonsetName: row.daemonsetName,
+              jobName: row.jobName,
               qosClass: row.qosClass,
               podUid: row.podUid,
               lastSeen: String(row.lastSeen),
               cpuUsage: Number(row.cpuUsage) || 0,
               cpuLimitPct: Number(row.cpuLimitPct) || 0,
               memoryLimitPct: Number(row.memoryLimitPct) || 0,
+              cpuRequestPct: Number(row.cpuRequestPct) || 0,
+              memoryRequestPct: Number(row.memoryRequestPct) || 0,
             })),
           })
         }),
@@ -653,6 +668,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
           const compiled = CH.compile(
             CH.listNodesQuery({
               search: payload.search,
+              nodeNames: payload.nodeNames,
+              clusters: payload.clusters,
+              environments: payload.environments,
               limit: payload.limit,
               offset: payload.offset,
             }),
@@ -664,6 +682,8 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
             data: typedRows.map((row) => ({
               nodeName: row.nodeName,
               nodeUid: row.nodeUid,
+              clusterName: row.clusterName,
+              environment: row.environment,
               kubeletVersion: row.kubeletVersion,
               lastSeen: String(row.lastSeen),
               cpuUsage: Number(row.cpuUsage) || 0,
@@ -738,7 +758,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
             CH.listWorkloadsQuery({
               kind: payload.kind,
               search: payload.search,
-              namespace: payload.namespace,
+              workloadNames: payload.workloadNames,
+              namespaces: payload.namespaces,
+              clusters: payload.clusters,
+              environments: payload.environments,
               limit: payload.limit,
               offset: payload.offset,
             }),
@@ -750,6 +773,8 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
             data: typedRows.map((row) => ({
               workloadName: row.workloadName,
               namespace: row.namespace,
+              clusterName: row.clusterName,
+              environment: row.environment,
               podCount: Number(row.podCount) || 0,
               lastSeen: String(row.lastSeen),
               avgCpuLimitPct: Number(row.avgCpuLimitPct) || 0,
@@ -826,6 +851,130 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
             })),
             unit: spec.unit,
           })
+        }),
+      )
+      .handle("podFacets", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compileUnion(
+            CH.podFacetsQuery({
+              search: payload.search,
+              podNames: payload.podNames,
+              namespaces: payload.namespaces,
+              nodeNames: payload.nodeNames,
+              clusters: payload.clusters,
+              deployments: payload.deployments,
+              statefulsets: payload.statefulsets,
+              daemonsets: payload.daemonsets,
+              jobs: payload.jobs,
+              environments: payload.environments,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "podFacets query failed")
+          const typedRows = compiled.castRows(rows) as ReadonlyArray<{
+            name: string
+            count: number
+            facetType: string
+          }>
+          const buckets = {
+            pods: [] as Array<{ name: string; count: number }>,
+            namespaces: [] as Array<{ name: string; count: number }>,
+            nodes: [] as Array<{ name: string; count: number }>,
+            clusters: [] as Array<{ name: string; count: number }>,
+            deployments: [] as Array<{ name: string; count: number }>,
+            statefulsets: [] as Array<{ name: string; count: number }>,
+            daemonsets: [] as Array<{ name: string; count: number }>,
+            jobs: [] as Array<{ name: string; count: number }>,
+            environments: [] as Array<{ name: string; count: number }>,
+          }
+          for (const row of typedRows) {
+            const entry = { name: String(row.name), count: Number(row.count) || 0 }
+            switch (row.facetType) {
+              case "pod": buckets.pods.push(entry); break
+              case "namespace": buckets.namespaces.push(entry); break
+              case "node": buckets.nodes.push(entry); break
+              case "cluster": buckets.clusters.push(entry); break
+              case "deployment": buckets.deployments.push(entry); break
+              case "statefulset": buckets.statefulsets.push(entry); break
+              case "daemonset": buckets.daemonsets.push(entry); break
+              case "job": buckets.jobs.push(entry); break
+              case "environment": buckets.environments.push(entry); break
+            }
+          }
+          return new PodFacetsResponse({ data: buckets })
+        }),
+      )
+      .handle("nodeFacets", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compileUnion(
+            CH.nodeFacetsQuery({
+              search: payload.search,
+              nodeNames: payload.nodeNames,
+              clusters: payload.clusters,
+              environments: payload.environments,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "nodeFacets query failed")
+          const typedRows = compiled.castRows(rows) as ReadonlyArray<{
+            name: string
+            count: number
+            facetType: string
+          }>
+          const buckets = {
+            nodes: [] as Array<{ name: string; count: number }>,
+            clusters: [] as Array<{ name: string; count: number }>,
+            environments: [] as Array<{ name: string; count: number }>,
+          }
+          for (const row of typedRows) {
+            const entry = { name: String(row.name), count: Number(row.count) || 0 }
+            switch (row.facetType) {
+              case "node": buckets.nodes.push(entry); break
+              case "cluster": buckets.clusters.push(entry); break
+              case "environment": buckets.environments.push(entry); break
+            }
+          }
+          return new NodeFacetsResponse({ data: buckets })
+        }),
+      )
+      .handle("workloadFacets", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compileUnion(
+            CH.workloadFacetsQuery({
+              kind: payload.kind,
+              search: payload.search,
+              workloadNames: payload.workloadNames,
+              namespaces: payload.namespaces,
+              clusters: payload.clusters,
+              environments: payload.environments,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "workloadFacets query failed")
+          const typedRows = compiled.castRows(rows) as ReadonlyArray<{
+            name: string
+            count: number
+            facetType: string
+          }>
+          const buckets = {
+            workloads: [] as Array<{ name: string; count: number }>,
+            namespaces: [] as Array<{ name: string; count: number }>,
+            clusters: [] as Array<{ name: string; count: number }>,
+            environments: [] as Array<{ name: string; count: number }>,
+          }
+          for (const row of typedRows) {
+            const entry = { name: String(row.name), count: Number(row.count) || 0 }
+            switch (row.facetType) {
+              case "workload": buckets.workloads.push(entry); break
+              case "namespace": buckets.namespaces.push(entry); break
+              case "cluster": buckets.clusters.push(entry); break
+              case "environment": buckets.environments.push(entry); break
+            }
+          }
+          return new WorkloadFacetsResponse({ data: buckets })
         }),
       )
   }),

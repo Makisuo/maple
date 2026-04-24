@@ -130,7 +130,7 @@ function WorkloadDetailContent() {
       data: {
         workloadKind: params.kind,
         workloadName: params.workloadName,
-        namespace,
+        namespaces: namespace ? [namespace] : undefined,
         startTime,
         endTime,
         limit: 200,

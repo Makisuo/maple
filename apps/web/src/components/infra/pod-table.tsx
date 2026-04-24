@@ -26,23 +26,30 @@ export interface PodRow {
   podName: string
   namespace: string
   nodeName: string
+  clusterName: string
+  environment: string
   deploymentName: string
   statefulsetName: string
   daemonsetName: string
+  jobName: string
   qosClass: string
   podUid: string
   lastSeen: string
   cpuUsage: number
   cpuLimitPct: number
   memoryLimitPct: number
+  cpuRequestPct: number
+  memoryRequestPct: number
 }
 
 type SortKey =
   | "podName"
   | "namespace"
+  | "cpuRequestPct"
   | "cpuLimitPct"
-  | "memoryLimitPct"
   | "cpuUsage"
+  | "memoryRequestPct"
+  | "memoryLimitPct"
   | "lastSeen"
 type SortDir = "asc" | "desc"
 
@@ -73,10 +80,11 @@ export function PodTableLoading() {
         <TableHeader>
           <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
             <TableHead>Pod</TableHead>
-            <TableHead className="w-[110px]">Status</TableHead>
-            <TableHead className="w-[200px]">CPU (limit)</TableHead>
-            <TableHead className="hidden md:table-cell w-[200px]">Memory (limit)</TableHead>
-            <TableHead className="hidden lg:table-cell w-[120px]">CPU cores</TableHead>
+            <TableHead className="hidden md:table-cell w-[170px]">CPU req usage (%)</TableHead>
+            <TableHead className="hidden md:table-cell w-[170px]">CPU limit usage (%)</TableHead>
+            <TableHead className="hidden lg:table-cell w-[120px]">CPU usage (cores)</TableHead>
+            <TableHead className="hidden md:table-cell w-[170px]">Mem req usage (%)</TableHead>
+            <TableHead className="hidden lg:table-cell w-[170px]">Mem limit usage (%)</TableHead>
             <TableHead className="w-[120px]">Last seen</TableHead>
           </TableRow>
         </TableHeader>
@@ -87,10 +95,7 @@ export function PodTableLoading() {
                 <Skeleton className="h-4 w-48" />
                 <Skeleton className="mt-1.5 h-3 w-32" />
               </TableCell>
-              <TableCell>
-                <Skeleton className="h-5 w-20" />
-              </TableCell>
-              <TableCell>
+              <TableCell className="hidden md:table-cell">
                 <Skeleton className="h-3 w-full" />
               </TableCell>
               <TableCell className="hidden md:table-cell">
@@ -98,6 +103,12 @@ export function PodTableLoading() {
               </TableCell>
               <TableCell className="hidden lg:table-cell">
                 <Skeleton className="h-4 w-12" />
+              </TableCell>
+              <TableCell className="hidden md:table-cell">
+                <Skeleton className="h-3 w-full" />
+              </TableCell>
+              <TableCell className="hidden lg:table-cell">
+                <Skeleton className="h-3 w-full" />
               </TableCell>
               <TableCell>
                 <Skeleton className="h-4 w-16" />
@@ -195,32 +206,45 @@ export function PodTable({ pods, waiting }: PodTableProps) {
               dir={sortDir}
               onSort={handleSort}
             />
-            <TableHead className="w-[110px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Status
-            </TableHead>
             <SortHead
-              label="CPU (limit)"
+              label="CPU req usage (%)"
+              sortKey="cpuRequestPct"
+              currentKey={sortKey}
+              dir={sortDir}
+              onSort={handleSort}
+              className="hidden md:table-cell w-[170px]"
+            />
+            <SortHead
+              label="CPU limit usage (%)"
               sortKey="cpuLimitPct"
               currentKey={sortKey}
               dir={sortDir}
               onSort={handleSort}
-              className="w-[200px]"
+              className="hidden md:table-cell w-[170px]"
             />
             <SortHead
-              label="Memory (limit)"
-              sortKey="memoryLimitPct"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden md:table-cell w-[200px]"
-            />
-            <SortHead
-              label="CPU cores"
+              label="CPU usage (cores)"
               sortKey="cpuUsage"
               currentKey={sortKey}
               dir={sortDir}
               onSort={handleSort}
               className="hidden lg:table-cell w-[120px]"
+            />
+            <SortHead
+              label="Mem req usage (%)"
+              sortKey="memoryRequestPct"
+              currentKey={sortKey}
+              dir={sortDir}
+              onSort={handleSort}
+              className="hidden md:table-cell w-[170px]"
+            />
+            <SortHead
+              label="Mem limit usage (%)"
+              sortKey="memoryLimitPct"
+              currentKey={sortKey}
+              dir={sortDir}
+              onSort={handleSort}
+              className="hidden lg:table-cell w-[170px]"
             />
             <SortHead
               label="Last seen"
@@ -235,7 +259,7 @@ export function PodTable({ pods, waiting }: PodTableProps) {
         <TableBody>
           {sorted.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+              <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                 No pods match your filter.
               </TableCell>
             </TableRow>
@@ -266,20 +290,24 @@ export function PodTable({ pods, waiting }: PodTableProps) {
                         )}
                         {pod.nodeName && <MetaChip>node={pod.nodeName}</MetaChip>}
                         {pod.qosClass && <MetaChip>qos={pod.qosClass}</MetaChip>}
+                        <HostStatusBadge lastSeen={pod.lastSeen} />
                       </div>
                     </Link>
                   </TableCell>
-                  <TableCell>
-                    <HostStatusBadge lastSeen={pod.lastSeen} />
-                  </TableCell>
-                  <TableCell>
-                    <UsageBar fraction={pod.cpuLimitPct} />
+                  <TableCell className="hidden md:table-cell">
+                    <UsageBar fraction={pod.cpuRequestPct} />
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
-                    <UsageBar fraction={pod.memoryLimitPct} />
+                    <UsageBar fraction={pod.cpuLimitPct} />
                   </TableCell>
                   <TableCell className="hidden lg:table-cell font-mono text-xs tabular-nums text-foreground/80">
                     {Number.isFinite(pod.cpuUsage) ? pod.cpuUsage.toFixed(3) : "—"}
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <UsageBar fraction={pod.memoryRequestPct} />
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell">
+                    <UsageBar fraction={pod.memoryLimitPct} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     <Tooltip>

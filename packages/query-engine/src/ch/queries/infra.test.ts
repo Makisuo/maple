@@ -1,17 +1,21 @@
 import { describe, expect, it } from "vitest"
 import { compileCH } from "../compile"
+import { compileUnion } from "../compile"
 import {
   listHostsQuery,
   hostDetailSummaryQuery,
   listPodsQuery,
   podDetailSummaryQuery,
   podGaugeTimeseriesQuery,
+  podFacetsQuery,
   listNodesQuery,
   nodeDetailSummaryQuery,
   nodeGaugeTimeseriesQuery,
+  nodeFacetsQuery,
   listWorkloadsQuery,
   workloadDetailSummaryQuery,
   workloadGaugeTimeseriesQuery,
+  workloadFacetsQuery,
 } from "./infra"
 
 const baseParams = {
@@ -55,17 +59,19 @@ describe("listPodsQuery", () => {
     expect(sql).toContain("k8s.pod.cpu.usage")
     expect(sql).toContain("k8s.pod.cpu_limit_utilization")
     expect(sql).toContain("k8s.pod.memory_limit_utilization")
+    expect(sql).toContain("k8s.pod.cpu_request_utilization")
+    expect(sql).toContain("k8s.pod.memory_request_utilization")
     expect(sql).toContain("LIMIT 200")
     expect(sql).toContain("FORMAT JSON")
     expect(sql).not.toMatch(/__PARAM_\w+__/)
   })
 
-  it("applies search, namespace, and node filters", () => {
+  it("applies search and single-node legacy filters", () => {
     const { sql } = compileCH(
       listPodsQuery({
         search: "auth",
-        namespace: "prod",
-        nodeName: "node-7",
+        namespaces: ["prod"],
+        nodeNames: ["node-7"],
       }),
       baseParams,
     )
@@ -75,7 +81,44 @@ describe("listPodsQuery", () => {
     expect(sql).toContain("'node-7'")
   })
 
-  it("applies workload filter when both kind+name supplied", () => {
+  it("applies multi-value array filters with IN clauses", () => {
+    const { sql } = compileCH(
+      listPodsQuery({
+        namespaces: ["prod", "stage"],
+        nodeNames: ["node-1", "node-2"],
+        clusters: ["c1"],
+        deployments: ["api", "web"],
+        environments: ["production"],
+      }),
+      baseParams,
+    )
+    expect(sql).toContain("ResourceAttributes['k8s.namespace.name'] IN")
+    expect(sql).toContain("'prod'")
+    expect(sql).toContain("'stage'")
+    expect(sql).toContain("ResourceAttributes['k8s.node.name'] IN")
+    expect(sql).toContain("ResourceAttributes['k8s.cluster.name'] IN")
+    expect(sql).toContain("ResourceAttributes['k8s.deployment.name'] IN")
+    expect(sql).toContain("ResourceAttributes['deployment.environment.name'] IN")
+    expect(sql).toContain("'production'")
+  })
+
+  it("filters by pod, statefulset, daemonset, and job names when arrays present", () => {
+    const { sql } = compileCH(
+      listPodsQuery({
+        podNames: ["pod-a"],
+        statefulsets: ["sts-x"],
+        daemonsets: ["ds-y"],
+        jobs: ["job-z"],
+      }),
+      baseParams,
+    )
+    expect(sql).toContain("ResourceAttributes['k8s.pod.name'] IN")
+    expect(sql).toContain("ResourceAttributes['k8s.statefulset.name'] IN")
+    expect(sql).toContain("ResourceAttributes['k8s.daemonset.name'] IN")
+    expect(sql).toContain("ResourceAttributes['k8s.job.name'] IN")
+  })
+
+  it("applies workload filter when both kind+name supplied (legacy)", () => {
     const { sql } = compileCH(
       listPodsQuery({
         workloadKind: "deployment",
@@ -94,6 +137,31 @@ describe("listPodsQuery", () => {
     )
     expect(sql).toContain("LIMIT 50")
     expect(sql).toContain("OFFSET 25")
+  })
+})
+
+describe("podFacetsQuery", () => {
+  it("emits a UNION ALL with one branch per facet dimension", () => {
+    const { sql } = compileUnion(podFacetsQuery({}), baseParams)
+    expect(sql.toUpperCase().split("UNION ALL").length).toBeGreaterThan(2)
+    expect(sql).toContain("ResourceAttributes['k8s.pod.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.namespace.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.node.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.cluster.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.deployment.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.statefulset.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.daemonset.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.job.name']")
+    expect(sql).toContain("ResourceAttributes['deployment.environment.name']")
+    expect(sql).toContain("FORMAT JSON")
+  })
+
+  it("propagates active filters into facet counts", () => {
+    const { sql } = compileUnion(
+      podFacetsQuery({ namespaces: ["prod"] }),
+      baseParams,
+    )
+    expect(sql).toContain("'prod'")
   })
 })
 
@@ -137,6 +205,28 @@ describe("listNodesQuery", () => {
     expect(sql).toContain("k8s.node.cpu.usage")
     expect(sql).toContain("k8s.node.uptime")
     expect(sql).not.toMatch(/__PARAM_\w+__/)
+  })
+
+  it("applies cluster/environment array filters", () => {
+    const { sql } = compileCH(
+      listNodesQuery({
+        clusters: ["c1", "c2"],
+        environments: ["production"],
+      }),
+      baseParams,
+    )
+    expect(sql).toContain("ResourceAttributes['k8s.cluster.name'] IN")
+    expect(sql).toContain("ResourceAttributes['deployment.environment.name'] IN")
+  })
+})
+
+describe("nodeFacetsQuery", () => {
+  it("emits node, cluster, and environment facet branches", () => {
+    const { sql } = compileUnion(nodeFacetsQuery({}), baseParams)
+    expect(sql.toUpperCase().split("UNION ALL").length).toBeGreaterThan(2)
+    expect(sql).toContain("ResourceAttributes['k8s.node.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.cluster.name']")
+    expect(sql).toContain("ResourceAttributes['deployment.environment.name']")
   })
 })
 
@@ -191,6 +281,36 @@ describe("listWorkloadsQuery", () => {
       baseParams,
     ).sql
     expect(ds).toContain("ResourceAttributes['k8s.daemonset.name']")
+  })
+
+  it("applies workloadNames + namespaces + clusters filters", () => {
+    const { sql } = compileCH(
+      listWorkloadsQuery({
+        kind: "deployment",
+        workloadNames: ["api"],
+        namespaces: ["prod"],
+        clusters: ["c1"],
+        environments: ["production"],
+      }),
+      baseParams,
+    )
+    expect(sql).toContain("ResourceAttributes['k8s.deployment.name'] IN")
+    expect(sql).toContain("ResourceAttributes['k8s.namespace.name'] IN")
+    expect(sql).toContain("ResourceAttributes['k8s.cluster.name'] IN")
+    expect(sql).toContain("ResourceAttributes['deployment.environment.name'] IN")
+  })
+})
+
+describe("workloadFacetsQuery", () => {
+  it("emits workload, namespace, cluster, environment branches scoped to kind", () => {
+    const { sql } = compileUnion(
+      workloadFacetsQuery({ kind: "deployment" }),
+      baseParams,
+    )
+    expect(sql).toContain("ResourceAttributes['k8s.deployment.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.namespace.name']")
+    expect(sql).toContain("ResourceAttributes['k8s.cluster.name']")
+    expect(sql).toContain("ResourceAttributes['deployment.environment.name']")
   })
 })
 

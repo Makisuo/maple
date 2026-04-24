@@ -321,12 +321,26 @@ export class FleetUtilizationTimeseriesResponse extends Schema.Class<FleetUtiliz
 
 const WorkloadKindLiteral = Schema.Literals(["deployment", "statefulset", "daemonset"])
 
+const StringArray = Schema.Array(Schema.String)
+
+const FacetRow = Schema.Struct({
+  name: Schema.String,
+  count: Schema.Number,
+})
+
 export class ListPodsRequest extends Schema.Class<ListPodsRequest>("ListPodsRequest")({
   startTime: TinybirdDateTime,
   endTime: TinybirdDateTime,
   search: Schema.optional(Schema.String),
-  namespace: Schema.optional(Schema.String),
-  nodeName: Schema.optional(Schema.String),
+  podNames: Schema.optional(StringArray),
+  namespaces: Schema.optional(StringArray),
+  nodeNames: Schema.optional(StringArray),
+  clusters: Schema.optional(StringArray),
+  deployments: Schema.optional(StringArray),
+  statefulsets: Schema.optional(StringArray),
+  daemonsets: Schema.optional(StringArray),
+  jobs: Schema.optional(StringArray),
+  environments: Schema.optional(StringArray),
   workloadKind: Schema.optional(WorkloadKindLiteral),
   workloadName: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.Number),
@@ -337,19 +351,53 @@ const PodRow = Schema.Struct({
   podName: Schema.String,
   namespace: Schema.String,
   nodeName: Schema.String,
+  clusterName: Schema.String,
+  environment: Schema.String,
   deploymentName: Schema.String,
   statefulsetName: Schema.String,
   daemonsetName: Schema.String,
+  jobName: Schema.String,
   qosClass: Schema.String,
   podUid: Schema.String,
   lastSeen: Schema.String,
   cpuUsage: Schema.Number,
   cpuLimitPct: Schema.Number,
   memoryLimitPct: Schema.Number,
+  cpuRequestPct: Schema.Number,
+  memoryRequestPct: Schema.Number,
 })
 
 export class ListPodsResponse extends Schema.Class<ListPodsResponse>("ListPodsResponse")({
   data: Schema.Array(PodRow),
+}) {}
+
+export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  search: Schema.optional(Schema.String),
+  podNames: Schema.optional(StringArray),
+  namespaces: Schema.optional(StringArray),
+  nodeNames: Schema.optional(StringArray),
+  clusters: Schema.optional(StringArray),
+  deployments: Schema.optional(StringArray),
+  statefulsets: Schema.optional(StringArray),
+  daemonsets: Schema.optional(StringArray),
+  jobs: Schema.optional(StringArray),
+  environments: Schema.optional(StringArray),
+}) {}
+
+export class PodFacetsResponse extends Schema.Class<PodFacetsResponse>("PodFacetsResponse")({
+  data: Schema.Struct({
+    pods: Schema.Array(FacetRow),
+    namespaces: Schema.Array(FacetRow),
+    nodes: Schema.Array(FacetRow),
+    clusters: Schema.Array(FacetRow),
+    deployments: Schema.Array(FacetRow),
+    statefulsets: Schema.Array(FacetRow),
+    daemonsets: Schema.Array(FacetRow),
+    jobs: Schema.Array(FacetRow),
+    environments: Schema.Array(FacetRow),
+  }),
 }) {}
 
 export class PodDetailSummaryRequest extends Schema.Class<PodDetailSummaryRequest>("PodDetailSummaryRequest")({
@@ -408,6 +456,9 @@ export class ListNodesRequest extends Schema.Class<ListNodesRequest>("ListNodesR
   startTime: TinybirdDateTime,
   endTime: TinybirdDateTime,
   search: Schema.optional(Schema.String),
+  nodeNames: Schema.optional(StringArray),
+  clusters: Schema.optional(StringArray),
+  environments: Schema.optional(StringArray),
   limit: Schema.optional(Schema.Number),
   offset: Schema.optional(Schema.Number),
 }) {}
@@ -415,6 +466,8 @@ export class ListNodesRequest extends Schema.Class<ListNodesRequest>("ListNodesR
 const NodeRow = Schema.Struct({
   nodeName: Schema.String,
   nodeUid: Schema.String,
+  clusterName: Schema.String,
+  environment: Schema.String,
   kubeletVersion: Schema.String,
   lastSeen: Schema.String,
   cpuUsage: Schema.Number,
@@ -423,6 +476,23 @@ const NodeRow = Schema.Struct({
 
 export class ListNodesResponse extends Schema.Class<ListNodesResponse>("ListNodesResponse")({
   data: Schema.Array(NodeRow),
+}) {}
+
+export class NodeFacetsRequest extends Schema.Class<NodeFacetsRequest>("NodeFacetsRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  search: Schema.optional(Schema.String),
+  nodeNames: Schema.optional(StringArray),
+  clusters: Schema.optional(StringArray),
+  environments: Schema.optional(StringArray),
+}) {}
+
+export class NodeFacetsResponse extends Schema.Class<NodeFacetsResponse>("NodeFacetsResponse")({
+  data: Schema.Struct({
+    nodes: Schema.Array(FacetRow),
+    clusters: Schema.Array(FacetRow),
+    environments: Schema.Array(FacetRow),
+  }),
 }) {}
 
 export class NodeDetailSummaryRequest extends Schema.Class<NodeDetailSummaryRequest>("NodeDetailSummaryRequest")({
@@ -466,7 +536,10 @@ export class ListWorkloadsRequest extends Schema.Class<ListWorkloadsRequest>("Li
   endTime: TinybirdDateTime,
   kind: WorkloadKindLiteral,
   search: Schema.optional(Schema.String),
-  namespace: Schema.optional(Schema.String),
+  workloadNames: Schema.optional(StringArray),
+  namespaces: Schema.optional(StringArray),
+  clusters: Schema.optional(StringArray),
+  environments: Schema.optional(StringArray),
   limit: Schema.optional(Schema.Number),
   offset: Schema.optional(Schema.Number),
 }) {}
@@ -474,6 +547,8 @@ export class ListWorkloadsRequest extends Schema.Class<ListWorkloadsRequest>("Li
 const WorkloadRow = Schema.Struct({
   workloadName: Schema.String,
   namespace: Schema.String,
+  clusterName: Schema.String,
+  environment: Schema.String,
   podCount: Schema.Number,
   lastSeen: Schema.String,
   avgCpuLimitPct: Schema.Number,
@@ -483,6 +558,26 @@ const WorkloadRow = Schema.Struct({
 
 export class ListWorkloadsResponse extends Schema.Class<ListWorkloadsResponse>("ListWorkloadsResponse")({
   data: Schema.Array(WorkloadRow),
+}) {}
+
+export class WorkloadFacetsRequest extends Schema.Class<WorkloadFacetsRequest>("WorkloadFacetsRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  kind: WorkloadKindLiteral,
+  search: Schema.optional(Schema.String),
+  workloadNames: Schema.optional(StringArray),
+  namespaces: Schema.optional(StringArray),
+  clusters: Schema.optional(StringArray),
+  environments: Schema.optional(StringArray),
+}) {}
+
+export class WorkloadFacetsResponse extends Schema.Class<WorkloadFacetsResponse>("WorkloadFacetsResponse")({
+  data: Schema.Struct({
+    workloads: Schema.Array(FacetRow),
+    namespaces: Schema.Array(FacetRow),
+    clusters: Schema.Array(FacetRow),
+    environments: Schema.Array(FacetRow),
+  }),
 }) {}
 
 export class WorkloadDetailSummaryRequest extends Schema.Class<WorkloadDetailSummaryRequest>("WorkloadDetailSummaryRequest")({
@@ -738,6 +833,18 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
   }))
   .add(HttpApiEndpoint.post("workloadInfraTimeseries", "/workload-infra-timeseries", {
     payload: WorkloadInfraTimeseriesRequest, success: WorkloadInfraTimeseriesResponse,
+    error: [QueryEngineExecutionError],
+  }))
+  .add(HttpApiEndpoint.post("podFacets", "/pod-facets", {
+    payload: PodFacetsRequest, success: PodFacetsResponse,
+    error: [QueryEngineExecutionError],
+  }))
+  .add(HttpApiEndpoint.post("nodeFacets", "/node-facets", {
+    payload: NodeFacetsRequest, success: NodeFacetsResponse,
+    error: [QueryEngineExecutionError],
+  }))
+  .add(HttpApiEndpoint.post("workloadFacets", "/workload-facets", {
+    payload: WorkloadFacetsRequest, success: WorkloadFacetsResponse,
     error: [QueryEngineExecutionError],
   }))
   .prefix("/api/query-engine")

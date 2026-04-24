@@ -1,7 +1,7 @@
-import { useState } from "react"
-import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
+import { Result, useAtomValue } from "@/lib/effect-atom"
 
 import { Input } from "@maple/ui/components/ui/input"
 import {
@@ -18,6 +18,7 @@ import {
   TabsTrigger,
 } from "@maple/ui/components/ui/tabs"
 
+import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { GridIcon } from "@/components/icons"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
@@ -26,17 +27,37 @@ import {
   WorkloadTableLoading,
   type WorkloadRow,
 } from "@/components/infra/workload-table"
-import { listWorkloadsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import {
+  WorkloadsFilterSidebarView,
+  type WorkloadFilters,
+} from "@/components/infra/k8s-filter-sidebar"
+import {
+  listWorkloadsResultAtom,
+  workloadFacetsResultAtom,
+} from "@/lib/services/atoms/tinybird-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
+import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
+import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import type { WorkloadKind } from "@/api/tinybird/infra"
 
+const WorkloadKindLiteral = Schema.Literals(["deployment", "statefulset", "daemonset"])
+
 const workloadsSearchSchema = Schema.Struct({
-  kind: Schema.optional(
-    Schema.Literals(["deployment", "statefulset", "daemonset"]),
-  ),
+  kind: Schema.optional(WorkloadKindLiteral),
+  search: Schema.optional(Schema.String),
+  workloadNames: OptionalStringArrayParam,
+  namespaces: OptionalStringArrayParam,
+  clusters: OptionalStringArrayParam,
+  environments: OptionalStringArrayParam,
+  startTime: Schema.optional(Schema.String),
+  endTime: Schema.optional(Schema.String),
+  timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/infra/kubernetes/workloads/")({
+export type WorkloadsSearchParams = Schema.Schema.Type<typeof workloadsSearchSchema>
+
+export const Route = effectRoute(createFileRoute("/infra/kubernetes/workloads/"))({
   component: WorkloadsPage,
   validateSearch: Schema.toStandardSchemaV1(workloadsSearchSchema),
 })
@@ -47,15 +68,29 @@ function WorkloadsPage() {
   return <WorkloadsPageContent />
 }
 
+const KIND_LABEL: Record<WorkloadKind, string> = {
+  deployment: "Deployment",
+  statefulset: "StatefulSet",
+  daemonset: "DaemonSet",
+}
+
 function WorkloadsPageContent() {
-  const search = Route.useSearch() as { kind?: WorkloadKind }
-  const navigate = Route.useNavigate()
+  const search = Route.useSearch()
+  const navigate = useNavigate({ from: Route.fullPath })
   const kind: WorkloadKind = search.kind ?? "deployment"
 
-  const [searchText, setSearchText] = useState("")
-  const [namespace, setNamespace] = useState("")
+  const { startTime, endTime } = useEffectiveTimeRange(
+    search.startTime,
+    search.endTime,
+    search.timePreset ?? "12h",
+  )
 
-  const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "12h")
+  const filters: WorkloadFilters = {
+    workloadNames: search.workloadNames,
+    namespaces: search.namespaces,
+    clusters: search.clusters,
+    environments: search.environments,
+  }
 
   const wlResult = useAtomValue(
     listWorkloadsResultAtom({
@@ -63,29 +98,88 @@ function WorkloadsPageContent() {
         kind,
         startTime,
         endTime,
-        search: searchText.trim() || undefined,
-        namespace: namespace.trim() || undefined,
+        search: search.search?.trim() || undefined,
+        ...filters,
       },
     }),
   )
 
+  const facetsResult = useAtomValue(
+    workloadFacetsResultAtom({
+      data: {
+        kind,
+        startTime,
+        endTime,
+        search: search.search?.trim() || undefined,
+      },
+    }),
+  )
+
+  const onFilterChange = <K extends keyof WorkloadFilters>(key: K, value: WorkloadFilters[K]) => {
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        [key]:
+          value === undefined || (Array.isArray(value) && value.length === 0)
+            ? undefined
+            : value,
+      }),
+    })
+  }
+
+  const onClearFilters = () => {
+    navigate({
+      search: {
+        kind: search.kind,
+        startTime: search.startTime,
+        endTime: search.endTime,
+        timePreset: search.timePreset,
+      },
+    })
+  }
+
+  const handleTimeChange = (
+    range: { startTime?: string; endTime?: string; presetValue?: string },
+    options?: { replace?: boolean },
+  ) => {
+    navigate({
+      replace: options?.replace,
+      search: (prev) => ({ ...applyTimeRangeSearch(prev, range) }),
+    })
+  }
+
   return (
-    <DashboardLayout
-      breadcrumbs={[
-        { label: "Infrastructure", href: "/infra" },
-        { label: "Kubernetes" },
-        { label: "Workloads" },
-      ]}
-      title="Workloads"
-      description="Kubernetes Deployments, StatefulSets, and DaemonSets aggregated from pod metrics."
-    >
-      <div className="space-y-6">
+    <PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
+      <DashboardLayout
+        breadcrumbs={[
+          { label: "Infrastructure", href: "/infra" },
+          { label: "Kubernetes" },
+          { label: "Workloads" },
+        ]}
+        filterSidebar={
+          <WorkloadsFilterSidebarView
+            facetsResult={facetsResult}
+            filters={filters}
+            workloadLabel={KIND_LABEL[kind]}
+            onFilterChange={onFilterChange}
+            onClearFilters={onClearFilters}
+          />
+        }
+        headerActions={
+          <TimeRangeHeaderControls
+            startTime={search.startTime ?? startTime}
+            endTime={search.endTime ?? endTime}
+            presetValue={search.timePreset ?? "12h"}
+            onTimeChange={handleTimeChange}
+          />
+        }
+      >
         <Tabs
           value={kind}
           onValueChange={(v) =>
             v &&
             navigate({
-              search: { kind: v as WorkloadKind },
+              search: (prev) => ({ ...prev, kind: v as WorkloadKind, workloadNames: undefined }),
             })
           }
         >
@@ -109,8 +203,14 @@ function WorkloadsPageContent() {
               ))
               .onSuccess((response, result) => {
                 const wls = response.data as ReadonlyArray<WorkloadRow>
+                const hasAnyFilter =
+                  !!search.search?.trim() ||
+                  (filters.workloadNames?.length ?? 0) > 0 ||
+                  (filters.namespaces?.length ?? 0) > 0 ||
+                  (filters.clusters?.length ?? 0) > 0 ||
+                  (filters.environments?.length ?? 0) > 0
 
-                if (wls.length === 0 && !searchText.trim() && !namespace.trim()) {
+                if (wls.length === 0 && !hasAnyFilter) {
                   return (
                     <Empty className="py-16">
                       <EmptyHeader>
@@ -131,21 +231,22 @@ function WorkloadsPageContent() {
 
                 return (
                   <div
-                    className={`space-y-6 transition-opacity ${
+                    className={`space-y-4 transition-opacity ${
                       result.waiting ? "opacity-60" : ""
                     }`}
                   >
                     <div className="flex flex-wrap items-center gap-3">
                       <Input
                         placeholder="Search…"
-                        value={searchText}
-                        onChange={(e) => setSearchText(e.target.value)}
-                        className="max-w-xs"
-                      />
-                      <Input
-                        placeholder="Namespace…"
-                        value={namespace}
-                        onChange={(e) => setNamespace(e.target.value)}
+                        value={search.search ?? ""}
+                        onChange={(e) =>
+                          navigate({
+                            search: (prev) => ({
+                              ...prev,
+                              search: e.target.value || undefined,
+                            }),
+                          })
+                        }
                         className="max-w-xs"
                       />
                       <span className="text-muted-foreground text-xs">
@@ -164,7 +265,7 @@ function WorkloadsPageContent() {
               .render()}
           </TabsContent>
         </Tabs>
-      </div>
-    </DashboardLayout>
+      </DashboardLayout>
+    </PageRefreshProvider>
   )
 }

@@ -98,7 +98,7 @@ function NodeDetailContent() {
 
   const podsResult = useAtomValue(
     listPodsResultAtom({
-      data: { nodeName, startTime, endTime, limit: 200 },
+      data: { nodeNames: [nodeName], startTime, endTime, limit: 200 },
     }),
   )
 

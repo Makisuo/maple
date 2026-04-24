@@ -24,6 +24,8 @@ import { formatRelative } from "./format"
 export interface NodeRow {
   nodeName: string
   nodeUid: string
+  clusterName: string
+  environment: string
   kubeletVersion: string
   lastSeen: string
   cpuUsage: number

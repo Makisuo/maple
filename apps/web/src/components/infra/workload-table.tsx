@@ -26,6 +26,8 @@ import { formatRelative } from "./format"
 export interface WorkloadRow {
   workloadName: string
   namespace: string
+  clusterName: string
+  environment: string
   podCount: number
   lastSeen: string
   avgCpuLimitPct: number

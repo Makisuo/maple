@@ -311,8 +311,17 @@ const POD_METRIC_NAMES = [
 
 export interface ListPodsOpts {
   search?: string
-  namespace?: string
-  nodeName?: string
+  podNames?: ReadonlyArray<string>
+  namespaces?: ReadonlyArray<string>
+  nodeNames?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  deployments?: ReadonlyArray<string>
+  statefulsets?: ReadonlyArray<string>
+  daemonsets?: ReadonlyArray<string>
+  jobs?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
+  // Single-value filters retained for backward compat with the workload detail
+  // page, which still narrows by a single workload owner.
   workloadKind?: "deployment" | "statefulset" | "daemonset"
   workloadName?: string
   limit?: number
@@ -323,15 +332,20 @@ export interface ListPodsOutput {
   readonly podName: string
   readonly namespace: string
   readonly nodeName: string
+  readonly clusterName: string
+  readonly environment: string
   readonly deploymentName: string
   readonly statefulsetName: string
   readonly daemonsetName: string
+  readonly jobName: string
   readonly qosClass: string
   readonly podUid: string
   readonly lastSeen: string
   readonly cpuUsage: number
   readonly cpuLimitPct: number
   readonly memoryLimitPct: number
+  readonly cpuRequestPct: number
+  readonly memoryRequestPct: number
 }
 
 const workloadAttrKey = (kind: "deployment" | "statefulset" | "daemonset") =>
@@ -341,15 +355,75 @@ const workloadAttrKey = (kind: "deployment" | "statefulset" | "daemonset") =>
       ? "k8s.statefulset.name"
       : "k8s.daemonset.name"
 
+const podBaseConditions = (
+  $: ColumnAccessor<typeof MetricsGauge.columns>,
+): Array<CH.Condition | undefined> => [
+  $.OrgId.eq(param.string("orgId")),
+  $.TimeUnix.gte(param.dateTime("startTime")),
+  $.TimeUnix.lte(param.dateTime("endTime")),
+  $.ResourceAttributes.get("k8s.pod.name").neq(""),
+  $.MetricName.in_(...POD_METRIC_NAMES),
+]
+
+const podFilterConditions = (
+  $: ColumnAccessor<typeof MetricsGauge.columns>,
+  opts: ListPodsOpts,
+): Array<CH.Condition | undefined> => [
+  CH.when(opts.search, (v: string) =>
+    CH.positionCaseInsensitive(
+      $.ResourceAttributes.get("k8s.pod.name"),
+      CH.lit(v),
+    ).gt(0),
+  ),
+  opts.podNames?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.pod.name"), opts.podNames)
+    : undefined,
+  opts.namespaces?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.namespace.name"), opts.namespaces)
+    : undefined,
+  opts.nodeNames?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.node.name"), opts.nodeNames)
+    : undefined,
+  opts.clusters?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.cluster.name"), opts.clusters)
+    : undefined,
+  opts.deployments?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.deployment.name"), opts.deployments)
+    : undefined,
+  opts.statefulsets?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.statefulset.name"), opts.statefulsets)
+    : undefined,
+  opts.daemonsets?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.daemonset.name"), opts.daemonsets)
+    : undefined,
+  opts.jobs?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.job.name"), opts.jobs)
+    : undefined,
+  opts.environments?.length
+    ? CH.inList(
+        $.ResourceAttributes.get("deployment.environment.name"),
+        opts.environments,
+      )
+    : undefined,
+  CH.when(opts.workloadKind && opts.workloadName, () =>
+    $.ResourceAttributes
+      .get(workloadAttrKey(opts.workloadKind!))
+      .eq(opts.workloadName!),
+  ),
+]
+
 export function listPodsQuery(opts: ListPodsOpts = {}) {
   return from(MetricsGauge)
     .select(($) => ({
       podName: $.ResourceAttributes.get("k8s.pod.name"),
       namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
       nodeName: CH.any_($.ResourceAttributes.get("k8s.node.name")),
+      clusterName: CH.any_($.ResourceAttributes.get("k8s.cluster.name")),
+      environment: CH.any_($.ResourceAttributes.get("deployment.environment.name")),
       deploymentName: CH.any_($.ResourceAttributes.get("k8s.deployment.name")),
       statefulsetName: CH.any_($.ResourceAttributes.get("k8s.statefulset.name")),
       daemonsetName: CH.any_($.ResourceAttributes.get("k8s.daemonset.name")),
+      jobName: CH.any_($.ResourceAttributes.get("k8s.job.name")),
       qosClass: CH.any_($.ResourceAttributes.get("k8s.pod.qos_class")),
       podUid: CH.any_($.ResourceAttributes.get("k8s.pod.uid")),
       lastSeen: CH.max_($.TimeUnix),
@@ -365,31 +439,16 @@ export function listPodsQuery(opts: ListPodsOpts = {}) {
         $.Value,
         $.MetricName.eq("k8s.pod.memory_limit_utilization"),
       ),
+      cpuRequestPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu_request_utilization"),
+      ),
+      memoryRequestPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.memory_request_utilization"),
+      ),
     }))
-    .where(($) => [
-      $.OrgId.eq(param.string("orgId")),
-      $.TimeUnix.gte(param.dateTime("startTime")),
-      $.TimeUnix.lte(param.dateTime("endTime")),
-      $.ResourceAttributes.get("k8s.pod.name").neq(""),
-      $.MetricName.in_(...POD_METRIC_NAMES),
-      CH.when(opts.search, (v: string) =>
-        CH.positionCaseInsensitive(
-          $.ResourceAttributes.get("k8s.pod.name"),
-          CH.lit(v),
-        ).gt(0),
-      ),
-      CH.when(opts.namespace, (v: string) =>
-        $.ResourceAttributes.get("k8s.namespace.name").eq(v),
-      ),
-      CH.when(opts.nodeName, (v: string) =>
-        $.ResourceAttributes.get("k8s.node.name").eq(v),
-      ),
-      CH.when(opts.workloadKind && opts.workloadName, () =>
-        $.ResourceAttributes
-          .get(workloadAttrKey(opts.workloadKind!))
-          .eq(opts.workloadName!),
-      ),
-    ])
+    .where(($) => [...podBaseConditions($), ...podFilterConditions($, opts)])
     .groupBy("podName")
     .orderBy(["lastSeen", "desc"])
     .limit(opts.limit ?? 200)
@@ -521,6 +580,9 @@ const NODE_METRIC_NAMES = [
 
 export interface ListNodesOpts {
   search?: string
+  nodeNames?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
   limit?: number
   offset?: number
 }
@@ -528,17 +590,56 @@ export interface ListNodesOpts {
 export interface ListNodesOutput {
   readonly nodeName: string
   readonly nodeUid: string
+  readonly clusterName: string
+  readonly environment: string
   readonly kubeletVersion: string
   readonly lastSeen: string
   readonly cpuUsage: number
   readonly uptime: number
 }
 
+const nodeBaseConditions = (
+  $: ColumnAccessor<typeof MetricsGauge.columns>,
+): Array<CH.Condition | undefined> => [
+  $.OrgId.eq(param.string("orgId")),
+  $.TimeUnix.gte(param.dateTime("startTime")),
+  $.TimeUnix.lte(param.dateTime("endTime")),
+  $.ResourceAttributes.get("k8s.node.name").neq(""),
+  $.ResourceAttributes.get("k8s.pod.name").eq(""),
+  $.MetricName.in_(...NODE_METRIC_NAMES),
+]
+
+const nodeFilterConditions = (
+  $: ColumnAccessor<typeof MetricsGauge.columns>,
+  opts: ListNodesOpts,
+): Array<CH.Condition | undefined> => [
+  CH.when(opts.search, (v: string) =>
+    CH.positionCaseInsensitive(
+      $.ResourceAttributes.get("k8s.node.name"),
+      CH.lit(v),
+    ).gt(0),
+  ),
+  opts.nodeNames?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.node.name"), opts.nodeNames)
+    : undefined,
+  opts.clusters?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.cluster.name"), opts.clusters)
+    : undefined,
+  opts.environments?.length
+    ? CH.inList(
+        $.ResourceAttributes.get("deployment.environment.name"),
+        opts.environments,
+      )
+    : undefined,
+]
+
 export function listNodesQuery(opts: ListNodesOpts = {}) {
   return from(MetricsGauge)
     .select(($) => ({
       nodeName: $.ResourceAttributes.get("k8s.node.name"),
       nodeUid: CH.any_($.ResourceAttributes.get("k8s.node.uid")),
+      clusterName: CH.any_($.ResourceAttributes.get("k8s.cluster.name")),
+      environment: CH.any_($.ResourceAttributes.get("deployment.environment.name")),
       kubeletVersion: CH.any_($.ResourceAttributes.get("k8s.kubelet.version")),
       lastSeen: CH.max_($.TimeUnix),
       cpuUsage: CH.avgIf(
@@ -550,20 +651,7 @@ export function listNodesQuery(opts: ListNodesOpts = {}) {
         $.MetricName.eq("k8s.node.uptime"),
       ),
     }))
-    .where(($) => [
-      $.OrgId.eq(param.string("orgId")),
-      $.TimeUnix.gte(param.dateTime("startTime")),
-      $.TimeUnix.lte(param.dateTime("endTime")),
-      $.ResourceAttributes.get("k8s.node.name").neq(""),
-      $.ResourceAttributes.get("k8s.pod.name").eq(""),
-      $.MetricName.in_(...NODE_METRIC_NAMES),
-      CH.when(opts.search, (v: string) =>
-        CH.positionCaseInsensitive(
-          $.ResourceAttributes.get("k8s.node.name"),
-          CH.lit(v),
-        ).gt(0),
-      ),
-    ])
+    .where(($) => [...nodeBaseConditions($), ...nodeFilterConditions($, opts)])
     .groupBy("nodeName")
     .orderBy(["lastSeen", "desc"])
     .limit(opts.limit ?? 200)
@@ -645,7 +733,10 @@ export type WorkloadKind = "deployment" | "statefulset" | "daemonset"
 export interface ListWorkloadsOpts {
   kind: WorkloadKind
   search?: string
-  namespace?: string
+  workloadNames?: ReadonlyArray<string>
+  namespaces?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
   limit?: number
   offset?: number
 }
@@ -653,6 +744,8 @@ export interface ListWorkloadsOpts {
 export interface ListWorkloadsOutput {
   readonly workloadName: string
   readonly namespace: string
+  readonly clusterName: string
+  readonly environment: string
   readonly podCount: number
   readonly lastSeen: string
   readonly avgCpuLimitPct: number
@@ -660,12 +753,42 @@ export interface ListWorkloadsOutput {
   readonly avgCpuUsage: number
 }
 
+const workloadFilterConditions = (
+  $: ColumnAccessor<typeof MetricsGauge.columns>,
+  opts: ListWorkloadsOpts,
+  attrKey: string,
+): Array<CH.Condition | undefined> => [
+  CH.when(opts.search, (v: string) =>
+    CH.positionCaseInsensitive(
+      $.ResourceAttributes.get(attrKey),
+      CH.lit(v),
+    ).gt(0),
+  ),
+  opts.workloadNames?.length
+    ? CH.inList($.ResourceAttributes.get(attrKey), opts.workloadNames)
+    : undefined,
+  opts.namespaces?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.namespace.name"), opts.namespaces)
+    : undefined,
+  opts.clusters?.length
+    ? CH.inList($.ResourceAttributes.get("k8s.cluster.name"), opts.clusters)
+    : undefined,
+  opts.environments?.length
+    ? CH.inList(
+        $.ResourceAttributes.get("deployment.environment.name"),
+        opts.environments,
+      )
+    : undefined,
+]
+
 export function listWorkloadsQuery(opts: ListWorkloadsOpts) {
   const attrKey = workloadAttrKey(opts.kind)
   return from(MetricsGauge)
     .select(($) => ({
       workloadName: $.ResourceAttributes.get(attrKey),
       namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
+      clusterName: CH.any_($.ResourceAttributes.get("k8s.cluster.name")),
+      environment: CH.any_($.ResourceAttributes.get("deployment.environment.name")),
       podCount: CH.uniq($.ResourceAttributes.get("k8s.pod.uid")),
       lastSeen: CH.max_($.TimeUnix),
       avgCpuLimitPct: CH.avgIf(
@@ -687,15 +810,7 @@ export function listWorkloadsQuery(opts: ListWorkloadsOpts) {
       $.TimeUnix.lte(param.dateTime("endTime")),
       $.ResourceAttributes.get(attrKey).neq(""),
       $.MetricName.in_(...POD_METRIC_NAMES),
-      CH.when(opts.search, (v: string) =>
-        CH.positionCaseInsensitive(
-          $.ResourceAttributes.get(attrKey),
-          CH.lit(v),
-        ).gt(0),
-      ),
-      CH.when(opts.namespace, (v: string) =>
-        $.ResourceAttributes.get("k8s.namespace.name").eq(v),
-      ),
+      ...workloadFilterConditions($, opts, attrKey),
     ])
     .groupBy("workloadName")
     .orderBy(["lastSeen", "desc"])
@@ -793,4 +908,137 @@ export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) 
   )
     .orderBy(["bucket", "asc"])
     .format("JSON")
+}
+
+// ---------------------------------------------------------------------------
+// K8s facets — distinct (name, count) pairs per ResourceAttribute key, used to
+// populate the SigNoz-style left filter sidebar. Each facet query is a UNION
+// of per-attribute SELECTs scoped to the rows that show up in the matching
+// list query (pods, nodes, or workloads), filtered by the same opts so the
+// facet counts reflect the *current* filtered set.
+// ---------------------------------------------------------------------------
+
+export interface PodFacetsOutput {
+  readonly name: string
+  readonly count: number
+  readonly facetType: string
+}
+
+const makePodFacet = (
+  opts: ListPodsOpts,
+  attrKey: string,
+  facetType: string,
+  perFacetLimit: number,
+) =>
+  from(MetricsGauge)
+    .select(($) => ({
+      name: $.ResourceAttributes.get(attrKey),
+      count: CH.uniq($.ResourceAttributes.get("k8s.pod.uid")),
+      facetType: CH.lit(facetType),
+    }))
+    .where(($) => [
+      ...podBaseConditions($),
+      ...podFilterConditions($, opts),
+      $.ResourceAttributes.get(attrKey).neq(""),
+    ])
+    .groupBy("name")
+    .orderBy(["count", "desc"])
+    .limit(perFacetLimit)
+
+export function podFacetsQuery(
+  opts: ListPodsOpts = {},
+): CHUnionQuery<PodFacetsOutput> {
+  return unionAll(
+    makePodFacet(opts, "k8s.pod.name", "pod", 200),
+    makePodFacet(opts, "k8s.namespace.name", "namespace", 100),
+    makePodFacet(opts, "k8s.node.name", "node", 100),
+    makePodFacet(opts, "k8s.cluster.name", "cluster", 50),
+    makePodFacet(opts, "k8s.deployment.name", "deployment", 100),
+    makePodFacet(opts, "k8s.statefulset.name", "statefulset", 100),
+    makePodFacet(opts, "k8s.daemonset.name", "daemonset", 100),
+    makePodFacet(opts, "k8s.job.name", "job", 100),
+    makePodFacet(opts, "deployment.environment.name", "environment", 50),
+  ).format("JSON")
+}
+
+export interface NodeFacetsOutput {
+  readonly name: string
+  readonly count: number
+  readonly facetType: string
+}
+
+const makeNodeFacet = (
+  opts: ListNodesOpts,
+  attrKey: string,
+  facetType: string,
+  perFacetLimit: number,
+) =>
+  from(MetricsGauge)
+    .select(($) => ({
+      name: $.ResourceAttributes.get(attrKey),
+      count: CH.uniq($.ResourceAttributes.get("k8s.node.name")),
+      facetType: CH.lit(facetType),
+    }))
+    .where(($) => [
+      ...nodeBaseConditions($),
+      ...nodeFilterConditions($, opts),
+      $.ResourceAttributes.get(attrKey).neq(""),
+    ])
+    .groupBy("name")
+    .orderBy(["count", "desc"])
+    .limit(perFacetLimit)
+
+export function nodeFacetsQuery(
+  opts: ListNodesOpts = {},
+): CHUnionQuery<NodeFacetsOutput> {
+  return unionAll(
+    makeNodeFacet(opts, "k8s.node.name", "node", 200),
+    makeNodeFacet(opts, "k8s.cluster.name", "cluster", 50),
+    makeNodeFacet(opts, "deployment.environment.name", "environment", 50),
+  ).format("JSON")
+}
+
+export interface WorkloadFacetsOutput {
+  readonly name: string
+  readonly count: number
+  readonly facetType: string
+}
+
+const makeWorkloadFacet = (
+  opts: ListWorkloadsOpts,
+  attrKey: string,
+  facetType: string,
+  perFacetLimit: number,
+) => {
+  const ownerKey = workloadAttrKey(opts.kind)
+  return from(MetricsGauge)
+    .select(($) => ({
+      name: $.ResourceAttributes.get(attrKey),
+      count: CH.uniq($.ResourceAttributes.get(ownerKey)),
+      facetType: CH.lit(facetType),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get(ownerKey).neq(""),
+      $.MetricName.in_(...POD_METRIC_NAMES),
+      ...workloadFilterConditions($, opts, ownerKey),
+      $.ResourceAttributes.get(attrKey).neq(""),
+    ])
+    .groupBy("name")
+    .orderBy(["count", "desc"])
+    .limit(perFacetLimit)
+}
+
+export function workloadFacetsQuery(
+  opts: ListWorkloadsOpts,
+): CHUnionQuery<WorkloadFacetsOutput> {
+  const ownerKey = workloadAttrKey(opts.kind)
+  return unionAll(
+    makeWorkloadFacet(opts, ownerKey, "workload", 200),
+    makeWorkloadFacet(opts, "k8s.namespace.name", "namespace", 100),
+    makeWorkloadFacet(opts, "k8s.cluster.name", "cluster", 50),
+    makeWorkloadFacet(opts, "deployment.environment.name", "environment", 50),
+  ).format("JSON")
 }

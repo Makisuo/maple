@@ -6,12 +6,15 @@ import {
   ListPodsRequest,
   PodDetailSummaryRequest,
   PodInfraTimeseriesRequest,
+  PodFacetsRequest,
   ListNodesRequest,
   NodeDetailSummaryRequest,
   NodeInfraTimeseriesRequest,
+  NodeFacetsRequest,
   ListWorkloadsRequest,
   WorkloadDetailSummaryRequest,
   WorkloadInfraTimeseriesRequest,
+  WorkloadFacetsRequest,
   type FleetUtilizationTimeseriesResponse,
   type HostDetailSummaryResponse,
   type HostInfraTimeseriesResponse,
@@ -19,12 +22,15 @@ import {
   type ListPodsResponse,
   type PodDetailSummaryResponse,
   type PodInfraTimeseriesResponse,
+  type PodFacetsResponse,
   type ListNodesResponse,
   type NodeDetailSummaryResponse,
   type NodeInfraTimeseriesResponse,
+  type NodeFacetsResponse,
   type ListWorkloadsResponse,
   type WorkloadDetailSummaryResponse,
   type WorkloadInfraTimeseriesResponse,
+  type WorkloadFacetsResponse,
 } from "@maple/domain/http"
 import { Effect } from "effect"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -143,8 +149,15 @@ export interface ListPodsInput {
   startTime: string
   endTime: string
   search?: string
-  namespace?: string
-  nodeName?: string
+  podNames?: ReadonlyArray<string>
+  namespaces?: ReadonlyArray<string>
+  nodeNames?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  deployments?: ReadonlyArray<string>
+  statefulsets?: ReadonlyArray<string>
+  daemonsets?: ReadonlyArray<string>
+  jobs?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
   workloadKind?: WorkloadKind
   workloadName?: string
   limit?: number
@@ -160,12 +173,59 @@ export function listPods({ data }: { data: ListPodsInput }) {
           startTime: data.startTime,
           endTime: data.endTime,
           search: data.search,
-          namespace: data.namespace,
-          nodeName: data.nodeName,
+          podNames: data.podNames,
+          namespaces: data.namespaces,
+          nodeNames: data.nodeNames,
+          clusters: data.clusters,
+          deployments: data.deployments,
+          statefulsets: data.statefulsets,
+          daemonsets: data.daemonsets,
+          jobs: data.jobs,
+          environments: data.environments,
           workloadKind: data.workloadKind,
           workloadName: data.workloadName,
           limit: data.limit,
           offset: data.offset,
+        }),
+      })
+      return response
+    }),
+  )
+}
+
+export interface PodFacetsInput {
+  startTime: string
+  endTime: string
+  search?: string
+  podNames?: ReadonlyArray<string>
+  namespaces?: ReadonlyArray<string>
+  nodeNames?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  deployments?: ReadonlyArray<string>
+  statefulsets?: ReadonlyArray<string>
+  daemonsets?: ReadonlyArray<string>
+  jobs?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
+}
+
+export function getPodFacets({ data }: { data: PodFacetsInput }) {
+  return runTinybirdQuery("podFacets", () =>
+    Effect.gen(function* () {
+      const client = yield* MapleApiAtomClient
+      const response: PodFacetsResponse = yield* client.queryEngine.podFacets({
+        payload: new PodFacetsRequest({
+          startTime: data.startTime,
+          endTime: data.endTime,
+          search: data.search,
+          podNames: data.podNames,
+          namespaces: data.namespaces,
+          nodeNames: data.nodeNames,
+          clusters: data.clusters,
+          deployments: data.deployments,
+          statefulsets: data.statefulsets,
+          daemonsets: data.daemonsets,
+          jobs: data.jobs,
+          environments: data.environments,
         }),
       })
       return response
@@ -240,6 +300,9 @@ export interface ListNodesInput {
   startTime: string
   endTime: string
   search?: string
+  nodeNames?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
   limit?: number
   offset?: number
 }
@@ -253,8 +316,39 @@ export function listNodes({ data }: { data: ListNodesInput }) {
           startTime: data.startTime,
           endTime: data.endTime,
           search: data.search,
+          nodeNames: data.nodeNames,
+          clusters: data.clusters,
+          environments: data.environments,
           limit: data.limit,
           offset: data.offset,
+        }),
+      })
+      return response
+    }),
+  )
+}
+
+export interface NodeFacetsInput {
+  startTime: string
+  endTime: string
+  search?: string
+  nodeNames?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
+}
+
+export function getNodeFacets({ data }: { data: NodeFacetsInput }) {
+  return runTinybirdQuery("nodeFacets", () =>
+    Effect.gen(function* () {
+      const client = yield* MapleApiAtomClient
+      const response: NodeFacetsResponse = yield* client.queryEngine.nodeFacets({
+        payload: new NodeFacetsRequest({
+          startTime: data.startTime,
+          endTime: data.endTime,
+          search: data.search,
+          nodeNames: data.nodeNames,
+          clusters: data.clusters,
+          environments: data.environments,
         }),
       })
       return response
@@ -321,7 +415,10 @@ export interface ListWorkloadsInput {
   endTime: string
   kind: WorkloadKind
   search?: string
-  namespace?: string
+  workloadNames?: ReadonlyArray<string>
+  namespaces?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
   limit?: number
   offset?: number
 }
@@ -336,9 +433,44 @@ export function listWorkloads({ data }: { data: ListWorkloadsInput }) {
           endTime: data.endTime,
           kind: data.kind,
           search: data.search,
-          namespace: data.namespace,
+          workloadNames: data.workloadNames,
+          namespaces: data.namespaces,
+          clusters: data.clusters,
+          environments: data.environments,
           limit: data.limit,
           offset: data.offset,
+        }),
+      })
+      return response
+    }),
+  )
+}
+
+export interface WorkloadFacetsInput {
+  startTime: string
+  endTime: string
+  kind: WorkloadKind
+  search?: string
+  workloadNames?: ReadonlyArray<string>
+  namespaces?: ReadonlyArray<string>
+  clusters?: ReadonlyArray<string>
+  environments?: ReadonlyArray<string>
+}
+
+export function getWorkloadFacets({ data }: { data: WorkloadFacetsInput }) {
+  return runTinybirdQuery("workloadFacets", () =>
+    Effect.gen(function* () {
+      const client = yield* MapleApiAtomClient
+      const response: WorkloadFacetsResponse = yield* client.queryEngine.workloadFacets({
+        payload: new WorkloadFacetsRequest({
+          startTime: data.startTime,
+          endTime: data.endTime,
+          kind: data.kind,
+          search: data.search,
+          workloadNames: data.workloadNames,
+          namespaces: data.namespaces,
+          clusters: data.clusters,
+          environments: data.environments,
         }),
       })
       return response
