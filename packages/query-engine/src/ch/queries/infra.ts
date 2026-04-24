@@ -15,7 +15,8 @@
 
 import * as CH from "../expr"
 import { param } from "../param"
-import { from } from "../query"
+import { from, type ColumnAccessor } from "../query"
+import { unionAll, type CHUnionQuery } from "../union"
 import { MetricsGauge, MetricsSum } from "../tables"
 
 const HOSTMETRIC_NAMES = [

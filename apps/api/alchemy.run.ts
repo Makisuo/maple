@@ -90,6 +90,14 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
       RESEND_FROM_EMAIL:
         process.env.RESEND_FROM_EMAIL?.trim() ||
         "Maple <notifications@maple.dev>",
+      // Bucket-cache knobs: on by default in deployed stages. Override via
+      // deploy-time env (e.g. `QE_BUCKET_CACHE_ENABLED=false`) if needed.
+      QE_BUCKET_CACHE_ENABLED:
+        process.env.QE_BUCKET_CACHE_ENABLED?.trim() || "true",
+      QE_BUCKET_CACHE_TTL_SECONDS:
+        process.env.QE_BUCKET_CACHE_TTL_SECONDS?.trim() || "86400",
+      QE_BUCKET_CACHE_FLUX_SECONDS:
+        process.env.QE_BUCKET_CACHE_FLUX_SECONDS?.trim() || "60",
       ...optionalPlain("OTEL_BASE_URL"),
       ...optionalPlain("OTEL_ENVIRONMENT", formatMapleStage(stage)),
       ...optionalPlain("COMMIT_SHA"),
