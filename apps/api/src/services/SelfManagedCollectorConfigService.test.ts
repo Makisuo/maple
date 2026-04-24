@@ -61,34 +61,22 @@ describe("renderCollectorConfig (pure)", () => {
     expect(config).toContain("datasource: metrics_histogram")
     expect(config).toContain("datasource: metrics_exponential_histogram")
 
-    // Per-signal routing connectors (OTel Contrib's routing connector is
-    // signal-scoped — one instance per traces/logs/metrics).
-    expect(config).toContain("routing/traces:")
-    expect(config).toContain("routing/logs:")
-    expect(config).toContain("routing/metrics:")
-    expect(config).toContain("default_pipelines: [traces/fallback]")
-    expect(config).toContain("default_pipelines: [logs/fallback]")
-    expect(config).toContain("default_pipelines: [metrics/fallback]")
+    // No routing connector anymore — the fan-out design exports each signal
+    // pipeline to all active orgs' tinybird exporters directly.
+    expect(config).not.toContain("connectors:")
+    expect(config).not.toContain("routing/")
 
-    // Each signal gets its own single-pipeline routing entry per org.
-    expect(config).toContain('statement: route() where attributes["maple_org_id"] == "org_a"')
-    expect(config).toContain("pipelines: [traces/org_a]")
-    expect(config).toContain("pipelines: [logs/org_a]")
-    expect(config).toContain("pipelines: [metrics/org_a]")
-    expect(config).toContain("pipelines: [traces/org_b]")
-    expect(config).toContain("pipelines: [logs/org_b]")
-    expect(config).toContain("pipelines: [metrics/org_b]")
+    // In-bound pipelines fan out to every org's tinybird exporter.
+    expect(config).toContain("exporters: [tinybird/org_a, tinybird/org_b]")
 
-    // Per-org pipelines
-    expect(config).toContain("    traces/org_a:")
-    expect(config).toContain("    logs/org_a:")
-    expect(config).toContain("    metrics/org_a:")
-    expect(config).toContain("    traces/org_b:")
-    expect(config).toContain("    logs/org_b:")
-    expect(config).toContain("    metrics/org_b:")
+    // Single pipeline per signal, not per-org.
+    expect(config).toMatch(/pipelines:\s*\n\s*traces:/)
+    expect(config).toMatch(/\n\s*logs:\s*\n/)
+    expect(config).toMatch(/\n\s*metrics:\s*\n/)
 
-    // Fallback still present
-    expect(config).toContain("    traces/fallback:")
+    // No per-org pipeline stubs and no routing-connector fallback pipeline.
+    expect(config).not.toContain("traces/org_a:")
+    expect(config).not.toContain("traces/fallback:")
   })
 
   it("renders orgs in alphabetical order regardless of input order", () => {

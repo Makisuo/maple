@@ -82,32 +82,24 @@ export const renderCollectorConfig = (
 
   const sorted = [...orgs].sort((a, b) => a.orgId.localeCompare(b.orgId))
 
-  // OTel Contrib's routing connector is signal-scoped: one connector instance
-  // per signal type. A single `routing:` that lists pipelines for traces +
-  // logs + metrics fails with "missing consumer" because each signal's
-  // instantiation only matches its own pipelines. Emit three instances
-  // (routing/traces, routing/logs, routing/metrics) with signal-matching
-  // default_pipelines + tables.
-  const routingTableForSignal = (signal: "traces" | "logs" | "metrics") =>
-    sorted
-      .map((o) =>
-        `      - context: resource\n` +
-        `        statement: route() where attributes["maple_org_id"] == ${escapeYamlString(o.orgId)}\n` +
-        `        pipelines: [${signal}/${o.orgId}]`,
-      )
-      .join("\n")
-
-  const routingConnectors =
-    (["traces", "logs", "metrics"] as const)
-      .map(
-        (signal) =>
-          `  routing/${signal}:\n` +
-          `    default_pipelines: [${signal}/fallback]\n` +
-          `    error_mode: ignore\n` +
-          `    table:\n` +
-          routingTableForSignal(signal),
-      )
-      .join("\n")
+  // Fan-out architecture (no routing connector).
+  //
+  // Ingest already authenticates each payload's org via the ingest key and
+  // decides per-request whether to forward to this pool — so by the time data
+  // arrives here, the org is known to be self-managed. We previously used a
+  // routing connector to dispatch by `maple_org_id` resource attribute to a
+  // per-org tinybird exporter, but the connector's OTTL match silently
+  // dropped 100% of traffic into the fallback (empirically observed) for
+  // reasons we could not nail down in a reasonable amount of time.
+  //
+  // Simpler design: every org's tinybird exporter subscribes to the single
+  // in-bound OTLP pipeline. Each exporter sends the full stream to its own
+  // Tinybird instance. With one self-managed org (the common case), this is
+  // trivially correct. With multiple self-managed orgs, *each* Tinybird would
+  // receive all orgs' rows — so before we onboard a second BYO customer we
+  // reintroduce proper routing (or switch to per-org collector instances for
+  // hard tenant isolation). Tracked as a limitation in OPEN_ITEMS.
+  const allTinybirdExporters = sorted.map((o) => `tinybird/${o.orgId}`).join(", ")
 
   const exporters = sorted
     .map(
@@ -138,22 +130,6 @@ export const renderCollectorConfig = (
     )
     .join("\n")
 
-  const perOrgPipelines = sorted
-    .flatMap((o) => [
-      `    traces/${o.orgId}:\n` +
-        `      receivers: [routing/traces]\n` +
-        `      processors: [batch]\n` +
-        `      exporters: [tinybird/${o.orgId}]`,
-      `    logs/${o.orgId}:\n` +
-        `      receivers: [routing/logs]\n` +
-        `      processors: [batch]\n` +
-        `      exporters: [tinybird/${o.orgId}]`,
-      `    metrics/${o.orgId}:\n` +
-        `      receivers: [routing/metrics]\n` +
-        `      processors: [batch]\n` +
-        `      exporters: [tinybird/${o.orgId}]`,
-    ])
-    .join("\n")
 
   const hasOrgs = sorted.length > 0
 
@@ -250,15 +226,8 @@ processors:
     send_batch_size: 5000
     send_batch_max_size: 10000
 
-connectors:
-${routingConnectors}
-
 exporters:
 ${exporters}
-  debug/fallback:
-    verbosity: basic
-    sampling_initial: 5
-    sampling_thereafter: 500
 
 extensions:
   file_storage/queue:
@@ -275,31 +244,18 @@ service:
   extensions: [health_check, file_storage/queue]
 
   pipelines:
-    traces/in:
+    traces:
       receivers: [otlp]
-      processors: [memory_limiter]
-      exporters: [routing/traces]
-    logs/in:
+      processors: [memory_limiter, batch]
+      exporters: [${allTinybirdExporters}]
+    logs:
       receivers: [otlp]
-      processors: [memory_limiter]
-      exporters: [routing/logs]
-    metrics/in:
+      processors: [memory_limiter, batch]
+      exporters: [${allTinybirdExporters}]
+    metrics:
       receivers: [otlp]
-      processors: [memory_limiter]
-      exporters: [routing/metrics]
-${perOrgPipelines}
-    traces/fallback:
-      receivers: [routing/traces]
-      processors: [batch]
-      exporters: [debug/fallback]
-    logs/fallback:
-      receivers: [routing/logs]
-      processors: [batch]
-      exporters: [debug/fallback]
-    metrics/fallback:
-      receivers: [routing/metrics]
-      processors: [batch]
-      exporters: [debug/fallback]
+      processors: [memory_limiter, batch]
+      exporters: [${allTinybirdExporters}]
 
   telemetry:
     logs:
