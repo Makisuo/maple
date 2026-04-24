@@ -29,11 +29,14 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("renderCollectorConfig (pure)", () => {
-  it("emits fallback-only config when no orgs are active", () => {
+  it("emits a routing-free fallback config when no orgs are active", () => {
+    // The OTel routing connector fails to start with an empty table, so the
+    // zero-orgs path skips the connector entirely and pipes OTLP straight
+    // into debug/fallback.
     const config = renderCollectorConfig([])
-    expect(config).toMatch(/table:\s*\n\s*\[\]/)
-    expect(config).toContain("default_pipelines: [traces/fallback, logs/fallback, metrics/fallback]")
-    expect(config).toContain("traces/fallback:")
+    expect(config).not.toContain("connectors:")
+    expect(config).not.toContain("routing")
+    expect(config).toContain("exporters: [debug/fallback]")
     expect(config).not.toContain("tinybird/")
   })
 
@@ -232,7 +235,7 @@ describe("SelfManagedCollectorConfigService", () => {
       ),
     )
 
-    expect(config).toMatch(/table:\s*\n\s*\[\]/)
+    expect(config).not.toContain("connectors:")
     expect(config).not.toContain("tinybird/org_")
   })
 

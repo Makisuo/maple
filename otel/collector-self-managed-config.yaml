@@ -1,14 +1,15 @@
-# OpenTelemetry Collector Configuration — Self-Managed Pool
+# OpenTelemetry Collector Configuration — Self-Managed Pool (bootstrap)
 #
-# This is the bootstrap config for the self-managed collector pool. It has no
-# per-org exporters baked in — those are appended at runtime by
-# SelfManagedCollectorConfigService whenever an org's BYO Tinybird sync
-# finishes. On startup with no orgs, every incoming payload falls through to
-# the `debug/fallback` exporter (warn-level log + drop) so the pool starts
-# cleanly before the first self-managed customer is onboarded.
+# This is the initial config used before any BYO org has been onboarded.
+# The `routing` connector rejects an empty table, so at bootstrap we wire a
+# simpler pipeline: OTLP receiver → memory_limiter → batch → debug sink.
+# Everything drops on the floor (warn log + drop) until the API publishes
+# the first real config via SelfManagedCollectorConfigService.publishConfig,
+# at which point the supervisor replaces this file with a version containing
+# per-org `tinybird/<orgId>` exporters and a populated routing connector.
 #
-# The ingestor selects this pool via INGEST_FORWARD_SELF_MANAGED_ENDPOINT when
-# the resolved org has `org_tinybird_settings.sync_status = 'active'`.
+# The ingestor selects this pool via INGEST_FORWARD_SELF_MANAGED_ENDPOINT
+# when the resolved org has `org_tinybird_settings.sync_status = 'active'`.
 
 receivers:
   otlp:
@@ -28,14 +29,6 @@ processors:
     timeout: 1s
     send_batch_size: 5000
     send_batch_max_size: 10000
-
-connectors:
-  routing:
-    # No table entries at bootstrap — every signal falls through to the
-    # fallback pipelines. The generator appends per-org routes on activation.
-    default_pipelines: [traces/fallback, logs/fallback, metrics/fallback]
-    error_mode: ignore
-    table: []
 
 exporters:
   debug/fallback:
@@ -59,34 +52,19 @@ service:
   extensions: [health_check, file_storage/queue]
 
   pipelines:
-    traces/in:
+    traces:
       receivers: [otlp]
-      processors: [memory_limiter]
-      exporters: [routing]
-
-    logs/in:
-      receivers: [otlp]
-      processors: [memory_limiter]
-      exporters: [routing]
-
-    metrics/in:
-      receivers: [otlp]
-      processors: [memory_limiter]
-      exporters: [routing]
-
-    traces/fallback:
-      receivers: [routing]
-      processors: [batch]
+      processors: [memory_limiter, batch]
       exporters: [debug/fallback]
 
-    logs/fallback:
-      receivers: [routing]
-      processors: [batch]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
       exporters: [debug/fallback]
 
-    metrics/fallback:
-      receivers: [routing]
-      processors: [batch]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
       exporters: [debug/fallback]
 
   telemetry:
