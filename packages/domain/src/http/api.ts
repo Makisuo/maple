@@ -12,6 +12,7 @@ import { OrgOpenrouterSettingsApiGroup } from "./org-openrouter-settings";
 import { OrgTinybirdSettingsApiGroup } from "./org-tinybird-settings";
 import { QueryEngineApiGroup } from "./query-engine";
 import { ScrapeTargetsApiGroup } from "./scrape-targets";
+import { SelfManagedCollectorApiGroup } from "./self-managed-collector";
 import { ServiceDiscoveryApiGroup } from "./service-discovery";
 export class MapleApi extends HttpApi.make("MapleApi")
   .add(AuthPublicApiGroup)
@@ -28,6 +29,7 @@ export class MapleApi extends HttpApi.make("MapleApi")
   .add(OrgTinybirdSettingsApiGroup)
   .add(QueryEngineApiGroup)
   .add(ScrapeTargetsApiGroup)
+  .add(SelfManagedCollectorApiGroup)
   .add(ServiceDiscoveryApiGroup)
   .annotateMerge(
     OpenApi.annotations({

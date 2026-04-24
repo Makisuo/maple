@@ -13,5 +13,6 @@ export * from "./org-tinybird-settings";
 export * from "../primitives";
 export * from "./query-engine";
 export * from "./scrape-targets";
+export * from "./self-managed-collector";
 export * from "./service-discovery";
 export * from "./tinybird";

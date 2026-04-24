@@ -17,6 +17,7 @@ import { HttpOrgOpenRouterSettingsLive } from "./routes/org-openrouter-settings.
 import { HttpOrgTinybirdSettingsLive } from "./routes/org-tinybird-settings.http"
 import { HttpQueryEngineLive } from "./routes/query-engine.http"
 import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http"
+import { HttpSelfManagedCollectorLive } from "./routes/self-managed-collector.http"
 import { HttpServiceDiscoveryLive } from "./routes/sd.http"
 import { AlertRuntime, AlertsService } from "./services/AlertsService"
 import { ErrorsService } from "./services/ErrorsService"
@@ -64,6 +65,9 @@ export const CoreServicesLive = Layer.mergeAll(
     Layer.provide(TinybirdSyncClient.layer),
     Layer.provide(SelfManagedCollectorConfigService.layer),
   ),
+  // Expose SelfManagedCollectorConfigService at the top of CoreServicesLive
+  // so the admin republish route can resolve it, not just OrgTinybirdSettingsService.
+  SelfManagedCollectorConfigService.layer,
   ScrapeTargetsService.layer,
 ).pipe(
   Layer.provideMerge(InfraLive),
@@ -131,6 +135,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
   Layer.provide(HttpOrgOpenRouterSettingsLive),
   Layer.provide(HttpOrgTinybirdSettingsLive),
   Layer.provide(HttpScrapeTargetsLive),
+  Layer.provide(HttpSelfManagedCollectorLive),
   Layer.provide(HttpServiceDiscoveryLive),
   Layer.provide(HttpQueryEngineLive),
 )
