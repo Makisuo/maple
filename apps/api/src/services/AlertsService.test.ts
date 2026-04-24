@@ -13,6 +13,7 @@ import type { TinybirdServiceShape } from "./TinybirdService"
 import { TinybirdService } from "./TinybirdService"
 import { AlertRuntime, type AlertRuntimeShape, AlertsService, type AlertsServiceShape } from "./AlertsService"
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
+import { BucketCacheService } from "./BucketCacheService"
 import { EdgeCacheService } from "./EdgeCacheService"
 import { Env } from "./Env"
 import { QueryEngineService } from "./QueryEngineService"
@@ -96,9 +97,13 @@ const makeLayer = (url: string, tinybirdStub: TinybirdServiceShape, runtimeOverr
   const envLive = Env.Default.pipe(Layer.provide(configLive))
   const databaseLive = DatabaseLibsqlLive.pipe(Layer.provide(envLive))
   const tinybirdLive = Layer.succeed(TinybirdService, tinybirdStub)
+  const bucketCacheLive = BucketCacheService.layer.pipe(
+    Layer.provide(EdgeCacheService.layer),
+  )
   const queryEngineLive = QueryEngineService.layer.pipe(
     Layer.provide(tinybirdLive),
     Layer.provide(EdgeCacheService.layer),
+    Layer.provide(bucketCacheLive),
   )
   const runtimeLive = Layer.succeed(AlertRuntime, { ...defaultTestRuntime, ...runtimeOverrides })
 

@@ -1,6 +1,7 @@
 import {
   AlertRuntime,
   AlertsService,
+  BucketCacheService,
   DatabaseD1Live,
   DigestService,
   EdgeCacheService,
@@ -46,9 +47,14 @@ const buildLayer = (_env: Record<string, unknown>) => {
     Layer.provide(Layer.mergeAll(EnvLive, OrgTinybirdSettingsLive)),
   )
 
+  const BucketCacheServiceLive = BucketCacheService.layer.pipe(
+    Layer.provide(EdgeCacheService.layer),
+  )
+
   const QueryEngineServiceLive = QueryEngineService.layer.pipe(
     Layer.provide(TinybirdServiceLive),
     Layer.provide(EdgeCacheService.layer),
+    Layer.provide(BucketCacheServiceLive),
   )
 
   const AlertsServiceLive = AlertsService.Live.pipe(

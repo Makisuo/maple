@@ -20,6 +20,7 @@ import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http"
 import { HttpSelfManagedCollectorLive } from "./routes/self-managed-collector.http"
 import { HttpServiceDiscoveryLive } from "./routes/sd.http"
 import { AlertRuntime, AlertsService } from "./services/AlertsService"
+import { BucketCacheService } from "./services/BucketCacheService"
 import { ErrorsService } from "./services/ErrorsService"
 import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
@@ -77,9 +78,14 @@ export const TinybirdServiceLive = TinybirdService.layer.pipe(
   Layer.provideMerge(CoreServicesLive),
 )
 
+export const BucketCacheServiceLive = BucketCacheService.layer.pipe(
+  Layer.provideMerge(EdgeCacheService.layer),
+)
+
 export const QueryEngineServiceLive = QueryEngineService.layer.pipe(
   Layer.provideMerge(TinybirdServiceLive),
   Layer.provideMerge(EdgeCacheService.layer),
+  Layer.provideMerge(BucketCacheServiceLive),
 )
 
 export const AlertsServiceLive = AlertsService.layer.pipe(

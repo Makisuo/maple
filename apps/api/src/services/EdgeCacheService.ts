@@ -1,9 +1,33 @@
-import { Context, Deferred, Effect, Layer } from "effect"
+import { Context, Deferred, Effect, Layer, Option, Schema } from "effect"
 
-export interface EdgeCacheGetOrComputeOptions {
+export class EdgeCacheIOError extends Schema.TaggedErrorClass<EdgeCacheIOError>()(
+  "@maple/api/EdgeCacheIOError",
+  {
+    op: Schema.Literals(["get", "put"]),
+    bucket: Schema.String,
+    key: Schema.String,
+    cause: Schema.String,
+  },
+) {}
+
+export interface EdgeCacheGetOrComputeOptions<A = unknown, I = unknown> {
   readonly bucket: string
   readonly key: string
   readonly ttlSeconds: number
+  /**
+   * Optional codec used to (a) encode the value into a JSON-safe form before
+   * `backend.put`, and (b) decode the cached bytes back into the original
+   * shape on `backend.get`. Required when the cached value is a
+   * `Schema.Class` instance or contains branded/transformed fields, since the
+   * Workers cache backend round-trips through `JSON.stringify` /
+   * `response.json()` and would otherwise return a plain object that fails
+   * downstream schema-typed boundaries (e.g. HTTP success encoding).
+   *
+   * Decode failures are treated as a cache miss (recompute + overwrite) so
+   * that a deploy with an incompatible schema change cannot poison reads.
+   * Encode failures fail loud — they indicate a programmer bug.
+   */
+  readonly schema?: Schema.Codec<A, I, never, never>
 }
 
 export interface EdgeCacheResult<A> {
@@ -11,14 +35,32 @@ export interface EdgeCacheResult<A> {
   readonly hit: boolean
 }
 
-export interface EdgeCacheServiceShape {
-  readonly getOrCompute: <A, E, R>(
-    options: EdgeCacheGetOrComputeOptions,
-    compute: Effect.Effect<A, E, R>,
-  ) => Effect.Effect<EdgeCacheResult<A>, E, R>
+interface DeferredAwaiter {
+  readonly await: Effect.Effect<unknown, unknown>
 }
 
-interface EdgeCacheBackend {
+export interface EdgeCacheServiceShape {
+  readonly getOrCompute: <A, E, R, I = unknown>(
+    options: EdgeCacheGetOrComputeOptions<A, I>,
+    compute: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<EdgeCacheResult<A>, E, R>
+  readonly rawGet: <A>(
+    bucket: string,
+    key: string,
+  ) => Effect.Effect<Option.Option<A>, EdgeCacheIOError>
+  readonly rawPut: (
+    bucket: string,
+    key: string,
+    value: unknown,
+    ttlSeconds: number,
+  ) => Effect.Effect<void, EdgeCacheIOError>
+}
+
+/**
+ * Internal storage interface; exported for tests so they can inject a fake
+ * backend that simulates the Workers cache JSON-roundtrip behaviour.
+ */
+export interface EdgeCacheBackend {
   readonly get: (bucket: string, hash: string) => Promise<unknown | undefined>
   readonly put: (
     bucket: string,
@@ -103,11 +145,18 @@ const makeMemoryBackend = (): EdgeCacheBackend => {
   }
 }
 
-const makeService = (backend: EdgeCacheBackend): EdgeCacheServiceShape => {
-  const inFlight = new Map<string, Deferred.Deferred<unknown, unknown>>()
+/**
+ * Build an `EdgeCacheServiceShape` against a specific backend. Exported for
+ * tests so they can substitute a fake backend (e.g. a JSON-roundtripping one)
+ * without going through `detectWorkersCache`.
+ */
+export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServiceShape => {
+  // Heterogeneous in-flight map keyed by bucket+hash; each entry stores a
+  // pre-typed awaiter Effect so callers never need to cast Deferred<any, any>.
+  const inFlight = new Map<string, DeferredAwaiter>()
 
-  const getOrCompute = <A, E, R>(
-    options: EdgeCacheGetOrComputeOptions,
+  const getOrCompute = <A, E, R, I = unknown>(
+    options: EdgeCacheGetOrComputeOptions<A, I>,
     compute: Effect.Effect<A, E, R>,
   ): Effect.Effect<EdgeCacheResult<A>, E, R> =>
     Effect.gen(function* () {
@@ -118,44 +167,103 @@ const makeService = (backend: EdgeCacheBackend): EdgeCacheServiceShape => {
         backend.get(options.bucket, hash),
       )
       if (cached !== undefined) {
-        return { value: cached as A, hit: true }
+        if (options.schema) {
+          const decoded = yield* Schema.decodeUnknownEffect(options.schema)(cached).pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning("Edge cache decode failed; treating as miss").pipe(
+                Effect.annotateLogs({
+                  bucket: options.bucket,
+                  key: options.key,
+                  hash,
+                  error: String(error),
+                }),
+              ),
+            ),
+            Effect.option,
+          )
+          if (Option.isSome(decoded)) {
+            return { value: decoded.value, hit: true }
+          }
+          // Fall through to recompute on decode failure (poisoned/stale entry).
+        } else {
+          return { value: cached as A, hit: true }
+        }
       }
 
       const existing = inFlight.get(composite)
       if (existing) {
-        const awaited = Deferred.await(existing) as Effect.Effect<A, E>
-        const value = yield* awaited
+        const value = (yield* existing.await as Effect.Effect<A, E>) as A
         return { value, hit: true }
       }
 
       const deferred = yield* Deferred.make<A, E>()
-      inFlight.set(composite, deferred as Deferred.Deferred<unknown, unknown>)
+      inFlight.set(composite, {
+        await: Deferred.await(deferred) as Effect.Effect<unknown, unknown>,
+      })
 
       const writeAndPublish = (value: A) =>
-        Effect.andThen(
-          Effect.promise(() =>
-            backend.put(options.bucket, hash, value, options.ttlSeconds),
-          ),
-          Deferred.succeed(deferred, value),
-        )
+        Effect.gen(function* () {
+          const stored: unknown = options.schema
+            ? yield* Schema.encodeUnknownEffect(options.schema)(value).pipe(Effect.orDie)
+            : value
+          yield* Effect.promise(() =>
+            backend.put(options.bucket, hash, stored, options.ttlSeconds),
+          )
+          yield* Deferred.succeed(deferred, value)
+        })
 
-      const tapped: Effect.Effect<A, E, R> = Effect.tap(compute, writeAndPublish)
-      const tappedError: Effect.Effect<A, E, R> = Effect.tapError(
-        tapped,
-        (error: E) => Deferred.fail(deferred, error),
-      )
-      const cleanup: Effect.Effect<A, E, R> = Effect.ensuring(
-        tappedError,
-        Effect.sync(() => {
-          inFlight.delete(composite)
-        }),
+      const body = compute.pipe(
+        Effect.tap(writeAndPublish),
+        Effect.tapError((error) => Deferred.fail(deferred, error)),
+        Effect.onInterrupt(() => Deferred.interrupt(deferred)),
+        Effect.ensuring(
+          Effect.sync(() => {
+            inFlight.delete(composite)
+          }),
+        ),
       )
 
-      const value = yield* cleanup
+      const value = yield* body
       return { value, hit: false }
     })
 
-  return { getOrCompute }
+  const rawGet = <A>(
+    bucket: string,
+    key: string,
+  ): Effect.Effect<Option.Option<A>, EdgeCacheIOError> =>
+    Effect.tryPromise({
+      try: () => backend.get(bucket, key),
+      catch: (cause) =>
+        new EdgeCacheIOError({
+          op: "get",
+          bucket,
+          key,
+          cause: cause instanceof Error ? cause.message : String(cause),
+        }),
+    }).pipe(
+      Effect.map((value) =>
+        value === undefined ? Option.none<A>() : Option.some(value as A),
+      ),
+    )
+
+  const rawPut = (
+    bucket: string,
+    key: string,
+    value: unknown,
+    ttlSeconds: number,
+  ): Effect.Effect<void, EdgeCacheIOError> =>
+    Effect.tryPromise({
+      try: () => backend.put(bucket, key, value, ttlSeconds),
+      catch: (cause) =>
+        new EdgeCacheIOError({
+          op: "put",
+          bucket,
+          key,
+          cause: cause instanceof Error ? cause.message : String(cause),
+        }),
+    })
+
+  return { getOrCompute, rawGet, rawPut }
 }
 
 export class EdgeCacheService extends Context.Service<
@@ -164,7 +272,7 @@ export class EdgeCacheService extends Context.Service<
 >()("EdgeCacheService") {
   static readonly layer = Layer.sync(this, () => {
     const workers = detectWorkersCache()
-    return makeService(workers ? makeWorkersBackend(workers) : makeMemoryBackend())
+    return makeEdgeCacheService(workers ? makeWorkersBackend(workers) : makeMemoryBackend())
   })
 
   static readonly Live = this.layer

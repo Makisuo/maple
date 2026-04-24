@@ -1,4 +1,5 @@
 export { AlertRuntime, AlertsService } from "./services/AlertsService";
+export { BucketCacheService } from "./services/BucketCacheService";
 export { ErrorsService } from "./services/ErrorsService";
 export { NotificationDispatcher } from "./services/NotificationDispatcher";
 export { Database } from "./services/DatabaseLive";
