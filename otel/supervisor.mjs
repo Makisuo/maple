@@ -35,7 +35,12 @@ const CONFIG_PATH =
 const OTELCOL_BIN =
   process.env.OTELCOL_BIN ?? "/usr/local/bin/otelcol-contrib"
 const RELOAD_BEARER = process.env.COLLECTOR_RELOAD_BEARER
-const RELOAD_PORT = Number(process.env.COLLECTOR_RELOAD_PORT ?? "13140")
+// Prefer Railway's auto-assigned PORT so its health probes + public
+// networking hit the supervisor by default. Falls back to the explicit
+// COLLECTOR_RELOAD_PORT for compose / self-hosted setups.
+const RELOAD_PORT = Number(
+  process.env.PORT ?? process.env.COLLECTOR_RELOAD_PORT ?? "13140",
+)
 const RESTART_TIMEOUT_MS = Number(
   process.env.COLLECTOR_RESTART_TIMEOUT_MS ?? "30000",
 )
