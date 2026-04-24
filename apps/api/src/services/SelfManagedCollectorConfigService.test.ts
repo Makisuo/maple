@@ -61,11 +61,23 @@ describe("renderCollectorConfig (pure)", () => {
     expect(config).toContain("datasource: metrics_histogram")
     expect(config).toContain("datasource: metrics_exponential_histogram")
 
-    // Routing table
+    // Per-signal routing connectors (OTel Contrib's routing connector is
+    // signal-scoped — one instance per traces/logs/metrics).
+    expect(config).toContain("routing/traces:")
+    expect(config).toContain("routing/logs:")
+    expect(config).toContain("routing/metrics:")
+    expect(config).toContain("default_pipelines: [traces/fallback]")
+    expect(config).toContain("default_pipelines: [logs/fallback]")
+    expect(config).toContain("default_pipelines: [metrics/fallback]")
+
+    // Each signal gets its own single-pipeline routing entry per org.
     expect(config).toContain('statement: route() where attributes["maple_org_id"] == "org_a"')
-    expect(config).toContain("pipelines: [traces/org_a, logs/org_a, metrics/org_a]")
-    expect(config).toContain('statement: route() where attributes["maple_org_id"] == "org_b"')
-    expect(config).toContain("pipelines: [traces/org_b, logs/org_b, metrics/org_b]")
+    expect(config).toContain("pipelines: [traces/org_a]")
+    expect(config).toContain("pipelines: [logs/org_a]")
+    expect(config).toContain("pipelines: [metrics/org_a]")
+    expect(config).toContain("pipelines: [traces/org_b]")
+    expect(config).toContain("pipelines: [logs/org_b]")
+    expect(config).toContain("pipelines: [metrics/org_b]")
 
     // Per-org pipelines
     expect(config).toContain("    traces/org_a:")

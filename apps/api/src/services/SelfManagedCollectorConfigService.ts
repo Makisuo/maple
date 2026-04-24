@@ -82,13 +82,32 @@ export const renderCollectorConfig = (
 
   const sorted = [...orgs].sort((a, b) => a.orgId.localeCompare(b.orgId))
 
-  const routingTable = sorted
-    .map((o) =>
-      `      - context: resource\n` +
-      `        statement: route() where attributes["maple_org_id"] == ${escapeYamlString(o.orgId)}\n` +
-      `        pipelines: [traces/${o.orgId}, logs/${o.orgId}, metrics/${o.orgId}]`,
-    )
-    .join("\n")
+  // OTel Contrib's routing connector is signal-scoped: one connector instance
+  // per signal type. A single `routing:` that lists pipelines for traces +
+  // logs + metrics fails with "missing consumer" because each signal's
+  // instantiation only matches its own pipelines. Emit three instances
+  // (routing/traces, routing/logs, routing/metrics) with signal-matching
+  // default_pipelines + tables.
+  const routingTableForSignal = (signal: "traces" | "logs" | "metrics") =>
+    sorted
+      .map((o) =>
+        `      - context: resource\n` +
+        `        statement: route() where attributes["maple_org_id"] == ${escapeYamlString(o.orgId)}\n` +
+        `        pipelines: [${signal}/${o.orgId}]`,
+      )
+      .join("\n")
+
+  const routingConnectors =
+    (["traces", "logs", "metrics"] as const)
+      .map(
+        (signal) =>
+          `  routing/${signal}:\n` +
+          `    default_pipelines: [${signal}/fallback]\n` +
+          `    error_mode: ignore\n` +
+          `    table:\n` +
+          routingTableForSignal(signal),
+      )
+      .join("\n")
 
   const exporters = sorted
     .map(
@@ -122,15 +141,15 @@ export const renderCollectorConfig = (
   const perOrgPipelines = sorted
     .flatMap((o) => [
       `    traces/${o.orgId}:\n` +
-        `      receivers: [routing]\n` +
+        `      receivers: [routing/traces]\n` +
         `      processors: [batch]\n` +
         `      exporters: [tinybird/${o.orgId}]`,
       `    logs/${o.orgId}:\n` +
-        `      receivers: [routing]\n` +
+        `      receivers: [routing/logs]\n` +
         `      processors: [batch]\n` +
         `      exporters: [tinybird/${o.orgId}]`,
       `    metrics/${o.orgId}:\n` +
-        `      receivers: [routing]\n` +
+        `      receivers: [routing/metrics]\n` +
         `      processors: [batch]\n` +
         `      exporters: [tinybird/${o.orgId}]`,
     ])
@@ -230,11 +249,7 @@ processors:
     send_batch_max_size: 10000
 
 connectors:
-  routing:
-    default_pipelines: [traces/fallback, logs/fallback, metrics/fallback]
-    error_mode: ignore
-    table:
-${routingTable}
+${routingConnectors}
 
 exporters:
 ${exporters}
@@ -261,26 +276,26 @@ service:
     traces/in:
       receivers: [otlp]
       processors: [memory_limiter]
-      exporters: [routing]
+      exporters: [routing/traces]
     logs/in:
       receivers: [otlp]
       processors: [memory_limiter]
-      exporters: [routing]
+      exporters: [routing/logs]
     metrics/in:
       receivers: [otlp]
       processors: [memory_limiter]
-      exporters: [routing]
+      exporters: [routing/metrics]
 ${perOrgPipelines}
     traces/fallback:
-      receivers: [routing]
+      receivers: [routing/traces]
       processors: [batch]
       exporters: [debug/fallback]
     logs/fallback:
-      receivers: [routing]
+      receivers: [routing/logs]
       processors: [batch]
       exporters: [debug/fallback]
     metrics/fallback:
-      receivers: [routing]
+      receivers: [routing/metrics]
       processors: [batch]
       exporters: [debug/fallback]
 
