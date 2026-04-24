@@ -224,6 +224,8 @@ service:
   telemetry:
     logs:
       level: info
+    metrics:
+      level: none
 `
   }
 
@@ -302,6 +304,8 @@ ${perOrgPipelines}
   telemetry:
     logs:
       level: info
+    metrics:
+      level: none
 `
 }
 

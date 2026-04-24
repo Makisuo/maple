@@ -70,3 +70,7 @@ service:
   telemetry:
     logs:
       level: info
+    # Disable the default Prometheus self-telemetry endpoint (localhost:8888)
+    # so rapid supervisor restarts don't race on the port binding.
+    metrics:
+      level: none

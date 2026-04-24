@@ -107,18 +107,31 @@ const waitForExit = (proc) =>
     })
   })
 
-const gracefulRestart = async () => {
-  const previous = child
-  reloadInFlight = true
-  try {
-    if (previous) {
-      previous.kill("SIGTERM")
-      await waitForExit(previous)
+// Serialize concurrent reloads. Two near-simultaneous PUT /-/reload calls
+// would otherwise race: one SIGTERMs the child, the second also SIGTERMs
+// (sometimes the newly-spawned replacement), and each spawns its own
+// successor — resulting in "address already in use" on otelcol's internal
+// ports. `pendingRestart` chains each call after the previous one's spawn.
+let pendingRestart = Promise.resolve()
+const gracefulRestart = () => {
+  const next = pendingRestart.then(async () => {
+    const previous = child
+    reloadInFlight = true
+    try {
+      if (previous) {
+        previous.kill("SIGTERM")
+        await waitForExit(previous)
+        // Small delay so the old process fully releases listening sockets
+        // (e.g. the self-telemetry Prometheus port) before the new one binds.
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      child = spawnCollector()
+    } finally {
+      reloadInFlight = false
     }
-    child = spawnCollector()
-  } finally {
-    reloadInFlight = false
-  }
+  })
+  pendingRestart = next.catch(() => {})
+  return next
 }
 
 const writeConfigAtomically = async (yaml) => {
