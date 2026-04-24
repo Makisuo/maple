@@ -48,7 +48,7 @@ const paramsSchema = Schema.Struct({
   workloadName: Schema.String,
 })
 
-export const Route = createFileRoute("/infra/workloads/$kind/$workloadName")({
+export const Route = createFileRoute("/infra/kubernetes/workloads/$kind/$workloadName")({
   component: WorkloadDetailPage,
   validateSearch: Schema.toStandardSchemaV1(workloadDetailSearchSchema),
   params: {
@@ -178,7 +178,8 @@ function WorkloadDetailContent() {
     <DashboardLayout
       breadcrumbs={[
         { label: "Infrastructure", href: "/infra" },
-        { label: "Workloads", href: "/infra/workloads" },
+        { label: "Kubernetes" },
+        { label: "Workloads", href: "/infra/kubernetes/workloads" },
         { label: params.workloadName },
       ]}
       title={params.workloadName}

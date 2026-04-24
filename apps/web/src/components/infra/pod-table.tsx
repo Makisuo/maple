@@ -249,7 +249,7 @@ export function PodTable({ pods, waiting }: PodTableProps) {
                 >
                   <TableCell className="py-3">
                     <Link
-                      to="/infra/pods/$podName"
+                      to="/infra/kubernetes/pods/$podName"
                       params={{ podName: pod.podName }}
                       search={pod.namespace ? { namespace: pod.namespace } : {}}
                       className="block focus-visible:outline-none"

@@ -12,39 +12,37 @@ import {
 } from "@maple/ui/components/ui/empty"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { FolderIcon } from "@/components/icons"
+import { ServerIcon } from "@/components/icons"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import {
-  PodTable,
-  PodTableLoading,
-  type PodRow,
-} from "@/components/infra/pod-table"
-import { listPodsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+  NodeTable,
+  NodeTableLoading,
+  type NodeRow,
+} from "@/components/infra/node-table"
+import { listNodesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 
-export const Route = createFileRoute("/infra/pods/")({
-  component: PodsPage,
+export const Route = createFileRoute("/infra/kubernetes/nodes/")({
+  component: NodesPage,
 })
 
-function PodsPage() {
+function NodesPage() {
   const infraEnabled = useInfraEnabled()
   if (!infraEnabled) return <Navigate to="/" replace />
-  return <PodsPageContent />
+  return <NodesPageContent />
 }
 
-function PodsPageContent() {
+function NodesPageContent() {
   const [search, setSearch] = useState("")
-  const [namespace, setNamespace] = useState("")
 
   const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "12h")
 
-  const podsResult = useAtomValue(
-    listPodsResultAtom({
+  const nodesResult = useAtomValue(
+    listNodesResultAtom({
       data: {
         startTime,
         endTime,
         search: search.trim() || undefined,
-        namespace: namespace.trim() || undefined,
       },
     }),
   )
@@ -53,35 +51,36 @@ function PodsPageContent() {
     <DashboardLayout
       breadcrumbs={[
         { label: "Infrastructure", href: "/infra" },
-        { label: "Pods" },
+        { label: "Kubernetes" },
+        { label: "Nodes" },
       ]}
-      title="Pods"
-      description="Kubernetes pods reporting via the kubelet stats receiver."
+      title="Nodes"
+      description="Kubernetes nodes reporting via the kubelet stats receiver."
     >
-      {Result.builder(podsResult)
-        .onInitial(() => <PodTableLoading />)
+      {Result.builder(nodesResult)
+        .onInitial(() => <NodeTableLoading />)
         .onError((err) => (
           <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-            <p className="font-medium text-destructive">Failed to load pods</p>
+            <p className="font-medium text-destructive">Failed to load nodes</p>
             <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
               {err.message}
             </pre>
           </div>
         ))
         .onSuccess((response, result) => {
-          const pods = response.data as ReadonlyArray<PodRow>
+          const nodes = response.data as ReadonlyArray<NodeRow>
 
-          if (pods.length === 0 && !search.trim() && !namespace.trim()) {
+          if (nodes.length === 0 && !search.trim()) {
             return (
               <Empty className="py-16">
                 <EmptyHeader>
                   <EmptyMedia variant="icon">
-                    <FolderIcon size={16} />
+                    <ServerIcon size={16} />
                   </EmptyMedia>
-                  <EmptyTitle>No pods reporting yet</EmptyTitle>
+                  <EmptyTitle>No nodes reporting yet</EmptyTitle>
                   <EmptyDescription>
                     Install the Maple Kubernetes Helm chart so the kubelet stats
-                    receiver can start collecting per-pod CPU and memory metrics.
+                    receiver can start collecting per-node metrics.
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -94,24 +93,18 @@ function PodsPageContent() {
                 result.waiting ? "opacity-60" : ""
               }`}
             >
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-3">
                 <Input
-                  placeholder="Search pods…"
+                  placeholder="Search nodes…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="max-w-xs"
                 />
-                <Input
-                  placeholder="Namespace…"
-                  value={namespace}
-                  onChange={(e) => setNamespace(e.target.value)}
-                  className="max-w-xs"
-                />
                 <span className="text-muted-foreground text-xs">
-                  {pods.length} {pods.length === 1 ? "pod" : "pods"}
+                  {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
                 </span>
               </div>
-              <PodTable pods={pods} waiting={result.waiting} />
+              <NodeTable nodes={nodes} waiting={result.waiting} />
             </div>
           )
         })

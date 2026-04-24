@@ -237,7 +237,7 @@ export function WorkloadTable({ workloads, kind, waiting }: WorkloadTableProps) 
               >
                 <TableCell className="py-3">
                   <Link
-                    to="/infra/workloads/$kind/$workloadName"
+                    to="/infra/kubernetes/workloads/$kind/$workloadName"
                     params={{ kind, workloadName: wl.workloadName }}
                     search={wl.namespace ? { namespace: wl.namespace } : {}}
                     className="block focus-visible:outline-none"

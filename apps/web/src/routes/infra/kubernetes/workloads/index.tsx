@@ -36,7 +36,7 @@ const workloadsSearchSchema = Schema.Struct({
   ),
 })
 
-export const Route = createFileRoute("/infra/workloads/")({
+export const Route = createFileRoute("/infra/kubernetes/workloads/")({
   component: WorkloadsPage,
   validateSearch: Schema.toStandardSchemaV1(workloadsSearchSchema),
 })
@@ -73,6 +73,7 @@ function WorkloadsPageContent() {
     <DashboardLayout
       breadcrumbs={[
         { label: "Infrastructure", href: "/infra" },
+        { label: "Kubernetes" },
         { label: "Workloads" },
       ]}
       title="Workloads"

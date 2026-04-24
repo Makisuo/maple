@@ -34,7 +34,7 @@ import {
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import type { NodeInfraMetric } from "@/api/tinybird/infra"
 
-export const Route = createFileRoute("/infra/nodes/$nodeName")({
+export const Route = createFileRoute("/infra/kubernetes/nodes/$nodeName")({
   component: NodeDetailPage,
 })
 
@@ -142,7 +142,8 @@ function NodeDetailContent() {
     <DashboardLayout
       breadcrumbs={[
         { label: "Infrastructure", href: "/infra" },
-        { label: "Nodes", href: "/infra/nodes" },
+        { label: "Kubernetes" },
+        { label: "Nodes", href: "/infra/kubernetes/nodes" },
         { label: nodeName },
       ]}
       title={nodeName}

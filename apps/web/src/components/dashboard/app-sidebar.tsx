@@ -113,9 +113,9 @@ const signalsNavItems: SignalsNavItem[] = [
     icon: ComputerIcon,
     subItems: [
       { title: "Hosts", href: "/infra" },
-      { title: "Pods", href: "/infra/pods" },
-      { title: "Nodes", href: "/infra/nodes" },
-      { title: "Workloads", href: "/infra/workloads" },
+      { title: "K8s Pods", href: "/infra/kubernetes/pods" },
+      { title: "K8s Nodes", href: "/infra/kubernetes/nodes" },
+      { title: "K8s Workloads", href: "/infra/kubernetes/workloads" },
     ],
   },
 ];

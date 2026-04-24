@@ -35,7 +35,7 @@ const podDetailSearchSchema = Schema.Struct({
   namespace: Schema.optional(Schema.String),
 })
 
-export const Route = createFileRoute("/infra/pods/$podName")({
+export const Route = createFileRoute("/infra/kubernetes/pods/$podName")({
   component: PodDetailPage,
   validateSearch: Schema.toStandardSchemaV1(podDetailSearchSchema),
 })
@@ -140,7 +140,8 @@ function PodDetailContent() {
     <DashboardLayout
       breadcrumbs={[
         { label: "Infrastructure", href: "/infra" },
-        { label: "Pods", href: "/infra/pods" },
+        { label: "Kubernetes" },
+        { label: "Pods", href: "/infra/kubernetes/pods" },
         { label: podName },
       ]}
       title={podName}

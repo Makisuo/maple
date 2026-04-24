@@ -225,7 +225,7 @@ export function NodeTable({ nodes, waiting }: NodeTableProps) {
               >
                 <TableCell className="py-3">
                   <Link
-                    to="/infra/nodes/$nodeName"
+                    to="/infra/kubernetes/nodes/$nodeName"
                     params={{ nodeName: node.nodeName }}
                     className="block focus-visible:outline-none"
                   >
