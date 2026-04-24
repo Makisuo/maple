@@ -48,6 +48,7 @@ interface WorkloadTableProps {
   workloads: ReadonlyArray<WorkloadRow>
   kind: WorkloadKind
   waiting?: boolean
+  referenceTime?: string
 }
 
 function MetaChip({ children }: { children: React.ReactNode }) {
@@ -142,7 +143,7 @@ function SortHead({
   )
 }
 
-export function WorkloadTable({ workloads, kind, waiting }: WorkloadTableProps) {
+export function WorkloadTable({ workloads, kind, waiting, referenceTime }: WorkloadTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("avgCpuLimitPct")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
@@ -254,7 +255,7 @@ export function WorkloadTable({ workloads, kind, waiting }: WorkloadTableProps) 
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <HostStatusBadge lastSeen={wl.lastSeen} />
+                  <HostStatusBadge lastSeen={wl.lastSeen} referenceTime={referenceTime} />
                 </TableCell>
                 <TableCell className="font-mono text-xs tabular-nums text-foreground/80">
                   {wl.podCount}

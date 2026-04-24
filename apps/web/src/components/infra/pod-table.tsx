@@ -56,6 +56,7 @@ type SortDir = "asc" | "desc"
 interface PodTableProps {
   pods: ReadonlyArray<PodRow>
   waiting?: boolean
+  referenceTime?: string
 }
 
 function workloadOf(pod: PodRow): { kind: string; name: string } | null {
@@ -161,7 +162,7 @@ function SortHead({
   )
 }
 
-export function PodTable({ pods, waiting }: PodTableProps) {
+export function PodTable({ pods, waiting, referenceTime }: PodTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("cpuLimitPct")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
@@ -290,7 +291,7 @@ export function PodTable({ pods, waiting }: PodTableProps) {
                         )}
                         {pod.nodeName && <MetaChip>node={pod.nodeName}</MetaChip>}
                         {pod.qosClass && <MetaChip>qos={pod.qosClass}</MetaChip>}
-                        <HostStatusBadge lastSeen={pod.lastSeen} />
+                        <HostStatusBadge lastSeen={pod.lastSeen} referenceTime={referenceTime} />
                       </div>
                     </Link>
                   </TableCell>

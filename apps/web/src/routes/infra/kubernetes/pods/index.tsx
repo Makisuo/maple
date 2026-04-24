@@ -225,7 +225,7 @@ function PodsPageContent() {
                     {pods.length} {pods.length === 1 ? "pod" : "pods"}
                   </span>
                 </div>
-                <PodTable pods={pods} waiting={result.waiting} />
+                <PodTable pods={pods} waiting={result.waiting} referenceTime={endTime} />
               </div>
             )
           })

@@ -61,10 +61,18 @@ export function severityLevel(fraction: number): SeverityLevel {
 
 const SCRAPE_INTERVAL_MS = 30_000
 
-export function deriveHostStatus(lastSeenIso: string, now = Date.now()): HostStatus {
+export function deriveHostStatus(
+  lastSeenIso: string,
+  reference: number | string = Date.now(),
+): HostStatus {
   const lastSeen = new Date(normalizeToUtcIso(lastSeenIso)).getTime()
   if (!Number.isFinite(lastSeen)) return "down"
-  const age = now - lastSeen
+  const referenceMs =
+    typeof reference === "number"
+      ? reference
+      : new Date(normalizeToUtcIso(reference)).getTime()
+  const ref = Number.isFinite(referenceMs) ? referenceMs : Date.now()
+  const age = ref - lastSeen
   if (age < SCRAPE_INTERVAL_MS * 2) return "active"
   if (age < SCRAPE_INTERVAL_MS * 10) return "idle"
   return "down"

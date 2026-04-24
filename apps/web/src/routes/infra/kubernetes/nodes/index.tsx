@@ -210,7 +210,7 @@ function NodesPageContent() {
                     {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
                   </span>
                 </div>
-                <NodeTable nodes={nodes} waiting={result.waiting} />
+                <NodeTable nodes={nodes} waiting={result.waiting} referenceTime={endTime} />
               </div>
             )
           })

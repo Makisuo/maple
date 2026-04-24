@@ -17,11 +17,17 @@ const STATUS_CLASS: Record<HostStatus, string> = {
 
 interface HostStatusBadgeProps {
   lastSeen: string
+  /**
+   * Reference timestamp ("as of when") for status calculation. Defaults to
+   * wall-clock now, but list pages should pass the query window's endTime so
+   * badges reflect data freshness at fetch time — not the user's idle clock.
+   */
+  referenceTime?: string | number
   className?: string
 }
 
-export function HostStatusBadge({ lastSeen, className }: HostStatusBadgeProps) {
-  const status = deriveHostStatus(lastSeen)
+export function HostStatusBadge({ lastSeen, referenceTime, className }: HostStatusBadgeProps) {
+  const status = deriveHostStatus(lastSeen, referenceTime ?? Date.now())
   return (
     <Badge
       variant="outline"

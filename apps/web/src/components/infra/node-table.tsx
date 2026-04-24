@@ -136,9 +136,10 @@ function SortHead({
 interface NodeTableProps {
   nodes: ReadonlyArray<NodeRow>
   waiting?: boolean
+  referenceTime?: string
 }
 
-export function NodeTable({ nodes, waiting }: NodeTableProps) {
+export function NodeTable({ nodes, waiting, referenceTime }: NodeTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("cpuUsage")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
@@ -242,7 +243,7 @@ export function NodeTable({ nodes, waiting }: NodeTableProps) {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <HostStatusBadge lastSeen={node.lastSeen} />
+                  <HostStatusBadge lastSeen={node.lastSeen} referenceTime={referenceTime} />
                 </TableCell>
                 <TableCell className="hidden md:table-cell font-mono text-xs tabular-nums text-foreground/80">
                   {Number.isFinite(node.cpuUsage) ? node.cpuUsage.toFixed(2) : "—"}

@@ -258,6 +258,7 @@ function WorkloadsPageContent() {
                       workloads={wls}
                       kind={kind}
                       waiting={result.waiting}
+                      referenceTime={endTime}
                     />
                   </div>
                 )
