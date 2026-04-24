@@ -52,6 +52,7 @@ type HmacSha256 = Hmac<Sha256>;
 struct AppConfig {
     port: u16,
     forward_endpoint: String,
+    forward_self_managed_endpoint: Option<String>,
     forward_timeout: Duration,
     max_request_body_bytes: usize,
     require_tls: bool,
@@ -83,6 +84,14 @@ impl AppConfig {
             return Err("INGEST_FORWARD_OTLP_ENDPOINT is required".to_string());
         }
 
+        // Optional: endpoint for the self-managed collector pool. When unset, self-managed
+        // orgs fall back to the shared pool so a missing env var degrades to "current
+        // behavior" rather than dropping traffic.
+        let forward_self_managed_endpoint = std::env::var("INGEST_FORWARD_SELF_MANAGED_ENDPOINT")
+            .ok()
+            .map(|value| value.trim().trim_end_matches('/').to_string())
+            .filter(|value| !value.is_empty());
+
         let forward_timeout_ms = parse_u64(
             "INGEST_FORWARD_TIMEOUT_MS",
             std::env::var("INGEST_FORWARD_TIMEOUT_MS").ok(),
@@ -106,6 +115,17 @@ impl AppConfig {
                 "INGEST_REQUIRE_TLS=true requires an https INGEST_FORWARD_OTLP_ENDPOINT"
                     .to_string(),
             );
+        }
+
+        if require_tls {
+            if let Some(endpoint) = forward_self_managed_endpoint.as_ref() {
+                if !endpoint.starts_with("https://") {
+                    return Err(
+                        "INGEST_REQUIRE_TLS=true requires an https INGEST_FORWARD_SELF_MANAGED_ENDPOINT"
+                            .to_string(),
+                    );
+                }
+            }
         }
 
         let db_url = std::env::var("MAPLE_DB_URL")
@@ -147,6 +167,7 @@ impl AppConfig {
         Ok(Self {
             port,
             forward_endpoint,
+            forward_self_managed_endpoint,
             forward_timeout: Duration::from_millis(forward_timeout_ms),
             max_request_body_bytes,
             require_tls,
@@ -186,6 +207,12 @@ struct ResolvedIngestKey {
     org_id: String,
     key_type: IngestKeyType,
     key_id: String,
+    // When true, the org has an active BYO Tinybird configuration and its OTLP
+    // payloads must be routed to the self-managed collector pool rather than the
+    // shared pool. Computed from a LEFT JOIN with `org_tinybird_settings` at
+    // resolve time; cached alongside the rest of the key so the hot path stays
+    // branch-free beyond a single boolean check.
+    self_managed: bool,
 }
 
 #[derive(Clone)]
@@ -196,6 +223,9 @@ struct ResolvedCloudflareConnector {
     zone_name: String,
     dataset: String,
     secret_key_id: String,
+    // Mirrors ResolvedIngestKey.self_managed so Cloudflare Logpush payloads route
+    // to the self-managed pool when the owning org has BYO Tinybird active.
+    self_managed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -415,6 +445,10 @@ async fn main() {
     info!(
         port = config.port,
         forward_endpoint = %config.forward_endpoint,
+        forward_self_managed_endpoint = %config
+            .forward_self_managed_endpoint
+            .as_deref()
+            .unwrap_or("<unset>"),
         require_tls = config.require_tls,
         max_body_bytes = config.max_request_body_bytes,
         "Maple ingest server listening"
@@ -861,6 +895,7 @@ async fn handle_cloudflare_logpush_inner(
                     org_id: resolved.org_id.clone(),
                     key_type: IngestKeyType::Connector,
                     key_id: resolved.secret_key_id.clone(),
+                    self_managed: resolved.self_managed,
                 },
             )
             .await
@@ -1424,6 +1459,23 @@ fn upsert_string_attribute(attributes: &mut Vec<KeyValue>, key: &str, value: &st
     });
 }
 
+/// Pick the upstream collector endpoint + pool label for a resolved ingest key.
+///
+/// Self-managed orgs go to the self-managed pool when it is configured; any
+/// other case (shared orgs, or self-managed-but-endpoint-unset) falls through
+/// to the shared pool. Kept as a pure function so the routing decision is unit
+/// testable without spinning up collectors or state.
+fn select_forward_endpoint<'a>(
+    shared: &'a str,
+    self_managed: Option<&'a str>,
+    org_is_self_managed: bool,
+) -> (&'a str, &'static str) {
+    match (org_is_self_managed, self_managed) {
+        (true, Some(url)) => (url, "self_managed"),
+        _ => (shared, "shared"),
+    }
+}
+
 async fn forward_to_collector(
     state: &AppState,
     signal: Signal,
@@ -1432,10 +1484,16 @@ async fn forward_to_collector(
     body: Vec<u8>,
     resolved_key: &ResolvedIngestKey,
 ) -> Result<Response, ApiError> {
-    let url = format!("{}/v1/{}", state.config.forward_endpoint, signal.path());
+    let (endpoint, upstream_pool) = select_forward_endpoint(
+        state.config.forward_endpoint.as_str(),
+        state.config.forward_self_managed_endpoint.as_deref(),
+        resolved_key.self_managed,
+    );
+
+    let url = format!("{endpoint}/v1/{}", signal.path());
     let outbound_bytes = body.len();
 
-    debug!(url = %url, outbound_bytes, "Forwarding to collector");
+    debug!(url = %url, upstream_pool, outbound_bytes, "Forwarding to collector");
 
     let mut request_builder = state
         .http_client
@@ -1450,15 +1508,25 @@ async fn forward_to_collector(
     let forward_start = Instant::now();
     let response = request_builder.send().await.map_err(|error| {
         let forward_duration = forward_start.elapsed();
-        histogram!("ingest_forward_duration_seconds", "signal" => signal.path())
-            .record(forward_duration.as_secs_f64());
-        counter!("ingest_forward_responses_total", "signal" => signal.path(), "upstream_status" => "error")
-            .increment(1);
+        histogram!(
+            "ingest_forward_duration_seconds",
+            "signal" => signal.path(),
+            "upstream_pool" => upstream_pool,
+        )
+        .record(forward_duration.as_secs_f64());
+        counter!(
+            "ingest_forward_responses_total",
+            "signal" => signal.path(),
+            "upstream_status" => "error",
+            "upstream_pool" => upstream_pool,
+        )
+        .increment(1);
         error!(
             error = %error,
             signal = signal.path(),
             org_id = %resolved_key.org_id,
             key_id = %resolved_key.key_id,
+            upstream_pool,
             url = %url,
             "Collector forwarding failed"
         );
@@ -1466,8 +1534,12 @@ async fn forward_to_collector(
     })?;
 
     let forward_duration = forward_start.elapsed();
-    histogram!("ingest_forward_duration_seconds", "signal" => signal.path())
-        .record(forward_duration.as_secs_f64());
+    histogram!(
+        "ingest_forward_duration_seconds",
+        "signal" => signal.path(),
+        "upstream_pool" => upstream_pool,
+    )
+    .record(forward_duration.as_secs_f64());
 
     let upstream_status_code = response.status().as_u16();
     let status_bucket = match upstream_status_code {
@@ -1476,8 +1548,13 @@ async fn forward_to_collector(
         500..=599 => "5xx",
         _ => "other",
     };
-    counter!("ingest_forward_responses_total", "signal" => signal.path(), "upstream_status" => status_bucket)
-        .increment(1);
+    counter!(
+        "ingest_forward_responses_total",
+        "signal" => signal.path(),
+        "upstream_status" => status_bucket,
+        "upstream_pool" => upstream_pool,
+    )
+    .increment(1);
 
     debug!(
         upstream_status = upstream_status_code,
@@ -1539,7 +1616,16 @@ impl IngestKeyResolver {
             IngestKeyType::Connector => return Ok(None),
         };
 
-        let query = format!("SELECT org_id FROM org_ingest_keys WHERE {hash_column} = ? LIMIT 1");
+        // LEFT JOIN against org_tinybird_settings so the "self-managed?" flag is
+        // resolved in the same roundtrip as org_id. This hits the DB only on cache
+        // miss; warm cache hits (>99% of traffic) skip this entirely.
+        let query = format!(
+            "SELECT k.org_id, \
+                    CASE WHEN s.sync_status = 'active' THEN 1 ELSE 0 END AS self_managed \
+             FROM org_ingest_keys k \
+             LEFT JOIN org_tinybird_settings s ON s.org_id = k.org_id \
+             WHERE k.{hash_column} = ? LIMIT 1"
+        );
 
         let conn = self.db.connect().map_err(|error| error.to_string())?;
         let mut rows = conn
@@ -1552,11 +1638,13 @@ impl IngestKeyResolver {
         };
 
         let org_id: String = row.get(0).map_err(|error| error.to_string())?;
+        let self_managed_flag: i64 = row.get(1).map_err(|error| error.to_string())?;
 
         let resolved = ResolvedIngestKey {
             org_id,
             key_type,
             key_id: key_hash.chars().take(16).collect(),
+            self_managed: self_managed_flag != 0,
         };
 
         self.cache
@@ -1582,7 +1670,11 @@ impl CloudflareConnectorResolver {
         let conn = self.db.connect().map_err(|error| error.to_string())?;
         let mut rows = conn
             .query(
-                "SELECT org_id, service_name, zone_name, dataset FROM cloudflare_logpush_connectors WHERE id = ? AND secret_hash = ? AND enabled = 1 LIMIT 1",
+                "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
+                        CASE WHEN s.sync_status = 'active' THEN 1 ELSE 0 END AS self_managed \
+                 FROM cloudflare_logpush_connectors c \
+                 LEFT JOIN org_tinybird_settings s ON s.org_id = c.org_id \
+                 WHERE c.id = ? AND c.secret_hash = ? AND c.enabled = 1 LIMIT 1",
                 params![connector_id.to_string(), secret_hash.clone()],
             )
             .await
@@ -1592,6 +1684,8 @@ impl CloudflareConnectorResolver {
             return Ok(None);
         };
 
+        let self_managed_flag: i64 = row.get(4).map_err(|error| error.to_string())?;
+
         let resolved = ResolvedCloudflareConnector {
             connector_id: connector_id.to_string(),
             org_id: row.get(0).map_err(|error| error.to_string())?,
@@ -1599,6 +1693,7 @@ impl CloudflareConnectorResolver {
             zone_name: row.get(2).map_err(|error| error.to_string())?,
             dataset: row.get(3).map_err(|error| error.to_string())?,
             secret_key_id: secret_hash.chars().take(16).collect(),
+            self_managed: self_managed_flag != 0,
         };
 
         self.cache.insert(cache_key, resolved.clone()).await;
@@ -1818,6 +1913,7 @@ mod tests {
             org_id: "org_real".to_string(),
             key_type: IngestKeyType::Private,
             key_id: "abc".to_string(),
+            self_managed: false,
         };
 
         enrich_resource_attributes(&mut attributes, &resolved);
@@ -1917,6 +2013,7 @@ mod tests {
             zone_name: "example.com".to_string(),
             dataset: "http_requests".to_string(),
             secret_key_id: "secret".to_string(),
+            self_managed: false,
         };
         let record = serde_json::from_str::<JsonMap<String, JsonValue>>(
             r#"{
@@ -1976,5 +2073,169 @@ mod tests {
 
         assert_eq!(log_values.get("RayID"), Some(&"abc123"));
         assert_eq!(log_values.get("ClientCountry"), Some(&"US"));
+    }
+
+    #[test]
+    fn non_self_managed_goes_to_shared_pool() {
+        let (endpoint, pool) = select_forward_endpoint(
+            "http://shared:4318",
+            Some("http://self-managed:4318"),
+            false,
+        );
+        assert_eq!(endpoint, "http://shared:4318");
+        assert_eq!(pool, "shared");
+    }
+
+    #[test]
+    fn self_managed_goes_to_self_managed_pool_when_configured() {
+        let (endpoint, pool) = select_forward_endpoint(
+            "http://shared:4318",
+            Some("http://self-managed:4318"),
+            true,
+        );
+        assert_eq!(endpoint, "http://self-managed:4318");
+        assert_eq!(pool, "self_managed");
+    }
+
+    #[test]
+    fn self_managed_degrades_to_shared_when_endpoint_unset() {
+        // Missing INGEST_FORWARD_SELF_MANAGED_ENDPOINT should never drop traffic
+        // — self-managed orgs degrade back to the shared pool until the
+        // operator wires the second collector in.
+        let (endpoint, pool) = select_forward_endpoint("http://shared:4318", None, true);
+        assert_eq!(endpoint, "http://shared:4318");
+        assert_eq!(pool, "shared");
+    }
+
+    async fn in_memory_db() -> Arc<Database> {
+        // libsql's local builder doesn't expose an in-memory mode directly, so
+        // use a uniquely-named temp file. The file is removed by the OS on
+        // process exit (tests use nextest/cargo test's sandbox by default).
+        let path = std::env::temp_dir().join(format!(
+            "maple-ingest-test-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = Builder::new_local(&path)
+            .build()
+            .await
+            .expect("libsql builder should open temp db");
+        let conn = db.connect().expect("db should connect");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE org_ingest_keys (
+                org_id TEXT NOT NULL,
+                public_key_hash TEXT,
+                private_key_hash TEXT
+            );
+            CREATE TABLE org_tinybird_settings (
+                org_id TEXT PRIMARY KEY,
+                sync_status TEXT NOT NULL
+            );
+            "#,
+        )
+        .await
+        .expect("schema should apply");
+        Arc::new(db)
+    }
+
+    fn make_resolver(db: Arc<Database>) -> IngestKeyResolver {
+        IngestKeyResolver {
+            db,
+            lookup_hmac_key: "test-hmac-key".to_string(),
+            cache: Cache::builder()
+                .time_to_live(Duration::from_secs(60))
+                .max_capacity(16)
+                .build(),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_ingest_key_returns_self_managed_false_when_no_settings_row() {
+        let db = in_memory_db().await;
+        let resolver = make_resolver(Arc::clone(&db));
+
+        let raw_key = "maple_sk_test_shared";
+        let hash = hash_ingest_key(raw_key, "test-hmac-key").unwrap();
+        db.connect()
+            .unwrap()
+            .execute(
+                "INSERT INTO org_ingest_keys (org_id, private_key_hash) VALUES (?, ?)",
+                params!["org_shared".to_string(), hash.clone()],
+            )
+            .await
+            .unwrap();
+
+        let resolved = resolver
+            .resolve_ingest_key(raw_key)
+            .await
+            .expect("resolve should succeed")
+            .expect("key should be found");
+
+        assert_eq!(resolved.org_id, "org_shared");
+        assert!(!resolved.self_managed);
+    }
+
+    #[tokio::test]
+    async fn resolve_ingest_key_returns_self_managed_true_when_active_settings_row() {
+        let db = in_memory_db().await;
+        let resolver = make_resolver(Arc::clone(&db));
+
+        let raw_key = "maple_sk_test_byo";
+        let hash = hash_ingest_key(raw_key, "test-hmac-key").unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute(
+            "INSERT INTO org_ingest_keys (org_id, private_key_hash) VALUES (?, ?)",
+            params!["org_byo".to_string(), hash.clone()],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO org_tinybird_settings (org_id, sync_status) VALUES (?, 'active')",
+            params!["org_byo".to_string()],
+        )
+        .await
+        .unwrap();
+
+        let resolved = resolver
+            .resolve_ingest_key(raw_key)
+            .await
+            .expect("resolve should succeed")
+            .expect("key should be found");
+
+        assert_eq!(resolved.org_id, "org_byo");
+        assert!(resolved.self_managed);
+    }
+
+    #[tokio::test]
+    async fn resolve_ingest_key_treats_non_active_settings_as_not_self_managed() {
+        // Rows in 'error' / 'out_of_sync' must not route — the customer
+        // Tinybird may be broken, so stay on the shared pool until sync
+        // recovers.
+        let db = in_memory_db().await;
+        let resolver = make_resolver(Arc::clone(&db));
+
+        let raw_key = "maple_sk_test_broken";
+        let hash = hash_ingest_key(raw_key, "test-hmac-key").unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute(
+            "INSERT INTO org_ingest_keys (org_id, private_key_hash) VALUES (?, ?)",
+            params!["org_broken".to_string(), hash.clone()],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO org_tinybird_settings (org_id, sync_status) VALUES (?, 'error')",
+            params!["org_broken".to_string()],
+        )
+        .await
+        .unwrap();
+
+        let resolved = resolver
+            .resolve_ingest_key(raw_key)
+            .await
+            .expect("resolve should succeed")
+            .expect("key should be found");
+
+        assert!(!resolved.self_managed);
     }
 }

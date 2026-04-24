@@ -1,0 +1,37 @@
+# Self-managed collector image.
+#
+# Runs a tiny Node supervisor (PID 1) that owns an otelcol-contrib child. The
+# supervisor accepts PUT /-/reload over HTTP and gracefully restarts the
+# collector with the new config. This is the piece between
+# SelfManagedCollectorConfigService.publishConfig() (API side) and the
+# actual running collector.
+
+FROM otel/opentelemetry-collector-contrib:latest AS otelcol
+
+FROM node:22-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# otelcol-contrib is a statically-linked Go binary; it runs cleanly on the
+# debian-based node image.
+COPY --from=otelcol /otelcol-contrib /usr/local/bin/otelcol-contrib
+
+COPY supervisor.mjs /opt/supervisor/supervisor.mjs
+COPY collector-self-managed-config.yaml /etc/otelcol/config.yaml
+
+RUN mkdir -p /var/lib/otelcol/file_storage \
+    && chown -R node:node /var/lib/otelcol /etc/otelcol /opt/supervisor
+
+USER node
+WORKDIR /opt/supervisor
+
+# 4317 = OTLP gRPC, 4318 = OTLP HTTP (the ingestor forwards here)
+# 13133 = otelcol health_check extension
+# 13140 = supervisor reload endpoint (MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL
+#         on the API should point here).
+EXPOSE 4317 4318 13133 13140
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "/opt/supervisor/supervisor.mjs"]

@@ -12,6 +12,7 @@ import { encryptAes256Gcm } from "./Crypto"
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
+import { SelfManagedCollectorConfigService } from "./SelfManagedCollectorConfigService"
 import {
   makeTestTinybirdSyncClientLayer,
   type TinybirdSyncClientOverrides,
@@ -66,6 +67,13 @@ const makeConfig = (url: string) =>
 const makeLayer = (url: string, overrides: TinybirdSyncClientOverrides = {}) =>
   OrgTinybirdSettingsService.Live.pipe(
     Layer.provide(makeTestTinybirdSyncClientLayer(overrides)),
+    Layer.provide(
+      SelfManagedCollectorConfigService.Live.pipe(
+        Layer.provide(DatabaseLibsqlLive),
+        Layer.provide(Env.Default),
+        Layer.provide(makeConfig(url)),
+      ),
+    ),
     Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
     Layer.provide(makeConfig(url)),

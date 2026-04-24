@@ -39,6 +39,7 @@ import {
 } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
+import { SelfManagedCollectorConfigService } from "./SelfManagedCollectorConfigService"
 import { TinybirdSyncClient } from "./TinybirdSyncClient"
 
 interface RuntimeTinybirdConfig {
@@ -316,10 +317,26 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
       const database = yield* Database
       const env = yield* Env
       const tinybirdSyncClient = yield* TinybirdSyncClient
+      const collectorConfig = yield* SelfManagedCollectorConfigService
       const encryptionKey = yield* parseEncryptionKey(
         Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
       )
       const kickoffSemaphore = yield* Semaphore.make(1)
+
+      const publishCollectorConfigBestEffort = Effect.fn(
+        "OrgTinybirdSettingsService.publishCollectorConfigBestEffort",
+      )(function* (orgId: OrgId) {
+        yield* collectorConfig.publishConfig().pipe(
+          Effect.tapError((error) =>
+            Effect.logWarning(
+              "Failed to publish self-managed collector config",
+            ).pipe(
+              Effect.annotateLogs({ orgId, error: error.message }),
+            ),
+          ),
+          Effect.ignore,
+        )
+      })
 
       const requireAdmin = Effect.fn("OrgTinybirdSettingsService.requireAdmin")(function* (
         roles: ReadonlyArray<RoleName>,
@@ -942,6 +959,12 @@ export class OrgTinybirdSettingsService extends Context.Service<OrgTinybirdSetti
         ).pipe(Effect.mapError(toPersistenceError))
 
         yield* deleteSyncRun(orgId)
+
+        // Regenerate the self-managed collector config so the now-disabled org's
+        // per-org exporter + routing rule drops out. Until the ingestor's 60s
+        // key cache expires, OTLP payloads may still route to the self-managed
+        // pool and hit the fallback — documented behavior.
+        yield* publishCollectorConfigBestEffort(orgId)
 
         return new OrgTinybirdSettingsDeleteResponse({
           configured: false,

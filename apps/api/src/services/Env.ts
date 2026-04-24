@@ -22,6 +22,8 @@ export interface EnvShape {
   readonly INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
   readonly RESEND_API_KEY: Option.Option<Redacted.Redacted<string>>
   readonly RESEND_FROM_EMAIL: string
+  readonly MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL: Option.Option<string>
+  readonly MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN: Option.Option<Redacted.Redacted<string>>
 }
 
 const stringWithDefault = (key: string, fallback: string) =>
@@ -81,6 +83,12 @@ const envConfig = Config.all({
   RESEND_FROM_EMAIL: stringWithDefault(
     "RESEND_FROM_EMAIL",
     "Maple <notifications@maple.dev>",
+  ),
+  MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL: optionalString(
+    "MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL",
+  ),
+  MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN: optionalRedacted(
+    "MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN",
   ),
 })
 

@@ -10,6 +10,7 @@ export { EmailService } from "./services/EmailService";
 export { Env } from "./services/Env";
 export { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService";
 export { QueryEngineService } from "./services/QueryEngineService";
+export { SelfManagedCollectorConfigService } from "./services/SelfManagedCollectorConfigService";
 export { TinybirdService } from "./services/TinybirdService";
 export { TinybirdSyncClient } from "./services/TinybirdSyncClient";
 export { WorkerEnvironment } from "./services/WorkerEnvironment";

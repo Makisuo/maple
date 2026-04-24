@@ -1,0 +1,94 @@
+# OpenTelemetry Collector Configuration — Self-Managed Pool
+#
+# This is the bootstrap config for the self-managed collector pool. It has no
+# per-org exporters baked in — those are appended at runtime by
+# SelfManagedCollectorConfigService whenever an org's BYO Tinybird sync
+# finishes. On startup with no orgs, every incoming payload falls through to
+# the `debug/fallback` exporter (warn-level log + drop) so the pool starts
+# cleanly before the first self-managed customer is onboarded.
+#
+# The ingestor selects this pool via INGEST_FORWARD_SELF_MANAGED_ENDPOINT when
+# the resolved org has `org_tinybird_settings.sync_status = 'active'`.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 1s
+    send_batch_size: 5000
+    send_batch_max_size: 10000
+
+connectors:
+  routing:
+    # No table entries at bootstrap — every signal falls through to the
+    # fallback pipelines. The generator appends per-org routes on activation.
+    default_pipelines: [traces/fallback, logs/fallback, metrics/fallback]
+    error_mode: ignore
+    table: []
+
+exporters:
+  debug/fallback:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 500
+
+extensions:
+  file_storage/queue:
+    directory: /var/lib/otelcol/file_storage
+    create_directory: true
+    timeout: 10s
+    compaction:
+      on_start: true
+      on_rebound: true
+
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check, file_storage/queue]
+
+  pipelines:
+    traces/in:
+      receivers: [otlp]
+      processors: [memory_limiter]
+      exporters: [routing]
+
+    logs/in:
+      receivers: [otlp]
+      processors: [memory_limiter]
+      exporters: [routing]
+
+    metrics/in:
+      receivers: [otlp]
+      processors: [memory_limiter]
+      exporters: [routing]
+
+    traces/fallback:
+      receivers: [routing]
+      processors: [batch]
+      exporters: [debug/fallback]
+
+    logs/fallback:
+      receivers: [routing]
+      processors: [batch]
+      exporters: [debug/fallback]
+
+    metrics/fallback:
+      receivers: [routing]
+      processors: [batch]
+      exporters: [debug/fallback]
+
+  telemetry:
+    logs:
+      level: info

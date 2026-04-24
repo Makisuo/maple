@@ -10,6 +10,7 @@ import {
   NotificationDispatcher,
   OrgTinybirdSettingsService,
   QueryEngineService,
+  SelfManagedCollectorConfigService,
   TinybirdService,
   TinybirdSyncClient,
 } from "@maple/api/alerting"
@@ -31,8 +32,14 @@ const buildLayer = (_env: Record<string, unknown>) => {
 
   const TinybirdSyncClientLive = TinybirdSyncClient.Default
 
+  const SelfManagedCollectorConfigLive = SelfManagedCollectorConfigService.Live.pipe(
+    Layer.provide(BaseLive),
+  )
+
   const OrgTinybirdSettingsLive = OrgTinybirdSettingsService.Live.pipe(
-    Layer.provide(Layer.mergeAll(BaseLive, TinybirdSyncClientLive)),
+    Layer.provide(
+      Layer.mergeAll(BaseLive, TinybirdSyncClientLive, SelfManagedCollectorConfigLive),
+    ),
   )
 
   const TinybirdServiceLive = TinybirdService.Live.pipe(

@@ -267,6 +267,12 @@ const DEFAULT_STEP_CONFIG: StepConfig = {
 export interface RunTinybirdSyncOptions {
   // Override the Database layer — tests pass a libsql-backed layer.
   readonly appLayer?: Layer.Layer<Database>
+  // Best-effort hook called after the BYO Tinybird sync successfully activates
+  // (or confirms no_changes). Prod wires this to regenerate the self-managed
+  // collector config so the new org starts receiving its own OTLP payloads.
+  // Swallows failures internally — the sync itself must not flip to "failed"
+  // because a collector reload endpoint was briefly unreachable.
+  readonly publishCollectorConfig?: () => Promise<void>
 }
 
 const logCleanupWarning = (orgId: OrgId, error: unknown) => {
@@ -281,6 +287,18 @@ const logCleanupWarning = (orgId: OrgId, error: unknown) => {
   )
 }
 
+const logPublishConfigWarning = (orgId: OrgId, error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error)
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      event: "tinybird-sync.publish-self-managed-collector-config.failed",
+      orgId,
+      message,
+    }),
+  )
+}
+
 export const runTinybirdSyncWorkflow = async (
   env: Record<string, unknown>,
   event: WorkflowEventLike<TinybirdSyncWorkflowPayload>,
@@ -289,6 +307,21 @@ export const runTinybirdSyncWorkflow = async (
 ): Promise<TinybirdSyncWorkflowResult> => {
   const appLayer = options?.appLayer ?? defaultAppLayer(env)
   const { orgId } = event.payload
+
+  const publishCollectorConfigStep = async () => {
+    if (!options?.publishCollectorConfig) return
+    await step.do(
+      "publish-self-managed-collector-config",
+      DEFAULT_STEP_CONFIG,
+      async () => {
+        try {
+          await options.publishCollectorConfig!()
+        } catch (error) {
+          logPublishConfigWarning(orgId, error)
+        }
+      },
+    )
+  }
 
   const markFailed = (errorMessage: string) =>
     step.do("mark-failed", DEFAULT_STEP_CONFIG, async () => {
@@ -366,6 +399,8 @@ export const runTinybirdSyncWorkflow = async (
         )
       })
 
+      await publishCollectorConfigStep()
+
       return {
         orgId,
         result: "no_changes",
@@ -434,6 +469,8 @@ export const runTinybirdSyncWorkflow = async (
         }),
       )
     })
+
+    await publishCollectorConfigStep()
 
     return { orgId, result: "succeeded", deploymentId, errorMessage: null }
   } catch (error) {

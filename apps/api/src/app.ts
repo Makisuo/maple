@@ -36,6 +36,7 @@ import { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsServic
 import { QueryEngineService } from "./services/QueryEngineService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { TinybirdService } from "./services/TinybirdService"
+import { SelfManagedCollectorConfigService } from "./services/SelfManagedCollectorConfigService"
 import { TinybirdSyncClient } from "./services/TinybirdSyncClient"
 
 export const HealthRouter = HttpRouter.use((router) =>
@@ -59,7 +60,10 @@ export const CoreServicesLive = Layer.mergeAll(
   DashboardPersistenceService.layer,
   OrgIngestKeysService.layer,
   OrgOpenRouterSettingsService.layer,
-  OrgTinybirdSettingsService.layer.pipe(Layer.provide(TinybirdSyncClient.layer)),
+  OrgTinybirdSettingsService.layer.pipe(
+    Layer.provide(TinybirdSyncClient.layer),
+    Layer.provide(SelfManagedCollectorConfigService.layer),
+  ),
   ScrapeTargetsService.layer,
 ).pipe(
   Layer.provideMerge(InfraLive),

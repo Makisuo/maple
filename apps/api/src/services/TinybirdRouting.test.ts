@@ -8,6 +8,7 @@ import {
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
+import { SelfManagedCollectorConfigService } from "./SelfManagedCollectorConfigService"
 import { TinybirdService, __testables as tinybirdTestables } from "./TinybirdService"
 import {
   makeTestTinybirdSyncClientLayer,
@@ -47,6 +48,7 @@ const makeTinybirdLayer = (url: string, overrides: TinybirdSyncClientOverrides =
     Layer.provide(
       OrgTinybirdSettingsService.Live.pipe(
         Layer.provide(makeTestTinybirdSyncClientLayer(overrides)),
+        Layer.provide(SelfManagedCollectorConfigService.Live),
         Layer.provide(DatabaseLibsqlLive),
       ),
     ),
@@ -57,6 +59,13 @@ const makeTinybirdLayer = (url: string, overrides: TinybirdSyncClientOverrides =
 const makeOrgTinybirdLayer = (url: string, overrides: TinybirdSyncClientOverrides = {}) =>
   OrgTinybirdSettingsService.Live.pipe(
     Layer.provide(makeTestTinybirdSyncClientLayer(overrides)),
+    Layer.provide(
+      SelfManagedCollectorConfigService.Live.pipe(
+        Layer.provide(DatabaseLibsqlLive),
+        Layer.provide(Env.Default),
+        Layer.provide(makeConfig(url)),
+      ),
+    ),
     Layer.provide(DatabaseLibsqlLive),
     Layer.provide(Env.Default),
     Layer.provide(makeConfig(url)),
