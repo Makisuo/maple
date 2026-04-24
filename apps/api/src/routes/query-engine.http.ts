@@ -19,6 +19,10 @@ import {
   ListLogsResponse,
   ListMetricsResponse,
   MetricsSummaryResponse,
+  ListHostsResponse,
+  HostDetailSummaryResponse,
+  HostInfraTimeseriesResponse,
+  FleetUtilizationTimeseriesResponse,
 } from "@maple/domain/http"
 import { Effect } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
@@ -386,6 +390,142 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               data: response.result.data.map((item) => ({ name: item.name, value: item.value })),
             },
             warnings: allWarnings.length > 0 ? allWarnings : undefined,
+          })
+        }),
+      )
+      .handle("listHosts", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compile(
+            CH.listHostsQuery({
+              search: payload.search,
+              limit: payload.limit,
+              offset: payload.offset,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "listHosts query failed")
+          const typedRows = compiled.castRows(rows)
+          return new ListHostsResponse({
+            data: typedRows.map((row) => ({
+              hostName: row.hostName,
+              osType: row.osType,
+              hostArch: row.hostArch,
+              cloudProvider: row.cloudProvider,
+              lastSeen: String(row.lastSeen),
+              cpuPct: Number(row.cpuPct) || 0,
+              memoryPct: Number(row.memoryPct) || 0,
+              diskPct: Number(row.diskPct) || 0,
+              load15: Number(row.load15) || 0,
+            })),
+          })
+        }),
+      )
+      .handle("hostDetailSummary", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compile(
+            CH.hostDetailSummaryQuery({ hostName: payload.hostName }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "hostDetailSummary query failed")
+          const typedRows = compiled.castRows(rows)
+          const row = typedRows[0]
+          return new HostDetailSummaryResponse({
+            data: row
+              ? {
+                  hostName: row.hostName,
+                  osType: row.osType,
+                  hostArch: row.hostArch,
+                  cloudProvider: row.cloudProvider,
+                  cloudRegion: row.cloudRegion,
+                  firstSeen: String(row.firstSeen),
+                  lastSeen: String(row.lastSeen),
+                  cpuPct: Number(row.cpuPct) || 0,
+                  memoryPct: Number(row.memoryPct) || 0,
+                  diskPct: Number(row.diskPct) || 0,
+                  load15: Number(row.load15) || 0,
+                }
+              : null,
+          })
+        }),
+      )
+      .handle("fleetUtilizationTimeseries", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const bucketSeconds = payload.bucketSeconds ?? 300
+          const compiled = CH.compile(
+            CH.fleetUtilizationTimeseriesQuery(),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime, bucketSeconds },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "fleetUtilizationTimeseries query failed")
+          const typedRows = compiled.castRows(rows)
+          return new FleetUtilizationTimeseriesResponse({
+            data: typedRows.map((row) => ({
+              bucket: String(row.bucket),
+              avgCpu: Number(row.avgCpu) || 0,
+              avgMemory: Number(row.avgMemory) || 0,
+              activeHosts: Number(row.activeHosts) || 0,
+            })),
+          })
+        }),
+      )
+      .handle("hostInfraTimeseries", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const bucketSeconds = payload.bucketSeconds ?? 60
+
+          const spec = (() => {
+            switch (payload.metric) {
+              case "cpu":
+                return { metricName: "system.cpu.utilization", groupByAttributeKey: "state", unit: "percent" as const, isNetwork: false }
+              case "memory":
+                return { metricName: "system.memory.utilization", groupByAttributeKey: "state", unit: "percent" as const, isNetwork: false }
+              case "filesystem":
+                return { metricName: "system.filesystem.utilization", groupByAttributeKey: "mountpoint", unit: "percent" as const, isNetwork: false }
+              case "load15":
+                return { metricName: "system.cpu.load_average.15m", groupByAttributeKey: undefined, unit: "load" as const, isNetwork: false }
+              case "network":
+                return { metricName: "system.network.io", groupByAttributeKey: "direction", unit: "bytes_per_second" as const, isNetwork: true }
+            }
+          })()
+
+          if (spec.isNetwork) {
+            const compiled = CH.compile(
+              CH.hostNetworkTimeseriesQuery({ hostName: payload.hostName }),
+              { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime, bucketSeconds },
+            )
+            const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "hostInfraTimeseries (network) query failed")
+            const typedRows = compiled.castRows(rows)
+            return new HostInfraTimeseriesResponse({
+              data: typedRows.map((row) => ({
+                bucket: String(row.bucket),
+                attributeValue: String(row.attributeValue ?? ""),
+                value: Number(row.sumValue) || 0,
+              })),
+              groupByAttributeKey: spec.groupByAttributeKey,
+              unit: spec.unit,
+            })
+          }
+
+          const compiled = CH.compile(
+            CH.hostGaugeTimeseriesQuery({
+              hostName: payload.hostName,
+              metricName: spec.metricName,
+              groupByAttributeKey: spec.groupByAttributeKey,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime, bucketSeconds },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "hostInfraTimeseries query failed")
+          const typedRows = compiled.castRows(rows)
+          return new HostInfraTimeseriesResponse({
+            data: typedRows.map((row) => ({
+              bucket: String(row.bucket),
+              attributeValue: String(row.attributeValue ?? ""),
+              value: Number(row.avgValue) || 0,
+            })),
+            groupByAttributeKey: spec.groupByAttributeKey,
+            unit: spec.unit,
           })
         }),
       )

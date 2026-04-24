@@ -17,6 +17,8 @@ export const sum = defineFn<[Expr<number>], number>("sum")
 
 export const countIf = defineFn<[Condition], number>("countIf")
 export const sumIf = defineFn<[Expr<number>, Condition], number>("sumIf")
+export const avgIf = defineFn<[Expr<number>, Condition], number>("avgIf")
+export const maxIf = defineFn<[Expr<number>, Condition], number>("maxIf")
 
 // ---------------------------------------------------------------------------
 // Generic aggregates (compileFnCall for type preservation)

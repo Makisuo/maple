@@ -6,6 +6,7 @@ import {
   PulseIcon,
   ChartLineIcon,
   ServerIcon,
+  ComputerIcon,
   BellIcon,
   CircleWarningIcon,
   CircleQuestionIcon,
@@ -54,6 +55,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode";
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth";
 import { useDashboardStore } from "@/hooks/use-dashboard-store";
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences";
+import { useInfraEnabled } from "@/hooks/use-infra-enabled";
 import { Badge } from "@maple/ui/components/ui/badge";
 
 const mainNavItems = [
@@ -97,6 +99,11 @@ const signalsNavItems = [
     title: "Metrics",
     href: "/metrics",
     icon: ChartLineIcon,
+  },
+  {
+    title: "Infrastructure",
+    href: "/infra",
+    icon: ComputerIcon,
   },
 ];
 
@@ -247,6 +254,11 @@ export function AppSidebar() {
   const favoriteDashboards = dashboards.filter((d) => favorites.has(d.id));
   const otherDashboards = dashboards.filter((d) => !favorites.has(d.id));
 
+  const infraEnabled = useInfraEnabled();
+  const visibleSignalsNavItems = infraEnabled
+    ? signalsNavItems
+    : signalsNavItems.filter((item) => item.href !== "/infra");
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -275,7 +287,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {[topologyNavItems, signalsNavItems, investigateNavItems].map((group) => (
+        {[topologyNavItems, visibleSignalsNavItems, investigateNavItems].map((group) => (
           <SidebarGroup key={group[0].title}>
             <SidebarGroupContent>
               <SidebarMenu>

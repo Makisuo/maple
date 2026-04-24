@@ -16,6 +16,12 @@ import {
 } from "@/api/tinybird/errors"
 import { getLogsFacets, listLogs } from "@/api/tinybird/logs"
 import { getMetricAttributeKeys, getMetricTimeSeries, getMetricsSummary, listMetrics } from "@/api/tinybird/metrics"
+import {
+  fleetUtilizationTimeseries,
+  hostDetailSummary,
+  hostInfraTimeseries,
+  listHosts,
+} from "@/api/tinybird/infra"
 import { getServiceUsage } from "@/api/tinybird/service-usage"
 import { getServiceMap } from "@/api/tinybird/service-map"
 import {
@@ -149,6 +155,25 @@ export const getMetricTimeSeriesResultAtom = makeQueryAtomFamily(getMetricTimeSe
 export const getMetricAttributeKeysResultAtom = makeQueryAtomFamily(getMetricAttributeKeys, {
   staleTime: 60_000,
 })
+
+export const listHostsResultAtom = makeQueryAtomFamily(listHosts, {
+  staleTime: 30_000,
+})
+
+export const hostDetailSummaryResultAtom = makeQueryAtomFamily(hostDetailSummary, {
+  staleTime: 30_000,
+})
+
+export const hostInfraTimeseriesResultAtom = makeQueryAtomFamily(hostInfraTimeseries, {
+  staleTime: 30_000,
+})
+
+export const fleetUtilizationTimeseriesResultAtom = makeQueryAtomFamily(
+  fleetUtilizationTimeseries,
+  {
+    staleTime: 30_000,
+  },
+)
 
 export const getServiceApdexTimeSeriesResultAtom = makeQueryAtomFamily(
   getServiceApdexTimeSeries,

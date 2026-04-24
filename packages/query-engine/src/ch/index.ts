@@ -65,6 +65,8 @@ export {
   anyIf,
   uniq,
   sumIf,
+  avgIf,
+  maxIf,
   groupUniqArray,
   // String
   toString_ as toString,
@@ -266,3 +268,21 @@ export {
   type ListRuleChecksOpts,
   type ListRuleChecksOutput,
 } from "./queries/alert-checks"
+
+// Queries — Infrastructure (host-centric aggregations over hostmetrics)
+export {
+  listHostsQuery,
+  hostDetailSummaryQuery,
+  hostGaugeTimeseriesQuery,
+  hostNetworkTimeseriesQuery,
+  fleetUtilizationTimeseriesQuery,
+  type ListHostsOpts,
+  type ListHostsOutput,
+  type HostDetailSummaryOpts,
+  type HostDetailSummaryOutput,
+  type HostGaugeTimeseriesOpts,
+  type HostGaugeTimeseriesOutput,
+  type HostNetworkTimeseriesOpts,
+  type HostNetworkTimeseriesOutput,
+  type FleetUtilizationTimeseriesOutput,
+} from "./queries/infra"

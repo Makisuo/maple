@@ -233,6 +233,89 @@ export class MetricsSummaryResponse extends Schema.Class<MetricsSummaryResponse>
 }) {}
 
 // ---------------------------------------------------------------------------
+// Infrastructure (host-centric)
+// ---------------------------------------------------------------------------
+
+export class ListHostsRequest extends Schema.Class<ListHostsRequest>("ListHostsRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  search: Schema.optional(Schema.String),
+  limit: Schema.optional(Schema.Number),
+  offset: Schema.optional(Schema.Number),
+}) {}
+
+const HostRow = Schema.Struct({
+  hostName: Schema.String,
+  osType: Schema.String,
+  hostArch: Schema.String,
+  cloudProvider: Schema.String,
+  lastSeen: Schema.String,
+  cpuPct: Schema.Number,
+  memoryPct: Schema.Number,
+  diskPct: Schema.Number,
+  load15: Schema.Number,
+})
+
+export class ListHostsResponse extends Schema.Class<ListHostsResponse>("ListHostsResponse")({
+  data: Schema.Array(HostRow),
+}) {}
+
+export class HostDetailSummaryRequest extends Schema.Class<HostDetailSummaryRequest>("HostDetailSummaryRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  hostName: Schema.String,
+}) {}
+
+export class HostDetailSummaryResponse extends Schema.Class<HostDetailSummaryResponse>("HostDetailSummaryResponse")({
+  data: Schema.NullOr(Schema.Struct({
+    hostName: Schema.String,
+    osType: Schema.String,
+    hostArch: Schema.String,
+    cloudProvider: Schema.String,
+    cloudRegion: Schema.String,
+    firstSeen: Schema.String,
+    lastSeen: Schema.String,
+    cpuPct: Schema.Number,
+    memoryPct: Schema.Number,
+    diskPct: Schema.Number,
+    load15: Schema.Number,
+  })),
+}) {}
+
+export class HostInfraTimeseriesRequest extends Schema.Class<HostInfraTimeseriesRequest>("HostInfraTimeseriesRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  hostName: Schema.String,
+  metric: Schema.Literals(["cpu", "memory", "filesystem", "network", "load15"]),
+  bucketSeconds: Schema.optional(Schema.Number),
+}) {}
+
+export class HostInfraTimeseriesResponse extends Schema.Class<HostInfraTimeseriesResponse>("HostInfraTimeseriesResponse")({
+  data: Schema.Array(Schema.Struct({
+    bucket: Schema.String,
+    attributeValue: Schema.String,
+    value: Schema.Number,
+  })),
+  groupByAttributeKey: Schema.optional(Schema.String),
+  unit: Schema.Literals(["percent", "load", "bytes_per_second"]),
+}) {}
+
+export class FleetUtilizationTimeseriesRequest extends Schema.Class<FleetUtilizationTimeseriesRequest>("FleetUtilizationTimeseriesRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  bucketSeconds: Schema.optional(Schema.Number),
+}) {}
+
+export class FleetUtilizationTimeseriesResponse extends Schema.Class<FleetUtilizationTimeseriesResponse>("FleetUtilizationTimeseriesResponse")({
+  data: Schema.Array(Schema.Struct({
+    bucket: Schema.String,
+    avgCpu: Schema.Number,
+    avgMemory: Schema.Number,
+    activeHosts: Schema.Number,
+  })),
+}) {}
+
+// ---------------------------------------------------------------------------
 // Query Builder execute (used by dashboards' custom_query_builder_* widgets)
 // ---------------------------------------------------------------------------
 
@@ -392,6 +475,22 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
     payload: ExecuteQueryBuilderRequest,
     success: ExecuteQueryBuilderResponse,
     error: [QueryEngineValidationError, QueryEngineExecutionError, QueryEngineTimeoutError],
+  }))
+  .add(HttpApiEndpoint.post("listHosts", "/list-hosts", {
+    payload: ListHostsRequest, success: ListHostsResponse,
+    error: [QueryEngineExecutionError],
+  }))
+  .add(HttpApiEndpoint.post("hostDetailSummary", "/host-detail-summary", {
+    payload: HostDetailSummaryRequest, success: HostDetailSummaryResponse,
+    error: [QueryEngineExecutionError],
+  }))
+  .add(HttpApiEndpoint.post("hostInfraTimeseries", "/host-infra-timeseries", {
+    payload: HostInfraTimeseriesRequest, success: HostInfraTimeseriesResponse,
+    error: [QueryEngineExecutionError],
+  }))
+  .add(HttpApiEndpoint.post("fleetUtilizationTimeseries", "/fleet-utilization-timeseries", {
+    payload: FleetUtilizationTimeseriesRequest, success: FleetUtilizationTimeseriesResponse,
+    error: [QueryEngineExecutionError],
   }))
   .prefix("/api/query-engine")
   .middleware(Authorization) {}

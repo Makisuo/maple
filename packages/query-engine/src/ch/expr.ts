@@ -255,6 +255,8 @@ export {
   anyIf,
   uniq,
   sumIf,
+  avgIf,
+  maxIf,
   groupUniqArray,
   toString_,
   positionCaseInsensitive,

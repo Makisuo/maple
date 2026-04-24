@@ -14,6 +14,8 @@ export {
   anyIf,
   uniq,
   sumIf,
+  avgIf,
+  maxIf,
   groupUniqArray,
 } from "./aggregate"
 
