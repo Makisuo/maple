@@ -154,9 +154,9 @@ receivers:
   otlp:
     protocols:
       grpc:
-        endpoint: 0.0.0.0:4317
+        endpoint: "[::]:4317"
       http:
-        endpoint: 0.0.0.0:4318
+        endpoint: "[::]:4318"
 
 processors:
   memory_limiter:
@@ -183,7 +183,7 @@ extensions:
       on_start: true
       on_rebound: true
   health_check:
-    endpoint: 0.0.0.0:13133
+    endpoint: "[::]:13133"
 
 service:
   extensions: [health_check, file_storage/queue]
@@ -215,9 +215,9 @@ receivers:
   otlp:
     protocols:
       grpc:
-        endpoint: 0.0.0.0:4317
+        endpoint: "[::]:4317"
       http:
-        endpoint: 0.0.0.0:4318
+        endpoint: "[::]:4318"
 
 processors:
   memory_limiter:
@@ -252,7 +252,7 @@ extensions:
       on_start: true
       on_rebound: true
   health_check:
-    endpoint: 0.0.0.0:13133
+    endpoint: "[::]:13133"
 
 service:
   extensions: [health_check, file_storage/queue]

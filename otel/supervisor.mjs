@@ -226,7 +226,10 @@ const shutdown = () => {
 process.on("SIGTERM", shutdown)
 process.on("SIGINT", shutdown)
 
-server.listen(RELOAD_PORT, "0.0.0.0", () => {
+// Bind to :: so the supervisor is reachable on Railway's IPv6-only private
+// network (for <service>.railway.internal DNS) as well as the public TCP
+// proxy. Node dual-stacks a `::` bind to also accept IPv4.
+server.listen(RELOAD_PORT, "::", () => {
   log("info", "supervisor listening", { port: RELOAD_PORT })
   child = spawnCollector()
 })
