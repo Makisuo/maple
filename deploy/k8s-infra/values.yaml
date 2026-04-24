@@ -43,9 +43,19 @@ presets:
     rootPath: /hostfs
     collectionInterval: 30s
     scrapers:
-      cpu: {}
+      # system.cpu.utilization is an optional gauge — not on by default in
+      # hostmetrics. Maple's listHostsQuery reads this metric (and the memory
+      # / filesystem equivalents below) to populate CPU% / Memory% / Disk%
+      # on the Infrastructure page, so enable them here.
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
       load: {}
-      memory: {}
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
       disk:
         exclude:
           devices:
@@ -60,6 +70,9 @@ presets:
             - ^nvme\d+n\d+p\d+$
           match_type: regexp
       filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
         exclude_fs_types:
           fs_types:
             - autofs
