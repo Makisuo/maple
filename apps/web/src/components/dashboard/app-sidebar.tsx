@@ -84,7 +84,14 @@ const topologyNavItems = [
   },
 ];
 
-const signalsNavItems = [
+interface SignalsNavItem {
+  title: string;
+  href: string;
+  icon: typeof PulseIcon;
+  subItems?: { title: string; href: string }[];
+}
+
+const signalsNavItems: SignalsNavItem[] = [
   {
     title: "Traces",
     href: "/traces",
@@ -104,6 +111,12 @@ const signalsNavItems = [
     title: "Infrastructure",
     href: "/infra",
     icon: ComputerIcon,
+    subItems: [
+      { title: "Hosts", href: "/infra" },
+      { title: "Pods", href: "/infra/pods" },
+      { title: "Nodes", href: "/infra/nodes" },
+      { title: "Workloads", href: "/infra/workloads" },
+    ],
   },
 ];
 
@@ -293,6 +306,8 @@ export function AppSidebar() {
               <SidebarMenu>
                 {group.map((item) => {
                   const isActive = currentPath.startsWith(item.href);
+                  const subItems =
+                    "subItems" in item ? (item.subItems as { title: string; href: string }[] | undefined) : undefined;
                   return (
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton
@@ -312,6 +327,27 @@ export function AppSidebar() {
                             {item.badge as string}
                           </Badge>
                         </SidebarMenuBadge>
+                      ) : null}
+                      {subItems && isActive ? (
+                        <SidebarMenuSub>
+                          {subItems.map((sub) => {
+                            const subActive =
+                              sub.href === item.href
+                                ? currentPath === item.href ||
+                                  currentPath === `${item.href}/`
+                                : currentPath.startsWith(sub.href);
+                            return (
+                              <SidebarMenuSubItem key={sub.title}>
+                                <SidebarMenuSubButton
+                                  render={<Link to={sub.href} />}
+                                  isActive={subActive}
+                                >
+                                  <span>{sub.title}</span>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            );
+                          })}
+                        </SidebarMenuSub>
                       ) : null}
                     </SidebarMenuItem>
                   );

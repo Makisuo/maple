@@ -23,6 +23,15 @@ import {
   HostDetailSummaryResponse,
   HostInfraTimeseriesResponse,
   FleetUtilizationTimeseriesResponse,
+  ListPodsResponse,
+  PodDetailSummaryResponse,
+  PodInfraTimeseriesResponse,
+  ListNodesResponse,
+  NodeDetailSummaryResponse,
+  NodeInfraTimeseriesResponse,
+  ListWorkloadsResponse,
+  WorkloadDetailSummaryResponse,
+  WorkloadInfraTimeseriesResponse,
 } from "@maple/domain/http"
 import { Effect } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
@@ -525,6 +534,296 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               value: Number(row.avgValue) || 0,
             })),
             groupByAttributeKey: spec.groupByAttributeKey,
+            unit: spec.unit,
+          })
+        }),
+      )
+      .handle("listPods", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compile(
+            CH.listPodsQuery({
+              search: payload.search,
+              namespace: payload.namespace,
+              nodeName: payload.nodeName,
+              workloadKind: payload.workloadKind,
+              workloadName: payload.workloadName,
+              limit: payload.limit,
+              offset: payload.offset,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "listPods query failed")
+          const typedRows = compiled.castRows(rows)
+          return new ListPodsResponse({
+            data: typedRows.map((row) => ({
+              podName: row.podName,
+              namespace: row.namespace,
+              nodeName: row.nodeName,
+              deploymentName: row.deploymentName,
+              statefulsetName: row.statefulsetName,
+              daemonsetName: row.daemonsetName,
+              qosClass: row.qosClass,
+              podUid: row.podUid,
+              lastSeen: String(row.lastSeen),
+              cpuUsage: Number(row.cpuUsage) || 0,
+              cpuLimitPct: Number(row.cpuLimitPct) || 0,
+              memoryLimitPct: Number(row.memoryLimitPct) || 0,
+            })),
+          })
+        }),
+      )
+      .handle("podDetailSummary", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compile(
+            CH.podDetailSummaryQuery({ podName: payload.podName, namespace: payload.namespace }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "podDetailSummary query failed")
+          const typedRows = compiled.castRows(rows)
+          const row = typedRows[0]
+          return new PodDetailSummaryResponse({
+            data: row
+              ? {
+                  podName: row.podName,
+                  namespace: row.namespace,
+                  nodeName: row.nodeName,
+                  deploymentName: row.deploymentName,
+                  statefulsetName: row.statefulsetName,
+                  daemonsetName: row.daemonsetName,
+                  qosClass: row.qosClass,
+                  podUid: row.podUid,
+                  podStartTime: row.podStartTime,
+                  firstSeen: String(row.firstSeen),
+                  lastSeen: String(row.lastSeen),
+                  cpuUsage: Number(row.cpuUsage) || 0,
+                  cpuLimitPct: Number(row.cpuLimitPct) || 0,
+                  memoryLimitPct: Number(row.memoryLimitPct) || 0,
+                  cpuRequestPct: Number(row.cpuRequestPct) || 0,
+                  memoryRequestPct: Number(row.memoryRequestPct) || 0,
+                }
+              : null,
+          })
+        }),
+      )
+      .handle("podInfraTimeseries", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const bucketSeconds = payload.bucketSeconds ?? 60
+
+          const spec = (() => {
+            switch (payload.metric) {
+              case "cpu_usage":
+                return { metricName: "k8s.pod.cpu.usage", unit: "cores" as const }
+              case "cpu_limit":
+                return { metricName: "k8s.pod.cpu_limit_utilization", unit: "percent" as const }
+              case "cpu_request":
+                return { metricName: "k8s.pod.cpu_request_utilization", unit: "percent" as const }
+              case "memory_limit":
+                return { metricName: "k8s.pod.memory_limit_utilization", unit: "percent" as const }
+              case "memory_request":
+                return { metricName: "k8s.pod.memory_request_utilization", unit: "percent" as const }
+            }
+          })()
+
+          const compiled = CH.compile(
+            CH.podGaugeTimeseriesQuery({
+              podName: payload.podName,
+              namespace: payload.namespace,
+              metricName: spec.metricName,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime, bucketSeconds },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "podInfraTimeseries query failed")
+          const typedRows = compiled.castRows(rows)
+          return new PodInfraTimeseriesResponse({
+            data: typedRows.map((row) => ({
+              bucket: String(row.bucket),
+              attributeValue: String(row.attributeValue ?? ""),
+              value: Number(row.avgValue) || 0,
+            })),
+            unit: spec.unit,
+          })
+        }),
+      )
+      .handle("listNodes", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compile(
+            CH.listNodesQuery({
+              search: payload.search,
+              limit: payload.limit,
+              offset: payload.offset,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "listNodes query failed")
+          const typedRows = compiled.castRows(rows)
+          return new ListNodesResponse({
+            data: typedRows.map((row) => ({
+              nodeName: row.nodeName,
+              nodeUid: row.nodeUid,
+              kubeletVersion: row.kubeletVersion,
+              lastSeen: String(row.lastSeen),
+              cpuUsage: Number(row.cpuUsage) || 0,
+              uptime: Number(row.uptime) || 0,
+            })),
+          })
+        }),
+      )
+      .handle("nodeDetailSummary", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compile(
+            CH.nodeDetailSummaryQuery({ nodeName: payload.nodeName }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "nodeDetailSummary query failed")
+          const typedRows = compiled.castRows(rows)
+          const row = typedRows[0]
+          return new NodeDetailSummaryResponse({
+            data: row
+              ? {
+                  nodeName: row.nodeName,
+                  nodeUid: row.nodeUid,
+                  kubeletVersion: row.kubeletVersion,
+                  containerRuntime: row.containerRuntime,
+                  firstSeen: String(row.firstSeen),
+                  lastSeen: String(row.lastSeen),
+                  cpuUsage: Number(row.cpuUsage) || 0,
+                  uptime: Number(row.uptime) || 0,
+                }
+              : null,
+          })
+        }),
+      )
+      .handle("nodeInfraTimeseries", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const bucketSeconds = payload.bucketSeconds ?? 60
+
+          const spec = (() => {
+            switch (payload.metric) {
+              case "cpu_usage":
+                return { metricName: "k8s.node.cpu.usage", unit: "cores" as const }
+              case "uptime":
+                return { metricName: "k8s.node.uptime", unit: "seconds" as const }
+            }
+          })()
+
+          const compiled = CH.compile(
+            CH.nodeGaugeTimeseriesQuery({
+              nodeName: payload.nodeName,
+              metricName: spec.metricName,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime, bucketSeconds },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "nodeInfraTimeseries query failed")
+          const typedRows = compiled.castRows(rows)
+          return new NodeInfraTimeseriesResponse({
+            data: typedRows.map((row) => ({
+              bucket: String(row.bucket),
+              attributeValue: String(row.attributeValue ?? ""),
+              value: Number(row.avgValue) || 0,
+            })),
+            unit: spec.unit,
+          })
+        }),
+      )
+      .handle("listWorkloads", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compile(
+            CH.listWorkloadsQuery({
+              kind: payload.kind,
+              search: payload.search,
+              namespace: payload.namespace,
+              limit: payload.limit,
+              offset: payload.offset,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "listWorkloads query failed")
+          const typedRows = compiled.castRows(rows)
+          return new ListWorkloadsResponse({
+            data: typedRows.map((row) => ({
+              workloadName: row.workloadName,
+              namespace: row.namespace,
+              podCount: Number(row.podCount) || 0,
+              lastSeen: String(row.lastSeen),
+              avgCpuLimitPct: Number(row.avgCpuLimitPct) || 0,
+              avgMemoryLimitPct: Number(row.avgMemoryLimitPct) || 0,
+              avgCpuUsage: Number(row.avgCpuUsage) || 0,
+            })),
+          })
+        }),
+      )
+      .handle("workloadDetailSummary", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.compile(
+            CH.workloadDetailSummaryQuery({
+              kind: payload.kind,
+              workloadName: payload.workloadName,
+              namespace: payload.namespace,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "workloadDetailSummary query failed")
+          const typedRows = compiled.castRows(rows)
+          const row = typedRows[0]
+          return new WorkloadDetailSummaryResponse({
+            data: row
+              ? {
+                  workloadName: row.workloadName,
+                  kind: payload.kind,
+                  namespace: row.namespace,
+                  podCount: Number(row.podCount) || 0,
+                  firstSeen: String(row.firstSeen),
+                  lastSeen: String(row.lastSeen),
+                  avgCpuLimitPct: Number(row.avgCpuLimitPct) || 0,
+                  avgMemoryLimitPct: Number(row.avgMemoryLimitPct) || 0,
+                  avgCpuUsage: Number(row.avgCpuUsage) || 0,
+                }
+              : null,
+          })
+        }),
+      )
+      .handle("workloadInfraTimeseries", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const bucketSeconds = payload.bucketSeconds ?? 60
+
+          const spec = (() => {
+            switch (payload.metric) {
+              case "cpu_usage":
+                return { metricName: "k8s.pod.cpu.usage", unit: "cores" as const }
+              case "cpu_limit":
+                return { metricName: "k8s.pod.cpu_limit_utilization", unit: "percent" as const }
+              case "memory_limit":
+                return { metricName: "k8s.pod.memory_limit_utilization", unit: "percent" as const }
+            }
+          })()
+
+          const compiled = CH.compile(
+            CH.workloadGaugeTimeseriesQuery({
+              kind: payload.kind,
+              workloadName: payload.workloadName,
+              namespace: payload.namespace,
+              metricName: spec.metricName,
+              groupByPod: payload.groupByPod,
+            }),
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime, bucketSeconds },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "workloadInfraTimeseries query failed")
+          const typedRows = compiled.castRows(rows)
+          return new WorkloadInfraTimeseriesResponse({
+            data: typedRows.map((row) => ({
+              bucket: String(row.bucket),
+              attributeValue: String(row.attributeValue ?? ""),
+              value: Number(row.avgValue) || 0,
+            })),
             unit: spec.unit,
           })
         }),

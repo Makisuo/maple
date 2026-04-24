@@ -21,6 +21,15 @@ import {
   hostDetailSummary,
   hostInfraTimeseries,
   listHosts,
+  listPods,
+  podDetailSummary,
+  podInfraTimeseries,
+  listNodes,
+  nodeDetailSummary,
+  nodeInfraTimeseries,
+  listWorkloads,
+  workloadDetailSummary,
+  workloadInfraTimeseries,
 } from "@/api/tinybird/infra"
 import { getServiceUsage } from "@/api/tinybird/service-usage"
 import { getServiceMap } from "@/api/tinybird/service-map"
@@ -174,6 +183,42 @@ export const fleetUtilizationTimeseriesResultAtom = makeQueryAtomFamily(
     staleTime: 30_000,
   },
 )
+
+export const listPodsResultAtom = makeQueryAtomFamily(listPods, {
+  staleTime: 30_000,
+})
+
+export const podDetailSummaryResultAtom = makeQueryAtomFamily(podDetailSummary, {
+  staleTime: 30_000,
+})
+
+export const podInfraTimeseriesResultAtom = makeQueryAtomFamily(podInfraTimeseries, {
+  staleTime: 30_000,
+})
+
+export const listNodesResultAtom = makeQueryAtomFamily(listNodes, {
+  staleTime: 30_000,
+})
+
+export const nodeDetailSummaryResultAtom = makeQueryAtomFamily(nodeDetailSummary, {
+  staleTime: 30_000,
+})
+
+export const nodeInfraTimeseriesResultAtom = makeQueryAtomFamily(nodeInfraTimeseries, {
+  staleTime: 30_000,
+})
+
+export const listWorkloadsResultAtom = makeQueryAtomFamily(listWorkloads, {
+  staleTime: 30_000,
+})
+
+export const workloadDetailSummaryResultAtom = makeQueryAtomFamily(workloadDetailSummary, {
+  staleTime: 30_000,
+})
+
+export const workloadInfraTimeseriesResultAtom = makeQueryAtomFamily(workloadInfraTimeseries, {
+  staleTime: 30_000,
+})
 
 export const getServiceApdexTimeSeriesResultAtom = makeQueryAtomFamily(
   getServiceApdexTimeSeries,

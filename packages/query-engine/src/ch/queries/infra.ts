@@ -285,3 +285,511 @@ export function hostNetworkTimeseriesQuery(opts: HostNetworkTimeseriesOpts) {
     .orderBy(["bucket", "asc"])
     .format("JSON")
 }
+
+// ---------------------------------------------------------------------------
+// Kubernetes — pod aggregations over k8s.pod.* metrics emitted by the kubelet
+// stats receiver. Identity carried on ResourceAttributes:
+//   k8s.pod.name, k8s.pod.uid, k8s.namespace.name, k8s.node.name,
+//   k8s.deployment.name | k8s.statefulset.name | k8s.daemonset.name,
+//   k8s.pod.qos_class, k8s.pod.start_time
+// Headline metrics:
+//   k8s.pod.cpu.usage                 gauge, cores
+//   k8s.pod.cpu_limit_utilization     gauge, 0..1
+//   k8s.pod.cpu_request_utilization   gauge, 0..1
+//   k8s.pod.memory_limit_utilization  gauge, 0..1
+//   k8s.pod.memory_request_utilization gauge, 0..1
+// ---------------------------------------------------------------------------
+
+const POD_METRIC_NAMES = [
+  "k8s.pod.cpu.usage",
+  "k8s.pod.cpu_limit_utilization",
+  "k8s.pod.cpu_request_utilization",
+  "k8s.pod.memory_limit_utilization",
+  "k8s.pod.memory_request_utilization",
+] as const
+
+export interface ListPodsOpts {
+  search?: string
+  namespace?: string
+  nodeName?: string
+  workloadKind?: "deployment" | "statefulset" | "daemonset"
+  workloadName?: string
+  limit?: number
+  offset?: number
+}
+
+export interface ListPodsOutput {
+  readonly podName: string
+  readonly namespace: string
+  readonly nodeName: string
+  readonly deploymentName: string
+  readonly statefulsetName: string
+  readonly daemonsetName: string
+  readonly qosClass: string
+  readonly podUid: string
+  readonly lastSeen: string
+  readonly cpuUsage: number
+  readonly cpuLimitPct: number
+  readonly memoryLimitPct: number
+}
+
+const workloadAttrKey = (kind: "deployment" | "statefulset" | "daemonset") =>
+  kind === "deployment"
+    ? "k8s.deployment.name"
+    : kind === "statefulset"
+      ? "k8s.statefulset.name"
+      : "k8s.daemonset.name"
+
+export function listPodsQuery(opts: ListPodsOpts = {}) {
+  return from(MetricsGauge)
+    .select(($) => ({
+      podName: $.ResourceAttributes.get("k8s.pod.name"),
+      namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
+      nodeName: CH.any_($.ResourceAttributes.get("k8s.node.name")),
+      deploymentName: CH.any_($.ResourceAttributes.get("k8s.deployment.name")),
+      statefulsetName: CH.any_($.ResourceAttributes.get("k8s.statefulset.name")),
+      daemonsetName: CH.any_($.ResourceAttributes.get("k8s.daemonset.name")),
+      qosClass: CH.any_($.ResourceAttributes.get("k8s.pod.qos_class")),
+      podUid: CH.any_($.ResourceAttributes.get("k8s.pod.uid")),
+      lastSeen: CH.max_($.TimeUnix),
+      cpuUsage: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu.usage"),
+      ),
+      cpuLimitPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu_limit_utilization"),
+      ),
+      memoryLimitPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.memory_limit_utilization"),
+      ),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get("k8s.pod.name").neq(""),
+      $.MetricName.in_(...POD_METRIC_NAMES),
+      CH.when(opts.search, (v: string) =>
+        CH.positionCaseInsensitive(
+          $.ResourceAttributes.get("k8s.pod.name"),
+          CH.lit(v),
+        ).gt(0),
+      ),
+      CH.when(opts.namespace, (v: string) =>
+        $.ResourceAttributes.get("k8s.namespace.name").eq(v),
+      ),
+      CH.when(opts.nodeName, (v: string) =>
+        $.ResourceAttributes.get("k8s.node.name").eq(v),
+      ),
+      CH.when(opts.workloadKind && opts.workloadName, () =>
+        $.ResourceAttributes
+          .get(workloadAttrKey(opts.workloadKind!))
+          .eq(opts.workloadName!),
+      ),
+    ])
+    .groupBy("podName")
+    .orderBy(["lastSeen", "desc"])
+    .limit(opts.limit ?? 200)
+    .offset(opts.offset ?? 0)
+    .format("JSON")
+}
+
+export interface PodDetailSummaryOpts {
+  podName: string
+  namespace?: string
+}
+
+export interface PodDetailSummaryOutput {
+  readonly podName: string
+  readonly namespace: string
+  readonly nodeName: string
+  readonly deploymentName: string
+  readonly statefulsetName: string
+  readonly daemonsetName: string
+  readonly qosClass: string
+  readonly podUid: string
+  readonly podStartTime: string
+  readonly firstSeen: string
+  readonly lastSeen: string
+  readonly cpuUsage: number
+  readonly cpuLimitPct: number
+  readonly memoryLimitPct: number
+  readonly cpuRequestPct: number
+  readonly memoryRequestPct: number
+}
+
+export function podDetailSummaryQuery(opts: PodDetailSummaryOpts) {
+  return from(MetricsGauge)
+    .select(($) => ({
+      podName: $.ResourceAttributes.get("k8s.pod.name"),
+      namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
+      nodeName: CH.any_($.ResourceAttributes.get("k8s.node.name")),
+      deploymentName: CH.any_($.ResourceAttributes.get("k8s.deployment.name")),
+      statefulsetName: CH.any_($.ResourceAttributes.get("k8s.statefulset.name")),
+      daemonsetName: CH.any_($.ResourceAttributes.get("k8s.daemonset.name")),
+      qosClass: CH.any_($.ResourceAttributes.get("k8s.pod.qos_class")),
+      podUid: CH.any_($.ResourceAttributes.get("k8s.pod.uid")),
+      podStartTime: CH.any_($.ResourceAttributes.get("k8s.pod.start_time")),
+      firstSeen: CH.min_($.TimeUnix),
+      lastSeen: CH.max_($.TimeUnix),
+      cpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.pod.cpu.usage")),
+      cpuLimitPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu_limit_utilization"),
+      ),
+      memoryLimitPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.memory_limit_utilization"),
+      ),
+      cpuRequestPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu_request_utilization"),
+      ),
+      memoryRequestPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.memory_request_utilization"),
+      ),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get("k8s.pod.name").eq(opts.podName),
+      CH.when(opts.namespace, (v: string) =>
+        $.ResourceAttributes.get("k8s.namespace.name").eq(v),
+      ),
+      $.MetricName.in_(...POD_METRIC_NAMES),
+    ])
+    .groupBy("podName")
+    .format("JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Pod time-series — gauge metric for one pod, optionally broken down by an
+// attribute key (e.g. container name, when present).
+// ---------------------------------------------------------------------------
+
+export interface PodGaugeTimeseriesOpts {
+  podName: string
+  namespace?: string
+  metricName: string
+  groupByAttributeKey?: string
+}
+
+export function podGaugeTimeseriesQuery(opts: PodGaugeTimeseriesOpts) {
+  const q = from(MetricsGauge)
+    .select(($) => ({
+      bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
+      attributeValue: opts.groupByAttributeKey
+        ? $.ResourceAttributes.get(opts.groupByAttributeKey)
+        : CH.lit(""),
+      avgValue: CH.avg($.Value),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get("k8s.pod.name").eq(opts.podName),
+      CH.when(opts.namespace, (v: string) =>
+        $.ResourceAttributes.get("k8s.namespace.name").eq(v),
+      ),
+      $.MetricName.eq(opts.metricName),
+    ])
+
+  return (opts.groupByAttributeKey
+    ? q.groupBy("bucket", "attributeValue")
+    : q.groupBy("bucket")
+  )
+    .orderBy(["bucket", "asc"])
+    .format("JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Kubernetes — node aggregations over k8s.node.* metrics from the kubelet
+// stats + k8s_cluster receivers.
+//   k8s.node.cpu.usage    gauge, cores
+//   k8s.node.uptime       gauge, seconds
+// ---------------------------------------------------------------------------
+
+const NODE_METRIC_NAMES = [
+  "k8s.node.cpu.usage",
+  "k8s.node.uptime",
+] as const
+
+export interface ListNodesOpts {
+  search?: string
+  limit?: number
+  offset?: number
+}
+
+export interface ListNodesOutput {
+  readonly nodeName: string
+  readonly nodeUid: string
+  readonly kubeletVersion: string
+  readonly lastSeen: string
+  readonly cpuUsage: number
+  readonly uptime: number
+}
+
+export function listNodesQuery(opts: ListNodesOpts = {}) {
+  return from(MetricsGauge)
+    .select(($) => ({
+      nodeName: $.ResourceAttributes.get("k8s.node.name"),
+      nodeUid: CH.any_($.ResourceAttributes.get("k8s.node.uid")),
+      kubeletVersion: CH.any_($.ResourceAttributes.get("k8s.kubelet.version")),
+      lastSeen: CH.max_($.TimeUnix),
+      cpuUsage: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.node.cpu.usage"),
+      ),
+      uptime: CH.maxIf(
+        $.Value,
+        $.MetricName.eq("k8s.node.uptime"),
+      ),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get("k8s.node.name").neq(""),
+      $.ResourceAttributes.get("k8s.pod.name").eq(""),
+      $.MetricName.in_(...NODE_METRIC_NAMES),
+      CH.when(opts.search, (v: string) =>
+        CH.positionCaseInsensitive(
+          $.ResourceAttributes.get("k8s.node.name"),
+          CH.lit(v),
+        ).gt(0),
+      ),
+    ])
+    .groupBy("nodeName")
+    .orderBy(["lastSeen", "desc"])
+    .limit(opts.limit ?? 200)
+    .offset(opts.offset ?? 0)
+    .format("JSON")
+}
+
+export interface NodeDetailSummaryOpts {
+  nodeName: string
+}
+
+export interface NodeDetailSummaryOutput {
+  readonly nodeName: string
+  readonly nodeUid: string
+  readonly kubeletVersion: string
+  readonly containerRuntime: string
+  readonly firstSeen: string
+  readonly lastSeen: string
+  readonly cpuUsage: number
+  readonly uptime: number
+}
+
+export function nodeDetailSummaryQuery(opts: NodeDetailSummaryOpts) {
+  return from(MetricsGauge)
+    .select(($) => ({
+      nodeName: $.ResourceAttributes.get("k8s.node.name"),
+      nodeUid: CH.any_($.ResourceAttributes.get("k8s.node.uid")),
+      kubeletVersion: CH.any_($.ResourceAttributes.get("k8s.kubelet.version")),
+      containerRuntime: CH.any_($.ResourceAttributes.get("container.runtime")),
+      firstSeen: CH.min_($.TimeUnix),
+      lastSeen: CH.max_($.TimeUnix),
+      cpuUsage: CH.avgIf($.Value, $.MetricName.eq("k8s.node.cpu.usage")),
+      uptime: CH.maxIf($.Value, $.MetricName.eq("k8s.node.uptime")),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get("k8s.node.name").eq(opts.nodeName),
+      $.ResourceAttributes.get("k8s.pod.name").eq(""),
+      $.MetricName.in_(...NODE_METRIC_NAMES),
+    ])
+    .groupBy("nodeName")
+    .format("JSON")
+}
+
+export interface NodeGaugeTimeseriesOpts {
+  nodeName: string
+  metricName: string
+}
+
+export function nodeGaugeTimeseriesQuery(opts: NodeGaugeTimeseriesOpts) {
+  return from(MetricsGauge)
+    .select(($) => ({
+      bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
+      attributeValue: CH.lit(""),
+      avgValue: CH.avg($.Value),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get("k8s.node.name").eq(opts.nodeName),
+      $.ResourceAttributes.get("k8s.pod.name").eq(""),
+      $.MetricName.eq(opts.metricName),
+    ])
+    .groupBy("bucket")
+    .orderBy(["bucket", "asc"])
+    .format("JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Kubernetes — workload aggregations (Deployment / StatefulSet / DaemonSet).
+// Walks over k8s.pod.* metrics and groups by workload-name + namespace.
+// ---------------------------------------------------------------------------
+
+export type WorkloadKind = "deployment" | "statefulset" | "daemonset"
+
+export interface ListWorkloadsOpts {
+  kind: WorkloadKind
+  search?: string
+  namespace?: string
+  limit?: number
+  offset?: number
+}
+
+export interface ListWorkloadsOutput {
+  readonly workloadName: string
+  readonly namespace: string
+  readonly podCount: number
+  readonly lastSeen: string
+  readonly avgCpuLimitPct: number
+  readonly avgMemoryLimitPct: number
+  readonly avgCpuUsage: number
+}
+
+export function listWorkloadsQuery(opts: ListWorkloadsOpts) {
+  const attrKey = workloadAttrKey(opts.kind)
+  return from(MetricsGauge)
+    .select(($) => ({
+      workloadName: $.ResourceAttributes.get(attrKey),
+      namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
+      podCount: CH.uniq($.ResourceAttributes.get("k8s.pod.uid")),
+      lastSeen: CH.max_($.TimeUnix),
+      avgCpuLimitPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu_limit_utilization"),
+      ),
+      avgMemoryLimitPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.memory_limit_utilization"),
+      ),
+      avgCpuUsage: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu.usage"),
+      ),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get(attrKey).neq(""),
+      $.MetricName.in_(...POD_METRIC_NAMES),
+      CH.when(opts.search, (v: string) =>
+        CH.positionCaseInsensitive(
+          $.ResourceAttributes.get(attrKey),
+          CH.lit(v),
+        ).gt(0),
+      ),
+      CH.when(opts.namespace, (v: string) =>
+        $.ResourceAttributes.get("k8s.namespace.name").eq(v),
+      ),
+    ])
+    .groupBy("workloadName")
+    .orderBy(["lastSeen", "desc"])
+    .limit(opts.limit ?? 200)
+    .offset(opts.offset ?? 0)
+    .format("JSON")
+}
+
+export interface WorkloadDetailSummaryOpts {
+  kind: WorkloadKind
+  workloadName: string
+  namespace?: string
+}
+
+export interface WorkloadDetailSummaryOutput {
+  readonly workloadName: string
+  readonly kind: string
+  readonly namespace: string
+  readonly podCount: number
+  readonly firstSeen: string
+  readonly lastSeen: string
+  readonly avgCpuLimitPct: number
+  readonly avgMemoryLimitPct: number
+  readonly avgCpuUsage: number
+}
+
+export function workloadDetailSummaryQuery(opts: WorkloadDetailSummaryOpts) {
+  const attrKey = workloadAttrKey(opts.kind)
+  return from(MetricsGauge)
+    .select(($) => ({
+      workloadName: $.ResourceAttributes.get(attrKey),
+      namespace: CH.any_($.ResourceAttributes.get("k8s.namespace.name")),
+      podCount: CH.uniq($.ResourceAttributes.get("k8s.pod.uid")),
+      firstSeen: CH.min_($.TimeUnix),
+      lastSeen: CH.max_($.TimeUnix),
+      avgCpuLimitPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu_limit_utilization"),
+      ),
+      avgMemoryLimitPct: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.memory_limit_utilization"),
+      ),
+      avgCpuUsage: CH.avgIf(
+        $.Value,
+        $.MetricName.eq("k8s.pod.cpu.usage"),
+      ),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get(attrKey).eq(opts.workloadName),
+      CH.when(opts.namespace, (v: string) =>
+        $.ResourceAttributes.get("k8s.namespace.name").eq(v),
+      ),
+      $.MetricName.in_(...POD_METRIC_NAMES),
+    ])
+    .groupBy("workloadName")
+    .format("JSON")
+}
+
+export interface WorkloadGaugeTimeseriesOpts {
+  kind: WorkloadKind
+  workloadName: string
+  namespace?: string
+  metricName: string
+  groupByPod?: boolean
+}
+
+export function workloadGaugeTimeseriesQuery(opts: WorkloadGaugeTimeseriesOpts) {
+  const attrKey = workloadAttrKey(opts.kind)
+  const q = from(MetricsGauge)
+    .select(($) => ({
+      bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
+      attributeValue: opts.groupByPod
+        ? $.ResourceAttributes.get("k8s.pod.name")
+        : CH.lit(""),
+      avgValue: CH.avg($.Value),
+    }))
+    .where(($) => [
+      $.OrgId.eq(param.string("orgId")),
+      $.TimeUnix.gte(param.dateTime("startTime")),
+      $.TimeUnix.lte(param.dateTime("endTime")),
+      $.ResourceAttributes.get(attrKey).eq(opts.workloadName),
+      CH.when(opts.namespace, (v: string) =>
+        $.ResourceAttributes.get("k8s.namespace.name").eq(v),
+      ),
+      $.MetricName.eq(opts.metricName),
+    ])
+
+  return (opts.groupByPod
+    ? q.groupBy("bucket", "attributeValue")
+    : q.groupBy("bucket")
+  )
+    .orderBy(["bucket", "asc"])
+    .format("JSON")
+}
