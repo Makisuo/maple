@@ -32,6 +32,7 @@ export interface PodFilters {
   daemonsets?: ReadonlyArray<string>
   jobs?: ReadonlyArray<string>
   environments?: ReadonlyArray<string>
+  computeTypes?: ReadonlyArray<string>
 }
 
 interface PodsFilterSidebarViewProps {
@@ -56,7 +57,8 @@ export function PodsFilterSidebarView({
     (filters.statefulsets?.length ?? 0) > 0 ||
     (filters.daemonsets?.length ?? 0) > 0 ||
     (filters.jobs?.length ?? 0) > 0 ||
-    (filters.environments?.length ?? 0) > 0
+    (filters.environments?.length ?? 0) > 0 ||
+    (filters.computeTypes?.length ?? 0) > 0
 
   return Result.builder(facetsResult)
     .onInitial(() => <FilterSidebarLoading sectionCount={6} sticky />)
@@ -166,6 +168,18 @@ export function PodsFilterSidebarView({
                 />
               </>
             )}
+            {f.computeTypes.length > 0 && (
+              <>
+                <Separator className="my-2" />
+                <FilterSection
+                  title="Compute Type"
+                  options={f.computeTypes as Array<{ name: string; count: number }>}
+                  selected={filters.computeTypes ? [...filters.computeTypes] : []}
+                  onChange={(val) => onFilterChange("computeTypes", val)}
+                  defaultOpen={false}
+                />
+              </>
+            )}
           </FilterSidebarBody>
         </FilterSidebarFrame>
       )
@@ -256,6 +270,7 @@ export interface WorkloadFilters {
   namespaces?: ReadonlyArray<string>
   clusters?: ReadonlyArray<string>
   environments?: ReadonlyArray<string>
+  computeTypes?: ReadonlyArray<string>
 }
 
 interface WorkloadsFilterSidebarViewProps {
@@ -280,7 +295,8 @@ export function WorkloadsFilterSidebarView({
     (filters.workloadNames?.length ?? 0) > 0 ||
     (filters.namespaces?.length ?? 0) > 0 ||
     (filters.clusters?.length ?? 0) > 0 ||
-    (filters.environments?.length ?? 0) > 0
+    (filters.environments?.length ?? 0) > 0 ||
+    (filters.computeTypes?.length ?? 0) > 0
 
   return Result.builder(facetsResult)
     .onInitial(() => <FilterSidebarLoading sectionCount={4} sticky />)
@@ -326,6 +342,18 @@ export function WorkloadsFilterSidebarView({
                   options={f.environments as Array<{ name: string; count: number }>}
                   selected={filters.environments ? [...filters.environments] : []}
                   onChange={(val) => onFilterChange("environments", val)}
+                  defaultOpen={false}
+                />
+              </>
+            )}
+            {f.computeTypes.length > 0 && (
+              <>
+                <Separator className="my-2" />
+                <FilterSection
+                  title="Compute Type"
+                  options={f.computeTypes as Array<{ name: string; count: number }>}
+                  selected={filters.computeTypes ? [...filters.computeTypes] : []}
+                  onChange={(val) => onFilterChange("computeTypes", val)}
                   defaultOpen={false}
                 />
               </>

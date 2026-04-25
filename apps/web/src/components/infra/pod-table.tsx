@@ -34,6 +34,7 @@ export interface PodRow {
   jobName: string
   qosClass: string
   podUid: string
+  computeType: string
   lastSeen: string
   cpuUsage: number
   cpuLimitPct: number
@@ -291,6 +292,11 @@ export function PodTable({ pods, waiting, referenceTime }: PodTableProps) {
                         )}
                         {pod.nodeName && <MetaChip>node={pod.nodeName}</MetaChip>}
                         {pod.qosClass && <MetaChip>qos={pod.qosClass}</MetaChip>}
+                        {pod.computeType === "fargate" && (
+                          <span className="inline-flex items-center rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-700 dark:text-amber-300">
+                            fargate
+                          </span>
+                        )}
                         <HostStatusBadge lastSeen={pod.lastSeen} referenceTime={referenceTime} />
                       </div>
                     </Link>

@@ -21,6 +21,12 @@ rules:
       - resourcequotas
       - services
     verbs: ["get", "list", "watch"]
+  {{- if .Values.presets.fargateMetrics.enabled }}
+  # Required for prometheus to scrape /api/v1/nodes/<name>/proxy/metrics/cadvisor.
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
+  {{- end }}
   - apiGroups: ["apps"]
     resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
     verbs: ["get", "list", "watch"]

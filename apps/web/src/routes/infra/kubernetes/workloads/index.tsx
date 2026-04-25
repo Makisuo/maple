@@ -50,6 +50,7 @@ const workloadsSearchSchema = Schema.Struct({
   namespaces: OptionalStringArrayParam,
   clusters: OptionalStringArrayParam,
   environments: OptionalStringArrayParam,
+  computeTypes: OptionalStringArrayParam,
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),
   timePreset: Schema.optional(Schema.String),
@@ -90,6 +91,7 @@ function WorkloadsPageContent() {
     namespaces: search.namespaces,
     clusters: search.clusters,
     environments: search.environments,
+    computeTypes: search.computeTypes,
   }
 
   const wlResult = useAtomValue(
@@ -208,7 +210,8 @@ function WorkloadsPageContent() {
                   (filters.workloadNames?.length ?? 0) > 0 ||
                   (filters.namespaces?.length ?? 0) > 0 ||
                   (filters.clusters?.length ?? 0) > 0 ||
-                  (filters.environments?.length ?? 0) > 0
+                  (filters.environments?.length ?? 0) > 0 ||
+                  (filters.computeTypes?.length ?? 0) > 0
 
                 if (wls.length === 0 && !hasAnyFilter) {
                   return (

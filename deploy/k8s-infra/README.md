@@ -62,7 +62,7 @@ helm upgrade --install maple-k8s-infra ./deploy/k8s-infra \
 ## Defaults
 
 - Host metrics, kubelet metrics, cluster metrics, and OTLP receiving are enabled.
-- Pod logs and Kubernetes events are disabled by default to keep ingestion volume predictable.
+- Pod logs, Kubernetes events, and Fargate metrics are disabled by default to keep ingestion volume predictable.
 - The cluster collector runs one replica by default to avoid duplicate cluster-wide metrics.
 - The DaemonSet exposes host ports `4317` and `4318` by default for node-local application OTLP.
 
@@ -92,6 +92,27 @@ presets:
     http:
       hostPort: null
 ```
+
+## EKS Fargate
+
+EKS Fargate pods can't host the DaemonSet (each Fargate pod is its own micro-VM with no shared host) and their kubelets aren't reachable on `:10250`. To collect per-pod CPU and memory for Fargate-launched pods, the cluster collector scrapes `/metrics/cadvisor` on each Fargate-typed node via the API server proxy and reshapes the cAdvisor output into the `kubeletstats` convention (`k8s.pod.cpu.usage`, `k8s.pod.memory.usage`) so the Pods/Workloads views light up the same way as for EC2-launched pods.
+
+Enable it with:
+
+```bash
+helm upgrade --install maple-k8s-infra ./deploy/k8s-infra \
+  --namespace maple --create-namespace \
+  --set maple.ingest.endpoint=https://ingest.example.com \
+  --set maple.ingestKey.value=YOUR_MAPLE_INGEST_KEY \
+  --set global.clusterName=production \
+  --set presets.fargateMetrics.enabled=true
+```
+
+What it collects: per-pod CPU usage (cores) and memory working-set bytes for every Fargate-launched pod, tagged with `eks.amazonaws.com/compute-type=fargate` in the resource attributes.
+
+What it does **not** collect: host metrics (there is no host on Fargate), CPU/memory limit utilization, network I/O. The first two require the kubeletstats receiver, which Fargate doesn't expose; network I/O is left out of v1 because cAdvisor reports it as a counter that we'd need to rate-convert.
+
+The preset adds a `nodes/proxy` permission to the cluster collector's ClusterRole so the prometheus receiver can scrape via the API server proxy. EC2-launched pods are filtered out of the Fargate scrape (relabel keeps only nodes labeled `eks.amazonaws.com/compute-type=fargate`), so there is no double-counting with the DaemonSet.
 
 ## Validate
 

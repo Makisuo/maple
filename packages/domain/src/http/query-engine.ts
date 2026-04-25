@@ -341,6 +341,7 @@ export class ListPodsRequest extends Schema.Class<ListPodsRequest>("ListPodsRequ
   daemonsets: Schema.optional(StringArray),
   jobs: Schema.optional(StringArray),
   environments: Schema.optional(StringArray),
+  computeTypes: Schema.optional(StringArray),
   workloadKind: Schema.optional(WorkloadKindLiteral),
   workloadName: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.Number),
@@ -359,6 +360,7 @@ const PodRow = Schema.Struct({
   jobName: Schema.String,
   qosClass: Schema.String,
   podUid: Schema.String,
+  computeType: Schema.String,
   lastSeen: Schema.String,
   cpuUsage: Schema.Number,
   cpuLimitPct: Schema.Number,
@@ -384,6 +386,7 @@ export class PodFacetsRequest extends Schema.Class<PodFacetsRequest>("PodFacetsR
   daemonsets: Schema.optional(StringArray),
   jobs: Schema.optional(StringArray),
   environments: Schema.optional(StringArray),
+  computeTypes: Schema.optional(StringArray),
 }) {}
 
 export class PodFacetsResponse extends Schema.Class<PodFacetsResponse>("PodFacetsResponse")({
@@ -397,6 +400,7 @@ export class PodFacetsResponse extends Schema.Class<PodFacetsResponse>("PodFacet
     daemonsets: Schema.Array(FacetRow),
     jobs: Schema.Array(FacetRow),
     environments: Schema.Array(FacetRow),
+    computeTypes: Schema.Array(FacetRow),
   }),
 }) {}
 
@@ -417,6 +421,7 @@ export class PodDetailSummaryResponse extends Schema.Class<PodDetailSummaryRespo
     daemonsetName: Schema.String,
     qosClass: Schema.String,
     podUid: Schema.String,
+    computeType: Schema.String,
     podStartTime: Schema.String,
     firstSeen: Schema.String,
     lastSeen: Schema.String,
@@ -540,6 +545,7 @@ export class ListWorkloadsRequest extends Schema.Class<ListWorkloadsRequest>("Li
   namespaces: Schema.optional(StringArray),
   clusters: Schema.optional(StringArray),
   environments: Schema.optional(StringArray),
+  computeTypes: Schema.optional(StringArray),
   limit: Schema.optional(Schema.Number),
   offset: Schema.optional(Schema.Number),
 }) {}
@@ -569,6 +575,7 @@ export class WorkloadFacetsRequest extends Schema.Class<WorkloadFacetsRequest>("
   namespaces: Schema.optional(StringArray),
   clusters: Schema.optional(StringArray),
   environments: Schema.optional(StringArray),
+  computeTypes: Schema.optional(StringArray),
 }) {}
 
 export class WorkloadFacetsResponse extends Schema.Class<WorkloadFacetsResponse>("WorkloadFacetsResponse")({
@@ -577,6 +584,7 @@ export class WorkloadFacetsResponse extends Schema.Class<WorkloadFacetsResponse>
     namespaces: Schema.Array(FacetRow),
     clusters: Schema.Array(FacetRow),
     environments: Schema.Array(FacetRow),
+    computeTypes: Schema.Array(FacetRow),
   }),
 }) {}
 

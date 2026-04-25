@@ -192,6 +192,14 @@ presets:
         enabled: true
       k8s.pod.status_reason:
         enabled: true
+  fargateMetrics:
+    # EKS Fargate pods can't host the DaemonSet (no shared host), so the
+    # cluster collector scrapes /metrics/cadvisor on each Fargate-typed node
+    # via the API server proxy and re-shapes the cAdvisor metrics into the
+    # OTel kubeletstats convention so the Pods/Workloads UI lights up.
+    # Off by default — enable on EKS clusters that use Fargate.
+    enabled: false
+    collectionInterval: 30s
   podLogs:
     enabled: false
     startAt: end
@@ -231,6 +239,14 @@ processors:
       - sources:
           - from: resource_attribute
             name: k8s.pod.uid
+      # Used by the Fargate metrics pipeline: cAdvisor scrapes don't carry
+      # pod IP / UID, so we associate by name + namespace (set in
+      # transform/fargate before this processor runs).
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.name
+          - from: resource_attribute
+            name: k8s.namespace.name
       - sources:
           - from: connection
     extract:
@@ -246,7 +262,13 @@ processors:
         - k8s.pod.name
         - k8s.pod.uid
         - k8s.pod.start_time
-      labels: []
+      labels:
+        # EKS sets this on each Fargate "node" (which is per-pod) — propagating
+        # it to ResourceAttributes lets the query layer / UI distinguish
+        # ec2-launched vs fargate-launched pods.
+        - tag_name: eks.amazonaws.com/compute-type
+          key: eks.amazonaws.com/compute-type
+          from: node
       annotations: []
   resourceDetection:
     enabled: true

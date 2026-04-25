@@ -42,6 +42,7 @@ const podsSearchSchema = Schema.Struct({
   daemonsets: OptionalStringArrayParam,
   jobs: OptionalStringArrayParam,
   environments: OptionalStringArrayParam,
+  computeTypes: OptionalStringArrayParam,
   startTime: Schema.optional(Schema.String),
   endTime: Schema.optional(Schema.String),
   timePreset: Schema.optional(Schema.String),
@@ -80,6 +81,7 @@ function PodsPageContent() {
     daemonsets: search.daemonsets,
     jobs: search.jobs,
     environments: search.environments,
+    computeTypes: search.computeTypes,
   }
 
   const podsResult = useAtomValue(
@@ -182,7 +184,8 @@ function PodsPageContent() {
               (filters.statefulsets?.length ?? 0) > 0 ||
               (filters.daemonsets?.length ?? 0) > 0 ||
               (filters.jobs?.length ?? 0) > 0 ||
-              (filters.environments?.length ?? 0) > 0
+              (filters.environments?.length ?? 0) > 0 ||
+              (filters.computeTypes?.length ?? 0) > 0
 
             if (pods.length === 0 && !hasAnyFilter) {
               return (

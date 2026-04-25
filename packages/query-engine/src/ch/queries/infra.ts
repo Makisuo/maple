@@ -320,6 +320,7 @@ export interface ListPodsOpts {
   daemonsets?: ReadonlyArray<string>
   jobs?: ReadonlyArray<string>
   environments?: ReadonlyArray<string>
+  computeTypes?: ReadonlyArray<string>
   // Single-value filters retained for backward compat with the workload detail
   // page, which still narrows by a single workload owner.
   workloadKind?: "deployment" | "statefulset" | "daemonset"
@@ -340,6 +341,10 @@ export interface ListPodsOutput {
   readonly jobName: string
   readonly qosClass: string
   readonly podUid: string
+  // "fargate" for EKS Fargate pods, "ec2" otherwise (empty when the
+  // collector hasn't been told to extract the eks.amazonaws.com/compute-type
+  // label, in which case the UI should treat it as ec2).
+  readonly computeType: string
   readonly lastSeen: string
   readonly cpuUsage: number
   readonly cpuLimitPct: number
@@ -405,6 +410,12 @@ const podFilterConditions = (
         opts.environments,
       )
     : undefined,
+  opts.computeTypes?.length
+    ? CH.inList(
+        $.ResourceAttributes.get("eks.amazonaws.com/compute-type"),
+        opts.computeTypes,
+      )
+    : undefined,
   CH.when(opts.workloadKind && opts.workloadName, () =>
     $.ResourceAttributes
       .get(workloadAttrKey(opts.workloadKind!))
@@ -426,6 +437,7 @@ export function listPodsQuery(opts: ListPodsOpts = {}) {
       jobName: CH.any_($.ResourceAttributes.get("k8s.job.name")),
       qosClass: CH.any_($.ResourceAttributes.get("k8s.pod.qos_class")),
       podUid: CH.any_($.ResourceAttributes.get("k8s.pod.uid")),
+      computeType: CH.any_($.ResourceAttributes.get("eks.amazonaws.com/compute-type")),
       lastSeen: CH.max_($.TimeUnix),
       cpuUsage: CH.avgIf(
         $.Value,
@@ -470,6 +482,7 @@ export interface PodDetailSummaryOutput {
   readonly daemonsetName: string
   readonly qosClass: string
   readonly podUid: string
+  readonly computeType: string
   readonly podStartTime: string
   readonly firstSeen: string
   readonly lastSeen: string
@@ -491,6 +504,7 @@ export function podDetailSummaryQuery(opts: PodDetailSummaryOpts) {
       daemonsetName: CH.any_($.ResourceAttributes.get("k8s.daemonset.name")),
       qosClass: CH.any_($.ResourceAttributes.get("k8s.pod.qos_class")),
       podUid: CH.any_($.ResourceAttributes.get("k8s.pod.uid")),
+      computeType: CH.any_($.ResourceAttributes.get("eks.amazonaws.com/compute-type")),
       podStartTime: CH.any_($.ResourceAttributes.get("k8s.pod.start_time")),
       firstSeen: CH.min_($.TimeUnix),
       lastSeen: CH.max_($.TimeUnix),
@@ -737,6 +751,7 @@ export interface ListWorkloadsOpts {
   namespaces?: ReadonlyArray<string>
   clusters?: ReadonlyArray<string>
   environments?: ReadonlyArray<string>
+  computeTypes?: ReadonlyArray<string>
   limit?: number
   offset?: number
 }
@@ -777,6 +792,12 @@ const workloadFilterConditions = (
     ? CH.inList(
         $.ResourceAttributes.get("deployment.environment.name"),
         opts.environments,
+      )
+    : undefined,
+  opts.computeTypes?.length
+    ? CH.inList(
+        $.ResourceAttributes.get("eks.amazonaws.com/compute-type"),
+        opts.computeTypes,
       )
     : undefined,
 ]
@@ -958,6 +979,7 @@ export function podFacetsQuery(
     makePodFacet(opts, "k8s.daemonset.name", "daemonset", 100),
     makePodFacet(opts, "k8s.job.name", "job", 100),
     makePodFacet(opts, "deployment.environment.name", "environment", 50),
+    makePodFacet(opts, "eks.amazonaws.com/compute-type", "computeType", 10),
   ).format("JSON")
 }
 
@@ -1040,5 +1062,6 @@ export function workloadFacetsQuery(
     makeWorkloadFacet(opts, "k8s.namespace.name", "namespace", 100),
     makeWorkloadFacet(opts, "k8s.cluster.name", "cluster", 50),
     makeWorkloadFacet(opts, "deployment.environment.name", "environment", 50),
+    makeWorkloadFacet(opts, "eks.amazonaws.com/compute-type", "computeType", 10),
   ).format("JSON")
 }

@@ -556,6 +556,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               daemonsets: payload.daemonsets,
               jobs: payload.jobs,
               environments: payload.environments,
+              computeTypes: payload.computeTypes,
               workloadKind: payload.workloadKind,
               workloadName: payload.workloadName,
               limit: payload.limit,
@@ -578,6 +579,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               jobName: row.jobName,
               qosClass: row.qosClass,
               podUid: row.podUid,
+              computeType: row.computeType,
               lastSeen: String(row.lastSeen),
               cpuUsage: Number(row.cpuUsage) || 0,
               cpuLimitPct: Number(row.cpuLimitPct) || 0,
@@ -609,6 +611,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
                   daemonsetName: row.daemonsetName,
                   qosClass: row.qosClass,
                   podUid: row.podUid,
+                  computeType: row.computeType,
                   podStartTime: row.podStartTime,
                   firstSeen: String(row.firstSeen),
                   lastSeen: String(row.lastSeen),
@@ -762,6 +765,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               namespaces: payload.namespaces,
               clusters: payload.clusters,
               environments: payload.environments,
+              computeTypes: payload.computeTypes,
               limit: payload.limit,
               offset: payload.offset,
             }),
@@ -868,6 +872,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               daemonsets: payload.daemonsets,
               jobs: payload.jobs,
               environments: payload.environments,
+              computeTypes: payload.computeTypes,
             }),
             { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
           )
@@ -887,6 +892,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
             daemonsets: [] as Array<{ name: string; count: number }>,
             jobs: [] as Array<{ name: string; count: number }>,
             environments: [] as Array<{ name: string; count: number }>,
+            computeTypes: [] as Array<{ name: string; count: number }>,
           }
           for (const row of typedRows) {
             const entry = { name: String(row.name), count: Number(row.count) || 0 }
@@ -900,6 +906,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               case "daemonset": buckets.daemonsets.push(entry); break
               case "job": buckets.jobs.push(entry); break
               case "environment": buckets.environments.push(entry); break
+              case "computeType": buckets.computeTypes.push(entry); break
             }
           }
           return new PodFacetsResponse({ data: buckets })
@@ -950,6 +957,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               namespaces: payload.namespaces,
               clusters: payload.clusters,
               environments: payload.environments,
+              computeTypes: payload.computeTypes,
             }),
             { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
           )
@@ -964,6 +972,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
             namespaces: [] as Array<{ name: string; count: number }>,
             clusters: [] as Array<{ name: string; count: number }>,
             environments: [] as Array<{ name: string; count: number }>,
+            computeTypes: [] as Array<{ name: string; count: number }>,
           }
           for (const row of typedRows) {
             const entry = { name: String(row.name), count: Number(row.count) || 0 }
@@ -972,6 +981,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
               case "namespace": buckets.namespaces.push(entry); break
               case "cluster": buckets.clusters.push(entry); break
               case "environment": buckets.environments.push(entry); break
+              case "computeType": buckets.computeTypes.push(entry); break
             }
           }
           return new WorkloadFacetsResponse({ data: buckets })

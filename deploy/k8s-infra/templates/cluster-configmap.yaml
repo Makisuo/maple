@@ -1,4 +1,4 @@
-{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled) -}}
+{{- if and .Values.clusterCollector.enabled (or .Values.presets.clusterMetrics.enabled .Values.presets.k8sEvents.enabled .Values.presets.fargateMetrics.enabled) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -24,6 +24,47 @@ data:
           {{- toYaml .Values.presets.clusterMetrics.resourceAttributes | nindent 10 }}
         metrics:
           {{- toYaml .Values.presets.clusterMetrics.metrics | nindent 10 }}
+      {{- end }}
+      {{- if .Values.presets.fargateMetrics.enabled }}
+      # EKS Fargate exposes per-pod cAdvisor metrics via the API server proxy.
+      # We scrape only Fargate-typed nodes; EC2 nodes are covered by the
+      # DaemonSet's kubeletstats receiver, so we don't double-count.
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: maple-fargate-cadvisor
+              scheme: https
+              scrape_interval: {{ .Values.presets.fargateMetrics.collectionInterval }}
+              kubernetes_sd_configs:
+                - role: node
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                insecure_skip_verify: true
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_node_label_eks_amazonaws_com_compute_type]
+                  action: keep
+                  regex: fargate
+                - target_label: __address__
+                  replacement: kubernetes.default.svc:443
+                - source_labels: [__meta_kubernetes_node_name]
+                  regex: (.+)
+                  target_label: __metrics_path__
+                  replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+                - source_labels: [__meta_kubernetes_node_name]
+                  target_label: k8s_node_name
+              metric_relabel_configs:
+                # Keep only metrics we transform into kubeletstats names.
+                # CPU usage is converted from a cumulative counter to a
+                # per-second rate by cumulativetodelta + deltatorate.
+                - source_labels: [__name__]
+                  regex: 'container_cpu_usage_seconds_total|container_memory_working_set_bytes'
+                  action: keep
+                # Drop the synthesized whole-pod (no container) rows so we
+                # don't double-count when summing per-container usage.
+                - source_labels: [container]
+                  regex: '^$|POD'
+                  action: drop
       {{- end }}
       {{- if .Values.presets.k8sEvents.enabled }}
       k8sobjects/events:
@@ -51,6 +92,10 @@ data:
         extract:
           metadata:
             {{- toYaml .Values.processors.kubernetesAttributes.extract.metadata | nindent 12 }}
+          {{- with .Values.processors.kubernetesAttributes.extract.labels }}
+          labels:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       {{- end }}
       {{- if .Values.processors.resourceDetection.enabled }}
       resourcedetection:
@@ -73,6 +118,45 @@ data:
         timeout: {{ .Values.processors.batch.timeout }}
         send_batch_size: {{ .Values.processors.batch.sendBatchSize }}
         send_batch_max_size: {{ .Values.processors.batch.sendBatchMaxSize }}
+      {{- if .Values.presets.fargateMetrics.enabled }}
+      # cAdvisor exposes container_cpu_usage_seconds_total as a cumulative
+      # counter in seconds. Convert it to a per-second gauge so it matches
+      # kubeletstats' k8s.pod.cpu.usage (cores).
+      cumulativetodelta/fargate:
+        include:
+          metrics:
+            - container_cpu_usage_seconds_total
+          match_type: strict
+      deltatorate/fargate:
+        metrics:
+          - container_cpu_usage_seconds_total
+      # Reshape cAdvisor metrics into the OTel kubeletstats convention so the
+      # existing Pods/Workloads queries don't need to know they came from
+      # Fargate. Move pod/namespace/container/node labels to resource attrs
+      # (so k8sattributes' name+namespace association can enrich), then
+      # rename the metric.
+      transform/fargate:
+        error_mode: ignore
+        metric_statements:
+          - context: datapoint
+            statements:
+              - set(resource.attributes["k8s.pod.name"], attributes["pod"]) where attributes["pod"] != nil
+              - set(resource.attributes["k8s.namespace.name"], attributes["namespace"]) where attributes["namespace"] != nil
+              - set(resource.attributes["k8s.container.name"], attributes["container"]) where attributes["container"] != nil
+              - set(resource.attributes["k8s.node.name"], attributes["k8s_node_name"]) where attributes["k8s_node_name"] != nil
+              - set(resource.attributes["eks.amazonaws.com/compute-type"], "fargate")
+              - delete_key(attributes, "pod")
+              - delete_key(attributes, "namespace")
+              - delete_key(attributes, "container")
+              - delete_key(attributes, "k8s_node_name")
+              - delete_key(attributes, "id")
+              - delete_key(attributes, "image")
+              - delete_key(attributes, "name")
+          - context: metric
+            statements:
+              - set(name, "k8s.pod.cpu.usage") where name == "container_cpu_usage_seconds_total"
+              - set(name, "k8s.pod.memory.usage") where name == "container_memory_working_set_bytes"
+      {{- end }}
 
     exporters:
       otlphttp/maple:
@@ -91,6 +175,23 @@ data:
         metrics:
           receivers: [k8s_cluster]
           processors: {{ include "maple-k8s-infra.baseProcessors" . }}
+          exporters: [otlphttp/maple]
+        {{- end }}
+        {{- if .Values.presets.fargateMetrics.enabled }}
+        metrics/fargate:
+          receivers: [prometheus]
+          processors:
+            - memory_limiter
+            - cumulativetodelta/fargate
+            - deltatorate/fargate
+            - transform/fargate
+            {{- if .Values.processors.kubernetesAttributes.enabled }}
+            - k8sattributes
+            {{- end }}
+            {{- if .Values.processors.resourceDetection.enabled }}
+            - resourcedetection
+            {{- end }}
+            - batch
           exporters: [otlphttp/maple]
         {{- end }}
         {{- if .Values.presets.k8sEvents.enabled }}

@@ -158,6 +158,7 @@ export interface ListPodsInput {
   daemonsets?: ReadonlyArray<string>
   jobs?: ReadonlyArray<string>
   environments?: ReadonlyArray<string>
+  computeTypes?: ReadonlyArray<string>
   workloadKind?: WorkloadKind
   workloadName?: string
   limit?: number
@@ -182,6 +183,7 @@ export function listPods({ data }: { data: ListPodsInput }) {
           daemonsets: data.daemonsets,
           jobs: data.jobs,
           environments: data.environments,
+          computeTypes: data.computeTypes,
           workloadKind: data.workloadKind,
           workloadName: data.workloadName,
           limit: data.limit,
@@ -206,6 +208,7 @@ export interface PodFacetsInput {
   daemonsets?: ReadonlyArray<string>
   jobs?: ReadonlyArray<string>
   environments?: ReadonlyArray<string>
+  computeTypes?: ReadonlyArray<string>
 }
 
 export function getPodFacets({ data }: { data: PodFacetsInput }) {
@@ -226,6 +229,7 @@ export function getPodFacets({ data }: { data: PodFacetsInput }) {
           daemonsets: data.daemonsets,
           jobs: data.jobs,
           environments: data.environments,
+          computeTypes: data.computeTypes,
         }),
       })
       return response
@@ -419,6 +423,7 @@ export interface ListWorkloadsInput {
   namespaces?: ReadonlyArray<string>
   clusters?: ReadonlyArray<string>
   environments?: ReadonlyArray<string>
+  computeTypes?: ReadonlyArray<string>
   limit?: number
   offset?: number
 }
@@ -437,6 +442,7 @@ export function listWorkloads({ data }: { data: ListWorkloadsInput }) {
           namespaces: data.namespaces,
           clusters: data.clusters,
           environments: data.environments,
+          computeTypes: data.computeTypes,
           limit: data.limit,
           offset: data.offset,
         }),
@@ -455,6 +461,7 @@ export interface WorkloadFacetsInput {
   namespaces?: ReadonlyArray<string>
   clusters?: ReadonlyArray<string>
   environments?: ReadonlyArray<string>
+  computeTypes?: ReadonlyArray<string>
 }
 
 export function getWorkloadFacets({ data }: { data: WorkloadFacetsInput }) {
@@ -471,6 +478,7 @@ export function getWorkloadFacets({ data }: { data: WorkloadFacetsInput }) {
           namespaces: data.namespaces,
           clusters: data.clusters,
           environments: data.environments,
+          computeTypes: data.computeTypes,
         }),
       })
       return response
