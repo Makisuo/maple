@@ -73,7 +73,7 @@ const COLOR_PALETTE = [
   "var(--chart-p50)",
 ]
 
-const CHART_HEIGHT = 280
+const CHART_HEIGHT = 220
 
 export function HostDetailChart({
   hostName,
@@ -89,9 +89,11 @@ export function HostDetailChart({
   )
 
   return Result.builder(result)
-    .onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
+    .onInitial(() => (
+      <Skeleton className="h-[220px] w-full rounded-none" />
+    ))
     .onError((err) => (
-      <div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
+      <div className="flex h-[220px] items-center justify-center border border-destructive/40 bg-destructive/5 font-mono text-[11px] text-destructive">
         {err.message ?? "Failed to load chart"}
       </div>
     ))
@@ -145,8 +147,8 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
 
   if (data.length === 0) {
     return (
-      <div className="flex h-[280px] items-center justify-center rounded-lg border border-dashed text-xs text-muted-foreground">
-        No data for this metric in the selected window.
+      <div className="flex h-[220px] items-center justify-center border border-dashed border-border/60 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+        No data
       </div>
     )
   }
@@ -170,29 +172,22 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
   const margin = { top: 12, right: 12, left: 0, bottom: 0 }
 
   return (
-    <div
-      className={cn(
-        "rounded-lg border bg-card p-4 transition-opacity",
-        waiting && "opacity-60",
-      )}
-    >
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className={cn("transition-opacity", waiting && "opacity-60")}>
+      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 px-3 py-2">
         {series.map((s) => {
           const value = lastValues[s]
           return (
-            <div
-              key={s}
-              className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-[11px]"
-            >
+            <div key={s} className="inline-flex items-baseline gap-1.5">
               <span
-                className="size-2 rounded-full"
+                aria-hidden
+                className="size-1.5 rounded-full translate-y-[-1px]"
                 style={{ background: `var(--color-${s})` }}
               />
-              <span className="font-medium text-foreground/80">
+              <span className="text-[11px] text-muted-foreground">
                 {config[s]?.label ?? s}
               </span>
               {value !== undefined && (
-                <span className="font-mono tabular-nums text-muted-foreground">
+                <span className="font-mono text-[11px] tabular-nums text-foreground/85">
                   {tooltipFormatter(value)}
                 </span>
               )}
@@ -220,14 +215,14 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
                     <stop
                       offset="95%"
                       stopColor={`var(--color-${s})`}
-                      stopOpacity={0.05}
+                      stopOpacity={0.04}
                     />
                   </linearGradient>
                 )
               })}
             </defs>
             <CartesianGrid
-              strokeDasharray="3 3"
+              strokeDasharray="2 4"
               stroke="var(--border)"
               vertical={false}
             />
@@ -244,7 +239,7 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
               axisLine={false}
               tickMargin={8}
               fontSize={10}
-              width={56}
+              width={52}
               stroke="var(--muted-foreground)"
               tickFormatter={tickFormatter}
             />
@@ -252,13 +247,13 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
               <ReferenceLine
                 y={0.8}
                 stroke="var(--severity-warn)"
-                strokeDasharray="4 4"
                 strokeOpacity={0.7}
+                className="infra-ref-line"
                 label={{
                   value: "80%",
                   position: "right",
                   fill: "var(--severity-warn)",
-                  fontSize: 10,
+                  fontSize: 9,
                 }}
               />
             )}
@@ -280,7 +275,7 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
                   type="monotone"
                   stackId="a"
                   stroke={`var(--color-${s})`}
-                  strokeWidth={1.6}
+                  strokeWidth={1.4}
                   fill={`url(#${id})`}
                   fillOpacity={1}
                 />
@@ -290,7 +285,7 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
         ) : (
           <LineChart data={data} margin={margin}>
             <CartesianGrid
-              strokeDasharray="3 3"
+              strokeDasharray="2 4"
               stroke="var(--border)"
               vertical={false}
             />
@@ -307,7 +302,7 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
               axisLine={false}
               tickMargin={8}
               fontSize={10}
-              width={70}
+              width={64}
               stroke="var(--muted-foreground)"
               tickFormatter={tickFormatter}
             />
@@ -326,7 +321,7 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
                 dataKey={s}
                 type="monotone"
                 stroke={`var(--color-${s})`}
-                strokeWidth={1.8}
+                strokeWidth={1.6}
                 dot={false}
                 activeDot={{ r: 3, strokeWidth: 0 }}
               />
@@ -335,5 +330,47 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
         )}
       </ChartContainer>
     </div>
+  )
+}
+
+interface MetricStripProps {
+  label: string
+  caption?: string
+  hostName: string
+  metric: HostInfraMetric
+  startTime: string
+  endTime: string
+  bucketSeconds?: number
+}
+
+export function MetricStrip({
+  label,
+  caption,
+  hostName,
+  metric,
+  startTime,
+  endTime,
+  bucketSeconds,
+}: MetricStripProps) {
+  return (
+    <section className="grid grid-cols-1 gap-0 border-t first:border-t-0 lg:grid-cols-[160px_1fr]">
+      <div className="border-b px-1 py-3 lg:border-b-0 lg:border-r lg:py-5">
+        <div className="text-[12px] font-medium text-foreground">{label}</div>
+        {caption ? (
+          <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            {caption}
+          </div>
+        ) : null}
+      </div>
+      <div className="lg:pl-4">
+        <HostDetailChart
+          hostName={hostName}
+          metric={metric}
+          startTime={startTime}
+          endTime={endTime}
+          bucketSeconds={bucketSeconds}
+        />
+      </div>
+    </section>
   )
 }

@@ -1,14 +1,6 @@
 import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@maple/ui/components/ui/table"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import {
   Tooltip,
@@ -19,8 +11,8 @@ import { cn } from "@maple/ui/lib/utils"
 
 import { ArrowUpDownIcon } from "@/components/icons"
 import { HostStatusBadge } from "./status-badge"
-import { UsageBar } from "./usage-bar"
-import { formatLoad, formatRelative } from "./format"
+import { InlineMetricBars } from "./primitives/inline-bars"
+import { deriveHostStatus, formatLoad, formatRelative, type HostStatus } from "./format"
 
 export interface HostRow {
   hostName: string
@@ -42,102 +34,105 @@ interface HostTableProps {
   waiting?: boolean
 }
 
+const STRIPE_COLOR: Record<HostStatus, string> = {
+  active: "bg-[color-mix(in_oklab,var(--severity-info)_75%,transparent)]",
+  idle: "bg-border",
+  down: "bg-[color-mix(in_oklab,var(--severity-error)_80%,transparent)]",
+}
+
 function MetaChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-sm border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+    <span className="font-mono text-[10px] text-muted-foreground/80">
       {children}
     </span>
   )
 }
 
-export function HostTableLoading() {
-  return (
-    <div className="overflow-hidden rounded-lg border bg-card">
-      <Table>
-        <TableHeader>
-          <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
-            <TableHead>Host</TableHead>
-            <TableHead className="w-[110px]">Status</TableHead>
-            <TableHead className="w-[200px]">CPU</TableHead>
-            <TableHead className="hidden md:table-cell w-[200px]">Memory</TableHead>
-            <TableHead className="hidden lg:table-cell w-[200px]">Disk</TableHead>
-            <TableHead className="hidden lg:table-cell w-[100px]">Load 15m</TableHead>
-            <TableHead className="w-[120px]">Last seen</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <TableRow key={i}>
-              <TableCell>
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="mt-1.5 h-3 w-32" />
-              </TableCell>
-              <TableCell>
-                <Skeleton className="h-5 w-20" />
-              </TableCell>
-              <TableCell>
-                <Skeleton className="h-3 w-full" />
-              </TableCell>
-              <TableCell className="hidden md:table-cell">
-                <Skeleton className="h-3 w-full" />
-              </TableCell>
-              <TableCell className="hidden lg:table-cell">
-                <Skeleton className="h-3 w-full" />
-              </TableCell>
-              <TableCell className="hidden lg:table-cell">
-                <Skeleton className="h-4 w-12" />
-              </TableCell>
-              <TableCell>
-                <Skeleton className="h-4 w-16" />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  )
-}
-
-function SortHead({
+function ColumnHead({
   label,
   sortKey,
   currentKey,
   dir,
   onSort,
-  className,
   align = "left",
+  width,
+  hidden,
 }: {
   label: string
-  sortKey: SortKey
-  currentKey: SortKey
-  dir: SortDir
-  onSort: (k: SortKey) => void
-  className?: string
+  sortKey?: SortKey
+  currentKey?: SortKey
+  dir?: SortDir
+  onSort?: (k: SortKey) => void
   align?: "left" | "right"
+  width: string
+  hidden?: string
 }) {
-  const active = currentKey === sortKey
+  const active = sortKey && currentKey === sortKey
+  const sortable = !!sortKey
   return (
-    <TableHead className={className}>
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className={cn(
-          "inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider transition-colors",
-          align === "right" && "ml-auto",
-          active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        {label}
-        <ArrowUpDownIcon
-          size={11}
+    <div
+      className={cn(
+        "flex items-center text-[11px] font-medium",
+        align === "right" && "justify-end",
+        width,
+        hidden,
+      )}
+    >
+      {sortable ? (
+        <button
+          type="button"
+          onClick={() => sortKey && onSort?.(sortKey)}
           className={cn(
-            "transition-opacity",
-            active ? "opacity-100" : "opacity-40",
-            active && dir === "asc" && "rotate-180",
+            "inline-flex items-center gap-1 transition-colors",
+            active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
           )}
-        />
-      </button>
-    </TableHead>
+        >
+          {label}
+          <ArrowUpDownIcon
+            size={10}
+            className={cn(
+              "transition-opacity",
+              active ? "opacity-100" : "opacity-40",
+              active && dir === "asc" && "rotate-180",
+            )}
+          />
+        </button>
+      ) : (
+        <span className="text-muted-foreground">{label}</span>
+      )}
+    </div>
+  )
+}
+
+export function HostTableLoading() {
+  return (
+    <div className="border-y border-border/70">
+      <div className="flex items-center gap-4 border-b border-border/60 px-4 py-2">
+        <ColumnHead label="Host" width="flex-1 min-w-[260px]" />
+        <ColumnHead label="Status" width="w-[88px]" />
+        <ColumnHead label="Usage" width="w-[200px]" />
+        <ColumnHead label="Load 15m" align="right" width="w-[80px]" hidden="hidden lg:flex" />
+        <ColumnHead label="Last seen" align="right" width="w-[100px]" />
+      </div>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-4 border-b border-border/40 px-4 py-3 last:border-0"
+        >
+          <div className="flex flex-1 min-w-[260px] gap-3">
+            <span className="w-[2px] self-stretch bg-muted/50" />
+            <div className="flex-1">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="mt-1.5 h-3 w-32" />
+            </div>
+          </div>
+          <Skeleton className="h-3 w-16 w-[88px]" />
+          <Skeleton className="h-9 w-[200px]" />
+          <Skeleton className="hidden lg:block ml-auto h-3 w-12 w-[80px]" />
+          <Skeleton className="h-3 w-16 w-[100px]" />
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -172,125 +167,117 @@ export function HostTable({ hosts, waiting }: HostTableProps) {
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-lg border bg-card transition-opacity",
+        "border-y border-border/70 transition-opacity",
         waiting && "opacity-60",
       )}
+      aria-label="Hosts"
     >
-      <Table aria-label="Hosts">
-        <TableHeader>
-          <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
-            <SortHead
-              label="Host"
-              sortKey="hostName"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-            />
-            <TableHead className="w-[110px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Status
-            </TableHead>
-            <SortHead
-              label="CPU"
-              sortKey="cpuPct"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="w-[200px]"
-            />
-            <SortHead
-              label="Memory"
-              sortKey="memoryPct"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden md:table-cell w-[200px]"
-            />
-            <SortHead
-              label="Disk"
-              sortKey="diskPct"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden lg:table-cell w-[200px]"
-            />
-            <SortHead
-              label="Load 15m"
-              sortKey="load15"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden lg:table-cell w-[100px]"
-            />
-            <SortHead
-              label="Last seen"
-              sortKey="lastSeen"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="w-[120px]"
-            />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sorted.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
-                No hosts match your search.
-              </TableCell>
-            </TableRow>
-          ) : (
-            sorted.map((host) => (
-              <TableRow
-                key={host.hostName}
-                className="group border-b last:border-0 hover:bg-muted/40"
-              >
-                <TableCell className="py-3">
-                  <Link
-                    to="/infra/$hostName"
-                    params={{ hostName: host.hostName }}
-                    className="block focus-visible:outline-none"
+      <div className="flex items-center gap-4 border-b border-border/60 px-4 py-2">
+        <ColumnHead
+          label="Host"
+          sortKey="hostName"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          width="flex-1 min-w-[260px]"
+        />
+        <ColumnHead label="Status" width="w-[88px]" />
+        <ColumnHead label="Usage" width="w-[200px]" />
+        <ColumnHead
+          label="Load 15m"
+          sortKey="load15"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          align="right"
+          width="w-[80px]"
+          hidden="hidden lg:flex"
+        />
+        <ColumnHead
+          label="Last seen"
+          sortKey="lastSeen"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          align="right"
+          width="w-[100px]"
+        />
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
+          No hosts match your search.
+        </div>
+      ) : (
+        sorted.map((host) => {
+          const status = deriveHostStatus(host.lastSeen)
+          return (
+            <Link
+              key={host.hostName}
+              to="/infra/$hostName"
+              params={{ hostName: host.hostName }}
+              className={cn(
+                "group flex items-center gap-4 border-b border-border/40 px-4 py-3",
+                "transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
+              )}
+            >
+              <div className="flex flex-1 min-w-[260px] gap-3">
+                <span
+                  className={cn(
+                    "w-[2px] self-stretch transition-all",
+                    STRIPE_COLOR[status],
+                    "group-hover:w-[3px] group-hover:bg-primary",
+                  )}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
+                    {host.hostName}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {host.osType && <MetaChip>{host.osType}</MetaChip>}
+                    {host.hostArch && (
+                      <>
+                        <span className="text-foreground/20">·</span>
+                        <MetaChip>{host.hostArch}</MetaChip>
+                      </>
+                    )}
+                    {host.cloudProvider && (
+                      <>
+                        <span className="text-foreground/20">·</span>
+                        <MetaChip>{host.cloudProvider}</MetaChip>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="w-[88px]">
+                <HostStatusBadge lastSeen={host.lastSeen} />
+              </div>
+              <div className="w-[200px]">
+                <InlineMetricBars
+                  cpu={host.cpuPct}
+                  memory={host.memoryPct}
+                  disk={host.diskPct}
+                />
+              </div>
+              <div className="hidden lg:block w-[80px] text-right font-mono text-[12px] tabular-nums text-foreground/80">
+                {formatLoad(host.load15)}
+              </div>
+              <div className="w-[100px] text-right">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span />}
+                    className="cursor-default font-mono text-[11px] text-muted-foreground"
                   >
-                    <div className="font-mono text-sm font-medium text-foreground group-hover:text-primary">
-                      {host.hostName}
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-1">
-                      {host.osType && <MetaChip>{host.osType}</MetaChip>}
-                      {host.hostArch && <MetaChip>{host.hostArch}</MetaChip>}
-                      {host.cloudProvider && <MetaChip>{host.cloudProvider}</MetaChip>}
-                    </div>
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  <HostStatusBadge lastSeen={host.lastSeen} />
-                </TableCell>
-                <TableCell>
-                  <UsageBar fraction={host.cpuPct} />
-                </TableCell>
-                <TableCell className="hidden md:table-cell">
-                  <UsageBar fraction={host.memoryPct} />
-                </TableCell>
-                <TableCell className="hidden lg:table-cell">
-                  <UsageBar fraction={host.diskPct} />
-                </TableCell>
-                <TableCell className="hidden lg:table-cell font-mono text-xs tabular-nums text-foreground/80">
-                  {formatLoad(host.load15)}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={<span />}
-                      className="cursor-default font-mono"
-                    >
-                      {formatRelative(host.lastSeen)}
-                    </TooltipTrigger>
-                    <TooltipContent>{host.lastSeen}</TooltipContent>
-                  </Tooltip>
-                </TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+                    {formatRelative(host.lastSeen)}
+                  </TooltipTrigger>
+                  <TooltipContent>{host.lastSeen}</TooltipContent>
+                </Tooltip>
+              </div>
+            </Link>
+          )
+        })
+      )}
     </div>
   )
 }

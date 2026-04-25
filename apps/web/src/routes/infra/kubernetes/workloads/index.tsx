@@ -11,16 +11,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@maple/ui/components/ui/empty"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@maple/ui/components/ui/tabs"
-
 import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { GridIcon } from "@/components/icons"
+import { GridIcon, MagnifierIcon } from "@/components/icons"
+import { PageHero } from "@/components/infra/primitives/page-hero"
+import { cn } from "@maple/ui/lib/utils"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import {
   WorkloadTable,
@@ -176,69 +171,92 @@ function WorkloadsPageContent() {
           />
         }
       >
-        <Tabs
-          value={kind}
-          onValueChange={(v) =>
-            v &&
-            navigate({
-              search: (prev) => ({ ...prev, kind: v as WorkloadKind, workloadNames: undefined }),
-            })
-          }
-        >
-          <TabsList>
-            <TabsTrigger value="deployment">Deployments</TabsTrigger>
-            <TabsTrigger value="statefulset">StatefulSets</TabsTrigger>
-            <TabsTrigger value="daemonset">DaemonSets</TabsTrigger>
-          </TabsList>
-          <TabsContent value={kind} className="pt-4">
-            {Result.builder(wlResult)
-              .onInitial(() => <WorkloadTableLoading />)
-              .onError((err) => (
-                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-                  <p className="font-medium text-destructive">
-                    Failed to load workloads
-                  </p>
-                  <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
-                    {err.message}
-                  </pre>
-                </div>
-              ))
-              .onSuccess((response, result) => {
-                const wls = response.data as ReadonlyArray<WorkloadRow>
-                const hasAnyFilter =
-                  !!search.search?.trim() ||
-                  (filters.workloadNames?.length ?? 0) > 0 ||
-                  (filters.namespaces?.length ?? 0) > 0 ||
-                  (filters.clusters?.length ?? 0) > 0 ||
-                  (filters.environments?.length ?? 0) > 0 ||
-                  (filters.computeTypes?.length ?? 0) > 0
+        <div className="space-y-6">
+          <PageHero
+            title="Workloads"
+            description="Aggregated pod metrics by deployment, statefulset, and daemonset."
+          />
 
-                if (wls.length === 0 && !hasAnyFilter) {
-                  return (
-                    <Empty className="py-16">
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <GridIcon size={16} />
-                        </EmptyMedia>
-                        <EmptyTitle>No workloads reporting yet</EmptyTitle>
-                        <EmptyDescription>
-                          Maple aggregates pod metrics by k8s.deployment.name,
-                          k8s.statefulset.name, and k8s.daemonset.name. Install the
-                          Helm chart so the k8sattributes processor can enrich pod
-                          metrics with workload identity.
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  )
-                }
+          <div className="flex items-center gap-1 rounded-md border bg-background p-0.5 self-start w-fit">
+            {(["deployment", "statefulset", "daemonset"] as const).map((k) => {
+              const active = kind === k
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() =>
+                    navigate({
+                      search: (prev) => ({
+                        ...prev,
+                        kind: k,
+                        workloadNames: undefined,
+                      }),
+                    })
+                  }
+                  className={cn(
+                    "rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors",
+                    active
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {KIND_LABEL[k]}
+                </button>
+              )
+            })}
+          </div>
 
+          {Result.builder(wlResult)
+            .onInitial(() => <WorkloadTableLoading />)
+            .onError((err) => (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
+                <p className="font-medium text-destructive">Failed to load workloads</p>
+                <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
+                  {err.message}
+                </pre>
+              </div>
+            ))
+            .onSuccess((response, result) => {
+              const wls = response.data as ReadonlyArray<WorkloadRow>
+              const hasAnyFilter =
+                !!search.search?.trim() ||
+                (filters.workloadNames?.length ?? 0) > 0 ||
+                (filters.namespaces?.length ?? 0) > 0 ||
+                (filters.clusters?.length ?? 0) > 0 ||
+                (filters.environments?.length ?? 0) > 0 ||
+                (filters.computeTypes?.length ?? 0) > 0
+
+              if (wls.length === 0 && !hasAnyFilter) {
                 return (
-                  <div
-                    className={`space-y-4 transition-opacity ${
-                      result.waiting ? "opacity-60" : ""
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center gap-3">
+                  <Empty className="py-16">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <GridIcon size={16} />
+                      </EmptyMedia>
+                      <EmptyTitle>No workloads reporting yet</EmptyTitle>
+                      <EmptyDescription>
+                        Maple aggregates pod metrics by k8s.deployment.name,
+                        k8s.statefulset.name, and k8s.daemonset.name. Install the
+                        Helm chart so the k8sattributes processor can enrich pod
+                        metrics with workload identity.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                )
+              }
+
+              return (
+                <div
+                  className={`space-y-4 transition-opacity ${
+                    result.waiting ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="relative">
+                      <MagnifierIcon
+                        size={12}
+                        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
                       <Input
                         placeholder="Search…"
                         value={search.search ?? ""}
@@ -250,25 +268,24 @@ function WorkloadsPageContent() {
                             }),
                           })
                         }
-                        className="max-w-xs"
+                        className="h-8 w-64 pl-7 text-xs"
                       />
-                      <span className="text-muted-foreground text-xs">
-                        {wls.length}{" "}
-                        {wls.length === 1 ? "workload" : "workloads"}
-                      </span>
                     </div>
-                    <WorkloadTable
-                      workloads={wls}
-                      kind={kind}
-                      waiting={result.waiting}
-                      referenceTime={endTime}
-                    />
+                    <span className="text-xs text-muted-foreground">
+                      {wls.length} {wls.length === 1 ? "workload" : "workloads"}
+                    </span>
                   </div>
-                )
-              })
-              .render()}
-          </TabsContent>
-        </Tabs>
+                  <WorkloadTable
+                    workloads={wls}
+                    kind={kind}
+                    waiting={result.waiting}
+                    referenceTime={endTime}
+                  />
+                </div>
+              )
+            })
+            .render()}
+        </div>
       </DashboardLayout>
     </PageRefreshProvider>
   )

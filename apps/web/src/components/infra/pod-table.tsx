@@ -1,14 +1,6 @@
 import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@maple/ui/components/ui/table"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import {
   Tooltip,
@@ -20,7 +12,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { ArrowUpDownIcon } from "@/components/icons"
 import { HostStatusBadge } from "./status-badge"
 import { UsageBar } from "./usage-bar"
-import { formatRelative } from "./format"
+import { deriveHostStatus, formatRelative, type HostStatus } from "./format"
 
 export interface PodRow {
   podName: string
@@ -54,6 +46,12 @@ type SortKey =
   | "lastSeen"
 type SortDir = "asc" | "desc"
 
+const STRIPE_COLOR: Record<HostStatus, string> = {
+  active: "bg-[color-mix(in_oklab,var(--severity-info)_75%,transparent)]",
+  idle: "bg-border",
+  down: "bg-[color-mix(in_oklab,var(--severity-error)_80%,transparent)]",
+}
+
 interface PodTableProps {
   pods: ReadonlyArray<PodRow>
   waiting?: boolean
@@ -69,97 +67,99 @@ function workloadOf(pod: PodRow): { kind: string; name: string } | null {
 
 function MetaChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-sm border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+    <span className="font-mono text-[10px] text-muted-foreground/80">
       {children}
     </span>
   )
 }
 
-export function PodTableLoading() {
-  return (
-    <div className="overflow-hidden rounded-lg border bg-card">
-      <Table>
-        <TableHeader>
-          <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
-            <TableHead>Pod</TableHead>
-            <TableHead className="hidden md:table-cell w-[170px]">CPU req usage (%)</TableHead>
-            <TableHead className="hidden md:table-cell w-[170px]">CPU limit usage (%)</TableHead>
-            <TableHead className="hidden lg:table-cell w-[120px]">CPU usage (cores)</TableHead>
-            <TableHead className="hidden md:table-cell w-[170px]">Mem req usage (%)</TableHead>
-            <TableHead className="hidden lg:table-cell w-[170px]">Mem limit usage (%)</TableHead>
-            <TableHead className="w-[120px]">Last seen</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <TableRow key={i}>
-              <TableCell>
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="mt-1.5 h-3 w-32" />
-              </TableCell>
-              <TableCell className="hidden md:table-cell">
-                <Skeleton className="h-3 w-full" />
-              </TableCell>
-              <TableCell className="hidden md:table-cell">
-                <Skeleton className="h-3 w-full" />
-              </TableCell>
-              <TableCell className="hidden lg:table-cell">
-                <Skeleton className="h-4 w-12" />
-              </TableCell>
-              <TableCell className="hidden md:table-cell">
-                <Skeleton className="h-3 w-full" />
-              </TableCell>
-              <TableCell className="hidden lg:table-cell">
-                <Skeleton className="h-3 w-full" />
-              </TableCell>
-              <TableCell>
-                <Skeleton className="h-4 w-16" />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  )
-}
-
-function SortHead({
+function ColumnHead({
   label,
   sortKey,
   currentKey,
   dir,
   onSort,
-  className,
+  align = "left",
+  width,
+  hidden,
 }: {
   label: string
-  sortKey: SortKey
-  currentKey: SortKey
-  dir: SortDir
-  onSort: (k: SortKey) => void
-  className?: string
+  sortKey?: SortKey
+  currentKey?: SortKey
+  dir?: SortDir
+  onSort?: (k: SortKey) => void
+  align?: "left" | "right"
+  width: string
+  hidden?: string
 }) {
-  const active = currentKey === sortKey
+  const active = sortKey && currentKey === sortKey
+  const sortable = !!sortKey
   return (
-    <TableHead className={className}>
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className={cn(
-          "inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider transition-colors",
-          active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        {label}
-        <ArrowUpDownIcon
-          size={11}
+    <div
+      className={cn(
+        "flex items-center text-[11px] font-medium",
+        align === "right" && "justify-end",
+        width,
+        hidden,
+      )}
+    >
+      {sortable ? (
+        <button
+          type="button"
+          onClick={() => sortKey && onSort?.(sortKey)}
           className={cn(
-            "transition-opacity",
-            active ? "opacity-100" : "opacity-40",
-            active && dir === "asc" && "rotate-180",
+            "inline-flex items-center gap-1 transition-colors",
+            active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
           )}
-        />
-      </button>
-    </TableHead>
+        >
+          {label}
+          <ArrowUpDownIcon
+            size={10}
+            className={cn(
+              "transition-opacity",
+              active ? "opacity-100" : "opacity-40",
+              active && dir === "asc" && "rotate-180",
+            )}
+          />
+        </button>
+      ) : (
+        <span className="text-muted-foreground">{label}</span>
+      )}
+    </div>
+  )
+}
+
+export function PodTableLoading() {
+  return (
+    <div className="border-y border-border/70">
+      <div className="flex items-center gap-4 border-b border-border/60 px-4 py-2">
+        <ColumnHead label="Pod" width="flex-1 min-w-[280px]" />
+        <ColumnHead label="CPU req" align="right" width="w-[140px]" hidden="hidden md:flex" />
+        <ColumnHead label="CPU limit" align="right" width="w-[140px]" hidden="hidden md:flex" />
+        <ColumnHead label="Mem req" align="right" width="w-[140px]" hidden="hidden lg:flex" />
+        <ColumnHead label="Mem limit" align="right" width="w-[140px]" hidden="hidden lg:flex" />
+        <ColumnHead label="Last seen" align="right" width="w-[100px]" />
+      </div>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-4 border-b border-border/40 px-4 py-3 last:border-0"
+        >
+          <div className="flex flex-1 min-w-[280px] gap-3">
+            <span className="w-[2px] self-stretch bg-muted/50" />
+            <div className="flex-1">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="mt-1.5 h-3 w-40" />
+            </div>
+          </div>
+          <Skeleton className="hidden md:block h-3 w-[140px]" />
+          <Skeleton className="hidden md:block h-3 w-[140px]" />
+          <Skeleton className="hidden lg:block h-3 w-[140px]" />
+          <Skeleton className="hidden lg:block h-3 w-[140px]" />
+          <Skeleton className="h-3 w-16" />
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -194,145 +194,159 @@ export function PodTable({ pods, waiting, referenceTime }: PodTableProps) {
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-lg border bg-card transition-opacity",
+        "border-y border-border/70 transition-opacity",
         waiting && "opacity-60",
       )}
+      aria-label="Pods"
     >
-      <Table aria-label="Pods">
-        <TableHeader>
-          <TableRow className="border-b bg-muted/40 hover:bg-muted/40">
-            <SortHead
-              label="Pod"
-              sortKey="podName"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-            />
-            <SortHead
-              label="CPU req usage (%)"
-              sortKey="cpuRequestPct"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden md:table-cell w-[170px]"
-            />
-            <SortHead
-              label="CPU limit usage (%)"
-              sortKey="cpuLimitPct"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden md:table-cell w-[170px]"
-            />
-            <SortHead
-              label="CPU usage (cores)"
-              sortKey="cpuUsage"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden lg:table-cell w-[120px]"
-            />
-            <SortHead
-              label="Mem req usage (%)"
-              sortKey="memoryRequestPct"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden md:table-cell w-[170px]"
-            />
-            <SortHead
-              label="Mem limit usage (%)"
-              sortKey="memoryLimitPct"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="hidden lg:table-cell w-[170px]"
-            />
-            <SortHead
-              label="Last seen"
-              sortKey="lastSeen"
-              currentKey={sortKey}
-              dir={sortDir}
-              onSort={handleSort}
-              className="w-[120px]"
-            />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sorted.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
-                No pods match your filter.
-              </TableCell>
-            </TableRow>
-          ) : (
-            sorted.map((pod) => {
-              const workload = workloadOf(pod)
-              return (
-                <TableRow
-                  key={`${pod.namespace}/${pod.podName}`}
-                  className="group border-b last:border-0 hover:bg-muted/40"
-                >
-                  <TableCell className="py-3">
-                    <Link
-                      to="/infra/kubernetes/pods/$podName"
-                      params={{ podName: pod.podName }}
-                      search={pod.namespace ? { namespace: pod.namespace } : {}}
-                      className="block focus-visible:outline-none"
-                    >
-                      <div className="font-mono text-sm font-medium text-foreground group-hover:text-primary">
-                        {pod.podName}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1">
-                        {pod.namespace && <MetaChip>ns={pod.namespace}</MetaChip>}
-                        {workload && (
-                          <MetaChip>
-                            {workload.kind}={workload.name}
-                          </MetaChip>
-                        )}
-                        {pod.nodeName && <MetaChip>node={pod.nodeName}</MetaChip>}
-                        {pod.qosClass && <MetaChip>qos={pod.qosClass}</MetaChip>}
-                        {pod.computeType === "fargate" && (
-                          <span className="inline-flex items-center rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-700 dark:text-amber-300">
-                            fargate
-                          </span>
-                        )}
-                        <HostStatusBadge lastSeen={pod.lastSeen} referenceTime={referenceTime} />
-                      </div>
-                    </Link>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    <UsageBar fraction={pod.cpuRequestPct} />
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    <UsageBar fraction={pod.cpuLimitPct} />
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell font-mono text-xs tabular-nums text-foreground/80">
-                    {Number.isFinite(pod.cpuUsage) ? pod.cpuUsage.toFixed(3) : "—"}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    <UsageBar fraction={pod.memoryRequestPct} />
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell">
-                    <UsageBar fraction={pod.memoryLimitPct} />
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={<span />}
-                        className="cursor-default font-mono"
-                      >
-                        {formatRelative(pod.lastSeen)}
-                      </TooltipTrigger>
-                      <TooltipContent>{pod.lastSeen}</TooltipContent>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              )
-            })
-          )}
-        </TableBody>
-      </Table>
+      <div className="flex items-center gap-4 border-b border-border/60 px-4 py-2">
+        <ColumnHead
+          label="Pod"
+          sortKey="podName"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          width="flex-1 min-w-[280px]"
+        />
+        <ColumnHead
+          label="CPU req"
+          sortKey="cpuRequestPct"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          align="right"
+          width="w-[140px]"
+          hidden="hidden md:flex"
+        />
+        <ColumnHead
+          label="CPU limit"
+          sortKey="cpuLimitPct"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          align="right"
+          width="w-[140px]"
+          hidden="hidden md:flex"
+        />
+        <ColumnHead
+          label="Mem req"
+          sortKey="memoryRequestPct"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          align="right"
+          width="w-[140px]"
+          hidden="hidden lg:flex"
+        />
+        <ColumnHead
+          label="Mem limit"
+          sortKey="memoryLimitPct"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          align="right"
+          width="w-[140px]"
+          hidden="hidden lg:flex"
+        />
+        <ColumnHead
+          label="Last seen"
+          sortKey="lastSeen"
+          currentKey={sortKey}
+          dir={sortDir}
+          onSort={handleSort}
+          align="right"
+          width="w-[100px]"
+        />
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
+          No pods match your filter.
+        </div>
+      ) : (
+        sorted.map((pod) => {
+          const workload = workloadOf(pod)
+          const status = deriveHostStatus(pod.lastSeen, referenceTime ?? Date.now())
+          return (
+            <Link
+              key={`${pod.namespace}/${pod.podName}`}
+              to="/infra/kubernetes/pods/$podName"
+              params={{ podName: pod.podName }}
+              search={pod.namespace ? { namespace: pod.namespace } : {}}
+              className="group flex items-center gap-4 border-b border-border/40 px-4 py-3 transition-colors last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
+            >
+              <div className="flex flex-1 min-w-[280px] gap-3">
+                <span
+                  className={cn(
+                    "w-[2px] self-stretch transition-all",
+                    STRIPE_COLOR[status],
+                    "group-hover:w-[3px] group-hover:bg-primary",
+                  )}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
+                      {pod.podName}
+                    </span>
+                    <HostStatusBadge lastSeen={pod.lastSeen} referenceTime={referenceTime} />
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {pod.namespace && <MetaChip>ns {pod.namespace}</MetaChip>}
+                    {workload && (
+                      <>
+                        <span className="text-foreground/20">·</span>
+                        <MetaChip>
+                          {workload.kind} {workload.name}
+                        </MetaChip>
+                      </>
+                    )}
+                    {pod.nodeName && (
+                      <>
+                        <span className="text-foreground/20">·</span>
+                        <MetaChip>node {pod.nodeName}</MetaChip>
+                      </>
+                    )}
+                    {pod.qosClass && (
+                      <>
+                        <span className="text-foreground/20">·</span>
+                        <MetaChip>qos {pod.qosClass}</MetaChip>
+                      </>
+                    )}
+                    {pod.computeType === "fargate" && (
+                      <span className="font-mono text-[10px] text-[var(--severity-warn)]">
+                        fargate
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="hidden md:block w-[140px]">
+                <UsageBar fraction={pod.cpuRequestPct} />
+              </div>
+              <div className="hidden md:block w-[140px]">
+                <UsageBar fraction={pod.cpuLimitPct} />
+              </div>
+              <div className="hidden lg:block w-[140px]">
+                <UsageBar fraction={pod.memoryRequestPct} />
+              </div>
+              <div className="hidden lg:block w-[140px]">
+                <UsageBar fraction={pod.memoryLimitPct} />
+              </div>
+              <div className="w-[100px] text-right">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span />}
+                    className="cursor-default font-mono text-[11px] text-muted-foreground"
+                  >
+                    {formatRelative(pod.lastSeen)}
+                  </TooltipTrigger>
+                  <TooltipContent>{pod.lastSeen}</TooltipContent>
+                </Tooltip>
+              </div>
+            </Link>
+          )
+        })
+      )}
     </div>
   )
 }

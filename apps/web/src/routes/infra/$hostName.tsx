@@ -11,23 +11,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@maple/ui/components/ui/select"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@maple/ui/components/ui/tabs"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import {
   HostDetailHeader,
   HostDetailHeaderLoading,
 } from "@/components/infra/host-detail-header"
-import { HostDetailChart } from "@/components/infra/host-detail-chart"
+import { MetricStrip } from "@/components/infra/host-detail-chart"
 import { HostMetadataPanel } from "@/components/infra/host-metadata-panel"
 import { hostDetailSummaryResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import type { HostInfraMetric } from "@/api/tinybird/infra"
 
 export const Route = createFileRoute("/infra/$hostName")({
   component: HostDetailPage,
@@ -41,6 +34,14 @@ const TIME_PRESETS = [
   { value: "24h", label: "Last 24 hours" },
   { value: "7d", label: "Last 7 days" },
 ]
+
+const METRIC_STRIPS = [
+  { metric: "cpu", label: "CPU", caption: "Per-mode utilization · stacked area" },
+  { metric: "memory", label: "Memory", caption: "Used / cached / free · stacked" },
+  { metric: "filesystem", label: "Filesystem", caption: "Mountpoint utilization" },
+  { metric: "network", label: "Network", caption: "Throughput in/out per device" },
+  { metric: "load15", label: "Load 15m", caption: "Linux load average" },
+] as const
 
 function bucketSecondsFor(preset: string): number {
   switch (preset) {
@@ -70,7 +71,6 @@ function HostDetailPage() {
 function HostDetailPageContent() {
   const { hostName } = Route.useParams()
   const [preset, setPreset] = useState("1h")
-  const [metric, setMetric] = useState<HostInfraMetric>("cpu")
 
   const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, preset)
   const bucketSeconds = bucketSecondsFor(preset)
@@ -108,12 +108,10 @@ function HostDetailPageContent() {
         { label: "Infrastructure", href: "/infra" },
         { label: hostName },
       ]}
-      title={hostName}
-      description="Host metrics scraped by the Maple infrastructure agent."
       headerActions={toolbar}
       rightSidebar={rightSidebar}
     >
-      <div className="space-y-6">
+      <div className="space-y-8">
         {Result.builder(summaryResult)
           .onInitial(() => <HostDetailHeaderLoading />)
           .onError(() => (
@@ -124,63 +122,28 @@ function HostDetailPageContent() {
           ))
           .render()}
 
-        <Tabs
-          value={metric}
-          onValueChange={(v) => v && setMetric(v as HostInfraMetric)}
-        >
-          <TabsList>
-            <TabsTrigger value="cpu">CPU</TabsTrigger>
-            <TabsTrigger value="memory">Memory</TabsTrigger>
-            <TabsTrigger value="filesystem">Filesystem</TabsTrigger>
-            <TabsTrigger value="network">Network</TabsTrigger>
-            <TabsTrigger value="load15">Load</TabsTrigger>
-          </TabsList>
-          <TabsContent value="cpu" className="pt-4">
-            <HostDetailChart
-              hostName={hostName}
-              metric="cpu"
-              startTime={startTime}
-              endTime={endTime}
-              bucketSeconds={bucketSeconds}
-            />
-          </TabsContent>
-          <TabsContent value="memory" className="pt-4">
-            <HostDetailChart
-              hostName={hostName}
-              metric="memory"
-              startTime={startTime}
-              endTime={endTime}
-              bucketSeconds={bucketSeconds}
-            />
-          </TabsContent>
-          <TabsContent value="filesystem" className="pt-4">
-            <HostDetailChart
-              hostName={hostName}
-              metric="filesystem"
-              startTime={startTime}
-              endTime={endTime}
-              bucketSeconds={bucketSeconds}
-            />
-          </TabsContent>
-          <TabsContent value="network" className="pt-4">
-            <HostDetailChart
-              hostName={hostName}
-              metric="network"
-              startTime={startTime}
-              endTime={endTime}
-              bucketSeconds={bucketSeconds}
-            />
-          </TabsContent>
-          <TabsContent value="load15" className="pt-4">
-            <HostDetailChart
-              hostName={hostName}
-              metric="load15"
-              startTime={startTime}
-              endTime={endTime}
-              bucketSeconds={bucketSeconds}
-            />
-          </TabsContent>
-        </Tabs>
+        <div className="rounded-md border bg-card">
+          <div className="flex items-baseline justify-between gap-3 border-b px-4 py-2.5">
+            <span className="text-sm font-medium">Metrics</span>
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {METRIC_STRIPS.length} signals · {preset}
+            </span>
+          </div>
+          <div className="px-4">
+            {METRIC_STRIPS.map((strip) => (
+              <MetricStrip
+                key={strip.metric}
+                label={strip.label}
+                caption={strip.caption}
+                hostName={hostName}
+                metric={strip.metric}
+                startTime={startTime}
+                endTime={endTime}
+                bucketSeconds={bucketSeconds}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     </DashboardLayout>
   )

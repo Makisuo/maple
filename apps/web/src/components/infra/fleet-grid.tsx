@@ -7,7 +7,6 @@ import {
   TooltipTrigger,
 } from "@maple/ui/components/ui/tooltip"
 
-import { GridIcon } from "@/components/icons"
 import {
   deriveHostStatus,
   formatPercent,
@@ -25,24 +24,31 @@ interface FleetGridProps {
 type CellTone = SeverityLevel | "stale"
 
 const CELL_BG: Record<CellTone, string> = {
-  ok: "bg-[color-mix(in_oklab,var(--severity-info)_72%,transparent)] hover:bg-[var(--severity-info)]",
-  warn: "bg-[color-mix(in_oklab,var(--severity-warn)_72%,transparent)] hover:bg-[var(--severity-warn)]",
+  ok: "bg-[color-mix(in_oklab,var(--severity-info)_55%,transparent)] hover:bg-[var(--severity-info)]",
+  warn: "bg-[color-mix(in_oklab,var(--severity-warn)_70%,transparent)] hover:bg-[var(--severity-warn)]",
   crit: "bg-[color-mix(in_oklab,var(--severity-error)_72%,transparent)] hover:bg-[var(--severity-error)]",
   stale:
-    "bg-[repeating-linear-gradient(135deg,color-mix(in_oklab,var(--muted-foreground)_24%,transparent)_0_3px,transparent_3px_6px)] hover:bg-muted-foreground/30",
+    "bg-[repeating-linear-gradient(135deg,color-mix(in_oklab,var(--muted-foreground)_18%,transparent)_0_3px,transparent_3px_6px)] hover:bg-muted-foreground/30",
 }
 
 const CELL_RING: Record<CellTone, string> = {
-  ok: "ring-[color-mix(in_oklab,var(--severity-info)_40%,transparent)]",
-  warn: "ring-[color-mix(in_oklab,var(--severity-warn)_40%,transparent)]",
+  ok: "ring-[color-mix(in_oklab,var(--severity-info)_30%,transparent)]",
+  warn: "ring-[color-mix(in_oklab,var(--severity-warn)_35%,transparent)]",
   crit: "ring-[color-mix(in_oklab,var(--severity-error)_40%,transparent)]",
   stale: "ring-border/40",
 }
 
+const GLYPH_TONE: Record<CellTone, string> = {
+  ok: "text-background/80",
+  warn: "text-background/85",
+  crit: "text-background/85",
+  stale: "text-muted-foreground/60",
+}
+
 const SORT_OPTIONS = [
-  { value: "worst", label: "Worst first" },
+  { value: "worst", label: "Worst" },
   { value: "cpu", label: "CPU" },
-  { value: "memory", label: "Memory" },
+  { value: "memory", label: "Mem" },
   { value: "disk", label: "Disk" },
   { value: "name", label: "Name" },
 ] as const
@@ -98,31 +104,25 @@ export function FleetGrid({ hosts }: FleetGridProps) {
   }, [annotated])
 
   return (
-    <section className="space-y-3 rounded-lg border bg-card/50 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <GridIcon size={14} />
-          <span className="text-[11px] font-medium uppercase tracking-wider">Fleet</span>
-          <span className="text-[11px]">
+    <section aria-label="Fleet ribbon" className="rounded-md border bg-card">
+      <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[12px] font-medium text-foreground">Fleet</span>
+          <span className="text-[11px] tabular-nums text-muted-foreground">
             {hosts.length} {hosts.length === 1 ? "host" : "hosts"}
           </span>
         </div>
-        <div
-          role="tablist"
-          aria-label="Sort fleet"
-          className="flex items-center gap-0.5 rounded-md border bg-background/80 p-0.5"
-        >
+        <div className="flex items-center gap-1">
+          <span className="mr-1 text-[11px] text-muted-foreground">Sort</span>
           {SORT_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               type="button"
-              role="tab"
-              aria-selected={sortKey === opt.value}
               onClick={() => setSortKey(opt.value)}
               className={cn(
-                "rounded-sm px-2 py-0.5 text-[11px] font-medium transition-colors",
+                "rounded px-2 py-0.5 text-[11px] transition-colors",
                 sortKey === opt.value
-                  ? "bg-foreground text-background"
+                  ? "bg-muted text-foreground"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -132,55 +132,72 @@ export function FleetGrid({ hosts }: FleetGridProps) {
         </div>
       </div>
 
-      <div
-        className="grid gap-1"
-        style={{ gridTemplateColumns: "repeat(auto-fill, minmax(28px, 1fr))" }}
-      >
-        {sorted.map(({ host, status, tone, worst }) => (
-          <Tooltip key={host.hostName}>
-            <TooltipTrigger
-              render={
-                <Link
-                  to="/infra/$hostName"
-                  params={{ hostName: host.hostName }}
-                  aria-label={`${host.hostName} — ${status}, worst ${formatPercent(worst)}`}
-                />
-              }
-              className={cn(
-                "aspect-square rounded-[4px] ring-1 ring-inset transition-all",
-                "hover:scale-110 hover:ring-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground",
-                CELL_BG[tone],
-                CELL_RING[tone],
-              )}
-            />
-            <TooltipContent
-              side="top"
-              className="space-y-1 text-xs"
-            >
-              <div className="font-mono font-medium">{host.hostName}</div>
-              <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono tabular-nums">
-                <span className="text-muted-foreground">CPU</span>
-                <span>{formatPercent(host.cpuPct)}</span>
-                <span className="text-muted-foreground">Memory</span>
-                <span>{formatPercent(host.memoryPct)}</span>
-                <span className="text-muted-foreground">Disk</span>
-                <span>{formatPercent(host.diskPct)}</span>
-              </div>
-              <div className="border-t pt-1 text-[10px] text-muted-foreground">
-                {status === "active" ? "Active" : status === "idle" ? "Idle" : "Down"}{" "}
-                · last seen {formatRelative(host.lastSeen)}
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        ))}
+      <div className="px-4 py-4">
+        <div
+          className="grid gap-[3px]"
+          style={{ gridTemplateColumns: "repeat(auto-fill, minmax(28px, 1fr))" }}
+        >
+          {sorted.map(({ host, status, tone, worst }, idx) => {
+            const glyph = host.hostName.charAt(0).toUpperCase() || "·"
+            return (
+              <Tooltip key={host.hostName}>
+                <TooltipTrigger
+                  render={
+                    <Link
+                      to="/infra/$hostName"
+                      params={{ hostName: host.hostName }}
+                      aria-label={`${host.hostName} — ${status}, worst ${formatPercent(worst)}`}
+                    />
+                  }
+                  className={cn(
+                    "group relative flex aspect-square items-center justify-center ring-1 ring-inset transition-all",
+                    "hover:scale-[1.12] hover:z-10 hover:ring-foreground/40",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground",
+                    CELL_BG[tone],
+                    CELL_RING[tone],
+                  )}
+                  style={{ animationDelay: `${Math.min(idx * 6, 240)}ms` }}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "font-mono text-[8px] font-semibold uppercase tracking-tight transition-opacity",
+                      GLYPH_TONE[tone],
+                      "opacity-60 group-hover:opacity-95",
+                    )}
+                  >
+                    {glyph}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="space-y-1 text-xs">
+                  <div className="font-mono font-medium">{host.hostName}</div>
+                  <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono tabular-nums">
+                    <span className="text-muted-foreground">CPU</span>
+                    <span>{formatPercent(host.cpuPct)}</span>
+                    <span className="text-muted-foreground">Memory</span>
+                    <span>{formatPercent(host.memoryPct)}</span>
+                    <span className="text-muted-foreground">Disk</span>
+                    <span>{formatPercent(host.diskPct)}</span>
+                  </div>
+                  <div className="border-t pt-1 text-[10px] text-muted-foreground">
+                    {status === "active" ? "Active" : status === "idle" ? "Idle" : "Down"} ·{" "}
+                    {formatRelative(host.lastSeen)}
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            )
+          })}
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t px-4 py-2 text-[11px] text-muted-foreground">
         <LegendDot tone="ok" label="Healthy" count={counts.ok} />
         <LegendDot tone="warn" label="Elevated" count={counts.warn} />
         <LegendDot tone="crit" label="Saturated" count={counts.crit} />
         <LegendDot tone="stale" label="Stale" count={counts.stale} />
-        <span className="ml-auto text-[10px]">Cell color = max(CPU, memory, disk)</span>
+        <span className="ml-auto text-[10px] text-muted-foreground/60">
+          cell = max(cpu, memory, disk)
+        </span>
       </div>
     </section>
   )
@@ -199,13 +216,13 @@ function LegendDot({
     <span className="inline-flex items-center gap-1.5">
       <span
         className={cn(
-          "size-2.5 rounded-[3px] ring-1 ring-inset",
+          "size-2 rounded-[2px] ring-1 ring-inset",
           CELL_BG[tone],
           CELL_RING[tone],
         )}
       />
       <span>{label}</span>
-      <span className="font-mono tabular-nums text-foreground/70">{count}</span>
+      <span className="tabular-nums text-foreground/70">{count}</span>
     </span>
   )
 }

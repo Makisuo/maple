@@ -14,7 +14,8 @@ import {
 
 import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { ServerIcon } from "@/components/icons"
+import { MagnifierIcon, ServerIcon } from "@/components/icons"
+import { PageHero } from "@/components/infra/primitives/page-hero"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import {
   NodeTable,
@@ -151,70 +152,82 @@ function NodesPageContent() {
           />
         }
       >
-        {Result.builder(nodesResult)
-          .onInitial(() => <NodeTableLoading />)
-          .onError((err) => (
-            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-              <p className="font-medium text-destructive">Failed to load nodes</p>
-              <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
-                {err.message}
-              </pre>
-            </div>
-          ))
-          .onSuccess((response, result) => {
-            const nodes = response.data as ReadonlyArray<NodeRow>
-            const hasAnyFilter =
-              !!search.search?.trim() ||
-              (filters.nodeNames?.length ?? 0) > 0 ||
-              (filters.clusters?.length ?? 0) > 0 ||
-              (filters.environments?.length ?? 0) > 0
-
-            if (nodes.length === 0 && !hasAnyFilter) {
-              return (
-                <Empty className="py-16">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <ServerIcon size={16} />
-                    </EmptyMedia>
-                    <EmptyTitle>No nodes reporting yet</EmptyTitle>
-                    <EmptyDescription>
-                      Install the Maple Kubernetes Helm chart so the kubelet stats
-                      receiver can start collecting per-node metrics.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              )
-            }
-
-            return (
-              <div
-                className={`space-y-4 transition-opacity ${
-                  result.waiting ? "opacity-60" : ""
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Input
-                    placeholder="Search nodes…"
-                    value={search.search ?? ""}
-                    onChange={(e) =>
-                      navigate({
-                        search: (prev) => ({
-                          ...prev,
-                          search: e.target.value || undefined,
-                        }),
-                      })
-                    }
-                    className="max-w-xs"
-                  />
-                  <span className="text-muted-foreground text-xs">
-                    {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
-                  </span>
-                </div>
-                <NodeTable nodes={nodes} waiting={result.waiting} referenceTime={endTime} />
+        <div className="space-y-6">
+          <PageHero
+            title="Nodes"
+            description="Kubelet-reported per-node CPU, memory, and lifecycle metrics."
+          />
+          {Result.builder(nodesResult)
+            .onInitial(() => <NodeTableLoading />)
+            .onError((err) => (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
+                <p className="font-medium text-destructive">Failed to load nodes</p>
+                <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
+                  {err.message}
+                </pre>
               </div>
-            )
-          })
-          .render()}
+            ))
+            .onSuccess((response, result) => {
+              const nodes = response.data as ReadonlyArray<NodeRow>
+              const hasAnyFilter =
+                !!search.search?.trim() ||
+                (filters.nodeNames?.length ?? 0) > 0 ||
+                (filters.clusters?.length ?? 0) > 0 ||
+                (filters.environments?.length ?? 0) > 0
+
+              if (nodes.length === 0 && !hasAnyFilter) {
+                return (
+                  <Empty className="py-16">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <ServerIcon size={16} />
+                      </EmptyMedia>
+                      <EmptyTitle>No nodes reporting yet</EmptyTitle>
+                      <EmptyDescription>
+                        Install the Maple Kubernetes Helm chart so the kubelet stats
+                        receiver can start collecting per-node metrics.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                )
+              }
+
+              return (
+                <div
+                  className={`space-y-4 transition-opacity ${
+                    result.waiting ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="relative">
+                      <MagnifierIcon
+                        size={12}
+                        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <Input
+                        placeholder="Search nodes…"
+                        value={search.search ?? ""}
+                        onChange={(e) =>
+                          navigate({
+                            search: (prev) => ({
+                              ...prev,
+                              search: e.target.value || undefined,
+                            }),
+                          })
+                        }
+                        className="h-8 w-64 pl-7 text-xs"
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
+                    </span>
+                  </div>
+                  <NodeTable nodes={nodes} waiting={result.waiting} referenceTime={endTime} />
+                </div>
+              )
+            })
+            .render()}
+        </div>
       </DashboardLayout>
     </PageRefreshProvider>
   )

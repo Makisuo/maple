@@ -14,7 +14,8 @@ import {
 
 import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { FolderIcon } from "@/components/icons"
+import { FolderIcon, MagnifierIcon } from "@/components/icons"
+import { PageHero } from "@/components/infra/primitives/page-hero"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import {
   PodTable,
@@ -162,77 +163,89 @@ function PodsPageContent() {
           />
         }
       >
-        {Result.builder(podsResult)
-          .onInitial(() => <PodTableLoading />)
-          .onError((err) => (
-            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-              <p className="font-medium text-destructive">Failed to load pods</p>
-              <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
-                {err.message}
-              </pre>
-            </div>
-          ))
-          .onSuccess((response, result) => {
-            const pods = response.data as ReadonlyArray<PodRow>
-            const hasAnyFilter =
-              !!search.search?.trim() ||
-              (filters.podNames?.length ?? 0) > 0 ||
-              (filters.namespaces?.length ?? 0) > 0 ||
-              (filters.nodeNames?.length ?? 0) > 0 ||
-              (filters.clusters?.length ?? 0) > 0 ||
-              (filters.deployments?.length ?? 0) > 0 ||
-              (filters.statefulsets?.length ?? 0) > 0 ||
-              (filters.daemonsets?.length ?? 0) > 0 ||
-              (filters.jobs?.length ?? 0) > 0 ||
-              (filters.environments?.length ?? 0) > 0 ||
-              (filters.computeTypes?.length ?? 0) > 0
-
-            if (pods.length === 0 && !hasAnyFilter) {
-              return (
-                <Empty className="py-16">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <FolderIcon size={16} />
-                    </EmptyMedia>
-                    <EmptyTitle>No pods reporting yet</EmptyTitle>
-                    <EmptyDescription>
-                      Install the Maple Kubernetes Helm chart so the kubelet stats
-                      receiver can start collecting per-pod CPU and memory metrics.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              )
-            }
-
-            return (
-              <div
-                className={`space-y-4 transition-opacity ${
-                  result.waiting ? "opacity-60" : ""
-                }`}
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <Input
-                    placeholder="Search pods…"
-                    value={search.search ?? ""}
-                    onChange={(e) =>
-                      navigate({
-                        search: (prev) => ({
-                          ...prev,
-                          search: e.target.value || undefined,
-                        }),
-                      })
-                    }
-                    className="max-w-xs"
-                  />
-                  <span className="text-muted-foreground text-xs">
-                    {pods.length} {pods.length === 1 ? "pod" : "pods"}
-                  </span>
-                </div>
-                <PodTable pods={pods} waiting={result.waiting} referenceTime={endTime} />
+        <div className="space-y-6">
+          <PageHero
+            title="Pods"
+            description="Per-pod CPU and memory utilization — request and limit thresholds."
+          />
+          {Result.builder(podsResult)
+            .onInitial(() => <PodTableLoading />)
+            .onError((err) => (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
+                <p className="font-medium text-destructive">Failed to load pods</p>
+                <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
+                  {err.message}
+                </pre>
               </div>
-            )
-          })
-          .render()}
+            ))
+            .onSuccess((response, result) => {
+              const pods = response.data as ReadonlyArray<PodRow>
+              const hasAnyFilter =
+                !!search.search?.trim() ||
+                (filters.podNames?.length ?? 0) > 0 ||
+                (filters.namespaces?.length ?? 0) > 0 ||
+                (filters.nodeNames?.length ?? 0) > 0 ||
+                (filters.clusters?.length ?? 0) > 0 ||
+                (filters.deployments?.length ?? 0) > 0 ||
+                (filters.statefulsets?.length ?? 0) > 0 ||
+                (filters.daemonsets?.length ?? 0) > 0 ||
+                (filters.jobs?.length ?? 0) > 0 ||
+                (filters.environments?.length ?? 0) > 0 ||
+                (filters.computeTypes?.length ?? 0) > 0
+
+              if (pods.length === 0 && !hasAnyFilter) {
+                return (
+                  <Empty className="py-16">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <FolderIcon size={16} />
+                      </EmptyMedia>
+                      <EmptyTitle>No pods reporting yet</EmptyTitle>
+                      <EmptyDescription>
+                        Install the Maple Kubernetes Helm chart so the kubelet stats
+                        receiver can start collecting per-pod CPU and memory metrics.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                )
+              }
+
+              return (
+                <div
+                  className={`space-y-4 transition-opacity ${
+                    result.waiting ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="relative">
+                      <MagnifierIcon
+                        size={12}
+                        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <Input
+                        placeholder="Search pods…"
+                        value={search.search ?? ""}
+                        onChange={(e) =>
+                          navigate({
+                            search: (prev) => ({
+                              ...prev,
+                              search: e.target.value || undefined,
+                            }),
+                          })
+                        }
+                        className="h-8 w-64 pl-7 text-xs"
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {pods.length} {pods.length === 1 ? "pod" : "pods"}
+                    </span>
+                  </div>
+                  <PodTable pods={pods} waiting={result.waiting} referenceTime={endTime} />
+                </div>
+              )
+            })
+            .render()}
+        </div>
       </DashboardLayout>
     </PageRefreshProvider>
   )

@@ -13,12 +13,6 @@ const FILL_BY_LEVEL: Record<SeverityLevel, string> = {
   crit: "bg-[var(--severity-error)]",
 }
 
-const TRACK_BY_LEVEL: Record<SeverityLevel, string> = {
-  ok: "bg-[color-mix(in_oklab,var(--severity-info)_14%,transparent)]",
-  warn: "bg-[color-mix(in_oklab,var(--severity-warn)_14%,transparent)]",
-  crit: "bg-[color-mix(in_oklab,var(--severity-error)_18%,transparent)]",
-}
-
 const VALUE_BY_LEVEL: Record<SeverityLevel, string> = {
   ok: "text-foreground/80",
   warn: "text-[var(--severity-warn)]",
@@ -32,15 +26,10 @@ export function UsageBar({ fraction, className, showValue = true }: UsageBarProp
 
   return (
     <div className={cn("flex items-center gap-2.5", className)}>
-      <div
-        className={cn(
-          "relative h-2 flex-1 overflow-hidden rounded-full ring-1 ring-inset ring-border/40",
-          TRACK_BY_LEVEL[level],
-        )}
-      >
+      <div className="relative h-[6px] flex-1 overflow-hidden rounded-[1px] bg-muted/50">
         <div
           className={cn(
-            "h-full rounded-full transition-[width] duration-500 ease-out",
+            "h-full transition-[width] duration-500 ease-out",
             FILL_BY_LEVEL[level],
           )}
           style={{ width: `${Math.max(clamped * 100, clamped > 0 ? 2 : 0)}%` }}

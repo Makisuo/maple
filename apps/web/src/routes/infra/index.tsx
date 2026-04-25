@@ -29,6 +29,7 @@ import {
 } from "@/components/infra/host-summary-cards"
 import { InstallHostModal } from "@/components/infra/install-modal"
 import { deriveHostStatus, type HostStatus } from "@/components/infra/format"
+import { PageHero } from "@/components/infra/primitives/page-hero"
 import { listHostsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 
@@ -36,7 +37,7 @@ export const Route = createFileRoute("/infra/")({
   component: InfraPage,
 })
 
-const FLEET_GRID_THRESHOLD = 8
+const FLEET_GRID_THRESHOLD = 4
 
 type StatusFilter = "all" | HostStatus
 
@@ -70,7 +71,7 @@ function InfraPageContent() {
     }),
   )
 
-  const headerActions = (
+  const heroActions = (
     <Button size="sm" onClick={() => setInstallOpen(true)}>
       <PlusIcon size={14} />
       Add host
@@ -78,66 +79,69 @@ function InfraPageContent() {
   )
 
   return (
-    <DashboardLayout
-      breadcrumbs={[{ label: "Infrastructure" }]}
-      title="Infrastructure"
-      description="Hosts, containers, and Kubernetes nodes reporting to Maple."
-      headerActions={headerActions}
-    >
-      {Result.builder(hostsResult)
-        .onInitial(() => (
-          <div className="space-y-6">
-            <HostSummaryCardsLoading />
-            <HostTableLoading />
-          </div>
-        ))
-        .onError((err) => (
-          <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-            <p className="font-medium text-destructive">Failed to load hosts</p>
-            <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
-              {err.message}
-            </pre>
-          </div>
-        ))
-        .onSuccess((response, result) => {
-          const hosts = response.data as ReadonlyArray<HostRow>
+    <DashboardLayout breadcrumbs={[{ label: "Infrastructure" }]}>
+      <div className="space-y-6">
+        <PageHero
+          title="Infrastructure"
+          description="Hosts, containers, and Kubernetes nodes reporting to Maple."
+          actions={heroActions}
+        />
 
-          if (hosts.length === 0 && !search.trim()) {
+        {Result.builder(hostsResult)
+          .onInitial(() => (
+            <div className="space-y-6">
+              <HostSummaryCardsLoading />
+              <HostTableLoading />
+            </div>
+          ))
+          .onError((err) => (
+            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
+              <p className="font-medium text-destructive">Failed to load hosts</p>
+              <pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
+                {err.message}
+              </pre>
+            </div>
+          ))
+          .onSuccess((response, result) => {
+            const hosts = response.data as ReadonlyArray<HostRow>
+
+            if (hosts.length === 0 && !search.trim()) {
+              return (
+                <Empty className="py-16">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <ServerIcon size={16} />
+                    </EmptyMedia>
+                    <EmptyTitle>No hosts reporting yet</EmptyTitle>
+                    <EmptyDescription>
+                      Install the Maple infrastructure agent on a host, container, or
+                      Kubernetes cluster to start collecting CPU, memory, disk, and
+                      network metrics.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  <Button onClick={() => setInstallOpen(true)}>
+                    <PlusIcon size={14} />
+                    Add host
+                  </Button>
+                </Empty>
+              )
+            }
+
             return (
-              <Empty className="py-16">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <ServerIcon size={16} />
-                  </EmptyMedia>
-                  <EmptyTitle>No hosts reporting yet</EmptyTitle>
-                  <EmptyDescription>
-                    Install the Maple infrastructure agent on a host, container, or
-                    Kubernetes cluster to start collecting CPU, memory, disk, and
-                    network metrics.
-                  </EmptyDescription>
-                </EmptyHeader>
-                <Button onClick={() => setInstallOpen(true)}>
-                  <PlusIcon size={14} />
-                  Add host
-                </Button>
-              </Empty>
+              <FleetView
+                hosts={hosts}
+                waiting={Boolean(result.waiting)}
+                startTime={startTime}
+                endTime={endTime}
+                search={search}
+                onSearchChange={setSearch}
+                statusFilter={statusFilter}
+                onStatusFilterChange={setStatusFilter}
+              />
             )
-          }
-
-          return (
-            <FleetView
-              hosts={hosts}
-              waiting={Boolean(result.waiting)}
-              startTime={startTime}
-              endTime={endTime}
-              search={search}
-              onSearchChange={setSearch}
-              statusFilter={statusFilter}
-              onStatusFilterChange={setStatusFilter}
-            />
-          )
-        })
-        .render()}
+          })
+          .render()}
+      </div>
 
       <InstallHostModal open={installOpen} onOpenChange={setInstallOpen} />
     </DashboardLayout>
@@ -192,14 +196,14 @@ function FleetView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="relative">
           <MagnifierIcon
-            size={14}
+            size={12}
             className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
           />
           <Input
             placeholder="Search hosts…"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="h-8 w-64 pl-8 text-xs"
+            className="h-8 w-64 pl-7 text-xs"
           />
         </div>
         <div
@@ -212,16 +216,17 @@ function FleetView({
               opt.value === "all"
                 ? hosts.length
                 : counts[opt.value as HostStatus] ?? 0
+            const active = statusFilter === opt.value
             return (
               <button
                 key={opt.value}
                 type="button"
                 role="tab"
-                aria-selected={statusFilter === opt.value}
+                aria-selected={active}
                 onClick={() => onStatusFilterChange(opt.value)}
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-sm px-2 py-1 text-[11px] font-medium transition-colors",
-                  statusFilter === opt.value
+                  active
                     ? "bg-foreground text-background"
                     : "text-muted-foreground hover:text-foreground",
                 )}
@@ -229,10 +234,8 @@ function FleetView({
                 {opt.label}
                 <span
                   className={cn(
-                    "font-mono tabular-nums",
-                    statusFilter === opt.value
-                      ? "text-background/70"
-                      : "text-foreground/50",
+                    "tabular-nums",
+                    active ? "text-background/70" : "text-foreground/40",
                   )}
                 >
                   {count}

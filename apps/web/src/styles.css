@@ -352,3 +352,64 @@
   box-shadow: inset 0 0 0 1px oklch(0.5 0.05 0 / 0.15);
   z-index: 5;
 }
+
+/* Infra "Operations Terminal" — shared primitives */
+@keyframes severity-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes ref-line-draw {
+  from {
+    stroke-dashoffset: 240;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.infra-pulse {
+  animation: severity-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.infra-ref-line line,
+.recharts-reference-line-line.infra-ref-line {
+  stroke-dasharray: 4 4;
+  animation: ref-line-draw 1.4s ease-out 0.1s both;
+}
+
+.dot-grid-bg {
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-position: 0 0;
+}
+
+.scanline-bg {
+  background-image: repeating-linear-gradient(
+    0deg,
+    color-mix(in oklab, var(--foreground) 4%, transparent) 0,
+    color-mix(in oklab, var(--foreground) 4%, transparent) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .infra-pulse {
+    animation: none;
+  }
+  .infra-ref-line line,
+  .recharts-reference-line-line.infra-ref-line {
+    animation: none;
+  }
+}

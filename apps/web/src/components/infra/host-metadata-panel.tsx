@@ -24,15 +24,16 @@ interface RowProps {
   label: string
   value: string | null | undefined
   copyValue?: string
-  mono?: boolean
   tooltip?: string
 }
 
-function Row({ label, value, copyValue, mono = true, tooltip }: RowProps) {
+function Row({ label, value, copyValue, tooltip }: RowProps) {
   const [copied, setCopied] = useState(false)
   if (!value) return null
 
-  const handleCopy = async () => {
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
     try {
       await navigator.clipboard.writeText(copyValue ?? value)
       setCopied(true)
@@ -43,15 +44,15 @@ function Row({ label, value, copyValue, mono = true, tooltip }: RowProps) {
   }
 
   const valueNode = (
-    <span className={cn("text-right break-all text-foreground/80", mono ? "font-mono" : "")}>
+    <span className="break-all text-right font-mono text-[11px] tabular-nums text-foreground/85">
       {value}
     </span>
   )
 
   return (
-    <div className="group flex items-start justify-between gap-3 py-1.5">
+    <div className="group flex items-baseline justify-between gap-3 py-1.5">
       <span className="font-mono text-[11px] text-muted-foreground">{label}</span>
-      <div className="flex items-center gap-1.5 text-[11px]">
+      <div className="flex min-w-0 items-center gap-1.5 text-[11px]">
         {tooltip ? (
           <Tooltip>
             <TooltipTrigger render={<span />} className="cursor-default">
@@ -87,9 +88,7 @@ interface SectionProps {
 function Section({ title, children }: SectionProps) {
   return (
     <div className="space-y-0.5 py-2 first:pt-0 last:pb-0">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
-        {title}
-      </div>
+      <div className="text-[11px] font-medium text-muted-foreground">{title}</div>
       <div className="divide-y divide-border/60">{children}</div>
     </div>
   )
@@ -124,14 +123,12 @@ export function HostMetadataPanel({ summary }: HostMetadataPanelProps) {
             value={formatRelative(summary.firstSeen)}
             copyValue={summary.firstSeen}
             tooltip={summary.firstSeen}
-            mono={false}
           />
           <Row
             label="last seen"
             value={formatRelative(summary.lastSeen)}
             copyValue={summary.lastSeen}
             tooltip={summary.lastSeen}
-            mono={false}
           />
         </Section>
       </CardContent>
