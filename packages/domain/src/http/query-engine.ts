@@ -175,6 +175,27 @@ export class ServiceDependenciesResponse extends Schema.Class<ServiceDependencie
   data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
+const ServiceWorkloadKindLiteral = Schema.Literals(["deployment", "statefulset", "daemonset", "unknown"])
+
+export class ServiceWorkloadsRequest extends Schema.Class<ServiceWorkloadsRequest>("ServiceWorkloadsRequest")({
+  startTime: TinybirdDateTime,
+  endTime: TinybirdDateTime,
+  services: Schema.Array(Schema.String),
+}) {}
+
+export class ServiceWorkloadsResponse extends Schema.Class<ServiceWorkloadsResponse>("ServiceWorkloadsResponse")({
+  data: Schema.Array(Schema.Struct({
+    serviceName: Schema.String,
+    workloadKind: ServiceWorkloadKindLiteral,
+    workloadName: Schema.String,
+    namespace: Schema.String,
+    clusterName: Schema.String,
+    podCount: Schema.Number,
+    avgCpuLimitUtilization: Schema.NullOr(Schema.Number),
+    avgMemoryLimitUtilization: Schema.NullOr(Schema.Number),
+  })),
+}) {}
+
 export class ServiceUsageRequest extends Schema.Class<ServiceUsageRequest>("ServiceUsageRequest")({
   startTime: TinybirdDateTime,
   endTime: TinybirdDateTime,
@@ -768,6 +789,10 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
   }))
   .add(HttpApiEndpoint.post("serviceDependencies", "/service-dependencies", {
     payload: ServiceDependenciesRequest, success: ServiceDependenciesResponse,
+    error: [QueryEngineExecutionError],
+  }))
+  .add(HttpApiEndpoint.post("serviceWorkloads", "/service-workloads", {
+    payload: ServiceWorkloadsRequest, success: ServiceWorkloadsResponse,
     error: [QueryEngineExecutionError],
   }))
   .add(HttpApiEndpoint.post("serviceUsage", "/service-usage", {

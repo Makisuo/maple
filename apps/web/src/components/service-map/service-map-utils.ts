@@ -1,6 +1,12 @@
 import type { Node, Edge } from "@xyflow/react"
 import type { ServiceEdge } from "@/api/tinybird/service-map"
 import type { ServiceOverview } from "@/api/tinybird/services"
+import type { ServiceWorkload } from "@/api/tinybird/service-infra"
+
+export interface ServiceNodeInfra {
+  podCount: number
+  workloadCount: number
+}
 
 export interface ServiceNodeData {
   label: string
@@ -12,6 +18,7 @@ export interface ServiceNodeData {
   avgLatencyMs: number
   services: string[]
   selected: boolean
+  infra?: ServiceNodeInfra
   [key: string]: unknown
 }
 
@@ -68,6 +75,7 @@ export function buildFlowElements(
   edges: ServiceEdge[],
   serviceOverviews: ServiceOverview[],
   durationSeconds: number,
+  serviceWorkloads: ServiceWorkload[] = [],
 ): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
   const services = deriveServiceList(edges, serviceOverviews)
 
@@ -81,8 +89,21 @@ export function buildFlowElements(
     }
   }
 
+  // Aggregate per-service infra rollup. Pod / workload counts are summed
+  // across all (workloadKind, workloadName, namespace, cluster) rows that map
+  // to the same serviceName — a service can run as multiple workloads (e.g.
+  // canary + stable) so we don't deduplicate.
+  const infraMap = new Map<string, ServiceNodeInfra>()
+  for (const wl of serviceWorkloads) {
+    const existing = infraMap.get(wl.serviceName) ?? { podCount: 0, workloadCount: 0 }
+    existing.podCount += wl.podCount
+    existing.workloadCount += 1
+    infraMap.set(wl.serviceName, existing)
+  }
+
   const flowNodes: Node<ServiceNodeData>[] = services.map((service) => {
     const overview = overviewMap.get(service)
+    const infra = infraMap.get(service)
     return {
       id: service,
       type: "serviceNode",
@@ -97,6 +118,7 @@ export function buildFlowElements(
         avgLatencyMs: overview?.p50LatencyMs ?? 0,
         services,
         selected: false,
+        infra,
       },
     }
   })

@@ -29,10 +29,17 @@ import {
 } from "@maple/ui/components/ui/resizable"
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { Button } from "@maple/ui/components/ui/button"
-import { XmarkIcon } from "@/components/icons"
-import { getServiceMapResultAtom, getServiceOverviewResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
+import { ArrowRightIcon, CubeIcon, NetworkNodesIcon, XmarkIcon } from "@/components/icons"
+import {
+  getServiceMapResultAtom,
+  getServiceOverviewResultAtom,
+  getServiceWorkloadsResultAtom,
+} from "@/lib/services/atoms/tinybird-query-atoms"
 import type { GetServiceMapInput, ServiceEdge } from "@/api/tinybird/service-map"
 import type { GetServiceOverviewInput, ServiceOverview } from "@/api/tinybird/services"
+import type { ServiceWorkload } from "@/api/tinybird/service-infra"
+import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { ServiceMapNode } from "./service-map-node"
 import { ServiceMapEdge } from "./service-map-edge"
 import {
@@ -99,7 +106,9 @@ interface ServiceDetailPanelProps {
   services: string[]
   edges: ServiceEdge[]
   overviews: ServiceOverview[]
+  workloads: ServiceWorkload[]
   durationSeconds: number
+  showInfraTab: boolean
   onClose: () => void
 }
 
@@ -108,7 +117,9 @@ function ServiceDetailPanel({
   services,
   edges,
   overviews,
+  workloads,
   durationSeconds,
+  showInfraTab,
   onClose,
 }: ServiceDetailPanelProps) {
   const overview = overviews.find((o) => o.serviceName === serviceId)
@@ -122,6 +133,7 @@ function ServiceDetailPanel({
 
   const dependencies = edges.filter((e) => e.sourceService === serviceId)
   const calledBy = edges.filter((e) => e.targetService === serviceId)
+  const serviceWorkloads = workloads.filter((w) => w.serviceName === serviceId)
 
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
@@ -149,9 +161,29 @@ function ServiceDetailPanel({
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="p-4 space-y-5">
-          {/* Metrics */}
+      <Tabs defaultValue="service" className="flex flex-col flex-1 min-h-0">
+        <TabsList variant="line" className="shrink-0 px-4 pt-2">
+          <TabsTrigger value="service">
+            <NetworkNodesIcon size={12} />
+            Service
+          </TabsTrigger>
+          {showInfraTab && (
+            <TabsTrigger value="infrastructure">
+              <CubeIcon size={12} />
+              Infrastructure
+              {serviceWorkloads.length > 0 && (
+                <span className="ml-1 text-[9px] tabular-nums text-muted-foreground/70">
+                  {serviceWorkloads.length}
+                </span>
+              )}
+            </TabsTrigger>
+          )}
+        </TabsList>
+
+        <TabsContent value="service" className="flex-1 min-h-0 mt-0">
+          <ScrollArea className="h-full">
+            <div className="p-4 space-y-5">
+              {/* Metrics */}
           <div className="space-y-3">
             <h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">Metrics</h4>
             <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -296,8 +328,122 @@ function ServiceDetailPanel({
               </div>
             </div>
           )}
+            </div>
+          </ScrollArea>
+        </TabsContent>
+
+        {showInfraTab && (
+          <TabsContent value="infrastructure" className="flex-1 min-h-0 mt-0">
+            <ScrollArea className="h-full">
+              <div className="p-4 space-y-4">
+                {serviceWorkloads.length === 0 ? (
+                  <ServiceInfraEmptyState />
+                ) : (
+                  <div className="space-y-2">
+                    <h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">Kubernetes workloads</h4>
+                    <div className="space-y-2">
+                      {serviceWorkloads.map((wl) => (
+                        <ServiceWorkloadRow key={`${wl.workloadKind}/${wl.workloadName}/${wl.namespace}/${wl.clusterName}`} workload={wl} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+        )}
+      </Tabs>
+    </div>
+  )
+}
+
+function formatPercent(value: number | null): string {
+  if (value == null) return "—"
+  return `${(value * 100).toFixed(0)}%`
+}
+
+function ServiceWorkloadRow({ workload }: { workload: ServiceWorkload }) {
+  const knownKind: "deployment" | "statefulset" | "daemonset" | null =
+    workload.workloadKind === "deployment" ||
+    workload.workloadKind === "statefulset" ||
+    workload.workloadKind === "daemonset"
+      ? workload.workloadKind
+      : null
+  return (
+    <div className="rounded-md border bg-card p-3 space-y-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wide">
+            <CubeIcon size={11} />
+            <span>{workload.workloadKind}</span>
+          </div>
+          <p className="text-xs font-medium text-foreground truncate mt-0.5">{workload.workloadName}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+            {workload.namespace || "default"}
+            {workload.clusterName ? ` · ${workload.clusterName}` : ""}
+          </p>
         </div>
-      </ScrollArea>
+        <div className="flex flex-col items-end gap-px shrink-0">
+          <span className="text-[9px] text-muted-foreground/60 uppercase tracking-wide">pods</span>
+          <span className="text-sm font-semibold text-foreground tabular-nums font-mono">{workload.podCount}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-[10px]">
+        <div className="flex items-center justify-between rounded bg-muted/30 px-2 py-1">
+          <span className="text-muted-foreground">CPU</span>
+          <span className="font-mono tabular-nums text-foreground">{formatPercent(workload.avgCpuLimitUtilization)}</span>
+        </div>
+        <div className="flex items-center justify-between rounded bg-muted/30 px-2 py-1">
+          <span className="text-muted-foreground">Memory</span>
+          <span className="font-mono tabular-nums text-foreground">{formatPercent(workload.avgMemoryLimitUtilization)}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 pt-0.5">
+        {knownKind && (
+          <Link
+            to="/infra/kubernetes/workloads/$kind/$workloadName"
+            params={{ kind: knownKind, workloadName: workload.workloadName }}
+            className="inline-flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors"
+          >
+            View workload <ArrowRightIcon size={10} />
+          </Link>
+        )}
+        <Link
+          to="/infra/kubernetes/pods"
+          search={
+            knownKind
+              ? {
+                  [`${knownKind}s`]: [workload.workloadName],
+                  namespaces: workload.namespace ? [workload.namespace] : undefined,
+                }
+              : {
+                  namespaces: workload.namespace ? [workload.namespace] : undefined,
+                }
+          }
+          className="inline-flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors"
+        >
+          View pods <ArrowRightIcon size={10} />
+        </Link>
+      </div>
+    </div>
+  )
+}
+
+function ServiceInfraEmptyState() {
+  return (
+    <div className="rounded-md border border-dashed bg-muted/20 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <CubeIcon size={14} className="text-muted-foreground/50" />
+        <p className="text-xs font-medium text-foreground">No Kubernetes workloads found</p>
+      </div>
+      <p className="text-[11px] text-muted-foreground leading-relaxed">
+        This service has no spans tagged with <code className="text-[10px] bg-muted px-1 py-0.5 rounded">k8s.deployment.name</code> in the selected window. Install the maple-k8s-infra Helm chart and label your namespace to enable infrastructure context:
+      </p>
+      <pre className="text-[10px] bg-muted px-2 py-1.5 rounded font-mono text-foreground overflow-x-auto">
+        kubectl label namespace &lt;ns&gt; maple.io/instrument=true
+      </pre>
     </div>
   )
 }
@@ -382,21 +528,25 @@ function LayoutDebugPanel({
 function ServiceMapCanvas({
   edges: serviceEdges,
   overviews,
+  workloads,
+  showInfraTab,
   durationSeconds,
 }: {
   edges: ServiceEdge[]
   overviews: ServiceOverview[]
+  workloads: ServiceWorkload[]
+  showInfraTab: boolean
   durationSeconds: number
 }) {
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
   const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>({ ...DEFAULT_LAYOUT_CONFIG })
 
   const { layoutedNodes, flowEdges, services } = useMemo(() => {
-    const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(serviceEdges, overviews, durationSeconds)
+    const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(serviceEdges, overviews, durationSeconds, workloads)
     const positioned = layoutNodes(rawNodes, rawEdges, layoutConfig)
     const allServices = [...new Set(positioned.map((n) => n.id))].sort()
     return { layoutedNodes: positioned, flowEdges: rawEdges, services: allServices }
-  }, [serviceEdges, overviews, durationSeconds, layoutConfig])
+  }, [serviceEdges, overviews, workloads, durationSeconds, layoutConfig])
 
   // Merge layout positions with selection state
   const nodesWithSelection = useMemo(() => {
@@ -580,6 +730,8 @@ function ServiceMapCanvas({
                 services={services}
                 edges={serviceEdges}
                 overviews={overviews}
+                workloads={workloads}
+                showInfraTab={showInfraTab}
                 durationSeconds={durationSeconds}
                 onClose={() => setSelectedServiceId(null)}
               />
@@ -592,6 +744,7 @@ function ServiceMapCanvas({
 }
 
 export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
+  const infraEnabled = useInfraEnabled()
   const durationSeconds = useMemo(() => {
     const ms = new Date(endTime).getTime() - new Date(startTime).getTime()
     return Math.max(1, ms / 1000)
@@ -613,6 +766,33 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
   // Render map as soon as edges arrive — don't wait for overview metrics
   const overviews = Result.isSuccess(overviewResult) ? overviewResult.value.data : []
 
+  // Bulk fetch workloads keyed off the same set of services that appear in edges.
+  // Gated on infraEnabled so we don't issue this query on plans without the
+  // infrastructure feature. Empty services array short-circuits to no rows.
+  const services = useMemo(() => {
+    if (!Result.isSuccess(mapResult)) return [] as string[]
+    const set = new Set<string>()
+    for (const edge of mapResult.value.edges) {
+      set.add(edge.sourceService)
+      set.add(edge.targetService)
+    }
+    for (const o of overviews) set.add(o.serviceName)
+    return Array.from(set).sort()
+  }, [mapResult, overviews])
+
+  const workloadsInput = useMemo(
+    () => ({ data: { startTime, endTime, services } }),
+    [startTime, endTime, services],
+  )
+  const workloadsResult = useRefreshableAtomValue(
+    getServiceWorkloadsResultAtom(workloadsInput),
+  )
+  // Don't block first paint on workloads — fall back to empty until it lands.
+  const workloads =
+    infraEnabled && Result.isSuccess(workloadsResult)
+      ? workloadsResult.value.workloads
+      : []
+
   return Result.builder(mapResult)
     .onInitial(() => (
       <div className="flex items-center justify-center h-full">
@@ -633,6 +813,8 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
       <ServiceMapCanvas
         edges={mapResponse.edges}
         overviews={overviews}
+        workloads={workloads}
+        showInfraTab={infraEnabled}
         durationSeconds={durationSeconds}
       />
     ))

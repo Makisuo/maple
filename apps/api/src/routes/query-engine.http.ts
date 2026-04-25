@@ -15,6 +15,7 @@ import {
   ServiceApdexResponse,
   ServiceReleasesResponse,
   ServiceDependenciesResponse,
+  ServiceWorkloadsResponse,
   ServiceUsageResponse,
   ListLogsResponse,
   ListMetricsResponse,
@@ -218,6 +219,29 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
           const compiled = CH.serviceDependenciesSQL({ deploymentEnv: payload.deploymentEnv }, { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime })
           const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "serviceDependencies query failed")
           return new ServiceDependenciesResponse({ data: compiled.castRows(rows) as any[] })
+        }),
+      )
+      .handle("serviceWorkloads", ({ payload }) =>
+        Effect.gen(function* () {
+          const tenant = yield* CurrentTenant.Context
+          const compiled = CH.serviceWorkloadsSQL(
+            { services: payload.services },
+            { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+          )
+          const rows = yield* mapExecError(tinybird.sqlQuery(tenant, compiled.sql), "serviceWorkloads query failed")
+          const typedRows = compiled.castRows(rows)
+          return new ServiceWorkloadsResponse({
+            data: typedRows.map((row) => ({
+              serviceName: String(row.serviceName ?? ""),
+              workloadKind: row.workloadKind,
+              workloadName: String(row.workloadName ?? ""),
+              namespace: String(row.namespace ?? ""),
+              clusterName: String(row.clusterName ?? ""),
+              podCount: Number(row.podCount) || 0,
+              avgCpuLimitUtilization: row.avgCpuLimitUtilization == null ? null : Number(row.avgCpuLimitUtilization),
+              avgMemoryLimitUtilization: row.avgMemoryLimitUtilization == null ? null : Number(row.avgMemoryLimitUtilization),
+            })),
+          })
         }),
       )
       .handle("serviceUsage", ({ payload }) =>

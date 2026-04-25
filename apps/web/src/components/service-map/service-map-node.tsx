@@ -7,6 +7,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@maple/ui/components/ui/tooltip"
+import { CubeIcon } from "@/components/icons"
 import type { ServiceNodeData } from "./service-map-utils"
 
 function formatRate(value: number): string {
@@ -39,7 +40,7 @@ interface ServiceMapNodeProps {
 export const ServiceMapNode = memo(function ServiceMapNode({
   data,
 }: ServiceMapNodeProps) {
-  const { label, throughput, tracedThroughput, hasSampling, samplingWeight, errorRate, avgLatencyMs, services, selected } = data
+  const { label, throughput, tracedThroughput, hasSampling, samplingWeight, errorRate, avgLatencyMs, services, selected, infra } = data
   const accentColor = getServiceLegendColor(label, services)
 
   return (
@@ -113,6 +114,32 @@ export const ServiceMapNode = memo(function ServiceMapNode({
               <span className="text-[11px] font-medium text-secondary-foreground font-mono tabular-nums">
                 {formatLatency(avgLatencyMs)}
               </span>
+            </div>
+
+            {/* Pods badge — empty placeholder when no infra so widths stay stable */}
+            <div className="flex flex-col gap-px ml-auto items-end">
+              <span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">pods</span>
+              {infra ? (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <span className="flex items-center gap-1 text-[11px] font-medium text-secondary-foreground font-mono tabular-nums">
+                      <CubeIcon size={10} className="text-muted-foreground/70" />
+                      {infra.podCount}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p>
+                      {infra.workloadCount === 1
+                        ? `1 Kubernetes workload`
+                        : `${infra.workloadCount} Kubernetes workloads`}
+                      {", "}
+                      {infra.podCount === 1 ? "1 pod" : `${infra.podCount} pods`}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <span className="text-[11px] font-mono tabular-nums text-muted-foreground/30">—</span>
+              )}
             </div>
           </div>
         </div>

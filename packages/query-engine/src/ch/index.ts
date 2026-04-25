@@ -257,6 +257,13 @@ export {
   type ServiceDependenciesOutput,
 } from "./queries/service-map"
 
+// Queries — Service Infrastructure (service.name ↔ k8s workload join)
+export {
+  serviceWorkloadsSQL,
+  type ServiceWorkloadsOpts,
+  type ServiceWorkloadsOutput,
+} from "./queries/service-infra"
+
 // Queries — Alerts: removed. Alert evaluation now reuses the dashboard
 // timeseries queries (tracesTimeseriesQuery / logsTimeseriesQuery /
 // metricsTimeseriesQuery) so dashboards and alerts share the same grouping
