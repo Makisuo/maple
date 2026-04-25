@@ -130,25 +130,35 @@ data:
       deltatorate/fargate:
         metrics:
           - container_cpu_usage_seconds_total
-      # Reshape cAdvisor metrics into the OTel kubeletstats convention so the
-      # existing Pods/Workloads queries don't need to know they came from
-      # Fargate. Move pod/namespace/container/node labels to resource attrs
-      # (so k8sattributes' name+namespace association can enrich), then
-      # rename the metric.
+      # The prometheus receiver creates one ResourceMetrics per scrape target
+      # (one Fargate node) with all pods' datapoints sharing it. We need each
+      # pod/container's datapoints under their own Resource so transform's
+      # set(resource.attributes[...]) doesn't clobber siblings — groupbyattrs
+      # promotes the listed attributes to resource and splits accordingly.
+      groupbyattrs/fargate:
+        keys:
+          - pod
+          - namespace
+          - container
+          - k8s_node_name
+      # Rename promoted attrs to OTel kubeletstats convention so the existing
+      # Pods/Workloads queries don't need to know they came from Fargate.
       transform/fargate:
         error_mode: ignore
         metric_statements:
-          - context: datapoint
+          - context: resource
             statements:
-              - set(resource.attributes["k8s.pod.name"], attributes["pod"]) where attributes["pod"] != nil
-              - set(resource.attributes["k8s.namespace.name"], attributes["namespace"]) where attributes["namespace"] != nil
-              - set(resource.attributes["k8s.container.name"], attributes["container"]) where attributes["container"] != nil
-              - set(resource.attributes["k8s.node.name"], attributes["k8s_node_name"]) where attributes["k8s_node_name"] != nil
-              - set(resource.attributes["eks.amazonaws.com/compute-type"], "fargate")
+              - set(attributes["k8s.pod.name"], attributes["pod"]) where attributes["pod"] != nil
+              - set(attributes["k8s.namespace.name"], attributes["namespace"]) where attributes["namespace"] != nil
+              - set(attributes["k8s.container.name"], attributes["container"]) where attributes["container"] != nil
+              - set(attributes["k8s.node.name"], attributes["k8s_node_name"]) where attributes["k8s_node_name"] != nil
+              - set(attributes["eks.amazonaws.com/compute-type"], "fargate")
               - delete_key(attributes, "pod")
               - delete_key(attributes, "namespace")
               - delete_key(attributes, "container")
               - delete_key(attributes, "k8s_node_name")
+          - context: datapoint
+            statements:
               - delete_key(attributes, "id")
               - delete_key(attributes, "image")
               - delete_key(attributes, "name")
@@ -184,6 +194,7 @@ data:
             - memory_limiter
             - cumulativetodelta/fargate
             - deltatorate/fargate
+            - groupbyattrs/fargate
             - transform/fargate
             {{- if .Values.processors.kubernetesAttributes.enabled }}
             - k8sattributes
