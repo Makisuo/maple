@@ -1,0 +1,101 @@
+{{- /*
+Instrumentation CR — env-vars-only mode.
+
+This is the recipe the OpenTelemetry Operator applies to pods that opt in via:
+
+  kubectl annotate namespace <ns> \
+    instrumentation.opentelemetry.io/inject-sdk={{ include "maple-k8s-infra.autoInstrument.crNamespacedName" . }}
+
+Or via Pod / Deployment annotation. The `inject-sdk` annotation (vs the
+`inject-<lang>` family) tells the operator to inject ONLY env vars from this
+CR — no language-specific init containers, no SDK swapping. User apps must
+already link their own OTel SDK; we just tell that SDK who it is and where to
+send.
+
+The downward-API env vars satisfy the agent k8sattributes processor's
+podAssociation rules (see deploy/k8s-infra/values.yaml). With these set, the
+agent reliably enriches spans with k8s.deployment.name / k8s.namespace.name
+regardless of CNI, service mesh, or SNAT — closing the join key for the
+service map's Infrastructure tab.
+*/ -}}
+{{- if .Values.autoInstrumentation.enabled }}
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: {{ .Values.autoInstrumentation.instrumentation.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "maple-k8s-infra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: instrumentation
+spec:
+  exporter:
+    endpoint: {{ include "maple-k8s-infra.autoInstrument.otlpEndpoint" . | quote }}
+  propagators:
+    - tracecontext
+    - baggage
+  # Default to parent-based always-on; user apps can override via
+  # OTEL_TRACES_SAMPLER if they want head-based sampling.
+  sampler:
+    type: parentbased_always_on
+  # Resource attributes baked statically into OTEL_RESOURCE_ATTRIBUTES by the
+  # operator's mutating webhook. We use these for cluster + environment
+  # identity that's known at install time.
+  resource:
+    resourceAttributes:
+      k8s.cluster.name: {{ include "maple-k8s-infra.clusterName" . | quote }}
+      {{- if .Values.global.deploymentEnvironment }}
+      deployment.environment.name: {{ .Values.global.deploymentEnvironment | quote }}
+      {{- end }}
+  # Pod-identity env vars injected via downward API. We then layer them into
+  # OTEL_RESOURCE_ATTRIBUTES via $(VAR) interpolation so the user's OTel SDK
+  # picks them up at process start. The agent's k8sattributes processor uses
+  # k8s.pod.ip / k8s.pod.uid to associate the span with its pod and enrich
+  # with k8s.deployment.name / k8s.namespace.name. Kubernetes resolves $(VAR)
+  # in env values from earlier env vars in the same container, so order
+  # matters here — the downward API entries MUST come before the
+  # OTEL_RESOURCE_ATTRIBUTES entry that references them.
+  env:
+    - name: K8S_POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: K8S_POD_UID
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.uid
+    - name: K8S_POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: K8S_NAMESPACE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+    - name: K8S_NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+    - name: OTEL_RESOURCE_ATTRIBUTES
+      value: "k8s.pod.ip=$(K8S_POD_IP),k8s.pod.uid=$(K8S_POD_UID),k8s.pod.name=$(K8S_POD_NAME),k8s.namespace.name=$(K8S_NAMESPACE_NAME),k8s.node.name=$(K8S_NODE_NAME)"
+{{- end }}
+{{- /*
+Optional: auto-annotate listed namespaces so they opt in at install/upgrade
+time without the user running `kubectl annotate` per namespace. We render a
+small batch of Namespace objects with the operator's inject-sdk annotation.
+Helm will manage them as resources, so they survive upgrades but get cleaned
+up on `helm uninstall` — be careful enabling this for namespaces you don't
+want Helm to own.
+*/ -}}
+{{- if and .Values.autoInstrumentation.enabled .Values.autoInstrumentation.instrumentation.autoInstrumentNamespaces }}
+{{- range $ns := .Values.autoInstrumentation.instrumentation.autoInstrumentNamespaces }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  annotations:
+    instrumentation.opentelemetry.io/inject-sdk: {{ include "maple-k8s-infra.autoInstrument.crNamespacedName" $ | quote }}
+  labels:
+    maple.io/instrumented: "true"
+{{- end }}
+{{- end }}

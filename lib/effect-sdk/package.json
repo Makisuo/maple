@@ -1,6 +1,6 @@
 {
   "name": "@maple-dev/effect-sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "Maple observability SDK for Effect applications",
   "license": "MIT",
@@ -27,7 +27,8 @@
   "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "peerDependencies": {
     "effect": ">=4.0.0-beta.33"
@@ -37,7 +38,8 @@
     "@types/node": "catalog:tooling",
     "effect": "catalog:effect",
     "tsdown": "^0.21.7",
-    "typescript": "catalog:tooling"
+    "typescript": "catalog:tooling",
+    "vitest": "catalog:"
   },
   "dependencies": {
     "std-env": "^4.0.0"

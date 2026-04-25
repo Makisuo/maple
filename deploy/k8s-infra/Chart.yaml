@@ -2,7 +2,7 @@ apiVersion: v2
 name: maple-k8s-infra
 description: Kubernetes infrastructure collector for Maple using OpenTelemetry Collector Contrib.
 type: application
-version: 0.1.8
+version: 0.2.0
 appVersion: "0.141.0"
 keywords:
   - maple
@@ -12,3 +12,21 @@ keywords:
 home: https://github.com/makisuo/maple
 sources:
   - https://github.com/open-telemetry/opentelemetry-collector-contrib
+  - https://github.com/open-telemetry/opentelemetry-operator
+dependencies:
+  # OpenTelemetry Operator — used in env-vars-only mode (no SDK init container
+  # injection). Maple's `Instrumentation/maple-default` CR (rendered by this
+  # chart) carries downward-API env vars so spans emitted by user apps land
+  # with `k8s.pod.ip` / `k8s.pod.uid` / `k8s.namespace.name` / `k8s.pod.name`
+  # resource attributes. The maple-agent's k8sattributes processor uses those
+  # to enrich spans with `k8s.deployment.name` etc., closing the join key for
+  # the service map's Infrastructure tab.
+  #
+  # Gated on `autoInstrumentation.enabled` (default true). Users who already
+  # run the operator in their cluster should set this to false and apply the
+  # Instrumentation CR manually (template still renders so they can copy it).
+  - name: opentelemetry-operator
+    version: "0.71.1"
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+    condition: autoInstrumentation.operator.enabled
+    alias: opentelemetryOperator

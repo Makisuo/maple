@@ -6,7 +6,10 @@ global:
 maple:
   ingest:
     # OTLP HTTP base endpoint. The collector appends /v1/{traces,logs,metrics}.
-    endpoint: "http://maple-ingest:3474"
+    # Defaults to Maple's hosted ingest gateway. Self-hosted installs should
+    # override this with their own ingest URL (e.g. http://maple-ingest:3474
+    # for an in-cluster deployment).
+    endpoint: "https://ingest.maple.dev"
     tls:
       insecure: false
       insecureSkipVerify: false
@@ -217,6 +220,64 @@ presets:
   k8sEvents:
     enabled: false
     namespaces: []
+
+# Auto-instrumentation glue — bundles the OpenTelemetry Operator and ships a
+# pre-baked Instrumentation CR (`maple-default`). The CR injects ONLY env vars
+# (downward-API → OTEL_RESOURCE_ATTRIBUTES + OTEL_EXPORTER_OTLP_ENDPOINT) into
+# pods that opt in via the namespace annotation:
+#
+#   kubectl annotate namespace <ns> \
+#     instrumentation.opentelemetry.io/inject-sdk=maple/maple-default
+#
+# We deliberately do NOT inject SDK init containers — users bring their own
+# OTel SDK. This chart is responsible for the deploy-time plumbing only.
+#
+# When enabled, the OpenTelemetry Operator is installed as a subchart with
+# auto-generated webhook certs (no cert-manager dependency). Users running
+# their own operator should set operator.enabled=false; the Instrumentation CR
+# still renders so they can copy it into their setup.
+autoInstrumentation:
+  enabled: true
+  operator:
+    enabled: true
+  # Namespace + name of the Instrumentation CR. Users reference this from
+  # their pod / namespace annotations. Default lives in this chart's release
+  # namespace.
+  instrumentation:
+    name: maple-default
+    # Namespaces listed here get the namespace annotation auto-applied at
+    # install/upgrade time (creates Namespace objects if they don't exist).
+    # Useful for GitOps setups where namespace manifests are managed elsewhere
+    # but you still want one-shot opt-in. Example:
+    #   autoInstrument:
+    #     - shop
+    #     - billing
+    autoInstrumentNamespaces: []
+    # Override the agent OTLP endpoint that pods will be told to export to.
+    # Empty = derive from the agent Service in this release's namespace.
+    otlpEndpointOverride: ""
+
+# OpenTelemetry Operator subchart configuration. Only used when
+# autoInstrumentation.operator.enabled=true. Keys mirror the upstream chart;
+# we set sensible defaults that don't require cert-manager.
+opentelemetryOperator:
+  manager:
+    # Disable the collector CRD reconciler — we don't ship OpenTelemetryCollector
+    # CRs from this chart and users who want them can enable it later.
+    collectorImage:
+      repository: otel/opentelemetry-collector-contrib
+    # Restrict watched resources to Instrumentation only — keeps RBAC small.
+    featureGates: ""
+  admissionWebhooks:
+    certManager:
+      enabled: false
+    autoGenerateCert:
+      enabled: true
+      recreate: false
+  # Skip installing the operator's CRDs if the user already has them (e.g. they
+  # ran an upstream operator install before). Set to false to opt out.
+  crds:
+    create: true
 
 processors:
   memoryLimiter:

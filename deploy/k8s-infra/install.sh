@@ -17,15 +17,15 @@ usage() {
   cat <<'USAGE'
 Install Maple's Kubernetes infra collector.
 
-Required:
-  MAPLE_INGEST_ENDPOINT   Maple ingest gateway base URL, e.g. https://ingest.example.com
-
 Auth, choose one:
   MAPLE_INGEST_KEY        Ingest key. The script creates/updates a Kubernetes Secret.
   or
   MAPLE_INGEST_SECRET_NAME Existing Secret name. Defaults to maple-ingest-key.
 
 Optional:
+  MAPLE_INGEST_ENDPOINT    Override the ingest gateway URL. Defaults to the
+                           hosted Maple endpoint baked into the chart. Set this
+                           for self-hosted Maple installs.
   MAPLE_NAMESPACE=maple
   MAPLE_RELEASE=maple-k8s-infra
   MAPLE_CLUSTER_NAME=production
@@ -35,7 +35,6 @@ Optional:
   MAPLE_INSTALL_YES=1      Skip interactive context confirmation.
 
 Example:
-  MAPLE_INGEST_ENDPOINT=https://ingest.example.com \
   MAPLE_INGEST_KEY=maple_xxx \
   MAPLE_CLUSTER_NAME=production \
   bash install.sh
@@ -57,12 +56,6 @@ fi
 need kubectl
 need helm
 
-if [[ -z "$INGEST_ENDPOINT" ]]; then
-  echo "MAPLE_INGEST_ENDPOINT is required." >&2
-  usage
-  exit 1
-fi
-
 if [[ -z "$INGEST_KEY" && -z "${MAPLE_INGEST_SECRET_NAME:-}" ]]; then
   echo "Provide MAPLE_INGEST_KEY or MAPLE_INGEST_SECRET_NAME." >&2
   usage
@@ -81,7 +74,7 @@ About to install Maple Kubernetes infra collector:
   namespace:       $NAMESPACE
   release:         $RELEASE
   chart:           $CHART_REF
-  ingest endpoint: $INGEST_ENDPOINT
+  ingest endpoint: ${INGEST_ENDPOINT:-(chart default: https://ingest.maple.dev)}
 EOF
 
 if [[ "$INSTALL_YES" != "1" ]]; then
@@ -103,10 +96,13 @@ fi
 HELM_ARGS=(
   upgrade --install "$RELEASE" "$CHART_REF"
   --namespace "$NAMESPACE"
-  --set-string "maple.ingest.endpoint=$INGEST_ENDPOINT"
   --set-string "maple.ingestKey.existingSecret.name=$INGEST_SECRET_NAME"
   --set-string "maple.ingestKey.existingSecret.key=$INGEST_SECRET_KEY"
 )
+
+if [[ -n "$INGEST_ENDPOINT" ]]; then
+  HELM_ARGS+=(--set-string "maple.ingest.endpoint=$INGEST_ENDPOINT")
+fi
 
 if [[ -n "$CHART_VERSION" ]]; then
   HELM_ARGS+=(--version "$CHART_VERSION")

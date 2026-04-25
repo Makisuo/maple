@@ -7,13 +7,16 @@ This chart deploys Maple's Kubernetes infrastructure collector using the upstrea
 
 All signals are exported with OTLP HTTP to Maple's ingest gateway. The collector does not write directly to Tinybird or ClickHouse; the ingest gateway remains responsible for ingest-key auth and authoritative `maple_org_id` enrichment.
 
+For wiring the service map's Infrastructure tab to your workloads, see [docs/service-map-infrastructure.md](../../docs/service-map-infrastructure.md).
+
 ## Install
+
+The chart defaults to Maple's hosted ingest gateway (`https://ingest.maple.dev`). Self-hosted users override `maple.ingest.endpoint`.
 
 Once the chart is published to GHCR, the easiest install path is:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Makisuo/maple/main/deploy/k8s-infra/install.sh | \
-  MAPLE_INGEST_ENDPOINT=https://ingest.example.com \
   MAPLE_INGEST_KEY=YOUR_MAPLE_INGEST_KEY \
   MAPLE_CLUSTER_NAME=production \
   bash
@@ -28,7 +31,6 @@ helm upgrade --install maple-k8s-infra \
   oci://ghcr.io/makisuo/charts/maple-k8s-infra \
   --namespace maple \
   --create-namespace \
-  --set-string maple.ingest.endpoint=https://ingest.example.com \
   --set-string maple.ingestKey.value=YOUR_MAPLE_INGEST_KEY \
   --set-string global.clusterName=production
 ```
@@ -39,7 +41,6 @@ Local install from this repository:
 helm upgrade --install maple-k8s-infra ./deploy/k8s-infra \
   --namespace maple \
   --create-namespace \
-  --set maple.ingest.endpoint=https://ingest.example.com \
   --set maple.ingestKey.value=YOUR_MAPLE_INGEST_KEY \
   --set global.clusterName=production
 ```
@@ -53,11 +54,12 @@ kubectl create secret generic maple-ingest-key \
 
 helm upgrade --install maple-k8s-infra ./deploy/k8s-infra \
   --namespace maple \
-  --set maple.ingest.endpoint=https://ingest.example.com \
   --set maple.ingestKey.existingSecret.name=maple-ingest-key \
   --set maple.ingestKey.existingSecret.key=ingest-key \
   --set global.clusterName=production
 ```
+
+For a self-hosted Maple deployment, add `--set maple.ingest.endpoint=https://your-ingest.example.com` to any of the commands above.
 
 ## Defaults
 

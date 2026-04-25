@@ -100,6 +100,24 @@ ingest-key
 {{- end -}}
 {{- end -}}
 
+{{/*
+Resolve the OTLP HTTP endpoint that user-app pods should send to.
+Falls back to the in-cluster agent Service when no override is set.
+The agent Service exposes port 4318 (otlp-http) and is gated on
+presets.otlpReceiver.http.enabled.
+*/}}
+{{- define "maple-k8s-infra.autoInstrument.otlpEndpoint" -}}
+{{- if .Values.autoInstrumentation.instrumentation.otlpEndpointOverride -}}
+{{- .Values.autoInstrumentation.instrumentation.otlpEndpointOverride -}}
+{{- else -}}
+{{- printf "http://%s.%s.svc.cluster.local:%d" (include "maple-k8s-infra.agent.fullname" .) .Release.Namespace (int .Values.presets.otlpReceiver.http.containerPort) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "maple-k8s-infra.autoInstrument.crNamespacedName" -}}
+{{- printf "%s/%s" .Release.Namespace .Values.autoInstrumentation.instrumentation.name -}}
+{{- end -}}
+
 {{- define "maple-k8s-infra.resourceAttributes.agent" -}}
 {{- $attrs := list "maple.collector.role=agent" (printf "k8s.cluster.name=%s" (include "maple-k8s-infra.clusterName" .)) "k8s.node.name=$(K8S_NODE_NAME)" "host.name=$(K8S_NODE_NAME)" -}}
 {{- if .Values.global.deploymentEnvironment -}}

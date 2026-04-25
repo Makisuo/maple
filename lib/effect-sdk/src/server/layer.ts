@@ -6,17 +6,28 @@ import { runtime, provider } from "std-env"
 import * as EnvConfig from "./config.js"
 
 export interface MapleConfig {
-  /** The service name reported in traces, logs, and metrics. */
-  readonly serviceName: string
+  /**
+   * Service name reported in traces, logs, and metrics. When omitted, falls
+   * back to `OTEL_SERVICE_NAME` env var, then `"unknown_service"`.
+   */
+  readonly serviceName?: string | undefined
   /** Override auto-detected service version (commit SHA). */
   readonly serviceVersion?: string | undefined
   /** Override auto-detected deployment environment. */
   readonly environment?: string | undefined
-  /** Maple ingest endpoint URL. Overrides MAPLE_ENDPOINT env var. */
+  /**
+   * Ingest endpoint URL. When omitted, falls back to `MAPLE_ENDPOINT` then
+   * `OTEL_EXPORTER_OTLP_ENDPOINT` env vars (the latter is what the
+   * maple-k8s-infra chart's operator injects into pods).
+   */
   readonly endpoint?: string | undefined
   /** Maple ingest key. Overrides MAPLE_INGEST_KEY env var. */
   readonly ingestKey?: string | undefined
-  /** Additional resource attributes merged into the telemetry resource. */
+  /**
+   * Additional resource attributes merged into the telemetry resource. These
+   * take precedence over `OTEL_RESOURCE_ATTRIBUTES` env-var entries with the
+   * same key.
+   */
   readonly attributes?: Record<string, unknown> | undefined
   readonly maxBatchSize?: number | undefined
   readonly loggerExportInterval?: Duration.Input | undefined
@@ -44,7 +55,7 @@ export interface MapleConfig {
  * Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
  * ```
  */
-export const layer = (config: MapleConfig) =>
+export const layer = (config: MapleConfig = {}) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const envEndpoint = yield* EnvConfig.endpoint
@@ -62,6 +73,15 @@ export const layer = (config: MapleConfig) =>
       const envEnvironment = yield* EnvConfig.environment
       const environment = config.environment ?? Option.getOrUndefined(envEnvironment)
 
+      const envOtelServiceName = yield* EnvConfig.otelServiceName
+      const serviceName = config.serviceName ?? Option.getOrUndefined(envOtelServiceName) ?? "unknown"
+
+      const envResourceAttributes = yield* EnvConfig.otelResourceAttributes
+
+      // Precedence (lowest to highest): SDK defaults → OTEL_RESOURCE_ATTRIBUTES
+      // (set externally, e.g. by the maple-k8s-infra chart's operator
+      // injection) → programmatic config.attributes (set in app code). Matches
+      // the OTel spec's "later writers win" rule.
       const attributes: Record<string, unknown> = {
         "maple.sdk.type": "server",
       }
@@ -69,12 +89,13 @@ export const layer = (config: MapleConfig) =>
       if (provider) attributes["maple.provider"] = provider
       if (environment) attributes["deployment.environment"] = environment
       if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
+      Object.assign(attributes, envResourceAttributes)
       if (config.attributes) Object.assign(attributes, config.attributes)
 
       return Otlp.layerJson({
         baseUrl: endpoint,
         resource: {
-          serviceName: config.serviceName,
+          serviceName,
           serviceVersion,
           attributes,
         },

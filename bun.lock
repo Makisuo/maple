@@ -286,6 +286,7 @@
         "effect": "catalog:effect",
         "tsdown": "^0.21.7",
         "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
       "peerDependencies": {
         "effect": ">=4.0.0-beta.33",
