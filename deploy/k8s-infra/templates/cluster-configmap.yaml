@@ -174,7 +174,7 @@ data:
       # reads, so Fargate pods light up the same usage bars as EC2 pods.
       # cAdvisor doesn't expose pod CPU/mem REQUESTS — only limits — so the
       # request bars stay at 0% for Fargate. Acceptable for v1.
-      experimental_metricsgeneration/fargate:
+      metricsgeneration/fargate:
         rules:
           # cpu_limit_cores = quota_us / period_us  (intermediate)
           - name: __fargate_cpu_limit_cores
@@ -241,7 +241,7 @@ data:
             - deltatorate/fargate
             - groupbyattrs/fargate
             - transform/fargate-cleanup
-            - experimental_metricsgeneration/fargate
+            - metricsgeneration/fargate
             - transform/fargate-rename
             - filter/fargate
             {{- if .Values.processors.kubernetesAttributes.enabled }}
