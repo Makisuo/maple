@@ -200,7 +200,7 @@ data:
             metric1: container_cpu_usage_seconds_total
             metric2: __fargate_cpu_limit_cores
             operation: divide
-transform/fargate-rename:
+      transform/fargate-rename:
         error_mode: ignore
         metric_statements:
           - context: metric
