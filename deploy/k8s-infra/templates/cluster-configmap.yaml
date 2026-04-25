@@ -54,17 +54,23 @@ data:
                 - source_labels: [__meta_kubernetes_node_name]
                   target_label: k8s_node_name
               metric_relabel_configs:
-                # Keep only metrics we transform into kubeletstats names.
-                # CPU usage is converted from a cumulative counter to a
-                # per-second rate by cumulativetodelta + deltatorate.
+                # Keep usage gauges + cAdvisor spec metrics (limits/period)
+                # so metricsgeneration can divide usage / limit to synthesize
+                # k8s.pod.{cpu,memory}_limit_utilization for the Pods view.
                 - source_labels: [__name__]
-                  regex: 'container_cpu_usage_seconds_total|container_memory_working_set_bytes'
+                  regex: 'container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_spec_cpu_quota|container_spec_cpu_period|container_spec_memory_limit_bytes'
                   action: keep
                 # Drop the synthesized whole-pod (no container) rows so we
                 # don't double-count when summing per-container usage.
                 - source_labels: [container]
                   regex: '^$|POD'
                   action: drop
+                # Drop the per-CPU dimension on container_cpu_usage_seconds_total
+                # (only cpu="total" is emitted on Fargate kubelets) so its
+                # datapoint attributes match the spec metrics — required by
+                # metricsgeneration's pairwise divide.
+                - regex: cpu
+                  action: labeldrop
       {{- end }}
       {{- if .Values.presets.k8sEvents.enabled }}
       k8sobjects/events:
@@ -141,9 +147,11 @@ data:
           - namespace
           - container
           - k8s_node_name
-      # Rename promoted attrs to OTel kubeletstats convention so the existing
-      # Pods/Workloads queries don't need to know they came from Fargate.
-      transform/fargate:
+      # Rename promoted attrs to OTel kubeletstats convention. We split the
+      # transform into a "cleanup" pass (resource attrs + datapoint cleanup)
+      # that runs BEFORE metricsgeneration, and a "rename" pass that runs
+      # AFTER — metricsgeneration uses the cAdvisor names to find sources.
+      transform/fargate-cleanup:
         error_mode: ignore
         metric_statements:
           - context: resource
@@ -162,10 +170,47 @@ data:
               - delete_key(attributes, "id")
               - delete_key(attributes, "image")
               - delete_key(attributes, "name")
+      # Synthesize the limit_utilization gauges the listPodsQuery already
+      # reads, so Fargate pods light up the same usage bars as EC2 pods.
+      # cAdvisor doesn't expose pod CPU/mem REQUESTS — only limits — so the
+      # request bars stay at 0% for Fargate. Acceptable for v1.
+      experimental_metricsgeneration/fargate:
+        rules:
+          # cpu_limit_cores = quota_us / period_us  (intermediate)
+          - name: __fargate_cpu_limit_cores
+            type: calculate
+            metric1: container_spec_cpu_quota
+            metric2: container_spec_cpu_period
+            operation: divide
+          # cpu_limit_utilization = cpu_usage_cores / cpu_limit_cores
+          - name: k8s.pod.cpu_limit_utilization
+            type: calculate
+            metric1: container_cpu_usage_seconds_total
+            metric2: __fargate_cpu_limit_cores
+            operation: divide
+          # mem_limit_utilization = working_set_bytes / mem_limit_bytes
+          - name: k8s.pod.memory_limit_utilization
+            type: calculate
+            metric1: container_memory_working_set_bytes
+            metric2: container_spec_memory_limit_bytes
+            operation: divide
+      transform/fargate-rename:
+        error_mode: ignore
+        metric_statements:
           - context: metric
             statements:
               - set(name, "k8s.pod.cpu.usage") where name == "container_cpu_usage_seconds_total"
               - set(name, "k8s.pod.memory.usage") where name == "container_memory_working_set_bytes"
+      # Drop the cAdvisor spec/intermediate metrics — only the synthesized
+      # k8s.pod.* metrics need to land in Tinybird.
+      filter/fargate:
+        error_mode: ignore
+        metrics:
+          metric:
+            - 'name == "container_spec_cpu_quota"'
+            - 'name == "container_spec_cpu_period"'
+            - 'name == "container_spec_memory_limit_bytes"'
+            - 'name == "__fargate_cpu_limit_cores"'
       {{- end }}
 
     exporters:
@@ -195,7 +240,10 @@ data:
             - cumulativetodelta/fargate
             - deltatorate/fargate
             - groupbyattrs/fargate
-            - transform/fargate
+            - transform/fargate-cleanup
+            - experimental_metricsgeneration/fargate
+            - transform/fargate-rename
+            - filter/fargate
             {{- if .Values.processors.kubernetesAttributes.enabled }}
             - k8sattributes
             {{- end }}
