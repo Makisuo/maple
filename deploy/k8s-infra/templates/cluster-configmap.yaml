@@ -174,7 +174,11 @@ data:
       # reads, so Fargate pods light up the same usage bars as EC2 pods.
       # cAdvisor doesn't expose pod CPU/mem REQUESTS — only limits — so the
       # request bars stay at 0% for Fargate. Acceptable for v1.
-      metricsgeneration/fargate:
+      #
+      # Split into two processor instances because rules in a single
+      # metricsgeneration call can't reference metrics produced by earlier
+      # rules in the same call — the second instance sees __fargate_cpu_limit_cores.
+      metricsgeneration/fargate-step1:
         rules:
           # cpu_limit_cores = quota_us / period_us  (intermediate)
           - name: __fargate_cpu_limit_cores
@@ -182,19 +186,21 @@ data:
             metric1: container_spec_cpu_quota
             metric2: container_spec_cpu_period
             operation: divide
-          # cpu_limit_utilization = cpu_usage_cores / cpu_limit_cores
-          - name: k8s.pod.cpu_limit_utilization
-            type: calculate
-            metric1: container_cpu_usage_seconds_total
-            metric2: __fargate_cpu_limit_cores
-            operation: divide
           # mem_limit_utilization = working_set_bytes / mem_limit_bytes
           - name: k8s.pod.memory_limit_utilization
             type: calculate
             metric1: container_memory_working_set_bytes
             metric2: container_spec_memory_limit_bytes
             operation: divide
-      transform/fargate-rename:
+      metricsgeneration/fargate-step2:
+        rules:
+          # cpu_limit_utilization = cpu_usage_cores / cpu_limit_cores
+          - name: k8s.pod.cpu_limit_utilization
+            type: calculate
+            metric1: container_cpu_usage_seconds_total
+            metric2: __fargate_cpu_limit_cores
+            operation: divide
+transform/fargate-rename:
         error_mode: ignore
         metric_statements:
           - context: metric
@@ -241,7 +247,8 @@ data:
             - deltatorate/fargate
             - groupbyattrs/fargate
             - transform/fargate-cleanup
-            - metricsgeneration/fargate
+            - metricsgeneration/fargate-step1
+            - metricsgeneration/fargate-step2
             - transform/fargate-rename
             - filter/fargate
             {{- if .Values.processors.kubernetesAttributes.enabled }}
