@@ -21,6 +21,11 @@ export const DestinationSecretConfigSchema = Schema.Union([
     url: Schema.String,
     signingSecret: Schema.NullOr(Schema.String),
   }),
+  Schema.Struct({
+    type: Schema.Literal("hazel"),
+    webhookUrl: Schema.String,
+    signingSecret: Schema.NullOr(Schema.String),
+  }),
 ])
 
 export type DestinationPublicConfig = Schema.Schema.Type<

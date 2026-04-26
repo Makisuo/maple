@@ -16,6 +16,7 @@ export const AlertDestinationType = Schema.Literals([
   "slack",
   "pagerduty",
   "webhook",
+  "hazel",
 ]).annotate({
   identifier: "@maple/AlertDestinationType",
   title: "Alert Destination Type",
@@ -210,6 +211,16 @@ export class WebhookAlertDestinationConfig extends Schema.Class<WebhookAlertDest
   enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class HazelAlertDestinationConfig extends Schema.Class<HazelAlertDestinationConfig>(
+  "HazelAlertDestinationConfig",
+)({
+  type: Schema.Literal("hazel"),
+  name: ChannelLabel,
+  webhookUrl: NonEmptyString,
+  signingSecret: Schema.optionalKey(Schema.String),
+  enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationCreateRequest = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("slack"),
@@ -228,6 +239,13 @@ export const AlertDestinationCreateRequest = Schema.Union([
     type: Schema.Literal("webhook"),
     name: ChannelLabel,
     url: NonEmptyString,
+    signingSecret: Schema.optionalKey(Schema.String),
+    enabled: Schema.optionalKey(Schema.Boolean),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("hazel"),
+    name: ChannelLabel,
+    webhookUrl: NonEmptyString,
     signingSecret: Schema.optionalKey(Schema.String),
     enabled: Schema.optionalKey(Schema.Boolean),
   }),
@@ -262,6 +280,15 @@ export class UpdateWebhookAlertDestinationConfig extends Schema.Class<UpdateWebh
   enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class UpdateHazelAlertDestinationConfig extends Schema.Class<UpdateHazelAlertDestinationConfig>(
+  "UpdateHazelAlertDestinationConfig",
+)({
+  name: OptionalNonEmptyString,
+  webhookUrl: Schema.optionalKey(Schema.String),
+  signingSecret: Schema.optionalKey(Schema.String),
+  enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationUpdateRequest = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("slack"),
@@ -274,6 +301,10 @@ export const AlertDestinationUpdateRequest = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("webhook"),
     ...UpdateWebhookAlertDestinationConfig.fields,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("hazel"),
+    ...UpdateHazelAlertDestinationConfig.fields,
   }),
 ])
 export type AlertDestinationUpdateRequest = Schema.Schema.Type<

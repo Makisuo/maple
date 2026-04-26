@@ -27,6 +27,11 @@ type DestinationSecretConfig =
       readonly url: string
       readonly signingSecret: string | null
     }
+  | {
+      readonly type: "hazel"
+      readonly webhookUrl: string
+      readonly signingSecret: string | null
+    }
 
 export interface DispatchContext {
   readonly deliveryKey: string
@@ -371,6 +376,28 @@ export const dispatchDelivery = (
               )
             }
             return { providerMessage: "Delivered to webhook", providerReference: context.dedupeKey, responseCode: response.status } as DispatchResult
+          }),
+        hazel: (config) =>
+          Effect.gen(function* () {
+            const headers: Record<string, string> = {
+              "content-type": "application/json",
+              "x-maple-event-type": context.eventType,
+              "x-maple-delivery-key": context.deliveryKey,
+            }
+            if (config.signingSecret) {
+              headers["x-maple-signature"] = createHmac("sha256", config.signingSecret)
+                .update(payloadJson)
+                .digest("hex")
+            }
+            const response = yield* runTimedFetch("hazel", "Hazel", fetchFn, timeoutMs, () =>
+              fetchFn(config.webhookUrl, { method: "POST", headers, body: payloadJson }),
+            )
+            if (!response.ok) {
+              return yield* Effect.fail(
+                makeDeliveryError(`Hazel delivery failed with ${response.status}`, "hazel"),
+              )
+            }
+            return { providerMessage: "Delivered to Hazel", providerReference: context.dedupeKey, responseCode: response.status } as DispatchResult
           }),
       }),
     )

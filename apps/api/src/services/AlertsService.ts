@@ -444,6 +444,10 @@ const buildPublicConfig = (
         summary: summarizeWebhookUrl(r.url),
         channelLabel: null,
       }),
+      hazel: (r) => ({
+        summary: summarizeWebhookUrl(r.webhookUrl),
+        channelLabel: null,
+      }),
     }),
   )
 
@@ -463,6 +467,11 @@ const buildSecretConfig = (
       webhook: (r) => ({
         type: "webhook" as const,
         url: r.url.trim(),
+        signingSecret: normalizeOptionalString(r.signingSecret),
+      }),
+      hazel: (r) => ({
+        type: "hazel" as const,
+        webhookUrl: r.webhookUrl.trim(),
         signingSecret: normalizeOptionalString(r.signingSecret),
       }),
     }),
@@ -1670,6 +1679,29 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
               signingSecret:
                 request.signingSecret === undefined
                   ? hydrated.secretConfig.type === "webhook"
+                    ? hydrated.secretConfig.signingSecret
+                    : null
+                  : normalizeOptionalString(request.signingSecret),
+            }
+            break
+          case "hazel":
+            nextPublicConfig = {
+              summary:
+                request.webhookUrl != null && request.webhookUrl.trim().length > 0
+                  ? summarizeWebhookUrl(request.webhookUrl)
+                  : hydrated.publicConfig.summary,
+              channelLabel: null,
+            }
+            nextSecretConfig = {
+              type: "hazel",
+              webhookUrl:
+                normalizeOptionalString(request.webhookUrl) ??
+                (hydrated.secretConfig.type === "hazel"
+                  ? hydrated.secretConfig.webhookUrl
+                  : ""),
+              signingSecret:
+                request.signingSecret === undefined
+                  ? hydrated.secretConfig.type === "hazel"
                     ? hydrated.secretConfig.signingSecret
                     : null
                   : normalizeOptionalString(request.signingSecret),
