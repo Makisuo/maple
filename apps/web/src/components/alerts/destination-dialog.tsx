@@ -1,6 +1,11 @@
 import type { AlertDestinationType } from "@maple/domain/http"
 import { type DestinationFormState, defaultDestinationForm } from "@/lib/alerts/form-utils"
-import { AlertSegmentedSelect } from "@/components/alerts/alert-segmented-select"
+import {
+  DESTINATION_TYPES,
+  PROVIDERS,
+  ProviderLogo,
+  type DestinationProvider,
+} from "@/components/alerts/destination-provider"
 import { LoaderIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -13,8 +18,8 @@ import {
 } from "@maple/ui/components/ui/dialog"
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
-import { Separator } from "@maple/ui/components/ui/separator"
 import { Switch } from "@maple/ui/components/ui/switch"
+import { cn } from "@maple/ui/utils"
 
 interface DestinationDialogProps {
   open: boolean
@@ -26,24 +31,60 @@ interface DestinationDialogProps {
   onSave: () => void
 }
 
-const typeOptions = [
-  { value: "slack" as const,     label: "Slack"     },
-  { value: "pagerduty" as const, label: "PagerDuty" },
-  { value: "webhook" as const,   label: "Webhook"   },
-  { value: "hazel" as const,     label: "Hazel"     },
-]
-
-function SectionHeader({ step, title, description }: { step: number; title: string; description?: string }) {
+function ProviderTile({
+  type,
+  selected,
+  onSelect,
+}: {
+  type: AlertDestinationType
+  selected: boolean
+  onSelect: () => void
+}) {
+  const provider = PROVIDERS[type]
   return (
-    <div className="flex items-start gap-3">
-      <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold tabular-nums text-muted-foreground">
-        {step}
-      </span>
-      <div className="space-y-0.5">
-        <div className="text-sm font-semibold">{title}</div>
-        {description && <div className="text-muted-foreground text-xs">{description}</div>}
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={cn(
+        "group relative flex flex-col items-start gap-2 overflow-hidden rounded-lg border p-3 text-left transition-all",
+        "hover:border-border/80 hover:bg-muted/40",
+        selected
+          ? "border-transparent shadow-[inset_0_0_0_1.5px_var(--tile-accent)] bg-muted/40"
+          : "border-border/60 bg-card",
+      )}
+      style={{ ["--tile-accent" as string]: provider.accent }}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-0 transition-opacity",
+          selected ? "opacity-100" : "opacity-0 group-hover:opacity-60",
+        )}
+        style={{
+          background: `radial-gradient(circle at 0% 0%, ${provider.accentBg}, transparent 60%)`,
+        }}
+      />
+      <div className="relative flex w-full items-center gap-2.5">
+        <ProviderLogo type={type} size={32} />
+        <span className="text-sm font-semibold">{provider.label}</span>
       </div>
-    </div>
+      <p className="relative text-[11px] leading-snug text-muted-foreground">{provider.description}</p>
+    </button>
+  )
+}
+
+function FieldHelper({ provider }: { provider: DestinationProvider }) {
+  if (!provider.docsUrl) return null
+  return (
+    <a
+      href={provider.docsUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+    >
+      {provider.docsLabel ?? "Docs"} ↗
+    </a>
   )
 }
 
@@ -56,44 +97,50 @@ export function DestinationDialog({
   saving,
   onSave,
 }: DestinationDialogProps) {
+  const provider = PROVIDERS[form.type]
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit destination" : "Add destination"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2.5">
+            {isEditing ? <ProviderLogo type={form.type} size={28} /> : null}
+            {isEditing ? `Edit ${provider.label} destination` : "Add destination"}
+          </DialogTitle>
           <DialogDescription>
             Reuse the same destination across alert rules and verify it with synthetic test events.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6">
-          {/* Section 1: Type */}
+        <div className="space-y-5">
           {!isEditing && (
-            <>
-              <div className="space-y-3">
-                <SectionHeader step={1} title="Type" description="Where should notifications go?" />
-                <AlertSegmentedSelect<AlertDestinationType>
-                  options={typeOptions}
-                  value={form.type}
-                  onChange={(value) => onFormChange(() => defaultDestinationForm(value))}
-                  aria-label="Destination type"
-                  className="pl-8"
-                />
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Provider
               </div>
-              <Separator />
-            </>
+              <div className="grid grid-cols-2 gap-2">
+                {DESTINATION_TYPES.map((type) => (
+                  <ProviderTile
+                    key={type}
+                    type={type}
+                    selected={form.type === type}
+                    onSelect={() => onFormChange(() => defaultDestinationForm(type))}
+                  />
+                ))}
+              </div>
+            </div>
           )}
 
-          {/* Section 2: Credentials */}
-          <div className="space-y-3">
-            <SectionHeader
-              step={isEditing ? 1 : 2}
-              title="Credentials"
-              description="A friendly name plus the provider connection."
-            />
-            <div className="space-y-4 pl-8">
-              <div className="space-y-2">
-                <Label htmlFor="destination-name">Name</Label>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Connection
+              </div>
+              <FieldHelper provider={provider} />
+            </div>
+            <div className="space-y-3 rounded-lg border border-border/60 bg-card p-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="destination-name" className="text-xs">Name</Label>
                 <Input
                   id="destination-name"
                   value={form.name}
@@ -104,57 +151,62 @@ export function DestinationDialog({
 
               {form.type === "slack" && (
                 <>
-                  <div className="space-y-2">
-                    <Label htmlFor="destination-webhook">Slack webhook URL</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="destination-webhook" className="text-xs">Slack webhook URL</Label>
                     <Input
                       id="destination-webhook"
                       value={form.webhookUrl}
                       onChange={(event) => onFormChange((current) => ({ ...current, webhookUrl: event.target.value }))}
                       placeholder={isEditing ? "Leave blank to keep current webhook" : "https://hooks.slack.com/services/..."}
+                      className="font-mono text-xs"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="destination-channel">Channel label</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="destination-channel" className="text-xs">Channel label</Label>
                     <Input
                       id="destination-channel"
                       value={form.channelLabel}
                       onChange={(event) => onFormChange((current) => ({ ...current, channelLabel: event.target.value }))}
                       placeholder="#ops-alerts"
+                      className="font-mono text-xs"
                     />
                   </div>
                 </>
               )}
 
               {form.type === "pagerduty" && (
-                <div className="space-y-2">
-                  <Label htmlFor="destination-integration">Integration key</Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="destination-integration" className="text-xs">Integration key</Label>
                   <Input
                     id="destination-integration"
                     value={form.integrationKey}
                     onChange={(event) => onFormChange((current) => ({ ...current, integrationKey: event.target.value }))}
                     placeholder={isEditing ? "Leave blank to keep current key" : "Routing key"}
+                    className="font-mono text-xs"
                   />
                 </div>
               )}
 
               {form.type === "webhook" && (
                 <>
-                  <div className="space-y-2">
-                    <Label htmlFor="destination-url">Webhook URL</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="destination-url" className="text-xs">Webhook URL</Label>
                     <Input
                       id="destination-url"
                       value={form.url}
                       onChange={(event) => onFormChange((current) => ({ ...current, url: event.target.value }))}
                       placeholder={isEditing ? "Leave blank to keep current URL" : "https://example.com/maple-alerts"}
+                      className="font-mono text-xs"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="destination-secret">Signing secret</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="destination-secret" className="text-xs">Signing secret</Label>
                     <Input
                       id="destination-secret"
                       value={form.signingSecret}
                       onChange={(event) => onFormChange((current) => ({ ...current, signingSecret: event.target.value }))}
                       placeholder={isEditing ? "Leave blank to keep current secret" : "Optional HMAC secret"}
+                      className="font-mono text-xs"
                     />
                   </div>
                 </>
@@ -162,8 +214,8 @@ export function DestinationDialog({
 
               {form.type === "hazel" && (
                 <>
-                  <div className="space-y-2">
-                    <Label htmlFor="destination-hazel-url">Hazel webhook URL</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="destination-hazel-url" className="text-xs">Hazel webhook URL</Label>
                     <Input
                       id="destination-hazel-url"
                       value={form.hazelWebhookUrl}
@@ -171,20 +223,22 @@ export function DestinationDialog({
                       placeholder={
                         isEditing
                           ? "Leave blank to keep current URL"
-                          : "https://api.hazel.io/webhooks/incoming/{webhookId}/{token}/maple"
+                          : "https://api.hazel.sh/webhooks/incoming/{webhookId}/{token}/maple"
                       }
+                      className="font-mono text-xs"
                     />
-                    <p className="text-muted-foreground text-xs">
+                    <p className="text-[11px] text-muted-foreground">
                       Create a Maple webhook in Hazel under Settings → Integrations → Maple, then paste the URL here.
                     </p>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="destination-hazel-secret">Signing secret</Label>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="destination-hazel-secret" className="text-xs">Signing secret</Label>
                     <Input
                       id="destination-hazel-secret"
                       value={form.signingSecret}
                       onChange={(event) => onFormChange((current) => ({ ...current, signingSecret: event.target.value }))}
                       placeholder={isEditing ? "Leave blank to keep current secret" : "Optional HMAC secret"}
+                      className="font-mono text-xs"
                     />
                   </div>
                 </>
@@ -192,19 +246,14 @@ export function DestinationDialog({
             </div>
           </div>
 
-          <Separator />
-
-          {/* Section 3: Delivery */}
-          <div className="space-y-3">
-            <SectionHeader
-              step={isEditing ? 2 : 3}
-              title="Delivery"
-              description="Pause notifications without deleting the destination."
-            />
-            <div className="flex items-center justify-between pl-8">
+          <div className="space-y-2">
+            <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Delivery
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border/60 bg-card px-4 py-3">
               <div>
                 <div className="text-sm font-medium">Enabled</div>
-                <div className="text-muted-foreground text-xs">
+                <div className="text-[11px] text-muted-foreground">
                   Disabled destinations stay attached to rules but won't receive notifications.
                 </div>
               </div>
@@ -220,9 +269,17 @@ export function DestinationDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={onSave} disabled={saving}>
+          <Button
+            onClick={onSave}
+            disabled={saving}
+            style={{
+              background: provider.accent,
+              borderColor: provider.accent,
+              color: "#fff",
+            }}
+          >
             {saving ? <LoaderIcon size={14} className="animate-spin" /> : null}
-            {isEditing ? "Save changes" : "Create destination"}
+            {isEditing ? "Save changes" : `Create ${provider.label} destination`}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -6,6 +6,7 @@ import { useState, useMemo } from "react"
 import { toast } from "sonner"
 
 import { DestinationDialog } from "@/components/alerts/destination-dialog"
+import { DestinationCard } from "@/components/alerts/destination-card"
 import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
 import { AlertSeverityBadge } from "@/components/alerts/alert-severity-badge"
 import { AlertStatCard, AlertFiringHero } from "@/components/alerts/alert-stat-card"
@@ -33,30 +34,16 @@ import {
   buildRuleToggleRequest,
 } from "@/lib/alerts/form-utils"
 import {
-  AlertWarningIcon,
   BellIcon,
-  CheckIcon,
   CircleWarningIcon,
-  DotsVerticalIcon,
   FireIcon,
-  LoaderIcon,
   MagnifierIcon,
   PaperPlaneIcon,
-  PencilIcon,
   PlusIcon,
-  TrashIcon,
 } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
-import { Card, CardContent } from "@maple/ui/components/ui/card"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@maple/ui/components/ui/dropdown-menu"
 import {
   Empty,
   EmptyDescription,
@@ -770,74 +757,17 @@ function AlertsPage() {
                 ) : (
                   <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                     {destinations.map((destination) => (
-                      <Card key={destination.id}>
-                        <CardContent className="p-5">
-                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="space-y-2 min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-sm font-semibold truncate">{destination.name}</div>
-                                <Badge variant="outline" className="text-xs">{destinationTypeLabels[destination.type]}</Badge>
-                                <AlertStatusBadge state={destination.enabled ? "ok" : "disabled"} label={destination.enabled ? "Enabled" : "Disabled"} />
-                              </div>
-                              <div className="text-muted-foreground text-sm truncate">{destination.summary}</div>
-                              <div className="text-muted-foreground text-xs">
-                                Last tested {destination.lastTestedAt ? formatRelativeTime(destination.lastTestedAt) : "never"}
-                              </div>
-                              {destination.lastTestError && (
-                                <div className="flex items-center gap-2 text-xs text-destructive">
-                                  <AlertWarningIcon size={12} />
-                                  <span className="truncate">{destination.lastTestError}</span>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2 shrink-0">
-                              <Switch
-                                checked={destination.enabled}
-                                onCheckedChange={() => handleDestinationToggle(destination)}
-                                disabled={!isAdmin}
-                              />
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleDestinationTest(destination)}
-                                disabled={!isAdmin || testingDestinationId === destination.id}
-                              >
-                                {testingDestinationId === destination.id ? (
-                                  <LoaderIcon size={14} className="animate-spin" />
-                                ) : (
-                                  <CheckIcon size={14} />
-                                )}
-                                Send test
-                              </Button>
-                              {isAdmin && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger
-                                    render={<Button variant="ghost" size="icon-sm" className="shrink-0" />}
-                                  >
-                                    <DotsVerticalIcon size={14} />
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => openDestinationDialog(destination)}>
-                                      <PencilIcon size={14} />
-                                      Edit
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      variant="destructive"
-                                      onClick={() => handleDestinationDelete(destination)}
-                                      disabled={deletingDestinationId === destination.id}
-                                    >
-                                      <TrashIcon size={14} />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
+                      <DestinationCard
+                        key={destination.id}
+                        destination={destination}
+                        isAdmin={isAdmin}
+                        isTesting={testingDestinationId === destination.id}
+                        isDeleting={deletingDestinationId === destination.id}
+                        onToggle={handleDestinationToggle}
+                        onTest={handleDestinationTest}
+                        onEdit={openDestinationDialog}
+                        onDelete={handleDestinationDelete}
+                      />
                     ))}
                   </div>
                 )}

@@ -71,12 +71,7 @@ export const comparatorLabels: Record<AlertComparator, string> = {
   lte: "<=",
 }
 
-export const destinationTypeLabels: Record<AlertDestinationType, string> = {
-  slack: "Slack",
-  pagerduty: "PagerDuty",
-  webhook: "Webhook",
-  hazel: "Hazel",
-}
+export { destinationTypeLabels } from "@/components/alerts/destination-provider"
 
 export const metricTypeLabels: Record<AlertMetricType, string> = {
   sum: "Sum",
