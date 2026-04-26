@@ -98,6 +98,31 @@ const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = "system-errors-tick"
 const D1_INARRAY_CHUNK_SIZE = 90
 
+export const describeCause = (cause: unknown): string | undefined => {
+  if (cause == null) return undefined
+  if (cause instanceof Error) return cause.stack ?? cause.message
+  if (typeof cause === "string") return cause
+  try {
+    return JSON.stringify(cause)
+  } catch {
+    return String(cause)
+  }
+}
+
+export const makePersistenceError = (error: unknown): ErrorPersistenceError => {
+  const baseFor = (message: string, raw: unknown) => {
+    const cause = describeCause(raw)
+    return cause === undefined ? { message } : { message, cause }
+  }
+  if (error instanceof DatabaseError) {
+    return new ErrorPersistenceError(baseFor(error.message, error.cause))
+  }
+  if (error instanceof Error) {
+    return new ErrorPersistenceError(baseFor(error.message, error.cause))
+  }
+  return new ErrorPersistenceError(baseFor("Error persistence failure", error))
+}
+
 // ---------------------------------------------------------------------------
 // Transition matrix. Rows = from, values = set of allowed "to" states.
 // ---------------------------------------------------------------------------
@@ -331,31 +356,6 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
       const newErrorIncidentId = () => decodeErrorIncidentIdSync(randomUUID())
       const newActorId = () => decodeActorIdSync(randomUUID())
       const newEventId = () => decodeEventIdSync(randomUUID())
-
-      const describeCause = (cause: unknown): string | undefined => {
-        if (cause == null) return undefined
-        if (cause instanceof Error) return cause.stack ?? cause.message
-        if (typeof cause === "string") return cause
-        try {
-          return JSON.stringify(cause)
-        } catch {
-          return String(cause)
-        }
-      }
-
-      const makePersistenceError = (error: unknown) => {
-        const baseFor = (message: string, raw: unknown) => {
-          const cause = describeCause(raw)
-          return cause === undefined ? { message } : { message, cause }
-        }
-        if (error instanceof DatabaseError) {
-          return new ErrorPersistenceError(baseFor(error.message, error.cause))
-        }
-        if (error instanceof Error) {
-          return new ErrorPersistenceError(baseFor(error.message, error.cause))
-        }
-        return new ErrorPersistenceError(baseFor("Error persistence failure", error))
-      }
 
       const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
         database.execute(fn).pipe(
