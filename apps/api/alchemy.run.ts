@@ -112,6 +112,11 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
       ...optionalSecret("RESEND_API_KEY"),
       ...optionalPlain("MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL"),
       ...optionalSecret("MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN"),
+      ...optionalPlain("HAZEL_API_BASE_URL"),
+      ...optionalPlain("HAZEL_OAUTH_DISCOVERY_URL"),
+      ...optionalPlain("HAZEL_OAUTH_CLIENT_ID"),
+      ...optionalSecret("HAZEL_OAUTH_CLIENT_SECRET"),
+      ...optionalPlain("HAZEL_OAUTH_SCOPES"),
     },
   })
 

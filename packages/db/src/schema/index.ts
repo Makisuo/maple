@@ -4,6 +4,7 @@ export * from "./cloudflare-logpush-connectors";
 export * from "./dashboards";
 export * from "./digest";
 export * from "./errors";
+export * from "./oauth-connections";
 export * from "./org-ingest-keys";
 export * from "./org-openrouter-settings";
 export * from "./org-tinybird-settings";

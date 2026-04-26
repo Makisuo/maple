@@ -8,6 +8,7 @@ import {
   EmailService,
   Env,
   ErrorsService,
+  HazelOAuthService,
   NotificationDispatcher,
   OrgTinybirdSettingsService,
   QueryEngineService,
@@ -57,14 +58,24 @@ const buildLayer = (_env: Record<string, unknown>) => {
     Layer.provide(BucketCacheServiceLive),
   )
 
+  const HazelOAuthServiceLive = HazelOAuthService.Live.pipe(
+    Layer.provide(BaseLive),
+  )
+
   const AlertsServiceLive = AlertsService.Live.pipe(
     Layer.provide(
-      Layer.mergeAll(BaseLive, QueryEngineServiceLive, TinybirdServiceLive, AlertRuntime.Default),
+      Layer.mergeAll(
+        BaseLive,
+        QueryEngineServiceLive,
+        TinybirdServiceLive,
+        AlertRuntime.Default,
+        HazelOAuthServiceLive,
+      ),
     ),
   )
 
   const NotificationDispatcherLive = NotificationDispatcher.Live.pipe(
-    Layer.provide(BaseLive),
+    Layer.provide(Layer.mergeAll(BaseLive, HazelOAuthServiceLive)),
   )
 
   const ErrorsServiceLive = ErrorsService.Live.pipe(

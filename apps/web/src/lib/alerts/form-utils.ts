@@ -6,6 +6,7 @@ import {
   AlertRuleTestRequest,
   AlertRuleUpsertRequest,
   HazelAlertDestinationConfig,
+  HazelOAuthAlertDestinationConfig,
   PagerDutyAlertDestinationConfig,
   SlackAlertDestinationConfig,
   WebhookAlertDestinationConfig,
@@ -336,6 +337,8 @@ export type DestinationFormState = {
   url: string
   signingSecret: string
   hazelWebhookUrl: string
+  hazelWorkspaceId: string
+  hazelWorkspaceName: string
 }
 
 export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
@@ -349,6 +352,8 @@ export function defaultDestinationForm(type: AlertDestinationType = "slack"): De
     url: "",
     signingSecret: "",
     hazelWebhookUrl: "",
+    hazelWorkspaceId: "",
+    hazelWorkspaceName: "",
   }
 }
 
@@ -363,6 +368,8 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
     url: "",
     signingSecret: "",
     hazelWebhookUrl: "",
+    hazelWorkspaceId: "",
+    hazelWorkspaceName: "",
   }
 }
 
@@ -405,6 +412,15 @@ export function buildDestinationCreatePayload(form: DestinationFormState): Alert
         ...(signingSecret ? { signingSecret } : {}),
       })
     }
+    case "hazel-oauth": {
+      return new HazelOAuthAlertDestinationConfig({
+        type: "hazel-oauth",
+        name: form.name.trim(),
+        enabled: form.enabled,
+        hazelWorkspaceId: form.hazelWorkspaceId.trim(),
+        hazelWorkspaceName: form.hazelWorkspaceName.trim(),
+      })
+    }
   }
 }
 
@@ -418,6 +434,14 @@ export function buildDestinationUpdatePayload(form: DestinationFormState): Alert
       return { type: "webhook", name: form.name.trim() || undefined, enabled: form.enabled, url: form.url.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined }
     case "hazel":
       return { type: "hazel", name: form.name.trim() || undefined, enabled: form.enabled, webhookUrl: form.hazelWebhookUrl.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined }
+    case "hazel-oauth":
+      return {
+        type: "hazel-oauth",
+        name: form.name.trim() || undefined,
+        enabled: form.enabled,
+        hazelWorkspaceId: form.hazelWorkspaceId.trim() || undefined,
+        hazelWorkspaceName: form.hazelWorkspaceName.trim() || undefined,
+      }
   }
 }
 

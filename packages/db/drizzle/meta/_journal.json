@@ -36,6 +36,13 @@
       "when": 1777204738595,
       "tag": "0004_cheerful_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1777216816116,
+      "tag": "0005_heavy_william_stryker",
+      "breakpoints": true
     }
   ]
 }

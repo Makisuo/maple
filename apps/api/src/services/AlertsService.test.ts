@@ -16,6 +16,7 @@ import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { BucketCacheService } from "./BucketCacheService"
 import { EdgeCacheService } from "./EdgeCacheService"
 import { Env } from "./Env"
+import { HazelOAuthService } from "./HazelOAuthService"
 import { QueryEngineService } from "./QueryEngineService"
 import { cleanupTempDirs, createTempDbUrl as makeTempDb, executeSql, queryFirstRow } from "./test-sqlite"
 
@@ -106,9 +107,21 @@ const makeLayer = (url: string, tinybirdStub: TinybirdServiceShape, runtimeOverr
     Layer.provide(bucketCacheLive),
   )
   const runtimeLive = Layer.succeed(AlertRuntime, { ...defaultTestRuntime, ...runtimeOverrides })
+  const hazelOAuthLive = HazelOAuthService.Live.pipe(
+    Layer.provide(Layer.mergeAll(envLive, databaseLive)),
+  )
 
   return AlertsService.Live.pipe(
-    Layer.provide(Layer.mergeAll(envLive, databaseLive, queryEngineLive, tinybirdLive, runtimeLive)),
+    Layer.provide(
+      Layer.mergeAll(
+        envLive,
+        databaseLive,
+        queryEngineLive,
+        tinybirdLive,
+        runtimeLive,
+        hazelOAuthLive,
+      ),
+    ),
   ) as Layer.Layer<AlertsService, never, never>
 }
 

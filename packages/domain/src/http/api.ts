@@ -7,6 +7,7 @@ import { DashboardsApiGroup } from "./dashboards";
 import { DigestApiGroup } from "./digest";
 import { ErrorsApiGroup } from "./errors";
 import { IngestKeysApiGroup } from "./ingest-keys";
+import { IntegrationsApiGroup } from "./integrations";
 import { ObservabilityApiGroup } from "./observability";
 import { OrgOpenrouterSettingsApiGroup } from "./org-openrouter-settings";
 import { OrgTinybirdSettingsApiGroup } from "./org-tinybird-settings";
@@ -24,6 +25,7 @@ export class MapleApi extends HttpApi.make("MapleApi")
   .add(DigestApiGroup)
   .add(ErrorsApiGroup)
   .add(IngestKeysApiGroup)
+  .add(IntegrationsApiGroup)
   .add(ObservabilityApiGroup)
   .add(OrgOpenrouterSettingsApiGroup)
   .add(OrgTinybirdSettingsApiGroup)

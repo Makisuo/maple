@@ -9,6 +9,7 @@ import {
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
 import { Duration, Effect, Match, Option } from "effect"
+import type { EnrichedDestinationSecretConfig } from "./AlertDestinationHydration"
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                     */
@@ -19,25 +20,11 @@ interface DestinationPublicConfig {
   readonly channelLabel: string | null
 }
 
-type DestinationSecretConfig =
-  | { readonly type: "slack"; readonly webhookUrl: string }
-  | { readonly type: "pagerduty"; readonly integrationKey: string }
-  | {
-      readonly type: "webhook"
-      readonly url: string
-      readonly signingSecret: string | null
-    }
-  | {
-      readonly type: "hazel"
-      readonly webhookUrl: string
-      readonly signingSecret: string | null
-    }
-
 export interface DispatchContext {
   readonly deliveryKey: string
   readonly destination: AlertDestinationRow
   readonly publicConfig: DestinationPublicConfig
-  readonly secretConfig: DestinationSecretConfig
+  readonly secretConfig: EnrichedDestinationSecretConfig
   readonly ruleId: string
   readonly ruleName: string
   readonly groupKey: string | null
@@ -398,6 +385,53 @@ export const dispatchDelivery = (
               )
             }
             return { providerMessage: "Delivered to Hazel", providerReference: context.dedupeKey, responseCode: response.status } as DispatchResult
+          }),
+        "hazel-oauth": (config) =>
+          Effect.gen(function* () {
+            const url = `${config.hazelApiBaseUrl.replace(/\/$/, "")}/api/v1/alerts`
+            const body = JSON.stringify({
+              workspaceId: config.hazelWorkspaceId,
+              eventType: context.eventType,
+              payload: JSON.parse(payloadJson),
+            })
+            const response = yield* runTimedFetch(
+              "hazel-oauth",
+              "Hazel",
+              fetchFn,
+              timeoutMs,
+              () =>
+                fetchFn(url, {
+                  method: "POST",
+                  headers: {
+                    "content-type": "application/json",
+                    authorization: `Bearer ${config.accessToken}`,
+                    "x-maple-event-type": context.eventType,
+                    "x-maple-delivery-key": context.deliveryKey,
+                  },
+                  body,
+                }),
+            )
+            if (response.status === 401) {
+              return yield* Effect.fail(
+                makeDeliveryError(
+                  "Hazel rejected the access token — reconnect required",
+                  "hazel-oauth",
+                ),
+              )
+            }
+            if (!response.ok) {
+              return yield* Effect.fail(
+                makeDeliveryError(
+                  `Hazel delivery failed with ${response.status}`,
+                  "hazel-oauth",
+                ),
+              )
+            }
+            return {
+              providerMessage: "Delivered to Hazel",
+              providerReference: context.dedupeKey,
+              responseCode: response.status,
+            } as DispatchResult
           }),
       }),
     )

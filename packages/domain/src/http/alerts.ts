@@ -17,6 +17,7 @@ export const AlertDestinationType = Schema.Literals([
   "pagerduty",
   "webhook",
   "hazel",
+  "hazel-oauth",
 ]).annotate({
   identifier: "@maple/AlertDestinationType",
   title: "Alert Destination Type",
@@ -221,11 +222,22 @@ export class HazelAlertDestinationConfig extends Schema.Class<HazelAlertDestinat
   enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class HazelOAuthAlertDestinationConfig extends Schema.Class<HazelOAuthAlertDestinationConfig>(
+  "HazelOAuthAlertDestinationConfig",
+)({
+  type: Schema.Literal("hazel-oauth"),
+  name: ChannelLabel,
+  hazelWorkspaceId: NonEmptyString,
+  hazelWorkspaceName: NonEmptyString,
+  enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationCreateRequest = Schema.Union([
   SlackAlertDestinationConfig,
   PagerDutyAlertDestinationConfig,
   WebhookAlertDestinationConfig,
   HazelAlertDestinationConfig,
+  HazelOAuthAlertDestinationConfig,
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<
   typeof AlertDestinationCreateRequest
@@ -266,6 +278,15 @@ export class UpdateHazelAlertDestinationConfig extends Schema.Class<UpdateHazelA
   enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class UpdateHazelOAuthAlertDestinationConfig extends Schema.Class<UpdateHazelOAuthAlertDestinationConfig>(
+  "UpdateHazelOAuthAlertDestinationConfig",
+)({
+  name: OptionalNonEmptyString,
+  hazelWorkspaceId: Schema.optionalKey(Schema.String),
+  hazelWorkspaceName: Schema.optionalKey(Schema.String),
+  enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationUpdateRequest = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("slack"),
@@ -282,6 +303,10 @@ export const AlertDestinationUpdateRequest = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("hazel"),
     ...UpdateHazelAlertDestinationConfig.fields,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("hazel-oauth"),
+    ...UpdateHazelOAuthAlertDestinationConfig.fields,
   }),
 ])
 export type AlertDestinationUpdateRequest = Schema.Schema.Type<

@@ -5,6 +5,8 @@ import { decryptAes256Gcm } from "./Crypto"
 export const DestinationPublicConfigSchema = Schema.Struct({
   summary: Schema.String,
   channelLabel: Schema.NullOr(Schema.String),
+  hazelWorkspaceId: Schema.optional(Schema.String),
+  hazelWorkspaceName: Schema.optional(Schema.String),
 })
 
 export const DestinationSecretConfigSchema = Schema.Union([
@@ -26,6 +28,11 @@ export const DestinationSecretConfigSchema = Schema.Union([
     webhookUrl: Schema.String,
     signingSecret: Schema.NullOr(Schema.String),
   }),
+  Schema.Struct({
+    type: Schema.Literal("hazel-oauth"),
+    hazelWorkspaceId: Schema.String,
+    hazelWorkspaceName: Schema.String,
+  }),
 ])
 
 export type DestinationPublicConfig = Schema.Schema.Type<
@@ -34,6 +41,18 @@ export type DestinationPublicConfig = Schema.Schema.Type<
 export type DestinationSecretConfig = Schema.Schema.Type<
   typeof DestinationSecretConfigSchema
 >
+
+export type EnrichedHazelOAuthSecretConfig = {
+  readonly type: "hazel-oauth"
+  readonly hazelWorkspaceId: string
+  readonly hazelWorkspaceName: string
+  readonly accessToken: string
+  readonly hazelApiBaseUrl: string
+}
+
+export type EnrichedDestinationSecretConfig =
+  | Exclude<DestinationSecretConfig, { type: "hazel-oauth" }>
+  | EnrichedHazelOAuthSecretConfig
 
 export const PublicConfigFromJson = Schema.fromJsonString(
   DestinationPublicConfigSchema,

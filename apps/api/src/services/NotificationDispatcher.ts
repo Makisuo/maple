@@ -15,10 +15,15 @@ import {
   dispatchDelivery as dispatchDeliveryImpl,
   type DispatchContext,
 } from "./AlertDeliveryDispatch"
-import { hydrateDestinationRow } from "./AlertDestinationHydration"
+import {
+  hydrateDestinationRow,
+  type DestinationSecretConfig,
+  type EnrichedDestinationSecretConfig,
+} from "./AlertDestinationHydration"
 import { parseBase64Aes256GcmKey } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
+import { HazelOAuthService } from "./HazelOAuthService"
 
 /*
  * Shared notification dispatch for alert-adjacent features (error issues /
@@ -61,11 +66,36 @@ export class NotificationDispatcher extends Context.Service<
   make: Effect.gen(function* () {
     const database = yield* Database
     const env = yield* Env
+    const hazelOAuth = yield* HazelOAuthService
 
     const encryptionKey = yield* parseBase64Aes256GcmKey(
       Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
       (message) => new Error(message),
     )
+
+    const enrichSecretConfig = (
+      row: AlertDestinationRow,
+      secretConfig: DestinationSecretConfig,
+    ): Effect.Effect<EnrichedDestinationSecretConfig, Error> => {
+      if (secretConfig.type !== "hazel-oauth") {
+        return Effect.succeed(secretConfig)
+      }
+      return hazelOAuth
+        .getValidAccessToken(row.orgId as OrgId)
+        .pipe(
+          Effect.map((token) => ({
+            type: "hazel-oauth" as const,
+            hazelWorkspaceId: secretConfig.hazelWorkspaceId,
+            hazelWorkspaceName: secretConfig.hazelWorkspaceName,
+            accessToken: token.accessToken,
+            hazelApiBaseUrl: env.HAZEL_API_BASE_URL,
+          })),
+          Effect.mapError(
+            (error) =>
+              new Error(`Hazel connection unavailable: ${error.message}`),
+          ),
+        )
+    }
 
     const dispatchOne = (row: AlertDestinationRow, request: NotificationRequest) =>
       Effect.gen(function* () {
@@ -77,10 +107,11 @@ export class NotificationDispatcher extends Context.Service<
           onSecretConfigInvalid: () =>
             new Error("Stored destination secret is invalid"),
         })
+        const enrichedSecret = yield* enrichSecretConfig(row, hydrated.secretConfig)
         const context: DispatchContext = {
           destination: row,
           publicConfig: hydrated.publicConfig,
-          secretConfig: hydrated.secretConfig,
+          secretConfig: enrichedSecret,
           deliveryKey: request.deliveryKey,
           ruleId: request.ruleId,
           ruleName: request.ruleName,

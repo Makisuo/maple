@@ -9,6 +9,7 @@ export { DigestService } from "./services/DigestService";
 export { EdgeCacheService } from "./services/EdgeCacheService";
 export { EmailService } from "./services/EmailService";
 export { Env } from "./services/Env";
+export { HazelOAuthService } from "./services/HazelOAuthService";
 export { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService";
 export { QueryEngineService } from "./services/QueryEngineService";
 export { SelfManagedCollectorConfigService } from "./services/SelfManagedCollectorConfigService";

@@ -57,6 +57,7 @@ import {
   type AlertSeverity,
   type AlertSignalType,
   type AlertGroupBy,
+  OrgId as OrgIdSchema,
   type OrgId,
   type AlertRuleId,
   type AlertDestinationId,
@@ -110,6 +111,7 @@ import {
   formatSignalMetric,
 } from "./AlertDeliveryDispatch"
 import { Env } from "./Env"
+import { HazelOAuthService } from "./HazelOAuthService"
 import { QueryEngineService, type GroupedAlertObservation } from "./QueryEngineService"
 import { TinybirdService } from "./TinybirdService"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
@@ -118,6 +120,7 @@ import {
   SecretConfigFromJson,
   type DestinationPublicConfig,
   type DestinationSecretConfig,
+  type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
 
 interface NormalizedRule {
@@ -163,7 +166,7 @@ interface DispatchContext {
   readonly deliveryKey: string
   readonly destination: AlertDestinationRow
   readonly publicConfig: DestinationPublicConfig
-  readonly secretConfig: DestinationSecretConfig
+  readonly secretConfig: EnrichedDestinationSecretConfig
   readonly ruleId: AlertRuleId
   readonly ruleName: string
   readonly groupKey: string | null
@@ -253,6 +256,7 @@ const DestinationIdArrayFromJson = Schema.fromJsonString(DestinationIdArraySchem
 const AlertGroupByFromJson = Schema.fromJsonString(AlertGroupBySchema)
 
 const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.id)
+const decodeOrgIdSync = Schema.decodeUnknownSync(OrgIdSchema)
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
 const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.id)
 const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(AlertDeliveryEventDocument.fields.id)
@@ -448,6 +452,12 @@ const buildPublicConfig = (
         summary: summarizeWebhookUrl(r.webhookUrl),
         channelLabel: null,
       }),
+      "hazel-oauth": (r) => ({
+        summary: `Hazel workspace ${r.hazelWorkspaceName}`,
+        channelLabel: null,
+        hazelWorkspaceId: r.hazelWorkspaceId,
+        hazelWorkspaceName: r.hazelWorkspaceName,
+      }),
     }),
   )
 
@@ -473,6 +483,11 @@ const buildSecretConfig = (
         type: "hazel" as const,
         webhookUrl: r.webhookUrl.trim(),
         signingSecret: normalizeOptionalString(r.signingSecret),
+      }),
+      "hazel-oauth": (r) => ({
+        type: "hazel-oauth" as const,
+        hazelWorkspaceId: r.hazelWorkspaceId.trim(),
+        hazelWorkspaceName: r.hazelWorkspaceName.trim(),
       }),
     }),
   )
@@ -927,6 +942,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
       const queryEngine = yield* QueryEngineService
       const tinybird = yield* TinybirdService
       const runtime = yield* AlertRuntime
+      const hazelOAuth = yield* HazelOAuthService
       const encryptionKey = yield* parseEncryptionKey(
         Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
       )
@@ -989,6 +1005,30 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
           document: rowToDestinationDocument(row, publicConfig),
         } as const
       })
+
+      const enrichSecretForDispatch = (
+        row: AlertDestinationRow,
+        secretConfig: DestinationSecretConfig,
+      ): Effect.Effect<EnrichedDestinationSecretConfig, AlertDeliveryError> =>
+        secretConfig.type === "hazel-oauth"
+          ? hazelOAuth
+              .getValidAccessToken(decodeOrgIdSync(row.orgId))
+              .pipe(
+                Effect.map((token) => ({
+                  type: "hazel-oauth" as const,
+                  hazelWorkspaceId: secretConfig.hazelWorkspaceId,
+                  hazelWorkspaceName: secretConfig.hazelWorkspaceName,
+                  accessToken: token.accessToken,
+                  hazelApiBaseUrl: env.HAZEL_API_BASE_URL,
+                })),
+                Effect.mapError((error) =>
+                  makeDeliveryError(
+                    `Hazel connection unavailable: ${error.message}`,
+                    "hazel-oauth",
+                  ),
+                ),
+              )
+          : Effect.succeed(secretConfig)
 
       const requireRuleRow = Effect.fn("AlertsService.requireRuleRow")(function* (
         orgId: OrgId,
@@ -1472,10 +1512,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         context: Omit<DispatchContext, "destination" | "publicConfig" | "secretConfig">,
       ) {
         const hydrated = yield* hydrateDestination(destinationRow)
+        const enrichedSecret = yield* enrichSecretForDispatch(
+          hydrated.row,
+          hydrated.secretConfig,
+        )
         const fullContext: DispatchContext = {
           destination: hydrated.row,
           publicConfig: hydrated.publicConfig,
-          secretConfig: hydrated.secretConfig,
+          secretConfig: enrichedSecret,
           ...context,
         }
         const payload = buildPayload(fullContext)
@@ -1707,6 +1751,34 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
                   : normalizeOptionalString(request.signingSecret),
             }
             break
+          case "hazel-oauth": {
+            const previousWorkspaceId =
+              hydrated.secretConfig.type === "hazel-oauth"
+                ? hydrated.secretConfig.hazelWorkspaceId
+                : ""
+            const previousWorkspaceName =
+              hydrated.secretConfig.type === "hazel-oauth"
+                ? hydrated.secretConfig.hazelWorkspaceName
+                : ""
+            const nextWorkspaceId =
+              normalizeOptionalString(request.hazelWorkspaceId) ??
+              previousWorkspaceId
+            const nextWorkspaceName =
+              normalizeOptionalString(request.hazelWorkspaceName) ??
+              previousWorkspaceName
+            nextPublicConfig = {
+              summary: `Hazel workspace ${nextWorkspaceName}`,
+              channelLabel: null,
+              hazelWorkspaceId: nextWorkspaceId,
+              hazelWorkspaceName: nextWorkspaceName,
+            }
+            nextSecretConfig = {
+              type: "hazel-oauth",
+              hazelWorkspaceId: nextWorkspaceId,
+              hazelWorkspaceName: nextWorkspaceName,
+            }
+            break
+          }
         }
 
         const encryptedSecret = yield* encryptSecret(
@@ -2449,13 +2521,17 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
           const ruleGroupBy = ruleRow ? parseStoredGroupBy(ruleRow.groupBy) : null
           const groupKey = incidentRow?.groupKey ?? payloadRule?.groupKey ?? null
 
+          const enrichedSecret = yield* enrichSecretForDispatch(
+            hydrated.row,
+            hydrated.secretConfig,
+          )
           const deliveryStart = now()
           const result = yield* dispatchDelivery(
             {
               deliveryKey: row.deliveryKey,
               destination: hydrated.row,
               publicConfig: hydrated.publicConfig,
-              secretConfig: hydrated.secretConfig,
+              secretConfig: enrichedSecret,
               ruleId: decodeAlertRuleIdSync(row.ruleId),
               ruleName: ruleRow?.name ?? String(payloadRule?.name ?? "Alert"),
               groupKey,

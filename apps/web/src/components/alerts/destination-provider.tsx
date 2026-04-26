@@ -58,8 +58,18 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
   },
   hazel: {
     type: "hazel",
+    label: "Hazel (webhook)",
+    description: "Legacy webhook integration — paste the URL Hazel issues you.",
+    accent: "#F46F0F",
+    accentBg: "rgba(244,111,15,0.16)",
+    fallbackIcon: ({ size = 22, className }) => <HazelIcon size={size} className={className} />,
+    docsUrl: "https://hazel.sh/docs/integrations/maple",
+    docsLabel: "Hazel integration guide",
+  },
+  "hazel-oauth": {
+    type: "hazel-oauth",
     label: "Hazel",
-    description: "Forward incidents into Hazel for triage and on-call routing.",
+    description: "Connect Hazel via OAuth and pick a workspace to route alerts into.",
     accent: "#F46F0F",
     accentBg: "rgba(244,111,15,0.16)",
     fallbackIcon: ({ size = 22, className }) => <HazelIcon size={size} className={className} />,
@@ -72,6 +82,7 @@ export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
   "slack",
   "pagerduty",
   "webhook",
+  "hazel-oauth",
   "hazel",
 ]
 

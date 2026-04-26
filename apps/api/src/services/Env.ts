@@ -24,6 +24,11 @@ export interface EnvShape {
   readonly RESEND_FROM_EMAIL: string
   readonly MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL: Option.Option<string>
   readonly MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN: Option.Option<Redacted.Redacted<string>>
+  readonly HAZEL_API_BASE_URL: string
+  readonly HAZEL_OAUTH_DISCOVERY_URL: string
+  readonly HAZEL_OAUTH_CLIENT_ID: Option.Option<string>
+  readonly HAZEL_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
+  readonly HAZEL_OAUTH_SCOPES: string
 }
 
 const stringWithDefault = (key: string, fallback: string) =>
@@ -89,6 +94,20 @@ const envConfig = Config.all({
   ),
   MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN: optionalRedacted(
     "MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN",
+  ),
+  HAZEL_API_BASE_URL: stringWithDefault(
+    "HAZEL_API_BASE_URL",
+    "https://api.hazel.sh",
+  ),
+  HAZEL_OAUTH_DISCOVERY_URL: stringWithDefault(
+    "HAZEL_OAUTH_DISCOVERY_URL",
+    "https://clerk.hazel.sh/.well-known/openid-configuration",
+  ),
+  HAZEL_OAUTH_CLIENT_ID: optionalString("HAZEL_OAUTH_CLIENT_ID"),
+  HAZEL_OAUTH_CLIENT_SECRET: optionalRedacted("HAZEL_OAUTH_CLIENT_SECRET"),
+  HAZEL_OAUTH_SCOPES: stringWithDefault(
+    "HAZEL_OAUTH_SCOPES",
+    "openid email profile alerts:write workspaces:read",
   ),
 })
 

@@ -11,6 +11,10 @@ import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpCloudflareLogpushLive } from "./routes/cloudflare-logpush.http"
 import { HttpDashboardsLive } from "./routes/dashboards.http"
 import { HttpDigestLive } from "./routes/digest.http"
+import {
+  HttpIntegrationsLive,
+  IntegrationsCallbackRouter,
+} from "./routes/integrations.http"
 import { HttpIngestKeysLive } from "./routes/ingest-keys.http"
 import { HttpObservabilityLive } from "./routes/observability.http"
 import { HttpOrgOpenRouterSettingsLive } from "./routes/org-openrouter-settings.http"
@@ -22,6 +26,7 @@ import { HttpServiceDiscoveryLive } from "./routes/sd.http"
 import { AlertRuntime, AlertsService } from "./services/AlertsService"
 import { BucketCacheService } from "./services/BucketCacheService"
 import { ErrorsService } from "./services/ErrorsService"
+import { HazelOAuthService } from "./services/HazelOAuthService"
 import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthService } from "./services/AuthService"
@@ -60,6 +65,7 @@ export const CoreServicesLive = Layer.mergeAll(
   ApiKeysService.layer,
   CloudflareLogpushService.layer,
   DashboardPersistenceService.layer,
+  HazelOAuthService.layer,
   OrgIngestKeysService.layer,
   OrgOpenRouterSettingsService.layer,
   OrgTinybirdSettingsService.layer.pipe(
@@ -137,6 +143,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
   Layer.provide(HttpDashboardsLive),
   Layer.provide(HttpDigestLive),
   Layer.provide(HttpIngestKeysLive),
+  Layer.provide(HttpIntegrationsLive),
   Layer.provide(HttpObservabilityLive),
   Layer.provide(HttpOrgOpenRouterSettingsLive),
   Layer.provide(HttpOrgTinybirdSettingsLive),
@@ -149,6 +156,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 export const AllRoutes = Layer.mergeAll(
   ApiRoutes,
   AutumnRouter,
+  IntegrationsCallbackRouter,
   McpLive,
   HealthRouter,
   McpGetFallback,

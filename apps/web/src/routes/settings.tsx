@@ -15,6 +15,7 @@ import { IngestionSection } from "@/components/settings/ingestion-section"
 import { ApiKeysSection } from "@/components/settings/api-keys-section"
 import { McpSection } from "@/components/settings/mcp-section"
 import { ConnectorsSection } from "@/components/settings/connectors-section"
+import { IntegrationsSection } from "@/components/settings/integrations-section"
 import { NotificationsSection } from "@/components/settings/notifications-section"
 import { OrgOpenRouterSettingsSection } from "@/components/settings/org-openrouter-settings-section"
 import { OrgTinybirdSettingsSection } from "@/components/settings/org-tinybird-settings-section"
@@ -29,11 +30,12 @@ import {
   DatabaseIcon,
   CodeIcon,
   ChatBubbleSparkleIcon,
+  GridIcon,
   type IconComponent,
 } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 
-const tabValues = ["members", "ingestion", "api-keys", "mcp", "connectors", "notifications", "ai", "billing", "data-platform"] as const
+const tabValues = ["members", "ingestion", "api-keys", "mcp", "connectors", "integrations", "notifications", "ai", "billing", "data-platform"] as const
 type SettingsTab = (typeof tabValues)[number]
 
 const SettingsSearch = Schema.Struct({
@@ -74,6 +76,7 @@ const navSections: NavSection[] = [
       { id: "api-keys", label: "API Keys", icon: KeyIcon },
       { id: "mcp", label: "MCP", icon: CodeIcon },
       { id: "connectors", label: "Connectors", icon: DatabaseIcon },
+      { id: "integrations", label: "Integrations", icon: GridIcon },
     ],
   },
   {
@@ -147,6 +150,7 @@ const tabLabels: Record<SettingsTab, string> = {
   "api-keys": "API Keys",
   mcp: "MCP",
   connectors: "Connectors",
+  integrations: "Integrations",
   notifications: "Notifications",
   ai: "AI",
   billing: "Billing",
@@ -243,6 +247,7 @@ export function SettingsPage() {
       {activeTab === "api-keys" && <ApiKeysSection />}
       {activeTab === "mcp" && <McpSection />}
       {activeTab === "connectors" && <ConnectorsSection />}
+      {activeTab === "integrations" && <IntegrationsSection />}
       {activeTab === "notifications" && <NotificationsSection />}
       {activeTab === "ai" && (
         <OrgOpenRouterSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessAi} />

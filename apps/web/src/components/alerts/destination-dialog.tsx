@@ -1,4 +1,4 @@
-import type { AlertDestinationType } from "@maple/domain/http"
+import { HazelStartConnectRequest, type AlertDestinationType } from "@maple/domain/http"
 import { type DestinationFormState, defaultDestinationForm } from "@/lib/alerts/form-utils"
 import {
   DESTINATION_TYPES,
@@ -7,6 +7,10 @@ import {
   type DestinationProvider,
 } from "@/components/alerts/destination-provider"
 import { LoaderIcon } from "@/components/icons"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Exit } from "effect"
+import { useEffect, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
 import {
   Dialog,
@@ -18,6 +22,14 @@ import {
 } from "@maple/ui/components/ui/dialog"
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@maple/ui/components/ui/select"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { cn } from "@maple/ui/utils"
 
@@ -29,6 +41,16 @@ interface DestinationDialogProps {
   isEditing: boolean
   saving: boolean
   onSave: () => void
+}
+
+function isFormReady(form: DestinationFormState): boolean {
+  if (form.name.trim().length === 0) return false
+  switch (form.type) {
+    case "hazel-oauth":
+      return form.hazelWorkspaceId.trim().length > 0
+    default:
+      return true
+  }
 }
 
 function ProviderTile({
@@ -71,6 +93,171 @@ function ProviderTile({
       </div>
       <p className="relative text-[11px] leading-snug text-muted-foreground">{provider.description}</p>
     </button>
+  )
+}
+
+function HazelOAuthFields({
+  form,
+  onFormChange,
+  isEditing,
+}: {
+  form: DestinationFormState
+  onFormChange: (updater: (current: DestinationFormState) => DestinationFormState) => void
+  isEditing: boolean
+}) {
+  const statusResult = useAtomValue(
+    MapleApiAtomClient.query("integrations", "hazelStatus", {
+      reactivityKeys: ["hazelIntegrationStatus"],
+    }),
+  )
+  const workspacesAtom = MapleApiAtomClient.query("integrations", "hazelWorkspaces", {
+    reactivityKeys: ["hazelIntegrationStatus", "hazelWorkspaces"],
+  })
+  const workspacesResult = useAtomValue(workspacesAtom)
+
+  const startConnect = useAtomSet(
+    MapleApiAtomClient.mutation("integrations", "hazelStart"),
+    { mode: "promiseExit" },
+  )
+  const disconnect = useAtomSet(
+    MapleApiAtomClient.mutation("integrations", "hazelDisconnect"),
+    { mode: "promiseExit" },
+  )
+
+  const [busy, setBusy] = useState(false)
+
+  const status = Result.builder(statusResult)
+    .onSuccess((s) => s)
+    .orElse(() => null)
+
+  const workspaces = Result.builder(workspacesResult)
+    .onSuccess((w) => [...w.workspaces])
+    .orElse(() => [] as Array<{ id: string; name: string }>)
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.data && event.data.type === "maple:integration:hazel") {
+        // Refetch by busting the reactivity key — Result will reload on next render.
+        // Using window.location refetch is a fallback; effect-atom's reactivityKeys
+        // bust automatically when mutations declare them. Trigger a manual refetch
+        // by toggling the form state (no-op update).
+        onFormChange((current) => ({ ...current }))
+      }
+    }
+    window.addEventListener("message", onMessage)
+    return () => window.removeEventListener("message", onMessage)
+  }, [onFormChange])
+
+  async function handleConnect() {
+    // Open the popup synchronously to satisfy popup-blocker user-gesture rules,
+    // then point it at the OAuth URL once the start mutation returns.
+    const popup = window.open("", "maple-hazel-connect", "popup,width=520,height=640")
+    setBusy(true)
+    const result = await startConnect({
+      payload: new HazelStartConnectRequest({ returnTo: window.location.href }),
+      reactivityKeys: ["hazelIntegrationStatus"],
+    })
+    setBusy(false)
+    if (Exit.isSuccess(result)) {
+      const url = result.value.redirectUrl
+      if (popup) popup.location.href = url
+      else window.open(url, "maple-hazel-connect", "popup,width=520,height=640")
+    } else {
+      popup?.close()
+    }
+  }
+
+  async function handleDisconnect() {
+    setBusy(true)
+    await disconnect({ reactivityKeys: ["hazelIntegrationStatus", "hazelWorkspaces"] })
+    setBusy(false)
+    onFormChange((current) => ({ ...current, hazelWorkspaceId: "", hazelWorkspaceName: "" }))
+  }
+
+  if (!status || !status.connected) {
+    return (
+      <div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+        <p className="text-xs text-muted-foreground">
+          Connect Maple to your Hazel workspace via OAuth. We'll fetch the workspaces
+          you can post into and let you pick one.
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleConnect}
+          disabled={busy}
+          style={{ background: "#F46F0F", borderColor: "#F46F0F", color: "#fff" }}
+        >
+          {busy ? <LoaderIcon size={14} className="animate-spin" /> : null}
+          Connect Hazel
+        </Button>
+      </div>
+    )
+  }
+
+  const selectItems = workspaces.map((w) => ({ value: w.id, label: w.name }))
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-xs">
+        <div className="space-y-0.5">
+          <div className="font-medium">Connected to Hazel</div>
+          <div className="text-muted-foreground">
+            {status.externalUserEmail ?? status.externalUserId ?? "Authorized"}
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={handleDisconnect}
+          disabled={busy}
+        >
+          Disconnect
+        </Button>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="destination-hazel-workspace" className="text-xs">
+          Hazel workspace
+        </Label>
+        <Select
+          items={selectItems}
+          defaultValue={form.hazelWorkspaceId || null}
+          onValueChange={(value) => {
+            const ws = workspaces.find((w) => w.id === value)
+            onFormChange((current) => ({
+              ...current,
+              hazelWorkspaceId: value ?? "",
+              hazelWorkspaceName: ws?.name ?? current.hazelWorkspaceName,
+            }))
+          }}
+        >
+          <SelectTrigger id="destination-hazel-workspace">
+            <SelectValue
+              placeholder={
+                isEditing && form.hazelWorkspaceName
+                  ? form.hazelWorkspaceName
+                  : "Pick a workspace"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {selectItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        {workspaces.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">
+            No workspaces returned — make sure your Hazel account has access to at least one.
+          </p>
+        ) : null}
+      </div>
+    </div>
   )
 }
 
@@ -212,6 +399,14 @@ export function DestinationDialog({
                 </>
               )}
 
+              {form.type === "hazel-oauth" && (
+                <HazelOAuthFields
+                  form={form}
+                  onFormChange={onFormChange}
+                  isEditing={isEditing}
+                />
+              )}
+
               {form.type === "hazel" && (
                 <>
                   <div className="space-y-1.5">
@@ -271,7 +466,7 @@ export function DestinationDialog({
           </Button>
           <Button
             onClick={onSave}
-            disabled={saving}
+            disabled={saving || !isFormReady(form)}
             style={{
               background: provider.accent,
               borderColor: provider.accent,
