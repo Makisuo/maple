@@ -71,6 +71,7 @@ export const destinationTypeLabels: Record<AlertDestinationType, string> = {
   slack: "Slack",
   pagerduty: "PagerDuty",
   webhook: "Webhook",
+  hazel: "Hazel",
 }
 
 export const metricTypeLabels: Record<AlertMetricType, string> = {
@@ -335,6 +336,7 @@ export type DestinationFormState = {
   integrationKey: string
   url: string
   signingSecret: string
+  hazelWebhookUrl: string
 }
 
 export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
@@ -347,6 +349,7 @@ export function defaultDestinationForm(type: AlertDestinationType = "slack"): De
     integrationKey: "",
     url: "",
     signingSecret: "",
+    hazelWebhookUrl: "",
   }
 }
 
@@ -360,6 +363,7 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
     integrationKey: "",
     url: "",
     signingSecret: "",
+    hazelWebhookUrl: "",
   }
 }
 
@@ -371,6 +375,8 @@ export function buildDestinationCreatePayload(form: DestinationFormState): Alert
       return { type: "pagerduty", name: form.name.trim(), enabled: form.enabled, integrationKey: form.integrationKey.trim() }
     case "webhook":
       return { type: "webhook", name: form.name.trim(), enabled: form.enabled, url: form.url.trim(), signingSecret: form.signingSecret.trim() || undefined }
+    case "hazel":
+      return { type: "hazel", name: form.name.trim(), enabled: form.enabled, webhookUrl: form.hazelWebhookUrl.trim(), signingSecret: form.signingSecret.trim() || undefined }
   }
 }
 
@@ -382,6 +388,8 @@ export function buildDestinationUpdatePayload(form: DestinationFormState): Alert
       return { type: "pagerduty", name: form.name.trim() || undefined, enabled: form.enabled, integrationKey: form.integrationKey.trim() || undefined }
     case "webhook":
       return { type: "webhook", name: form.name.trim() || undefined, enabled: form.enabled, url: form.url.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined }
+    case "hazel":
+      return { type: "hazel", name: form.name.trim() || undefined, enabled: form.enabled, webhookUrl: form.hazelWebhookUrl.trim() || undefined, signingSecret: form.signingSecret.trim() || undefined }
   }
 }
 

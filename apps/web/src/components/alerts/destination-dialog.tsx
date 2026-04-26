@@ -30,6 +30,7 @@ const typeOptions = [
   { value: "slack" as const,     label: "Slack"     },
   { value: "pagerduty" as const, label: "PagerDuty" },
   { value: "webhook" as const,   label: "Webhook"   },
+  { value: "hazel" as const,     label: "Hazel"     },
 ]
 
 function SectionHeader({ step, title, description }: { step: number; title: string; description?: string }) {
@@ -151,6 +152,36 @@ export function DestinationDialog({
                     <Label htmlFor="destination-secret">Signing secret</Label>
                     <Input
                       id="destination-secret"
+                      value={form.signingSecret}
+                      onChange={(event) => onFormChange((current) => ({ ...current, signingSecret: event.target.value }))}
+                      placeholder={isEditing ? "Leave blank to keep current secret" : "Optional HMAC secret"}
+                    />
+                  </div>
+                </>
+              )}
+
+              {form.type === "hazel" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="destination-hazel-url">Hazel webhook URL</Label>
+                    <Input
+                      id="destination-hazel-url"
+                      value={form.hazelWebhookUrl}
+                      onChange={(event) => onFormChange((current) => ({ ...current, hazelWebhookUrl: event.target.value }))}
+                      placeholder={
+                        isEditing
+                          ? "Leave blank to keep current URL"
+                          : "https://api.hazel.io/webhooks/incoming/{webhookId}/{token}/maple"
+                      }
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      Create a Maple webhook in Hazel under Settings → Integrations → Maple, then paste the URL here.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="destination-hazel-secret">Signing secret</Label>
+                    <Input
+                      id="destination-hazel-secret"
                       value={form.signingSecret}
                       onChange={(event) => onFormChange((current) => ({ ...current, signingSecret: event.target.value }))}
                       placeholder={isEditing ? "Leave blank to keep current secret" : "Optional HMAC secret"}
