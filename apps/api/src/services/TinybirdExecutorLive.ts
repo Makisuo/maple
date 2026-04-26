@@ -1,5 +1,9 @@
 import { Effect, Layer } from "effect"
-import { TinybirdExecutor, ObservabilityError } from "@maple/query-engine/observability"
+import {
+  TinybirdExecutor,
+  ObservabilityError,
+  type ExecutorQueryOptions,
+} from "@maple/query-engine/observability"
 import { TinybirdService } from "./TinybirdService"
 import type { TenantContext } from "./AuthService"
 
@@ -20,8 +24,8 @@ export const makeTinybirdExecutorFromTenant = (tenant: TenantContext) =>
 
       return TinybirdExecutor.of({
         orgId: tenant.orgId,
-        query: <T>(pipe: string, params: Record<string, unknown>) =>
-          tinybird.query(tenant, { pipe: pipe as any, params }).pipe(
+        query: <T>(pipe: string, params: Record<string, unknown>, options?: ExecutorQueryOptions) =>
+          tinybird.query(tenant, { pipe: pipe as any, params }, options).pipe(
             Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
             Effect.tap((response) =>
               Effect.annotateCurrentSpan("result.rowCount", response.data.length),
@@ -30,11 +34,11 @@ export const makeTinybirdExecutorFromTenant = (tenant: TenantContext) =>
               (error) => new ObservabilityError({ message: error.message, pipe }),
             ),
             Effect.withSpan("TinybirdExecutor.query", {
-              attributes: { pipe, orgId: tenant.orgId },
+              attributes: { pipe, orgId: tenant.orgId, "query.profile": options?.profile },
             }),
           ),
-        sqlQuery: <T>(sql: string) =>
-          tinybird.sqlQuery(tenant, sql).pipe(
+        sqlQuery: <T>(sql: string, options?: ExecutorQueryOptions) =>
+          tinybird.sqlQuery(tenant, sql, options).pipe(
             Effect.map((rows) => rows as unknown as ReadonlyArray<T>),
             Effect.tap((rows) =>
               Effect.annotateCurrentSpan("result.rowCount", rows.length),
@@ -47,6 +51,7 @@ export const makeTinybirdExecutorFromTenant = (tenant: TenantContext) =>
                 "db.system": "clickhouse",
                 orgId: tenant.orgId,
                 "db.statement": truncateSql(sql),
+                "query.profile": options?.profile,
               },
             }),
           ),

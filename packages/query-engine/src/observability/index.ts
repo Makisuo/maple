@@ -1,4 +1,11 @@
-export { TinybirdExecutor, ObservabilityError, type TinybirdExecutorShape } from "./TinybirdExecutor"
+export {
+  TinybirdExecutor,
+  ObservabilityError,
+  type TinybirdExecutorShape,
+  type ExecutorQueryOptions,
+  type ExecutorQuerySettings,
+  type ExecutorQueryProfile,
+} from "./TinybirdExecutor"
 export type * from "./types"
 export { toSpanResult, toLogEntry, toErrorSummary } from "./row-mappers"
 export { aggregateServiceRows, weightedAvg } from "./aggregation"

@@ -13,6 +13,7 @@ import {
   QueryEngineTimeoutError,
   QueryEngineValidationError,
   TinybirdQueryError,
+  TinybirdQuotaExceededError,
 } from "@maple/domain/http"
 import { Array as Arr, Duration, Effect, Layer, Match, Metric, Option, Result, Context } from "effect"
 import type { TenantContext } from "./AuthService"
@@ -492,7 +493,7 @@ const validateEvaluate = Effect.fn("QueryEngineService.validateEvaluate")(functi
 })
 
 const mapTinybirdError = <A, R>(
-  effect: Effect.Effect<A, TinybirdQueryError, R>,
+  effect: Effect.Effect<A, TinybirdQueryError | TinybirdQuotaExceededError, R>,
   context: string,
 ): Effect.Effect<A, QueryEngineExecutionError, R> =>
   effect.pipe(
@@ -504,6 +505,17 @@ const mapTinybirdError = <A, R>(
           pipe: error.pipe,
         }),
       ),
+    ),
+    Effect.catchTag(
+      "@maple/http/errors/TinybirdQuotaExceededError",
+      (error: TinybirdQuotaExceededError) =>
+        Effect.fail(
+          new QueryEngineExecutionError({
+            message: `${context}: query exceeded quota (${error.setting}); narrow the time range or add a service filter`,
+            causeTag: error._tag,
+            pipe: error.pipe,
+          }),
+        ),
     ),
   )
 

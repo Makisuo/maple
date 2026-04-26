@@ -89,6 +89,7 @@ import {
   Metric,
   Option,
   Redacted,
+  Ref,
   Schema,
   Context,
 } from "effect"
@@ -2701,6 +2702,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         evaluation: EvaluatedRule,
         groupKey: string,
         timestamp: number,
+        pendingChecks: Ref.Ref<AlertChecksRow[]>,
       ) {
         const stateConflictTarget: [typeof alertRuleStates.orgId, typeof alertRuleStates.ruleId, typeof alertRuleStates.groupKey] = [alertRuleStates.orgId, alertRuleStates.ruleId, alertRuleStates.groupKey]
 
@@ -2972,14 +2974,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
           IncidentTransition: capturedTransition,
           EvaluationDurationMs: Math.max(0, now() - timestamp),
         }
-        // Awaited (not forked) so the Cloudflare Worker isolate doesn't dispose
-        // mid-POST once the scheduled handler resolves. Errors are logged inside
-        // TinybirdService.ingest and swallowed here so a slow/failed Tinybird
-        // never blocks the scheduler tick's state/incident writes (those already
-        // committed above).
-        yield* tinybird
-          .ingest(systemTenant(row.orgId as OrgId), "alert_checks", [checkRow])
-          .pipe(Effect.ignore)
+        // Buffer instead of POSTing per-evaluation; the scheduler tick flushes
+        // all rows once at the end (one POST per orgId). Awaited flush keeps
+        // the Cloudflare Worker isolate alive across the batch write.
+        yield* Ref.update(pendingChecks, (rows) => {
+          rows.push(checkRow)
+          return rows
+        })
       })
 
       /* -------------------------------------------------------------------------- */
@@ -3238,6 +3239,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         yield* Metric.update(AlertingMetrics.activeRulesGauge, rows.length)
 
         let evaluationFailureCount = 0
+        const pendingChecks = yield* Ref.make<AlertChecksRow[]>([])
 
         yield* Effect.forEach(
           rows,
@@ -3260,7 +3262,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
                   yield* Effect.forEach(eligible, ({ evaluation, groupKey }) =>
                     Effect.gen(function* () {
                       yield* recordEvaluationStatus(evaluation)
-                      yield* processEvaluation(row, normalized, evaluation, groupKey, timestamp)
+                      yield* processEvaluation(row, normalized, evaluation, groupKey, timestamp, pendingChecks)
                     }))
 
                   const evaluatedGroups = HashSet.fromIterable(Arr.map(eligible, (r) => r.groupKey))
@@ -3291,7 +3293,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
                       const evaluation = observations[0]?.evaluation
                       if (evaluation == null) return
                       yield* recordEvaluationStatus(evaluation)
-                      yield* processEvaluation(row, normalized, evaluation, svcName, timestamp)
+                      yield* processEvaluation(row, normalized, evaluation, svcName, timestamp, pendingChecks)
                     }))
 
                   yield* resolveOrphanedGroupIncidents(
@@ -3315,6 +3317,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
                     evaluation,
                     "__total__",
                     timestamp,
+                    pendingChecks,
                   )
                 }
                 yield* Metric.update(AlertingMetrics.ruleEvaluationDurationMs, now() - ruleStart)
@@ -3367,6 +3370,28 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
             const normalized = yield* normalizeRuleRow(ruleRow)
             yield* resolveStaleIncidents(orgId as OrgId, normalized.id, normalized, { resolveAll: true })
           }))
+
+        // Flush accumulated alert_check audit rows to Tinybird, one POST per
+        // orgId. Awaited so the Cloudflare Worker isolate stays alive until
+        // the writes complete; errors are swallowed because the authoritative
+        // state already lives in Postgres above.
+        const accumulatedChecks = yield* Ref.getAndSet(pendingChecks, [])
+        if (accumulatedChecks.length > 0) {
+          const byOrg = new Map<string, AlertChecksRow[]>()
+          for (const check of accumulatedChecks) {
+            const bucket = byOrg.get(check.OrgId)
+            if (bucket) bucket.push(check)
+            else byOrg.set(check.OrgId, [check])
+          }
+          yield* Effect.forEach(
+            Array.from(byOrg.entries()),
+            ([orgId, checks]) =>
+              tinybird
+                .ingest(systemTenant(orgId as OrgId), "alert_checks", checks)
+                .pipe(Effect.ignore),
+            { concurrency: "unbounded" },
+          )
+        }
 
         const deliveryResult = yield* processQueuedDeliveries()
         yield* Metric.update(AlertingMetrics.rulesEvaluatedTotal, rows.length)
