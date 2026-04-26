@@ -21,3 +21,35 @@ export const dashboards = sqliteTable(
 
 export type DashboardRow = typeof dashboards.$inferSelect
 export type DashboardInsert = typeof dashboards.$inferInsert
+
+/**
+ * Append-only history of dashboard snapshots. One row per save, with
+ * coalescing — back-to-back edits by the same actor of the same kind within
+ * a short window update the latest row in place rather than appending.
+ */
+export const dashboardVersions = sqliteTable(
+  "dashboard_versions",
+  {
+    orgId: text("org_id").notNull(),
+    id: text("id").notNull(),
+    dashboardId: text("dashboard_id").notNull(),
+    versionNumber: integer("version_number", { mode: "number" }).notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+    changeKind: text("change_kind").notNull(),
+    changeSummary: text("change_summary"),
+    sourceVersionId: text("source_version_id"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    createdBy: text("created_by").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.orgId, table.id] }),
+    index("dashboard_versions_org_dashboard_idx").on(
+      table.orgId,
+      table.dashboardId,
+      table.versionNumber,
+    ),
+  ],
+)
+
+export type DashboardVersionRow = typeof dashboardVersions.$inferSelect
+export type DashboardVersionInsert = typeof dashboardVersions.$inferInsert

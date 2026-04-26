@@ -58,5 +58,36 @@ export const HttpDashboardsLive = HttpApiBuilder.group(
             return yield* persistence.delete(tenant.orgId, params.dashboardId)
           }),
         )
+        .handle("listVersions", ({ params, query }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            return yield* persistence.listVersions(
+              tenant.orgId,
+              params.dashboardId,
+              { limit: query.limit, before: query.before },
+            )
+          }),
+        )
+        .handle("getVersion", ({ params }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            return yield* persistence.getVersion(
+              tenant.orgId,
+              params.dashboardId,
+              params.versionId,
+            )
+          }),
+        )
+        .handle("restoreVersion", ({ params }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            return yield* persistence.restoreVersion(
+              tenant.orgId,
+              tenant.userId,
+              params.dashboardId,
+              params.versionId,
+            )
+          }),
+        )
     }),
 )

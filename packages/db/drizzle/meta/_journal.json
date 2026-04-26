@@ -29,6 +29,13 @@
       "when": 1776807065333,
       "tag": "0003_slimy_moira_mactaggert",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777204738595,
+      "tag": "0004_cheerful_paibok",
+      "breakpoints": true
     }
   ]
 }

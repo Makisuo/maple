@@ -22,6 +22,12 @@ import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
 
 interface DashboardCanvasProps {
   widgets: DashboardWidget[]
+  /**
+   * When true, the grid is read-only: drag/resize disabled, layout-change
+   * callbacks suppressed. Used while previewing a historical version so
+   * interactions don't accidentally mutate the live dashboard.
+   */
+  readOnly?: boolean
 }
 
 const visualizationRegistry: Record<
@@ -81,9 +87,11 @@ const WidgetRenderer = memo(function WidgetRenderer({
 
 export function DashboardCanvas({
   widgets,
+  readOnly = false,
 }: DashboardCanvasProps) {
   const { mode, updateWidgetLayouts } = useDashboardActions()
   const { width, containerRef, mounted } = useContainerWidth()
+  const editable = mode === "edit" && !readOnly
 
   const layouts: Layout = widgets.map((w) => ({
     i: w.id,
@@ -109,17 +117,18 @@ export function DashboardCanvas({
             margin: [12, 12] as [number, number],
           }}
           dragConfig={{
-            enabled: mode === "edit",
+            enabled: editable,
             handle: ".widget-drag-handle",
             bounded: false,
             threshold: 3,
           }}
           resizeConfig={{
-            enabled: mode === "edit",
+            enabled: editable,
             handles: ["se"],
           }}
           compactor={verticalCompactor}
-          onLayoutChange={(layout) =>
+          onLayoutChange={(layout) => {
+            if (readOnly) return
             updateWidgetLayouts(
               layout.map((l) => ({
                 i: l.i,
@@ -129,7 +138,7 @@ export function DashboardCanvas({
                 h: l.h,
               }))
             )
-          }
+          }}
         >
           {widgets.map((widget) => (
             <div key={widget.id}>

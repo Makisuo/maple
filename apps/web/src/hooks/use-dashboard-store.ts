@@ -189,7 +189,7 @@ export function useDashboardStore() {
         payload: new DashboardUpsertRequest({
           dashboard: toDashboardDocument(updated),
         }),
-        reactivityKeys: ["dashboards"],
+        reactivityKeys: ["dashboards", `dashboard:${updated.id}:versions`],
       })
 
       if (Exit.isFailure(result)) {
@@ -458,7 +458,16 @@ export function useDashboardStore() {
 
         // Return same reference if nothing changed — mutateDashboard skips no-ops
         if (!changed) return dashboard
-        return { ...dashboard, widgets, updatedAt: new Date().toISOString() }
+
+        // Sort by (y, x) so the array order matches visual order. The grid
+        // compactor uses array order as a tiebreaker when items share a row,
+        // so a stale order causes drag-to-swap to snap back.
+        const sorted = [...widgets].sort((a, b) => {
+          if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
+          return a.layout.x - b.layout.x
+        })
+
+        return { ...dashboard, widgets: sorted, updatedAt: new Date().toISOString() }
       })
     },
     [mutateDashboard],

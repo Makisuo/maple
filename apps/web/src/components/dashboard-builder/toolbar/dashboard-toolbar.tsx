@@ -1,4 +1,4 @@
-import { PlusIcon, PencilIcon, CheckIcon, GridIcon, ChatBubbleSparkleIcon, DotsVerticalIcon, DownloadIcon } from "@/components/icons"
+import { PlusIcon, PencilIcon, CheckIcon, GridIcon, ChatBubbleSparkleIcon, DotsVerticalIcon, DownloadIcon, HistoryIcon } from "@/components/icons"
 
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -19,6 +19,7 @@ interface DashboardToolbarProps {
   onToggleEdit: () => void
   onAddWidget: () => void
   onOpenAi?: () => void
+  onOpenHistory?: () => void
 }
 
 export function DashboardToolbar({
@@ -26,6 +27,7 @@ export function DashboardToolbar({
   onToggleEdit,
   onAddWidget,
   onOpenAi,
+  onOpenHistory,
 }: DashboardToolbarProps) {
   const { mode, readOnly, autoLayoutWidgets } = useDashboardActions()
   const {
@@ -68,6 +70,16 @@ export function DashboardToolbar({
             Auto Layout
           </Button>
         </>
+      )}
+      {onOpenHistory && (
+        <Button
+          variant="outline"
+          size="icon-xs"
+          onClick={onOpenHistory}
+          aria-label="Show dashboard history"
+        >
+          <HistoryIcon size={14} />
+        </Button>
       )}
       {onOpenAi && (
         <Button variant="outline" size="sm" onClick={onOpenAi}>

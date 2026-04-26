@@ -14,6 +14,16 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import type { WidgetMode } from "@/components/dashboard-builder/types";
 import { useDashboardStore } from "@/hooks/use-dashboard-store";
 import { DashboardAiPanel } from "@/components/dashboard-builder/ai";
+import {
+  DashboardHistoryPanel,
+  PreviewedCanvas,
+} from "@/components/dashboard-builder/history";
+import {
+  historyPanelOpenAtom,
+  previewedVersionAtom,
+} from "@/atoms/dashboard-history-atoms";
+import { useDashboardVersions } from "@/components/dashboard-builder/history/use-dashboard-history";
+import { Result } from "@/lib/effect-atom";
 import type { ReactNode } from "react";
 
 // Module-level atoms — singleton (only one dashboard page visible at a time)
@@ -62,17 +72,33 @@ function DashboardViewPage() {
 
   const [chartPickerOpen, setChartPickerOpen] = useAtom(chartPickerOpenAtom);
   const [aiPanelOpen, setAiPanelOpen] = useAtom(aiPanelOpenAtom);
+  const [historyPanelOpen, setHistoryPanelOpen] = useAtom(historyPanelOpenAtom);
+  const [previewed, setPreviewed] = useAtom(previewedVersionAtom);
 
   const activeDashboard = dashboards.find((d) => d.id === dashboardId);
 
-  const mode: WidgetMode = search.mode === "edit" && !readOnly ? "edit" : "view";
+  const isPreviewing = previewed !== null;
+  const mode: WidgetMode =
+    search.mode === "edit" && !readOnly && !isPreviewing ? "edit" : "view";
 
   const handleToggleEdit = () => {
+    if (isPreviewing) return;
     navigate({
       to: "/dashboards/$dashboardId",
       params: { dashboardId },
       search: mode === "edit" ? {} : { mode: "edit" },
     });
+  };
+
+  const openHistory = () => {
+    setAiPanelOpen(false);
+    setHistoryPanelOpen(true);
+  };
+
+  const openAi = () => {
+    setHistoryPanelOpen(false);
+    setPreviewed(null);
+    setAiPanelOpen(true);
   };
 
   if (!activeDashboard) {
@@ -94,7 +120,7 @@ function DashboardViewPage() {
       <DashboardActionsProvider
         dashboardId={dashboardId}
         mode={mode}
-        readOnly={readOnly}
+        readOnly={readOnly || isPreviewing}
         store={{ addWidget, removeWidget, cloneWidget, updateWidgetDisplay, updateWidgetLayouts, autoLayoutWidgets }}
       >
       <DashboardRefreshBridge>
@@ -106,7 +132,7 @@ function DashboardViewPage() {
         titleContent={
           <InlineEditableTitle
             value={activeDashboard.name}
-            readOnly={readOnly}
+            readOnly={readOnly || isPreviewing}
             onChange={(name) => updateDashboard(dashboardId, { name })}
           />
         }
@@ -116,11 +142,20 @@ function DashboardViewPage() {
             dashboard={activeDashboard}
             onToggleEdit={handleToggleEdit}
             onAddWidget={() => setChartPickerOpen(true)}
-            onOpenAi={() => setAiPanelOpen(true)}
+            onOpenAi={openAi}
+            onOpenHistory={openHistory}
           />
         }
         rightSidebar={
-          aiPanelOpen ? (
+          historyPanelOpen ? (
+            <HistoryPanelMount
+              dashboardId={dashboardId}
+              onClose={() => {
+                setHistoryPanelOpen(false);
+                setPreviewed(null);
+              }}
+            />
+          ) : aiPanelOpen ? (
             <DashboardAiPanel
               onOpenChange={setAiPanelOpen}
               dashboardName={activeDashboard.name}
@@ -134,7 +169,15 @@ function DashboardViewPage() {
             {persistenceError}. Dashboard editing is temporarily disabled.
           </div>
         )}
-        {activeDashboard.widgets.length === 0 && mode === "view" ? (
+
+        {isPreviewing && previewed ? (
+          <PreviewedCanvas
+            dashboardId={dashboardId}
+            preview={previewed}
+            onCancel={() => setPreviewed(null)}
+            onRestored={() => setPreviewed(null)}
+          />
+        ) : activeDashboard.widgets.length === 0 && mode === "view" ? (
           <div className="flex flex-col items-center justify-center py-24 gap-4">
             <div className="flex gap-2">
               <div className="w-8 h-8 rounded bg-primary/15" />
@@ -170,13 +213,45 @@ function DashboardViewPage() {
         )}
 
         <WidgetPickerWithActions
-          open={readOnly ? false : chartPickerOpen}
-          onOpenChange={readOnly ? () => undefined : setChartPickerOpen}
+          open={readOnly || isPreviewing ? false : chartPickerOpen}
+          onOpenChange={readOnly || isPreviewing ? () => undefined : setChartPickerOpen}
         />
       </DashboardLayout>
       </DashboardRefreshBridge>
       </DashboardActionsProvider>
     </DashboardTimeRangeWrapper>
+  );
+}
+
+function HistoryPanelMount({
+  dashboardId,
+  onClose,
+}: {
+  dashboardId: string
+  onClose: () => void
+}) {
+  const [previewed, setPreviewed] = useAtom(previewedVersionAtom);
+  const result = useDashboardVersions(dashboardId);
+
+  const onPreview = (versionId: string) => {
+    if (!Result.isSuccess(result)) return;
+    const version = result.value.versions.find((v) => v.id === versionId);
+    if (!version) return;
+    setPreviewed({
+      versionId: version.id,
+      versionNumber: version.versionNumber,
+      createdAt: version.createdAt,
+      createdBy: version.createdBy,
+    });
+  };
+
+  return (
+    <DashboardHistoryPanel
+      dashboardId={dashboardId}
+      previewed={previewed}
+      onPreview={onPreview}
+      onClose={onClose}
+    />
   );
 }
 

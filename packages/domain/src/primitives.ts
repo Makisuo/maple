@@ -33,6 +33,12 @@ export type RoleName = Schema.Schema.Type<typeof RoleName>
 export const DashboardId = MapleId("@maple/DashboardId", "Dashboard ID")
 export type DashboardId = Schema.Schema.Type<typeof DashboardId>
 
+export const DashboardVersionId = MapleUuidId(
+  "@maple/DashboardVersionId",
+  "Dashboard Version ID",
+)
+export type DashboardVersionId = Schema.Schema.Type<typeof DashboardVersionId>
+
 export const IngestKeyId = MapleId("@maple/IngestKeyId", "Ingest Key ID")
 export type IngestKeyId = Schema.Schema.Type<typeof IngestKeyId>
 

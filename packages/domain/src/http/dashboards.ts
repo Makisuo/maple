@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { DashboardId, IsoDateTimeString } from "../primitives"
+import { DashboardId, DashboardVersionId, IsoDateTimeString, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 
 const TimeRangeSchema = Schema.Union([
@@ -176,6 +176,76 @@ export class DashboardDeleteResponse extends Schema.Class<DashboardDeleteRespons
   id: DashboardId,
 }) {}
 
+// ---------------------------------------------------------------------------
+// Versions / history
+// ---------------------------------------------------------------------------
+
+export const DashboardVersionChangeKind = Schema.Literals([
+  "created",
+  "renamed",
+  "description_changed",
+  "tags_changed",
+  "time_range_changed",
+  "widget_added",
+  "widget_removed",
+  "widget_updated",
+  "layout_changed",
+  "restored",
+  "multiple",
+]).annotate({
+  identifier: "@maple/DashboardVersionChangeKind",
+  title: "Dashboard Version Change Kind",
+})
+export type DashboardVersionChangeKind = Schema.Schema.Type<typeof DashboardVersionChangeKind>
+
+export class DashboardVersionSummary extends Schema.Class<DashboardVersionSummary>("DashboardVersionSummary")({
+  id: DashboardVersionId,
+  dashboardId: DashboardId,
+  versionNumber: Schema.Number,
+  changeKind: DashboardVersionChangeKind,
+  changeSummary: Schema.NullOr(Schema.String),
+  sourceVersionId: Schema.NullOr(DashboardVersionId),
+  createdAt: IsoDateTimeString,
+  createdBy: UserId,
+}) {}
+
+export class DashboardVersionDetail extends Schema.Class<DashboardVersionDetail>("DashboardVersionDetail")({
+  id: DashboardVersionId,
+  dashboardId: DashboardId,
+  versionNumber: Schema.Number,
+  changeKind: DashboardVersionChangeKind,
+  changeSummary: Schema.NullOr(Schema.String),
+  sourceVersionId: Schema.NullOr(DashboardVersionId),
+  createdAt: IsoDateTimeString,
+  createdBy: UserId,
+  snapshot: DashboardDocument,
+}) {}
+
+export class DashboardVersionsListResponse extends Schema.Class<DashboardVersionsListResponse>("DashboardVersionsListResponse")({
+  versions: Schema.Array(DashboardVersionSummary),
+  hasMore: Schema.Boolean,
+}) {}
+
+const DashboardVersionsListQuery = Schema.Struct({
+  limit: Schema.optional(
+    Schema.NumberFromString.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: 200 }),
+    ),
+  ),
+  before: Schema.optional(Schema.NumberFromString.check(Schema.isInt())),
+})
+
+export class DashboardVersionNotFoundError extends Schema.TaggedErrorClass<DashboardVersionNotFoundError>()(
+  "@maple/http/errors/DashboardVersionNotFoundError",
+  {
+    dashboardId: DashboardId,
+    versionId: DashboardVersionId,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
 export class DashboardPersistenceError extends Schema.TaggedErrorClass<DashboardPersistenceError>()(
   "@maple/http/errors/DashboardPersistenceError",
   {
@@ -234,6 +304,45 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
       success: DashboardDeleteResponse,
       error: [DashboardNotFoundError, DashboardPersistenceError],
     }),
+  )
+  .add(
+    HttpApiEndpoint.get("listVersions", "/:dashboardId/versions", {
+      params: { dashboardId: DashboardId },
+      query: DashboardVersionsListQuery,
+      success: DashboardVersionsListResponse,
+      error: [DashboardNotFoundError, DashboardPersistenceError],
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get(
+      "getVersion",
+      "/:dashboardId/versions/:versionId",
+      {
+        params: { dashboardId: DashboardId, versionId: DashboardVersionId },
+        success: DashboardVersionDetail,
+        error: [
+          DashboardNotFoundError,
+          DashboardVersionNotFoundError,
+          DashboardPersistenceError,
+        ],
+      },
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      "restoreVersion",
+      "/:dashboardId/versions/:versionId/restore",
+      {
+        params: { dashboardId: DashboardId, versionId: DashboardVersionId },
+        success: DashboardDocument,
+        error: [
+          DashboardNotFoundError,
+          DashboardVersionNotFoundError,
+          DashboardValidationError,
+          DashboardPersistenceError,
+        ],
+      },
+    ),
   )
   .prefix("/api/dashboards")
   .middleware(Authorization) {}
