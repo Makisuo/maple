@@ -15,8 +15,9 @@ import { ShorthandInput } from "./shorthand-input"
 import { RecentlyUsed } from "./recently-used"
 import { TimezoneDisplay } from "./timezone-display"
 import { CustomRangePicker } from "./custom-range-picker"
+import { LiveIndicatorDot, LivePopoverFooter } from "./reload-controls"
 
-export function TimeRangePicker({ startTime, endTime, presetValue, onChange }: TimeRangePickerProps) {
+export function TimeRangePicker({ startTime, endTime, presetValue, onChange, showLiveControls = false }: TimeRangePickerProps) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<TimeRangeTab>("relative")
   const { recentTimes, addRecentTime } = useRecentlyUsedTimes()
@@ -105,6 +106,7 @@ export function TimeRangePicker({ startTime, endTime, presetValue, onChange }: T
           <Button variant="outline" size="sm" className="gap-2">
             <ClockIcon className="size-3.5" />
             <span>{displayText}</span>
+            {showLiveControls && <LiveIndicatorDot />}
           </Button>
         }
       />
@@ -120,35 +122,38 @@ export function TimeRangePicker({ startTime, endTime, presetValue, onChange }: T
             onCancel={() => setTab("relative")}
           />
         ) : (
-          <div className="flex">
-            {/* Left column: Presets */}
-            <ScrollArea className="h-[320px] w-[160px] border-r">
-              <PresetList
-                selectedValue={undefined}
-                onSelect={handlePresetSelect}
-                onCustomClick={() => setTab("custom")}
-              />
-            </ScrollArea>
+          <div className="flex flex-col">
+            <div className="flex">
+              {/* Left column: Presets */}
+              <ScrollArea className="h-[320px] w-[160px] border-r">
+                <PresetList
+                  selectedValue={undefined}
+                  onSelect={handlePresetSelect}
+                  onCustomClick={() => setTab("custom")}
+                />
+              </ScrollArea>
 
-            {/* Right column: Quick select, input, recent, timezone */}
-            <div className="flex-1 p-3 space-y-4">
-              <ShorthandInput onApply={handleShorthandApply} />
+              {/* Right column: Quick select, input, recent, timezone */}
+              <div className="flex-1 p-3 space-y-4">
+                <ShorthandInput onApply={handleShorthandApply} />
 
-              <Separator />
+                <Separator />
 
-              <QuickSelectGrid onSelect={handleQuickSelect} />
+                <QuickSelectGrid onSelect={handleQuickSelect} />
 
-              {recentTimes.length > 0 && (
-                <>
-                  <Separator />
-                  <RecentlyUsed recentTimes={recentTimes} onSelect={handleRecentSelect} />
-                </>
-              )}
+                {recentTimes.length > 0 && (
+                  <>
+                    <Separator />
+                    <RecentlyUsed recentTimes={recentTimes} onSelect={handleRecentSelect} />
+                  </>
+                )}
 
-              <Separator />
+                <Separator />
 
-              <TimezoneDisplay />
+                <TimezoneDisplay />
+              </div>
             </div>
+            {showLiveControls && <LivePopoverFooter />}
           </div>
         )}
       </PopoverContent>

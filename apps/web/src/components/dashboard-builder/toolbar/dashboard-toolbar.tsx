@@ -6,9 +6,9 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@maple/ui/components/ui/dropdown-menu"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
-import { ReloadControls } from "@/components/time-range-picker/reload-controls"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
 import { downloadPortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
@@ -35,12 +35,15 @@ export function DashboardToolbar({
     actions: { setTimeRange },
   } = useDashboardTimeRange()
 
+  const isEdit = mode === "edit"
+
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-3">
       <TimeRangePicker
         startTime={resolvedTimeRange?.startTime}
         endTime={resolvedTimeRange?.endTime}
         presetValue={timeRange.type === "relative" ? timeRange.value : undefined}
+        showLiveControls
         onChange={(range) => {
           if (range.startTime && range.endTime) {
             if (range.presetValue) {
@@ -58,57 +61,63 @@ export function DashboardToolbar({
           }
         }}
       />
-      <ReloadControls />
-      {mode === "edit" && (
-        <>
+
+      <div className="flex items-center gap-1">
+        {isEdit && (
           <Button variant="outline" size="sm" onClick={onAddWidget} disabled={readOnly}>
             <PlusIcon size={14} data-icon="inline-start" />
             Add Widget
           </Button>
-          <Button variant="outline" size="sm" onClick={autoLayoutWidgets} disabled={readOnly}>
-            <GridIcon size={14} data-icon="inline-start" />
-            Auto Layout
+        )}
+        {onOpenAi && (
+          <Button variant="outline" size="sm" onClick={onOpenAi}>
+            <ChatBubbleSparkleIcon size={14} data-icon="inline-start" />
+            AI
           </Button>
-        </>
-      )}
-      {onOpenHistory && (
+        )}
         <Button
-          variant="outline"
-          size="icon-xs"
-          onClick={onOpenHistory}
-          aria-label="Show dashboard history"
+          variant={isEdit ? "default" : "outline"}
+          size="sm"
+          onClick={onToggleEdit}
+          disabled={readOnly}
         >
-          <HistoryIcon size={14} />
+          {isEdit ? <CheckIcon size={14} data-icon="inline-start" /> : <PencilIcon size={14} data-icon="inline-start" />}
+          {isEdit ? "Done" : "Edit"}
         </Button>
-      )}
-      {onOpenAi && (
-        <Button variant="outline" size="sm" onClick={onOpenAi}>
-          <ChatBubbleSparkleIcon size={14} data-icon="inline-start" />
-          AI
-        </Button>
-      )}
-      <Button
-        variant={mode === "edit" ? "default" : "outline"}
-        size="sm"
-        onClick={onToggleEdit}
-        disabled={readOnly}
-      >
-        {mode === "edit" ? <CheckIcon size={14} data-icon="inline-start" /> : <PencilIcon size={14} data-icon="inline-start" />}
-        {mode === "edit" ? "Done" : "Edit"}
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={<Button variant="ghost" size="icon-xs" />}
-        >
-          <DotsVerticalIcon size={16} />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[160px]">
-          <DropdownMenuItem onClick={() => downloadPortableDashboard(dashboard)} className="whitespace-nowrap">
-            <DownloadIcon size={14} />
-            Export as JSON
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="icon-xs" aria-label="More dashboard actions" />}
+          >
+            <DotsVerticalIcon size={16} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[180px]">
+            {isEdit && (
+              <DropdownMenuItem
+                onClick={autoLayoutWidgets}
+                disabled={readOnly}
+                className="whitespace-nowrap"
+              >
+                <GridIcon size={14} />
+                Auto Layout
+              </DropdownMenuItem>
+            )}
+            {onOpenHistory && (
+              <DropdownMenuItem onClick={onOpenHistory} className="whitespace-nowrap">
+                <HistoryIcon size={14} />
+                Version history
+              </DropdownMenuItem>
+            )}
+            {(isEdit || onOpenHistory) && <DropdownMenuSeparator />}
+            <DropdownMenuItem
+              onClick={() => downloadPortableDashboard(dashboard)}
+              className="whitespace-nowrap"
+            >
+              <DownloadIcon size={14} />
+              Export as JSON
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   )
 }
