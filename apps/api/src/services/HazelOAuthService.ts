@@ -46,7 +46,7 @@ const UserInfoSchema = Schema.Struct({
 })
 
 const HazelWorkspacesResponseSchema = Schema.Struct({
-  workspaces: Schema.Array(
+  data: Schema.Array(
     Schema.Struct({
       id: Schema.String,
       name: Schema.String,
@@ -749,7 +749,7 @@ export class HazelOAuthService extends Context.Service<
       const { accessToken } = yield* getValidAccessToken(orgId)
       const response = yield* Effect.tryPromise({
         try: () =>
-          fetch(`${config.apiBaseUrl}/api/v1/workspaces`, {
+          fetch(`${config.apiBaseUrl}/api/v1/organizations`, {
             headers: {
               authorization: `Bearer ${accessToken}`,
               accept: "application/json",
@@ -787,7 +787,7 @@ export class HazelOAuthService extends Context.Service<
           toUpstreamError("Hazel workspaces returned an unexpected payload"),
         ),
       )
-      return decoded.workspaces.map((w) => ({ id: w.id, name: w.name }))
+      return decoded.data.map((w) => ({ id: w.id, name: w.name }))
     })
 
     const disconnect = Effect.fn("HazelOAuthService.disconnect")(function* (
