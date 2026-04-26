@@ -344,22 +344,17 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
       }
 
       const makePersistenceError = (error: unknown) => {
+        const baseFor = (message: string, raw: unknown) => {
+          const cause = describeCause(raw)
+          return cause === undefined ? { message } : { message, cause }
+        }
         if (error instanceof DatabaseError) {
-          return new ErrorPersistenceError({
-            message: error.message,
-            cause: describeCause(error.cause),
-          })
+          return new ErrorPersistenceError(baseFor(error.message, error.cause))
         }
         if (error instanceof Error) {
-          return new ErrorPersistenceError({
-            message: error.message,
-            cause: describeCause(error.cause),
-          })
+          return new ErrorPersistenceError(baseFor(error.message, error.cause))
         }
-        return new ErrorPersistenceError({
-          message: "Error persistence failure",
-          cause: describeCause(error),
-        })
+        return new ErrorPersistenceError(baseFor("Error persistence failure", error))
       }
 
       const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
@@ -2406,21 +2401,24 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
         }
 
         let orgFailures = 0
-        const results = yield* Effect.forEach([...knownOrgs], (org) =>
-          processOrg(org as OrgId, startMs, endMs, retentionRan).pipe(
-            Effect.catchCause((cause) =>
-              Effect.gen(function* () {
-                yield* Effect.logError("Error tick failed for org").pipe(
-                  Effect.annotateLogs({
-                    orgId: org,
-                    error: Cause.pretty(cause),
-                  }),
-                )
-                orgFailures += 1
-                return emptyResult
-              }),
+        const results = yield* Effect.forEach(
+          [...knownOrgs],
+          (org) =>
+            processOrg(org as OrgId, startMs, endMs, retentionRan).pipe(
+              Effect.catchCause((cause) =>
+                Effect.gen(function* () {
+                  yield* Effect.logError("Error tick failed for org").pipe(
+                    Effect.annotateLogs({
+                      orgId: org,
+                      error: Cause.pretty(cause),
+                    }),
+                  )
+                  orgFailures += 1
+                  return emptyResult
+                }),
+              ),
             ),
-          ),
+          { concurrency: 16 },
         )
 
         const totals = results.reduce(

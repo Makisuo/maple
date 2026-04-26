@@ -18,8 +18,11 @@ interface StatWidgetProps {
 }
 
 export function formatValue(value: unknown, unit?: string, prefix?: string, suffix?: string): string {
+  if (value === null || value === undefined) return "-"
+  if (typeof value === "object") return "—"
+
   const num = typeof value === "number" ? value : Number(value)
-  if (Number.isNaN(num)) return String(value ?? "-")
+  if (Number.isNaN(num)) return String(value)
 
   const formatted = formatValueByUnit(num, unit)
   return `${prefix ?? ""}${formatted}${suffix ?? ""}`
@@ -30,6 +33,7 @@ function getThresholdColor(
   thresholds?: Array<{ value: number; color: string }>
 ): string | undefined {
   if (!thresholds || thresholds.length === 0) return undefined
+  if (value === null || value === undefined || typeof value === "object") return undefined
   const num = typeof value === "number" ? value : Number(value)
   if (Number.isNaN(num)) return undefined
 
