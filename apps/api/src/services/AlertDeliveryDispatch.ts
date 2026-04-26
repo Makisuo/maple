@@ -388,11 +388,34 @@ export const dispatchDelivery = (
           }),
         "hazel-oauth": (config) =>
           Effect.gen(function* () {
-            const url = `${config.hazelApiBaseUrl.replace(/\/$/, "")}/api/v1/alerts`
+            // Hazel's MaplePayload schema (see hazel
+            // packages/domain/src/http/incoming-webhooks.ts). The webhook URL
+            // already includes the channel-scoped delivery token in its path,
+            // so no Authorization header is required.
+            const incidentStatus =
+              context.eventType === "resolve" ? "resolved" : "open"
             const body = JSON.stringify({
-              workspaceId: config.hazelWorkspaceId,
               eventType: context.eventType,
-              payload: JSON.parse(payloadJson),
+              incidentId: context.incidentId,
+              incidentStatus,
+              dedupeKey: context.dedupeKey,
+              rule: {
+                id: context.ruleId,
+                name: context.ruleName,
+                signalType: context.signalType,
+                severity: context.severity,
+                groupKey: context.groupKey,
+                comparator: context.comparator,
+                threshold: context.threshold,
+                windowMinutes: context.windowMinutes,
+              },
+              observed: {
+                value: context.value,
+                sampleCount: context.sampleCount,
+              },
+              linkUrl,
+              chatUrl,
+              sentAt: new Date().toISOString(),
             })
             const response = yield* runTimedFetch(
               "hazel-oauth",
@@ -400,21 +423,28 @@ export const dispatchDelivery = (
               fetchFn,
               timeoutMs,
               () =>
-                fetchFn(url, {
+                fetchFn(config.webhookUrl, {
                   method: "POST",
                   headers: {
                     "content-type": "application/json",
-                    authorization: `Bearer ${config.accessToken}`,
                     "x-maple-event-type": context.eventType,
                     "x-maple-delivery-key": context.deliveryKey,
                   },
                   body,
                 }),
             )
-            if (response.status === 401) {
+            if (response.status === 401 || response.status === 403) {
               return yield* Effect.fail(
                 makeDeliveryError(
-                  "Hazel rejected the access token — reconnect required",
+                  "Hazel rejected the webhook token — reconfigure the channel",
+                  "hazel-oauth",
+                ),
+              )
+            }
+            if (response.status === 404) {
+              return yield* Effect.fail(
+                makeDeliveryError(
+                  "Hazel webhook no longer exists — pick a different channel",
                   "hazel-oauth",
                 ),
               )
@@ -428,7 +458,7 @@ export const dispatchDelivery = (
               )
             }
             return {
-              providerMessage: "Delivered to Hazel",
+              providerMessage: `Delivered to Hazel #${config.hazelChannelName}`,
               providerReference: context.dedupeKey,
               responseCode: response.status,
             } as DispatchResult

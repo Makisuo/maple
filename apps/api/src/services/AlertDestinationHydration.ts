@@ -5,8 +5,11 @@ import { decryptAes256Gcm } from "./Crypto"
 export const DestinationPublicConfigSchema = Schema.Struct({
   summary: Schema.String,
   channelLabel: Schema.NullOr(Schema.String),
-  hazelWorkspaceId: Schema.optional(Schema.String),
-  hazelWorkspaceName: Schema.optional(Schema.String),
+  hazelOrganizationId: Schema.optional(Schema.String),
+  hazelOrganizationName: Schema.optional(Schema.String),
+  hazelOrganizationLogoUrl: Schema.optional(Schema.NullOr(Schema.String)),
+  hazelChannelId: Schema.optional(Schema.String),
+  hazelChannelName: Schema.optional(Schema.String),
 })
 
 export const DestinationSecretConfigSchema = Schema.Union([
@@ -30,8 +33,13 @@ export const DestinationSecretConfigSchema = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("hazel-oauth"),
-    hazelWorkspaceId: Schema.String,
-    hazelWorkspaceName: Schema.String,
+    hazelOrganizationId: Schema.String,
+    hazelOrganizationName: Schema.String,
+    hazelChannelId: Schema.String,
+    hazelChannelName: Schema.String,
+    webhookId: Schema.String,
+    webhookUrl: Schema.String,
+    webhookToken: Schema.String,
   }),
 ])
 
@@ -42,17 +50,17 @@ export type DestinationSecretConfig = Schema.Schema.Type<
   typeof DestinationSecretConfigSchema
 >
 
-export type EnrichedHazelOAuthSecretConfig = {
-  readonly type: "hazel-oauth"
-  readonly hazelWorkspaceId: string
-  readonly hazelWorkspaceName: string
-  readonly accessToken: string
-  readonly hazelApiBaseUrl: string
-}
+/**
+ * No enrichment is needed for hazel-oauth at delivery time — the webhook URL
+ * already embeds its delivery token, so the dispatcher POSTs directly. Kept
+ * around so the dispatch type alias still resolves to the same shape.
+ */
+export type EnrichedHazelOAuthSecretConfig = Extract<
+  DestinationSecretConfig,
+  { type: "hazel-oauth" }
+>
 
-export type EnrichedDestinationSecretConfig =
-  | Exclude<DestinationSecretConfig, { type: "hazel-oauth" }>
-  | EnrichedHazelOAuthSecretConfig
+export type EnrichedDestinationSecretConfig = DestinationSecretConfig
 
 export const PublicConfigFromJson = Schema.fromJsonString(
   DestinationPublicConfigSchema,

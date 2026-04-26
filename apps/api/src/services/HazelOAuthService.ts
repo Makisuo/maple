@@ -5,7 +5,8 @@ import {
   IntegrationsRevokedError,
   IntegrationsUpstreamError,
   IntegrationsValidationError,
-  type HazelWorkspaceSummary,
+  type HazelChannelSummary,
+  type HazelOrganizationSummary,
   type OrgId,
   type UserId,
 } from "@maple/domain/http"
@@ -45,13 +46,35 @@ const UserInfoSchema = Schema.Struct({
   name: Schema.optional(Schema.String),
 })
 
-const HazelWorkspacesResponseSchema = Schema.Struct({
+const HazelOrganizationsResponseSchema = Schema.Struct({
   data: Schema.Array(
     Schema.Struct({
       id: Schema.String,
       name: Schema.String,
+      slug: Schema.NullOr(Schema.String),
+      logoUrl: Schema.NullOr(Schema.String),
     }),
   ),
+})
+
+const HazelChannelsResponseSchema = Schema.Struct({
+  data: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      type: Schema.Literals(["public", "private"]),
+      organizationId: Schema.String,
+    }),
+  ),
+})
+
+const HazelChannelWebhookResponseSchema = Schema.Struct({
+  id: Schema.String,
+  channelId: Schema.String,
+  organizationId: Schema.String,
+  name: Schema.String,
+  webhookUrl: Schema.String,
+  token: Schema.String,
 })
 
 const DiscoveryDocumentSchema = Schema.Struct({
@@ -62,8 +85,14 @@ const DiscoveryDocumentSchema = Schema.Struct({
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponseSchema)
 const decodeUserInfo = Schema.decodeUnknownEffect(UserInfoSchema)
-const decodeWorkspacesResponse = Schema.decodeUnknownEffect(
-  HazelWorkspacesResponseSchema,
+const decodeOrganizationsResponse = Schema.decodeUnknownEffect(
+  HazelOrganizationsResponseSchema,
+)
+const decodeChannelsResponse = Schema.decodeUnknownEffect(
+  HazelChannelsResponseSchema,
+)
+const decodeChannelWebhookResponse = Schema.decodeUnknownEffect(
+  HazelChannelWebhookResponseSchema,
 )
 const decodeDiscoveryDocument = Schema.decodeUnknownEffect(
   DiscoveryDocumentSchema,
@@ -178,10 +207,43 @@ export interface HazelOAuthServiceShape {
     | IntegrationsPersistenceError
     | IntegrationsValidationError
   >
-  readonly listWorkspaces: (
+  readonly listOrganizations: (
     orgId: OrgId,
   ) => Effect.Effect<
-    ReadonlyArray<HazelWorkspaceSummary>,
+    ReadonlyArray<HazelOrganizationSummary>,
+    | IntegrationsNotConnectedError
+    | IntegrationsRevokedError
+    | IntegrationsUpstreamError
+    | IntegrationsPersistenceError
+    | IntegrationsValidationError
+  >
+  readonly listChannels: (
+    orgId: OrgId,
+    hazelOrganizationId: string,
+  ) => Effect.Effect<
+    ReadonlyArray<HazelChannelSummary>,
+    | IntegrationsNotConnectedError
+    | IntegrationsRevokedError
+    | IntegrationsUpstreamError
+    | IntegrationsPersistenceError
+    | IntegrationsValidationError
+  >
+  readonly createChannelWebhook: (
+    orgId: OrgId,
+    options: {
+      readonly channelId: string
+      readonly name: string
+      readonly description?: string
+    },
+  ) => Effect.Effect<
+    {
+      readonly id: string
+      readonly channelId: string
+      readonly organizationId: string
+      readonly name: string
+      readonly webhookUrl: string
+      readonly token: string
+    },
     | IntegrationsNotConnectedError
     | IntegrationsRevokedError
     | IntegrationsUpstreamError
@@ -742,7 +804,7 @@ export class HazelOAuthService extends Context.Service<
       } as const
     })
 
-    const listWorkspaces = Effect.fn("HazelOAuthService.listWorkspaces")(function* (
+    const listOrganizations = Effect.fn("HazelOAuthService.listOrganizations")(function* (
       orgId: OrgId,
     ) {
       const config = yield* resolveConfig
@@ -758,8 +820,8 @@ export class HazelOAuthService extends Context.Service<
         catch: (cause) =>
           toUpstreamError(
             cause instanceof Error
-              ? `Hazel workspaces request failed: ${cause.message}`
-              : "Hazel workspaces request failed",
+              ? `Hazel organizations request failed: ${cause.message}`
+              : "Hazel organizations request failed",
           ),
       })
       if (response.status === 401) {
@@ -772,7 +834,7 @@ export class HazelOAuthService extends Context.Service<
       if (!response.ok) {
         return yield* Effect.fail(
           toUpstreamError(
-            `Hazel workspaces returned ${response.status}`,
+            `Hazel organizations returned ${response.status}`,
             response.status,
           ),
         )
@@ -780,14 +842,167 @@ export class HazelOAuthService extends Context.Service<
       const json = yield* Effect.tryPromise({
         try: () => response.json(),
         catch: () =>
-          toUpstreamError("Hazel workspaces returned a non-JSON response"),
+          toUpstreamError("Hazel organizations returned a non-JSON response"),
       })
-      const decoded = yield* decodeWorkspacesResponse(json).pipe(
+      const decoded = yield* decodeOrganizationsResponse(json).pipe(
         Effect.mapError(() =>
-          toUpstreamError("Hazel workspaces returned an unexpected payload"),
+          toUpstreamError("Hazel organizations returned an unexpected payload"),
         ),
       )
-      return decoded.data.map((w) => ({ id: w.id, name: w.name }))
+      return decoded.data.map((o) => ({
+        id: o.id,
+        name: o.name,
+        slug: o.slug,
+        logoUrl: o.logoUrl,
+      }))
+    })
+
+    const listChannels = Effect.fn("HazelOAuthService.listChannels")(function* (
+      orgId: OrgId,
+      hazelOrganizationId: string,
+    ) {
+      const config = yield* resolveConfig
+      const { accessToken } = yield* getValidAccessToken(orgId)
+      const encodedOrgId = encodeURIComponent(hazelOrganizationId)
+      const response = yield* Effect.tryPromise({
+        try: () =>
+          fetch(
+            `${config.apiBaseUrl}/api/v1/organizations/${encodedOrgId}/channels`,
+            {
+              headers: {
+                authorization: `Bearer ${accessToken}`,
+                accept: "application/json",
+              },
+            },
+          ),
+        catch: (cause) =>
+          toUpstreamError(
+            cause instanceof Error
+              ? `Hazel channels request failed: ${cause.message}`
+              : "Hazel channels request failed",
+          ),
+      })
+      if (response.status === 401) {
+        return yield* Effect.fail(
+          new IntegrationsRevokedError({
+            message: "Hazel rejected the access token — reconnect required",
+          }),
+        )
+      }
+      if (response.status === 404) {
+        return yield* Effect.fail(
+          new IntegrationsValidationError({
+            message: "Hazel organization not found or you are not a member",
+          }),
+        )
+      }
+      if (!response.ok) {
+        return yield* Effect.fail(
+          toUpstreamError(
+            `Hazel channels returned ${response.status}`,
+            response.status,
+          ),
+        )
+      }
+      const json = yield* Effect.tryPromise({
+        try: () => response.json(),
+        catch: () =>
+          toUpstreamError("Hazel channels returned a non-JSON response"),
+      })
+      const decoded = yield* decodeChannelsResponse(json).pipe(
+        Effect.mapError(() =>
+          toUpstreamError("Hazel channels returned an unexpected payload"),
+        ),
+      )
+      return decoded.data.map((c) => ({
+        id: c.id,
+        name: c.name,
+        type: c.type,
+        organizationId: c.organizationId,
+      }))
+    })
+
+    const createChannelWebhook = Effect.fn(
+      "HazelOAuthService.createChannelWebhook",
+    )(function* (
+      orgId: OrgId,
+      options: {
+        readonly channelId: string
+        readonly name: string
+        readonly description?: string
+      },
+    ) {
+      const config = yield* resolveConfig
+      const { accessToken } = yield* getValidAccessToken(orgId)
+      const body: Record<string, unknown> = {
+        channelId: options.channelId,
+        name: options.name,
+        integrationProvider: "maple",
+      }
+      if (options.description) body.description = options.description
+      const response = yield* Effect.tryPromise({
+        try: () =>
+          fetch(`${config.apiBaseUrl}/api/v1/channel-webhooks`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${accessToken}`,
+              accept: "application/json",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(body),
+          }),
+        catch: (cause) =>
+          toUpstreamError(
+            cause instanceof Error
+              ? `Hazel webhook provisioning failed: ${cause.message}`
+              : "Hazel webhook provisioning failed",
+          ),
+      })
+      if (response.status === 401) {
+        return yield* Effect.fail(
+          new IntegrationsRevokedError({
+            message: "Hazel rejected the access token — reconnect required",
+          }),
+        )
+      }
+      if (response.status === 404) {
+        return yield* Effect.fail(
+          new IntegrationsValidationError({
+            message:
+              "Hazel channel not found — pick a different channel and try again",
+          }),
+        )
+      }
+      if (!response.ok) {
+        const text = yield* Effect.tryPromise({
+          try: () => response.text(),
+          catch: () =>
+            toUpstreamError(
+              `Hazel webhook provisioning returned ${response.status}`,
+              response.status,
+            ),
+        })
+        return yield* Effect.fail(
+          toUpstreamError(
+            `Hazel webhook provisioning failed: ${text || response.statusText}`,
+            response.status,
+          ),
+        )
+      }
+      const json = yield* Effect.tryPromise({
+        try: () => response.json(),
+        catch: () =>
+          toUpstreamError(
+            "Hazel webhook provisioning returned a non-JSON response",
+          ),
+      })
+      return yield* decodeChannelWebhookResponse(json).pipe(
+        Effect.mapError(() =>
+          toUpstreamError(
+            "Hazel webhook provisioning returned an unexpected payload",
+          ),
+        ),
+      )
     })
 
     const disconnect = Effect.fn("HazelOAuthService.disconnect")(function* (
@@ -811,7 +1026,9 @@ export class HazelOAuthService extends Context.Service<
       completeConnect,
       getStatus,
       getValidAccessToken,
-      listWorkspaces,
+      listOrganizations,
+      listChannels,
+      createChannelWebhook,
       disconnect,
     } satisfies HazelOAuthServiceShape
   }),

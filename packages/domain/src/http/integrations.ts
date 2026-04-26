@@ -12,17 +12,40 @@ export class HazelIntegrationStatus extends Schema.Class<HazelIntegrationStatus>
   scope: Schema.NullOr(Schema.String),
 }) {}
 
-export class HazelWorkspaceSummary extends Schema.Class<HazelWorkspaceSummary>(
-  "HazelWorkspaceSummary",
+export class HazelOrganizationSummary extends Schema.Class<HazelOrganizationSummary>(
+  "HazelOrganizationSummary",
 )({
   id: Schema.String,
   name: Schema.String,
+  slug: Schema.NullOr(Schema.String),
+  logoUrl: Schema.NullOr(Schema.String),
 }) {}
 
-export class HazelWorkspacesListResponse extends Schema.Class<HazelWorkspacesListResponse>(
-  "HazelWorkspacesListResponse",
+export class HazelOrganizationsListResponse extends Schema.Class<HazelOrganizationsListResponse>(
+  "HazelOrganizationsListResponse",
 )({
-  workspaces: Schema.Array(HazelWorkspaceSummary),
+  organizations: Schema.Array(HazelOrganizationSummary),
+}) {}
+
+export const HazelChannelType = Schema.Literals(["public", "private"]).annotate({
+  identifier: "@maple/HazelChannelType",
+  title: "Hazel Channel Type",
+})
+export type HazelChannelType = Schema.Schema.Type<typeof HazelChannelType>
+
+export class HazelChannelSummary extends Schema.Class<HazelChannelSummary>(
+  "HazelChannelSummary",
+)({
+  id: Schema.String,
+  name: Schema.String,
+  type: HazelChannelType,
+  organizationId: Schema.String,
+}) {}
+
+export class HazelChannelsListResponse extends Schema.Class<HazelChannelsListResponse>(
+  "HazelChannelsListResponse",
+)({
+  channels: Schema.Array(HazelChannelSummary),
 }) {}
 
 export class HazelStartConnectRequest extends Schema.Class<HazelStartConnectRequest>(
@@ -113,8 +136,8 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
     }),
   )
   .add(
-    HttpApiEndpoint.get("hazelWorkspaces", "/hazel/workspaces", {
-      success: HazelWorkspacesListResponse,
+    HttpApiEndpoint.get("hazelOrganizations", "/hazel/organizations", {
+      success: HazelOrganizationsListResponse,
       error: [
         IntegrationsValidationError,
         IntegrationsNotConnectedError,
@@ -123,6 +146,27 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
         IntegrationsPersistenceError,
       ],
     }),
+  )
+  .add(
+    HttpApiEndpoint.get(
+      "hazelChannels",
+      "/hazel/organizations/:organizationId/channels",
+      {
+        params: {
+          organizationId: Schema.String.pipe(
+            Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
+          ),
+        },
+        success: HazelChannelsListResponse,
+        error: [
+          IntegrationsValidationError,
+          IntegrationsNotConnectedError,
+          IntegrationsRevokedError,
+          IntegrationsUpstreamError,
+          IntegrationsPersistenceError,
+        ],
+      },
+    ),
   )
   .add(
     HttpApiEndpoint.delete("hazelDisconnect", "/hazel", {

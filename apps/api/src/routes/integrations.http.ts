@@ -2,10 +2,11 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
   CurrentTenant,
+  HazelChannelsListResponse,
   HazelDisconnectResponse,
   HazelIntegrationStatus,
+  HazelOrganizationsListResponse,
   HazelStartConnectResponse,
-  HazelWorkspacesListResponse,
   IntegrationsForbiddenError,
   IntegrationsValidationError,
   MapleApi,
@@ -94,12 +95,34 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(
             return new HazelStartConnectResponse(result)
           }),
         )
-        .handle("hazelWorkspaces", () =>
+        .handle("hazelOrganizations", () =>
           Effect.gen(function* () {
             const tenant = yield* CurrentTenant.Context
-            const workspaces = yield* hazel.listWorkspaces(tenant.orgId)
-            return new HazelWorkspacesListResponse({
-              workspaces: workspaces.map((w) => ({ id: w.id, name: w.name })),
+            const organizations = yield* hazel.listOrganizations(tenant.orgId)
+            return new HazelOrganizationsListResponse({
+              organizations: organizations.map((o) => ({
+                id: o.id,
+                name: o.name,
+                slug: o.slug,
+                logoUrl: o.logoUrl,
+              })),
+            })
+          }),
+        )
+        .handle("hazelChannels", ({ params }) =>
+          Effect.gen(function* () {
+            const tenant = yield* CurrentTenant.Context
+            const channels = yield* hazel.listChannels(
+              tenant.orgId,
+              params.organizationId,
+            )
+            return new HazelChannelsListResponse({
+              channels: channels.map((c) => ({
+                id: c.id,
+                name: c.name,
+                type: c.type,
+                organizationId: c.organizationId,
+              })),
             })
           }),
         )

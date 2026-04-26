@@ -23,7 +23,6 @@ import {
 import { parseBase64Aes256GcmKey } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
-import { HazelOAuthService } from "./HazelOAuthService"
 
 /*
  * Shared notification dispatch for alert-adjacent features (error issues /
@@ -66,7 +65,6 @@ export class NotificationDispatcher extends Context.Service<
   make: Effect.gen(function* () {
     const database = yield* Database
     const env = yield* Env
-    const hazelOAuth = yield* HazelOAuthService
 
     const encryptionKey = yield* parseBase64Aes256GcmKey(
       Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
@@ -74,28 +72,12 @@ export class NotificationDispatcher extends Context.Service<
     )
 
     const enrichSecretConfig = (
-      row: AlertDestinationRow,
+      _row: AlertDestinationRow,
       secretConfig: DestinationSecretConfig,
-    ): Effect.Effect<EnrichedDestinationSecretConfig, Error> => {
-      if (secretConfig.type !== "hazel-oauth") {
-        return Effect.succeed(secretConfig)
-      }
-      return hazelOAuth
-        .getValidAccessToken(row.orgId as OrgId)
-        .pipe(
-          Effect.map((token) => ({
-            type: "hazel-oauth" as const,
-            hazelWorkspaceId: secretConfig.hazelWorkspaceId,
-            hazelWorkspaceName: secretConfig.hazelWorkspaceName,
-            accessToken: token.accessToken,
-            hazelApiBaseUrl: env.HAZEL_API_BASE_URL,
-          })),
-          Effect.mapError(
-            (error) =>
-              new Error(`Hazel connection unavailable: ${error.message}`),
-          ),
-        )
-    }
+    ): Effect.Effect<EnrichedDestinationSecretConfig, Error> =>
+      // Hazel-OAuth webhooks now embed their delivery token in the URL path,
+      // so no enrichment is required at dispatch time.
+      Effect.succeed(secretConfig)
 
     const dispatchOne = (row: AlertDestinationRow, request: NotificationRequest) =>
       Effect.gen(function* () {

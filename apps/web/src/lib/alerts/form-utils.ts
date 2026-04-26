@@ -337,8 +337,11 @@ export type DestinationFormState = {
   url: string
   signingSecret: string
   hazelWebhookUrl: string
-  hazelWorkspaceId: string
-  hazelWorkspaceName: string
+  hazelOrganizationId: string
+  hazelOrganizationName: string
+  hazelOrganizationLogoUrl: string | null
+  hazelChannelId: string
+  hazelChannelName: string
 }
 
 export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
@@ -352,8 +355,11 @@ export function defaultDestinationForm(type: AlertDestinationType = "slack"): De
     url: "",
     signingSecret: "",
     hazelWebhookUrl: "",
-    hazelWorkspaceId: "",
-    hazelWorkspaceName: "",
+    hazelOrganizationId: "",
+    hazelOrganizationName: "",
+    hazelOrganizationLogoUrl: null,
+    hazelChannelId: "",
+    hazelChannelName: "",
   }
 }
 
@@ -368,8 +374,11 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
     url: "",
     signingSecret: "",
     hazelWebhookUrl: "",
-    hazelWorkspaceId: "",
-    hazelWorkspaceName: "",
+    hazelOrganizationId: "",
+    hazelOrganizationName: "",
+    hazelOrganizationLogoUrl: null,
+    hazelChannelId: "",
+    hazelChannelName: "",
   }
 }
 
@@ -413,12 +422,18 @@ export function buildDestinationCreatePayload(form: DestinationFormState): Alert
       })
     }
     case "hazel-oauth": {
+      const logoUrl = form.hazelOrganizationLogoUrl
       return new HazelOAuthAlertDestinationConfig({
         type: "hazel-oauth",
         name: form.name.trim(),
         enabled: form.enabled,
-        hazelWorkspaceId: form.hazelWorkspaceId.trim(),
-        hazelWorkspaceName: form.hazelWorkspaceName.trim(),
+        hazelOrganizationId: form.hazelOrganizationId.trim(),
+        hazelOrganizationName: form.hazelOrganizationName.trim(),
+        ...(logoUrl !== null && logoUrl.trim().length > 0
+          ? { hazelOrganizationLogoUrl: logoUrl.trim() }
+          : {}),
+        hazelChannelId: form.hazelChannelId.trim(),
+        hazelChannelName: form.hazelChannelName.trim(),
       })
     }
   }
@@ -439,8 +454,14 @@ export function buildDestinationUpdatePayload(form: DestinationFormState): Alert
         type: "hazel-oauth",
         name: form.name.trim() || undefined,
         enabled: form.enabled,
-        hazelWorkspaceId: form.hazelWorkspaceId.trim() || undefined,
-        hazelWorkspaceName: form.hazelWorkspaceName.trim() || undefined,
+        hazelOrganizationId: form.hazelOrganizationId.trim() || undefined,
+        hazelOrganizationName: form.hazelOrganizationName.trim() || undefined,
+        hazelOrganizationLogoUrl:
+          form.hazelOrganizationLogoUrl === null
+            ? null
+            : form.hazelOrganizationLogoUrl.trim() || undefined,
+        hazelChannelId: form.hazelChannelId.trim() || undefined,
+        hazelChannelName: form.hazelChannelName.trim() || undefined,
       }
   }
 }

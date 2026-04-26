@@ -107,7 +107,7 @@ const envConfig = Config.all({
   HAZEL_OAUTH_CLIENT_SECRET: optionalRedacted("HAZEL_OAUTH_CLIENT_SECRET"),
   HAZEL_OAUTH_SCOPES: stringWithDefault(
     "HAZEL_OAUTH_SCOPES",
-    "openid email profile alerts:write workspaces:read",
+    "openid email profile organizations:read channels:read channel-webhooks:write",
   ),
 })
 

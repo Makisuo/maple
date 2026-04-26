@@ -57,7 +57,6 @@ import {
   type AlertSeverity,
   type AlertSignalType,
   type AlertGroupBy,
-  OrgId as OrgIdSchema,
   type OrgId,
   type AlertRuleId,
   type AlertDestinationId,
@@ -256,7 +255,6 @@ const DestinationIdArrayFromJson = Schema.fromJsonString(DestinationIdArraySchem
 const AlertGroupByFromJson = Schema.fromJsonString(AlertGroupBySchema)
 
 const decodeAlertDestinationIdSync = Schema.decodeUnknownSync(AlertDestinationDocument.fields.id)
-const decodeOrgIdSync = Schema.decodeUnknownSync(OrgIdSchema)
 const decodeAlertRuleIdSync = Schema.decodeUnknownSync(AlertRuleDocument.fields.id)
 const decodeAlertIncidentIdSync = Schema.decodeUnknownSync(AlertIncidentDocument.fields.id)
 const decodeAlertDeliveryEventIdSync = Schema.decodeUnknownSync(AlertDeliveryEventDocument.fields.id)
@@ -453,10 +451,13 @@ const buildPublicConfig = (
         channelLabel: null,
       }),
       "hazel-oauth": (r) => ({
-        summary: `Hazel workspace ${r.hazelWorkspaceName}`,
-        channelLabel: null,
-        hazelWorkspaceId: r.hazelWorkspaceId,
-        hazelWorkspaceName: r.hazelWorkspaceName,
+        summary: `${r.hazelOrganizationName} · #${r.hazelChannelName}`,
+        channelLabel: `#${r.hazelChannelName}`,
+        hazelOrganizationId: r.hazelOrganizationId,
+        hazelOrganizationName: r.hazelOrganizationName,
+        hazelOrganizationLogoUrl: r.hazelOrganizationLogoUrl ?? null,
+        hazelChannelId: r.hazelChannelId,
+        hazelChannelName: r.hazelChannelName,
       }),
     }),
   )
@@ -484,11 +485,13 @@ const buildSecretConfig = (
         webhookUrl: r.webhookUrl.trim(),
         signingSecret: normalizeOptionalString(r.signingSecret),
       }),
-      "hazel-oauth": (r) => ({
-        type: "hazel-oauth" as const,
-        hazelWorkspaceId: r.hazelWorkspaceId.trim(),
-        hazelWorkspaceName: r.hazelWorkspaceName.trim(),
-      }),
+      // Hazel-OAuth requires provisioning a channel webhook on Hazel; we build
+      // the secret config inline after that side effect, not here.
+      "hazel-oauth": () => {
+        throw new Error(
+          "Hazel-OAuth secret config must be built via the channel-webhook provisioning path",
+        )
+      },
     }),
   )
 
@@ -1007,28 +1010,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
       })
 
       const enrichSecretForDispatch = (
-        row: AlertDestinationRow,
+        _row: AlertDestinationRow,
         secretConfig: DestinationSecretConfig,
       ): Effect.Effect<EnrichedDestinationSecretConfig, AlertDeliveryError> =>
-        secretConfig.type === "hazel-oauth"
-          ? hazelOAuth
-              .getValidAccessToken(decodeOrgIdSync(row.orgId))
-              .pipe(
-                Effect.map((token) => ({
-                  type: "hazel-oauth" as const,
-                  hazelWorkspaceId: secretConfig.hazelWorkspaceId,
-                  hazelWorkspaceName: secretConfig.hazelWorkspaceName,
-                  accessToken: token.accessToken,
-                  hazelApiBaseUrl: env.HAZEL_API_BASE_URL,
-                })),
-                Effect.mapError((error) =>
-                  makeDeliveryError(
-                    `Hazel connection unavailable: ${error.message}`,
-                    "hazel-oauth",
-                  ),
-                ),
-              )
-          : Effect.succeed(secretConfig)
+        // Hazel-OAuth webhooks embed their delivery token in the URL path, so
+        // there's nothing to enrich at dispatch time.
+        Effect.succeed(secretConfig)
 
       const requireRuleRow = Effect.fn("AlertsService.requireRuleRow")(function* (
         orgId: OrgId,
@@ -1624,7 +1611,31 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         yield* requireAdmin(roles)
         const destinationId = makeUuid()
         const publicConfig = buildPublicConfig(request)
-        const secretConfig = buildSecretConfig(request)
+        const secretConfig: DestinationSecretConfig =
+          request.type === "hazel-oauth"
+            ? yield* hazelOAuth
+                .createChannelWebhook(orgId, {
+                  channelId: request.hazelChannelId.trim(),
+                  name: request.name.trim(),
+                })
+                .pipe(
+                  Effect.map((webhook) => ({
+                    type: "hazel-oauth" as const,
+                    hazelOrganizationId: request.hazelOrganizationId.trim(),
+                    hazelOrganizationName: request.hazelOrganizationName.trim(),
+                    hazelChannelId: request.hazelChannelId.trim(),
+                    hazelChannelName: request.hazelChannelName.trim(),
+                    webhookId: webhook.id,
+                    webhookUrl: webhook.webhookUrl,
+                    webhookToken: webhook.token,
+                  })),
+                  Effect.mapError((error) =>
+                    makeValidationError(
+                      `Could not provision Hazel channel webhook: ${error.message}`,
+                    ),
+                  ),
+                )
+            : buildSecretConfig(request)
         const encryptedSecret = yield* encryptSecret(
           JSON.stringify(secretConfig),
           encryptionKey,
@@ -1752,30 +1763,78 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
             }
             break
           case "hazel-oauth": {
-            const previousWorkspaceId =
+            const previousSecret =
               hydrated.secretConfig.type === "hazel-oauth"
-                ? hydrated.secretConfig.hazelWorkspaceId
-                : ""
-            const previousWorkspaceName =
-              hydrated.secretConfig.type === "hazel-oauth"
-                ? hydrated.secretConfig.hazelWorkspaceName
-                : ""
-            const nextWorkspaceId =
-              normalizeOptionalString(request.hazelWorkspaceId) ??
-              previousWorkspaceId
-            const nextWorkspaceName =
-              normalizeOptionalString(request.hazelWorkspaceName) ??
-              previousWorkspaceName
+                ? hydrated.secretConfig
+                : null
+            const nextOrganizationId =
+              normalizeOptionalString(request.hazelOrganizationId) ??
+              previousSecret?.hazelOrganizationId ??
+              ""
+            const nextOrganizationName =
+              normalizeOptionalString(request.hazelOrganizationName) ??
+              previousSecret?.hazelOrganizationName ??
+              ""
+            const requestLogoUrl = request.hazelOrganizationLogoUrl
+            const nextOrganizationLogoUrl =
+              requestLogoUrl === undefined
+                ? hydrated.publicConfig.hazelOrganizationLogoUrl ?? null
+                : requestLogoUrl
+            const nextChannelId =
+              normalizeOptionalString(request.hazelChannelId) ??
+              previousSecret?.hazelChannelId ??
+              ""
+            const nextChannelName =
+              normalizeOptionalString(request.hazelChannelName) ??
+              previousSecret?.hazelChannelName ??
+              ""
+            const nextName =
+              normalizeOptionalString(request.name) ?? existing.name
+            const channelChanged =
+              previousSecret == null ||
+              previousSecret.hazelChannelId !== nextChannelId
+
+            // TODO: when Hazel exposes DELETE /api/v1/channel-webhooks/:id,
+            // revoke the old webhook here on channel change.
+            const provisioned = channelChanged
+              ? yield* hazelOAuth
+                  .createChannelWebhook(orgId, {
+                    channelId: nextChannelId,
+                    name: nextName,
+                  })
+                  .pipe(
+                    Effect.mapError((error) =>
+                      makeValidationError(
+                        `Could not provision Hazel channel webhook: ${error.message}`,
+                      ),
+                    ),
+                  )
+              : null
+
+            const webhookId = provisioned?.id ?? previousSecret!.webhookId
+            const webhookUrl =
+              provisioned?.webhookUrl ?? previousSecret!.webhookUrl
+            const webhookToken =
+              provisioned?.token ?? previousSecret!.webhookToken
+
             nextPublicConfig = {
-              summary: `Hazel workspace ${nextWorkspaceName}`,
-              channelLabel: null,
-              hazelWorkspaceId: nextWorkspaceId,
-              hazelWorkspaceName: nextWorkspaceName,
+              summary: `${nextOrganizationName} · #${nextChannelName}`,
+              channelLabel: `#${nextChannelName}`,
+              hazelOrganizationId: nextOrganizationId,
+              hazelOrganizationName: nextOrganizationName,
+              hazelOrganizationLogoUrl: nextOrganizationLogoUrl,
+              hazelChannelId: nextChannelId,
+              hazelChannelName: nextChannelName,
             }
             nextSecretConfig = {
               type: "hazel-oauth",
-              hazelWorkspaceId: nextWorkspaceId,
-              hazelWorkspaceName: nextWorkspaceName,
+              hazelOrganizationId: nextOrganizationId,
+              hazelOrganizationName: nextOrganizationName,
+              hazelChannelId: nextChannelId,
+              hazelChannelName: nextChannelName,
+              webhookId,
+              webhookUrl,
+              webhookToken,
             }
             break
           }

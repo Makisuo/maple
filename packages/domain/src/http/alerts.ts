@@ -227,8 +227,11 @@ export class HazelOAuthAlertDestinationConfig extends Schema.Class<HazelOAuthAle
 )({
   type: Schema.Literal("hazel-oauth"),
   name: ChannelLabel,
-  hazelWorkspaceId: NonEmptyString,
-  hazelWorkspaceName: NonEmptyString,
+  hazelOrganizationId: NonEmptyString,
+  hazelOrganizationName: NonEmptyString,
+  hazelOrganizationLogoUrl: Schema.optionalKey(Schema.NullOr(NonEmptyString)),
+  hazelChannelId: NonEmptyString,
+  hazelChannelName: NonEmptyString,
   enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
@@ -282,8 +285,11 @@ export class UpdateHazelOAuthAlertDestinationConfig extends Schema.Class<UpdateH
   "UpdateHazelOAuthAlertDestinationConfig",
 )({
   name: OptionalNonEmptyString,
-  hazelWorkspaceId: Schema.optionalKey(Schema.String),
-  hazelWorkspaceName: Schema.optionalKey(Schema.String),
+  hazelOrganizationId: Schema.optionalKey(Schema.String),
+  hazelOrganizationName: Schema.optionalKey(Schema.String),
+  hazelOrganizationLogoUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  hazelChannelId: Schema.optionalKey(Schema.String),
+  hazelChannelName: Schema.optionalKey(Schema.String),
   enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 

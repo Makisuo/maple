@@ -6,9 +6,11 @@ import {
   ProviderLogo,
   type DestinationProvider,
 } from "@/components/alerts/destination-provider"
-import { LoaderIcon } from "@/components/icons"
+import { HazelIcon, LoaderIcon } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import type { HazelChannelsListResponse } from "@maple/domain/http"
 import { Exit } from "effect"
 import { useEffect, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
@@ -47,7 +49,10 @@ function isFormReady(form: DestinationFormState): boolean {
   if (form.name.trim().length === 0) return false
   switch (form.type) {
     case "hazel-oauth":
-      return form.hazelWorkspaceId.trim().length > 0
+      return (
+        form.hazelOrganizationId.trim().length > 0 &&
+        form.hazelChannelId.trim().length > 0
+      )
     default:
       return true
   }
@@ -96,6 +101,49 @@ function ProviderTile({
   )
 }
 
+function HazelOrgAvatar({
+  logoUrl,
+  name,
+  size = 16,
+}: {
+  logoUrl: string | null
+  name: string
+  size?: number
+}) {
+  const [errored, setErrored] = useState(false)
+  if (logoUrl && !errored) {
+    return (
+      <img
+        src={logoUrl}
+        alt={`${name} logo`}
+        width={size}
+        height={size}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setErrored(true)}
+        className="shrink-0 rounded-sm object-cover"
+        style={{ width: size, height: size }}
+      />
+    )
+  }
+  // Fallback: a tinted square with the Hazel mark, mirroring ProviderLogo's
+  // visual language but at compact size.
+  const inner = Math.round(size * 0.7)
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-sm"
+      style={{
+        width: size,
+        height: size,
+        background: "rgba(244,111,15,0.16)",
+        color: "#F46F0F",
+      }}
+    >
+      <HazelIcon size={inner} />
+    </span>
+  )
+}
+
 function HazelOAuthFields({
   form,
   onFormChange,
@@ -110,10 +158,23 @@ function HazelOAuthFields({
       reactivityKeys: ["hazelIntegrationStatus"],
     }),
   )
-  const workspacesAtom = MapleApiAtomClient.query("integrations", "hazelWorkspaces", {
-    reactivityKeys: ["hazelIntegrationStatus", "hazelWorkspaces"],
+  const organizationsAtom = MapleApiAtomClient.query("integrations", "hazelOrganizations", {
+    reactivityKeys: ["hazelIntegrationStatus", "hazelOrganizations"],
   })
-  const workspacesResult = useAtomValue(workspacesAtom)
+  const organizationsResult = useAtomValue(organizationsAtom)
+
+  const orgIdForChannels = form.hazelOrganizationId.trim()
+  const channelsAtom = orgIdForChannels.length > 0
+    ? MapleApiAtomClient.query("integrations", "hazelChannels", {
+        params: { organizationId: orgIdForChannels },
+        reactivityKeys: [
+          "hazelIntegrationStatus",
+          "hazelChannels",
+          orgIdForChannels,
+        ],
+      })
+    : disabledResultAtom<HazelChannelsListResponse>()
+  const channelsResult = useAtomValue(channelsAtom)
 
   const startConnect = useAtomSet(
     MapleApiAtomClient.mutation("integrations", "hazelStart"),
@@ -130,17 +191,19 @@ function HazelOAuthFields({
     .onSuccess((s) => s)
     .orElse(() => null)
 
-  const workspaces = Result.builder(workspacesResult)
-    .onSuccess((w) => [...w.workspaces])
-    .orElse(() => [] as Array<{ id: string; name: string }>)
+  const organizations = Result.builder(organizationsResult)
+    .onSuccess((o) => [...o.organizations])
+    .orElse(() => [] as Array<{ id: string; name: string; slug: string | null; logoUrl: string | null }>)
+
+  const channels = Result.builder(channelsResult)
+    .onSuccess((c) => [...c.channels])
+    .orElse(() => [] as Array<{ id: string; name: string; type: "public" | "private"; organizationId: string }>)
+  const channelsLoading = orgIdForChannels.length > 0 && channelsResult.waiting
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
       if (event.data && event.data.type === "maple:integration:hazel") {
-        // Refetch by busting the reactivity key — Result will reload on next render.
-        // Using window.location refetch is a fallback; effect-atom's reactivityKeys
-        // bust automatically when mutations declare them. Trigger a manual refetch
-        // by toggling the form state (no-op update).
+        // Bust by toggling form state so the reactivity-keyed atoms refetch.
         onFormChange((current) => ({ ...current }))
       }
     }
@@ -169,17 +232,31 @@ function HazelOAuthFields({
 
   async function handleDisconnect() {
     setBusy(true)
-    await disconnect({ reactivityKeys: ["hazelIntegrationStatus", "hazelWorkspaces"] })
+    await disconnect({
+      reactivityKeys: [
+        "hazelIntegrationStatus",
+        "hazelOrganizations",
+        "hazelChannels",
+      ],
+    })
     setBusy(false)
-    onFormChange((current) => ({ ...current, hazelWorkspaceId: "", hazelWorkspaceName: "" }))
+    onFormChange((current) => ({
+      ...current,
+      hazelOrganizationId: "",
+      hazelOrganizationName: "",
+      hazelOrganizationLogoUrl: null,
+      hazelChannelId: "",
+      hazelChannelName: "",
+    }))
   }
 
   if (!status || !status.connected) {
     return (
       <div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
         <p className="text-xs text-muted-foreground">
-          Connect Maple to your Hazel workspace via OAuth. We'll fetch the workspaces
-          you can post into and let you pick one.
+          Connect Maple to your Hazel account via OAuth. We'll fetch the
+          organizations and channels you can post into and provision a
+          dedicated webhook for this destination.
         </p>
         <Button
           type="button"
@@ -195,7 +272,17 @@ function HazelOAuthFields({
     )
   }
 
-  const selectItems = workspaces.map((w) => ({ value: w.id, label: w.name }))
+  const selectedOrg = organizations.find((o) => o.id === form.hazelOrganizationId)
+  const selectedOrgLogoUrl =
+    selectedOrg?.logoUrl ?? form.hazelOrganizationLogoUrl ?? null
+  const selectedOrgName =
+    selectedOrg?.name ?? form.hazelOrganizationName ?? ""
+
+  const orgSelectItems = organizations.map((o) => ({ value: o.id, label: o.name }))
+  const channelSelectItems = channels.map((c) => ({
+    value: c.id,
+    label: c.type === "private" ? `${c.name} (private)` : c.name,
+  }))
 
   return (
     <div className="space-y-3">
@@ -217,43 +304,99 @@ function HazelOAuthFields({
         </Button>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="destination-hazel-workspace" className="text-xs">
-          Hazel workspace
+        <Label htmlFor="destination-hazel-organization" className="text-xs">
+          Hazel organization
         </Label>
         <Select
-          items={selectItems}
-          defaultValue={form.hazelWorkspaceId || null}
+          items={orgSelectItems}
+          defaultValue={form.hazelOrganizationId || null}
           onValueChange={(value) => {
-            const ws = workspaces.find((w) => w.id === value)
+            const org = organizations.find((o) => o.id === value)
             onFormChange((current) => ({
               ...current,
-              hazelWorkspaceId: value ?? "",
-              hazelWorkspaceName: ws?.name ?? current.hazelWorkspaceName,
+              hazelOrganizationId: value ?? "",
+              hazelOrganizationName: org?.name ?? "",
+              hazelOrganizationLogoUrl: org?.logoUrl ?? null,
+              // Reset channel when org changes.
+              hazelChannelId: "",
+              hazelChannelName: "",
             }))
           }}
         >
-          <SelectTrigger id="destination-hazel-workspace">
-            <SelectValue
-              placeholder={
-                isEditing && form.hazelWorkspaceName
-                  ? form.hazelWorkspaceName
-                  : "Pick a workspace"
-              }
-            />
+          <SelectTrigger id="destination-hazel-organization">
+            {selectedOrgName ? (
+              <span className="flex items-center gap-2">
+                <HazelOrgAvatar logoUrl={selectedOrgLogoUrl} name={selectedOrgName} />
+                <span className="truncate">{selectedOrgName}</span>
+              </span>
+            ) : (
+              <SelectValue placeholder="Pick an organization" />
+            )}
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
-              {selectItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
+              {organizations.map((org) => (
+                <SelectItem key={org.id} value={org.id}>
+                  <span className="flex items-center gap-2">
+                    <HazelOrgAvatar logoUrl={org.logoUrl} name={org.name} />
+                    <span className="truncate">{org.name}</span>
+                  </span>
                 </SelectItem>
               ))}
             </SelectGroup>
           </SelectContent>
         </Select>
-        {workspaces.length === 0 ? (
+        {organizations.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">
-            No workspaces returned — make sure your Hazel account has access to at least one.
+            No organizations returned — make sure your Hazel account is a
+            member of at least one organization.
+          </p>
+        ) : null}
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="destination-hazel-channel" className="text-xs">
+          Hazel channel
+        </Label>
+        <Select
+          items={channelSelectItems}
+          defaultValue={form.hazelChannelId || null}
+          onValueChange={(value) => {
+            const ch = channels.find((c) => c.id === value)
+            onFormChange((current) => ({
+              ...current,
+              hazelChannelId: value ?? "",
+              hazelChannelName: ch?.name ?? current.hazelChannelName,
+            }))
+          }}
+          disabled={orgIdForChannels.length === 0 || channelsLoading}
+        >
+          <SelectTrigger id="destination-hazel-channel">
+            <SelectValue
+              placeholder={
+                orgIdForChannels.length === 0
+                  ? "Pick an organization first"
+                  : channelsLoading
+                    ? "Loading channels…"
+                    : isEditing && form.hazelChannelName
+                      ? `#${form.hazelChannelName}`
+                      : "Pick a channel"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {channelSelectItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  #{item.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        {orgIdForChannels.length > 0 && !channelsLoading && channels.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">
+            No channels — make sure your account is in at least one channel of
+            this organization.
           </p>
         ) : null}
       </div>
