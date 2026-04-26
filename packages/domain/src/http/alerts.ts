@@ -222,33 +222,10 @@ export class HazelAlertDestinationConfig extends Schema.Class<HazelAlertDestinat
 }) {}
 
 export const AlertDestinationCreateRequest = Schema.Union([
-  Schema.Struct({
-    type: Schema.Literal("slack"),
-    name: ChannelLabel,
-    webhookUrl: NonEmptyString,
-    channelLabel: OptionalNonEmptyString,
-    enabled: Schema.optionalKey(Schema.Boolean),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("pagerduty"),
-    name: ChannelLabel,
-    integrationKey: NonEmptyString,
-    enabled: Schema.optionalKey(Schema.Boolean),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("webhook"),
-    name: ChannelLabel,
-    url: NonEmptyString,
-    signingSecret: Schema.optionalKey(Schema.String),
-    enabled: Schema.optionalKey(Schema.Boolean),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("hazel"),
-    name: ChannelLabel,
-    webhookUrl: NonEmptyString,
-    signingSecret: Schema.optionalKey(Schema.String),
-    enabled: Schema.optionalKey(Schema.Boolean),
-  }),
+  SlackAlertDestinationConfig,
+  PagerDutyAlertDestinationConfig,
+  WebhookAlertDestinationConfig,
+  HazelAlertDestinationConfig,
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<
   typeof AlertDestinationCreateRequest
