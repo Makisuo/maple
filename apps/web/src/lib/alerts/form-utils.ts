@@ -5,6 +5,10 @@ import {
   AlertRuleDocument,
   AlertRuleTestRequest,
   AlertRuleUpsertRequest,
+  HazelAlertDestinationConfig,
+  PagerDutyAlertDestinationConfig,
+  SlackAlertDestinationConfig,
+  WebhookAlertDestinationConfig,
   type AlertComparator,
   type AlertDestinationCreateRequest,
   type AlertDestinationId,
@@ -369,14 +373,43 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 
 export function buildDestinationCreatePayload(form: DestinationFormState): AlertDestinationCreateRequest {
   switch (form.type) {
-    case "slack":
-      return { type: "slack", name: form.name.trim(), enabled: form.enabled, webhookUrl: form.webhookUrl.trim(), channelLabel: form.channelLabel.trim() || undefined }
+    case "slack": {
+      const channelLabel = form.channelLabel.trim()
+      return new SlackAlertDestinationConfig({
+        type: "slack",
+        name: form.name.trim(),
+        enabled: form.enabled,
+        webhookUrl: form.webhookUrl.trim(),
+        ...(channelLabel ? { channelLabel } : {}),
+      })
+    }
     case "pagerduty":
-      return { type: "pagerduty", name: form.name.trim(), enabled: form.enabled, integrationKey: form.integrationKey.trim() }
-    case "webhook":
-      return { type: "webhook", name: form.name.trim(), enabled: form.enabled, url: form.url.trim(), signingSecret: form.signingSecret.trim() || undefined }
-    case "hazel":
-      return { type: "hazel", name: form.name.trim(), enabled: form.enabled, webhookUrl: form.hazelWebhookUrl.trim(), signingSecret: form.signingSecret.trim() || undefined }
+      return new PagerDutyAlertDestinationConfig({
+        type: "pagerduty",
+        name: form.name.trim(),
+        enabled: form.enabled,
+        integrationKey: form.integrationKey.trim(),
+      })
+    case "webhook": {
+      const signingSecret = form.signingSecret.trim()
+      return new WebhookAlertDestinationConfig({
+        type: "webhook",
+        name: form.name.trim(),
+        enabled: form.enabled,
+        url: form.url.trim(),
+        ...(signingSecret ? { signingSecret } : {}),
+      })
+    }
+    case "hazel": {
+      const signingSecret = form.signingSecret.trim()
+      return new HazelAlertDestinationConfig({
+        type: "hazel",
+        name: form.name.trim(),
+        enabled: form.enabled,
+        webhookUrl: form.hazelWebhookUrl.trim(),
+        ...(signingSecret ? { signingSecret } : {}),
+      })
+    }
   }
 }
 
