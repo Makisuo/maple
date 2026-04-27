@@ -313,5 +313,6 @@ export function logsFacetsQuery(
 
   return unionAll(severityQuery, serviceQuery, envQuery)
     .orderBy(["count", "desc"])
+    .limit(500)
     .format("JSON")
 }

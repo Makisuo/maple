@@ -276,7 +276,7 @@ export interface BucketCacheServiceShape {
 }
 
 const enabledConfig = Config.boolean("QE_BUCKET_CACHE_ENABLED").pipe(
-  Config.withDefault(false),
+  Config.withDefault(true),
 )
 const ttlSecondsConfig = Config.number("QE_BUCKET_CACHE_TTL_SECONDS").pipe(
   Config.withDefault(86400),

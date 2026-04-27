@@ -333,6 +333,13 @@ export function tracesBreakdownQuery(
 export interface TracesListOpts extends TracesQueryOpts {
   limit?: number
   offset?: number
+  /**
+   * Keyset pagination cursor. When set, only spans with `Timestamp < cursor`
+   * are returned. Mutually exclusive with `offset` in practice — the DSL applies
+   * both, but callers should pick one. Cursor is strictly preferred for deep
+   * pages: offset still scans all skipped rows.
+   */
+  cursor?: string
   columns?: readonly string[]
 }
 
@@ -393,6 +400,8 @@ export function tracesListQuery(
     ? undefined // use $.ResourceAttributes directly
     : buildProjectedMapExpr(requestedResourceAttrKeys, "ResourceAttributes")
 
+  const cursor = opts.cursor
+
   let q = from(Traces)
     .select(($) => ({
       traceId: $.TraceId,
@@ -407,7 +416,10 @@ export function tracesListQuery(
       spanAttributes: spanAttrExpr ?? $.SpanAttributes,
       resourceAttributes: resourceAttrExpr ?? $.ResourceAttributes,
     }))
-    .where(($) => buildWhereConditions($, opts))
+    .where(($) => [
+      ...buildWhereConditions($, opts),
+      CH.when(cursor, (v: string) => $.Timestamp.lt(v)),
+    ])
     .orderBy(["timestamp", "desc"])
     .limit(limit)
     .format("JSON")
@@ -426,6 +438,11 @@ export function tracesListQuery(
 export interface TracesRootListOpts extends TracesQueryOpts {
   limit?: number
   offset?: number
+  /**
+   * Keyset pagination cursor. When set, only root spans with `Timestamp < cursor`
+   * are returned. Strictly preferred over `offset` for deep pagination.
+   */
+  cursor?: string
 }
 
 export interface TracesRootListOutput {
@@ -450,6 +467,8 @@ export function tracesRootListQuery(
   const limit = opts.limit ?? 25
   const offset = opts.offset ?? 0
 
+  const cursor = opts.cursor
+
   let q = from(Traces)
     .select(($) => ({
       traceId: $.TraceId,
@@ -466,7 +485,10 @@ export function tracesRootListQuery(
       rootHttpStatusCode: $.SpanAttributes.get("http.status_code"),
       hasError: CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
     }))
-    .where(($) => buildWhereConditions($, { ...opts, rootOnly: true }))
+    .where(($) => [
+      ...buildWhereConditions($, { ...opts, rootOnly: true }),
+      CH.when(cursor, (v: string) => $.Timestamp.lt(v)),
+    ])
     .orderBy(["startTime", "desc"])
     .limit(limit)
     .format("JSON")

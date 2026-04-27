@@ -211,8 +211,10 @@ export const TracesListQuery = Schema.Struct({
     Schema.Number.check(
       Schema.isInt(),
       Schema.isGreaterThanOrEqualTo(0),
+      Schema.isLessThanOrEqualTo(1000),
     ),
   ),
+  cursor: Schema.optional(Schema.String),
 })
 export type TracesListQuery = Schema.Schema.Type<typeof TracesListQuery>
 
@@ -227,6 +229,7 @@ export const LogsListQuery = Schema.Struct({
       Schema.isLessThanOrEqualTo(200),
     ),
   ),
+  cursor: Schema.optional(Schema.String),
 })
 export type LogsListQuery = Schema.Schema.Type<typeof LogsListQuery>
 

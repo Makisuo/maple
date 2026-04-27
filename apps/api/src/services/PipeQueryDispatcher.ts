@@ -75,6 +75,7 @@ export function compilePipeQuery(
         CH.tracesRootListQuery({
           limit: int("limit", 100),
           offset: int("offset", 0),
+          cursor: str("cursor"),
           serviceName: str("service"),
           spanName: str("span_name"),
           errorsOnly: bool("has_error"),

@@ -1192,6 +1192,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           ...opts,
           limit: clampedLimit,
           offset: request.query.offset,
+          cursor: request.query.cursor,
           columns: (request.query as { columns?: readonly string[] }).columns as string[] | undefined,
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
