@@ -17,6 +17,12 @@
       "migrations_table": "drizzle_migrations"
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "MCP_SESSIONS",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
   "workflows": [
     {
       "name": "tinybird-sync-workflow",

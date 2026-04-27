@@ -11,6 +11,10 @@ import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
+import {
+  runWithSessionBindings,
+  sessionStore,
+} from "./mcp/lib/session-store"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
@@ -82,12 +86,59 @@ const makeRequestTelemetryLayer = (env: Record<string, unknown>) => {
 
 export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"
 
+const isMcpPost = (request: Request): boolean => {
+  if (request.method !== "POST") return false
+  try {
+    return new URL(request.url).pathname === "/mcp"
+  } catch {
+    return false
+  }
+}
+
+const inner = withRequestRuntime(
+  makeRequestTelemetryLayer,
+  async (request, services, env) => {
+    if (isMcpPost(request)) {
+      const sid = request.headers.get("mcp-session-id")
+      if (sid) await sessionStore.preload(sid)
+    }
+    const { handler } = getHandler(env)
+    return handler(request, services as any)
+  },
+)
+
+interface McpSessionsBinding {
+  readonly get: (key: string, type: "json") => Promise<unknown>
+  readonly put: (
+    key: string,
+    value: string,
+    options?: { readonly expirationTtl?: number },
+  ) => Promise<void>
+}
+
+const readMcpSessionsBinding = (
+  env: Record<string, unknown>,
+): McpSessionsBinding | undefined => {
+  const candidate = env.MCP_SESSIONS
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    "get" in candidate &&
+    "put" in candidate
+  ) {
+    return candidate as McpSessionsBinding
+  }
+  return undefined
+}
+
 export default {
-  fetch: withRequestRuntime(
-    makeRequestTelemetryLayer,
-    (request, services, env) => {
-      const { handler } = getHandler(env)
-      return handler(request, services as any)
-    },
-  ),
+  fetch: (
+    request: Request,
+    env: Record<string, unknown>,
+    ctx: ExecutionContext,
+  ) =>
+    runWithSessionBindings(
+      { ctx, kv: readMcpSessionsBinding(env) },
+      () => inner(request, env, ctx),
+    ),
 }

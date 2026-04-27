@@ -5,6 +5,7 @@ import { DebugErrorsPrompt } from "./prompts/debug-errors"
 import { LatencyAnalysisPrompt } from "./prompts/latency-analysis"
 import { IncidentTriagePrompt } from "./prompts/incident-triage"
 import { InstructionsResource } from "./resources/instructions"
+import { sessionStore } from "./lib/session-store"
 
 export const McpLive = Layer.mergeAll(
   McpToolsLive,
@@ -18,6 +19,7 @@ export const McpLive = Layer.mergeAll(
       name: "maple-observability",
       version: "1.0.0",
       path: "/mcp",
+      clientSessions: sessionStore,
     }),
   ),
 )

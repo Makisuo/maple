@@ -1,6 +1,6 @@
 import path from "node:path"
 import alchemy from "alchemy"
-import { D1Database, Worker, Workflow } from "alchemy/cloudflare"
+import { D1Database, KVNamespace, Worker, Workflow } from "alchemy/cloudflare"
 import type { TinybirdSyncWorkflowPayload } from "./src/workflows/TinybirdSyncWorkflow"
 import type {
   MapleDomains,
@@ -59,6 +59,11 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
     },
   )
 
+  const mcpSessions = await KVNamespace("MCP_SESSIONS", {
+    title: resolveWorkerName("mcp-sessions", stage),
+    adopt: true,
+  })
+
   const worker = await Worker("api", {
     name: resolveWorkerName("api", stage),
     cwd: import.meta.dirname,
@@ -72,6 +77,7 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
       : undefined,
     bindings: {
       MAPLE_DB: mapleDb,
+      MCP_SESSIONS: mcpSessions,
       TINYBIRD_SYNC_WORKFLOW: tinybirdSyncWorkflow,
       TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
       TINYBIRD_TOKEN: alchemy.secret(requireEnv("TINYBIRD_TOKEN")),

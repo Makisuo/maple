@@ -258,8 +258,7 @@ export const fromCloudflareSocket = (cfSocket: cf.Socket): Socket.Socket => {
     }),
   )
 
-  return Socket.Socket.of({
-    [Socket.TypeId]: Socket.TypeId,
+  return Socket.make({
     run,
     runRaw,
     writer,

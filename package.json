@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260414.1",
-    "@effect/vitest": "4.0.0-beta.52",
+    "@effect/vitest": "4.0.0-beta.57",
     "@maple/db": "workspace:*",
     "@maple/infra": "workspace:*",
     "@tinybirdco/sdk": "catalog:tinybird",
@@ -37,17 +37,20 @@
     "typescript": "catalog:tooling"
   },
   "packageManager": "bun@1.3.11",
+  "overrides": {
+    "effect": "https://github.com/Makisuo/effect-smol/releases/download/mcp-clientsessions-pre/effect-4.0.0-beta.57.tgz"
+  },
   "catalog": {
     "vite": "^8.0.3",
     "vitest": "^4.1.2"
   },
   "catalogs": {
     "effect": {
-      "@effect/atom-react": "4.0.0-beta.52",
+      "@effect/atom-react": "4.0.0-beta.57",
       "@effect/language-service": "^0.85.1",
-      "@effect/opentelemetry": "4.0.0-beta.52",
-      "@effect/platform-bun": "4.0.0-beta.52",
-      "effect": "4.0.0-beta.52"
+      "@effect/opentelemetry": "4.0.0-beta.57",
+      "@effect/platform-bun": "4.0.0-beta.57",
+      "effect": "4.0.0-beta.57"
     },
     "react": {
       "@types/react": "^19.2.14",
