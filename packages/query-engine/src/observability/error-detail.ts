@@ -32,13 +32,17 @@ export const errorDetail = (input: {
     const executor = yield* TinybirdExecutor
     const limit = input.limit ?? 5
 
-    const tracesResult = yield* executor.query<ErrorDetailTracesOutput>("error_detail_traces", {
-      error_type: input.errorType,
-      start_time: input.timeRange.startTime,
-      end_time: input.timeRange.endTime,
-      ...(input.service && { services: input.service }),
-      limit,
-    })
+    const tracesResult = yield* executor.query<ErrorDetailTracesOutput>(
+      "error_detail_traces",
+      {
+        error_type: input.errorType,
+        start_time: input.timeRange.startTime,
+        end_time: input.timeRange.endTime,
+        ...(input.service && { services: input.service }),
+        limit,
+      },
+      { profile: "list" },
+    )
 
     const traces = tracesResult.data
 
@@ -47,19 +51,28 @@ export const errorDetail = (input: {
       traces,
       Arr.take(3),
       Effect.forEach(
-        (t) => executor.query<ListLogsOutput>("list_logs", { trace_id: t.traceId, limit: 10 }),
+        (t) =>
+          executor.query<ListLogsOutput>(
+            "list_logs",
+            { trace_id: t.traceId, limit: 10 },
+            { profile: "list" },
+          ),
         { concurrency: "unbounded" },
       ),
     )
 
     // Optionally fetch timeseries
     const timeseries = input.includeTimeseries
-      ? yield* executor.query<ErrorsTimeseriesOutput>("errors_timeseries", {
-          error_type: input.errorType,
-          start_time: input.timeRange.startTime,
-          end_time: input.timeRange.endTime,
-          ...(input.service && { services: input.service }),
-        }).pipe(
+      ? yield* executor.query<ErrorsTimeseriesOutput>(
+          "errors_timeseries",
+          {
+            error_type: input.errorType,
+            start_time: input.timeRange.startTime,
+            end_time: input.timeRange.endTime,
+            ...(input.service && { services: input.service }),
+          },
+          { profile: "aggregation" },
+        ).pipe(
           Effect.map((r) => pipe(
             r.data,
             Arr.map((p) => ({ bucket: String(p.bucket), count: Number(p.count) })),

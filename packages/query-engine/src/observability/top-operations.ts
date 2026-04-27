@@ -47,7 +47,7 @@ export const topOperations = (input: {
     `
 
     interface TopOpRow { readonly name: string; readonly value: number }
-    const rows = yield* executor.sqlQuery<TopOpRow>(sql)
+    const rows = yield* executor.sqlQuery<TopOpRow>(sql, { profile: "aggregation" })
     return pipe(
       rows,
       Arr.map((r): TopOperation => ({ name: r.name, value: Number(r.value) })),

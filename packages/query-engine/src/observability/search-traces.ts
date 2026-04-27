@@ -133,7 +133,7 @@ const spanLevelSearch = (
   }
 
   return Effect.flatMap(
-    executor.sqlQuery<RawSpanRow>(sql),
+    executor.sqlQuery<RawSpanRow>(sql, { profile: "list" }),
     (rows) =>
       Effect.forEach(rows, (row) =>
         Effect.map(
@@ -190,7 +190,7 @@ const rootLevelSearch = (
   }
 
   return Effect.map(
-    executor.query<ListTracesOutput>("list_traces", params),
+    executor.query<ListTracesOutput>("list_traces", params, { profile: "list" }),
     (result): ReadonlyArray<SpanResult> =>
       pipe(result.data, Arr.map(toSpanResult)),
   )

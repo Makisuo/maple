@@ -51,8 +51,16 @@ export const inspectTrace = Effect.fn("Observability.inspectTrace")(
 
     const [spansResult, logsResult] = yield* Effect.all(
       [
-        executor.query<SpanHierarchyOutput>("span_hierarchy", { trace_id: traceId }),
-        executor.query<ListLogsOutput>("list_logs", { trace_id: traceId, limit: 50 }),
+        executor.query<SpanHierarchyOutput>(
+          "span_hierarchy",
+          { trace_id: traceId },
+          { profile: "list" },
+        ),
+        executor.query<ListLogsOutput>(
+          "list_logs",
+          { trace_id: traceId, limit: 50 },
+          { profile: "list" },
+        ),
       ],
       { concurrency: "unbounded" },
     )

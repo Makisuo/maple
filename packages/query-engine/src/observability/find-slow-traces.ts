@@ -70,12 +70,16 @@ export const findSlowTraces = Effect.fn("Observability.findSlowTraces")(
 
     const [rows, statsResult] = yield* Effect.all(
       [
-        executor.sqlQuery<SlowTraceRow>(sql),
-        executor.query<TracesDurationStatsOutput>("traces_duration_stats", {
-          start_time: input.timeRange.startTime,
-          end_time: input.timeRange.endTime,
-          ...(input.service && { service: input.service }),
-        }),
+        executor.sqlQuery<SlowTraceRow>(sql, { profile: "list" }),
+        executor.query<TracesDurationStatsOutput>(
+          "traces_duration_stats",
+          {
+            start_time: input.timeRange.startTime,
+            end_time: input.timeRange.endTime,
+            ...(input.service && { service: input.service }),
+          },
+          { profile: "aggregation" },
+        ),
       ],
       { concurrency: "unbounded" },
     )

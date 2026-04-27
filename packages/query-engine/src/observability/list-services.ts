@@ -10,11 +10,15 @@ export const listServices = (
   Effect.gen(function* () {
     const executor = yield* TinybirdExecutor
 
-    const result = yield* executor.query<ServiceOverviewOutput>("service_overview", {
-      start_time: input.timeRange.startTime,
-      end_time: input.timeRange.endTime,
-      ...(input.environment && { environments: input.environment }),
-    })
+    const result = yield* executor.query<ServiceOverviewOutput>(
+      "service_overview",
+      {
+        start_time: input.timeRange.startTime,
+        end_time: input.timeRange.endTime,
+        ...(input.environment && { environments: input.environment }),
+      },
+      { profile: "aggregation" },
+    )
 
     return pipe(
       result.data,

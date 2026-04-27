@@ -27,12 +27,16 @@ export const searchLogs = Effect.fn("Observability.searchLogs")(
 
     const [logsResult, countResult] = yield* Effect.all(
       [
-        executor.query<ListLogsOutput>("list_logs", params),
-        executor.query<LogsCountOutput>("logs_count", {
-          start_time: input.timeRange.startTime,
-          end_time: input.timeRange.endTime,
-          ...optionalParams,
-        }),
+        executor.query<ListLogsOutput>("list_logs", params, { profile: "list" }),
+        executor.query<LogsCountOutput>(
+          "logs_count",
+          {
+            start_time: input.timeRange.startTime,
+            end_time: input.timeRange.endTime,
+            ...optionalParams,
+          },
+          { profile: "discovery" },
+        ),
       ],
       { concurrency: "unbounded" },
     )

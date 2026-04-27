@@ -2319,7 +2319,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
         )
 
         const tenant = systemTenant(orgId)
-        const rawRows = yield* tinybird.sqlQuery(tenant, compiled.sql).pipe(
+        const rawRows = yield* tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }).pipe(
           Effect.mapError(
             (error) =>
               new AlertPersistenceError({

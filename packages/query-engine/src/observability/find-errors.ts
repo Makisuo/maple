@@ -8,13 +8,17 @@ export const findErrors = Effect.fn("Observability.findErrors")(
   function* (input: FindErrorsInput) {
     const executor = yield* TinybirdExecutor
 
-    const result = yield* executor.query<ErrorsByTypeOutput>("errors_by_type", {
-      start_time: input.timeRange.startTime,
-      end_time: input.timeRange.endTime,
-      ...(input.service && { services: input.service }),
-      ...(input.environment && { deployment_envs: input.environment }),
-      limit: input.limit ?? 20,
-    })
+    const result = yield* executor.query<ErrorsByTypeOutput>(
+      "errors_by_type",
+      {
+        start_time: input.timeRange.startTime,
+        end_time: input.timeRange.endTime,
+        ...(input.service && { services: input.service }),
+        ...(input.environment && { deployment_envs: input.environment }),
+        limit: input.limit ?? 20,
+      },
+      { profile: "aggregation" },
+    )
 
     return pipe(result.data, Arr.map(toErrorSummary))
   },

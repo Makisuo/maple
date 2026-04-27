@@ -23,36 +23,56 @@ export const diagnoseService = Effect.fn("Observability.diagnoseService")(
     const [overviewResult, errorsResult, logsResult, tracesResult, apdexResult] =
       yield* Effect.all(
         [
-          executor.query<ServiceOverviewOutput>("service_overview", {
-            start_time: input.timeRange.startTime,
-            end_time: input.timeRange.endTime,
-            ...(input.environment && { environments: input.environment }),
-          }),
-          executor.query<ErrorsByTypeOutput>("errors_by_type", {
-            start_time: input.timeRange.startTime,
-            end_time: input.timeRange.endTime,
-            services: input.serviceName,
-            limit: 10,
-            ...envFilter,
-          }),
-          executor.query<ListLogsOutput>("list_logs", {
-            start_time: input.timeRange.startTime,
-            end_time: input.timeRange.endTime,
-            service: input.serviceName,
-            limit: 15,
-          }),
-          executor.query<ListTracesOutput>("list_traces", {
-            start_time: input.timeRange.startTime,
-            end_time: input.timeRange.endTime,
-            service: input.serviceName,
-            limit: 5,
-          }),
-          executor.query<ServiceApdexTimeSeriesOutput>("service_apdex_time_series", {
-            service_name: input.serviceName,
-            start_time: input.timeRange.startTime,
-            end_time: input.timeRange.endTime,
-            bucket_seconds: 300,
-          }),
+          executor.query<ServiceOverviewOutput>(
+            "service_overview",
+            {
+              start_time: input.timeRange.startTime,
+              end_time: input.timeRange.endTime,
+              ...(input.environment && { environments: input.environment }),
+            },
+            { profile: "aggregation" },
+          ),
+          executor.query<ErrorsByTypeOutput>(
+            "errors_by_type",
+            {
+              start_time: input.timeRange.startTime,
+              end_time: input.timeRange.endTime,
+              services: input.serviceName,
+              limit: 10,
+              ...envFilter,
+            },
+            { profile: "aggregation" },
+          ),
+          executor.query<ListLogsOutput>(
+            "list_logs",
+            {
+              start_time: input.timeRange.startTime,
+              end_time: input.timeRange.endTime,
+              service: input.serviceName,
+              limit: 15,
+            },
+            { profile: "list" },
+          ),
+          executor.query<ListTracesOutput>(
+            "list_traces",
+            {
+              start_time: input.timeRange.startTime,
+              end_time: input.timeRange.endTime,
+              service: input.serviceName,
+              limit: 5,
+            },
+            { profile: "list" },
+          ),
+          executor.query<ServiceApdexTimeSeriesOutput>(
+            "service_apdex_time_series",
+            {
+              service_name: input.serviceName,
+              start_time: input.timeRange.startTime,
+              end_time: input.timeRange.endTime,
+              bucket_seconds: 300,
+            },
+            { profile: "aggregation" },
+          ),
         ],
         { concurrency: "unbounded" },
       )

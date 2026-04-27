@@ -20,6 +20,7 @@ import type { TenantContext } from "./AuthService"
 import { BucketCacheService } from "./BucketCacheService"
 import { EdgeCacheService } from "./EdgeCacheService"
 import { TinybirdService, type TinybirdServiceShape } from "./TinybirdService"
+import type { QueryProfileName } from "./TinybirdQueryProfile"
 import * as QueryEngineMetrics from "./QueryEngineMetrics"
 
 interface TimeRangeBounds {
@@ -86,6 +87,8 @@ export interface QueryEngineServiceShape {
 const MAX_RANGE_SECONDS = 60 * 60 * 24 * 31
 const MAX_LIST_RANGE_SECONDS = 60 * 60 * 24 * 7
 const MAX_TIMESERIES_POINTS = 1_500
+const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
+const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
 const QUERY_ENGINE_TIMEOUT = Duration.seconds(30)
 
 const withTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -111,16 +114,56 @@ const msToTinybirdDateTime = (ms: number): string => {
 
 const CACHE_SNAP_S = 15
 
-function snapSeconds(dateStr: string): string {
+/**
+ * Snap a Tinybird datetime to a window. Used to align cache keys so that
+ * concurrent requests within the same window share an entry. Larger windows
+ * trade staleness for hit-rate.
+ */
+export function snapToWindow(dateStr: string, windowSeconds: number): string {
   if (dateStr.length !== 19 || dateStr[4] !== "-" || dateStr[10] !== " ") return dateStr
-  const seconds = parseInt(dateStr.slice(17, 19), 10)
-  if (Number.isNaN(seconds)) return dateStr
-  const snapped = seconds - (seconds % CACHE_SNAP_S)
-  return dateStr.slice(0, 17) + snapped.toString().padStart(2, "0")
+  if (windowSeconds <= 0 || windowSeconds > 3600) return dateStr
+  // Snap by deriving epoch ms, flooring, formatting back. Handles cross-minute
+  // and cross-hour boundaries cleanly for windows up to 1h.
+  const ms = Date.parse(dateStr.replace(" ", "T") + "Z")
+  if (Number.isNaN(ms)) return dateStr
+  const snappedMs = Math.floor(ms / (windowSeconds * 1000)) * (windowSeconds * 1000)
+  const iso = new Date(snappedMs).toISOString()
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)}`
+}
+
+const snapSeconds = (dateStr: string): string => snapToWindow(dateStr, CACHE_SNAP_S)
+
+/**
+ * Discovery queries (attribute keys/values, facets) change slowly because
+ * they're driven by what's been ingested. Use a wider snap window so
+ * concurrent dashboard widgets share cache entries.
+ */
+export function snapWindowForQueryKind(kind: string): number {
+  switch (kind) {
+    case "attributeKeys": return 300  // 5 min
+    case "attributeValues": return 60 // 1 min
+    case "facets": return 60          // 1 min
+    default: return CACHE_SNAP_S
+  }
+}
+
+/**
+ * TTL paired with the snap window above. Discovery queries can sit in cache
+ * longer because the underlying signal (newly observed keys/values) updates
+ * gradually as data ingests.
+ */
+export function cacheTtlForQueryKind(kind: string): number {
+  switch (kind) {
+    case "attributeKeys": return 300
+    case "attributeValues": return 60
+    case "facets": return 60
+    default: return 15
+  }
 }
 
 function buildCacheKey(orgId: string, request: QueryEngineExecuteRequest): string {
-  return `${orgId}:${snapSeconds(request.startTime)}:${snapSeconds(request.endTime)}:${JSON.stringify(request.query)}`
+  const snap = snapWindowForQueryKind(request.query.kind)
+  return `${orgId}:${snapToWindow(request.startTime, snap)}:${snapToWindow(request.endTime, snap)}:${JSON.stringify(request.query)}`
 }
 
 function buildEvaluateCacheKey(orgId: string, request: QueryEngineEvaluateRequest): string {
@@ -312,6 +355,60 @@ const validateListQuery = Effect.fn("QueryEngineService.validateListQuery")(func
   }
 })
 
+/**
+ * Whether the query carries a filter narrow enough to keep ClickHouse from
+ * scanning the whole partition prefix. Used to reject obviously broad
+ * breakdown queries before they hit Tinybird.
+ */
+function hasNarrowingFilter(request: QueryEngineExecuteRequest): boolean {
+  if (!("filters" in request.query) || !request.query.filters) return false
+  const filters = request.query.filters as Record<string, unknown>
+  if (filters.serviceName || filters.spanName || filters.metricName || filters.traceId) return true
+  if (filters.errorsOnly || filters.rootOnly) return true
+  const envs = filters.environments
+  if (Array.isArray(envs) && envs.length > 0) return true
+  const services = filters.services
+  if (Array.isArray(services) && services.length > 0) return true
+  return false
+}
+
+/**
+ * Reject obviously expensive breakdown queries before submission. Wide
+ * unfiltered breakdowns scan vast amounts of data; the per-query
+ * `max_execution_time` setting (Item B profiles) catches them eventually,
+ * but failing fast gives the user a friendlier message and saves the
+ * 15-30s wait until ClickHouse trips its own timeout.
+ */
+const validateBreakdownQuery = Effect.fn("QueryEngineService.validateBreakdownQuery")(function* (
+  request: QueryEngineExecuteRequest,
+  range: TimeRangeBounds,
+): Effect.fn.Return<void, QueryEngineValidationError> {
+  if (request.query.kind !== "breakdown") return
+
+  if (range.rangeSeconds > MAX_BREAKDOWN_RANGE_SECONDS) {
+    return yield* new QueryEngineValidationError({
+      message: "Breakdown query time range too large",
+      details: [
+        "Breakdown queries support a maximum range of 30 days",
+        "Narrow the time range or use a timeseries query for wider trends",
+      ],
+    })
+  }
+
+  if (
+    range.rangeSeconds > MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS &&
+    !hasNarrowingFilter(request)
+  ) {
+    return yield* new QueryEngineValidationError({
+      message: "Breakdown query too broad without filters",
+      details: [
+        "Breakdowns spanning more than 24 hours require a serviceName, environment, or similar filter",
+        "Add a filter or narrow the time range",
+      ],
+    })
+  }
+})
+
 function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: string }>(
   rows: ReadonlyArray<T>,
   valueExtractor: (row: T) => number,
@@ -481,6 +578,7 @@ const validateExecute = Effect.fn("QueryEngineService.validateExecute")(function
   yield* validateTraceAttributeFilters(request.query)
   yield* validatePointBudget(request, range)
   yield* validateListQuery(request, range)
+  yield* validateBreakdownQuery(request, range)
   return range
 })
 
@@ -529,15 +627,17 @@ const executeCHQuery = <Output extends Record<string, any>, Params extends Recor
   query: CH.CHQuery<any, Output>,
   params: Params,
   context: string,
+  profile: QueryProfileName = "aggregation",
 ): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {
   const compiled = CH.compile(query, params)
-  return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql), context).pipe(
+  return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql, { profile }), context).pipe(
     Effect.map((rows) => compiled.castRows(rows)),
     Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
     Effect.withSpan("QueryEngineService.executeCHQuery", {
       attributes: {
         "db.statement": truncateSql(compiled.sql),
         "query.context": context,
+        "query.profile": profile,
       },
     }),
   )
@@ -550,15 +650,17 @@ const executeCHUnionQuery = <Output extends Record<string, any>, Params extends 
   query: CH.CHUnionQuery<Output>,
   params: Params,
   context: string,
+  profile: QueryProfileName = "aggregation",
 ): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {
   const compiled = CH.compileUnion(query, params)
-  return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql), context).pipe(
+  return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql, { profile }), context).pipe(
     Effect.map((rows) => compiled.castRows(rows)),
     Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
     Effect.withSpan("QueryEngineService.executeCHUnionQuery", {
       attributes: {
         "db.statement": truncateSql(compiled.sql),
         "query.context": context,
+        "query.profile": profile,
       },
     }),
   )
@@ -892,7 +994,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           },
         )
         const rawRows = yield* mapTinybirdError(
-          tinybird.sqlQuery(tenant, compiled.sql),
+          tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
           "Failed to execute metrics rate/increase query",
         ).pipe(
           Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
@@ -1094,6 +1196,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         "Failed to execute traces list query",
+        "list",
       )
 
       return new QueryEngineExecuteResponse({
@@ -1132,6 +1235,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           endTime: request.endTime,
         },
         "Failed to execute attribute keys query",
+        "discovery",
       )
 
       return new QueryEngineExecuteResponse({
@@ -1155,6 +1259,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         const rows = yield* executeCHUnionQuery(
           tinybird, tenant, CH.tracesFacetsQuery(opts), baseParams,
           "Failed to execute traces facets query",
+          "discovery",
         )
         return new QueryEngineExecuteResponse({
           result: {
@@ -1177,6 +1282,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           }),
           baseParams,
           "Failed to execute logs facets query",
+          "discovery",
         )
         return new QueryEngineExecuteResponse({
           result: {
@@ -1207,6 +1313,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
           }),
           baseParams,
           "Failed to execute errors facets query",
+          "discovery",
         )
         return new QueryEngineExecuteResponse({
           result: {
@@ -1220,6 +1327,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         const rows = yield* executeCHUnionQuery(
           tinybird, tenant, CH.servicesFacetsQuery(), baseParams,
           "Failed to execute services facets query",
+          "discovery",
         )
         return new QueryEngineExecuteResponse({
           result: {
@@ -1264,6 +1372,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         `Failed to execute ${request.query.scope} attribute values query`,
+        "discovery",
       )
       return new QueryEngineExecuteResponse({
         result: {
@@ -1289,6 +1398,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
         }),
         { orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
         "Failed to execute logs count query",
+        "discovery",
       )
       return new QueryEngineExecuteResponse({
         result: {
@@ -1524,17 +1634,19 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
       Effect.gen(function* () {
         const startMs = Date.now()
         const key = buildCacheKey(tenant.orgId, request)
+        const ttlSeconds = cacheTtlForQueryKind(request.query.kind)
         const { value, hit } = yield* edgeCache.getOrCompute(
           {
             bucket: "qe-execute",
             key,
-            ttlSeconds: 15,
+            ttlSeconds,
             schema: QueryEngineExecuteResponse,
           },
           executeImpl(tenant, request),
         )
         yield* recordCacheOutcome(hit)
         yield* Effect.annotateCurrentSpan("cache.hit", hit)
+        yield* Effect.annotateCurrentSpan("cache.ttlSeconds", ttlSeconds)
         yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
         return value
       })

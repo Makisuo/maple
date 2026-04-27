@@ -442,6 +442,79 @@ describe("makeQueryEngineExecute", () => {
       ],
     })
   })
+
+  it("rejects breakdown queries beyond a 30-day range", async () => {
+    const execute = makeQueryEngineExecute(
+      makeTinybirdStub({
+        sqlQuery: () => Effect.die(new Error("should not be called")),
+      }),
+    )
+
+    const exit = await Effect.runPromiseExit(execute(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-31 12:00:00", // 30.5 days — between breakdown cap (30d) and global cap (31d)
+      query: {
+        kind: "breakdown",
+        source: "traces",
+        metric: "count",
+        groupBy: "service",
+        filters: { serviceName: "checkout" },
+      },
+    }))
+
+    const failure = getFailure(exit)
+    expect(failure).toBeDefined()
+    expect((failure as { message?: string })?.message).toContain("Breakdown query time range too large")
+  })
+
+  it("rejects breakdown queries over 24h with no narrowing filter", async () => {
+    const execute = makeQueryEngineExecute(
+      makeTinybirdStub({
+        sqlQuery: () => Effect.die(new Error("should not be called")),
+      }),
+    )
+
+    const exit = await Effect.runPromiseExit(execute(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-05 00:00:00", // 4 days, no filters
+      query: {
+        kind: "breakdown",
+        source: "traces",
+        metric: "count",
+        groupBy: "service",
+      },
+    }))
+
+    const failure = getFailure(exit)
+    expect(failure).toBeDefined()
+    expect((failure as { message?: string })?.message).toContain("Breakdown query too broad without filters")
+  })
+
+  it("allows breakdown queries over 24h when a serviceName filter is present", async () => {
+    let called = false
+    const execute = makeQueryEngineExecute(
+      makeTinybirdStub({
+        sqlQuery: () => {
+          called = true
+          return Effect.succeed([])
+        },
+      }),
+    )
+
+    await Effect.runPromiseExit(execute(tenant, {
+      startTime: "2026-01-01 00:00:00",
+      endTime: "2026-01-05 00:00:00",
+      query: {
+        kind: "breakdown",
+        source: "traces",
+        metric: "count",
+        groupBy: "service",
+        filters: { serviceName: "checkout" },
+      },
+    }))
+
+    expect(called).toBe(true)
+  })
 })
 
 describe("makeQueryEngineEvaluate", () => {

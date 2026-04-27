@@ -29,23 +29,31 @@ export const exploreAttributeKeys = (
 
     if (pipeName === "services_facets") {
       // Different schema: { name, count, facetType }
-      const result = yield* executor.query<{ name: string; count: number; facetType: string }>(pipeName, {
-        start_time: input.timeRange.startTime,
-        end_time: input.timeRange.endTime,
-        limit: input.limit ?? 50,
-      })
+      const result = yield* executor.query<{ name: string; count: number; facetType: string }>(
+        pipeName,
+        {
+          start_time: input.timeRange.startTime,
+          end_time: input.timeRange.endTime,
+          limit: input.limit ?? 50,
+        },
+        { profile: "discovery" },
+      )
       return pipe(
         result.data,
         Arr.map((d): AttributeKeyResult => ({ key: d.name, count: Number(d.count) })),
       )
     }
 
-    const result = yield* executor.query<AttributeKeyRow>(pipeName, {
-      start_time: input.timeRange.startTime,
-      end_time: input.timeRange.endTime,
-      ...(input.service && { service_name: input.service }),
-      limit: input.limit ?? 50,
-    })
+    const result = yield* executor.query<AttributeKeyRow>(
+      pipeName,
+      {
+        start_time: input.timeRange.startTime,
+        end_time: input.timeRange.endTime,
+        ...(input.service && { service_name: input.service }),
+        limit: input.limit ?? 50,
+      },
+      { profile: "discovery" },
+    )
 
     return pipe(
       result.data,
@@ -63,13 +71,17 @@ export const exploreAttributeValues = (
       ? "resource_attribute_values" as const
       : "span_attribute_values" as const
 
-    const result = yield* executor.query<AttributeValueRow>(pipeName, {
-      attribute_key: input.key,
-      start_time: input.timeRange.startTime,
-      end_time: input.timeRange.endTime,
-      ...(input.service && { service_name: input.service }),
-      limit: input.limit ?? 50,
-    })
+    const result = yield* executor.query<AttributeValueRow>(
+      pipeName,
+      {
+        attribute_key: input.key,
+        start_time: input.timeRange.startTime,
+        end_time: input.timeRange.endTime,
+        ...(input.service && { service_name: input.service }),
+        limit: input.limit ?? 50,
+      },
+      { profile: "discovery" },
+    )
 
     return pipe(
       result.data,

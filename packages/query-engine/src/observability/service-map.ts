@@ -11,12 +11,16 @@ export const serviceMap = (input: {
   Effect.gen(function* () {
     const executor = yield* TinybirdExecutor
 
-    const result = yield* executor.query<ServiceDependenciesOutput>("service_dependencies", {
-      start_time: input.timeRange.startTime,
-      end_time: input.timeRange.endTime,
-      ...(input.service && { service_name: input.service }),
-      ...(input.environment && { deployment_env: input.environment }),
-    })
+    const result = yield* executor.query<ServiceDependenciesOutput>(
+      "service_dependencies",
+      {
+        start_time: input.timeRange.startTime,
+        end_time: input.timeRange.endTime,
+        ...(input.service && { service_name: input.service }),
+        ...(input.environment && { deployment_env: input.environment }),
+      },
+      { profile: "aggregation" },
+    )
 
     return pipe(
       result.data,
