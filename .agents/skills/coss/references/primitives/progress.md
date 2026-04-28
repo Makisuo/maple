@@ -25,11 +25,7 @@ npm install @base-ui/react
 ## Canonical imports
 
 ```tsx
-import {
-  Progress,
-  ProgressLabel,
-  ProgressValue,
-} from "@/components/ui/progress"
+import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress"
 ```
 
 ## Minimal pattern
@@ -46,10 +42,10 @@ Progress with label and value display:
 
 ```tsx
 <Progress value={60}>
-  <div className="flex justify-between text-sm">
-    <ProgressLabel>Uploading...</ProgressLabel>
-    <ProgressValue />
-  </div>
+	<div className="flex justify-between text-sm">
+		<ProgressLabel>Uploading...</ProgressLabel>
+		<ProgressValue />
+	</div>
 </Progress>
 ```
 

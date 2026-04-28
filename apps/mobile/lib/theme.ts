@@ -22,9 +22,4 @@ export const severityColors: Record<string, string> = {
 	FATAL: "#a03a20",
 }
 
-export {
-	HTTP_METHOD_COLORS,
-	getServiceColor,
-	getStatusColor,
-	getStatusBgColor,
-} from "./colors"
+export { HTTP_METHOD_COLORS, getServiceColor, getStatusColor, getStatusBgColor } from "./colors"

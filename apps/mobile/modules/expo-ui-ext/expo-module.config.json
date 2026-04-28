@@ -1,6 +1,6 @@
 {
-  "platforms": ["ios"],
-  "ios": {
-    "modules": ["ExpoUiExtModule"]
-  }
+	"platforms": ["ios"],
+	"ios": {
+		"modules": ["ExpoUiExtModule"]
+	}
 }

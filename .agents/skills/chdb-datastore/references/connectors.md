@@ -35,6 +35,7 @@ ds = DataStore.from_file("data.tsv", format="TabSeparatedWithNames")  # explicit
 ```
 
 **Notes:**
+
 - Glob patterns (`*`, `**`) work for querying multiple files at once
 - Compression (`.gz`, `.zst`, `.bz2`, `.xz`, `.lz4`) is auto-detected from extension
 - Use `structure` parameter to specify column types: `structure="id UInt64, name String"`
@@ -226,24 +227,24 @@ DataStore.uri(uri_string, **kwargs)
 
 Universal one-liner that auto-detects source type from the URI scheme:
 
-| Scheme | Example |
-|--------|---------|
-| _(path)_ | `sales.parquet`, `/data/file.csv` |
-| `file` | `file:///data/file.csv` |
-| `s3`, `s3a`, `s3n` | `s3://bucket/key?nosign=true` |
-| `gs`, `gcs` | `gs://bucket/path` |
-| `az`, `azure`, `wasb` | `az://container/blob?account_name=X&account_key=Y` |
-| `hdfs` | `hdfs://namenode:9000/path` |
-| `http`, `https` | `https://example.com/data.json` |
-| `mysql` | `mysql://user:pass@host:port/db/table` |
-| `postgresql`, `postgres` | `postgresql://user:pass@host:port/db/table` |
-| `clickhouse` | `clickhouse://host:port/db/table?user=X&password=Y` |
-| `mongodb`, `mongo` | `mongodb://user:pass@host:port/db.collection` |
-| `sqlite` | `sqlite:///path/to/db.db?table=name` |
-| `redis` | `redis://host:port/db?key=mykey&password=pass` |
-| `iceberg` | `iceberg://catalog/namespace/table` |
-| `deltalake`, `delta` | `deltalake:///path/to/table` |
-| `hudi` | `hudi:///path/to/table` |
+| Scheme                   | Example                                             |
+| ------------------------ | --------------------------------------------------- |
+| _(path)_                 | `sales.parquet`, `/data/file.csv`                   |
+| `file`                   | `file:///data/file.csv`                             |
+| `s3`, `s3a`, `s3n`       | `s3://bucket/key?nosign=true`                       |
+| `gs`, `gcs`              | `gs://bucket/path`                                  |
+| `az`, `azure`, `wasb`    | `az://container/blob?account_name=X&account_key=Y`  |
+| `hdfs`                   | `hdfs://namenode:9000/path`                         |
+| `http`, `https`          | `https://example.com/data.json`                     |
+| `mysql`                  | `mysql://user:pass@host:port/db/table`              |
+| `postgresql`, `postgres` | `postgresql://user:pass@host:port/db/table`         |
+| `clickhouse`             | `clickhouse://host:port/db/table?user=X&password=Y` |
+| `mongodb`, `mongo`       | `mongodb://user:pass@host:port/db.collection`       |
+| `sqlite`                 | `sqlite:///path/to/db.db?table=name`                |
+| `redis`                  | `redis://host:port/db?key=mykey&password=pass`      |
+| `iceberg`                | `iceberg://catalog/namespace/table`                 |
+| `deltalake`, `delta`     | `deltalake:///path/to/table`                        |
+| `hudi`                   | `hudi:///path/to/table`                             |
 
 ```python
 from datastore import DataStore

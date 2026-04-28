@@ -61,6 +61,7 @@ GROUP BY event_type, hour;
 ```
 
 **Key points:**
+
 - Use `-State` functions in MV, `-Merge` functions in query
 - Incremental - existing data not automatically included (backfill separately)
 - Minimal cluster overhead at insert time

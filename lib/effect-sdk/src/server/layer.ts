@@ -6,34 +6,34 @@ import { runtime, provider } from "std-env"
 import * as EnvConfig from "./config.js"
 
 export interface MapleConfig {
-  /**
-   * Service name reported in traces, logs, and metrics. When omitted, falls
-   * back to `OTEL_SERVICE_NAME` env var, then `"unknown_service"`.
-   */
-  readonly serviceName?: string | undefined
-  /** Override auto-detected service version (commit SHA). */
-  readonly serviceVersion?: string | undefined
-  /** Override auto-detected deployment environment. */
-  readonly environment?: string | undefined
-  /**
-   * Ingest endpoint URL. When omitted, falls back to `MAPLE_ENDPOINT` then
-   * `OTEL_EXPORTER_OTLP_ENDPOINT` env vars (the latter is what the
-   * maple-k8s-infra chart's operator injects into pods).
-   */
-  readonly endpoint?: string | undefined
-  /** Maple ingest key. Overrides MAPLE_INGEST_KEY env var. */
-  readonly ingestKey?: string | undefined
-  /**
-   * Additional resource attributes merged into the telemetry resource. These
-   * take precedence over `OTEL_RESOURCE_ATTRIBUTES` env-var entries with the
-   * same key.
-   */
-  readonly attributes?: Record<string, unknown> | undefined
-  readonly maxBatchSize?: number | undefined
-  readonly loggerExportInterval?: Duration.Input | undefined
-  readonly metricsExportInterval?: Duration.Input | undefined
-  readonly tracerExportInterval?: Duration.Input | undefined
-  readonly shutdownTimeout?: Duration.Input | undefined
+	/**
+	 * Service name reported in traces, logs, and metrics. When omitted, falls
+	 * back to `OTEL_SERVICE_NAME` env var, then `"unknown_service"`.
+	 */
+	readonly serviceName?: string | undefined
+	/** Override auto-detected service version (commit SHA). */
+	readonly serviceVersion?: string | undefined
+	/** Override auto-detected deployment environment. */
+	readonly environment?: string | undefined
+	/**
+	 * Ingest endpoint URL. When omitted, falls back to `MAPLE_ENDPOINT` then
+	 * `OTEL_EXPORTER_OTLP_ENDPOINT` env vars (the latter is what the
+	 * maple-k8s-infra chart's operator injects into pods).
+	 */
+	readonly endpoint?: string | undefined
+	/** Maple ingest key. Overrides MAPLE_INGEST_KEY env var. */
+	readonly ingestKey?: string | undefined
+	/**
+	 * Additional resource attributes merged into the telemetry resource. These
+	 * take precedence over `OTEL_RESOURCE_ATTRIBUTES` env-var entries with the
+	 * same key.
+	 */
+	readonly attributes?: Record<string, unknown> | undefined
+	readonly maxBatchSize?: number | undefined
+	readonly loggerExportInterval?: Duration.Input | undefined
+	readonly metricsExportInterval?: Duration.Input | undefined
+	readonly tracerExportInterval?: Duration.Input | undefined
+	readonly shutdownTimeout?: Duration.Input | undefined
 }
 
 /**
@@ -56,57 +56,55 @@ export interface MapleConfig {
  * ```
  */
 export const layer = (config: MapleConfig = {}) =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const envEndpoint = yield* EnvConfig.endpoint
-      const endpoint = config.endpoint ?? Option.getOrUndefined(envEndpoint)
-      if (!endpoint) return Layer.empty
+	Layer.unwrap(
+		Effect.gen(function* () {
+			const envEndpoint = yield* EnvConfig.endpoint
+			const endpoint = config.endpoint ?? Option.getOrUndefined(envEndpoint)
+			if (!endpoint) return Layer.empty
 
-      const envIngestKey = yield* EnvConfig.ingestKey
-      const ingestKey = config.ingestKey
-        ? Redacted.make(config.ingestKey)
-        : Option.getOrUndefined(envIngestKey)
+			const envIngestKey = yield* EnvConfig.ingestKey
+			const ingestKey = config.ingestKey
+				? Redacted.make(config.ingestKey)
+				: Option.getOrUndefined(envIngestKey)
 
-      const envServiceVersion = yield* EnvConfig.serviceVersion
-      const serviceVersion = config.serviceVersion ?? Option.getOrUndefined(envServiceVersion)
+			const envServiceVersion = yield* EnvConfig.serviceVersion
+			const serviceVersion = config.serviceVersion ?? Option.getOrUndefined(envServiceVersion)
 
-      const envEnvironment = yield* EnvConfig.environment
-      const environment = config.environment ?? Option.getOrUndefined(envEnvironment)
+			const envEnvironment = yield* EnvConfig.environment
+			const environment = config.environment ?? Option.getOrUndefined(envEnvironment)
 
-      const envOtelServiceName = yield* EnvConfig.otelServiceName
-      const serviceName = config.serviceName ?? Option.getOrUndefined(envOtelServiceName) ?? "unknown"
+			const envOtelServiceName = yield* EnvConfig.otelServiceName
+			const serviceName = config.serviceName ?? Option.getOrUndefined(envOtelServiceName) ?? "unknown"
 
-      const envResourceAttributes = yield* EnvConfig.otelResourceAttributes
+			const envResourceAttributes = yield* EnvConfig.otelResourceAttributes
 
-      // Precedence (lowest to highest): SDK defaults → OTEL_RESOURCE_ATTRIBUTES
-      // (set externally, e.g. by the maple-k8s-infra chart's operator
-      // injection) → programmatic config.attributes (set in app code). Matches
-      // the OTel spec's "later writers win" rule.
-      const attributes: Record<string, unknown> = {
-        "maple.sdk.type": "server",
-      }
-      if (runtime) attributes["maple.runtime"] = runtime
-      if (provider) attributes["maple.provider"] = provider
-      if (environment) attributes["deployment.environment"] = environment
-      if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
-      Object.assign(attributes, envResourceAttributes)
-      if (config.attributes) Object.assign(attributes, config.attributes)
+			// Precedence (lowest to highest): SDK defaults → OTEL_RESOURCE_ATTRIBUTES
+			// (set externally, e.g. by the maple-k8s-infra chart's operator
+			// injection) → programmatic config.attributes (set in app code). Matches
+			// the OTel spec's "later writers win" rule.
+			const attributes: Record<string, unknown> = {
+				"maple.sdk.type": "server",
+			}
+			if (runtime) attributes["maple.runtime"] = runtime
+			if (provider) attributes["maple.provider"] = provider
+			if (environment) attributes["deployment.environment"] = environment
+			if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
+			Object.assign(attributes, envResourceAttributes)
+			if (config.attributes) Object.assign(attributes, config.attributes)
 
-      return Otlp.layerJson({
-        baseUrl: endpoint,
-        resource: {
-          serviceName,
-          serviceVersion,
-          attributes,
-        },
-        headers: ingestKey
-          ? { Authorization: `Bearer ${Redacted.value(ingestKey)}` }
-          : undefined,
-        maxBatchSize: config.maxBatchSize,
-        loggerExportInterval: config.loggerExportInterval,
-        metricsExportInterval: config.metricsExportInterval,
-        tracerExportInterval: config.tracerExportInterval,
-        shutdownTimeout: config.shutdownTimeout,
-      }).pipe(Layer.provide(FetchHttpClient.layer))
-    }),
-  )
+			return Otlp.layerJson({
+				baseUrl: endpoint,
+				resource: {
+					serviceName,
+					serviceVersion,
+					attributes,
+				},
+				headers: ingestKey ? { Authorization: `Bearer ${Redacted.value(ingestKey)}` } : undefined,
+				maxBatchSize: config.maxBatchSize,
+				loggerExportInterval: config.loggerExportInterval,
+				metricsExportInterval: config.metricsExportInterval,
+				tracerExportInterval: config.tracerExportInterval,
+				shutdownTimeout: config.shutdownTimeout,
+			}).pipe(Layer.provide(FetchHttpClient.layer))
+		}),
+	)

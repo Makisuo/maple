@@ -10,4 +10,6 @@ export const sharedAtomRuntime = MapleApiAtomClient.runtime
 appRegistry.mount(sharedAtomRuntime)
 
 // Extract the typed layer from the AtomRuntime for imperative Effect.provide() usage
-export const mapleApiClientLayer: Layer.Layer<MapleApiAtomClient> = appRegistry.get(MapleApiAtomClient.runtime.layer)
+export const mapleApiClientLayer: Layer.Layer<MapleApiAtomClient> = appRegistry.get(
+	MapleApiAtomClient.runtime.layer,
+)

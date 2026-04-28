@@ -1,14 +1,14 @@
 name: Create Production Builds
 
 on:
-  push:
-    branches: [main]
+    push:
+        branches: [main]
 
-  workflow_dispatch: {}
+    workflow_dispatch: {}
 
 jobs:
-  build_ios:
-    type: build
-    params:
-      platform: ios
-      profile: production
+    build_ios:
+        type: build
+        params:
+            platform: ios
+            profile: production

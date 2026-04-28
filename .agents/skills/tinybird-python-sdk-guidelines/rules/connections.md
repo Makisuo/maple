@@ -63,25 +63,25 @@ Secrets must be created in Tinybird before deploying connections that use them.
 
 ### Kafka Options
 
-| Option | Description |
-|--------|-------------|
-| `bootstrap_servers` | Kafka broker addresses |
-| `security_protocol` | Protocol (e.g., `SASL_SSL`, `PLAINTEXT`) |
-| `sasl_mechanism` | SASL mechanism (e.g., `PLAIN`, `SCRAM-SHA-256`) |
-| `key` | SASL username (use `secret()`) |
-| `secret` | SASL password (use `secret()`) |
+| Option              | Description                                     |
+| ------------------- | ----------------------------------------------- |
+| `bootstrap_servers` | Kafka broker addresses                          |
+| `security_protocol` | Protocol (e.g., `SASL_SSL`, `PLAINTEXT`)        |
+| `sasl_mechanism`    | SASL mechanism (e.g., `PLAIN`, `SCRAM-SHA-256`) |
+| `key`               | SASL username (use `secret()`)                  |
+| `secret`            | SASL password (use `secret()`)                  |
 
 ### S3 Options
 
-| Option | Description |
-|--------|-------------|
-| `region` | AWS region |
-| `arn` | IAM role ARN for cross-account access |
+| Option   | Description                           |
+| -------- | ------------------------------------- |
+| `region` | AWS region                            |
+| `arn`    | IAM role ARN for cross-account access |
 
 ### GCS Options
 
-| Option | Description |
-|--------|-------------|
+| Option                             | Description                           |
+| ---------------------------------- | ------------------------------------- |
 | `service_account_credentials_json` | Service account JSON (use `secret()`) |
 
 ## Using Connections in Sink Pipes

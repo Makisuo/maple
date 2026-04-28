@@ -240,6 +240,7 @@ These variables are read by the OTel SDK automatically when creating exporters w
 3. Open the Maple dashboard and check that traces appear in the traces view
 
 If traces aren't appearing, verify:
+
 - The ingest endpoint URL is correct
 - Your API key is valid
 - Your application can reach `ingest.maple.dev` (or your self-hosted URL)

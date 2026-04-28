@@ -1,4 +1,9 @@
-import type { AnyRoute, RouterConstructorOptions, RouterHistory, TrailingSlashOption } from "@tanstack/react-router"
+import type {
+	AnyRoute,
+	RouterConstructorOptions,
+	RouterHistory,
+	TrailingSlashOption,
+} from "@tanstack/react-router"
 import { createRouter } from "@tanstack/react-router"
 import { Effect, Exit, type ManagedRuntime, type Tracer } from "effect"
 import type { Atom, AtomRegistry } from "effect/unstable/reactivity"
@@ -15,9 +20,9 @@ type AnyAtomRuntime = Atom.AtomRuntime<any, any>
  * Loaders and beforeLoad hooks access the runtime through this.
  */
 export interface EffectRouterContext {
-  readonly effectManagedRuntime: AnyManagedRuntime
-  readonly effectAtomRuntime: AnyAtomRuntime
-  readonly effectRegistry: AtomRegistry.AtomRegistry
+	readonly effectManagedRuntime: AnyManagedRuntime
+	readonly effectAtomRuntime: AnyAtomRuntime
+	readonly effectRegistry: AtomRegistry.AtomRegistry
 }
 
 /**
@@ -25,42 +30,48 @@ export interface EffectRouterContext {
  * the Effect runtime, atom runtime, and registry.
  */
 export type EffectRouterOptions<
-  TRouteTree extends AnyRoute,
-  TTrailingSlashOption extends TrailingSlashOption = "never",
-  TDefaultStructuralSharingOption extends boolean = false,
-  TRouterHistory extends RouterHistory = RouterHistory,
-  TDehydrated extends Record<string, any> = Record<string, any>,
+	TRouteTree extends AnyRoute,
+	TTrailingSlashOption extends TrailingSlashOption = "never",
+	TDefaultStructuralSharingOption extends boolean = false,
+	TRouterHistory extends RouterHistory = RouterHistory,
+	TDehydrated extends Record<string, any> = Record<string, any>,
 > = Omit<
-  RouterConstructorOptions<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>,
-  "context"
+	RouterConstructorOptions<
+		TRouteTree,
+		TTrailingSlashOption,
+		TDefaultStructuralSharingOption,
+		TRouterHistory,
+		TDehydrated
+	>,
+	"context"
 > & {
-  /**
-   * The ManagedRuntime used to execute Effects in loaders and beforeLoad hooks.
-   * Must share the same `memoMap` as the AtomRuntime for service memoization.
-   *
-   * @example
-   * ```ts
-   * const managedRuntime = ManagedRuntime.make(myLayer, { memoMap: Atom.defaultMemoMap })
-   * ```
-   */
-  readonly managedRuntime: AnyManagedRuntime
+	/**
+	 * The ManagedRuntime used to execute Effects in loaders and beforeLoad hooks.
+	 * Must share the same `memoMap` as the AtomRuntime for service memoization.
+	 *
+	 * @example
+	 * ```ts
+	 * const managedRuntime = ManagedRuntime.make(myLayer, { memoMap: Atom.defaultMemoMap })
+	 * ```
+	 */
+	readonly managedRuntime: AnyManagedRuntime
 
-  /**
-   * The Effect AtomRuntime for creating reactive route data atoms.
-   * Created via `Atom.runtime(layer)`.
-   */
-  readonly atomRuntime: AnyAtomRuntime
+	/**
+	 * The Effect AtomRuntime for creating reactive route data atoms.
+	 * Created via `Atom.runtime(layer)`.
+	 */
+	readonly atomRuntime: AnyAtomRuntime
 
-  /**
-   * The AtomRegistry used for reactive state management.
-   * Created via `AtomRegistry.make()`.
-   */
-  readonly registry: AtomRegistry.AtomRegistry
+	/**
+	 * The AtomRegistry used for reactive state management.
+	 * Created via `AtomRegistry.make()`.
+	 */
+	readonly registry: AtomRegistry.AtomRegistry
 
-  /**
-   * Additional router context merged with the Effect context.
-   */
-  readonly context?: Record<string, unknown>
+	/**
+	 * Additional router context merged with the Effect context.
+	 */
+	readonly context?: Record<string, unknown>
 }
 
 /**
@@ -93,62 +104,74 @@ export type EffectRouterOptions<
  * ```
  */
 export function createEffectRouter<
-  TRouteTree extends AnyRoute,
-  TTrailingSlashOption extends TrailingSlashOption = "never",
-  TDefaultStructuralSharingOption extends boolean = false,
-  TRouterHistory extends RouterHistory = RouterHistory,
-  TDehydrated extends Record<string, any> = Record<string, any>,
+	TRouteTree extends AnyRoute,
+	TTrailingSlashOption extends TrailingSlashOption = "never",
+	TDefaultStructuralSharingOption extends boolean = false,
+	TRouterHistory extends RouterHistory = RouterHistory,
+	TDehydrated extends Record<string, any> = Record<string, any>,
 >({
-  managedRuntime,
-  atomRuntime,
-  registry,
-  context: userContext,
-  ...options
-}: EffectRouterOptions<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>) {
-  const effectContext: EffectRouterContext = {
-    effectManagedRuntime: managedRuntime,
-    effectAtomRuntime: atomRuntime,
-    effectRegistry: registry,
-  }
+	managedRuntime,
+	atomRuntime,
+	registry,
+	context: userContext,
+	...options
+}: EffectRouterOptions<
+	TRouteTree,
+	TTrailingSlashOption,
+	TDefaultStructuralSharingOption,
+	TRouterHistory,
+	TDehydrated
+>) {
+	const effectContext: EffectRouterContext = {
+		effectManagedRuntime: managedRuntime,
+		effectAtomRuntime: atomRuntime,
+		effectRegistry: registry,
+	}
 
-  // Cast needed: we merge EffectRouterContext fields into the user's router
-  // context. Generic TRouteTree constraints don't survive the spread, and the
-  // context type is wider than what createRouter expects. The user's root route
-  // should include EffectRouterContext in its context type for full type safety.
-  const router = createRouter<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>({
-    ...options as any,
-    context: { ...userContext, ...effectContext },
-  })
+	// Cast needed: we merge EffectRouterContext fields into the user's router
+	// context. Generic TRouteTree constraints don't survive the spread, and the
+	// context type is wider than what createRouter expects. The user's root route
+	// should include EffectRouterContext in its context type for full type safety.
+	const router = createRouter<
+		TRouteTree,
+		TTrailingSlashOption,
+		TDefaultStructuralSharingOption,
+		TRouterHistory,
+		TDehydrated
+	>({
+		...(options as any),
+		context: { ...userContext, ...effectContext },
+	})
 
-  // ---------------------------------------------------------------------------
-  // Navigation-level span tracking
-  // ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Navigation-level span tracking
+	// ---------------------------------------------------------------------------
 
-  router.subscribe("onBeforeNavigate", (event) => {
-    // End any lingering span from a previous navigation (shouldn't happen, but defensive)
-    if (_currentNavigationSpan) {
-      _currentNavigationSpan.end(BigInt(Date.now() * 1_000_000), Exit.void)
-    }
+	router.subscribe("onBeforeNavigate", (event) => {
+		// End any lingering span from a previous navigation (shouldn't happen, but defensive)
+		if (_currentNavigationSpan) {
+			_currentNavigationSpan.end(BigInt(Date.now() * 1_000_000), Exit.void)
+		}
 
-    _currentNavigationSpan = managedRuntime.runSync(
-      Effect.makeSpan("navigation", {
-        attributes: {
-          "navigation.from": event.fromLocation?.pathname ?? "",
-          "navigation.to": event.toLocation.pathname,
-          "navigation.pathChanged": event.pathChanged,
-        },
-      }),
-    )
-  })
+		_currentNavigationSpan = managedRuntime.runSync(
+			Effect.makeSpan("navigation", {
+				attributes: {
+					"navigation.from": event.fromLocation?.pathname ?? "",
+					"navigation.to": event.toLocation.pathname,
+					"navigation.pathChanged": event.pathChanged,
+				},
+			}),
+		)
+	})
 
-  router.subscribe("onResolved", () => {
-    if (_currentNavigationSpan) {
-      _currentNavigationSpan.end(BigInt(Date.now() * 1_000_000), Exit.void)
-      _currentNavigationSpan = undefined
-    }
-  })
+	router.subscribe("onResolved", () => {
+		if (_currentNavigationSpan) {
+			_currentNavigationSpan.end(BigInt(Date.now() * 1_000_000), Exit.void)
+			_currentNavigationSpan = undefined
+		}
+	})
 
-  return router
+	return router
 }
 
 // ---------------------------------------------------------------------------
@@ -163,5 +186,5 @@ let _currentNavigationSpan: Tracer.Span | undefined
  * a single navigation-level span.
  */
 export function getCurrentNavigationSpan(): Tracer.AnySpan | undefined {
-  return _currentNavigationSpan
+	return _currentNavigationSpan
 }

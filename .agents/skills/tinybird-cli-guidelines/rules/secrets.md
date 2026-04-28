@@ -11,16 +11,16 @@
 ## CLI: tb secret
 
 - List secrets:
-  - `tb secret ls`
-  - `tb secret ls --match _test`
+    - `tb secret ls`
+    - `tb secret ls --match _test`
 
 - Set or update a secret:
-  - `tb secret set SECRET_NAME SECRET_VALUE`
-  - `tb secret set SECRET_NAME` (prompts securely)
-  - `tb secret set SECRET_NAME --multiline` (opens editor)
+    - `tb secret set SECRET_NAME SECRET_VALUE`
+    - `tb secret set SECRET_NAME` (prompts securely)
+    - `tb secret set SECRET_NAME --multiline` (opens editor)
 
 - Remove a secret:
-  - `tb secret rm SECRET_NAME`
+    - `tb secret rm SECRET_NAME`
 
 ## Local Secrets
 

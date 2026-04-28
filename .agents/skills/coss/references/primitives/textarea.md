@@ -40,10 +40,10 @@ Textarea in a field with label:
 
 ```tsx
 <Field name="bio">
-  <FieldLabel>Bio</FieldLabel>
-  <Textarea placeholder="Tell us about yourself..." />
-  <FieldDescription>Max 500 characters.</FieldDescription>
-  <FieldError />
+	<FieldLabel>Bio</FieldLabel>
+	<Textarea placeholder="Tell us about yourself..." />
+	<FieldDescription>Max 500 characters.</FieldDescription>
+	<FieldError />
 </Field>
 ```
 

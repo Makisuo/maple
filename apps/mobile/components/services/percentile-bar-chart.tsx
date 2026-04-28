@@ -11,10 +11,7 @@ interface PercentileBarChartProps {
 	height?: number
 }
 
-export function PercentileBarChart({
-	data,
-	height = 100,
-}: PercentileBarChartProps) {
+export function PercentileBarChart({ data, height = 100 }: PercentileBarChartProps) {
 	const max = Math.max(...data.map((d) => d.p99), 0.001)
 
 	const labelIndices: number[] = []
@@ -97,11 +94,7 @@ export function PercentileBarChart({
 			{/* X-axis labels */}
 			<View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
 				{labelIndices.map((idx) => (
-					<Text
-						key={idx}
-						className="text-muted-foreground font-mono"
-						style={{ fontSize: 10 }}
-					>
+					<Text key={idx} className="text-muted-foreground font-mono" style={{ fontSize: 10 }}>
 						{formatLabel(data[idx].bucket)}
 					</Text>
 				))}
@@ -111,7 +104,9 @@ export function PercentileBarChart({
 			<View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
 				{(["p50", "p95", "p99"] as const).map((key) => (
 					<View key={key} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-						<View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS[key] }} />
+						<View
+							style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS[key] }}
+						/>
 						<Text className="text-muted-foreground font-mono" style={{ fontSize: 10 }}>
 							{key.toUpperCase()}
 						</Text>

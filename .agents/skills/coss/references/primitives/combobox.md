@@ -27,19 +27,19 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Combobox,
-  ComboboxClear,
-  ComboboxCollection,
-  ComboboxEmpty,
-  ComboboxGroup,
-  ComboboxGroupLabel,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxPopup,
-  ComboboxSeparator,
-  ComboboxValue,
-  useComboboxFilter,
+	Combobox,
+	ComboboxClear,
+	ComboboxCollection,
+	ComboboxEmpty,
+	ComboboxGroup,
+	ComboboxGroupLabel,
+	ComboboxInput,
+	ComboboxItem,
+	ComboboxList,
+	ComboboxPopup,
+	ComboboxSeparator,
+	ComboboxValue,
+	useComboboxFilter,
 } from "@/components/ui/combobox"
 ```
 
@@ -76,16 +76,20 @@ Combobox with label in a Field:
 
 ```tsx
 <Field>
-  <FieldLabel>Framework</FieldLabel>
-  <Combobox items={items}>
-    <ComboboxInput placeholder="Search..." />
-    <ComboboxPopup>
-      <ComboboxEmpty>No results found.</ComboboxEmpty>
-      <ComboboxList>
-        {(item) => <ComboboxItem key={item.value} value={item}>{item.label}</ComboboxItem>}
-      </ComboboxList>
-    </ComboboxPopup>
-  </Combobox>
+	<FieldLabel>Framework</FieldLabel>
+	<Combobox items={items}>
+		<ComboboxInput placeholder="Search..." />
+		<ComboboxPopup>
+			<ComboboxEmpty>No results found.</ComboboxEmpty>
+			<ComboboxList>
+				{(item) => (
+					<ComboboxItem key={item.value} value={item}>
+						{item.label}
+					</ComboboxItem>
+				)}
+			</ComboboxList>
+		</ComboboxPopup>
+	</Combobox>
 </Field>
 ```
 

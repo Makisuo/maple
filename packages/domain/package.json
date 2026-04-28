@@ -1,30 +1,30 @@
 {
-  "name": "@maple/domain",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./http": "./src/http/index.ts",
-    "./primitives": "./src/primitives.ts",
-    "./query-engine": "./src/query-engine.ts",
-    "./tinybird-project-sync": "./src/tinybird/project-sync.ts",
-    "./tinybird-pipes": "./src/tinybird-pipes.ts",
-    "./tinybird": "./src/tinybird/index.ts",
-    "./where-clause": "./src/where-clause.ts",
-    "./http/observability": "./src/http/observability.ts"
-  },
-  "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@tinybirdco/sdk": "catalog:tinybird",
-    "effect": "catalog:effect"
-  },
-  "devDependencies": {
-    "@effect/language-service": "catalog:effect",
-    "@types/node": "catalog:tooling",
-    "typescript": "catalog:tooling",
-    "vitest": "catalog:"
-  }
+	"name": "@maple/domain",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./http": "./src/http/index.ts",
+		"./primitives": "./src/primitives.ts",
+		"./query-engine": "./src/query-engine.ts",
+		"./tinybird-project-sync": "./src/tinybird/project-sync.ts",
+		"./tinybird-pipes": "./src/tinybird-pipes.ts",
+		"./tinybird": "./src/tinybird/index.ts",
+		"./where-clause": "./src/where-clause.ts",
+		"./http/observability": "./src/http/observability.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@tinybirdco/sdk": "catalog:tinybird",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	}
 }

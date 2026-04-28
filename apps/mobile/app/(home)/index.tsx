@@ -68,9 +68,7 @@ function TelemetryRow({
 	isLast?: boolean
 }) {
 	return (
-		<View
-			className={`flex-row items-center px-4 py-3.5 ${isLast ? "" : "border-b border-border"}`}
-		>
+		<View className={`flex-row items-center px-4 py-3.5 ${isLast ? "" : "border-b border-border"}`}>
 			<View className="flex-1">
 				<Text className="text-xs text-muted-foreground font-mono mb-1">{label}</Text>
 				<View className="flex-row items-baseline gap-2">
@@ -111,9 +109,7 @@ export default function DashboardScreen() {
 						className="rounded-md"
 						style={{ width: 28, height: 28, backgroundColor: colors.primary }}
 					/>
-					<Text className="text-xl font-bold text-foreground font-mono">
-						Maple
-					</Text>
+					<Text className="text-xl font-bold text-foreground font-mono">Maple</Text>
 				</View>
 				<View className="flex-row items-center gap-3">
 					<Pressable
@@ -192,19 +188,12 @@ export default function DashboardScreen() {
 				<DashboardContent data={state.data} />
 			)}
 
-			<OrgSwitcherModal
-				visible={orgModalVisible}
-				onClose={() => setOrgModalVisible(false)}
-			/>
+			<OrgSwitcherModal visible={orgModalVisible} onClose={() => setOrgModalVisible(false)} />
 		</Screen>
 	)
 }
 
-function DashboardContent({
-	data,
-}: {
-	data: import("../../hooks/use-dashboard-data").DashboardData
-}) {
+function DashboardContent({ data }: { data: import("../../hooks/use-dashboard-data").DashboardData }) {
 	const { usage, prevUsage, timeseries, logsTimeseries } = data
 
 	const logsSparkline = logsTimeseries.map((p) => p.count)
@@ -222,13 +211,9 @@ function DashboardContent({
 	// by throughput so the displayed value reflects the true overall error rate.
 	const totalCount = points.reduce((sum, p) => sum + p.throughput, 0)
 	const overallErrorRate =
-		totalCount > 0
-			? points.reduce((sum, p) => sum + p.errorRate * p.throughput, 0) / totalCount
-			: 0
+		totalCount > 0 ? points.reduce((sum, p) => sum + p.errorRate * p.throughput, 0) / totalCount : 0
 	const weightedP95 =
-		totalCount > 0
-			? points.reduce((sum, p) => sum + p.p95LatencyMs * p.throughput, 0) / totalCount
-			: 0
+		totalCount > 0 ? points.reduce((sum, p) => sum + p.p95LatencyMs * p.throughput, 0) / totalCount : 0
 	const errorSparkline = points.slice(-10).map((p) => p.errorRate)
 	const latencySparkline = points.slice(-10).map((p) => p.p95LatencyMs)
 
@@ -303,9 +288,7 @@ function DashboardContent({
 					{chartData.length > 0 ? (
 						<StackedBarChart data={chartData} height={100} />
 					) : (
-						<View
-							style={{ height: 100, justifyContent: "center", alignItems: "center" }}
-						>
+						<View style={{ height: 100, justifyContent: "center", alignItems: "center" }}>
 							<Text className="text-xs text-muted-foreground font-mono">No data</Text>
 						</View>
 					)}
@@ -319,13 +302,8 @@ function DashboardContent({
 					<View className="flex-1">
 						<Card>
 							<View className="flex-row items-baseline justify-between mb-2">
-								<Text className="text-xs text-muted-foreground font-mono">
-									Error Rate
-								</Text>
-								<Text
-									className="text-lg font-bold font-mono"
-									style={{ color: colors.error }}
-								>
+								<Text className="text-xs text-muted-foreground font-mono">Error Rate</Text>
+								<Text className="text-lg font-bold font-mono" style={{ color: colors.error }}>
 									{formatErrorRate(overallErrorRate)}
 								</Text>
 							</View>
@@ -341,9 +319,7 @@ function DashboardContent({
 					<View className="flex-1">
 						<Card>
 							<View className="flex-row items-baseline justify-between mb-2">
-								<Text className="text-xs text-muted-foreground font-mono">
-									P95 Latency
-								</Text>
+								<Text className="text-xs text-muted-foreground font-mono">P95 Latency</Text>
 								<Text
 									className="text-lg font-bold font-mono"
 									style={{ color: colors.primary }}

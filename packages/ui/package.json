@@ -1,42 +1,42 @@
 {
-  "name": "@maple/ui",
-  "private": true,
-  "type": "module",
-  "exports": {
-    "./utils": "./src/lib/utils.ts",
-    "./colors": "./src/lib/colors.ts",
-    "./types": "./src/lib/types.ts",
-    "./format": "./src/lib/format.ts",
-    "./*": "./src/*"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@base-ui/react": "catalog:ui",
-    "@xyflow/react": "catalog:ui",
-    "class-variance-authority": "catalog:ui",
-    "clsx": "catalog:ui",
-    "cmdk": "^1.1.1",
-    "effect": "catalog:effect",
-    "embla-carousel-react": "^8.6.0",
-    "input-otp": "^1.4.2",
-    "next-themes": "^0.4.6",
-    "react-day-picker": "^9.14.0",
-    "react-resizable-panels": "^4.9.0",
-    "recharts": "catalog:ui",
-    "sonner": "^2.0.7",
-    "tailwind-merge": "catalog:tailwind",
-    "vaul": "^1.1.2"
-  },
-  "peerDependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwindcss": "^4.0.0"
-  },
-  "devDependencies": {
-    "@types/react": "catalog:react",
-    "@types/react-dom": "catalog:react",
-    "typescript": "catalog:tooling"
-  }
+	"name": "@maple/ui",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./utils": "./src/lib/utils.ts",
+		"./colors": "./src/lib/colors.ts",
+		"./types": "./src/lib/types.ts",
+		"./format": "./src/lib/format.ts",
+		"./*": "./src/*"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@base-ui/react": "catalog:ui",
+		"@xyflow/react": "catalog:ui",
+		"class-variance-authority": "catalog:ui",
+		"clsx": "catalog:ui",
+		"cmdk": "^1.1.1",
+		"effect": "catalog:effect",
+		"embla-carousel-react": "^8.6.0",
+		"input-otp": "^1.4.2",
+		"next-themes": "^0.4.6",
+		"react-day-picker": "^9.14.0",
+		"react-resizable-panels": "^4.9.0",
+		"recharts": "catalog:ui",
+		"sonner": "^2.0.7",
+		"tailwind-merge": "catalog:tailwind",
+		"vaul": "^1.1.2"
+	},
+	"devDependencies": {
+		"@types/react": "catalog:react",
+		"@types/react-dom": "catalog:react",
+		"typescript": "catalog:tooling"
+	},
+	"peerDependencies": {
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
+		"tailwindcss": "^4.0.0"
+	}
 }

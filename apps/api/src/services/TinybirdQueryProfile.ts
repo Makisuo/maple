@@ -10,9 +10,9 @@
  * `max_bytes_to_read`) — they error with "restricted" if used.
  */
 export type TinybirdQuerySettings = {
-  maxExecutionTime?: number
-  maxMemoryUsage?: number
-  maxThreads?: number
+	maxExecutionTime?: number
+	maxMemoryUsage?: number
+	maxThreads?: number
 }
 
 export type QueryProfileName = "discovery" | "list" | "aggregation" | "explain" | "unbounded"
@@ -26,17 +26,17 @@ export type QueryProfileName = "discovery" | "list" | "aggregation" | "explain" 
  * (MV-backed scalars, alert evaluation that pre-validates range).
  */
 export const QueryProfile: Record<QueryProfileName, TinybirdQuerySettings> = {
-  discovery: { maxExecutionTime: 5, maxMemoryUsage: 512_000_000 },
-  list: { maxExecutionTime: 15, maxMemoryUsage: 1_500_000_000 },
-  aggregation: { maxExecutionTime: 30, maxMemoryUsage: 4_000_000_000 },
-  explain: { maxExecutionTime: 2, maxMemoryUsage: 128_000_000 },
-  unbounded: {},
+	discovery: { maxExecutionTime: 5, maxMemoryUsage: 512_000_000 },
+	list: { maxExecutionTime: 15, maxMemoryUsage: 1_500_000_000 },
+	aggregation: { maxExecutionTime: 30, maxMemoryUsage: 4_000_000_000 },
+	explain: { maxExecutionTime: 2, maxMemoryUsage: 128_000_000 },
+	unbounded: {},
 }
 
 const settingToCh: Record<keyof TinybirdQuerySettings, string> = {
-  maxExecutionTime: "max_execution_time",
-  maxMemoryUsage: "max_memory_usage",
-  maxThreads: "max_threads",
+	maxExecutionTime: "max_execution_time",
+	maxMemoryUsage: "max_memory_usage",
+	maxThreads: "max_threads",
 }
 
 /**
@@ -47,51 +47,51 @@ const settingToCh: Record<keyof TinybirdQuerySettings, string> = {
  * clause — none of maple's DSL queries do today.
  */
 export const appendSettings = (sql: string, settings: TinybirdQuerySettings | undefined): string => {
-  if (!settings) return sql
-  const parts: string[] = []
-  for (const key of Object.keys(settings) as Array<keyof TinybirdQuerySettings>) {
-    const value = settings[key]
-    if (typeof value === "number" && Number.isFinite(value)) {
-      parts.push(`${settingToCh[key]}=${value}`)
-    }
-  }
-  if (parts.length === 0) return sql
-  return `${sql.replace(/;\s*$/, "")} SETTINGS ${parts.join(", ")}`
+	if (!settings) return sql
+	const parts: string[] = []
+	for (const key of Object.keys(settings) as Array<keyof TinybirdQuerySettings>) {
+		const value = settings[key]
+		if (typeof value === "number" && Number.isFinite(value)) {
+			parts.push(`${settingToCh[key]}=${value}`)
+		}
+	}
+	if (parts.length === 0) return sql
+	return `${sql.replace(/;\s*$/, "")} SETTINGS ${parts.join(", ")}`
 }
 
 /**
  * Resolve effective settings: profile defaults overridden by explicit settings.
  */
 export const resolveSettings = (options?: {
-  profile?: QueryProfileName
-  settings?: TinybirdQuerySettings
+	profile?: QueryProfileName
+	settings?: TinybirdQuerySettings
 }): TinybirdQuerySettings | undefined => {
-  if (!options) return undefined
-  const base = options.profile ? QueryProfile[options.profile] : undefined
-  if (!base && !options.settings) return undefined
-  return { ...(base ?? {}), ...(options.settings ?? {}) }
+	if (!options) return undefined
+	const base = options.profile ? QueryProfile[options.profile] : undefined
+	if (!base && !options.settings) return undefined
+	return { ...base, ...options.settings }
 }
 
 const QUOTA_ERROR_PATTERNS: ReadonlyArray<{
-  pattern: RegExp
-  setting: "max_execution_time" | "max_memory_usage" | "max_threads"
+	pattern: RegExp
+	setting: "max_execution_time" | "max_memory_usage" | "max_threads"
 }> = [
-  {
-    pattern: /TIMEOUT[_ ]EXCEEDED|Timeout exceeded|max_execution_time|estimated query execution time/i,
-    setting: "max_execution_time",
-  },
-  {
-    pattern: /MEMORY[_ ]LIMIT[_ ]EXCEEDED|Memory limit \(for query\) exceeded/i,
-    setting: "max_memory_usage",
-  },
+	{
+		pattern: /TIMEOUT[_ ]EXCEEDED|Timeout exceeded|max_execution_time|estimated query execution time/i,
+		setting: "max_execution_time",
+	},
+	{
+		pattern: /MEMORY[_ ]LIMIT[_ ]EXCEEDED|Memory limit \(for query\) exceeded/i,
+		setting: "max_memory_usage",
+	},
 ]
 
 export const detectQuotaSetting = (
-  message: string | undefined,
+	message: string | undefined,
 ): "max_execution_time" | "max_memory_usage" | "max_threads" | undefined => {
-  if (!message) return undefined
-  for (const { pattern, setting } of QUOTA_ERROR_PATTERNS) {
-    if (pattern.test(message)) return setting
-  }
-  return undefined
+	if (!message) return undefined
+	for (const { pattern, setting } of QUOTA_ERROR_PATTERNS) {
+		if (pattern.test(message)) return setting
+	}
+	return undefined
 }

@@ -1,38 +1,38 @@
 {
-  "$schema": "https://turborepo.com/schema.json",
-  "globalPassThroughEnv": ["*"],
-  "tasks": {
-    "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".output/**"]
-    },
-    "typecheck": {
-      "dependsOn": ["^typecheck"]
-    },
-    "test": {
-      "dependsOn": ["^build"],
-      "outputs": []
-    },
-    "dev": {
-      "cache": false,
-      "persistent": true,
-      "interactive": true
-    },
-    "tinybird:dev": {
-      "cache": false
-    },
-    "tinybird:build": {
-      "cache": false
-    },
-    "tinybird:deploy": {
-      "cache": false
-    },
-    "deploy:stack": {
-      "dependsOn": ["^build"],
-      "cache": false
-    },
-    "destroy:stack": {
-      "cache": false
-    }
-  }
+	"$schema": "https://turborepo.com/schema.json",
+	"globalPassThroughEnv": ["*"],
+	"tasks": {
+		"build": {
+			"dependsOn": ["^build"],
+			"outputs": ["dist/**", ".output/**"]
+		},
+		"typecheck": {
+			"dependsOn": ["^typecheck"]
+		},
+		"test": {
+			"dependsOn": ["^build"],
+			"outputs": []
+		},
+		"dev": {
+			"cache": false,
+			"persistent": true,
+			"interactive": true
+		},
+		"tinybird:dev": {
+			"cache": false
+		},
+		"tinybird:build": {
+			"cache": false
+		},
+		"tinybird:deploy": {
+			"cache": false
+		},
+		"deploy:stack": {
+			"dependsOn": ["^build"],
+			"cache": false
+		},
+		"destroy:stack": {
+			"cache": false
+		}
+	}
 }

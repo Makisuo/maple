@@ -35,15 +35,15 @@ CREATE TABLE metrics (
 
 **Numeric Type Reference:**
 
-| Type | Range | Bytes |
-|------|-------|-------|
-| UInt8 | 0 to 255 | 1 |
-| UInt16 | 0 to 65,535 | 2 |
-| UInt32 | 0 to 4.3 billion | 4 |
-| UInt64 | 0 to 18 quintillion | 8 |
-| Int8 | -128 to 127 | 1 |
-| Int16 | -32,768 to 32,767 | 2 |
-| Int32 | -2.1 billion to 2.1 billion | 4 |
-| Int64 | -9 quintillion to 9 quintillion | 8 |
+| Type   | Range                           | Bytes |
+| ------ | ------------------------------- | ----- |
+| UInt8  | 0 to 255                        | 1     |
+| UInt16 | 0 to 65,535                     | 2     |
+| UInt32 | 0 to 4.3 billion                | 4     |
+| UInt64 | 0 to 18 quintillion             | 8     |
+| Int8   | -128 to 127                     | 1     |
+| Int16  | -32,768 to 32,767               | 2     |
+| Int32  | -2.1 billion to 2.1 billion     | 4     |
+| Int64  | -9 quintillion to 9 quintillion | 8     |
 
 Reference: [Select Data Types](https://clickhouse.com/docs/best-practices/select-data-types)

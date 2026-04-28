@@ -3,10 +3,4 @@ export { InlineService } from "./inline-service"
 export { InlineError } from "./inline-error"
 export { InlineLog } from "./inline-log"
 export { parseAnnotations } from "./parse-annotations"
-export type {
-  InlineTraceData,
-  InlineServiceData,
-  InlineErrorData,
-  InlineLogData,
-  Segment,
-} from "./types"
+export type { InlineTraceData, InlineServiceData, InlineErrorData, InlineLogData, Segment } from "./types"

@@ -25,17 +25,17 @@ To opt in many namespaces declaratively at install time, list them in `autoInstr
 
 **The chart injects env vars; it does not add an OpenTelemetry SDK to your app.** Your app still needs to produce OTLP spans somehow. Whether the env-var injection has any effect depends on whether your SDK reads the standard `OTEL_*` env vars at startup:
 
-| Stack | Works automatically? |
-| --- | --- |
-| Maple's `@maple-dev/effect-sdk/server` (>= 0.2.0) | Yes — reads `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_RESOURCE_ATTRIBUTES`. Calling `Maple.layer()` with no args picks up the operator-injected config. |
-| Java with `opentelemetry-javaagent.jar` | Yes — auto-config reads every `OTEL_*` env var. |
-| Python with `opentelemetry-distro` / `opentelemetry-instrument` | Yes. |
-| Node.js with `@opentelemetry/auto-instrumentations-node` | Yes. |
-| .NET with `AddOtlpExporter()` and no explicit endpoint | Yes — falls back to `OTEL_EXPORTER_OTLP_ENDPOINT`. |
-| Go with `otlptracehttp.New(ctx)` (no `WithEndpoint`) | Yes. |
-| Go with `otlptracehttp.New(ctx, WithEndpoint("..."))` | No — hardcoded endpoint wins. |
-| Rust / other | Depends on whether the exporter is constructed from env vars. |
-| Apps with no OTel SDK linked at all | No — nothing produces spans for env vars to configure. |
+| Stack                                                           | Works automatically?                                                                                                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Maple's `@maple-dev/effect-sdk/server` (>= 0.2.0)               | Yes — reads `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_RESOURCE_ATTRIBUTES`. Calling `Maple.layer()` with no args picks up the operator-injected config. |
+| Java with `opentelemetry-javaagent.jar`                         | Yes — auto-config reads every `OTEL_*` env var.                                                                                                       |
+| Python with `opentelemetry-distro` / `opentelemetry-instrument` | Yes.                                                                                                                                                  |
+| Node.js with `@opentelemetry/auto-instrumentations-node`        | Yes.                                                                                                                                                  |
+| .NET with `AddOtlpExporter()` and no explicit endpoint          | Yes — falls back to `OTEL_EXPORTER_OTLP_ENDPOINT`.                                                                                                    |
+| Go with `otlptracehttp.New(ctx)` (no `WithEndpoint`)            | Yes.                                                                                                                                                  |
+| Go with `otlptracehttp.New(ctx, WithEndpoint("..."))`           | No — hardcoded endpoint wins.                                                                                                                         |
+| Rust / other                                                    | Depends on whether the exporter is constructed from env vars.                                                                                         |
+| Apps with no OTel SDK linked at all                             | No — nothing produces spans for env vars to configure.                                                                                                |
 
 If you're on a stack from the first half of the table, you can stop reading here and do the quickstart. If you're hardcoding endpoints in app code, switch to the env-var form (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_RESOURCE_ATTRIBUTES`) before the injection helps you. If you have no SDK, you need to add one before any of this matters — `inject-sdk` mode (the one we use) deliberately does not bundle a language agent.
 
@@ -58,15 +58,15 @@ The end-to-end join key is `service.name` → `k8s.deployment.name`. If step 3 f
 
 ## Per-cloud caveats
 
-| Distribution | Caveat |
-| --- | --- |
-| EKS standard | None. |
-| EKS Fargate | Agent DaemonSet can't run on Fargate-typed nodes. Either keep one EC2 node so the agent has somewhere to land, or override `autoInstrumentation.instrumentation.otlpEndpointOverride` to point at the cluster collector. Set `presets.fargateMetrics.enabled=true` so per-pod CPU/memory still feed the join. |
-| GKE Standard | None. |
-| GKE Autopilot | Mutating webhooks are rejected on Google-managed namespaces. Only annotate user namespaces. |
-| AKS Azure CNI Overlay | None — pod IPs survive overlay. |
-| Self-managed (k3s, kind, k0s) | None. Auto-generated webhook certs work without cert-manager. |
-| Service-mesh (Linkerd, Istio) | Sidecars rewrite source IPs, breaking the `k8s.pod.ip` association key. The `k8s.pod.uid` and `(k8s.pod.name, k8s.namespace.name)` keys travel inside the OTLP payload itself and rescue the join. No mesh-side config needed. |
+| Distribution                  | Caveat                                                                                                                                                                                                                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| EKS standard                  | None.                                                                                                                                                                                                                                                                                                         |
+| EKS Fargate                   | Agent DaemonSet can't run on Fargate-typed nodes. Either keep one EC2 node so the agent has somewhere to land, or override `autoInstrumentation.instrumentation.otlpEndpointOverride` to point at the cluster collector. Set `presets.fargateMetrics.enabled=true` so per-pod CPU/memory still feed the join. |
+| GKE Standard                  | None.                                                                                                                                                                                                                                                                                                         |
+| GKE Autopilot                 | Mutating webhooks are rejected on Google-managed namespaces. Only annotate user namespaces.                                                                                                                                                                                                                   |
+| AKS Azure CNI Overlay         | None — pod IPs survive overlay.                                                                                                                                                                                                                                                                               |
+| Self-managed (k3s, kind, k0s) | None. Auto-generated webhook certs work without cert-manager.                                                                                                                                                                                                                                                 |
+| Service-mesh (Linkerd, Istio) | Sidecars rewrite source IPs, breaking the `k8s.pod.ip` association key. The `k8s.pod.uid` and `(k8s.pod.name, k8s.namespace.name)` keys travel inside the OTLP payload itself and rescue the join. No mesh-side config needed.                                                                                |
 
 ## Verification
 

@@ -5,6 +5,6 @@ import { map } from "./map"
 import { topOps } from "./top-ops"
 
 export const services = Command.make("services").pipe(
-  Command.withDescription("Service discovery, health, and dependencies"),
-  Command.withSubcommands([list, health, map, topOps]),
+	Command.withDescription("Service discovery, health, and dependencies"),
+	Command.withSubcommands([list, health, map, topOps]),
 )

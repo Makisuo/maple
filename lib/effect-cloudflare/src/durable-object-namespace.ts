@@ -34,10 +34,7 @@ import * as Effect from "effect/Effect"
 import type { HttpServerError } from "effect/unstable/http/HttpServerError"
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
-import {
-  DurableObjectState,
-  fromDurableObjectState,
-} from "./durable-object-state.ts"
+import { DurableObjectState, fromDurableObjectState } from "./durable-object-state.ts"
 import type { HttpEffect } from "./http.ts"
 import { makeDurableObjectBridge, makeRpcStub } from "./rpc.ts"
 import type { DurableWebSocket } from "./websocket.ts"
@@ -47,40 +44,31 @@ export type DurableObjectId = cf.DurableObjectId
 export type AlarmInvocationInfo = cf.AlarmInvocationInfo
 
 export interface DurableObjectShape {
-  fetch?: HttpEffect<any>
-  alarm?: (
-    alarmInfo?: AlarmInvocationInfo,
-  ) => Effect.Effect<void, never, never>
-  webSocketMessage?: (
-    socket: DurableWebSocket,
-    message: string | ArrayBuffer,
-  ) => Effect.Effect<void>
-  webSocketClose?: (
-    socket: DurableWebSocket,
-    code: number,
-    reason: string,
-    wasClean: boolean,
-  ) => Effect.Effect<void>
+	fetch?: HttpEffect<any>
+	alarm?: (alarmInfo?: AlarmInvocationInfo) => Effect.Effect<void, never, never>
+	webSocketMessage?: (socket: DurableWebSocket, message: string | ArrayBuffer) => Effect.Effect<void>
+	webSocketClose?: (
+		socket: DurableWebSocket,
+		code: number,
+		reason: string,
+		wasClean: boolean,
+	) => Effect.Effect<void>
 }
 
 export type DurableObjectStub<Shape> = {
-  [K in keyof Shape]: Shape[K]
+	[K in keyof Shape]: Shape[K]
 } & {
-  fetch(
-    request: HttpServerRequest.HttpServerRequest,
-  ): Effect.Effect<
-    HttpServerResponse.HttpServerResponse,
-    HttpServerError,
-    never
-  >
+	fetch(
+		request: HttpServerRequest.HttpServerRequest,
+	): Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerError, never>
 }
 
 export interface DurableObjectNamespaceHandle<Shape = unknown> {
-  readonly name: string
-  getByName(name: string): DurableObjectStub<Shape>
-  idFromName(name: string): DurableObjectId
-  idFromString(id: string): DurableObjectId
-  newUniqueId(): DurableObjectId
+	readonly name: string
+	getByName(name: string): DurableObjectStub<Shape>
+	idFromName(name: string): DurableObjectId
+	idFromString(id: string): DurableObjectId
+	newUniqueId(): DurableObjectId
 }
 
 // ---------------------------------------------------------------------------
@@ -93,54 +81,43 @@ export interface DurableObjectNamespaceHandle<Shape = unknown> {
 // ---------------------------------------------------------------------------
 
 type DurableObjectImpl = Effect.Effect<
-  Effect.Effect<Record<string, unknown>, never, DurableObjectState>,
-  never,
-  any
+	Effect.Effect<Record<string, unknown>, never, DurableObjectState>,
+	never,
+	any
 >
 
 const implRegistry = new Map<string, DurableObjectImpl>()
 
-export const registerDurableObjectImpl = (
-  name: string,
-  impl: DurableObjectImpl,
-): void => {
-  implRegistry.set(name, impl)
+export const registerDurableObjectImpl = (name: string, impl: DurableObjectImpl): void => {
+	implRegistry.set(name, impl)
 }
 
-export const getDurableObjectImpl = (
-  name: string,
-): DurableObjectImpl | undefined => implRegistry.get(name)
+export const getDurableObjectImpl = (name: string): DurableObjectImpl | undefined => implRegistry.get(name)
 
 // ---------------------------------------------------------------------------
 // Bridge base class — built once, parameterised per DO name.
 // ---------------------------------------------------------------------------
 
 const Bridge = makeDurableObjectBridge(
-  DurableObject as unknown as abstract new (
-    state: unknown,
-    env: unknown,
-  ) => cf.DurableObject,
-  async (name: string) => {
-    const impl = implRegistry.get(name)
-    if (!impl) {
-      throw new Error(
-        `Durable Object impl for '${name}' is not registered. Ensure the class module is loaded before CF instantiates the DO.`,
-      )
-    }
-    return (state: unknown, env: unknown) =>
-      Effect.gen(function* () {
-        const doState = fromDurableObjectState(state as cf.DurableObjectState)
-        const innerEffect = yield* impl
-        const methods = yield* innerEffect.pipe(
-          Effect.provideService(DurableObjectState, doState),
-          Effect.provideService(
-            WorkerEnvironment,
-            env as Record<string, unknown>,
-          ),
-        )
-        return methods as Record<string, unknown>
-      }) as Effect.Effect<Record<string, unknown>>
-  },
+	DurableObject as unknown as abstract new (state: unknown, env: unknown) => cf.DurableObject,
+	async (name: string) => {
+		const impl = implRegistry.get(name)
+		if (!impl) {
+			throw new Error(
+				`Durable Object impl for '${name}' is not registered. Ensure the class module is loaded before CF instantiates the DO.`,
+			)
+		}
+		return (state: unknown, env: unknown) =>
+			Effect.gen(function* () {
+				const doState = fromDurableObjectState(state as cf.DurableObjectState)
+				const innerEffect = yield* impl
+				const methods = yield* innerEffect.pipe(
+					Effect.provideService(DurableObjectState, doState),
+					Effect.provideService(WorkerEnvironment, env as Record<string, unknown>),
+				)
+				return methods as Record<string, unknown>
+			}) as Effect.Effect<Record<string, unknown>>
+	},
 )
 
 // ---------------------------------------------------------------------------
@@ -173,20 +150,13 @@ const Bridge = makeDurableObjectBridge(
  * handle with `.getByName(id)` → typed stub.
  */
 export const DurableObjectNamespace = <_Self = unknown>() => {
-  return <Shape extends DurableObjectShape, InitReq = never>(
-    name: string,
-    impl: Effect.Effect<
-      Effect.Effect<Shape, never, DurableObjectState>,
-      never,
-      InitReq
-    >,
-  ) => {
-    registerDurableObjectImpl(name, impl as unknown as DurableObjectImpl)
-    return Bridge(name) as unknown as new (
-      state: cf.DurableObjectState,
-      env: unknown,
-    ) => cf.DurableObject
-  }
+	return <Shape extends DurableObjectShape, InitReq = never>(
+		name: string,
+		impl: Effect.Effect<Effect.Effect<Shape, never, DurableObjectState>, never, InitReq>,
+	) => {
+		registerDurableObjectImpl(name, impl as unknown as DurableObjectImpl)
+		return Bridge(name) as unknown as new (state: cf.DurableObjectState, env: unknown) => cf.DurableObject
+	}
 }
 
 /**
@@ -198,29 +168,24 @@ export const DurableObjectNamespace = <_Self = unknown>() => {
  * actual binding comes from the worker env at runtime.
  */
 export const namespaceOf = <Shape = unknown>(
-  classOrName: { name: string } | string,
-): Effect.Effect<
-  DurableObjectNamespaceHandle<Shape>,
-  never,
-  WorkerEnvironment
-> =>
-  Effect.gen(function* () {
-    const env = yield* WorkerEnvironment
-    const name = typeof classOrName === "string" ? classOrName : classOrName.name
-    const binding = env[name] as cf.DurableObjectNamespace | undefined
-    if (!binding || typeof binding.getByName !== "function") {
-      return yield* Effect.die(
-        new Error(
-          `Worker env has no DurableObjectNamespace binding named '${name}'. Check wrangler.jsonc.`,
-        ),
-      )
-    }
-    return {
-      name,
-      getByName: (id: string) =>
-        makeRpcStub<DurableObjectStub<Shape>>(binding.getByName(id)),
-      idFromName: (id: string) => binding.idFromName(id),
-      idFromString: (id: string) => binding.idFromString(id),
-      newUniqueId: () => binding.newUniqueId(),
-    }
-  })
+	classOrName: { name: string } | string,
+): Effect.Effect<DurableObjectNamespaceHandle<Shape>, never, WorkerEnvironment> =>
+	Effect.gen(function* () {
+		const env = yield* WorkerEnvironment
+		const name = typeof classOrName === "string" ? classOrName : classOrName.name
+		const binding = env[name] as cf.DurableObjectNamespace | undefined
+		if (!binding || typeof binding.getByName !== "function") {
+			return yield* Effect.die(
+				new Error(
+					`Worker env has no DurableObjectNamespace binding named '${name}'. Check wrangler.jsonc.`,
+				),
+			)
+		}
+		return {
+			name,
+			getByName: (id: string) => makeRpcStub<DurableObjectStub<Shape>>(binding.getByName(id)),
+			idFromName: (id: string) => binding.idFromName(id),
+			idFromString: (id: string) => binding.idFromString(id),
+			newUniqueId: () => binding.newUniqueId(),
+		}
+	})

@@ -3,22 +3,22 @@
 ## Basic Datasource Definition
 
 ```typescript
-import { defineDatasource, t, engine, type InferRow } from "@tinybirdco/sdk";
+import { defineDatasource, t, engine, type InferRow } from "@tinybirdco/sdk"
 
 export const pageViews = defineDatasource("page_views", {
-  description: "Page view tracking data",
-  schema: {
-    timestamp: t.dateTime(),
-    pathname: t.string(),
-    session_id: t.string(),
-    country: t.string().lowCardinality().nullable(),
-  },
-  engine: engine.mergeTree({
-    sortingKey: ["pathname", "timestamp"],
-  }),
-});
+	description: "Page view tracking data",
+	schema: {
+		timestamp: t.dateTime(),
+		pathname: t.string(),
+		session_id: t.string(),
+		country: t.string().lowCardinality().nullable(),
+	},
+	engine: engine.mergeTree({
+		sortingKey: ["pathname", "timestamp"],
+	}),
+})
 
-export type PageViewsRow = InferRow<typeof pageViews>;
+export type PageViewsRow = InferRow<typeof pageViews>
 ```
 
 ## Schema Types
@@ -41,6 +41,7 @@ Chain modifiers on types:
 - `.array()` - Array of the type
 
 Example:
+
 ```typescript
 schema: {
   tags: t.string().array(),
@@ -53,15 +54,16 @@ schema: {
 
 ```typescript
 engine: engine.mergeTree({
-  sortingKey: ["column1", "column2"],
-  partitionKey: "toYYYYMM(timestamp)",  // optional
+	sortingKey: ["column1", "column2"],
+	partitionKey: "toYYYYMM(timestamp)", // optional
 })
 ```
 
 For aggregating materialized views:
+
 ```typescript
 engine: engine.aggregatingMergeTree({
-  sortingKey: ["date", "dimension"],
+	sortingKey: ["date", "dimension"],
 })
 ```
 
@@ -70,6 +72,6 @@ engine: engine.aggregatingMergeTree({
 Use `InferRow` to extract the TypeScript type from a datasource:
 
 ```typescript
-export type PageViewsRow = InferRow<typeof pageViews>;
+export type PageViewsRow = InferRow<typeof pageViews>
 // Results in: { timestamp: Date; pathname: string; session_id: string; country: string | null }
 ```

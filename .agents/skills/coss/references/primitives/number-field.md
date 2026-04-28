@@ -21,12 +21,12 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-  NumberFieldScrubArea,
+	NumberField,
+	NumberFieldDecrement,
+	NumberFieldGroup,
+	NumberFieldIncrement,
+	NumberFieldInput,
+	NumberFieldScrubArea,
 } from "@/components/ui/number-field"
 ```
 
@@ -34,12 +34,12 @@ import {
 
 ```tsx
 <NumberField defaultValue={0}>
-  <NumberFieldScrubArea label="Quantity" />
-  <NumberFieldGroup>
-    <NumberFieldDecrement />
-    <NumberFieldInput />
-    <NumberFieldIncrement />
-  </NumberFieldGroup>
+	<NumberFieldScrubArea label="Quantity" />
+	<NumberFieldGroup>
+		<NumberFieldDecrement />
+		<NumberFieldInput />
+		<NumberFieldIncrement />
+	</NumberFieldGroup>
 </NumberField>
 ```
 
@@ -53,15 +53,15 @@ Number field with external label and bounds:
 
 ```tsx
 <Field name="quantity">
-  <FieldLabel>Quantity</FieldLabel>
-  <NumberField defaultValue={1} min={0} max={99}>
-    <NumberFieldGroup>
-      <NumberFieldDecrement />
-      <NumberFieldInput />
-      <NumberFieldIncrement />
-    </NumberFieldGroup>
-  </NumberField>
-  <FieldError />
+	<FieldLabel>Quantity</FieldLabel>
+	<NumberField defaultValue={1} min={0} max={99}>
+		<NumberFieldGroup>
+			<NumberFieldDecrement />
+			<NumberFieldInput />
+			<NumberFieldIncrement />
+		</NumberFieldGroup>
+	</NumberField>
+	<FieldError />
 </Field>
 ```
 
@@ -69,12 +69,12 @@ Number field with scrub area (drag to adjust):
 
 ```tsx
 <NumberField defaultValue={50}>
-  <NumberFieldScrubArea label="Brightness" />
-  <NumberFieldGroup>
-    <NumberFieldDecrement />
-    <NumberFieldInput />
-    <NumberFieldIncrement />
-  </NumberFieldGroup>
+	<NumberFieldScrubArea label="Brightness" />
+	<NumberFieldGroup>
+		<NumberFieldDecrement />
+		<NumberFieldInput />
+		<NumberFieldIncrement />
+	</NumberFieldGroup>
 </NumberField>
 ```
 

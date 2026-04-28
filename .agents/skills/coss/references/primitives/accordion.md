@@ -20,24 +20,17 @@ npm install @base-ui/react
 ## Canonical imports
 
 ```tsx
-import {
-  Accordion,
-  AccordionItem,
-  AccordionPanel,
-  AccordionTrigger,
-} from "@/components/ui/accordion"
+import { Accordion, AccordionItem, AccordionPanel, AccordionTrigger } from "@/components/ui/accordion"
 ```
 
 ## Minimal pattern
 
 ```tsx
 <Accordion defaultValue={["item-1"]}>
-  <AccordionItem value="item-1">
-    <AccordionTrigger>What is Base UI?</AccordionTrigger>
-    <AccordionPanel>
-      Base UI is a library of high-quality unstyled React components.
-    </AccordionPanel>
-  </AccordionItem>
+	<AccordionItem value="item-1">
+		<AccordionTrigger>What is Base UI?</AccordionTrigger>
+		<AccordionPanel>Base UI is a library of high-quality unstyled React components.</AccordionPanel>
+	</AccordionItem>
 </Accordion>
 ```
 
@@ -49,14 +42,14 @@ Multiple panels open simultaneously:
 
 ```tsx
 <Accordion multiple defaultValue={["item-1", "item-2"]}>
-  <AccordionItem value="item-1">
-    <AccordionTrigger>Section 1</AccordionTrigger>
-    <AccordionPanel>Content 1</AccordionPanel>
-  </AccordionItem>
-  <AccordionItem value="item-2">
-    <AccordionTrigger>Section 2</AccordionTrigger>
-    <AccordionPanel>Content 2</AccordionPanel>
-  </AccordionItem>
+	<AccordionItem value="item-1">
+		<AccordionTrigger>Section 1</AccordionTrigger>
+		<AccordionPanel>Content 1</AccordionPanel>
+	</AccordionItem>
+	<AccordionItem value="item-2">
+		<AccordionTrigger>Section 2</AccordionTrigger>
+		<AccordionPanel>Content 2</AccordionPanel>
+	</AccordionItem>
 </Accordion>
 ```
 
@@ -89,4 +82,3 @@ See `p-accordion-1` through `p-accordion-4` for mapped items, single-open, multi
 - single-open static sections: `p-accordion-2`
 - multiple-open behavior: `p-accordion-3`
 - controlled value + external actions: `p-accordion-4`
-

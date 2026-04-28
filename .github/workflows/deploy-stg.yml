@@ -1,41 +1,41 @@
 name: Deploy STG (Cloudflare via Alchemy)
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+    push:
+        branches:
+            - main
+    workflow_dispatch:
 
 concurrency:
-  group: deploy-stg
-  cancel-in-progress: false
+    group: deploy-stg
+    cancel-in-progress: false
 
 permissions:
-  contents: read
+    contents: read
 
 jobs:
-  deploy-stg:
-    runs-on: ubuntu-latest
-    env:
-      DOPPLER_PROJECT: maple
-      DOPPLER_CONFIG: stg
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    deploy-stg:
+        runs-on: ubuntu-latest
+        env:
+            DOPPLER_PROJECT: maple
+            DOPPLER_CONFIG: stg
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+            - name: Setup Bun
+              uses: oven-sh/setup-bun@v2
 
-      - name: Load deployment secrets from Doppler
-        uses: dopplerhq/secrets-fetch-action@v1.3.0
-        with:
-          doppler-token: ${{ secrets.DOPPLER_TOKEN }}
-          doppler-project: ${{ env.DOPPLER_PROJECT }}
-          doppler-config: ${{ env.DOPPLER_CONFIG }}
-          inject-env-vars: true
+            - name: Load deployment secrets from Doppler
+              uses: dopplerhq/secrets-fetch-action@v1.3.0
+              with:
+                  doppler-token: ${{ secrets.DOPPLER_TOKEN }}
+                  doppler-project: ${{ env.DOPPLER_PROJECT }}
+                  doppler-config: ${{ env.DOPPLER_CONFIG }}
+                  inject-env-vars: true
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
 
-      - name: Deploy STG stack with Alchemy
-        run: bun run alchemy:deploy:stg
+            - name: Deploy STG stack with Alchemy
+              run: bun run alchemy:deploy:stg

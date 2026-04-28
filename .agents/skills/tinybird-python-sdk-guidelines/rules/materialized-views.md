@@ -5,6 +5,7 @@ Materialized views automatically aggregate data as it arrives, enabling real-tim
 ## Basic Materialized View
 
 A materialized view consists of:
+
 1. A target datasource with aggregate columns
 2. A materialized view definition that populates it
 
@@ -75,13 +76,13 @@ For complex aggregations (uniq, quantile, etc.):
 
 In materialized view SQL, use state functions to prepare aggregates:
 
-| Final Function | State Function |
-|----------------|----------------|
-| `count()` | `count()` (no state needed for SimpleAggregateFunction) |
-| `sum(col)` | `sum(col)` (no state needed) |
-| `uniq(col)` | `uniqState(col)` |
-| `quantile(0.95)(col)` | `quantileState(0.95)(col)` |
-| `avg(col)` | `avgState(col)` |
+| Final Function        | State Function                                          |
+| --------------------- | ------------------------------------------------------- |
+| `count()`             | `count()` (no state needed for SimpleAggregateFunction) |
+| `sum(col)`            | `sum(col)` (no state needed)                            |
+| `uniq(col)`           | `uniqState(col)`                                        |
+| `quantile(0.95)(col)` | `quantileState(0.95)(col)`                              |
+| `avg(col)`            | `avgState(col)`                                         |
 
 ## Querying Materialized Views
 

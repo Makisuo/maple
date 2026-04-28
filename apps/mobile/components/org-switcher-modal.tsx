@@ -1,14 +1,6 @@
 import { useOrganization, useOrganizationList } from "@clerk/expo"
 import { useRouter } from "expo-router"
-import {
-	ActivityIndicator,
-	FlatList,
-	Image,
-	Modal,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native"
+import { ActivityIndicator, FlatList, Image, Modal, Text, TouchableOpacity, View } from "react-native"
 import { hapticSelection } from "../lib/haptics"
 import { colors } from "../lib/theme"
 
@@ -20,12 +12,7 @@ interface OrgSwitcherModalProps {
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
 	const initial = name.charAt(0).toUpperCase()
 	if (imageUrl) {
-		return (
-			<Image
-				source={{ uri: imageUrl }}
-				style={{ width: 32, height: 32, borderRadius: 6 }}
-			/>
-		)
+		return <Image source={{ uri: imageUrl }} style={{ width: 32, height: 32, borderRadius: 6 }} />
 	}
 	return (
 		<View
@@ -74,21 +61,14 @@ export function OrgSwitcherModal({ visible, onClose }: OrgSwitcherModalProps) {
 	const loading = !isLoaded || userMemberships?.isLoading
 
 	return (
-		<Modal
-			visible={visible}
-			animationType="slide"
-			presentationStyle="pageSheet"
-			onRequestClose={onClose}
-		>
+		<Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
 			<View className="flex-1 bg-background">
 				{/* Header */}
 				<View className="flex-row items-center justify-between px-5 pt-5 pb-4">
 					<TouchableOpacity onPress={onClose}>
 						<Text className="text-sm text-muted-foreground font-mono">Cancel</Text>
 					</TouchableOpacity>
-					<Text className="text-base font-bold text-foreground font-mono">
-						Organization
-					</Text>
+					<Text className="text-base font-bold text-foreground font-mono">Organization</Text>
 					<View style={{ width: 48 }} />
 				</View>
 

@@ -1,23 +1,23 @@
 ---
 name: chdb-datastore
 description: >-
-  Drop-in pandas replacement with ClickHouse performance. Use
-  `import chdb.datastore as pd` (or `from datastore import DataStore`)
-  and write standard pandas code — same API, 10-100x faster on large
-  datasets. Supports 16+ data sources (MySQL, PostgreSQL, S3, MongoDB,
-  ClickHouse, Iceberg, Delta Lake, etc.) and 10+ file formats (Parquet,
-  CSV, JSON, Arrow, ORC, etc.) with cross-source joins. Use this skill
-  when the user wants to analyze data with pandas-style syntax, speed
-  up slow pandas code, query remote databases or cloud storage as
-  DataFrames, or join data across different sources — even if they
-  don't explicitly mention chdb or DataStore. Do NOT use for raw SQL
-  queries, ClickHouse server administration, or non-Python languages.
+    Drop-in pandas replacement with ClickHouse performance. Use
+    `import chdb.datastore as pd` (or `from datastore import DataStore`)
+    and write standard pandas code — same API, 10-100x faster on large
+    datasets. Supports 16+ data sources (MySQL, PostgreSQL, S3, MongoDB,
+    ClickHouse, Iceberg, Delta Lake, etc.) and 10+ file formats (Parquet,
+    CSV, JSON, Arrow, ORC, etc.) with cross-source joins. Use this skill
+    when the user wants to analyze data with pandas-style syntax, speed
+    up slow pandas code, query remote databases or cloud storage as
+    DataFrames, or join data across different sources — even if they
+    don't explicitly mention chdb or DataStore. Do NOT use for raw SQL
+    queries, ClickHouse server administration, or non-Python languages.
 license: Apache-2.0
 compatibility: Requires Python 3.9+, macOS or Linux. pip install chdb.
 metadata:
-  author: chdb-io
-  version: "4.1"
-  homepage: https://clickhouse.com/docs/chdb
+    author: chdb-io
+    version: "4.1"
+    homepage: https://clickhouse.com/docs/chdb
 ---
 
 # chdb DataStore — It's Just Faster Pandas
@@ -124,14 +124,14 @@ target.insert_into("category", "total", "count").select_from(
 
 ## Troubleshooting
 
-| Problem | Fix |
-|---------|-----|
-| `ImportError: No module named 'chdb'` | `pip install chdb` |
+| Problem                                  | Fix                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------------- |
+| `ImportError: No module named 'chdb'`    | `pip install chdb`                                                              |
 | `ImportError: cannot import 'DataStore'` | Use `from datastore import DataStore` or `from chdb.datastore import DataStore` |
-| Database connection timeout | Include port in host: `host="db:3306"` not `host="db"` |
-| Join returns empty result | Check key types match (both int or both string); use `.to_sql()` to inspect |
-| Unexpected results | Call `ds.to_sql()` to see the generated SQL and debug |
-| Environment check | Run `python scripts/verify_install.py` (from skill directory) |
+| Database connection timeout              | Include port in host: `host="db:3306"` not `host="db"`                          |
+| Join returns empty result                | Check key types match (both int or both string); use `.to_sql()` to inspect     |
+| Unexpected results                       | Call `ds.to_sql()` to see the generated SQL and debug                           |
+| Environment check                        | Run `python scripts/verify_install.py` (from skill directory)                   |
 
 ## References
 
@@ -141,6 +141,6 @@ target.insert_into("category", "total", "count").select_from(
 - [Verify Install](scripts/verify_install.py) — Environment verification script
 - [Official Docs](https://clickhouse.com/docs/chdb)
 
-> Note: This skill teaches how to *use* chdb DataStore.
+> Note: This skill teaches how to _use_ chdb DataStore.
 > For raw SQL queries, use the `chdb-sql` skill.
 > For contributing to chdb source code, see CLAUDE.md in the project root.

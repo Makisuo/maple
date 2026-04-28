@@ -15,5 +15,5 @@ export const BooleanFromStringParam = Schema.fromJsonString(Schema.Boolean)
  * and a JSON-encoded string, preventing crashes from malformed URLs.
  */
 export const OptionalStringArrayParam = Schema.optional(
-  Schema.Union([MutableStringArray, StringArrayFromJsonString]),
+	Schema.Union([MutableStringArray, StringArrayFromJsonString]),
 )

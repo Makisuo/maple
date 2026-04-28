@@ -12,69 +12,69 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const logsSearchSchema = Schema.Struct({
-  services: OptionalStringArrayParam,
-  severities: OptionalStringArrayParam,
-  deploymentEnvs: OptionalStringArrayParam,
-  deploymentEnvMatchMode: Schema.optional(Schema.Literals(["contains"])),
-  search: Schema.optional(Schema.String),
-  startTime: Schema.optional(Schema.String),
-  endTime: Schema.optional(Schema.String),
-  timePreset: Schema.optional(Schema.String),
+	services: OptionalStringArrayParam,
+	severities: OptionalStringArrayParam,
+	deploymentEnvs: OptionalStringArrayParam,
+	deploymentEnvMatchMode: Schema.optional(Schema.Literals(["contains"])),
+	search: Schema.optional(Schema.String),
+	startTime: Schema.optional(Schema.String),
+	endTime: Schema.optional(Schema.String),
+	timePreset: Schema.optional(Schema.String),
 })
 
 export type LogsSearchParams = Schema.Schema.Type<typeof logsSearchSchema>
 
 export const Route = effectRoute(createFileRoute("/logs"))({
-  component: LogsPage,
-  validateSearch: Schema.toStandardSchemaV1(logsSearchSchema),
+	component: LogsPage,
+	validateSearch: Schema.toStandardSchemaV1(logsSearchSchema),
 })
 
 export function LogsPage() {
-  const search = Route.useSearch()
-  const navigate = useNavigate({ from: Route.fullPath })
+	const search = Route.useSearch()
+	const navigate = useNavigate({ from: Route.fullPath })
 
-  const handleTimeChange = (
-    range: {
-      startTime?: string
-      endTime?: string
-      presetValue?: string
-    },
-    options?: { replace?: boolean },
-  ) => {
-    navigate({
-      replace: options?.replace,
-      search: (prev) => applyTimeRangeSearch(prev, range),
-    })
-  }
+	const handleTimeChange = (
+		range: {
+			startTime?: string
+			endTime?: string
+			presetValue?: string
+		},
+		options?: { replace?: boolean },
+	) => {
+		navigate({
+			replace: options?.replace,
+			search: (prev) => applyTimeRangeSearch(prev, range),
+		})
+	}
 
-  return (
-    <PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-      <DashboardLayout
-        breadcrumbs={[{ label: "Logs" }]}
-        title="Logs"
-        filterSidebar={<LogsFilterSidebar />}
-        headerActions={
-          <TimeRangeHeaderControls
-            startTime={search.startTime}
-            endTime={search.endTime}
-            presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
-            onTimeChange={handleTimeChange}
-          />
-        }
-        stickyContent={
-          <LogsVolumeChart
-            filters={search}
-            onTimeRangeSelect={(range) =>
-              handleTimeChange(
-                { startTime: range.startTime, endTime: range.endTime },
-                { replace: true },
-              )
-            }
-          />
-        }
-      >
-        <LogsTable filters={search} />
-      </DashboardLayout>
-    </PageRefreshProvider>
-  )
+	return (
+		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
+			<DashboardLayout
+				breadcrumbs={[{ label: "Logs" }]}
+				title="Logs"
+				filterSidebar={<LogsFilterSidebar />}
+				headerActions={
+					<TimeRangeHeaderControls
+						startTime={search.startTime}
+						endTime={search.endTime}
+						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
+						onTimeChange={handleTimeChange}
+					/>
+				}
+				stickyContent={
+					<LogsVolumeChart
+						filters={search}
+						onTimeRangeSelect={(range) =>
+							handleTimeChange(
+								{ startTime: range.startTime, endTime: range.endTime },
+								{ replace: true },
+							)
+						}
+					/>
+				}
+			>
+				<LogsTable filters={search} />
+			</DashboardLayout>
+		</PageRefreshProvider>
+	)
 }

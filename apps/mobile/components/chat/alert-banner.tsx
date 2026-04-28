@@ -29,10 +29,7 @@ export function AlertBanner({ alert }: AlertBannerProps) {
 			<View style={{ width: 3, backgroundColor: sev }} />
 			<View className="flex-1 gap-1 px-3 py-2.5">
 				<View className="flex-row items-center gap-2">
-					<Text
-						className="font-mono text-[10px]"
-						style={{ color: sev, letterSpacing: 1.5 }}
-					>
+					<Text className="font-mono text-[10px]" style={{ color: sev, letterSpacing: 1.5 }}>
 						{alert.severity.toUpperCase()} · {alert.eventType.toUpperCase()}
 					</Text>
 					<Text
@@ -42,17 +39,12 @@ export function AlertBanner({ alert }: AlertBannerProps) {
 						ATTACHED
 					</Text>
 				</View>
-				<Text
-					className="font-mono text-[13px] font-bold text-foreground"
-					numberOfLines={1}
-				>
+				<Text className="font-mono text-[13px] font-bold text-foreground" numberOfLines={1}>
 					{alert.ruleName}
 				</Text>
-				<Text
-					className="font-mono text-[11px] text-muted-foreground"
-					numberOfLines={1}
-				>
-					{signalLabel(alert.signalType)} · observed {observed} {threshold} · {alert.windowMinutes}m window
+				<Text className="font-mono text-[11px] text-muted-foreground" numberOfLines={1}>
+					{signalLabel(alert.signalType)} · observed {observed} {threshold} · {alert.windowMinutes}m
+					window
 				</Text>
 			</View>
 		</View>

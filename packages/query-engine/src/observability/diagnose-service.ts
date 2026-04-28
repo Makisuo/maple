@@ -1,119 +1,114 @@
 import { Array as Arr, Effect, pipe } from "effect"
 import type {
-  ServiceOverviewOutput,
-  ErrorsByTypeOutput,
-  ListLogsOutput,
-  ListTracesOutput,
-  ServiceApdexTimeSeriesOutput,
+	ServiceOverviewOutput,
+	ErrorsByTypeOutput,
+	ListLogsOutput,
+	ListTracesOutput,
+	ServiceApdexTimeSeriesOutput,
 } from "@maple/domain/tinybird"
 import { TinybirdExecutor } from "./TinybirdExecutor"
 import type { TimeRange } from "./types"
 import { toLogEntry } from "./row-mappers"
 import { aggregateServiceRows, weightedAvg } from "./aggregation"
 
-export const diagnoseService = Effect.fn("Observability.diagnoseService")(
-  function* (input: {
-    readonly serviceName: string
-    readonly timeRange: TimeRange
-    readonly environment?: string
-  }) {
-    const executor = yield* TinybirdExecutor
-    const envFilter = input.environment ? { deployment_envs: input.environment } : {}
+export const diagnoseService = Effect.fn("Observability.diagnoseService")(function* (input: {
+	readonly serviceName: string
+	readonly timeRange: TimeRange
+	readonly environment?: string
+}) {
+	const executor = yield* TinybirdExecutor
+	const envFilter = input.environment ? { deployment_envs: input.environment } : {}
 
-    const [overviewResult, errorsResult, logsResult, tracesResult, apdexResult] =
-      yield* Effect.all(
-        [
-          executor.query<ServiceOverviewOutput>(
-            "service_overview",
-            {
-              start_time: input.timeRange.startTime,
-              end_time: input.timeRange.endTime,
-              ...(input.environment && { environments: input.environment }),
-            },
-            { profile: "aggregation" },
-          ),
-          executor.query<ErrorsByTypeOutput>(
-            "errors_by_type",
-            {
-              start_time: input.timeRange.startTime,
-              end_time: input.timeRange.endTime,
-              services: input.serviceName,
-              limit: 10,
-              ...envFilter,
-            },
-            { profile: "aggregation" },
-          ),
-          executor.query<ListLogsOutput>(
-            "list_logs",
-            {
-              start_time: input.timeRange.startTime,
-              end_time: input.timeRange.endTime,
-              service: input.serviceName,
-              limit: 15,
-            },
-            { profile: "list" },
-          ),
-          executor.query<ListTracesOutput>(
-            "list_traces",
-            {
-              start_time: input.timeRange.startTime,
-              end_time: input.timeRange.endTime,
-              service: input.serviceName,
-              limit: 5,
-            },
-            { profile: "list" },
-          ),
-          executor.query<ServiceApdexTimeSeriesOutput>(
-            "service_apdex_time_series",
-            {
-              service_name: input.serviceName,
-              start_time: input.timeRange.startTime,
-              end_time: input.timeRange.endTime,
-              bucket_seconds: 300,
-            },
-            { profile: "aggregation" },
-          ),
-        ],
-        { concurrency: "unbounded" },
-      )
+	const [overviewResult, errorsResult, logsResult, tracesResult, apdexResult] = yield* Effect.all(
+		[
+			executor.query<ServiceOverviewOutput>(
+				"service_overview",
+				{
+					start_time: input.timeRange.startTime,
+					end_time: input.timeRange.endTime,
+					...(input.environment && { environments: input.environment }),
+				},
+				{ profile: "aggregation" },
+			),
+			executor.query<ErrorsByTypeOutput>(
+				"errors_by_type",
+				{
+					start_time: input.timeRange.startTime,
+					end_time: input.timeRange.endTime,
+					services: input.serviceName,
+					limit: 10,
+					...envFilter,
+				},
+				{ profile: "aggregation" },
+			),
+			executor.query<ListLogsOutput>(
+				"list_logs",
+				{
+					start_time: input.timeRange.startTime,
+					end_time: input.timeRange.endTime,
+					service: input.serviceName,
+					limit: 15,
+				},
+				{ profile: "list" },
+			),
+			executor.query<ListTracesOutput>(
+				"list_traces",
+				{
+					start_time: input.timeRange.startTime,
+					end_time: input.timeRange.endTime,
+					service: input.serviceName,
+					limit: 5,
+				},
+				{ profile: "list" },
+			),
+			executor.query<ServiceApdexTimeSeriesOutput>(
+				"service_apdex_time_series",
+				{
+					service_name: input.serviceName,
+					start_time: input.timeRange.startTime,
+					end_time: input.timeRange.endTime,
+					bucket_seconds: 300,
+				},
+				{ profile: "aggregation" },
+			),
+		],
+		{ concurrency: "unbounded" },
+	)
 
-    const agg = aggregateServiceRows(overviewResult.data, input.serviceName)
-    const errorRate = agg.throughput > 0 ? agg.errorCount / agg.throughput : 0
+	const agg = aggregateServiceRows(overviewResult.data, input.serviceName)
+	const errorRate = agg.throughput > 0 ? agg.errorCount / agg.throughput : 0
 
-    const avgApdex = pipe(
-      apdexResult.data,
-      Arr.filter((a) => Number(a.totalCount) > 0),
-      (vals) => vals.length > 0
-        ? Arr.reduce(vals, 0, (sum, a) => sum + a.apdexScore) / vals.length
-        : 0,
-    )
+	const avgApdex = pipe(
+		apdexResult.data,
+		Arr.filter((a) => Number(a.totalCount) > 0),
+		(vals) => (vals.length > 0 ? Arr.reduce(vals, 0, (sum, a) => sum + a.apdexScore) / vals.length : 0),
+	)
 
-    return {
-      serviceName: input.serviceName,
-      timeRange: input.timeRange,
-      health: {
-        throughput: agg.throughput,
-        errorRate,
-        errorCount: agg.errorCount,
-        p50Ms: weightedAvg(agg.weightedP50, agg.throughput),
-        p95Ms: weightedAvg(agg.weightedP95, agg.throughput),
-        p99Ms: weightedAvg(agg.weightedP99, agg.throughput),
-        apdex: avgApdex,
-      },
-      topErrors: pipe(
-        errorsResult.data,
-        Arr.map((e) => ({ errorType: e.errorType, count: Number(e.count) })),
-      ),
-      recentTraces: pipe(
-        tracesResult.data,
-        Arr.map((t) => ({
-          traceId: t.traceId,
-          rootSpanName: t.rootSpanName,
-          durationMs: Number(t.durationMicros) / 1000,
-          hasError: Boolean(Number(t.hasError)),
-        })),
-      ),
-      recentLogs: pipe(logsResult.data, Arr.map(toLogEntry)),
-    }
-  },
-)
+	return {
+		serviceName: input.serviceName,
+		timeRange: input.timeRange,
+		health: {
+			throughput: agg.throughput,
+			errorRate,
+			errorCount: agg.errorCount,
+			p50Ms: weightedAvg(agg.weightedP50, agg.throughput),
+			p95Ms: weightedAvg(agg.weightedP95, agg.throughput),
+			p99Ms: weightedAvg(agg.weightedP99, agg.throughput),
+			apdex: avgApdex,
+		},
+		topErrors: pipe(
+			errorsResult.data,
+			Arr.map((e) => ({ errorType: e.errorType, count: Number(e.count) })),
+		),
+		recentTraces: pipe(
+			tracesResult.data,
+			Arr.map((t) => ({
+				traceId: t.traceId,
+				rootSpanName: t.rootSpanName,
+				durationMs: Number(t.durationMicros) / 1000,
+				hasError: Boolean(Number(t.hasError)),
+			})),
+		),
+		recentLogs: pipe(logsResult.data, Arr.map(toLogEntry)),
+	}
+})

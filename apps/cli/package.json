@@ -1,24 +1,24 @@
 {
-  "name": "@maple/cli",
-  "private": true,
-  "type": "module",
-  "bin": {
-    "maple": "./src/bin.ts"
-  },
-  "scripts": {
-    "start": "bun run src/bin.ts",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@effect/platform-bun": "catalog:effect",
-    "@maple/domain": "workspace:*",
-    "@maple/query-engine": "workspace:*",
-    "effect": "catalog:effect"
-  },
-  "devDependencies": {
-    "@effect/language-service": "catalog:effect",
-    "@types/bun": "^1.3.11",
-    "@types/node": "catalog:tooling",
-    "typescript": "catalog:tooling"
-  }
+	"name": "@maple/cli",
+	"private": true,
+	"bin": {
+		"maple": "./src/bin.ts"
+	},
+	"type": "module",
+	"scripts": {
+		"start": "bun run src/bin.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@effect/platform-bun": "catalog:effect",
+		"@maple/domain": "workspace:*",
+		"@maple/query-engine": "workspace:*",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@types/bun": "^1.3.11",
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling"
+	}
 }

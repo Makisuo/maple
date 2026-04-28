@@ -4,22 +4,22 @@
 
 import { expectTypeOf } from "expect-type"
 import type {
-  CHString,
-  CHUInt8,
-  CHUInt16,
-  CHUInt32,
-  CHUInt64,
-  CHInt32,
-  CHFloat64,
-  CHDateTime,
-  CHDateTime64,
-  CHBool,
-  CHMap,
-  CHArray,
-  CHNullable,
-  InferTS,
-  OutputToColumnDefs,
-  NullableColumnDefs,
+	CHString,
+	CHUInt8,
+	CHUInt16,
+	CHUInt32,
+	CHUInt64,
+	CHInt32,
+	CHFloat64,
+	CHDateTime,
+	CHDateTime64,
+	CHBool,
+	CHMap,
+	CHArray,
+	CHNullable,
+	InferTS,
+	OutputToColumnDefs,
+	NullableColumnDefs,
 } from "./types"
 
 // ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ expectTypeOf<InferTS<CHNullable<CHFloat64>>>().toEqualTypeOf<number | null>()
 
 // Nested compound types
 expectTypeOf<InferTS<CHArray<CHMap<CHString, CHString>>>>().toEqualTypeOf<
-  ReadonlyArray<Record<string, string>>
+	ReadonlyArray<Record<string, string>>
 >()
 expectTypeOf<InferTS<CHNullable<CHArray<CHString>>>>().toEqualTypeOf<ReadonlyArray<string> | null>()
 

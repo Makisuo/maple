@@ -6,11 +6,7 @@ interface SingleBarChartProps {
 	color: string
 }
 
-export function SingleBarChart({
-	data,
-	height = 100,
-	color,
-}: SingleBarChartProps) {
+export function SingleBarChart({ data, height = 100, color }: SingleBarChartProps) {
 	const max = Math.max(...data.map((d) => d.value), 0.001)
 
 	const labelIndices: number[] = []
@@ -40,10 +36,7 @@ export function SingleBarChart({
 				{data.map((bar, i) => {
 					const barHeight = Math.max((bar.value / max) * height, 1)
 					return (
-						<View
-							key={i}
-							style={{ flex: 1, justifyContent: "flex-end", height }}
-						>
+						<View key={i} style={{ flex: 1, justifyContent: "flex-end", height }}>
 							<View
 								style={{
 									width: "100%",
@@ -58,11 +51,7 @@ export function SingleBarChart({
 			</View>
 			<View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
 				{labelIndices.map((idx) => (
-					<Text
-						key={idx}
-						className="text-muted-foreground font-mono"
-						style={{ fontSize: 10 }}
-					>
+					<Text key={idx} className="text-muted-foreground font-mono" style={{ fontSize: 10 }}>
 						{formatLabel(data[idx].bucket)}
 					</Text>
 				))}

@@ -33,8 +33,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 
 ```tsx
 <Label>
-  <Checkbox value="terms" />
-  Accept terms and conditions
+	<Checkbox value="terms" />
+	Accept terms and conditions
 </Label>
 ```
 
@@ -46,18 +46,18 @@ CheckboxGroup with label-wrapped options:
 
 ```tsx
 <CheckboxGroup aria-label="Select frameworks" defaultValue={["next"]}>
-  <Label>
-    <Checkbox value="next" />
-    Next.js
-  </Label>
-  <Label>
-    <Checkbox value="vite" />
-    Vite
-  </Label>
-  <Label>
-    <Checkbox value="astro" />
-    Astro
-  </Label>
+	<Label>
+		<Checkbox value="next" />
+		Next.js
+	</Label>
+	<Label>
+		<Checkbox value="vite" />
+		Vite
+	</Label>
+	<Label>
+		<Checkbox value="astro" />
+		Astro
+	</Label>
 </CheckboxGroup>
 ```
 

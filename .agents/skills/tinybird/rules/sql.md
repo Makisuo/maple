@@ -25,11 +25,13 @@
 - In `defined()` checks, do not quote the parameter name.
 
 Bad:
+
 ```
 SELECT * FROM events WHERE session_id={{String(my_param, "default")}}
 ```
 
 Good:
+
 ```
 %
 SELECT * FROM events WHERE session_id={{String(my_param, "default")}}
@@ -54,11 +56,13 @@ SELECT * FROM events WHERE session_id={{String(my_param, "default")}}
 ## External Tables
 
 Iceberg:
+
 ```
 FROM iceberg('s3://bucket/path/to/table', {{tb_secret('aws_access_key_id')}}, {{tb_secret('aws_secret_access_key')}})
 ```
 
 Postgres:
+
 ```
 FROM postgresql({{ tb_secret("db_host_port") }}, 'database', 'table', {{tb_secret('db_username')}}, {{tb_secret('db_password')}}, 'schema_optional')
 ```

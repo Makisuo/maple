@@ -50,8 +50,8 @@ Badge with decorative icon:
 
 ```tsx
 <Badge variant="outline">
-  <CheckIcon aria-hidden="true" />
-  Verified
+	<CheckIcon aria-hidden="true" />
+	Verified
 </Badge>
 ```
 
@@ -59,8 +59,10 @@ Badge inside a button (use negative margin for alignment):
 
 ```tsx
 <Button variant="outline">
-  Messages
-  <Badge className="-me-1" variant="outline">18</Badge>
+	Messages
+	<Badge className="-me-1" variant="outline">
+		18
+	</Badge>
 </Button>
 ```
 

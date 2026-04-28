@@ -1,22 +1,24 @@
 export type FrameworkId = "nextjs" | "nodejs" | "python" | "go" | "effect" | "otel"
 
 export interface SdkSnippet {
-  language: FrameworkId
-  label: string
-  description: string
-  iconKey: FrameworkId
-  install: string | { packages: string[] }
-  instrument: string
+	language: FrameworkId
+	label: string
+	description: string
+	iconKey: FrameworkId
+	install: string | { packages: string[] }
+	instrument: string
 }
 
 export const sdkSnippets: SdkSnippet[] = [
-  {
-    language: "nextjs",
-    label: "Next.js",
-    description: "React framework",
-    iconKey: "nextjs",
-    install: { packages: ["@vercel/otel", "@opentelemetry/sdk-logs", "@opentelemetry/exporter-logs-otlp-http"] },
-    instrument: `// instrumentation.ts (project root)
+	{
+		language: "nextjs",
+		label: "Next.js",
+		description: "React framework",
+		iconKey: "nextjs",
+		install: {
+			packages: ["@vercel/otel", "@opentelemetry/sdk-logs", "@opentelemetry/exporter-logs-otlp-http"],
+		},
+		instrument: `// instrumentation.ts (project root)
 import { registerOTel } from "@vercel/otel";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
@@ -34,14 +36,21 @@ export function register() {
     ),
   });
 }`,
-  },
-  {
-    language: "nodejs",
-    label: "Node.js",
-    description: "JavaScript runtime",
-    iconKey: "nodejs",
-    install: { packages: ["@opentelemetry/sdk-node", "@opentelemetry/auto-instrumentations-node", "@opentelemetry/exporter-trace-otlp-http", "@opentelemetry/exporter-logs-otlp-http"] },
-    instrument: `// tracing.ts — run with: node --import ./tracing.ts app.ts
+	},
+	{
+		language: "nodejs",
+		label: "Node.js",
+		description: "JavaScript runtime",
+		iconKey: "nodejs",
+		install: {
+			packages: [
+				"@opentelemetry/sdk-node",
+				"@opentelemetry/auto-instrumentations-node",
+				"@opentelemetry/exporter-trace-otlp-http",
+				"@opentelemetry/exporter-logs-otlp-http",
+			],
+		},
+		instrument: `// tracing.ts — run with: node --import ./tracing.ts app.ts
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -65,16 +74,16 @@ const sdk = new NodeSDK({
 });
 
 sdk.start();`,
-  },
-  {
-    language: "python",
-    label: "Python",
-    description: "General purpose",
-    iconKey: "python",
-    install: `pip install opentelemetry-sdk \\
+	},
+	{
+		language: "python",
+		label: "Python",
+		description: "General purpose",
+		iconKey: "python",
+		install: `pip install opentelemetry-sdk \\
   opentelemetry-exporter-otlp-proto-http \\
   opentelemetry-instrumentation`,
-    instrument: `# tracing.py
+		instrument: `# tracing.py
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -92,16 +101,16 @@ trace.set_tracer_provider(provider)
 tracer = trace.get_tracer("quickstart")
 with tracer.start_as_current_span("hello-maple"):
     print("Trace sent!")`,
-  },
-  {
-    language: "go",
-    label: "Go",
-    description: "Systems language",
-    iconKey: "go",
-    install: `go get go.opentelemetry.io/otel \\
+	},
+	{
+		language: "go",
+		label: "Go",
+		description: "Systems language",
+		iconKey: "go",
+		install: `go get go.opentelemetry.io/otel \\
   go.opentelemetry.io/otel/sdk \\
   go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`,
-    instrument: `package main
+		instrument: `package main
 
 import (
 	"context"
@@ -137,14 +146,14 @@ func main() {
 
 	log.Println("Trace sent!")
 }`,
-  },
-  {
-    language: "effect",
-    label: "Effect",
-    description: "TypeScript toolkit (Effect 3: use @effect-v3 tag)",
-    iconKey: "effect",
-    install: { packages: ["@maple-dev/effect-sdk", "effect"] },
-    instrument: `// telemetry.ts
+	},
+	{
+		language: "effect",
+		label: "Effect",
+		description: "TypeScript toolkit (Effect 3: use @effect-v3 tag)",
+		iconKey: "effect",
+		install: { packages: ["@maple-dev/effect-sdk", "effect"] },
+		instrument: `// telemetry.ts
 import { Maple } from "@maple-dev/effect-sdk"
 import { Effect } from "effect"
 
@@ -162,19 +171,19 @@ const program = Effect.gen(function* () {
 Effect.runPromise(
   program.pipe(Effect.provide(TracerLive))
 )`,
-  },
-  {
-    language: "otel",
-    label: "Custom / OpenTelemetry",
-    description: "Any language or runtime — just point your OTLP exporter at Maple",
-    iconKey: "otel",
-    install: `# Use your language's OpenTelemetry SDK
+	},
+	{
+		language: "otel",
+		label: "Custom / OpenTelemetry",
+		description: "Any language or runtime — just point your OTLP exporter at Maple",
+		iconKey: "otel",
+		install: `# Use your language's OpenTelemetry SDK
 # See https://opentelemetry.io/docs/languages/ for installation`,
-    instrument: `# Configure via environment variables
+		instrument: `# Configure via environment variables
 export OTEL_EXPORTER_OTLP_ENDPOINT="{{INGEST_URL}}"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer {{API_KEY}}"
 export OTEL_SERVICE_NAME="my-service"
 
 # Then run your application with your language's OTel SDK enabled`,
-  },
+	},
 ]

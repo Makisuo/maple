@@ -9,54 +9,51 @@ const CHART_BUCKET_TARGET = 96
 const emptyChartAtom = Atom.make(Result.initial())
 
 export function useAlertRuleChart(form: RuleFormState) {
-  const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "24h")
+	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "24h")
 
-  const bucketSeconds = useMemo(
-    () => computeBucketSeconds(startTime, endTime, CHART_BUCKET_TARGET),
-    [startTime, endTime],
-  )
+	const bucketSeconds = useMemo(
+		() => computeBucketSeconds(startTime, endTime, CHART_BUCKET_TARGET),
+		[startTime, endTime],
+	)
 
-  const queryParams = useMemo(() => signalToQueryParams(form), [form])
+	const queryParams = useMemo(() => signalToQueryParams(form), [form])
 
-  const chartGroupBy = useMemo(
-    () =>
-      form.serviceNames.length > 1 ||
-      (form.serviceNames.length === 0 && form.groupBy.length > 0)
-        ? "service" as const
-        : "none" as const,
-    [form.serviceNames.length, form.groupBy],
-  )
+	const chartGroupBy = useMemo(
+		() =>
+			form.serviceNames.length > 1 || (form.serviceNames.length === 0 && form.groupBy.length > 0)
+				? ("service" as const)
+				: ("none" as const),
+		[form.serviceNames.length, form.groupBy],
+	)
 
-  const chartQueryInput = useMemo(() => {
-    if (!queryParams) return null
-    return {
-      data: {
-        source: queryParams.source as "traces" | "logs" | "metrics",
-        metric: queryParams.metric,
-        groupBy: chartGroupBy,
-        startTime,
-        endTime,
-        bucketSeconds,
-        filters: queryParams.filters as Record<string, string | boolean | string[] | undefined>,
-        apdexThresholdMs: queryParams.apdexThresholdMs,
-      },
-    }
-  }, [queryParams, startTime, endTime, bucketSeconds, chartGroupBy])
+	const chartQueryInput = useMemo(() => {
+		if (!queryParams) return null
+		return {
+			data: {
+				source: queryParams.source as "traces" | "logs" | "metrics",
+				metric: queryParams.metric,
+				groupBy: chartGroupBy,
+				startTime,
+				endTime,
+				bucketSeconds,
+				filters: queryParams.filters as Record<string, string | boolean | string[] | undefined>,
+				apdexThresholdMs: queryParams.apdexThresholdMs,
+			},
+		}
+	}, [queryParams, startTime, endTime, bucketSeconds, chartGroupBy])
 
-  const chartResult = useAtomValue(
-    chartQueryInput
-      ? getCustomChartTimeSeriesResultAtom(chartQueryInput)
-      : emptyChartAtom,
-  )
+	const chartResult = useAtomValue(
+		chartQueryInput ? getCustomChartTimeSeriesResultAtom(chartQueryInput) : emptyChartAtom,
+	)
 
-  const chartData = useMemo(() => {
-    if (!chartQueryInput) return []
-    return Result.builder(chartResult)
-      .onSuccess((response) => flattenAlertChartData(response.data, form.serviceNames))
-      .orElse(() => [])
-  }, [chartResult, chartQueryInput, form.serviceNames])
+	const chartData = useMemo(() => {
+		if (!chartQueryInput) return []
+		return Result.builder(chartResult)
+			.onSuccess((response) => flattenAlertChartData(response.data, form.serviceNames))
+			.orElse(() => [])
+	}, [chartResult, chartQueryInput, form.serviceNames])
 
-  const chartLoading = !chartQueryInput || Result.isInitial(chartResult)
+	const chartLoading = !chartQueryInput || Result.isInitial(chartResult)
 
-  return { chartData, chartLoading }
+	return { chartData, chartLoading }
 }

@@ -5,9 +5,9 @@ Use this guide when installing, previewing, or discovering coss components via t
 ## CLI Safety Rules
 
 - Always use the project's package runner:
-  - `npx shadcn@latest ...`
-  - `pnpm dlx shadcn@latest ...`
-  - `bunx --bun shadcn@latest ...`
+    - `npx shadcn@latest ...`
+    - `pnpm dlx shadcn@latest ...`
+    - `bunx --bun shadcn@latest ...`
 - Do not invent flags. Use only documented CLI flags.
 
 ## Core Commands for coss Usage
@@ -74,11 +74,11 @@ If these are unsupported in the environment, use fallback sources below.
 ### Inside the coss repo (preferred)
 
 - `apps/ui/registry/registry-particles.ts`
-  - `https://github.com/cosscom/coss/blob/main/apps/ui/registry/registry-particles.ts`
+    - `https://github.com/cosscom/coss/blob/main/apps/ui/registry/registry-particles.ts`
 - `apps/ui/registry.json`
-  - `https://github.com/cosscom/coss/blob/main/apps/ui/registry.json`
+    - `https://github.com/cosscom/coss/blob/main/apps/ui/registry.json`
 - `apps/ui/content/docs/components/*.mdx`
-  - `https://github.com/cosscom/coss/tree/main/apps/ui/content/docs/components`
+    - `https://github.com/cosscom/coss/tree/main/apps/ui/content/docs/components`
 
 ### Outside the coss repo
 

@@ -12,6 +12,7 @@ tags: [query, materialized-view, refresh, batch]
 Refreshable MVs execute queries periodically on a schedule. The full query re-executes and overwrites (or appends to) the target table.
 
 **Best for:**
+
 - Sub-millisecond latency where minor staleness is acceptable
 - Caching "top N" results or lookup tables
 - Complex multi-table joins requiring denormalization
@@ -54,10 +55,10 @@ SELECT * FROM orders_denormalized WHERE segment = 'enterprise';
 
 **APPEND vs REPLACE modes:**
 
-| Mode | Behavior | Use Case |
-|------|----------|----------|
-| `REPLACE` (default) | Overwrites previous contents | Current state, lookup tables |
-| `APPEND` | Adds new rows to existing data | Periodic snapshots, historical accumulation |
+| Mode                | Behavior                       | Use Case                                    |
+| ------------------- | ------------------------------ | ------------------------------------------- |
+| `REPLACE` (default) | Overwrites previous contents   | Current state, lookup tables                |
+| `APPEND`            | Adds new rows to existing data | Periodic snapshots, historical accumulation |
 
 **Critical warning:** Query should run quickly compared to refresh interval. Don't schedule every 10 seconds if the query takes 10+ seconds.
 

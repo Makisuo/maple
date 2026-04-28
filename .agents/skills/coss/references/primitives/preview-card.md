@@ -21,19 +21,15 @@ npm install @base-ui/react
 
 ```tsx
 import { Button } from "@/components/ui/button"
-import {
-  PreviewCard,
-  PreviewCardPopup,
-  PreviewCardTrigger,
-} from "@/components/ui/preview-card"
+import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "@/components/ui/preview-card"
 ```
 
 ## Minimal pattern
 
 ```tsx
 <PreviewCard>
-  <PreviewCardTrigger>Open Preview Card</PreviewCardTrigger>
-  <PreviewCardPopup>Preview Card Content</PreviewCardPopup>
+	<PreviewCardTrigger>Open Preview Card</PreviewCardTrigger>
+	<PreviewCardPopup>Preview Card Content</PreviewCardPopup>
 </PreviewCard>
 ```
 
@@ -47,21 +43,19 @@ Preview card with rich content:
 
 ```tsx
 <PreviewCard>
-  <PreviewCardTrigger render={<a href="/user/johndoe" />}>
-    @johndoe
-  </PreviewCardTrigger>
-  <PreviewCardPopup className="w-80">
-    <div className="flex items-center gap-3">
-      <Avatar>
-        <AvatarImage src="/avatar.png" alt="John Doe" />
-        <AvatarFallback>JD</AvatarFallback>
-      </Avatar>
-      <div>
-        <p className="text-sm font-semibold">John Doe</p>
-        <p className="text-muted-foreground text-xs">Software Engineer</p>
-      </div>
-    </div>
-  </PreviewCardPopup>
+	<PreviewCardTrigger render={<a href="/user/johndoe" />}>@johndoe</PreviewCardTrigger>
+	<PreviewCardPopup className="w-80">
+		<div className="flex items-center gap-3">
+			<Avatar>
+				<AvatarImage src="/avatar.png" alt="John Doe" />
+				<AvatarFallback>JD</AvatarFallback>
+			</Avatar>
+			<div>
+				<p className="text-sm font-semibold">John Doe</p>
+				<p className="text-muted-foreground text-xs">Software Engineer</p>
+			</div>
+		</div>
+	</PreviewCardPopup>
 </PreviewCard>
 ```
 

@@ -33,11 +33,11 @@ from datastore import DataStore
 DataStore(source=None, table=None, database=":memory:", connection=None, **kwargs)
 ```
 
-| Source type | Usage |
-|-------------|-------|
-| dict | `DataStore({'col1': [1, 2], 'col2': ['a', 'b']})` |
-| pd.DataFrame | `DataStore(df)` |
-| str (source type) | `DataStore("file", path="data.parquet")` |
+| Source type       | Usage                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| dict              | `DataStore({'col1': [1, 2], 'col2': ['a', 'b']})`                                        |
+| pd.DataFrame      | `DataStore(df)`                                                                          |
+| str (source type) | `DataStore("file", path="data.parquet")`                                                 |
 | str (source type) | `DataStore("mysql", host="host:3306", database="db", table="t", user="u", password="p")` |
 
 ### Factory Methods
@@ -48,14 +48,14 @@ See [connectors.md](connectors.md) for all factory methods (`from_file`, `from_m
 
 ## Selection & Filtering
 
-| Expression | Returns | Description |
-|------------|---------|-------------|
-| `ds['col']` | LazySeries | Single column |
-| `ds[['c1', 'c2']]` | DataStore | Multiple columns |
-| `ds[condition]` | DataStore | Boolean filter (e.g., `ds[ds['age'] > 25]`) |
-| `.select(*fields)` | DataStore | SQL-style SELECT with expressions |
-| `.filter(condition)` | DataStore | SQL-style WHERE clause |
-| `.where(condition)` | DataStore | Mask values where condition is False (pandas semantics) |
+| Expression           | Returns    | Description                                             |
+| -------------------- | ---------- | ------------------------------------------------------- |
+| `ds['col']`          | LazySeries | Single column                                           |
+| `ds[['c1', 'c2']]`   | DataStore  | Multiple columns                                        |
+| `ds[condition]`      | DataStore  | Boolean filter (e.g., `ds[ds['age'] > 25]`)             |
+| `.select(*fields)`   | DataStore  | SQL-style SELECT with expressions                       |
+| `.filter(condition)` | DataStore  | SQL-style WHERE clause                                  |
+| `.where(condition)`  | DataStore  | Mask values where condition is False (pandas semantics) |
 
 ```python
 result = ds[ds["age"] > 25]
@@ -70,15 +70,15 @@ result = ds.where(ds["age"] > 25)  # keeps all rows; non-matching values become 
 
 ## Sorting & Limiting
 
-| Method | Description |
-|--------|-------------|
-| `.sort_values(by, ascending=True)` | Pandas-style sort (by can be str or list) |
-| `.sort(*columns, ascending=True)` | SQL-style ORDER BY |
-| `.orderby(*columns, ascending=True)` | Alias for `.sort()` |
-| `.limit(n)` | LIMIT n rows |
-| `.offset(n)` | Skip first n rows |
-| `.head(n=5)` | First n rows |
-| `.tail(n=5)` | Last n rows |
+| Method                               | Description                               |
+| ------------------------------------ | ----------------------------------------- |
+| `.sort_values(by, ascending=True)`   | Pandas-style sort (by can be str or list) |
+| `.sort(*columns, ascending=True)`    | SQL-style ORDER BY                        |
+| `.orderby(*columns, ascending=True)` | Alias for `.sort()`                       |
+| `.limit(n)`                          | LIMIT n rows                              |
+| `.offset(n)`                         | Skip first n rows                         |
+| `.head(n=5)`                         | First n rows                              |
+| `.tail(n=5)`                         | Last n rows                               |
 
 ```python
 result = ds.sort_values("revenue", ascending=False)
@@ -97,12 +97,12 @@ grouped = ds.groupby("dept")
 grouped = ds.groupby(["region", "product"])
 ```
 
-| Method | Description |
-|--------|-------------|
-| `.agg(func=None, **kwargs)` | Aggregate with named functions |
-| `.sum()`, `.mean()`, `.count()`, `.min()`, `.max()` | Single aggregation |
-| `.std()`, `.var()` | Standard deviation / variance |
-| `.having(condition)` | HAVING clause (after aggregation) |
+| Method                                              | Description                       |
+| --------------------------------------------------- | --------------------------------- |
+| `.agg(func=None, **kwargs)`                         | Aggregate with named functions    |
+| `.sum()`, `.mean()`, `.count()`, `.min()`, `.max()` | Single aggregation                |
+| `.std()`, `.var()`                                  | Standard deviation / variance     |
+| `.having(condition)`                                | HAVING clause (after aggregation) |
 
 ```python
 result = ds.groupby("dept")["salary"].mean()
@@ -121,13 +121,13 @@ result = ds.groupby(["region", "product"]).agg(
 .merge(other, on=None, how='inner')
 ```
 
-| `how` | Description |
-|-------|-------------|
-| `'inner'` | Only matching rows (default) |
-| `'left'` | All left rows + matching right |
+| `how`     | Description                    |
+| --------- | ------------------------------ |
+| `'inner'` | Only matching rows (default)   |
+| `'left'`  | All left rows + matching right |
 | `'right'` | All right rows + matching left |
-| `'outer'` | All rows from both sides |
-| `'cross'` | Cartesian product |
+| `'outer'` | All rows from both sides       |
+| `'cross'` | Cartesian product              |
 
 ```python
 result = orders.join(customers, left_on="customer_id", right_on="id")
@@ -147,15 +147,15 @@ result = mysql_ds.join(parquet_ds, left_on="id", right_on="user_id")
 
 ## Mutation
 
-| Method | Description |
-|--------|-------------|
-| `.assign(**kwargs)` | Add computed columns |
-| `.with_column(name, expr)` | Add single column |
-| `.drop(columns)` | Remove columns (str or list) |
-| `.rename(columns={})` | Rename columns via mapping |
-| `.fillna(value)` | Fill NaN/NULL values |
-| `.dropna(subset=None)` | Drop rows with NaN/NULL |
-| `.distinct(subset=None, keep='first')` | Deduplicate rows |
+| Method                                 | Description                  |
+| -------------------------------------- | ---------------------------- |
+| `.assign(**kwargs)`                    | Add computed columns         |
+| `.with_column(name, expr)`             | Add single column            |
+| `.drop(columns)`                       | Remove columns (str or list) |
+| `.rename(columns={})`                  | Rename columns via mapping   |
+| `.fillna(value)`                       | Fill NaN/NULL values         |
+| `.dropna(subset=None)`                 | Drop rows with NaN/NULL      |
+| `.distinct(subset=None, keep='first')` | Deduplicate rows             |
 
 ```python
 result = ds.assign(
@@ -174,20 +174,20 @@ result = ds.distinct(subset=["user_id"], keep="first")
 
 Access via `ds['column'].str.*`. 56 methods available, including:
 
-| Method | Description |
-|--------|-------------|
-| `.str.upper()`, `.str.lower()` | Case conversion |
-| `.str.strip()`, `.str.lstrip()`, `.str.rstrip()` | Whitespace trimming |
-| `.str.contains(pattern)` | Substring/regex match → boolean |
-| `.str.startswith(prefix)`, `.str.endswith(suffix)` | Prefix/suffix check |
-| `.str.replace(old, new)` | String replacement |
-| `.str.split(sep)` | Split into parts |
-| `.str.len()` | String length |
-| `.str.slice(start, stop)` | Substring extraction |
-| `.str.cat(sep=None)` | Concatenation |
-| `.str.extract(pattern)` | Regex group extraction |
-| `.str.pad(width)`, `.str.zfill(width)` | Padding |
-| `.str.match(pattern)` | Full regex match |
+| Method                                             | Description                     |
+| -------------------------------------------------- | ------------------------------- |
+| `.str.upper()`, `.str.lower()`                     | Case conversion                 |
+| `.str.strip()`, `.str.lstrip()`, `.str.rstrip()`   | Whitespace trimming             |
+| `.str.contains(pattern)`                           | Substring/regex match → boolean |
+| `.str.startswith(prefix)`, `.str.endswith(suffix)` | Prefix/suffix check             |
+| `.str.replace(old, new)`                           | String replacement              |
+| `.str.split(sep)`                                  | Split into parts                |
+| `.str.len()`                                       | String length                   |
+| `.str.slice(start, stop)`                          | Substring extraction            |
+| `.str.cat(sep=None)`                               | Concatenation                   |
+| `.str.extract(pattern)`                            | Regex group extraction          |
+| `.str.pad(width)`, `.str.zfill(width)`             | Padding                         |
+| `.str.match(pattern)`                              | Full regex match                |
 
 ```python
 ds["name"].str.upper()
@@ -201,17 +201,17 @@ ds["code"].str.slice(0, 3)
 
 Access via `ds['column'].dt.*`. 42+ methods available, including:
 
-| Property/Method | Description |
-|-----------------|-------------|
-| `.dt.year`, `.dt.month`, `.dt.day` | Date components |
-| `.dt.hour`, `.dt.minute`, `.dt.second` | Time components |
-| `.dt.dayofweek`, `.dt.dayofyear` | Day ordinals |
-| `.dt.quarter` | Quarter (1-4) |
-| `.dt.date`, `.dt.time` | Date/time part |
-| `.dt.strftime(format)` | Format as string |
-| `.dt.floor(freq)`, `.dt.ceil(freq)` | Round to frequency |
-| `.dt.tz_localize(tz)`, `.dt.tz_convert(tz)` | Timezone handling |
-| `.dt.normalize()` | Reset time to midnight |
+| Property/Method                             | Description            |
+| ------------------------------------------- | ---------------------- |
+| `.dt.year`, `.dt.month`, `.dt.day`          | Date components        |
+| `.dt.hour`, `.dt.minute`, `.dt.second`      | Time components        |
+| `.dt.dayofweek`, `.dt.dayofyear`            | Day ordinals           |
+| `.dt.quarter`                               | Quarter (1-4)          |
+| `.dt.date`, `.dt.time`                      | Date/time part         |
+| `.dt.strftime(format)`                      | Format as string       |
+| `.dt.floor(freq)`, `.dt.ceil(freq)`         | Round to frequency     |
+| `.dt.tz_localize(tz)`, `.dt.tz_convert(tz)` | Timezone handling      |
+| `.dt.normalize()`                           | Reset time to midnight |
 
 ```python
 ds["order_date"].dt.year
@@ -226,26 +226,26 @@ ds["created_at"].dt.strftime("%Y-%m-%d")
 
 These properties/methods **trigger execution** of the lazy query:
 
-| Property/Method | Returns | Description |
-|-----------------|---------|-------------|
-| `.columns` | list | Column names |
-| `.shape` | (rows, cols) | Dimensions |
-| `.dtypes` | dict | Column types |
-| `.head(n=5)` | DataStore | First n rows |
-| `.tail(n=5)` | DataStore | Last n rows |
-| `.describe()` | DataStore | Summary statistics |
-| `.info()` | None | Print DataFrame info |
-| `print(ds)` | — | Display results |
-| `len(ds)` | int | Row count |
-| `for row in ds` | — | Iterate rows |
-| `.equals(other)` | bool | Compare DataStores |
+| Property/Method  | Returns      | Description          |
+| ---------------- | ------------ | -------------------- |
+| `.columns`       | list         | Column names         |
+| `.shape`         | (rows, cols) | Dimensions           |
+| `.dtypes`        | dict         | Column types         |
+| `.head(n=5)`     | DataStore    | First n rows         |
+| `.tail(n=5)`     | DataStore    | Last n rows          |
+| `.describe()`    | DataStore    | Summary statistics   |
+| `.info()`        | None         | Print DataFrame info |
+| `print(ds)`      | —            | Display results      |
+| `len(ds)`        | int          | Row count            |
+| `for row in ds`  | —            | Iterate rows         |
+| `.equals(other)` | bool         | Compare DataStores   |
 
 These methods **do not trigger execution**:
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `.to_sql()` | str | View the generated SQL |
-| `.explain()` | str | Execution plan |
+| Method       | Returns | Description            |
+| ------------ | ------- | ---------------------- |
+| `.to_sql()`  | str     | View the generated SQL |
+| `.explain()` | str     | Execution plan         |
 
 ```python
 print(ds.columns)          # → ['name', 'age', 'city']

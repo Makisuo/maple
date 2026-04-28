@@ -64,11 +64,11 @@ ALTER TABLE events DELETE WHERE toYYYYMM(timestamp) = 202301;
 
 **Delete strategy comparison:**
 
-| Method | Speed | When to Use |
-|--------|-------|-------------|
-| ALTER DELETE | Slow | Rare corrections only |
-| CollapsingMergeTree | Fast | Frequent soft deletes |
-| Lightweight DELETE | Medium | Occasional deletes |
-| DROP PARTITION | Instant | Bulk deletion by partition |
+| Method              | Speed   | When to Use                |
+| ------------------- | ------- | -------------------------- |
+| ALTER DELETE        | Slow    | Rare corrections only      |
+| CollapsingMergeTree | Fast    | Frequent soft deletes      |
+| Lightweight DELETE  | Medium  | Occasional deletes         |
+| DROP PARTITION      | Instant | Bulk deletion by partition |
 
 Reference: [Avoid Mutations](https://clickhouse.com/docs/best-practices/avoid-mutations)

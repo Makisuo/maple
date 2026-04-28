@@ -10,6 +10,7 @@ tags: [schema, partitioning, TTL, data-management]
 **Impact: HIGH**
 
 Partitioning is **primarily a data management technique, not a query optimization tool**. It excels at:
+
 - **Dropping data**: Remove entire partitions as single metadata operations
 - **TTL retention**: Implement time-based retention policies efficiently
 - **Tiered storage**: Move old partitions to cold storage

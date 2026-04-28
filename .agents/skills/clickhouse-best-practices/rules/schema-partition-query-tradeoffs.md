@@ -10,6 +10,7 @@ tags: [schema, partitioning, query, performance]
 **Impact: MEDIUM**
 
 Partitioning can help or hurt query performance:
+
 - **Potential improvement**: Queries filtering by partition key may benefit from partition pruning
 - **Potential degradation**: Queries spanning many partitions increase total parts scanned
 

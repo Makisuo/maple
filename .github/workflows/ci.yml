@@ -1,45 +1,45 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  typescript:
-    name: TypeScript
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    typescript:
+        name: TypeScript
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+            - uses: oven-sh/setup-bun@v2
 
-      - run: bun install --frozen-lockfile
+            - run: bun install --frozen-lockfile
 
-      - run: bun turbo typecheck test build --filter='!@maple/ingest'
+            - run: bun turbo typecheck test build --filter='!@maple/ingest'
 
-  rust:
-    name: Rust (ingest)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/ingest
-    steps:
-      - uses: actions/checkout@v4
+    rust:
+        name: Rust (ingest)
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: apps/ingest
+        steps:
+            - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+            - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/ingest
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  workspaces: apps/ingest
 
-      - run: cargo check
+            - run: cargo check
 
-      - run: cargo test
+            - run: cargo test
 
-      - run: cargo build --release
+            - run: cargo build --release

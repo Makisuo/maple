@@ -15,7 +15,8 @@ const KIND_LABELS: Record<string, string> = {
 
 function getBarColor(span: SpanNode): string {
 	if (span.statusCode === "Error") return "#c45a3c"
-	const httpStatus = span.spanAttributes["http.status_code"] || span.spanAttributes["http.response.status_code"]
+	const httpStatus =
+		span.spanAttributes["http.status_code"] || span.spanAttributes["http.response.status_code"]
 	if (httpStatus) {
 		const code = parseInt(httpStatus, 10)
 		if (code >= 500) return "#c45a3c"
@@ -25,7 +26,8 @@ function getBarColor(span: SpanNode): string {
 }
 
 function getSpanStatusBadge(span: SpanNode): { label: string; color: string; bgColor: string } | null {
-	const httpStatus = span.spanAttributes["http.status_code"] || span.spanAttributes["http.response.status_code"]
+	const httpStatus =
+		span.spanAttributes["http.status_code"] || span.spanAttributes["http.response.status_code"]
 	if (httpStatus) {
 		const code = parseInt(httpStatus, 10)
 		return {
@@ -78,7 +80,14 @@ export function SpanRowDetail({
 
 	return (
 		<Pressable
-			onPress={hasChildren ? () => { hapticLight(); onToggle() } : undefined}
+			onPress={
+				hasChildren
+					? () => {
+							hapticLight()
+							onToggle()
+						}
+					: undefined
+			}
 			style={({ pressed }) => ({ opacity: pressed && hasChildren ? 0.7 : 1 })}
 		>
 			<View className="py-3 px-5" style={{ paddingLeft: 20 + span.depth * 16 }}>
@@ -91,15 +100,10 @@ export function SpanRowDetail({
 							</Text>
 						) : (
 							<View className="w-4 mr-1 items-center">
-								<View
-									style={{ width: 1, height: 14, backgroundColor: serviceColor }}
-								/>
+								<View style={{ width: 1, height: 14, backgroundColor: serviceColor }} />
 							</View>
 						)}
-						<Text
-							className="text-xs font-bold font-mono"
-							style={{ color: serviceColor }}
-						>
+						<Text className="text-xs font-bold font-mono" style={{ color: serviceColor }}>
 							{span.serviceName}
 						</Text>
 						{kindLabel ? (

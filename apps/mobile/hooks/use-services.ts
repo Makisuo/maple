@@ -3,10 +3,10 @@ import { useQuery } from "@tanstack/react-query"
 import { fetchServiceOverview, fetchServiceSparklines, type ServiceOverview } from "../lib/api"
 import { computeBucketSeconds, getTimeRange, type TimeRangeKey } from "../lib/time-utils"
 import {
-  getQueryErrorMessage,
-  mobileQueryKeys,
-  mobileQueryStaleTimes,
-  preservePreviousData,
+	getQueryErrorMessage,
+	mobileQueryKeys,
+	mobileQueryStaleTimes,
+	preservePreviousData,
 } from "../lib/query"
 
 export interface ServicesData {

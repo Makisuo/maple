@@ -36,6 +36,7 @@ ENGINE_SORTING_KEY "date, dimension_1, dimension_2"
 ```
 
 ## Usual gotchas
+
 - Materialized Views work as insert triggers, which means a delete or truncate operation on your original Data Source doesn't affect the related Materialized Views.
 
 - As transformation and ingestion in the Materialized View is done on each block of inserted data in the original Data Source, some operations such as GROUP BY, ORDER BY, DISTINCT and LIMIT might need a specific engine, such as AggregatingMergeTree or SummingMergeTree, which can handle data aggregations.

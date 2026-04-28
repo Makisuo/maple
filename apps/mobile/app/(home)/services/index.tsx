@@ -51,9 +51,7 @@ export default function ServicesScreen() {
 	const { state, refresh } = useServices("24h")
 
 	const subtitle =
-		state.status === "success"
-			? `${state.data.services.length} services`
-			: "Loading services..."
+		state.status === "success" ? `${state.data.services.length} services` : "Loading services..."
 
 	return (
 		<Screen>
@@ -84,19 +82,12 @@ function ServicesContent({ data }: { data: ServicesData }) {
 	const bottomPadding = useScreenBottomPadding()
 
 	const avgErrorRate =
-		services.length > 0
-			? services.reduce((sum, s) => sum + s.errorRate, 0) / services.length
-			: 0
+		services.length > 0 ? services.reduce((sum, s) => sum + s.errorRate, 0) / services.length : 0
 	const avgP95 =
-		services.length > 0
-			? services.reduce((sum, s) => sum + s.p95LatencyMs, 0) / services.length
-			: 0
+		services.length > 0 ? services.reduce((sum, s) => sum + s.p95LatencyMs, 0) / services.length : 0
 
 	return (
-		<ScrollView
-			className="flex-1"
-			contentContainerStyle={{ paddingBottom: bottomPadding }}
-		>
+		<ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: bottomPadding }}>
 			{/* Summary Stats Bar */}
 			<View className="px-5 pb-4">
 				<Card padding="none">
@@ -150,13 +141,8 @@ function ServicesContent({ data }: { data: ServicesData }) {
 					{/* Service Rows */}
 					{envServices.map((service, i) => (
 						<View key={`${service.serviceName}::${service.environment}`}>
-							<ServiceRow
-								service={service}
-								sparklineData={sparklines[service.serviceName]}
-							/>
-							{i < envServices.length - 1 && (
-								<View className="h-px bg-border mx-5" />
-							)}
+							<ServiceRow service={service} sparklineData={sparklines[service.serviceName]} />
+							{i < envServices.length - 1 && <View className="h-px bg-border mx-5" />}
 						</View>
 					))}
 				</View>

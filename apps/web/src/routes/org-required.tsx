@@ -7,48 +7,48 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { AuthLayout } from "@/components/layout/auth-layout"
 
 const OrgRequiredSearch = Schema.Struct({
-  redirect_url: Schema.optional(Schema.String),
+	redirect_url: Schema.optional(Schema.String),
 })
 
 export const Route = effectRoute(createFileRoute("/org-required"))({
-  component: OrgRequiredPage,
-  validateSearch: Schema.toStandardSchemaV1(OrgRequiredSearch),
+	component: OrgRequiredPage,
+	validateSearch: Schema.toStandardSchemaV1(OrgRequiredSearch),
 })
 
 function OrgRequiredPage() {
-  if (!isClerkAuthEnabled) {
-    return <Navigate to="/" replace />
-  }
+	if (!isClerkAuthEnabled) {
+		return <Navigate to="/" replace />
+	}
 
-  return <OrgRequiredPageClerk />
+	return <OrgRequiredPageClerk />
 }
 
 function OrgRequiredPageClerk() {
-  const { isLoaded, isSignedIn, orgId } = useAuth()
-  const { redirect_url } = Route.useSearch()
+	const { isLoaded, isSignedIn, orgId } = useAuth()
+	const { redirect_url } = Route.useSearch()
 
-  if (!isLoaded) {
-    return null
-  }
+	if (!isLoaded) {
+		return null
+	}
 
-  if (!isSignedIn) {
-    return <Navigate to="/sign-in" search={{ redirect_url }} replace />
-  }
+	if (!isSignedIn) {
+		return <Navigate to="/sign-in" search={{ redirect_url }} replace />
+	}
 
-  if (orgId) {
-    const target = parseRedirectUrl(redirect_url || "/")
-    return <Navigate to={target.pathname} search={target.search} replace />
-  }
+	if (orgId) {
+		const target = parseRedirectUrl(redirect_url || "/")
+		return <Navigate to={target.pathname} search={target.search} replace />
+	}
 
-  return (
-    <AuthLayout maxWidth="max-w-lg">
-      <h1 className="text-xl font-semibold">Organization required</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Select or create an organization before entering the app.
-      </p>
-      <div className="mt-4">
-        <OrganizationSwitcher hidePersonal />
-      </div>
-    </AuthLayout>
-  )
+	return (
+		<AuthLayout maxWidth="max-w-lg">
+			<h1 className="text-xl font-semibold">Organization required</h1>
+			<p className="mt-2 text-sm text-muted-foreground">
+				Select or create an organization before entering the app.
+			</p>
+			<div className="mt-4">
+				<OrganizationSwitcher hidePersonal />
+			</div>
+		</AuthLayout>
+	)
 }

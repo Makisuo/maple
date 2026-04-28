@@ -15,13 +15,13 @@ export const toInt64 = defineFn<[Expr<number>], number>("toInt64")
 // ---------------------------------------------------------------------------
 
 export function intDiv(a: Expr<number>, b: number | Expr<number>): Expr<number> {
-  return compileFnCall<number>("intDiv", a, b)
+	return compileFnCall<number>("intDiv", a, b)
 }
 
 export function round_(expr: Expr<number>, decimals?: number): Expr<number> {
-  return decimals != null
-    ? compileFnCall<number>("round", expr, decimals)
-    : compileFnCall<number>("round", expr)
+	return decimals != null
+		? compileFnCall<number>("round", expr, decimals)
+		: compileFnCall<number>("round", expr)
 }
 
 // ---------------------------------------------------------------------------
@@ -29,9 +29,9 @@ export function round_(expr: Expr<number>, decimals?: number): Expr<number> {
 // ---------------------------------------------------------------------------
 
 export function least_(...exprs: Expr<number>[]): Expr<number> {
-  return compileFnCall<number>("least", ...exprs)
+	return compileFnCall<number>("least", ...exprs)
 }
 
 export function greatest_(...exprs: Expr<number>[]): Expr<number> {
-  return compileFnCall<number>("greatest", ...exprs)
+	return compileFnCall<number>("greatest", ...exprs)
 }

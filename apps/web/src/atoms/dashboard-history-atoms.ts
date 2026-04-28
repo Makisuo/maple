@@ -1,10 +1,10 @@
 import { Atom } from "@/lib/effect-atom"
 
 export interface PreviewedVersion {
-  readonly versionId: string
-  readonly versionNumber: number
-  readonly createdAt: string
-  readonly createdBy: string
+	readonly versionId: string
+	readonly versionNumber: number
+	readonly createdAt: string
+	readonly createdBy: string
 }
 
 /**

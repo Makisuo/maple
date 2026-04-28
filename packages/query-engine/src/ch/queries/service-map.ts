@@ -12,32 +12,30 @@ import type { CompiledQuery } from "../compile"
 // ---------------------------------------------------------------------------
 
 export interface ServiceDependenciesOpts {
-  deploymentEnv?: string
+	deploymentEnv?: string
 }
 
 export interface ServiceDependenciesOutput {
-  readonly sourceService: string
-  readonly targetService: string
-  readonly callCount: number
-  readonly errorCount: number
-  readonly avgDurationMs: number
-  readonly p95DurationMs: number
-  readonly sampledSpanCount: number
-  readonly unsampledSpanCount: number
-  readonly dominantThreshold: string
+	readonly sourceService: string
+	readonly targetService: string
+	readonly callCount: number
+	readonly errorCount: number
+	readonly avgDurationMs: number
+	readonly p95DurationMs: number
+	readonly sampledSpanCount: number
+	readonly unsampledSpanCount: number
+	readonly dominantThreshold: string
 }
 
 export function serviceDependenciesSQL(
-  opts: ServiceDependenciesOpts,
-  params: { orgId: string; startTime: string; endTime: string },
+	opts: ServiceDependenciesOpts,
+	params: { orgId: string; startTime: string; endTime: string },
 ): CompiledQuery<ServiceDependenciesOutput> {
-  const esc = escapeClickHouseString
-  const envFilter = opts.deploymentEnv
-    ? `AND DeploymentEnv = '${esc(opts.deploymentEnv)}'`
-    : ""
+	const esc = escapeClickHouseString
+	const envFilter = opts.deploymentEnv ? `AND DeploymentEnv = '${esc(opts.deploymentEnv)}'` : ""
 
-  // Node 1: Pre-aggregated hourly edges (peer.service path)
-  const peerServiceEdges = `SELECT
+	// Node 1: Pre-aggregated hourly edges (peer.service path)
+	const peerServiceEdges = `SELECT
       SourceService AS sourceService,
       TargetService AS targetService,
       sum(CallCount) AS callCount,
@@ -54,8 +52,8 @@ export function serviceDependenciesSQL(
       ${envFilter}
     GROUP BY sourceService, targetService`
 
-  // Node 2: Join-based edges (Client/Producer spans without peer.service)
-  const joinEdges = `SELECT
+	// Node 2: Join-based edges (Client/Producer spans without peer.service)
+	const joinEdges = `SELECT
       p.ServiceName AS sourceService,
       c.ServiceName AS targetService,
       count() AS callCount,
@@ -87,8 +85,8 @@ export function serviceDependenciesSQL(
     WHERE p.ServiceName != c.ServiceName
     GROUP BY sourceService, targetService`
 
-  // Node 3: Merge both edge sources
-  const sql = `SELECT
+	// Node 3: Merge both edge sources
+	const sql = `SELECT
   sourceService,
   targetService,
   sum(callCount) AS callCount,
@@ -108,8 +106,8 @@ ORDER BY callCount DESC
 LIMIT 200
 FORMAT JSON`
 
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<ServiceDependenciesOutput>,
-  }
+	return {
+		sql,
+		castRows: (rows) => rows as unknown as ReadonlyArray<ServiceDependenciesOutput>,
+	}
 }

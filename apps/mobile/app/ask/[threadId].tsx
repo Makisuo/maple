@@ -10,8 +10,7 @@ export default function ChatThread() {
 	const router = useRouter()
 	const insets = useSafeAreaInsets()
 	const params = useLocalSearchParams<{ threadId: string; alert?: string }>()
-	const threadId =
-		typeof params.threadId === "string" ? decodeURIComponent(params.threadId) : ""
+	const threadId = typeof params.threadId === "string" ? decodeURIComponent(params.threadId) : ""
 
 	const alertContext = useMemo(() => {
 		if (typeof params.alert !== "string" || !params.alert) return undefined
@@ -24,10 +23,7 @@ export default function ChatThread() {
 
 	return (
 		<View className="flex-1 bg-background">
-			<View
-				className="absolute z-10 flex-row items-center px-4 pt-2"
-				style={{ top: insets.top + 4 }}
-			>
+			<View className="absolute z-10 flex-row items-center px-4 pt-2" style={{ top: insets.top + 4 }}>
 				<Pressable
 					onPress={() => {
 						hapticLight()

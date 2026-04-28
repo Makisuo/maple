@@ -27,11 +27,11 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Tooltip,
-  TooltipCreateHandle,
-  TooltipPopup,
-  TooltipProvider,
-  TooltipTrigger,
+	Tooltip,
+	TooltipCreateHandle,
+	TooltipPopup,
+	TooltipProvider,
+	TooltipTrigger,
 } from "@/components/ui/tooltip"
 ```
 
@@ -39,10 +39,8 @@ import {
 
 ```tsx
 <Tooltip>
-  <TooltipTrigger render={<Button variant="outline" />}>
-    Hover me
-  </TooltipTrigger>
-  <TooltipPopup>Helpful hint</TooltipPopup>
+	<TooltipTrigger render={<Button variant="outline" />}>Hover me</TooltipTrigger>
+	<TooltipPopup>Helpful hint</TooltipPopup>
 </Tooltip>
 ```
 
@@ -56,10 +54,10 @@ Tooltip on an icon-only button:
 
 ```tsx
 <Tooltip>
-  <TooltipTrigger render={<Button size="icon" variant="ghost" aria-label="Settings" />}>
-    <SettingsIcon aria-hidden="true" />
-  </TooltipTrigger>
-  <TooltipPopup>Settings</TooltipPopup>
+	<TooltipTrigger render={<Button size="icon" variant="ghost" aria-label="Settings" />}>
+		<SettingsIcon aria-hidden="true" />
+	</TooltipTrigger>
+	<TooltipPopup>Settings</TooltipPopup>
 </Tooltip>
 ```
 
@@ -67,14 +65,14 @@ Grouped tooltips (shared delay/provider):
 
 ```tsx
 <TooltipProvider>
-  <Tooltip>
-    <TooltipTrigger>Item 1</TooltipTrigger>
-    <TooltipPopup>Hint 1</TooltipPopup>
-  </Tooltip>
-  <Tooltip>
-    <TooltipTrigger>Item 2</TooltipTrigger>
-    <TooltipPopup>Hint 2</TooltipPopup>
-  </Tooltip>
+	<Tooltip>
+		<TooltipTrigger>Item 1</TooltipTrigger>
+		<TooltipPopup>Hint 1</TooltipPopup>
+	</Tooltip>
+	<Tooltip>
+		<TooltipTrigger>Item 2</TooltipTrigger>
+		<TooltipPopup>Hint 2</TooltipPopup>
+	</Tooltip>
 </TooltipProvider>
 ```
 

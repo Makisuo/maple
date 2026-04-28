@@ -5,9 +5,9 @@
 - Workload: order and execution event stream
 - Ingest rate: 80M events/day
 - Query pattern:
-  - latest order state
-  - time-bounded compliance scans
-  - intraday anomaly and pattern detection
+    - latest order state
+    - time-bounded compliance scans
+    - intraday anomaly and pattern detection
 - Freshness target: sub-second to low-single-digit seconds
 - Additional requirement: late-arriving corrections and cancels
 
@@ -39,6 +39,7 @@ derived
 medium
 
 **Source**
+
 - https://clickhouse.com/docs/en/guides/replacing-merge-tree
 
 ### 2. Use ReplacingMergeTree for current-state table if version semantics are clean
@@ -56,6 +57,7 @@ official
 high
 
 **Source**
+
 - https://clickhouse.com/docs/en/guides/replacing-merge-tree
 
 ### 3. Use dictionaries for small reference data used in surveillance rules
@@ -73,6 +75,7 @@ official
 high
 
 **Source**
+
 - https://clickhouse.com/docs/en/sql-reference/dictionaries
 
 ## Example raw events table

@@ -162,8 +162,7 @@ function parseBlocks(input: string): Block[] {
 	return blocks
 }
 
-const INLINE_PATTERN =
-	/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`|\[[^\]]+]\([^)]+\)|https?:\/\/[^\s)]+)/g
+const INLINE_PATTERN = /(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`|\[[^\]]+]\([^)]+\)|https?:\/\/[^\s)]+)/g
 
 function renderInline(text: string, keyPrefix = ""): ReactNode[] {
 	const out: ReactNode[] = []
@@ -240,7 +239,15 @@ function renderInline(text: string, keyPrefix = ""): ReactNode[] {
 	return out
 }
 
-function HeadingBlock({ level, content, keyPrefix }: { level: 1 | 2 | 3; content: string; keyPrefix: string }) {
+function HeadingBlock({
+	level,
+	content,
+	keyPrefix,
+}: {
+	level: 1 | 2 | 3
+	content: string
+	keyPrefix: string
+}) {
 	const size = level === 1 ? 19 : level === 2 ? 16 : 14
 	const tracking = level === 3 ? 1 : 0
 	const marginTop = level === 1 ? 4 : 2
@@ -265,10 +272,7 @@ function ListBlock({ ordered, items, keyPrefix }: { ordered: boolean; items: str
 					>
 						{ordered ? `${idx + 1}.` : "•"}
 					</Text>
-					<Text
-						className="flex-1 font-mono text-[14px] leading-[22px] text-foreground"
-						selectable
-					>
+					<Text className="flex-1 font-mono text-[14px] leading-[22px] text-foreground" selectable>
 						{renderInline(item, `${keyPrefix}-li-${idx}`)}
 					</Text>
 				</View>
@@ -281,10 +285,7 @@ function QuoteBlock({ content, keyPrefix }: { content: string; keyPrefix: string
 	const paragraphs = content.split(/\n{2,}/)
 	return (
 		<View className="flex-row gap-3">
-			<View
-				className="bg-border rounded-sm"
-				style={{ width: 2, alignSelf: "stretch" }}
-			/>
+			<View className="bg-border rounded-sm" style={{ width: 2, alignSelf: "stretch" }} />
 			<View className="flex-1 gap-2">
 				{paragraphs.map((p, idx) => (
 					<Text
@@ -422,9 +423,23 @@ function RichTextImpl({ children }: RichTextProps) {
 							</Text>
 						)
 					case "heading":
-						return <HeadingBlock key={keyPrefix} level={block.level} content={block.content} keyPrefix={keyPrefix} />
+						return (
+							<HeadingBlock
+								key={keyPrefix}
+								level={block.level}
+								content={block.content}
+								keyPrefix={keyPrefix}
+							/>
+						)
 					case "list":
-						return <ListBlock key={keyPrefix} ordered={block.ordered} items={block.items} keyPrefix={keyPrefix} />
+						return (
+							<ListBlock
+								key={keyPrefix}
+								ordered={block.ordered}
+								items={block.items}
+								keyPrefix={keyPrefix}
+							/>
+						)
 					case "code":
 						return <CodeBlock key={keyPrefix} language={block.language} content={block.content} />
 					case "quote":

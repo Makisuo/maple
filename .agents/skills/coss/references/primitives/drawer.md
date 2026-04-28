@@ -27,26 +27,26 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Drawer,
-  DrawerCreateHandle,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerMenu,
-  DrawerMenuCheckboxItem,
-  DrawerMenuGroup,
-  DrawerMenuGroupLabel,
-  DrawerMenuItem,
-  DrawerMenuRadioGroup,
-  DrawerMenuRadioItem,
-  DrawerMenuSeparator,
-  DrawerPanel,
-  DrawerPopup,
-  DrawerMenuTrigger,
-  DrawerTitle,
-  DrawerTrigger,
+	Drawer,
+	DrawerCreateHandle,
+	DrawerClose,
+	DrawerContent,
+	DrawerDescription,
+	DrawerFooter,
+	DrawerHeader,
+	DrawerMenu,
+	DrawerMenuCheckboxItem,
+	DrawerMenuGroup,
+	DrawerMenuGroupLabel,
+	DrawerMenuItem,
+	DrawerMenuRadioGroup,
+	DrawerMenuRadioItem,
+	DrawerMenuSeparator,
+	DrawerPanel,
+	DrawerPopup,
+	DrawerMenuTrigger,
+	DrawerTitle,
+	DrawerTrigger,
 } from "@/components/ui/drawer"
 ```
 
@@ -54,17 +54,17 @@ import {
 
 ```tsx
 <Drawer>
-  <DrawerTrigger>Open</DrawerTrigger>
-  <DrawerPopup>
-    <DrawerHeader>
-      <DrawerTitle>Drawer Title</DrawerTitle>
-      <DrawerDescription>Drawer Description</DrawerDescription>
-    </DrawerHeader>
-    <DrawerPanel>Content</DrawerPanel>
-    <DrawerFooter>
-      <DrawerClose>Close</DrawerClose>
-    </DrawerFooter>
-  </DrawerPopup>
+	<DrawerTrigger>Open</DrawerTrigger>
+	<DrawerPopup>
+		<DrawerHeader>
+			<DrawerTitle>Drawer Title</DrawerTitle>
+			<DrawerDescription>Drawer Description</DrawerDescription>
+		</DrawerHeader>
+		<DrawerPanel>Content</DrawerPanel>
+		<DrawerFooter>
+			<DrawerClose>Close</DrawerClose>
+		</DrawerFooter>
+	</DrawerPopup>
 </Drawer>
 ```
 
@@ -78,21 +78,19 @@ Drawer with handle:
 
 ```tsx
 <Drawer>
-  <DrawerTrigger render={<Button variant="outline" />}>Open Drawer</DrawerTrigger>
-  <DrawerPopup>
-    <DrawerCreateHandle />
-    <DrawerHeader>
-      <DrawerTitle>Edit Profile</DrawerTitle>
-      <DrawerDescription>Make changes to your profile here.</DrawerDescription>
-    </DrawerHeader>
-    <DrawerPanel>
-      {/* Form content */}
-    </DrawerPanel>
-    <DrawerFooter>
-      <Button>Save</Button>
-      <DrawerClose render={<Button variant="ghost" />}>Cancel</DrawerClose>
-    </DrawerFooter>
-  </DrawerPopup>
+	<DrawerTrigger render={<Button variant="outline" />}>Open Drawer</DrawerTrigger>
+	<DrawerPopup>
+		<DrawerCreateHandle />
+		<DrawerHeader>
+			<DrawerTitle>Edit Profile</DrawerTitle>
+			<DrawerDescription>Make changes to your profile here.</DrawerDescription>
+		</DrawerHeader>
+		<DrawerPanel>{/* Form content */}</DrawerPanel>
+		<DrawerFooter>
+			<Button>Save</Button>
+			<DrawerClose render={<Button variant="ghost" />}>Cancel</DrawerClose>
+		</DrawerFooter>
+	</DrawerPopup>
 </Drawer>
 ```
 

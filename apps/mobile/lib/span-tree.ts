@@ -97,10 +97,7 @@ export function buildSpanTree(spans: Span[]): SpanNode[] {
 	return rootSpans
 }
 
-export function flattenSpanTree(
-	roots: SpanNode[],
-	expandedSpans: Set<string>,
-): SpanNode[] {
+export function flattenSpanTree(roots: SpanNode[], expandedSpans: Set<string>): SpanNode[] {
 	const result: SpanNode[] = []
 	function walk(nodes: SpanNode[]) {
 		for (const node of nodes) {

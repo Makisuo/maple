@@ -27,15 +27,15 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Select,
-  SelectGroup,
-  SelectGroupLabel,
-  SelectItem,
-  SelectLabel,
-  SelectPopup,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
+	Select,
+	SelectGroup,
+	SelectGroupLabel,
+	SelectItem,
+	SelectLabel,
+	SelectPopup,
+	SelectSeparator,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select"
 ```
 
@@ -94,4 +94,3 @@ For form-bound selects, prefer wrapping with `Field` + `FieldLabel` + `FieldErro
 - object values + rich option content: `p-select-10`, `p-select-17`, `p-select-20`
 - disabled options: `p-select-12`
 - related pattern: `p-combobox-18` (`SelectButton` with combobox trigger)
-

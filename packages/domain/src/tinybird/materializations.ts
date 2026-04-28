@@ -1,33 +1,30 @@
-import { defineMaterializedView, node } from "@tinybirdco/sdk";
+import { defineMaterializedView, node } from "@tinybirdco/sdk"
 import {
-  serviceUsage,
-  serviceMapSpans,
-  serviceMapChildren,
-  serviceMapEdgesHourly,
-  serviceOverviewSpans,
-  errorSpans,
-  errorEvents,
-  traceDetailSpans,
-  traceListMv,
-  attributeKeysHourly,
-  attributeValuesHourly,
-  tracesAggregatesHourly,
-  logsAggregatesHourly,
-} from "./datasources";
+	serviceUsage,
+	serviceMapSpans,
+	serviceMapChildren,
+	serviceMapEdgesHourly,
+	serviceOverviewSpans,
+	errorSpans,
+	errorEvents,
+	traceDetailSpans,
+	traceListMv,
+	attributeKeysHourly,
+	attributeValuesHourly,
+	tracesAggregatesHourly,
+	logsAggregatesHourly,
+} from "./datasources"
 
 /**
  * Materialized view to aggregate log usage statistics per service per hour
  */
-export const serviceUsageLogsMv = defineMaterializedView(
-  "service_usage_logs_mv",
-  {
-    description:
-      "Materialized view to aggregate log usage statistics per service per hour",
-    datasource: serviceUsage,
-    nodes: [
-      node({
-        name: "service_usage_logs_mv_node",
-        sql: `
+export const serviceUsageLogsMv = defineMaterializedView("service_usage_logs_mv", {
+	description: "Materialized view to aggregate log usage statistics per service per hour",
+	datasource: serviceUsage,
+	nodes: [
+		node({
+			name: "service_usage_logs_mv_node",
+			sql: `
         SELECT
           OrgId,
           ServiceName,
@@ -47,24 +44,20 @@ export const serviceUsageLogsMv = defineMaterializedView(
         FROM logs
         GROUP BY OrgId, ServiceName, Hour
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view to aggregate trace/span usage statistics per service per hour
  */
-export const serviceUsageTracesMv = defineMaterializedView(
-  "service_usage_traces_mv",
-  {
-    description:
-      "Materialized view to aggregate trace/span usage statistics per service per hour",
-    datasource: serviceUsage,
-    nodes: [
-      node({
-        name: "service_usage_traces_mv_node",
-        sql: `
+export const serviceUsageTracesMv = defineMaterializedView("service_usage_traces_mv", {
+	description: "Materialized view to aggregate trace/span usage statistics per service per hour",
+	datasource: serviceUsage,
+	nodes: [
+		node({
+			name: "service_usage_traces_mv_node",
+			sql: `
         SELECT
           OrgId,
           ServiceName,
@@ -84,24 +77,20 @@ export const serviceUsageTracesMv = defineMaterializedView(
         FROM traces
         GROUP BY OrgId, ServiceName, Hour
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view to aggregate sum metric usage statistics per service per hour
  */
-export const serviceUsageMetricsSumMv = defineMaterializedView(
-  "service_usage_metrics_sum_mv",
-  {
-    description:
-      "Materialized view to aggregate sum metric usage statistics per service per hour",
-    datasource: serviceUsage,
-    nodes: [
-      node({
-        name: "service_usage_metrics_sum_mv_node",
-        sql: `
+export const serviceUsageMetricsSumMv = defineMaterializedView("service_usage_metrics_sum_mv", {
+	description: "Materialized view to aggregate sum metric usage statistics per service per hour",
+	datasource: serviceUsage,
+	nodes: [
+		node({
+			name: "service_usage_metrics_sum_mv_node",
+			sql: `
         SELECT
           OrgId,
           ServiceName,
@@ -121,24 +110,20 @@ export const serviceUsageMetricsSumMv = defineMaterializedView(
         FROM metrics_sum
         GROUP BY OrgId, ServiceName, Hour
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view to aggregate gauge metric usage statistics per service per hour
  */
-export const serviceUsageMetricsGaugeMv = defineMaterializedView(
-  "service_usage_metrics_gauge_mv",
-  {
-    description:
-      "Materialized view to aggregate gauge metric usage statistics per service per hour",
-    datasource: serviceUsage,
-    nodes: [
-      node({
-        name: "service_usage_metrics_gauge_mv_node",
-        sql: `
+export const serviceUsageMetricsGaugeMv = defineMaterializedView("service_usage_metrics_gauge_mv", {
+	description: "Materialized view to aggregate gauge metric usage statistics per service per hour",
+	datasource: serviceUsage,
+	nodes: [
+		node({
+			name: "service_usage_metrics_gauge_mv_node",
+			sql: `
         SELECT
           OrgId,
           ServiceName,
@@ -158,24 +143,20 @@ export const serviceUsageMetricsGaugeMv = defineMaterializedView(
         FROM metrics_gauge
         GROUP BY OrgId, ServiceName, Hour
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view to aggregate histogram metric usage statistics per service per hour
  */
-export const serviceUsageMetricsHistogramMv = defineMaterializedView(
-  "service_usage_metrics_histogram_mv",
-  {
-    description:
-      "Materialized view to aggregate histogram metric usage statistics per service per hour",
-    datasource: serviceUsage,
-    nodes: [
-      node({
-        name: "service_usage_metrics_histogram_mv_node",
-        sql: `
+export const serviceUsageMetricsHistogramMv = defineMaterializedView("service_usage_metrics_histogram_mv", {
+	description: "Materialized view to aggregate histogram metric usage statistics per service per hour",
+	datasource: serviceUsage,
+	nodes: [
+		node({
+			name: "service_usage_metrics_histogram_mv_node",
+			sql: `
         SELECT
           OrgId,
           ServiceName,
@@ -195,24 +176,23 @@ export const serviceUsageMetricsHistogramMv = defineMaterializedView(
         FROM metrics_histogram
         GROUP BY OrgId, ServiceName, Hour
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view to aggregate exponential histogram metric usage statistics per service per hour
  */
 export const serviceUsageMetricsExpHistogramMv = defineMaterializedView(
-  "service_usage_metrics_exp_histogram_mv",
-  {
-    description:
-      "Materialized view to aggregate exponential histogram metric usage statistics per service per hour",
-    datasource: serviceUsage,
-    nodes: [
-      node({
-        name: "service_usage_metrics_exp_histogram_mv_node",
-        sql: `
+	"service_usage_metrics_exp_histogram_mv",
+	{
+		description:
+			"Materialized view to aggregate exponential histogram metric usage statistics per service per hour",
+		datasource: serviceUsage,
+		nodes: [
+			node({
+				name: "service_usage_metrics_exp_histogram_mv_node",
+				sql: `
         SELECT
           OrgId,
           ServiceName,
@@ -232,26 +212,24 @@ export const serviceUsageMetricsExpHistogramMv = defineMaterializedView(
         FROM metrics_exponential_histogram
         GROUP BY OrgId, ServiceName, Hour
       `,
-      }),
-    ],
-  }
-);
+			}),
+		],
+	},
+)
 
 /**
  * Materialized view projecting trace spans needed for service dependency map.
  * Extracts peer.service and deployment.environment from Map columns at write time
  * so the service map JOIN query avoids scanning heavy Map columns.
  */
-export const serviceMapSpansMv = defineMaterializedView(
-  "service_map_spans_mv",
-  {
-    description:
-      "Materialized view projecting trace spans needed for service dependency map. Extracts peer.service and deployment.environment from Map columns at write time.",
-    datasource: serviceMapSpans,
-    nodes: [
-      node({
-        name: "service_map_spans_mv_node",
-        sql: `
+export const serviceMapSpansMv = defineMaterializedView("service_map_spans_mv", {
+	description:
+		"Materialized view projecting trace spans needed for service dependency map. Extracts peer.service and deployment.environment from Map columns at write time.",
+	datasource: serviceMapSpans,
+	nodes: [
+		node({
+			name: "service_map_spans_mv_node",
+			sql: `
         SELECT
           OrgId,
           toDateTime(Timestamp) AS Timestamp,
@@ -268,10 +246,9 @@ export const serviceMapSpansMv = defineMaterializedView(
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer', 'Server', 'Consumer')
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view projecting service entry point spans for service overview queries.
@@ -280,16 +257,14 @@ export const serviceMapSpansMv = defineMaterializedView(
  * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes
  * so the service overview query avoids scanning heavy Map columns.
  */
-export const serviceOverviewSpansMv = defineMaterializedView(
-  "service_overview_spans_mv",
-  {
-    description:
-      "Materialized view projecting service entry point spans (Server/Consumer + root) for service overview queries. Pre-extracts deployment attributes from ResourceAttributes at write time.",
-    datasource: serviceOverviewSpans,
-    nodes: [
-      node({
-        name: "service_overview_spans_mv_node",
-        sql: `
+export const serviceOverviewSpansMv = defineMaterializedView("service_overview_spans_mv", {
+	description:
+		"Materialized view projecting service entry point spans (Server/Consumer + root) for service overview queries. Pre-extracts deployment attributes from ResourceAttributes at write time.",
+	datasource: serviceOverviewSpans,
+	nodes: [
+		node({
+			name: "service_overview_spans_mv_node",
+			sql: `
         SELECT
           OrgId,
           toDateTime(Timestamp) AS Timestamp,
@@ -302,10 +277,9 @@ export const serviceOverviewSpansMv = defineMaterializedView(
         FROM traces
         WHERE SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view populating trace_list_mv from root spans.
@@ -317,16 +291,14 @@ export const serviceOverviewSpansMv = defineMaterializedView(
  * Pre-filters to only spans with a parent and extracts deployment.environment
  * so the service map JOIN query scans far fewer rows on the child side.
  */
-export const serviceMapChildrenMv = defineMaterializedView(
-  "service_map_children_mv",
-  {
-    description:
-      "Populates service_map_children with Server/Consumer spans that have a parent for efficient JOIN lookups.",
-    datasource: serviceMapChildren,
-    nodes: [
-      node({
-        name: "service_map_children_mv_node",
-        sql: `
+export const serviceMapChildrenMv = defineMaterializedView("service_map_children_mv", {
+	description:
+		"Populates service_map_children with Server/Consumer spans that have a parent for efficient JOIN lookups.",
+	datasource: serviceMapChildren,
+	nodes: [
+		node({
+			name: "service_map_children_mv_node",
+			sql: `
         SELECT
           OrgId,
           toDateTime(Timestamp) AS Timestamp,
@@ -342,26 +314,23 @@ export const serviceMapChildrenMv = defineMaterializedView(
         WHERE SpanKind IN ('Server', 'Consumer')
           AND ParentSpanId != ''
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view pre-aggregating service-to-service edges per hour.
  * Aggregates Client spans with peer.service into hourly buckets at write time
  * so the service map query scans pre-aggregated rows instead of individual spans.
  */
-export const serviceMapEdgesHourlyMv = defineMaterializedView(
-  "service_map_edges_hourly_mv",
-  {
-    description:
-      "Pre-aggregates Client spans with peer.service into hourly service-to-service edge buckets for fast service map queries.",
-    datasource: serviceMapEdgesHourly,
-    nodes: [
-      node({
-        name: "service_map_edges_hourly_mv_node",
-        sql: `
+export const serviceMapEdgesHourlyMv = defineMaterializedView("service_map_edges_hourly_mv", {
+	description:
+		"Pre-aggregates Client spans with peer.service into hourly service-to-service edge buckets for fast service map queries.",
+	datasource: serviceMapEdgesHourly,
+	nodes: [
+		node({
+			name: "service_map_edges_hourly_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
@@ -379,10 +348,9 @@ export const serviceMapEdgesHourlyMv = defineMaterializedView(
           AND SpanAttributes['peer.service'] != ''
         GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Materialized view populating error_spans from error spans.
@@ -390,13 +358,13 @@ export const serviceMapEdgesHourlyMv = defineMaterializedView(
  * so error queries avoid scanning the full traces table and Map columns.
  */
 export const errorSpansMv = defineMaterializedView("error_spans_mv", {
-  description:
-    "Materializes error spans from traces. Pre-filters to StatusCode='Error' and pre-extracts deployment.environment.",
-  datasource: errorSpans,
-  nodes: [
-    node({
-      name: "error_spans_mv_node",
-      sql: `
+	description:
+		"Materializes error spans from traces. Pre-filters to StatusCode='Error' and pre-extracts deployment.environment.",
+	datasource: errorSpans,
+	nodes: [
+		node({
+			name: "error_spans_mv_node",
+			sql: `
         SELECT
           OrgId,
           toDateTime(Timestamp) AS Timestamp,
@@ -410,9 +378,9 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
         FROM traces
         WHERE StatusCode = 'Error'
       `,
-    }),
-  ],
-});
+		}),
+	],
+})
 
 /**
  * Materialized view populating error_events from traces where StatusCode='Error'.
@@ -440,13 +408,13 @@ export const errorSpansMv = defineMaterializedView("error_spans_mv", {
  * across Node/Python/Java/Go stack shapes. If you change one, change both.
  */
 export const errorEventsMv = defineMaterializedView("error_events_mv", {
-  description:
-    "Materializes per-occurrence error events from traces. Unwraps the first OTel exception event and computes a cityHash64 FingerprintHash for issue grouping.",
-  datasource: errorEvents,
-  nodes: [
-    node({
-      name: "error_events_mv_node",
-      sql: `
+	description:
+		"Materializes per-occurrence error events from traces. Unwraps the first OTel exception event and computes a cityHash64 FingerprintHash for issue grouping.",
+	datasource: errorEvents,
+	nodes: [
+		node({
+			name: "error_events_mv_node",
+			sql: `
         WITH
           arrayFirstIndex(n -> n = 'exception', EventsName) AS _ei,
           if(_ei > 0, EventsAttributes[_ei]['exception.type'], '') AS _exType,
@@ -488,20 +456,17 @@ export const errorEventsMv = defineMaterializedView("error_events_mv", {
         FROM traces
         WHERE StatusCode = 'Error'
       `,
-    }),
-  ],
-});
+		}),
+	],
+})
 
-export const traceDetailSpansMv = defineMaterializedView(
-  "trace_detail_spans_mv",
-  {
-    description:
-      "Populates trace_detail_spans with all spans re-sorted by TraceId for fast detail lookups",
-    datasource: traceDetailSpans,
-    nodes: [
-      node({
-        name: "trace_detail_spans_mv_node",
-        sql: `
+export const traceDetailSpansMv = defineMaterializedView("trace_detail_spans_mv", {
+	description: "Populates trace_detail_spans with all spans re-sorted by TraceId for fast detail lookups",
+	datasource: traceDetailSpans,
+	nodes: [
+		node({
+			name: "trace_detail_spans_mv_node",
+			sql: `
         SELECT
           OrgId,
           Timestamp,
@@ -521,19 +486,18 @@ export const traceDetailSpansMv = defineMaterializedView(
           EventsAttributes
         FROM traces
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 export const traceListMvMv = defineMaterializedView("trace_list_mv_mv", {
-  description:
-    "Populates trace_list_mv from root spans with pre-extracted HTTP attributes and normalized span names.",
-  datasource: traceListMv,
-  nodes: [
-    node({
-      name: "trace_list_mv_node",
-      sql: `
+	description:
+		"Populates trace_list_mv from root spans with pre-extracted HTTP attributes and normalized span names.",
+	datasource: traceListMv,
+	nodes: [
+		node({
+			name: "trace_list_mv_node",
+			sql: `
         SELECT
           OrgId,
           TraceId,
@@ -565,23 +529,21 @@ export const traceListMvMv = defineMaterializedView("trace_list_mv_mv", {
         FROM traces
         WHERE ParentSpanId = ''
       `,
-    }),
-  ],
-});
+		}),
+	],
+})
 
 // ---------------------------------------------------------------------------
 // Attribute key aggregation MVs
 // ---------------------------------------------------------------------------
 
-export const traceSpanAttributeKeysMv = defineMaterializedView(
-  "trace_span_attribute_keys_mv",
-  {
-    description: "Aggregates span attribute keys from traces hourly.",
-    datasource: attributeKeysHourly,
-    nodes: [
-      node({
-        name: "trace_span_attribute_keys_mv_node",
-        sql: `
+export const traceSpanAttributeKeysMv = defineMaterializedView("trace_span_attribute_keys_mv", {
+	description: "Aggregates span attribute keys from traces hourly.",
+	datasource: attributeKeysHourly,
+	nodes: [
+		node({
+			name: "trace_span_attribute_keys_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
@@ -592,20 +554,17 @@ export const traceSpanAttributeKeysMv = defineMaterializedView(
         WHERE SpanAttributes != map()
         GROUP BY OrgId, Hour, AttributeKey, AttributeScope
       `,
-      }),
-    ],
-  },
-);
+		}),
+	],
+})
 
-export const traceResourceAttributeKeysMv = defineMaterializedView(
-  "trace_resource_attribute_keys_mv",
-  {
-    description: "Aggregates resource attribute keys from traces hourly.",
-    datasource: attributeKeysHourly,
-    nodes: [
-      node({
-        name: "trace_resource_attribute_keys_mv_node",
-        sql: `
+export const traceResourceAttributeKeysMv = defineMaterializedView("trace_resource_attribute_keys_mv", {
+	description: "Aggregates resource attribute keys from traces hourly.",
+	datasource: attributeKeysHourly,
+	nodes: [
+		node({
+			name: "trace_resource_attribute_keys_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
@@ -616,20 +575,17 @@ export const traceResourceAttributeKeysMv = defineMaterializedView(
         WHERE ResourceAttributes != map()
         GROUP BY OrgId, Hour, AttributeKey, AttributeScope
       `,
-      }),
-    ],
-  },
-);
+		}),
+	],
+})
 
-export const logAttributeKeysMv = defineMaterializedView(
-  "log_attribute_keys_mv",
-  {
-    description: "Aggregates log attribute keys from logs hourly.",
-    datasource: attributeKeysHourly,
-    nodes: [
-      node({
-        name: "log_attribute_keys_mv_node",
-        sql: `
+export const logAttributeKeysMv = defineMaterializedView("log_attribute_keys_mv", {
+	description: "Aggregates log attribute keys from logs hourly.",
+	datasource: attributeKeysHourly,
+	nodes: [
+		node({
+			name: "log_attribute_keys_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
@@ -640,20 +596,17 @@ export const logAttributeKeysMv = defineMaterializedView(
         WHERE LogAttributes != map()
         GROUP BY OrgId, Hour, AttributeKey, AttributeScope
       `,
-      }),
-    ],
-  },
-);
+		}),
+	],
+})
 
-export const metricAttributeKeysMv = defineMaterializedView(
-  "metric_attribute_keys_mv",
-  {
-    description: "Aggregates metric attribute keys from metrics_sum hourly.",
-    datasource: attributeKeysHourly,
-    nodes: [
-      node({
-        name: "metric_attribute_keys_mv_node",
-        sql: `
+export const metricAttributeKeysMv = defineMaterializedView("metric_attribute_keys_mv", {
+	description: "Aggregates metric attribute keys from metrics_sum hourly.",
+	datasource: attributeKeysHourly,
+	nodes: [
+		node({
+			name: "metric_attribute_keys_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(toDateTime(TimeUnix)) AS Hour,
@@ -664,20 +617,17 @@ export const metricAttributeKeysMv = defineMaterializedView(
         WHERE Attributes != map()
         GROUP BY OrgId, Hour, AttributeKey, AttributeScope
       `,
-      }),
-    ],
-  },
-);
+		}),
+	],
+})
 
-export const traceSpanAttributeValuesMv = defineMaterializedView(
-  "trace_span_attribute_values_mv",
-  {
-    description: "Aggregates span attribute values from traces hourly.",
-    datasource: attributeValuesHourly,
-    nodes: [
-      node({
-        name: "trace_span_attribute_values_mv_node",
-        sql: `
+export const traceSpanAttributeValuesMv = defineMaterializedView("trace_span_attribute_values_mv", {
+	description: "Aggregates span attribute values from traces hourly.",
+	datasource: attributeValuesHourly,
+	nodes: [
+		node({
+			name: "trace_span_attribute_values_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
@@ -692,20 +642,17 @@ export const traceSpanAttributeValuesMv = defineMaterializedView(
         WHERE AttributeValue != ''
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
-      }),
-    ],
-  },
-);
+		}),
+	],
+})
 
-export const traceResourceAttributeValuesMv = defineMaterializedView(
-  "trace_resource_attribute_values_mv",
-  {
-    description: "Aggregates resource attribute values from traces hourly.",
-    datasource: attributeValuesHourly,
-    nodes: [
-      node({
-        name: "trace_resource_attribute_values_mv_node",
-        sql: `
+export const traceResourceAttributeValuesMv = defineMaterializedView("trace_resource_attribute_values_mv", {
+	description: "Aggregates resource attribute values from traces hourly.",
+	datasource: attributeValuesHourly,
+	nodes: [
+		node({
+			name: "trace_resource_attribute_values_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
@@ -720,10 +667,9 @@ export const traceResourceAttributeValuesMv = defineMaterializedView(
         WHERE AttributeValue != ''
         GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
       `,
-      }),
-    ],
-  },
-);
+		}),
+	],
+})
 
 /**
  * Populates traces_aggregates_hourly with sample-weighted -State aggregates.
@@ -736,16 +682,14 @@ export const traceResourceAttributeValuesMv = defineMaterializedView(
  * the row count grows quickly. See docs/persistence.md and the cardinality
  * pre-flight query in the rollout plan.
  */
-export const tracesAggregatesHourlyMv = defineMaterializedView(
-  "traces_aggregates_hourly_mv",
-  {
-    description:
-      "Pre-aggregates spans hourly with sample-weighted state columns (count, duration sum, t-digest quantiles, error count). Sample-correct from day one via SampleRate materialized column on traces.",
-    datasource: tracesAggregatesHourly,
-    nodes: [
-      node({
-        name: "traces_aggregates_hourly_mv_node",
-        sql: `
+export const tracesAggregatesHourlyMv = defineMaterializedView("traces_aggregates_hourly_mv", {
+	description:
+		"Pre-aggregates spans hourly with sample-weighted state columns (count, duration sum, t-digest quantiles, error count). Sample-correct from day one via SampleRate materialized column on traces.",
+	datasource: tracesAggregatesHourly,
+	nodes: [
+		node({
+			name: "traces_aggregates_hourly_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
@@ -764,25 +708,22 @@ export const tracesAggregatesHourlyMv = defineMaterializedView(
         FROM traces
         GROUP BY OrgId, Hour, ServiceName, SpanName, SpanKind, StatusCode, IsEntryPoint, DeploymentEnv
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})
 
 /**
  * Populates logs_aggregates_hourly. Severity-aware drop-in for
  * severity-distribution and log-volume dashboards.
  */
-export const logsAggregatesHourlyMv = defineMaterializedView(
-  "logs_aggregates_hourly_mv",
-  {
-    description:
-      "Pre-aggregates logs hourly by service × severity × deployment env. Drop-in for severity-distribution and log-volume queries.",
-    datasource: logsAggregatesHourly,
-    nodes: [
-      node({
-        name: "logs_aggregates_hourly_mv_node",
-        sql: `
+export const logsAggregatesHourlyMv = defineMaterializedView("logs_aggregates_hourly_mv", {
+	description:
+		"Pre-aggregates logs hourly by service × severity × deployment env. Drop-in for severity-distribution and log-volume queries.",
+	datasource: logsAggregatesHourly,
+	nodes: [
+		node({
+			name: "logs_aggregates_hourly_mv_node",
+			sql: `
         SELECT
           OrgId,
           toStartOfHour(TimestampTime) AS Hour,
@@ -794,7 +735,6 @@ export const logsAggregatesHourlyMv = defineMaterializedView(
         FROM logs
         GROUP BY OrgId, Hour, ServiceName, SeverityText, DeploymentEnv
       `,
-      }),
-    ],
-  }
-);
+		}),
+	],
+})

@@ -1,6 +1,4 @@
 {
-  "setup": [
-    "bun install"
-  ],
-  "teardown": []
+	"setup": ["bun install"],
+	"teardown": []
 }

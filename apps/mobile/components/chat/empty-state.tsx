@@ -14,10 +14,7 @@ export function EmptyState({ tagline }: EmptyStateProps) {
 				▌
 			</Text>
 			<View className="items-center gap-1">
-				<Text
-					className="font-mono text-[10px] text-muted-foreground"
-					style={{ letterSpacing: 2 }}
-				>
+				<Text className="font-mono text-[10px] text-muted-foreground" style={{ letterSpacing: 2 }}>
 					MAPLE AI
 				</Text>
 				<Text

@@ -8,9 +8,7 @@ export const HTTP_METHOD_COLORS: Record<string, string> = {
 	OPTIONS: "#5A5248",
 }
 
-const SERVICE_HUES = [
-	250, 185, 155, 130, 90, 60, 45, 25, 0, 340, 320, 290, 270, 260, 210, 230,
-]
+const SERVICE_HUES = [250, 185, 155, 130, 90, 60, 45, 25, 0, 340, 320, 290, 270, 260, 210, 230]
 
 function hashString(str: string): number {
 	let hash = 0
@@ -25,7 +23,9 @@ function hslToHex(h: number, s: number, l: number): string {
 	const f = (n: number) => {
 		const k = (n + h / 30) % 12
 		const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)
-		return Math.round(255 * color).toString(16).padStart(2, "0")
+		return Math.round(255 * color)
+			.toString(16)
+			.padStart(2, "0")
 	}
 	return `#${f(0)}${f(8)}${f(4)}`
 }

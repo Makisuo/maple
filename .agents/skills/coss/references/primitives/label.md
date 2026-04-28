@@ -48,8 +48,8 @@ Label wrapping a checkbox:
 
 ```tsx
 <Label>
-  <Checkbox />
-  Accept terms and conditions
+	<Checkbox />
+	Accept terms and conditions
 </Label>
 ```
 

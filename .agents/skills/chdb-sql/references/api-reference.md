@@ -22,24 +22,24 @@
 chdb.query(sql, output_format="CSV", path="", udf_path="", params=None)
 ```
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `sql` | str | _(required)_ | ClickHouse SQL query |
-| `output_format` | str | `"CSV"` | Output format (see [Output Formats](#output-formats)) |
-| `path` | str | `""` | Database path (empty = in-memory, no state) |
-| `udf_path` | str | `""` | Path for UDF scripts |
-| `params` | dict | `None` | Named parameters (see [Parametrized Queries](#parametrized-queries)) |
+| Param           | Type | Default      | Description                                                          |
+| --------------- | ---- | ------------ | -------------------------------------------------------------------- |
+| `sql`           | str  | _(required)_ | ClickHouse SQL query                                                 |
+| `output_format` | str  | `"CSV"`      | Output format (see [Output Formats](#output-formats))                |
+| `path`          | str  | `""`         | Database path (empty = in-memory, no state)                          |
+| `udf_path`      | str  | `""`         | Path for UDF scripts                                                 |
+| `params`        | dict | `None`       | Named parameters (see [Parametrized Queries](#parametrized-queries)) |
 
 **Returns:** Result object with:
 
-| Property/Method | Description |
-|-----------------|-------------|
-| `.show()` | Print result to stdout |
-| `.bytes()` | Raw bytes of the result |
-| `.data()` | Result as string |
-| `.rows_read` | Number of rows read |
-| `.bytes_read` | Number of bytes read |
-| `.elapsed` | Query execution time in seconds |
+| Property/Method | Description                     |
+| --------------- | ------------------------------- |
+| `.show()`       | Print result to stdout          |
+| `.bytes()`      | Raw bytes of the result         |
+| `.data()`       | Result as string                |
+| `.rows_read`    | Number of rows read             |
+| `.bytes_read`   | Number of bytes read            |
+| `.elapsed`      | Query execution time in seconds |
 
 ```python
 import chdb
@@ -63,11 +63,11 @@ sess = chs.Session()                    # in-memory (no persistence)
 sess = chs.Session("./mydb")            # persistent to disk
 ```
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `query()` | `(sql, fmt="CSV", params=None)` | Execute SQL with session state |
-| `send_query()` | `(sql, format="CSV")` | Streaming query (returns iterator) |
-| `close()` | `()` | Close session and release resources |
+| Method         | Signature                       | Description                         |
+| -------------- | ------------------------------- | ----------------------------------- |
+| `query()`      | `(sql, fmt="CSV", params=None)` | Execute SQL with session state      |
+| `send_query()` | `(sql, format="CSV")`           | Streaming query (returns iterator)  |
+| `close()`      | `()`                            | Close session and release resources |
 
 ```python
 from chdb import session as chs
@@ -83,6 +83,7 @@ sess.close()
 ```
 
 **Key differences from `chdb.query()`:**
+
 - Session maintains state: tables, databases, and settings persist across calls
 - Persistent sessions (`path="./dir"`) survive process restarts
 - In-memory sessions (`path=":memory:"`) are discarded on close
@@ -97,17 +98,17 @@ from chdb import dbapi
 conn = dbapi.connect()    # or: dbapi.connect(path="./mydb")
 ```
 
-| Method | Description |
-|--------|-------------|
-| `conn.cursor()` | Create a cursor |
-| `cur.execute(sql)` | Execute SQL |
+| Method                     | Description             |
+| -------------------------- | ----------------------- |
+| `conn.cursor()`            | Create a cursor         |
+| `cur.execute(sql)`         | Execute SQL             |
 | `cur.execute(sql, params)` | Execute with parameters |
-| `cur.fetchone()` | Fetch one row |
-| `cur.fetchmany(size)` | Fetch `size` rows |
-| `cur.fetchall()` | Fetch all rows |
-| `cur.description` | Column metadata |
-| `cur.close()` | Close cursor |
-| `conn.close()` | Close connection |
+| `cur.fetchone()`           | Fetch one row           |
+| `cur.fetchmany(size)`      | Fetch `size` rows       |
+| `cur.fetchall()`           | Fetch all rows          |
+| `cur.description`          | Column metadata         |
+| `cur.close()`              | Close cursor            |
+| `conn.close()`             | Close connection        |
 
 ```python
 from chdb import dbapi
@@ -125,20 +126,20 @@ conn.close()
 
 ## Output Formats
 
-| Format | Description | Use case |
-|--------|-------------|----------|
-| `"CSV"` | Comma-separated (default) | General export |
-| `"CSVWithNames"` | CSV with header row | Spreadsheet import |
-| `"JSON"` | JSON object with metadata | API responses |
-| `"JSONEachRow"` | One JSON object per line | Streaming / NDJSON |
-| `"DataFrame"` | pandas DataFrame | Python analysis |
-| `"Arrow"` | Apache Arrow bytes | IPC format |
-| `"ArrowTable"` | pyarrow.Table | Arrow ecosystem |
-| `"Parquet"` | Parquet bytes | File export |
-| `"Pretty"` | Formatted table | Terminal display |
-| `"PrettyCompact"` | Compact table | Terminal display |
-| `"TabSeparated"` | TSV | Tab-delimited export |
-| `"Debug"` | Debug info | Troubleshooting |
+| Format            | Description               | Use case             |
+| ----------------- | ------------------------- | -------------------- |
+| `"CSV"`           | Comma-separated (default) | General export       |
+| `"CSVWithNames"`  | CSV with header row       | Spreadsheet import   |
+| `"JSON"`          | JSON object with metadata | API responses        |
+| `"JSONEachRow"`   | One JSON object per line  | Streaming / NDJSON   |
+| `"DataFrame"`     | pandas DataFrame          | Python analysis      |
+| `"Arrow"`         | Apache Arrow bytes        | IPC format           |
+| `"ArrowTable"`    | pyarrow.Table             | Arrow ecosystem      |
+| `"Parquet"`       | Parquet bytes             | File export          |
+| `"Pretty"`        | Formatted table           | Terminal display     |
+| `"PrettyCompact"` | Compact table             | Terminal display     |
+| `"TabSeparated"`  | TSV                       | Tab-delimited export |
+| `"Debug"`         | Debug info                | Troubleshooting      |
 
 ```python
 import chdb
@@ -219,6 +220,7 @@ print(result)
 ```
 
 **Limitations:**
+
 - UDFs execute in-process, not distributed
 - Arguments and return values must be scalar types
 - Performance may be lower than native ClickHouse functions for large datasets

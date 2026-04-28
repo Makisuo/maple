@@ -8,21 +8,21 @@ import type * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
  * Props for the EffectRouterProvider component.
  */
 export interface EffectRouterProviderProps {
-  /**
-   * The router created by `createEffectRouter`.
-   */
-  readonly router: AnyRouter
+	/**
+	 * The router created by `createEffectRouter`.
+	 */
+	readonly router: AnyRouter
 
-  /**
-   * The AtomRegistry. Same one passed to `createEffectRouter`.
-   */
-  readonly registry: AtomRegistry.AtomRegistry
+	/**
+	 * The AtomRegistry. Same one passed to `createEffectRouter`.
+	 */
+	readonly registry: AtomRegistry.AtomRegistry
 
-  /**
-   * Additional router context passed to `RouterProvider`.
-   * Typically used for auth state that changes at runtime.
-   */
-  readonly context?: Partial<RouterOptions<any, any, any>["context"]>
+	/**
+	 * Additional router context passed to `RouterProvider`.
+	 * Typically used for auth state that changes at runtime.
+	 */
+	readonly context?: Partial<RouterOptions<any, any, any>["context"]>
 }
 
 /**
@@ -42,11 +42,11 @@ export interface EffectRouterProviderProps {
  * ```
  */
 export function EffectRouterProvider({ router, registry, context }: EffectRouterProviderProps) {
-  return (
-    <RegistryContext.Provider value={registry}>
-      <RouterProvider router={router} context={context} />
-    </RegistryContext.Provider>
-  )
+	return (
+		<RegistryContext.Provider value={registry}>
+			<RouterProvider router={router} context={context} />
+		</RegistryContext.Provider>
+	)
 }
 
 /**
@@ -73,8 +73,8 @@ export function EffectRouterProvider({ router, registry, context }: EffectRouter
  * ```
  */
 export function useRouteData<A, E>(
-  atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
+	atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
 ): AsyncResult.AsyncResult<A, E> {
-  useAtomMount(atom)
-  return useAtomValue(atom)
+	useAtomMount(atom)
+	return useAtomValue(atom)
 }

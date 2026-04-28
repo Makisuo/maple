@@ -40,9 +40,9 @@ Field-wrapped input (preferred for forms):
 
 ```tsx
 <Field>
-  <FieldLabel>Email</FieldLabel>
-  <Input type="email" placeholder="name@company.com" />
-  <FieldError>Please enter a valid email.</FieldError>
+	<FieldLabel>Email</FieldLabel>
+	<Input type="email" placeholder="name@company.com" />
+	<FieldError>Please enter a valid email.</FieldError>
 </Field>
 ```
 
@@ -50,10 +50,10 @@ Input with addon (InputGroup):
 
 ```tsx
 <InputGroup>
-  <InputGroupInput aria-label="Search" placeholder="Search" type="search" />
-  <InputGroupAddon>
-    <SearchIcon aria-hidden="true" />
-  </InputGroupAddon>
+	<InputGroupInput aria-label="Search" placeholder="Search" type="search" />
+	<InputGroupAddon>
+		<SearchIcon aria-hidden="true" />
+	</InputGroupAddon>
 </InputGroup>
 ```
 

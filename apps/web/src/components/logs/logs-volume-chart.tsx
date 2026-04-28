@@ -3,21 +3,16 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from "recharts"
 
 import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
+	ChartContainer,
+	ChartTooltip,
+	ChartTooltipContent,
+	type ChartConfig,
 } from "@maple/ui/components/ui/chart"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
-import {
-  formatBucketLabel,
-  formatNumber,
-  inferBucketSeconds,
-  inferRangeMs,
-} from "@/lib/format"
+import { formatBucketLabel, formatNumber, inferBucketSeconds, inferRangeMs } from "@/lib/format"
 import { formatForTinybird } from "@/lib/time-utils"
 import type { LogsSearchParams } from "@/routes/logs"
 import { SEVERITY_COLORS, SEVERITY_ORDER } from "@/lib/severity"
@@ -26,244 +21,250 @@ import { SEVERITY_COLORS, SEVERITY_ORDER } from "@/lib/severity"
 const HISTOGRAM_TARGET_POINTS = 150
 
 function buildChartConfig(seriesKeys: string[]): ChartConfig {
-  const config: ChartConfig = {}
-  for (const key of seriesKeys) {
-    const upper = key.toUpperCase()
-    config[key] = {
-      label: upper,
-      color: SEVERITY_COLORS[upper] ?? "var(--color-muted-foreground)",
-    }
-  }
-  return config
+	const config: ChartConfig = {}
+	for (const key of seriesKeys) {
+		const upper = key.toUpperCase()
+		config[key] = {
+			label: upper,
+			color: SEVERITY_COLORS[upper] ?? "var(--color-muted-foreground)",
+		}
+	}
+	return config
 }
 
 interface LogsVolumeChartProps {
-  filters?: LogsSearchParams
-  onTimeRangeSelect?: (range: { startTime: string; endTime: string }) => void
+	filters?: LogsSearchParams
+	onTimeRangeSelect?: (range: { startTime: string; endTime: string }) => void
 }
 
 export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartProps) {
-  const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
-    useEffectiveTimeRange(filters?.startTime, filters?.endTime, filters?.timePreset ?? "12h")
+	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
+		filters?.startTime,
+		filters?.endTime,
+		filters?.timePreset ?? "12h",
+	)
 
-  const bucketSeconds = useMemo(
-    () => computeBucketSeconds(effectiveStartTime, effectiveEndTime, HISTOGRAM_TARGET_POINTS),
-    [effectiveStartTime, effectiveEndTime],
-  )
+	const bucketSeconds = useMemo(
+		() => computeBucketSeconds(effectiveStartTime, effectiveEndTime, HISTOGRAM_TARGET_POINTS),
+		[effectiveStartTime, effectiveEndTime],
+	)
 
-  const timeSeriesResult = useAtomValue(
-    getCustomChartTimeSeriesResultAtom({
-      data: {
-        source: "logs",
-        metric: "count",
-        groupBy: "severity",
-        startTime: effectiveStartTime,
-        endTime: effectiveEndTime,
-        bucketSeconds,
-        filters: {
-          serviceName: filters?.services?.[0],
-          severity: filters?.severities?.[0],
-          environments: filters?.deploymentEnvs ? [...filters.deploymentEnvs] : undefined,
-        },
-      },
-    }),
-  )
+	const timeSeriesResult = useAtomValue(
+		getCustomChartTimeSeriesResultAtom({
+			data: {
+				source: "logs",
+				metric: "count",
+				groupBy: "severity",
+				startTime: effectiveStartTime,
+				endTime: effectiveEndTime,
+				bucketSeconds,
+				filters: {
+					serviceName: filters?.services?.[0],
+					severity: filters?.severities?.[0],
+					environments: filters?.deploymentEnvs ? [...filters.deploymentEnvs] : undefined,
+				},
+			},
+		}),
+	)
 
-  // Brush selection state (lifted out of onSuccess so hooks are unconditional)
-  const [refAreaLeft, setRefAreaLeft] = useState<string | null>(null)
-  const [refAreaRight, setRefAreaRight] = useState<string | null>(null)
-  const [isSelecting, setIsSelecting] = useState(false)
-  const bucketSecondsRef = useRef(300)
+	// Brush selection state (lifted out of onSuccess so hooks are unconditional)
+	const [refAreaLeft, setRefAreaLeft] = useState<string | null>(null)
+	const [refAreaRight, setRefAreaRight] = useState<string | null>(null)
+	const [isSelecting, setIsSelecting] = useState(false)
+	const bucketSecondsRef = useRef(300)
 
-  const handleMouseDown = useCallback(
-    (nextState: { activeLabel?: string }) => {
-      if (nextState.activeLabel && onTimeRangeSelect) {
-        setRefAreaLeft(nextState.activeLabel)
-        setRefAreaRight(null)
-        setIsSelecting(true)
-      }
-    },
-    [onTimeRangeSelect],
-  )
+	const handleMouseDown = useCallback(
+		(nextState: { activeLabel?: string }) => {
+			if (nextState.activeLabel && onTimeRangeSelect) {
+				setRefAreaLeft(nextState.activeLabel)
+				setRefAreaRight(null)
+				setIsSelecting(true)
+			}
+		},
+		[onTimeRangeSelect],
+	)
 
-  const handleMouseMove = useCallback(
-    (nextState: { activeLabel?: string }) => {
-      if (isSelecting && nextState.activeLabel) {
-        setRefAreaRight(nextState.activeLabel)
-      }
-    },
-    [isSelecting],
-  )
+	const handleMouseMove = useCallback(
+		(nextState: { activeLabel?: string }) => {
+			if (isSelecting && nextState.activeLabel) {
+				setRefAreaRight(nextState.activeLabel)
+			}
+		},
+		[isSelecting],
+	)
 
-  const handleMouseUp = useCallback(() => {
-    if (!isSelecting || !refAreaLeft) {
-      setIsSelecting(false)
-      setRefAreaLeft(null)
-      setRefAreaRight(null)
-      return
-    }
+	const handleMouseUp = useCallback(() => {
+		if (!isSelecting || !refAreaLeft) {
+			setIsSelecting(false)
+			setRefAreaLeft(null)
+			setRefAreaRight(null)
+			return
+		}
 
-    setIsSelecting(false)
+		setIsSelecting(false)
 
-    const left = refAreaLeft
-    const right = refAreaRight ?? refAreaLeft
-    const leftMs = new Date(left).getTime()
-    const rightMs = new Date(right).getTime()
+		const left = refAreaLeft
+		const right = refAreaRight ?? refAreaLeft
+		const leftMs = new Date(left).getTime()
+		const rightMs = new Date(right).getTime()
 
-    if (Number.isNaN(leftMs) || Number.isNaN(rightMs)) {
-      setRefAreaLeft(null)
-      setRefAreaRight(null)
-      return
-    }
+		if (Number.isNaN(leftMs) || Number.isNaN(rightMs)) {
+			setRefAreaLeft(null)
+			setRefAreaRight(null)
+			return
+		}
 
-    const startMs = Math.min(leftMs, rightMs)
-    const endMs = Math.max(leftMs, rightMs)
+		const startMs = Math.min(leftMs, rightMs)
+		const endMs = Math.max(leftMs, rightMs)
 
-    // Don't zoom if user just clicked without dragging
-    if (startMs === endMs) {
-      setRefAreaLeft(null)
-      setRefAreaRight(null)
-      return
-    }
+		// Don't zoom if user just clicked without dragging
+		if (startMs === endMs) {
+			setRefAreaLeft(null)
+			setRefAreaRight(null)
+			return
+		}
 
-    // Extend end by one bucket width so the rightmost selected bar is included
-    const endWithBucket = endMs + bucketSecondsRef.current * 1000
+		// Extend end by one bucket width so the rightmost selected bar is included
+		const endWithBucket = endMs + bucketSecondsRef.current * 1000
 
-    onTimeRangeSelect?.({
-      startTime: formatForTinybird(new Date(startMs)),
-      endTime: formatForTinybird(new Date(endWithBucket)),
-    })
+		onTimeRangeSelect?.({
+			startTime: formatForTinybird(new Date(startMs)),
+			endTime: formatForTinybird(new Date(endWithBucket)),
+		})
 
-    setRefAreaLeft(null)
-    setRefAreaRight(null)
-  }, [isSelecting, refAreaLeft, refAreaRight, onTimeRangeSelect])
+		setRefAreaLeft(null)
+		setRefAreaRight(null)
+	}, [isSelecting, refAreaLeft, refAreaRight, onTimeRangeSelect])
 
-  const handleMouseLeave = useCallback(() => {
-    if (isSelecting) {
-      setIsSelecting(false)
-      setRefAreaLeft(null)
-      setRefAreaRight(null)
-    }
-  }, [isSelecting])
+	const handleMouseLeave = useCallback(() => {
+		if (isSelecting) {
+			setIsSelecting(false)
+			setRefAreaLeft(null)
+			setRefAreaRight(null)
+		}
+	}, [isSelecting])
 
-  return Result.builder(timeSeriesResult)
-    .onInitial(() => <Skeleton className="h-[120px] w-full rounded-md" />)
-    .onError(() => null)
-    .onSuccess((response, result) => {
-      const points = response.data
-      if (points.length === 0) return null
+	return Result.builder(timeSeriesResult)
+		.onInitial(() => <Skeleton className="h-[120px] w-full rounded-md" />)
+		.onError(() => null)
+		.onSuccess((response, result) => {
+			const points = response.data
+			if (points.length === 0) return null
 
-      const seriesKeysSet = new Set<string>()
-      for (const point of points) {
-        for (const key of Object.keys(point.series)) {
-          seriesKeysSet.add(key)
-        }
-      }
+			const seriesKeysSet = new Set<string>()
+			for (const point of points) {
+				for (const key of Object.keys(point.series)) {
+					seriesKeysSet.add(key)
+				}
+			}
 
-      const seriesKeys = SEVERITY_ORDER.filter((s) => seriesKeysSet.has(s))
-      for (const key of seriesKeysSet) {
-        if (!seriesKeys.includes(key)) seriesKeys.push(key)
-      }
+			const seriesKeys = SEVERITY_ORDER.filter((s) => seriesKeysSet.has(s))
+			for (const key of seriesKeysSet) {
+				if (!seriesKeys.includes(key)) seriesKeys.push(key)
+			}
 
-      const chartData = points.map((point) => ({
-        bucket: point.bucket,
-        ...point.series,
-      }))
+			const chartData = points.map((point) => ({
+				bucket: point.bucket,
+				...point.series,
+			}))
 
-      const totalCount = points.reduce((sum, point) => {
-        return (
-          sum +
-          Object.values(point.series).reduce<number>(
-            (s, v) => s + (typeof v === "number" ? v : 0),
-            0,
-          )
-        )
-      }, 0)
+			const totalCount = points.reduce((sum, point) => {
+				return (
+					sum +
+					Object.values(point.series).reduce<number>(
+						(s, v) => s + (typeof v === "number" ? v : 0),
+						0,
+					)
+				)
+			}, 0)
 
-      const chartConfig = buildChartConfig(seriesKeys)
-      const rangeMs = inferRangeMs(chartData)
-      const dataBucketSeconds = inferBucketSeconds(chartData)
-      bucketSecondsRef.current = dataBucketSeconds ?? 300
+			const chartConfig = buildChartConfig(seriesKeys)
+			const rangeMs = inferRangeMs(chartData)
+			const dataBucketSeconds = inferBucketSeconds(chartData)
+			bucketSecondsRef.current = dataBucketSeconds ?? 300
 
-      return (
-        <div className={`transition-opacity ${result.waiting ? "opacity-60" : ""}`}>
-          <div className="mb-1 flex items-baseline gap-2">
-            <span className="text-sm font-medium">{formatNumber(totalCount)} logs</span>
-            <span className="text-xs text-muted-foreground">in selected range</span>
-          </div>
-          <ChartContainer
-            config={chartConfig}
-            className={`h-[120px] w-full select-none ${onTimeRangeSelect ? "cursor-crosshair" : ""}`}
-          >
-            <BarChart
-              data={chartData}
-              margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseLeave}
-            >
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis
-                dataKey="bucket"
-                tickLine={false}
-                axisLine={false}
-                tickMargin={4}
-                fontSize={10}
-                minTickGap={50}
-                tickFormatter={(value) =>
-                  formatBucketLabel(value, { rangeMs, bucketSeconds: dataBucketSeconds }, "tick")
-                }
-              />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                tickMargin={4}
-                fontSize={10}
-                width={40}
-                tickFormatter={(value) => formatNumber(value)}
-              />
-              {!isSelecting && (
-                <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      labelFormatter={(value) =>
-                        formatBucketLabel(
-                          value,
-                          { rangeMs, bucketSeconds: dataBucketSeconds },
-                          "tooltip",
-                        )
-                      }
-                    />
-                  }
-                />
-              )}
-              {seriesKeys.map((key) => (
-                <Bar
-                  key={key}
-                  dataKey={key}
-                  stackId="severity"
-                  fill={
-                    SEVERITY_COLORS[key.toUpperCase()] ??
-                    "var(--color-muted-foreground)"
-                  }
-                  radius={0}
-                  isAnimationActive={false}
-                />
-              ))}
-              {refAreaLeft && refAreaRight && (
-                <ReferenceArea
-                  x1={refAreaLeft}
-                  x2={refAreaRight}
-                  strokeOpacity={0.3}
-                  fill="hsl(var(--primary))"
-                  fillOpacity={0.15}
-                />
-              )}
-            </BarChart>
-          </ChartContainer>
-        </div>
-      )
-    })
-    .render()
+			return (
+				<div className={`transition-opacity ${result.waiting ? "opacity-60" : ""}`}>
+					<div className="mb-1 flex items-baseline gap-2">
+						<span className="text-sm font-medium">{formatNumber(totalCount)} logs</span>
+						<span className="text-xs text-muted-foreground">in selected range</span>
+					</div>
+					<ChartContainer
+						config={chartConfig}
+						className={`h-[120px] w-full select-none ${onTimeRangeSelect ? "cursor-crosshair" : ""}`}
+					>
+						<BarChart
+							data={chartData}
+							margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
+							onMouseDown={handleMouseDown}
+							onMouseMove={handleMouseMove}
+							onMouseUp={handleMouseUp}
+							onMouseLeave={handleMouseLeave}
+						>
+							<CartesianGrid vertical={false} strokeDasharray="3 3" />
+							<XAxis
+								dataKey="bucket"
+								tickLine={false}
+								axisLine={false}
+								tickMargin={4}
+								fontSize={10}
+								minTickGap={50}
+								tickFormatter={(value) =>
+									formatBucketLabel(
+										value,
+										{ rangeMs, bucketSeconds: dataBucketSeconds },
+										"tick",
+									)
+								}
+							/>
+							<YAxis
+								tickLine={false}
+								axisLine={false}
+								tickMargin={4}
+								fontSize={10}
+								width={40}
+								tickFormatter={(value) => formatNumber(value)}
+							/>
+							{!isSelecting && (
+								<ChartTooltip
+									content={
+										<ChartTooltipContent
+											labelFormatter={(value) =>
+												formatBucketLabel(
+													value,
+													{ rangeMs, bucketSeconds: dataBucketSeconds },
+													"tooltip",
+												)
+											}
+										/>
+									}
+								/>
+							)}
+							{seriesKeys.map((key) => (
+								<Bar
+									key={key}
+									dataKey={key}
+									stackId="severity"
+									fill={
+										SEVERITY_COLORS[key.toUpperCase()] ?? "var(--color-muted-foreground)"
+									}
+									radius={0}
+									isAnimationActive={false}
+								/>
+							))}
+							{refAreaLeft && refAreaRight && (
+								<ReferenceArea
+									x1={refAreaLeft}
+									x2={refAreaRight}
+									strokeOpacity={0.3}
+									fill="hsl(var(--primary))"
+									fillOpacity={0.15}
+								/>
+							)}
+						</BarChart>
+					</ChartContainer>
+				</div>
+			)
+		})
+		.render()
 }

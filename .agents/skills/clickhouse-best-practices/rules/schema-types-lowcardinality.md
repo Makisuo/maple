@@ -33,10 +33,10 @@ CREATE TABLE events (
 
 **When to use LowCardinality:**
 
-| Unique Values | Recommendation |
-|---------------|----------------|
-| < 10,000 | Use LowCardinality |
-| > 10,000 | Use regular String |
+| Unique Values | Recommendation     |
+| ------------- | ------------------ |
+| < 10,000      | Use LowCardinality |
+| > 10,000      | Use regular String |
 
 ```sql
 -- Check cardinality before deciding

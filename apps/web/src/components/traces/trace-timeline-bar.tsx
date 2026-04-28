@@ -11,162 +11,150 @@ import { ROW_HEIGHT, ROW_GAP, DEPTH_INDENT } from "./trace-timeline-types"
 export type BarSearchState = "match" | "dimmed" | null
 
 interface TraceTimelineBarProps {
-  bar: TimelineBar
-  leftPercent: number
-  widthPercent: number
-  services: string[]
-  isSelected: boolean
-  isFocused: boolean
-  searchState: BarSearchState
-  containerWidth: number
+	bar: TimelineBar
+	leftPercent: number
+	widthPercent: number
+	services: string[]
+	isSelected: boolean
+	isFocused: boolean
+	searchState: BarSearchState
+	containerWidth: number
 }
 
 const SERVICE_HUES = [50, 155, 255, 25, 100, 310, 200, 340]
 
 function getBarBackground(serviceName: string, services: string[]): string {
-  const index = services.indexOf(serviceName)
-  const hue = SERVICE_HUES[index % SERVICE_HUES.length]
-  return `oklch(0.22 0.015 ${hue})`
+	const index = services.indexOf(serviceName)
+	const hue = SERVICE_HUES[index % SERVICE_HUES.length]
+	return `oklch(0.22 0.015 ${hue})`
 }
 
 function getBarHoverBackground(serviceName: string, services: string[]): string {
-  const index = services.indexOf(serviceName)
-  const hue = SERVICE_HUES[index % SERVICE_HUES.length]
-  return `oklch(0.28 0.025 ${hue})`
+	const index = services.indexOf(serviceName)
+	const hue = SERVICE_HUES[index % SERVICE_HUES.length]
+	return `oklch(0.28 0.025 ${hue})`
 }
 
 function TraceTimelineBarInner({
-  bar,
-  leftPercent,
-  widthPercent,
-  services,
-  isSelected,
-  isFocused,
-  searchState,
-  containerWidth,
+	bar,
+	leftPercent,
+	widthPercent,
+	services,
+	isSelected,
+	isFocused,
+	searchState,
+	containerWidth,
 }: TraceTimelineBarProps) {
-  const borderColor = bar.isError
-    ? "var(--destructive)"
-    : getServiceBorderColor(bar.span.serviceName, services)
+	const borderColor = bar.isError
+		? "var(--destructive)"
+		: getServiceBorderColor(bar.span.serviceName, services)
 
-  const bgColor = bar.isError
-    ? "oklch(0.20 0.05 25)"
-    : getBarBackground(bar.span.serviceName, services)
+	const bgColor = bar.isError ? "oklch(0.20 0.05 25)" : getBarBackground(bar.span.serviceName, services)
 
-  const hoverBgColor = bar.isError
-    ? "oklch(0.25 0.06 25)"
-    : getBarHoverBackground(bar.span.serviceName, services)
+	const hoverBgColor = bar.isError
+		? "oklch(0.25 0.06 25)"
+		: getBarHoverBackground(bar.span.serviceName, services)
 
-  const cacheInfo = getCacheInfo(bar.span.spanAttributes)
+	const cacheInfo = getCacheInfo(bar.span.spanAttributes)
 
-  // Pixel-based label visibility
-  const barPx = (widthPercent / 100) * containerWidth
-  const showName = barPx > 60
-  const showService = barPx > 150
-  const showDuration = barPx > 200
+	// Pixel-based label visibility
+	const barPx = (widthPercent / 100) * containerWidth
+	const showName = barPx > 60
+	const showService = barPx > 150
+	const showDuration = barPx > 200
 
-  const leftOffset = bar.depth * DEPTH_INDENT
+	const leftOffset = bar.depth * DEPTH_INDENT
 
-  // CSS custom properties for hover effect
-  const barStyle: React.CSSProperties = {
-    position: "absolute",
-    transform: `translateY(${bar.row * (ROW_HEIGHT + ROW_GAP)}px)`,
-    left: `calc(${leftPercent}% + ${leftOffset}px)`,
-    width: `calc(${Math.max(widthPercent, 0.3)}% - ${leftOffset}px)`,
-    height: ROW_HEIGHT,
-    borderLeft: `3px solid ${borderColor}`,
-    backgroundColor: bgColor,
-    "--hover-bg": hoverBgColor,
-  } as React.CSSProperties
+	// CSS custom properties for hover effect
+	const barStyle: React.CSSProperties = {
+		position: "absolute",
+		transform: `translateY(${bar.row * (ROW_HEIGHT + ROW_GAP)}px)`,
+		left: `calc(${leftPercent}% + ${leftOffset}px)`,
+		width: `calc(${Math.max(widthPercent, 0.3)}% - ${leftOffset}px)`,
+		height: ROW_HEIGHT,
+		borderLeft: `3px solid ${borderColor}`,
+		backgroundColor: bgColor,
+		"--hover-bg": hoverBgColor,
+	} as React.CSSProperties
 
-  return (
-    <div
-      data-span-id={bar.span.spanId}
-      data-row={bar.row}
-      className={cn(
-        "trace-timeline-bar flex items-center overflow-hidden text-left font-mono text-[11px] font-medium cursor-pointer",
-        "transition-[background-color,box-shadow] duration-75",
-        isSelected && "ring-1 ring-primary bg-primary/10 z-20",
-        isFocused && "outline-2 outline-dashed outline-primary outline-offset-[-2px] z-10",
-        searchState === "dimmed" && "opacity-25",
-        searchState === "match" && "ring-1 ring-primary/50 z-10",
-        bar.span.isMissing && "border-dashed italic text-muted-foreground",
-      )}
-      style={barStyle}
-    >
-      {/* Collapse toggle */}
-      {bar.span.children.length > 0 && (
-        <button
-          data-collapse-toggle={bar.span.spanId}
-          className="flex items-center justify-center w-4 h-4 shrink-0 ml-1 text-muted-foreground hover:text-foreground"
-          tabIndex={-1}
-        >
-          {bar.isCollapsed ? (
-            <ChevronRightIcon size={12} />
-          ) : (
-            <ChevronDownIcon size={12} />
-          )}
-        </button>
-      )}
-      {bar.span.children.length === 0 && <div className="w-4 shrink-0 ml-1" />}
+	return (
+		<div
+			data-span-id={bar.span.spanId}
+			data-row={bar.row}
+			className={cn(
+				"trace-timeline-bar flex items-center overflow-hidden text-left font-mono text-[11px] font-medium cursor-pointer",
+				"transition-[background-color,box-shadow] duration-75",
+				isSelected && "ring-1 ring-primary bg-primary/10 z-20",
+				isFocused && "outline-2 outline-dashed outline-primary outline-offset-[-2px] z-10",
+				searchState === "dimmed" && "opacity-25",
+				searchState === "match" && "ring-1 ring-primary/50 z-10",
+				bar.span.isMissing && "border-dashed italic text-muted-foreground",
+			)}
+			style={barStyle}
+		>
+			{/* Collapse toggle */}
+			{bar.span.children.length > 0 && (
+				<button
+					data-collapse-toggle={bar.span.spanId}
+					className="flex items-center justify-center w-4 h-4 shrink-0 ml-1 text-muted-foreground hover:text-foreground"
+					tabIndex={-1}
+				>
+					{bar.isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}
+				</button>
+			)}
+			{bar.span.children.length === 0 && <div className="w-4 shrink-0 ml-1" />}
 
-      {/* Labels */}
-      {showName ? (
-        <div className="flex items-center min-w-0 flex-1 gap-1 px-1">
-          <span className="truncate text-foreground/90">
-            {bar.span.spanName}
-          </span>
-          {showService && (
-            <span className="truncate text-[10px] text-muted-foreground shrink-0">
-              {bar.span.serviceName}
-            </span>
-          )}
-          {cacheInfo?.result && (
-            <span
-              className={cn(
-                "text-[9px] font-semibold px-1 shrink-0",
-                cacheInfo.result === "hit"
-                  ? "text-primary"
-                  : "text-chart-p50"
-              )}
-            >
-              {cacheInfo.result === "hit" ? "HIT" : "MISS"}
-            </span>
-          )}
-          {bar.isCollapsed && bar.childCount > 0 && (
-            <span className="text-[9px] text-muted-foreground/60 shrink-0">
-              +{bar.childCount}
-            </span>
-          )}
-          {showDuration && (
-            <span className="ml-auto shrink-0 pl-1 text-[10px] tabular-nums text-muted-foreground">
-              {formatDuration(bar.span.durationMs)}
-            </span>
-          )}
-        </div>
-      ) : (
-        <div className="flex items-center min-w-0 flex-1 px-1">
-          {bar.isCollapsed && bar.childCount > 0 && (
-            <span className="text-[9px] text-muted-foreground/60">
-              +{bar.childCount}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  )
+			{/* Labels */}
+			{showName ? (
+				<div className="flex items-center min-w-0 flex-1 gap-1 px-1">
+					<span className="truncate text-foreground/90">{bar.span.spanName}</span>
+					{showService && (
+						<span className="truncate text-[10px] text-muted-foreground shrink-0">
+							{bar.span.serviceName}
+						</span>
+					)}
+					{cacheInfo?.result && (
+						<span
+							className={cn(
+								"text-[9px] font-semibold px-1 shrink-0",
+								cacheInfo.result === "hit" ? "text-primary" : "text-chart-p50",
+							)}
+						>
+							{cacheInfo.result === "hit" ? "HIT" : "MISS"}
+						</span>
+					)}
+					{bar.isCollapsed && bar.childCount > 0 && (
+						<span className="text-[9px] text-muted-foreground/60 shrink-0">
+							+{bar.childCount}
+						</span>
+					)}
+					{showDuration && (
+						<span className="ml-auto shrink-0 pl-1 text-[10px] tabular-nums text-muted-foreground">
+							{formatDuration(bar.span.durationMs)}
+						</span>
+					)}
+				</div>
+			) : (
+				<div className="flex items-center min-w-0 flex-1 px-1">
+					{bar.isCollapsed && bar.childCount > 0 && (
+						<span className="text-[9px] text-muted-foreground/60">+{bar.childCount}</span>
+					)}
+				</div>
+			)}
+		</div>
+	)
 }
 
 export const TraceTimelineBar = React.memo(TraceTimelineBarInner, (prev, next) => {
-  return (
-    prev.bar.span.spanId === next.bar.span.spanId &&
-    prev.bar.row === next.bar.row &&
-    prev.bar.isCollapsed === next.bar.isCollapsed &&
-    prev.leftPercent === next.leftPercent &&
-    prev.widthPercent === next.widthPercent &&
-    prev.isSelected === next.isSelected &&
-    prev.isFocused === next.isFocused &&
-    prev.searchState === next.searchState &&
-    prev.containerWidth === next.containerWidth
-  )
+	return (
+		prev.bar.span.spanId === next.bar.span.spanId &&
+		prev.bar.row === next.bar.row &&
+		prev.bar.isCollapsed === next.bar.isCollapsed &&
+		prev.leftPercent === next.leftPercent &&
+		prev.widthPercent === next.widthPercent &&
+		prev.isSelected === next.isSelected &&
+		prev.isFocused === next.isFocused &&
+		prev.searchState === next.searchState &&
+		prev.containerWidth === next.containerWidth
+	)
 })

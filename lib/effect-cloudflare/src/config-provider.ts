@@ -10,9 +10,7 @@ import type * as Layer from "effect/Layer"
 import cloudflareWorkers from "./cloudflare-workers.ts"
 
 export const WorkerConfigProvider = () =>
-  cloudflareWorkers.pipe(
-    Effect.map(({ env }) => ConfigProvider.fromUnknown(env)),
-  )
+	cloudflareWorkers.pipe(Effect.map(({ env }) => ConfigProvider.fromUnknown(env)))
 
 /**
  * A Layer that sets Effect's ConfigProvider to read from the `cloudflare:workers`
@@ -20,5 +18,4 @@ export const WorkerConfigProvider = () =>
  * and anything downstream that uses Effect `Config` — resolves against the
  * runtime env without the worker having to pass env around manually.
  */
-export const WorkerConfigProviderLive: Layer.Layer<never> =
-  ConfigProvider.layer(WorkerConfigProvider())
+export const WorkerConfigProviderLive: Layer.Layer<never> = ConfigProvider.layer(WorkerConfigProvider())

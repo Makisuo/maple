@@ -28,9 +28,9 @@ import { Group, GroupSeparator } from "@/components/ui/group"
 
 ```tsx
 <Group>
-  <Button>Button</Button>
-  <GroupSeparator />
-  <Button>Button</Button>
+	<Button>Button</Button>
+	<GroupSeparator />
+	<Button>Button</Button>
 </Group>
 ```
 
@@ -42,11 +42,11 @@ Button group with separator:
 
 ```tsx
 <Group>
-  <Button variant="outline">Copy</Button>
-  <GroupSeparator />
-  <Button variant="outline">Paste</Button>
-  <GroupSeparator />
-  <Button variant="outline">Cut</Button>
+	<Button variant="outline">Copy</Button>
+	<GroupSeparator />
+	<Button variant="outline">Paste</Button>
+	<GroupSeparator />
+	<Button variant="outline">Cut</Button>
 </Group>
 ```
 
@@ -54,9 +54,9 @@ Group with input and button:
 
 ```tsx
 <Group>
-  <Input type="text" placeholder="Enter URL..." />
-  <GroupSeparator />
-  <Button>Go</Button>
+	<Input type="text" placeholder="Enter URL..." />
+	<GroupSeparator />
+	<Button>Go</Button>
 </Group>
 ```
 

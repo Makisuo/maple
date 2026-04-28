@@ -6,21 +6,21 @@ let authHeaders: MapleAuthHeaders = {}
 let authHeadersProvider: MapleAuthHeadersProvider | undefined
 
 export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {
-  const providedHeaders = authHeadersProvider ? await authHeadersProvider() : {}
-  return {
-    ...providedHeaders,
-    ...authHeaders,
-  }
+	const providedHeaders = authHeadersProvider ? await authHeadersProvider() : {}
+	return {
+		...providedHeaders,
+		...authHeaders,
+	}
 }
 
 export const setMapleAuthHeaders = (headers: Record<string, string>) => {
-  authHeaders = { ...headers }
+	authHeaders = { ...headers }
 }
 
 export const clearMapleAuthHeaders = () => {
-  authHeaders = {}
+	authHeaders = {}
 }
 
 export const setMapleAuthHeadersProvider = (provider?: MapleAuthHeadersProvider) => {
-  authHeadersProvider = provider
+	authHeadersProvider = provider
 }

@@ -110,21 +110,21 @@ Secrets source model (CI):
 
 - GitHub Secrets (only one): `DOPPLER_TOKEN`
 - Doppler configs (`prd`, `stg`, `pr`) must define:
-  - `ALCHEMY_PASSWORD`
-  - `ALCHEMY_STATE_TOKEN`
-  - `CLOUDFLARE_API_TOKEN`
-  - `CLOUDFLARE_DEFAULT_ACCOUNT_ID`
-  - `TINYBIRD_HOST`
-  - `TINYBIRD_TOKEN`
-  - `RESEND_API_KEY`
-  - `RESEND_FROM_EMAIL`
-  - `MAPLE_INGEST_KEY_ENCRYPTION_KEY`
-  - `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`
-  - `MAPLE_AUTH_MODE`
-  - `MAPLE_ROOT_PASSWORD` (required in `self_hosted` mode)
-  - `CLERK_SECRET_KEY`
-  - `CLERK_PUBLISHABLE_KEY`
-  - `CLERK_JWT_KEY`
+    - `ALCHEMY_PASSWORD`
+    - `ALCHEMY_STATE_TOKEN`
+    - `CLOUDFLARE_API_TOKEN`
+    - `CLOUDFLARE_DEFAULT_ACCOUNT_ID`
+    - `TINYBIRD_HOST`
+    - `TINYBIRD_TOKEN`
+    - `RESEND_API_KEY`
+    - `RESEND_FROM_EMAIL`
+    - `MAPLE_INGEST_KEY_ENCRYPTION_KEY`
+    - `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`
+    - `MAPLE_AUTH_MODE`
+    - `MAPLE_ROOT_PASSWORD` (required in `self_hosted` mode)
+    - `CLERK_SECRET_KEY`
+    - `CLERK_PUBLISHABLE_KEY`
+    - `CLERK_JWT_KEY`
 
 Free/Starter note: when using a personal Doppler token, the workflow must also specify Doppler selectors (`doppler-project`, `doppler-config`). This repo uses `maple` with stage configs `prd`, `stg`, and `pr`.
 
@@ -182,17 +182,17 @@ When running the API (`bun --filter=@maple/api dev` or `bun --filter=@maple/api 
 Maple supports exactly two auth modes via `MAPLE_AUTH_MODE`:
 
 1. `clerk`
-   - Create a Clerk application with Organizations enabled.
-   - Set `MAPLE_AUTH_MODE=clerk`
-   - Set `CLERK_SECRET_KEY`
-   - Optionally set `CLERK_JWT_KEY` for networkless verification
-   - Set `CLERK_PUBLISHABLE_KEY` for the web app
-   - Optionally override `VITE_CLERK_SIGN_IN_URL` and `VITE_CLERK_SIGN_UP_URL`
+    - Create a Clerk application with Organizations enabled.
+    - Set `MAPLE_AUTH_MODE=clerk`
+    - Set `CLERK_SECRET_KEY`
+    - Optionally set `CLERK_JWT_KEY` for networkless verification
+    - Set `CLERK_PUBLISHABLE_KEY` for the web app
+    - Optionally override `VITE_CLERK_SIGN_IN_URL` and `VITE_CLERK_SIGN_UP_URL`
 2. `self_hosted`
-   - Set `MAPLE_AUTH_MODE=self_hosted`
-   - Set `MAPLE_ROOT_PASSWORD` (required)
-   - Set `MAPLE_DEFAULT_ORG_ID` (defaults to `default`)
-   - Users must sign in at `/sign-in` with the root password before accessing the dashboard/API.
+    - Set `MAPLE_AUTH_MODE=self_hosted`
+    - Set `MAPLE_ROOT_PASSWORD` (required)
+    - Set `MAPLE_DEFAULT_ORG_ID` (defaults to `default`)
+    - Users must sign in at `/sign-in` with the root password before accessing the dashboard/API.
 
 Start apps:
 
@@ -202,15 +202,17 @@ bun --filter=@maple/web dev
 ```
 
 Validate behavior:
+
 - Clerk mode:
-  - Signed-out users are redirected to `/sign-in`
-  - Signed-in users without an active org are redirected to `/org-required`
-  - Signed-in users with an active org can query the API with bearer auth
+    - Signed-out users are redirected to `/sign-in`
+    - Signed-in users without an active org are redirected to `/org-required`
+    - Signed-in users with an active org can query the API with bearer auth
 - Self-hosted mode:
-  - Signed-out users are redirected to `/sign-in`
-  - `MAPLE_ROOT_PASSWORD` login issues a bearer session token
-  - Protected API routes reject requests without a valid bearer session token
+    - Signed-out users are redirected to `/sign-in`
+    - `MAPLE_ROOT_PASSWORD` login issues a bearer session token
+    - Protected API routes reject requests without a valid bearer session token
 
 Breaking change:
+
 - Self-hosted multi-tenant JWT/API-key auth paths were removed.
 - `MAPLE_ROOT_PASSWORD` is now required when `MAPLE_AUTH_MODE=self_hosted`.

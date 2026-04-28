@@ -10,9 +10,7 @@ interface MessageListProps {
 	isStreaming: boolean
 }
 
-type Row =
-	| { kind: "msg"; message: UIMessage; isLast: boolean }
-	| { kind: "thinking" }
+type Row = { kind: "msg"; message: UIMessage; isLast: boolean } | { kind: "thinking" }
 
 export function MessageList({ messages, isStreaming }: MessageListProps) {
 	const ref = useRef<LegendListRef>(null)
@@ -60,13 +58,7 @@ export function MessageList({ messages, isStreaming }: MessageListProps) {
 						</View>
 					)
 				}
-				return (
-					<MessageBubble
-						message={item.message}
-						isStreaming={isStreaming}
-						isLast={item.isLast}
-					/>
-				)
+				return <MessageBubble message={item.message} isStreaming={isStreaming} isLast={item.isLast} />
 			}}
 		/>
 	)

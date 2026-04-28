@@ -1,30 +1,30 @@
 {
-  "name": "@maple/query-engine",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./query-engine": "./src/query-engine.ts",
-    "./where-clause": "./src/where-clause.ts",
-    "./traces-shared": "./src/traces-shared.ts",
-    "./query-builder": "./src/query-builder/model.ts",
-    "./sql": "./src/sql/index.ts",
-    "./ch": "./src/ch/index.ts",
-    "./observability": "./src/observability/index.ts"
-  },
-  "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@maple/domain": "workspace:*",
-    "effect": "catalog:effect"
-  },
-  "devDependencies": {
-    "@effect/language-service": "catalog:effect",
-    "@types/node": "catalog:tooling",
-    "expect-type": "^1.3.0",
-    "typescript": "catalog:tooling",
-    "vitest": "catalog:"
-  }
+	"name": "@maple/query-engine",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./query-engine": "./src/query-engine.ts",
+		"./where-clause": "./src/where-clause.ts",
+		"./traces-shared": "./src/traces-shared.ts",
+		"./query-builder": "./src/query-builder/model.ts",
+		"./sql": "./src/sql/index.ts",
+		"./ch": "./src/ch/index.ts",
+		"./observability": "./src/observability/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@maple/domain": "workspace:*",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@types/node": "catalog:tooling",
+		"expect-type": "^1.3.0",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	}
 }

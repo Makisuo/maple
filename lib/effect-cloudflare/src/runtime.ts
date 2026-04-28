@@ -7,7 +7,7 @@ import { ConfigProvider, Layer, ManagedRuntime } from "effect"
  * `@cloudflare/workers-types` transitively.
  */
 export interface ExecutionContextLike {
-  waitUntil(promise: Promise<unknown>): void
+	waitUntil(promise: Promise<unknown>): void
 }
 
 /**
@@ -37,25 +37,25 @@ const drainScheduler = () => new Promise<void>((r) => setTimeout(r, 0))
  * it leaks forked fibers and silently drops buffered OTLP spans/logs.
  */
 export const buildRequestRuntime = <R>(
-  layer: Layer.Layer<R, unknown, never>,
+	layer: Layer.Layer<R, unknown, never>,
 ): {
-  readonly services: Promise<Context.Context<R>>
-  readonly flush: () => Promise<void>
+	readonly services: Promise<Context.Context<R>>
+	readonly flush: () => Promise<void>
 } => {
-  const runtime = ManagedRuntime.make(layer)
-  const services = runtime.context().catch((err) => {
-    console.error("[effect-cloudflare] runtime build failed:", err)
-    throw err
-  })
-  const flush = async () => {
-    await drainScheduler()
-    try {
-      await runtime.dispose()
-    } catch (err) {
-      console.error("[effect-cloudflare] runtime flush failed:", err)
-    }
-  }
-  return { services, flush }
+	const runtime = ManagedRuntime.make(layer)
+	const services = runtime.context().catch((err) => {
+		console.error("[effect-cloudflare] runtime build failed:", err)
+		throw err
+	})
+	const flush = async () => {
+		await drainScheduler()
+		try {
+			await runtime.dispose()
+		} catch (err) {
+			console.error("[effect-cloudflare] runtime flush failed:", err)
+		}
+	}
+	return { services, flush }
 }
 
 /**
@@ -69,37 +69,28 @@ export const buildRequestRuntime = <R>(
  * hand. Forgetting the flush is the exact bug class this package exists to
  * prevent.
  */
-export const withRequestRuntime = <
-  R,
-  Env extends Record<string, unknown>,
-  Ctx extends ExecutionContextLike,
->(
-  makeLayer: (env: Env) => Layer.Layer<R, unknown, never>,
-  handler: (
-    request: Request,
-    services: Context.Context<R>,
-    env: Env,
-    ctx: Ctx,
-  ) => Promise<Response>,
+export const withRequestRuntime = <R, Env extends Record<string, unknown>, Ctx extends ExecutionContextLike>(
+	makeLayer: (env: Env) => Layer.Layer<R, unknown, never>,
+	handler: (request: Request, services: Context.Context<R>, env: Env, ctx: Ctx) => Promise<Response>,
 ): ((request: Request, env: Env, ctx: Ctx) => Promise<Response>) => {
-  return async (request, env, ctx) => {
-    const { services, flush } = buildRequestRuntime(makeLayer(env))
-    const resolvedServices = await services
-    const response = handler(request, resolvedServices, env, ctx)
-    ctx.waitUntil(
-      (async () => {
-        try {
-          await response
-        } catch {
-          // Swallow handler errors — the handler's own error path is
-          // responsible for surfacing them. We still need to flush so
-          // the error gets traced/logged before the runtime is torn down.
-        }
-        await flush()
-      })(),
-    )
-    return response
-  }
+	return async (request, env, ctx) => {
+		const { services, flush } = buildRequestRuntime(makeLayer(env))
+		const resolvedServices = await services
+		const response = handler(request, resolvedServices, env, ctx)
+		ctx.waitUntil(
+			(async () => {
+				try {
+					await response
+				} catch {
+					// Swallow handler errors — the handler's own error path is
+					// responsible for surfacing them. We still need to flush so
+					// the error gets traced/logged before the runtime is torn down.
+				}
+				await flush()
+			})(),
+		)
+		return response
+	}
 }
 
 /**
@@ -111,29 +102,24 @@ export const withRequestRuntime = <
  * `ctx.waitUntil`. Rethrows so the CF runtime reports the failure.
  */
 export const runScheduledEffect = <A, E, R>(
-  layer: Layer.Layer<R, unknown, never>,
-  program: Effect.Effect<A, E, R>,
-  ctx: ExecutionContextLike,
+	layer: Layer.Layer<R, unknown, never>,
+	program: Effect.Effect<A, E, R>,
+	ctx: ExecutionContextLike,
 ): Promise<A> => {
-  const runtime = ManagedRuntime.make(layer)
-  const done = runtime.runPromise(program).finally(async () => {
-    await drainScheduler()
-    await runtime.dispose().catch((err) => {
-      console.error(
-        "[effect-cloudflare] scheduled runtime dispose failed:",
-        err,
-      )
-    })
-  })
-  ctx.waitUntil(done.catch(() => undefined))
-  return done
+	const runtime = ManagedRuntime.make(layer)
+	const done = runtime.runPromise(program).finally(async () => {
+		await drainScheduler()
+		await runtime.dispose().catch((err) => {
+			console.error("[effect-cloudflare] scheduled runtime dispose failed:", err)
+		})
+	})
+	ctx.waitUntil(done.catch(() => undefined))
+	return done
 }
 
 /**
  * Convenience: wrap `env` as an Effect `ConfigProvider` layer. Useful when
  * composing `makeTelemetryLayer` (which reads config) inside `makeLayer`.
  */
-export const layerFromEnv = (
-  env: Record<string, unknown>,
-): Layer.Layer<never, never, never> =>
-  ConfigProvider.layer(ConfigProvider.fromUnknown(env))
+export const layerFromEnv = (env: Record<string, unknown>): Layer.Layer<never, never, never> =>
+	ConfigProvider.layer(ConfigProvider.fromUnknown(env))

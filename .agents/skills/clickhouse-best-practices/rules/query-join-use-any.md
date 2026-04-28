@@ -31,10 +31,10 @@ LEFT ANY JOIN customers c ON c.id = o.customer_id;
 
 **ANY JOIN types:**
 
-| Type | Behavior |
-|------|----------|
-| `LEFT ANY JOIN` | At most one match from right table |
+| Type             | Behavior                              |
+| ---------------- | ------------------------------------- |
+| `LEFT ANY JOIN`  | At most one match from right table    |
 | `INNER ANY JOIN` | At most one match, only matching rows |
-| `RIGHT ANY JOIN` | At most one match from left table |
+| `RIGHT ANY JOIN` | At most one match from left table     |
 
 Reference: [Minimize and Optimize JOINs](https://clickhouse.com/docs/best-practices/minimize-optimize-joins)

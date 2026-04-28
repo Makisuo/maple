@@ -55,19 +55,19 @@ manual_report = define_copy_pipe(
 
 ### Copy Modes
 
-| Mode | Description |
-|------|-------------|
-| `append` | Add rows to existing data (default) |
+| Mode      | Description                           |
+| --------- | ------------------------------------- |
+| `append`  | Add rows to existing data (default)   |
 | `replace` | Replace all data in target datasource |
 
 ### Schedule Options
 
-| Schedule | Description |
-|----------|-------------|
-| `"0 0 * * *"` | Cron expression (daily at midnight) |
-| `"*/5 * * * *"` | Every 5 minutes |
-| `"@on-demand"` | Manual trigger only |
-| `"@once"` | Run once on deployment |
+| Schedule        | Description                         |
+| --------------- | ----------------------------------- |
+| `"0 0 * * *"`   | Cron expression (daily at midnight) |
+| `"*/5 * * * *"` | Every 5 minutes                     |
+| `"@on-demand"`  | Manual trigger only                 |
+| `"@once"`       | Run once on deployment              |
 
 ## Sink Pipes
 
@@ -127,11 +127,11 @@ s3_events_sink = define_sink_pipe(
 
 ### S3 Sink Options
 
-| Option | Description |
-|--------|-------------|
-| `bucket_uri` | S3 bucket and path prefix |
+| Option          | Description                                     |
+| --------------- | ----------------------------------------------- |
+| `bucket_uri`    | S3 bucket and path prefix                       |
 | `file_template` | Filename template (supports `{date}`, `{time}`) |
-| `format` | Output format: `csv`, `json`, `parquet` |
-| `schedule` | Cron expression or `@on-demand`, `@once` |
-| `strategy` | `create_new` or `overwrite` |
-| `compression` | `none`, `gzip`, `lz4` |
+| `format`        | Output format: `csv`, `json`, `parquet`         |
+| `schedule`      | Cron expression or `@on-demand`, `@once`        |
+| `strategy`      | `create_new` or `overwrite`                     |
+| `compression`   | `none`, `gzip`, `lz4`                           |

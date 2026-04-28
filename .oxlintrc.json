@@ -1,0 +1,21 @@
+{
+	"rules": {
+		"no-alert": "error",
+		"oxc/approx-constant": "warn",
+		"no-plusplus": "off",
+		"require-yield": "off",
+		"no-restricted-imports": [
+			"warn",
+			{
+				"paths": [
+					{
+						"name": "react",
+						"importNames": ["useEffect"],
+						"message": "Do not use useEffect. Use useMountEffect for mount-only external sync, derive state inline, use event handlers, or use TanStack Query. See /no-use-effect. Bump to 'error' once all existing call sites are refactored."
+					}
+				]
+			}
+		]
+	},
+	"ignorePatterns": [".context"]
+}

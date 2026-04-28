@@ -17,6 +17,7 @@ tb datasource append [datasource_name] --events '{"a":"b", "c":"d"}'
 ```
 
 Notes:
+
 - The command appends to an existing datasource.
 - Use `tb --cloud datasource append` to target Cloud; Local is the default.
 - For ingesting data from Kafka, S3 or GCS, see: https://www.tinybird.co/docs/forward/get-data-in/connectors

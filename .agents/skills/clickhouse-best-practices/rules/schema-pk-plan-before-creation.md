@@ -55,6 +55,7 @@ ORDER BY (user_id, event_date, event_id);
 ```
 
 **Pre-creation checklist:**
+
 - [ ] Listed top 5-10 query patterns
 - [ ] Identified columns in WHERE clauses with frequency
 - [ ] Prioritized columns that exclude large numbers of rows

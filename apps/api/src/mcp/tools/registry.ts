@@ -48,76 +48,74 @@ import { registerUpdateDashboardWidgetTool } from "./update-dashboard-widget"
 // loose `any` here to let both sides typecheck.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface MapleToolDefinition {
-  readonly name: string
-  readonly description: string
-  readonly schema: Schema.Decoder<unknown, never>
-  readonly handler: (
-    params: unknown,
-  ) => Effect.Effect<McpToolResult, McpToolError, any>
+	readonly name: string
+	readonly description: string
+	readonly schema: Schema.Decoder<unknown, never>
+	readonly handler: (params: unknown) => Effect.Effect<McpToolResult, McpToolError, any>
 }
 
 export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
-  const document = Schema.toJsonSchemaDocument(schema)
-  return Object.keys(document.definitions).length > 0
-    ? { ...document.schema, $defs: document.definitions }
-    : document.schema
+	const document = Schema.toJsonSchemaDocument(schema)
+	return Object.keys(document.definitions).length > 0
+		? { ...document.schema, $defs: document.definitions }
+		: document.schema
 }
 
 export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
-  const definitions: MapleToolDefinition[] = []
-  const registrar: McpToolRegistrar = {
-    tool(name, description, schema, handler) {
-      definitions.push({
-        name,
-        description,
-        schema,
-        handler: handler as MapleToolDefinition["handler"],
-      })
-    },
-  }
+	const definitions: MapleToolDefinition[] = []
+	const registrar: McpToolRegistrar = {
+		tool(name, description, schema, handler) {
+			definitions.push({
+				name,
+				description,
+				schema,
+				handler: handler as MapleToolDefinition["handler"],
+			})
+		},
+	}
 
-  registerFindErrorsTool(registrar)
-  registerInspectTraceTool(registrar)
-  registerSearchLogsTool(registrar)
-  registerSearchTracesTool(registrar)
-  registerDiagnoseServiceTool(registrar)
-  registerFindSlowTracesTool(registrar)
-  registerErrorDetailTool(registrar)
-  registerListMetricsTool(registrar)
-  registerQueryDataTool(registrar)
-  registerServiceMapTool(registrar)
-  registerListAlertRulesTool(registrar)
-  registerGetAlertRuleTool(registrar)
-  registerListAlertIncidentsTool(registrar)
-  registerListAlertChecksTool(registrar)
-  registerGetIncidentTimelineTool(registrar)
-  registerCreateAlertRuleTool(registrar)
-  registerListDashboardsTool(registrar)
-  registerGetDashboardTool(registrar)
-  registerCreateDashboardTool(registrar)
-  registerUpdateDashboardTool(registrar)
-  registerAddDashboardWidgetTool(registrar)
-  registerUpdateDashboardWidgetTool(registrar)
-  registerRemoveDashboardWidgetTool(registrar)
-  registerReorderDashboardWidgetsTool(registrar)
-  registerInspectChartDataTool(registrar)
-  registerComparePeriodsTool(registrar)
-  registerExploreAttributesTool(registrar)
-  registerListServicesTool(registrar)
-  registerGetServiceTopOperationsTool(registrar)
-  registerListErrorIssuesTool(registrar)
-  registerTransitionErrorIssueTool(registrar)
-  registerClaimErrorIssueTool(registrar)
-  registerReleaseErrorIssueTool(registrar)
-  registerHeartbeatErrorIssueTool(registrar)
-  registerCommentOnErrorIssueTool(registrar)
-  registerProposeFixTool(registrar)
-  registerListErrorIssueEventsTool(registrar)
-  registerRegisterAgentTool(registrar)
-  registerListErrorIncidentsTool(registrar)
-  registerUpdateErrorNotificationPolicyTool(registrar)
+	registerFindErrorsTool(registrar)
+	registerInspectTraceTool(registrar)
+	registerSearchLogsTool(registrar)
+	registerSearchTracesTool(registrar)
+	registerDiagnoseServiceTool(registrar)
+	registerFindSlowTracesTool(registrar)
+	registerErrorDetailTool(registrar)
+	registerListMetricsTool(registrar)
+	registerQueryDataTool(registrar)
+	registerServiceMapTool(registrar)
+	registerListAlertRulesTool(registrar)
+	registerGetAlertRuleTool(registrar)
+	registerListAlertIncidentsTool(registrar)
+	registerListAlertChecksTool(registrar)
+	registerGetIncidentTimelineTool(registrar)
+	registerCreateAlertRuleTool(registrar)
+	registerListDashboardsTool(registrar)
+	registerGetDashboardTool(registrar)
+	registerCreateDashboardTool(registrar)
+	registerUpdateDashboardTool(registrar)
+	registerAddDashboardWidgetTool(registrar)
+	registerUpdateDashboardWidgetTool(registrar)
+	registerRemoveDashboardWidgetTool(registrar)
+	registerReorderDashboardWidgetsTool(registrar)
+	registerInspectChartDataTool(registrar)
+	registerComparePeriodsTool(registrar)
+	registerExploreAttributesTool(registrar)
+	registerListServicesTool(registrar)
+	registerGetServiceTopOperationsTool(registrar)
+	registerListErrorIssuesTool(registrar)
+	registerTransitionErrorIssueTool(registrar)
+	registerClaimErrorIssueTool(registrar)
+	registerReleaseErrorIssueTool(registrar)
+	registerHeartbeatErrorIssueTool(registrar)
+	registerCommentOnErrorIssueTool(registrar)
+	registerProposeFixTool(registrar)
+	registerListErrorIssueEventsTool(registrar)
+	registerRegisterAgentTool(registrar)
+	registerListErrorIncidentsTool(registrar)
+	registerUpdateErrorNotificationPolicyTool(registrar)
 
-  return definitions
+	return definitions
 }
 
 export const mapleToolDefinitions = collectMapleToolDefinitions()

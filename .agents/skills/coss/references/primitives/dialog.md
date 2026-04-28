@@ -27,15 +27,15 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Dialog,
-  DialogClose,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-  DialogTrigger,
+	Dialog,
+	DialogClose,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogPanel,
+	DialogPopup,
+	DialogTitle,
+	DialogTrigger,
 } from "@/components/ui/dialog"
 ```
 
@@ -43,17 +43,17 @@ import {
 
 ```tsx
 <Dialog>
-  <DialogTrigger render={<Button variant="outline" />}>Open Dialog</DialogTrigger>
-  <DialogPopup>
-    <DialogHeader>
-      <DialogTitle>Dialog Title</DialogTitle>
-      <DialogDescription>Dialog Description</DialogDescription>
-    </DialogHeader>
-    <DialogPanel>Content</DialogPanel>
-    <DialogFooter>
-      <DialogClose render={<Button variant="ghost" />}>Close</DialogClose>
-    </DialogFooter>
-  </DialogPopup>
+	<DialogTrigger render={<Button variant="outline" />}>Open Dialog</DialogTrigger>
+	<DialogPopup>
+		<DialogHeader>
+			<DialogTitle>Dialog Title</DialogTitle>
+			<DialogDescription>Dialog Description</DialogDescription>
+		</DialogHeader>
+		<DialogPanel>Content</DialogPanel>
+		<DialogFooter>
+			<DialogClose render={<Button variant="ghost" />}>Close</DialogClose>
+		</DialogFooter>
+	</DialogPopup>
 </Dialog>
 ```
 
@@ -90,4 +90,3 @@ import {
 - long scrollable content in panel: `p-dialog-5`
 - bare footer variant usage: `p-dialog-6`
 - responsive dialog/drawer variant: `p-drawer-12`
-

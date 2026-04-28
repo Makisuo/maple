@@ -27,18 +27,18 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Autocomplete,
-  AutocompleteCollection,
-  AutocompleteEmpty,
-  AutocompleteGroup,
-  AutocompleteGroupLabel,
-  AutocompleteInput,
-  AutocompleteItem,
-  AutocompleteList,
-  AutocompletePopup,
-  AutocompleteSeparator,
-  AutocompleteStatus,
-  useAutocompleteFilter,
+	Autocomplete,
+	AutocompleteCollection,
+	AutocompleteEmpty,
+	AutocompleteGroup,
+	AutocompleteGroupLabel,
+	AutocompleteInput,
+	AutocompleteItem,
+	AutocompleteList,
+	AutocompletePopup,
+	AutocompleteSeparator,
+	AutocompleteStatus,
+	useAutocompleteFilter,
 } from "@/components/ui/autocomplete"
 ```
 
@@ -77,19 +77,23 @@ Autocomplete with input affordances:
 
 ```tsx
 <Autocomplete items={items}>
-  <AutocompleteInput
-    aria-label="Search frameworks"
-    placeholder="Search..."
-    showClear
-    showTrigger
-    startAddon={<SearchIcon aria-hidden="true" />}
-  />
-  <AutocompletePopup>
-    <AutocompleteEmpty>No results found.</AutocompleteEmpty>
-    <AutocompleteList>
-      {(item) => <AutocompleteItem key={item.value} value={item}>{item.label}</AutocompleteItem>}
-    </AutocompleteList>
-  </AutocompletePopup>
+	<AutocompleteInput
+		aria-label="Search frameworks"
+		placeholder="Search..."
+		showClear
+		showTrigger
+		startAddon={<SearchIcon aria-hidden="true" />}
+	/>
+	<AutocompletePopup>
+		<AutocompleteEmpty>No results found.</AutocompleteEmpty>
+		<AutocompleteList>
+			{(item) => (
+				<AutocompleteItem key={item.value} value={item}>
+					{item.label}
+				</AutocompleteItem>
+			)}
+		</AutocompleteList>
+	</AutocompletePopup>
 </Autocomplete>
 ```
 
@@ -97,12 +101,16 @@ Grouped lists:
 
 ```tsx
 <AutocompleteList>
-  <AutocompleteGroup>
-    <AutocompleteGroupLabel>Fruits</AutocompleteGroupLabel>
-    <AutocompleteCollection>
-      {(item) => <AutocompleteItem key={item.value} value={item}>{item.label}</AutocompleteItem>}
-    </AutocompleteCollection>
-  </AutocompleteGroup>
+	<AutocompleteGroup>
+		<AutocompleteGroupLabel>Fruits</AutocompleteGroupLabel>
+		<AutocompleteCollection>
+			{(item) => (
+				<AutocompleteItem key={item.value} value={item}>
+					{item.label}
+				</AutocompleteItem>
+			)}
+		</AutocompleteCollection>
+	</AutocompleteGroup>
 </AutocompleteList>
 ```
 

@@ -1,10 +1,7 @@
 import { useState } from "react"
 import { ScrollView, Text, View } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
-import {
-	useServiceDetail,
-	type ServiceDetailData,
-} from "../../../hooks/use-service-detail"
+import { useServiceDetail, type ServiceDetailData } from "../../../hooks/use-service-detail"
 import type { TimeRangeKey } from "../../../lib/time-utils"
 import { colors } from "../../../lib/theme"
 import { ChartCard } from "../../../components/services/chart-card"
@@ -63,10 +60,7 @@ export default function ServiceDetailScreen() {
 			{state.status === "error" ? (
 				<ErrorView message={state.error} onRetry={refresh} />
 			) : state.status === "loading" ? (
-				<ScrollView
-					className="flex-1"
-					contentContainerStyle={{ paddingBottom: bottomPadding }}
-				>
+				<ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: bottomPadding }}>
 					<View className="px-5 gap-4">
 						<ChartSkeleton />
 						<ChartSkeleton />
@@ -86,24 +80,15 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 	const bottomPadding = useScreenBottomPadding()
 
 	const avgP95 =
-		timeseries.length > 0
-			? timeseries.reduce((sum, p) => sum + p.p95LatencyMs, 0) / timeseries.length
-			: 0
+		timeseries.length > 0 ? timeseries.reduce((sum, p) => sum + p.p95LatencyMs, 0) / timeseries.length : 0
 	const avgThroughput =
-		timeseries.length > 0
-			? timeseries.reduce((sum, p) => sum + p.throughput, 0) / timeseries.length
-			: 0
+		timeseries.length > 0 ? timeseries.reduce((sum, p) => sum + p.throughput, 0) / timeseries.length : 0
 	const hasSamplingData = timeseries.some((p) => p.hasSampling)
 	// errorRate from the query engine is a 0–1 ratio; average the per-bucket
 	// values and formatPercent handles the display conversion.
 	const avgErrorRate =
-		timeseries.length > 0
-			? timeseries.reduce((sum, p) => sum + p.errorRate, 0) / timeseries.length
-			: 0
-	const avgApdex =
-		apdex.length > 0
-			? apdex.reduce((sum, p) => sum + p.apdexScore, 0) / apdex.length
-			: 0
+		timeseries.length > 0 ? timeseries.reduce((sum, p) => sum + p.errorRate, 0) / timeseries.length : 0
+	const avgApdex = apdex.length > 0 ? apdex.reduce((sum, p) => sum + p.apdexScore, 0) / apdex.length : 0
 
 	const latencyData = timeseries.map((p) => ({
 		bucket: p.bucket,
@@ -128,18 +113,12 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 	}))
 
 	return (
-		<ScrollView
-			className="flex-1"
-			contentContainerStyle={{ paddingBottom: bottomPadding }}
-		>
+		<ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: bottomPadding }}>
 			<View className="px-5 gap-4">
 				<ChartCard
 					title="Latency"
 					summary={
-						<Text
-							className="text-sm font-bold font-mono"
-							style={{ color: colors.primary }}
-						>
+						<Text className="text-sm font-bold font-mono" style={{ color: colors.primary }}>
 							p95: {formatLatency(avgP95)}
 						</Text>
 					}
@@ -170,10 +149,7 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 				<ChartCard
 					title="Error Rate"
 					summary={
-						<Text
-							className="text-sm font-bold font-mono"
-							style={{ color: colors.error }}
-						>
+						<Text className="text-sm font-bold font-mono" style={{ color: colors.error }}>
 							{formatPercent(avgErrorRate)}
 						</Text>
 					}
@@ -188,10 +164,7 @@ function ServiceDetailContent({ data }: { data: ServiceDetailData }) {
 				<ChartCard
 					title="Apdex"
 					summary={
-						<Text
-							className="text-sm font-bold font-mono"
-							style={{ color: colors.success }}
-						>
+						<Text className="text-sm font-bold font-mono" style={{ color: colors.success }}>
 							{avgApdex.toFixed(2)}
 						</Text>
 					}

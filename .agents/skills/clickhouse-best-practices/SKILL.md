@@ -3,8 +3,8 @@ name: clickhouse-best-practices
 description: MUST USE when reviewing ClickHouse schemas, queries, or configurations. Contains 28 rules that MUST be checked before providing recommendations. Always read relevant rule files and cite specific rules in responses.
 license: Apache-2.0
 metadata:
-  author: ClickHouse Inc
-  version: "0.3.0"
+    author: ClickHouse Inc
+    version: "0.3.0"
 ---
 
 # ClickHouse Best Practices
@@ -48,6 +48,7 @@ When performing a formal review of schemas, queries, or data ingestion:
 9. `rules/schema-partition-lifecycle.md` - Partitioning purpose
 
 **Check for:**
+
 - [ ] PRIMARY KEY / ORDER BY column order (low-to-high cardinality)
 - [ ] Data types match actual data ranges
 - [ ] LowCardinality applied to appropriate string columns
@@ -65,6 +66,7 @@ When performing a formal review of schemas, queries, or data ingestion:
 5. `rules/schema-pk-filter-on-orderby.md` - Filter alignment with ORDER BY
 
 **Check for:**
+
 - [ ] Filters use ORDER BY prefix columns
 - [ ] JOINs filter tables before joining (not after)
 - [ ] Correct JOIN algorithm for table sizes
@@ -81,6 +83,7 @@ When performing a formal review of schemas, queries, or data ingestion:
 5. `rules/insert-optimize-avoid-final.md` - OPTIMIZE TABLE risks
 
 **Check for:**
+
 - [ ] Batch size 10K-100K rows per INSERT
 - [ ] No ALTER TABLE UPDATE for frequent changes
 - [ ] ReplacingMergeTree or CollapsingMergeTree for update patterns
@@ -117,19 +120,19 @@ Structure your response as follows:
 
 ## Rule Categories by Priority
 
-| Priority | Category | Impact | Prefix | Rule Count |
-|----------|----------|--------|--------|------------|
-| 1 | Primary Key Selection | CRITICAL | `schema-pk-` | 4 |
-| 2 | Data Type Selection | CRITICAL | `schema-types-` | 5 |
-| 3 | JOIN Optimization | CRITICAL | `query-join-` | 5 |
-| 4 | Insert Batching | CRITICAL | `insert-batch-` | 1 |
-| 5 | Mutation Avoidance | CRITICAL | `insert-mutation-` | 2 |
-| 6 | Partitioning Strategy | HIGH | `schema-partition-` | 4 |
-| 7 | Skipping Indices | HIGH | `query-index-` | 1 |
-| 8 | Materialized Views | HIGH | `query-mv-` | 2 |
-| 9 | Async Inserts | HIGH | `insert-async-` | 2 |
-| 10 | OPTIMIZE Avoidance | HIGH | `insert-optimize-` | 1 |
-| 11 | JSON Usage | MEDIUM | `schema-json-` | 1 |
+| Priority | Category              | Impact   | Prefix              | Rule Count |
+| -------- | --------------------- | -------- | ------------------- | ---------- |
+| 1        | Primary Key Selection | CRITICAL | `schema-pk-`        | 4          |
+| 2        | Data Type Selection   | CRITICAL | `schema-types-`     | 5          |
+| 3        | JOIN Optimization     | CRITICAL | `query-join-`       | 5          |
+| 4        | Insert Batching       | CRITICAL | `insert-batch-`     | 1          |
+| 5        | Mutation Avoidance    | CRITICAL | `insert-mutation-`  | 2          |
+| 6        | Partitioning Strategy | HIGH     | `schema-partition-` | 4          |
+| 7        | Skipping Indices      | HIGH     | `query-index-`      | 1          |
+| 8        | Materialized Views    | HIGH     | `query-mv-`         | 2          |
+| 9        | Async Inserts         | HIGH     | `insert-async-`     | 2          |
+| 10       | OPTIMIZE Avoidance    | HIGH     | `insert-optimize-`  | 1          |
+| 11       | JSON Usage            | MEDIUM   | `schema-json-`      | 1          |
 
 ---
 

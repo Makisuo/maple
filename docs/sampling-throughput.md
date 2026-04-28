@@ -84,18 +84,18 @@ A typical Collector pipeline:
 
 ```yaml
 connectors:
-  spanmetrics:
-    namespace: span.metrics
+    spanmetrics:
+        namespace: span.metrics
 
 service:
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [otlp, spanmetrics]   # fork to both export + metrics
-    metrics:
-      receivers: [spanmetrics]
-      exporters: [otlp]
+    pipelines:
+        traces:
+            receivers: [otlp]
+            processors: [batch]
+            exporters: [otlp, spanmetrics] # fork to both export + metrics
+        metrics:
+            receivers: [spanmetrics]
+            exporters: [otlp]
 ```
 
 This way, your metrics pipeline sees every request while your traces pipeline can sample aggressively.

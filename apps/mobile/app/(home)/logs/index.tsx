@@ -13,11 +13,7 @@ import {
 import { FilterModal } from "../../../components/logs/filter-modal"
 import { Screen, useScreenBottomPadding } from "../../../components/ui/screen"
 import { ScreenHeader } from "../../../components/ui/screen-header"
-import {
-	EmptyView,
-	ErrorView,
-	LoadingView,
-} from "../../../components/ui/state-view"
+import { EmptyView, ErrorView, LoadingView } from "../../../components/ui/state-view"
 import type { LogsFilters } from "../../../lib/api"
 
 export default function LogsScreen() {
@@ -32,10 +28,7 @@ export default function LogsScreen() {
 		return Object.keys(f).length > 0 ? f : undefined
 	}, [filterState.service, filterState.severity, filterState.search])
 
-	const { state, fetchNextPage, refresh } = useInfiniteLogs(
-		filterState.timeKey,
-		apiFilters,
-	)
+	const { state, fetchNextPage, refresh } = useInfiniteLogs(filterState.timeKey, apiFilters)
 	const { state: facetsState } = useLogsFacets(filterState.timeKey)
 	const bottomPadding = useScreenBottomPadding()
 
@@ -46,10 +39,7 @@ export default function LogsScreen() {
 		}))
 	}
 
-	const subtitle =
-		state.status === "success"
-			? `${state.data.length} logs`
-			: "Loading logs..."
+	const subtitle = state.status === "success" ? `${state.data.length} logs` : "Loading logs..."
 
 	return (
 		<Screen>
@@ -73,7 +63,13 @@ export default function LogsScreen() {
 					estimatedItemSize={65}
 					recycleItems
 					refreshControl={
-						<RefreshControl refreshing={false} onRefresh={() => { hapticSuccess(); refresh() }} />
+						<RefreshControl
+							refreshing={false}
+							onRefresh={() => {
+								hapticSuccess()
+								refresh()
+							}}
+						/>
 					}
 					renderItem={({ item }) => <LogRow item={item} />}
 					onEndReached={fetchNextPage}

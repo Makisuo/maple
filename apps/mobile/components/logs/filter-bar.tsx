@@ -23,18 +23,17 @@ interface FilterBarProps {
 }
 
 export function FilterBar({ filterState, onRemoveFilter, onOpenFilters }: FilterBarProps) {
-	const activeCount = [
-		filterState.service,
-		filterState.severity,
-		filterState.search,
-	].filter(Boolean).length
+	const activeCount = [filterState.service, filterState.severity, filterState.search].filter(Boolean).length
 
 	return (
 		<View className="px-5 pb-3">
 			<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-2">
 				{/* Filter button */}
 				<TouchableOpacity
-					onPress={() => { hapticLight(); onOpenFilters() }}
+					onPress={() => {
+						hapticLight()
+						onOpenFilters()
+					}}
 					className="flex-row items-center rounded-lg border border-border bg-card px-3 py-1.5"
 				>
 					<Text className="text-xs text-foreground font-mono">Filters</Text>
@@ -77,7 +76,13 @@ function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }
 			<Text className="text-xs text-foreground font-mono mr-1.5" numberOfLines={1}>
 				{label}
 			</Text>
-			<TouchableOpacity onPress={() => { hapticLight(); onRemove() }} hitSlop={8}>
+			<TouchableOpacity
+				onPress={() => {
+					hapticLight()
+					onRemove()
+				}}
+				hitSlop={8}
+			>
 				<Text className="text-xs text-muted-foreground font-mono">{"\u2715"}</Text>
 			</TouchableOpacity>
 		</View>

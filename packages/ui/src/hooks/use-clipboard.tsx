@@ -1,7 +1,7 @@
 import * as React from "react"
 
 export interface ClipboardAPI {
-  copy: (text: string) => Promise<void>
+	copy: (text: string) => Promise<void>
 }
 
 const ClipboardContext = React.createContext<ClipboardAPI | null>(null)
@@ -12,23 +12,23 @@ const ClipboardContext = React.createContext<ClipboardAPI | null>(null)
  * On React Native, provide a ClipboardProvider wrapping expo-clipboard.
  */
 export function useClipboard(): ClipboardAPI {
-  const ctx = React.use(ClipboardContext)
-  if (ctx) return ctx
+	const ctx = React.use(ClipboardContext)
+	if (ctx) return ctx
 
-  // Default web implementation
-  return defaultWebClipboard
+	// Default web implementation
+	return defaultWebClipboard
 }
 
 const defaultWebClipboard: ClipboardAPI = {
-  copy: (text: string) => navigator.clipboard.writeText(text),
+	copy: (text: string) => navigator.clipboard.writeText(text),
 }
 
 export function ClipboardProvider({
-  children,
-  clipboard,
+	children,
+	clipboard,
 }: {
-  children: React.ReactNode
-  clipboard: ClipboardAPI
+	children: React.ReactNode
+	clipboard: ClipboardAPI
 }) {
-  return <ClipboardContext value={clipboard}>{children}</ClipboardContext>
+	return <ClipboardContext value={clipboard}>{children}</ClipboardContext>
 }

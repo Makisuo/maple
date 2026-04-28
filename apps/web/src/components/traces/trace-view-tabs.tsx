@@ -8,64 +8,64 @@ import { TraceViewProvider } from "./trace-view-context"
 import type { SpanNode, Span } from "@/api/tinybird/traces"
 
 interface TraceViewTabsProps {
-  rootSpans: SpanNode[]
-  spans: Span[]
-  totalDurationMs: number
-  traceStartTime: string
-  services: string[]
-  defaultExpandDepth?: number
-  selectedSpanId?: string
-  onSelectSpan?: (span: SpanNode) => void
+	rootSpans: SpanNode[]
+	spans: Span[]
+	totalDurationMs: number
+	traceStartTime: string
+	services: string[]
+	defaultExpandDepth?: number
+	selectedSpanId?: string
+	onSelectSpan?: (span: SpanNode) => void
 }
 
 export function TraceViewTabs({
-  rootSpans,
-  spans: _spans,
-  totalDurationMs,
-  traceStartTime,
-  services,
-  defaultExpandDepth = Infinity,
-  selectedSpanId,
-  onSelectSpan,
+	rootSpans,
+	spans: _spans,
+	totalDurationMs,
+	traceStartTime,
+	services,
+	defaultExpandDepth = Infinity,
+	selectedSpanId,
+	onSelectSpan,
 }: TraceViewTabsProps) {
-  // _spans is reserved for future Flow view implementation
-  return (
-    <TraceViewProvider
-      rootSpans={rootSpans}
-      totalDurationMs={totalDurationMs}
-      traceStartTime={traceStartTime}
-      services={services}
-      selectedSpanId={selectedSpanId}
-      onSelectSpan={onSelectSpan}
-    >
-      <Tabs defaultValue="waterfall" className="flex flex-col h-full">
-        <TabsList variant="line" className="shrink-0">
-          <TabsTrigger value="waterfall">
-            <MenuIcon size={14} />
-            Waterfall
-          </TabsTrigger>
-          <TabsTrigger value="timeline">
-            <FireIcon size={14} />
-            Timeline
-          </TabsTrigger>
-          <TabsTrigger value="flow">
-            <NetworkNodesIcon size={14} />
-            Flow
-          </TabsTrigger>
-        </TabsList>
+	// _spans is reserved for future Flow view implementation
+	return (
+		<TraceViewProvider
+			rootSpans={rootSpans}
+			totalDurationMs={totalDurationMs}
+			traceStartTime={traceStartTime}
+			services={services}
+			selectedSpanId={selectedSpanId}
+			onSelectSpan={onSelectSpan}
+		>
+			<Tabs defaultValue="waterfall" className="flex flex-col h-full">
+				<TabsList variant="line" className="shrink-0">
+					<TabsTrigger value="waterfall">
+						<MenuIcon size={14} />
+						Waterfall
+					</TabsTrigger>
+					<TabsTrigger value="timeline">
+						<FireIcon size={14} />
+						Timeline
+					</TabsTrigger>
+					<TabsTrigger value="flow">
+						<NetworkNodesIcon size={14} />
+						Flow
+					</TabsTrigger>
+				</TabsList>
 
-        <TabsContent value="waterfall" className="flex-1 min-h-0 overflow-auto">
-          <SpanHierarchy defaultExpandDepth={defaultExpandDepth} />
-        </TabsContent>
+				<TabsContent value="waterfall" className="flex-1 min-h-0 overflow-auto">
+					<SpanHierarchy defaultExpandDepth={defaultExpandDepth} />
+				</TabsContent>
 
-        <TabsContent value="timeline" className="flex-1 min-h-0">
-          <TraceTimeline />
-        </TabsContent>
+				<TabsContent value="timeline" className="flex-1 min-h-0">
+					<TraceTimeline />
+				</TabsContent>
 
-        <TabsContent value="flow" className="flex-1 min-h-0">
-          <TraceFlowView />
-        </TabsContent>
-      </Tabs>
-    </TraceViewProvider>
-  )
+				<TabsContent value="flow" className="flex-1 min-h-0">
+					<TraceFlowView />
+				</TabsContent>
+			</Tabs>
+		</TraceViewProvider>
+	)
 }

@@ -11,15 +11,16 @@ Maple is fully compatible with the OpenTelemetry Protocol (OTLP). This document 
 
 Send telemetry to Maple using standard OTLP HTTP endpoints:
 
-| Signal  | Endpoint       |
-|---------|----------------|
-| Traces  | `/v1/traces`   |
-| Logs    | `/v1/logs`     |
-| Metrics | `/v1/metrics`  |
+| Signal  | Endpoint      |
+| ------- | ------------- |
+| Traces  | `/v1/traces`  |
+| Logs    | `/v1/logs`    |
+| Metrics | `/v1/metrics` |
 
 **Base URL:** `https://ingest.maple.dev`
 
 **Content types:**
+
 - `application/x-protobuf` (recommended)
 - `application/json`
 
@@ -45,17 +46,17 @@ API keys are available in your Maple project settings.
 
 ### Required
 
-| Attribute      | Description                                          |
-|----------------|------------------------------------------------------|
+| Attribute      | Description                                                                     |
+| -------------- | ------------------------------------------------------------------------------- |
 | `service.name` | Identifies the service. Used for grouping in the services list and service map. |
 
 ### Recommended
 
-| Attribute               | Description                                                       |
-|-------------------------|-------------------------------------------------------------------|
-| `deployment.environment`| Environment name (`production`, `staging`, `development`). Used for filtering and release tracking. |
-| `deployment.commit_sha` | Git commit SHA. Enables release markers on charts and deployment tracking. |
-| `service.version`       | Service version string.                                           |
+| Attribute                | Description                                                                                         |
+| ------------------------ | --------------------------------------------------------------------------------------------------- |
+| `deployment.environment` | Environment name (`production`, `staging`, `development`). Used for filtering and release tracking. |
+| `deployment.commit_sha`  | Git commit SHA. Enables release markers on charts and deployment tracking.                          |
+| `service.version`        | Service version string.                                                                             |
 
 Set resource attributes via environment variable:
 
@@ -67,23 +68,23 @@ export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production,deployment.co
 
 Maple stores span status codes as title-case strings:
 
-| Value     | Meaning                              |
-|-----------|--------------------------------------|
-| `"Unset"` | Default -- no explicit status set    |
-| `"Ok"`    | Explicitly marked successful         |
-| `"Error"` | Span encountered an error            |
+| Value     | Meaning                           |
+| --------- | --------------------------------- |
+| `"Unset"` | Default -- no explicit status set |
+| `"Ok"`    | Explicitly marked successful      |
+| `"Error"` | Span encountered an error         |
 
 The OpenTelemetry Collector normalizes integer status codes (0, 1, 2) to these strings automatically. Only spans with `StatusCode = 'Error'` appear in error analytics.
 
 ## Span Kinds
 
-| Kind         | Description                              | How Maple Uses It                    |
-|--------------|------------------------------------------|--------------------------------------|
-| `"Server"`   | Incoming request handler                 | Throughput and error rate calculations |
-| `"Client"`   | Outgoing request to another service      | Service map edges (with `peer.service`) |
-| `"Producer"` | Async message producer                   | Service map edges (with `peer.service`) |
-| `"Consumer"` | Async message consumer                   | Throughput calculations              |
-| `"Internal"` | Default, synchronous in-process work     | Trace detail view                    |
+| Kind         | Description                          | How Maple Uses It                       |
+| ------------ | ------------------------------------ | --------------------------------------- |
+| `"Server"`   | Incoming request handler             | Throughput and error rate calculations  |
+| `"Client"`   | Outgoing request to another service  | Service map edges (with `peer.service`) |
+| `"Producer"` | Async message producer               | Service map edges (with `peer.service`) |
+| `"Consumer"` | Async message consumer               | Throughput calculations                 |
+| `"Internal"` | Default, synchronous in-process work | Trace detail view                       |
 
 ## Service Map
 
@@ -96,7 +97,7 @@ peer.service = "downstream-service-name"
 The value must match the `service.name` of the downstream service. For example, when service A calls service B's API:
 
 ```javascript
-span.setAttribute("peer.service", "service-b");
+span.setAttribute("peer.service", "service-b")
 ```
 
 Maple materializes these attributes into a dedicated service edges table for fast dependency queries.
@@ -105,19 +106,19 @@ Maple materializes these attributes into a dedicated service edges table for fas
 
 Auto-instrumentation libraries typically set these automatically. Maple uses them for trace filtering and breakdown views:
 
-| Attribute                     | Description              | Example            |
-|-------------------------------|--------------------------|---------------------|
-| `http.method` / `http.request.method` | HTTP verb         | `"GET"`             |
-| `http.route`                  | Route template           | `"/users/:id"`      |
-| `http.status_code` / `http.response.status_code` | Response code | `200`          |
-| `http.target` / `url.path`   | Request path (fallback)  | `"/users/42"`       |
+| Attribute                                        | Description             | Example        |
+| ------------------------------------------------ | ----------------------- | -------------- |
+| `http.method` / `http.request.method`            | HTTP verb               | `"GET"`        |
+| `http.route`                                     | Route template          | `"/users/:id"` |
+| `http.status_code` / `http.response.status_code` | Response code           | `200`          |
+| `http.target` / `url.path`                       | Request path (fallback) | `"/users/42"`  |
 
 ## Logs
 
 ### Severity Levels
 
 | SeverityText | SeverityNumber |
-|--------------|----------------|
+| ------------ | -------------- |
 | `TRACE`      | 1-4            |
 | `DEBUG`      | 5-8            |
 | `INFO`       | 9-12           |
@@ -137,27 +138,27 @@ For accurate RED (Rate, Error, Duration) metrics alongside sampled traces, use t
 
 ```yaml
 connectors:
-  spanmetrics:
-    namespace: span.metrics
+    spanmetrics:
+        namespace: span.metrics
 
 service:
-  pipelines:
-    traces:
-      receivers: [otlp]
-      exporters: [otlp/maple, spanmetrics]
-    metrics:
-      receivers: [spanmetrics]
-      exporters: [otlp/maple]
+    pipelines:
+        traces:
+            receivers: [otlp]
+            exporters: [otlp/maple, spanmetrics]
+        metrics:
+            receivers: [spanmetrics]
+            exporters: [otlp/maple]
 ```
 
 This derives 100%-accurate metrics from every span before sampling reduces the trace volume. See [Sampling & Throughput Estimation](/docs/concepts/sampling-throughput) for details.
 
 ## Data Retention
 
-| Signal           | Retention |
-|------------------|-----------|
-| Traces and logs  | 90 days   |
-| Metrics          | 365 days  |
+| Signal          | Retention |
+| --------------- | --------- |
+| Traces and logs | 90 days   |
+| Metrics         | 365 days  |
 
 ## Environment Variable Reference
 

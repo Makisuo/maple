@@ -15,12 +15,7 @@ interface ScreenProps {
 	scrollViewProps?: Omit<ScrollViewProps, "contentContainerStyle">
 }
 
-export function Screen({
-	children,
-	scroll,
-	extraBottomPadding = 0,
-	scrollViewProps,
-}: ScreenProps) {
+export function Screen({ children, scroll, extraBottomPadding = 0, scrollViewProps }: ScreenProps) {
 	const insets = useSafeAreaInsets()
 	const topPadding = insets.top
 	const bottomPadding = insets.bottom + TAB_BAR_HEIGHT + extraBottomPadding

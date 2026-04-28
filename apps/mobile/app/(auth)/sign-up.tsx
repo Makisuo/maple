@@ -1,6 +1,6 @@
-import { useSignUp, useSSO, useAuth } from "@clerk/expo";
-import { Link, useRouter, type Href } from "expo-router";
-import { useState } from "react";
+import { useSignUp, useSSO, useAuth } from "@clerk/expo"
+import { Link, useRouter, type Href } from "expo-router"
+import { useState } from "react"
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -10,79 +10,76 @@ import {
 	Text,
 	TextInput,
 	View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { GithubIcon } from "../../components/icons/github-icon";
-import { GoogleIcon } from "../../components/icons/google-icon";
-import {
-	PrimaryButton,
-	SecondaryButton,
-} from "../../components/ui/button";
+} from "react-native"
+import { SafeAreaView } from "react-native-safe-area-context"
+import { GithubIcon } from "../../components/icons/github-icon"
+import { GoogleIcon } from "../../components/icons/google-icon"
+import { PrimaryButton, SecondaryButton } from "../../components/ui/button"
 
-type SsoProvider = "google" | "github";
+type SsoProvider = "google" | "github"
 
 export default function SignUpScreen() {
-	const { signUp, errors, fetchStatus } = useSignUp();
-	const { startSSOFlow } = useSSO();
-	const { isSignedIn } = useAuth();
-	const router = useRouter();
+	const { signUp, errors, fetchStatus } = useSignUp()
+	const { startSSOFlow } = useSSO()
+	const { isSignedIn } = useAuth()
+	const router = useRouter()
 
-	const [emailAddress, setEmailAddress] = useState("");
-	const [password, setPassword] = useState("");
-	const [code, setCode] = useState("");
-	const [ssoLoading, setSsoLoading] = useState<SsoProvider | null>(null);
+	const [emailAddress, setEmailAddress] = useState("")
+	const [password, setPassword] = useState("")
+	const [code, setCode] = useState("")
+	const [ssoLoading, setSsoLoading] = useState<SsoProvider | null>(null)
 
-	const loading = fetchStatus === "fetching";
-	const ssoBusy = ssoLoading !== null;
+	const loading = fetchStatus === "fetching"
+	const ssoBusy = ssoLoading !== null
 
 	const handleSubmit = async () => {
 		try {
-			const { error } = await signUp.password({ emailAddress, password });
-			if (error) return;
+			const { error } = await signUp.password({ emailAddress, password })
+			if (error) return
 
-			await signUp.verifications.sendEmailCode();
+			await signUp.verifications.sendEmailCode()
 		} catch (err) {
-			Alert.alert("Sign up failed", err instanceof Error ? err.message : "An unexpected error occurred");
+			Alert.alert("Sign up failed", err instanceof Error ? err.message : "An unexpected error occurred")
 		}
-	};
+	}
 
 	const handleVerify = async () => {
-		await signUp.verifications.verifyEmailCode({ code });
+		await signUp.verifications.verifyEmailCode({ code })
 
 		if (signUp.status === "complete") {
 			await signUp.finalize({
 				navigate: ({ session, decorateUrl }) => {
-					if (session?.currentTask) return;
-					const url = decorateUrl("/");
-					router.push(url as Href);
+					if (session?.currentTask) return
+					const url = decorateUrl("/")
+					router.push(url as Href)
 				},
-			});
+			})
 		}
-	};
+	}
 
 	const handleSsoSignUp = async (provider: SsoProvider) => {
-		setSsoLoading(provider);
+		setSsoLoading(provider)
 		try {
 			const { createdSessionId, setActive } = await startSSOFlow({
 				strategy: provider === "google" ? "oauth_google" : "oauth_github",
-			});
+			})
 			if (createdSessionId && setActive) {
-				await setActive({ session: createdSessionId });
+				await setActive({ session: createdSessionId })
 			}
 		} catch (err) {
-			console.error(`${provider} sign-up error:`, err);
-			Alert.alert("Sign up failed", err instanceof Error ? err.message : "An unexpected error occurred");
+			console.error(`${provider} sign-up error:`, err)
+			Alert.alert("Sign up failed", err instanceof Error ? err.message : "An unexpected error occurred")
 		} finally {
-			setSsoLoading(null);
+			setSsoLoading(null)
 		}
-	};
+	}
 
-	if (signUp.status === "complete" || isSignedIn) return null;
+	if (signUp.status === "complete" || isSignedIn) return null
 
 	const needsVerification =
 		signUp.status === "missing_requirements" &&
 		signUp.unverifiedFields?.includes("email_address") &&
-		signUp.missingFields?.length === 0;
+		signUp.missingFields?.length === 0
 
 	// Email verification screen
 	if (needsVerification) {
@@ -134,26 +131,20 @@ export default function SignUpScreen() {
 							<Text className="text-sm text-muted-foreground font-mono">
 								Didn't receive a code?
 							</Text>
-							<Pressable
-								onPress={() => signUp.verifications.sendEmailCode()}
-								hitSlop={8}
-							>
+							<Pressable onPress={() => signUp.verifications.sendEmailCode()} hitSlop={8}>
 								<Text className="text-sm text-primary font-mono">Resend</Text>
 							</Pressable>
 						</View>
 					</ScrollView>
 				</KeyboardAvoidingView>
 			</SafeAreaView>
-		);
+		)
 	}
 
 	// Main sign-up screen
 	return (
 		<SafeAreaView className="flex-1 bg-background">
-			<KeyboardAvoidingView
-				className="flex-1"
-				behavior={Platform.OS === "ios" ? "padding" : "height"}
-			>
+			<KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : "height"}>
 				<ScrollView
 					contentContainerClassName="flex-grow justify-center px-6"
 					keyboardShouldPersistTaps="handled"
@@ -163,9 +154,7 @@ export default function SignUpScreen() {
 					</Text>
 
 					<View className="gap-1 mb-6">
-						<Text className="text-xl font-semibold text-foreground font-mono">
-							Sign up
-						</Text>
+						<Text className="text-xl font-semibold text-foreground font-mono">Sign up</Text>
 						<Text className="text-sm text-muted-foreground font-mono">
 							Create your Maple account.
 						</Text>
@@ -222,9 +211,7 @@ export default function SignUpScreen() {
 						</View>
 
 						<View className="gap-2">
-							<Text className="text-sm font-medium text-foreground font-mono">
-								Password
-							</Text>
+							<Text className="text-sm font-medium text-foreground font-mono">Password</Text>
 							<TextInput
 								className="h-12 rounded-lg border border-input bg-transparent px-3 text-sm text-foreground font-mono"
 								value={password}
@@ -262,5 +249,5 @@ export default function SignUpScreen() {
 				</ScrollView>
 			</KeyboardAvoidingView>
 		</SafeAreaView>
-	);
+	)
 }

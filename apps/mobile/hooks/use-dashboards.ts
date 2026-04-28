@@ -2,10 +2,10 @@ import { useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchDashboards, type DashboardDocument } from "../lib/api"
 import {
-  getQueryErrorMessage,
-  mobileQueryKeys,
-  mobileQueryStaleTimes,
-  preservePreviousData,
+	getQueryErrorMessage,
+	mobileQueryKeys,
+	mobileQueryStaleTimes,
+	preservePreviousData,
 } from "../lib/query"
 
 type DashboardsState =
@@ -15,9 +15,7 @@ type DashboardsState =
 
 async function fetchSortedDashboards(): Promise<DashboardDocument[]> {
 	const dashboards = await fetchDashboards()
-	return [...dashboards].sort((a, b) =>
-		b.updatedAt.localeCompare(a.updatedAt),
-	)
+	return [...dashboards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 
 export function useDashboards() {

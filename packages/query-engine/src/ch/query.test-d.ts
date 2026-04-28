@@ -14,26 +14,26 @@ import type { Expr } from "./expr"
 // ---------------------------------------------------------------------------
 
 const Users = CH.table("users", {
-  Id: CH.string,
-  Name: CH.string,
-  Age: CH.uint64,
-  Score: CH.float64,
-  Attrs: CH.map(CH.string, CH.string),
-  Tags: CH.array(CH.string),
-  CreatedAt: CH.dateTime64,
+	Id: CH.string,
+	Name: CH.string,
+	Age: CH.uint64,
+	Score: CH.float64,
+	Attrs: CH.map(CH.string, CH.string),
+	Tags: CH.array(CH.string),
+	CreatedAt: CH.dateTime64,
 })
 
 const Orders = CH.table("orders", {
-  Id: CH.string,
-  UserId: CH.string,
-  Amount: CH.uint64,
-  Status: CH.string,
+	Id: CH.string,
+	UserId: CH.string,
+	Amount: CH.uint64,
+	Status: CH.string,
 })
 
 const Tags = CH.table("tags", {
-  Id: CH.string,
-  UserId: CH.string,
-  Label: CH.string,
+	Id: CH.string,
+	UserId: CH.string,
+	Label: CH.string,
 })
 
 // ---------------------------------------------------------------------------
@@ -41,16 +41,16 @@ const Tags = CH.table("tags", {
 // ---------------------------------------------------------------------------
 
 const q1 = CH.from(Users).select(($) => ({
-  bucket: CH.toStartOfInterval($.CreatedAt, 60),
-  count: CH.count(),
-  avgScore: CH.avg($.Score),
+	bucket: CH.toStartOfInterval($.CreatedAt, 60),
+	count: CH.count(),
+	avgScore: CH.avg($.Score),
 }))
 
 type Q1Output = InferQueryOutput<typeof q1>
 expectTypeOf<Q1Output>().toEqualTypeOf<{
-  readonly bucket: string
-  readonly count: number
-  readonly avgScore: number
+	readonly bucket: string
+	readonly count: number
+	readonly avgScore: number
 }>()
 
 // ---------------------------------------------------------------------------
@@ -61,17 +61,17 @@ const q2 = CH.from(Users).select("Id", "Name")
 
 type Q2Output = InferQueryOutput<typeof q2>
 expectTypeOf<Q2Output>().toEqualTypeOf<{
-  readonly Id: string
-  readonly Name: string
+	readonly Id: string
+	readonly Name: string
 }>()
 
 const q3 = CH.from(Users).select("Id", "Age", "Score")
 
 type Q3Output = InferQueryOutput<typeof q3>
 expectTypeOf<Q3Output>().toEqualTypeOf<{
-  readonly Id: string
-  readonly Age: number
-  readonly Score: number
+	readonly Id: string
+	readonly Age: number
+	readonly Score: number
 }>()
 
 // ---------------------------------------------------------------------------
@@ -86,13 +86,13 @@ CH.from(Users).select("Id", "NonExistent")
 // ---------------------------------------------------------------------------
 
 CH.from(Users).select(($) => {
-  expectTypeOf($.Id).toMatchTypeOf<Expr<string>>()
-  expectTypeOf($.Age).toMatchTypeOf<Expr<number>>()
-  expectTypeOf($.Score).toMatchTypeOf<Expr<number>>()
-  expectTypeOf($.Attrs).toMatchTypeOf<Expr<Record<string, string>>>()
-  expectTypeOf($.Tags).toMatchTypeOf<Expr<ReadonlyArray<string>>>()
-  expectTypeOf($.CreatedAt).toMatchTypeOf<Expr<string>>()
-  return { id: $.Id }
+	expectTypeOf($.Id).toMatchTypeOf<Expr<string>>()
+	expectTypeOf($.Age).toMatchTypeOf<Expr<number>>()
+	expectTypeOf($.Score).toMatchTypeOf<Expr<number>>()
+	expectTypeOf($.Attrs).toMatchTypeOf<Expr<Record<string, string>>>()
+	expectTypeOf($.Tags).toMatchTypeOf<Expr<ReadonlyArray<string>>>()
+	expectTypeOf($.CreatedAt).toMatchTypeOf<Expr<string>>()
+	return { id: $.Id }
 })
 
 // ---------------------------------------------------------------------------
@@ -100,20 +100,20 @@ CH.from(Users).select(($) => {
 // ---------------------------------------------------------------------------
 
 const full = CH.from(Users)
-  .select(($) => ({
-    name: $.Name,
-    count: CH.count(),
-  }))
-  .where(($) => [$.Id.eq("test")])
-  .groupBy("name")
-  .orderBy(["count", "desc"])
-  .limit(10)
-  .format("JSON")
+	.select(($) => ({
+		name: $.Name,
+		count: CH.count(),
+	}))
+	.where(($) => [$.Id.eq("test")])
+	.groupBy("name")
+	.orderBy(["count", "desc"])
+	.limit(10)
+	.format("JSON")
 
 type FullOutput = InferQueryOutput<typeof full>
 expectTypeOf<FullOutput>().toEqualTypeOf<{
-  readonly name: string
-  readonly count: number
+	readonly name: string
+	readonly count: number
 }>()
 
 // ---------------------------------------------------------------------------
@@ -121,8 +121,8 @@ expectTypeOf<FullOutput>().toEqualTypeOf<{
 // ---------------------------------------------------------------------------
 
 const qWithSelect = CH.from(Users).select(($) => ({
-  name: $.Name,
-  count: CH.count(),
+	name: $.Name,
+	count: CH.count(),
 }))
 
 // Valid — keys exist in Output
@@ -139,40 +139,38 @@ qWithSelect.orderBy(["bogus", "asc"])
 // innerJoin — adds typed columns under alias
 // ---------------------------------------------------------------------------
 
-const joined = CH.from(Users)
-  .innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
+const joined = CH.from(Users).innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
 
 const jq = joined.select(($) => ({
-  userName: $.Name,
-  orderAmount: $.o.Amount,
-  orderStatus: $.o.Status,
+	userName: $.Name,
+	orderAmount: $.o.Amount,
+	orderStatus: $.o.Status,
 }))
 
 type JQOutput = InferQueryOutput<typeof jq>
 expectTypeOf<JQOutput>().toEqualTypeOf<{
-  readonly userName: string
-  readonly orderAmount: number
-  readonly orderStatus: string
+	readonly userName: string
+	readonly orderAmount: number
+	readonly orderStatus: string
 }>()
 
 // ---------------------------------------------------------------------------
 // leftJoin — wraps joined columns with | null
 // ---------------------------------------------------------------------------
 
-const leftJoined = CH.from(Users)
-  .leftJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
+const leftJoined = CH.from(Users).leftJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
 
 const ljq = leftJoined.select(($) => ({
-  userName: $.Name,
-  orderAmount: $.o.Amount,
-  orderStatus: $.o.Status,
+	userName: $.Name,
+	orderAmount: $.o.Amount,
+	orderStatus: $.o.Status,
 }))
 
 type LJQOutput = InferQueryOutput<typeof ljq>
 expectTypeOf<LJQOutput>().toEqualTypeOf<{
-  readonly userName: string
-  readonly orderAmount: number | null
-  readonly orderStatus: string | null
+	readonly userName: string
+	readonly orderAmount: number | null
+	readonly orderStatus: string | null
 }>()
 
 // ---------------------------------------------------------------------------
@@ -180,19 +178,19 @@ expectTypeOf<LJQOutput>().toEqualTypeOf<{
 // ---------------------------------------------------------------------------
 
 const multi = CH.from(Users)
-  .innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
-  .innerJoin(Tags, "t", (u, t) => u.Id.eq(t.UserId))
-  .select(($) => ({
-    name: $.Name,
-    amount: $.o.Amount,
-    label: $.t.Label,
-  }))
+	.innerJoin(Orders, "o", (u, o) => u.Id.eq(o.UserId))
+	.innerJoin(Tags, "t", (u, t) => u.Id.eq(t.UserId))
+	.select(($) => ({
+		name: $.Name,
+		amount: $.o.Amount,
+		label: $.t.Label,
+	}))
 
 type MultiOutput = InferQueryOutput<typeof multi>
 expectTypeOf<MultiOutput>().toEqualTypeOf<{
-  readonly name: string
-  readonly amount: number
-  readonly label: string
+	readonly name: string
+	readonly amount: number
+	readonly label: string
 }>()
 
 // ---------------------------------------------------------------------------
@@ -200,16 +198,16 @@ expectTypeOf<MultiOutput>().toEqualTypeOf<{
 // ---------------------------------------------------------------------------
 
 const crossed = CH.from(Users)
-  .crossJoin(Orders, "o")
-  .select(($) => ({
-    userName: $.Name,
-    orderAmount: $.o.Amount,
-  }))
+	.crossJoin(Orders, "o")
+	.select(($) => ({
+		userName: $.Name,
+		orderAmount: $.o.Amount,
+	}))
 
 type CrossOutput = InferQueryOutput<typeof crossed>
 expectTypeOf<CrossOutput>().toEqualTypeOf<{
-  readonly userName: string
-  readonly orderAmount: number
+	readonly userName: string
+	readonly orderAmount: number
 }>()
 
 // ---------------------------------------------------------------------------
@@ -217,21 +215,21 @@ expectTypeOf<CrossOutput>().toEqualTypeOf<{
 // ---------------------------------------------------------------------------
 
 const subquery = CH.from(Orders).select(($) => ({
-  userId: $.UserId,
-  totalAmount: CH.sum($.Amount),
+	userId: $.UserId,
+	totalAmount: CH.sum($.Amount),
 }))
 
 const joinedSub = CH.from(Users)
-  .innerJoinQuery(subquery, "agg", (u, agg) => u.Id.eq(agg.userId))
-  .select(($) => ({
-    name: $.Name,
-    total: $.agg.totalAmount,
-  }))
+	.innerJoinQuery(subquery, "agg", (u, agg) => u.Id.eq(agg.userId))
+	.select(($) => ({
+		name: $.Name,
+		total: $.agg.totalAmount,
+	}))
 
 type JoinedSubOutput = InferQueryOutput<typeof joinedSub>
 expectTypeOf<JoinedSubOutput>().toEqualTypeOf<{
-  readonly name: string
-  readonly total: number
+	readonly name: string
+	readonly total: number
 }>()
 
 // ---------------------------------------------------------------------------
@@ -239,16 +237,16 @@ expectTypeOf<JoinedSubOutput>().toEqualTypeOf<{
 // ---------------------------------------------------------------------------
 
 const leftJoinedSub = CH.from(Users)
-  .leftJoinQuery(subquery, "agg", (u, agg) => u.Id.eq(agg.userId))
-  .select(($) => ({
-    name: $.Name,
-    total: $.agg.totalAmount,
-  }))
+	.leftJoinQuery(subquery, "agg", (u, agg) => u.Id.eq(agg.userId))
+	.select(($) => ({
+		name: $.Name,
+		total: $.agg.totalAmount,
+	}))
 
 type LeftJoinedSubOutput = InferQueryOutput<typeof leftJoinedSub>
 expectTypeOf<LeftJoinedSubOutput>().toEqualTypeOf<{
-  readonly name: string
-  readonly total: number | null
+	readonly name: string
+	readonly total: number | null
 }>()
 
 // ---------------------------------------------------------------------------
@@ -256,20 +254,20 @@ expectTypeOf<LeftJoinedSubOutput>().toEqualTypeOf<{
 // ---------------------------------------------------------------------------
 
 const inner = CH.from(Users).select(($) => ({
-  userId: $.Id,
-  userName: $.Name,
-  userAge: $.Age,
+	userId: $.Id,
+	userName: $.Name,
+	userAge: $.Age,
 }))
 
 const outer = CH.fromQuery(inner, "sub").select(($) => ({
-  id: $.userId,
-  name: $.userName,
+	id: $.userId,
+	name: $.userName,
 }))
 
 type OuterOutput = InferQueryOutput<typeof outer>
 expectTypeOf<OuterOutput>().toEqualTypeOf<{
-  readonly id: string
-  readonly name: string
+	readonly id: string
+	readonly name: string
 }>()
 
 // ---------------------------------------------------------------------------
@@ -277,20 +275,20 @@ expectTypeOf<OuterOutput>().toEqualTypeOf<{
 // ---------------------------------------------------------------------------
 
 const uq1 = CH.from(Users).select(($) => ({
-  name: $.Name,
-  count: CH.count(),
+	name: $.Name,
+	count: CH.count(),
 }))
 
 const uq2 = CH.from(Users).select(($) => ({
-  name: $.Id,
-  count: CH.count(),
+	name: $.Id,
+	count: CH.count(),
 }))
 
 const union = CH.unionAll(uq1, uq2)
 type UnionOutput = InferUnionOutput<typeof union>
 expectTypeOf<UnionOutput>().toEqualTypeOf<{
-  readonly name: string
-  readonly count: number
+	readonly name: string
+	readonly count: number
 }>()
 
 // Union orderBy accepts Output keys
@@ -304,13 +302,13 @@ union.orderBy(["bogus", "asc"])
 // ---------------------------------------------------------------------------
 
 const qA = CH.from(Users).select(($) => ({
-  name: $.Name,
-  count: CH.count(),
+	name: $.Name,
+	count: CH.count(),
 }))
 
 const qB = CH.from(Users).select(($) => ({
-  name: $.Name,
-  extra: $.Id,
+	name: $.Name,
+	extra: $.Id,
 }))
 
 // @ts-expect-error — Output types don't match (count vs extra)
@@ -321,19 +319,17 @@ CH.unionAll(qA, qB)
 // ---------------------------------------------------------------------------
 
 const compileTarget = CH.from(Users).select(($) => ({
-  id: $.Id,
-  age: $.Age,
+	id: $.Id,
+	age: $.Age,
 }))
 
 const compiled = CH.compile(compileTarget, {})
 
-expectTypeOf(compiled).toMatchTypeOf<
-  CompiledQuery<{ readonly id: string; readonly age: number }>
->()
+expectTypeOf(compiled).toMatchTypeOf<CompiledQuery<{ readonly id: string; readonly age: number }>>()
 
 // castRows returns correctly typed array
 expectTypeOf(compiled.castRows([])).toEqualTypeOf<
-  ReadonlyArray<{ readonly id: string; readonly age: number }>
+	ReadonlyArray<{ readonly id: string; readonly age: number }>
 >()
 
 // ---------------------------------------------------------------------------
@@ -342,6 +338,6 @@ expectTypeOf(compiled.castRows([])).toEqualTypeOf<
 
 type Extracted = InferQueryOutput<typeof compileTarget>
 expectTypeOf<Extracted>().toEqualTypeOf<{
-  readonly id: string
-  readonly age: number
+	readonly id: string
+	readonly age: number
 }>()

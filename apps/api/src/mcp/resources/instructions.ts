@@ -2,13 +2,13 @@ import { McpServer } from "effect/unstable/ai"
 import { Effect } from "effect"
 
 export const InstructionsResource = McpServer.resource({
-  uri: "maple://instructions",
-  name: "Maple MCP Usage Guide",
-  description: "Cross-cutting rules for using Maple MCP tools effectively",
-  audience: ["assistant"] as ReadonlyArray<"user" | "assistant">,
-  priority: 1,
-  content: Effect.succeed(
-    `# Maple MCP Tool Usage Guide
+	uri: "maple://instructions",
+	name: "Maple MCP Usage Guide",
+	description: "Cross-cutting rules for using Maple MCP tools effectively",
+	audience: ["assistant"] as ReadonlyArray<"user" | "assistant">,
+	priority: 1,
+	content: Effect.succeed(
+		`# Maple MCP Tool Usage Guide
 
 ## Time Format
 - Always use YYYY-MM-DD HH:mm:ss in UTC
@@ -45,5 +45,5 @@ export const InstructionsResource = McpServer.resource({
 - Trend analysis: query_data (timeseries or breakdown)
 - Service discovery: list_services -> diagnose_service
 - Alert management: list_alert_rules -> get_alert_rule -> list_alert_incidents`,
-  ),
+	),
 })

@@ -34,10 +34,10 @@ for batch in chunks(events, BATCH_SIZE):
 
 **Recommended batch sizes:**
 
-| Threshold | Value |
-|-----------|-------|
-| Minimum | 1,000 rows |
-| Ideal range | 10,000-100,000 rows |
+| Threshold          | Value                |
+| ------------------ | -------------------- |
+| Minimum            | 1,000 rows           |
+| Ideal range        | 10,000-100,000 rows  |
 | Insert rate (sync) | ~1 insert per second |
 
 **Validation:**

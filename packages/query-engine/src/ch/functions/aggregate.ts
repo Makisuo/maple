@@ -25,27 +25,27 @@ export const maxIf = defineFn<[Expr<number>, Condition], number>("maxIf")
 // ---------------------------------------------------------------------------
 
 export function min_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
-  return compileFnCall<NonNullable<T>>("min", expr)
+	return compileFnCall<NonNullable<T>>("min", expr)
 }
 
 export function max_<T>(expr: Expr<T>): Expr<NonNullable<T>> {
-  return compileFnCall<NonNullable<T>>("max", expr)
+	return compileFnCall<NonNullable<T>>("max", expr)
 }
 
 export function any_<T>(expr: Expr<T>): Expr<T> {
-  return compileFnCall<T>("any", expr)
+	return compileFnCall<T>("any", expr)
 }
 
 export function anyIf<T>(expr: Expr<T>, cond: Condition): Expr<T> {
-  return compileFnCall<T>("anyIf", expr, cond)
+	return compileFnCall<T>("anyIf", expr, cond)
 }
 
 export function uniq<T>(expr: Expr<T>): Expr<number> {
-  return compileFnCall<number>("uniq", expr)
+	return compileFnCall<number>("uniq", expr)
 }
 
 export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
-  return compileFnCall<ReadonlyArray<T>>("groupUniqArray", expr)
+	return compileFnCall<ReadonlyArray<T>>("groupUniqArray", expr)
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +53,6 @@ export function groupUniqArray<T>(expr: Expr<T>): Expr<ReadonlyArray<T>> {
 // ---------------------------------------------------------------------------
 
 export function quantile(q: number) {
-  return (expr: Expr<number>): Expr<number> =>
-    makeExpr<number>(raw(`quantile(${q})(${compile(expr.toFragment())})`))
+	return (expr: Expr<number>): Expr<number> =>
+		makeExpr<number>(raw(`quantile(${q})(${compile(expr.toFragment())})`))
 }

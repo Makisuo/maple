@@ -29,20 +29,20 @@ Also include the destructive foreground CSS variable snippet from the coss menu 
 
 ```tsx
 import {
-  Menu,
-  MenuCheckboxItem,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuItem,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator,
-  MenuShortcut,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
-  MenuTrigger,
+	Menu,
+	MenuCheckboxItem,
+	MenuGroup,
+	MenuGroupLabel,
+	MenuItem,
+	MenuPopup,
+	MenuRadioGroup,
+	MenuRadioItem,
+	MenuSeparator,
+	MenuShortcut,
+	MenuSub,
+	MenuSubPopup,
+	MenuSubTrigger,
+	MenuTrigger,
 } from "@/components/ui/menu"
 ```
 
@@ -50,12 +50,12 @@ import {
 
 ```tsx
 <Menu>
-  <MenuTrigger>Open</MenuTrigger>
-  <MenuPopup>
-    <MenuItem>Profile</MenuItem>
-    <MenuSeparator />
-    <MenuCheckboxItem>Shuffle</MenuCheckboxItem>
-  </MenuPopup>
+	<MenuTrigger>Open</MenuTrigger>
+	<MenuPopup>
+		<MenuItem>Profile</MenuItem>
+		<MenuSeparator />
+		<MenuCheckboxItem>Shuffle</MenuCheckboxItem>
+	</MenuPopup>
 </Menu>
 ```
 
@@ -94,4 +94,3 @@ Use popup positioning props like `align` / `sideOffset` only when a layout needs
 - switch-style checkbox items: `p-menu-9`
 - cross-component example: `p-dialog-2` (menu opening dialog)
 - responsive menu/drawer variant: `p-drawer-13`
-

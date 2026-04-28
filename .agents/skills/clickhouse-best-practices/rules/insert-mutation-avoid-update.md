@@ -12,6 +12,7 @@ tags: [insert, mutation, UPDATE, ReplacingMergeTree]
 `ALTER TABLE UPDATE` is a mutation - an asynchronous background process that rewrites entire data parts affected by the change. This is extremely expensive for frequent or large-scale operations.
 
 **Why mutations are problematic:**
+
 - **Write amplification:** Rewrite complete parts even for minor changes
 - **Disk I/O spike:** Degrades overall cluster performance
 - **No rollback:** Cannot be rolled back after submission

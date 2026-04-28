@@ -30,9 +30,7 @@ export function TraceRow({ trace }: { trace: Trace }) {
 								className="rounded px-1.5 py-0.5 mr-2"
 								style={{ backgroundColor: HTTP_METHOD_COLORS[method] ?? "#5A5248" }}
 							>
-								<Text className="text-[10px] font-bold text-white font-mono">
-									{method}
-								</Text>
+								<Text className="text-[10px] font-bold text-white font-mono">{method}</Text>
 							</View>
 						)}
 						<Text

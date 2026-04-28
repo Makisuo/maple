@@ -12,17 +12,17 @@
  */
 
 export interface FingerprintInputs {
-  /** First normalized frame — stored on error_events and error_issues for display. */
-  readonly topFrame: string
-  /** Top 3 normalized frames joined by newline — the stack portion of the hash. */
-  readonly fpFrames: string
-  /**
-   * Normalized StatusMessage prefix, folded into the hash whenever there are no
-   * frame-shaped stack lines (regardless of whether ExceptionType is present).
-   * Prevents status-only errors — and errors with generic or malformed
-   * ExceptionType values — from all collapsing into a single issue per service.
-   */
-  readonly msgFallback: string
+	/** First normalized frame — stored on error_events and error_issues for display. */
+	readonly topFrame: string
+	/** Top 3 normalized frames joined by newline — the stack portion of the hash. */
+	readonly fpFrames: string
+	/**
+	 * Normalized StatusMessage prefix, folded into the hash whenever there are no
+	 * frame-shaped stack lines (regardless of whether ExceptionType is present).
+	 * Prevents status-only errors — and errors with generic or malformed
+	 * ExceptionType values — from all collapsing into a single issue per service.
+	 */
+	readonly msgFallback: string
 }
 
 // Matches frame-shaped lines across common runtimes:
@@ -33,23 +33,20 @@ const LINE_NUM_OR_HEX_RE = /:\d+|line \d+|0x[0-9a-fA-F]+/g
 const MSG_REDACT_RE = /[0-9a-fA-F]{8,}|[0-9]+/g
 
 export function computeFingerprintInputs(args: {
-  readonly exceptionType: string
-  readonly exceptionStacktrace: string
-  readonly statusMessage: string
+	readonly exceptionType: string
+	readonly exceptionStacktrace: string
+	readonly statusMessage: string
 }): FingerprintInputs {
-  const rawFrames = args.exceptionStacktrace
-    .split("\n")
-    .filter((line) => FRAME_LINE_RE.test(line))
-    .slice(0, 3)
+	const rawFrames = args.exceptionStacktrace
+		.split("\n")
+		.filter((line) => FRAME_LINE_RE.test(line))
+		.slice(0, 3)
 
-  const topFrames = rawFrames.map((line) => line.replace(LINE_NUM_OR_HEX_RE, ""))
-  const topFrame = topFrames[0] ?? ""
-  const fpFrames = topFrames.join("\n")
+	const topFrames = rawFrames.map((line) => line.replace(LINE_NUM_OR_HEX_RE, ""))
+	const topFrame = topFrames[0] ?? ""
+	const fpFrames = topFrames.join("\n")
 
-  const msgFallback =
-    fpFrames === ""
-      ? args.statusMessage.slice(0, 200).replace(MSG_REDACT_RE, "#")
-      : ""
+	const msgFallback = fpFrames === "" ? args.statusMessage.slice(0, 200).replace(MSG_REDACT_RE, "#") : ""
 
-  return { topFrame, fpFrames, msgFallback }
+	return { topFrame, fpFrames, msgFallback }
 }

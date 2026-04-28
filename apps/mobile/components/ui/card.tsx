@@ -20,9 +20,7 @@ export function Card({ children, padding = "md", bordered = true }: CardProps) {
 	const paddingClass = PADDING_CLASS[padding]
 	const borderClass = bordered ? "border border-border" : ""
 	return (
-		<View
-			className={`bg-card rounded-xl overflow-hidden ${borderClass} ${paddingClass}`.trim()}
-		>
+		<View className={`bg-card rounded-xl overflow-hidden ${borderClass} ${paddingClass}`.trim()}>
 			{children}
 		</View>
 	)

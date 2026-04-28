@@ -5,8 +5,8 @@ import { effectLoader, effectBeforeLoad, getEffectContext } from "./route.ts"
  * Context passed to a preload function.
  */
 export interface PreloadContext {
-  readonly params: Record<string, string>
-  readonly search: Record<string, unknown>
+	readonly params: Record<string, string>
+	readonly search: Record<string, unknown>
 }
 
 /**
@@ -41,40 +41,32 @@ export type PreloadFn = (ctx: PreloadContext) => ReadonlyArray<Atom.Atom<any>>
  * })
  * ```
  */
-export function effectRoute<T extends (...args: any[]) => any>(
-  fileRoute: T,
-  preload?: PreloadFn,
-): T {
-  return ((options?: any) => {
-    if (!options) return (fileRoute as any)()
-    return (fileRoute as any)(transformOptions(options, preload))
-  }) as T
+export function effectRoute<T extends (...args: any[]) => any>(fileRoute: T, preload?: PreloadFn): T {
+	return ((options?: any) => {
+		if (!options) return (fileRoute as any)()
+		return (fileRoute as any)(transformOptions(options, preload))
+	}) as T
 }
 
-function transformOptions(
-  options: Record<string, any>,
-  preload?: PreloadFn,
-): Record<string, any> {
-  const result = { ...options }
+function transformOptions(options: Record<string, any>, preload?: PreloadFn): Record<string, any> {
+	const result = { ...options }
 
-  const userLoader = typeof options.loader === "function"
-    ? effectLoader(options.loader)
-    : undefined
+	const userLoader = typeof options.loader === "function" ? effectLoader(options.loader) : undefined
 
-  if (preload || userLoader) {
-    result.loader = (ctx: any) => {
-      if (preload) {
-        const { effectRegistry } = getEffectContext(ctx.context)
-        const atoms = preload({ params: ctx.params, search: ctx.search ?? {} })
-        for (const atom of atoms) effectRegistry.mount(atom)
-      }
-      if (userLoader) return userLoader(ctx)
-    }
-  }
+	if (preload || userLoader) {
+		result.loader = (ctx: any) => {
+			if (preload) {
+				const { effectRegistry } = getEffectContext(ctx.context)
+				const atoms = preload({ params: ctx.params, search: ctx.search ?? {} })
+				for (const atom of atoms) effectRegistry.mount(atom)
+			}
+			if (userLoader) return userLoader(ctx)
+		}
+	}
 
-  if (typeof options.beforeLoad === "function") {
-    result.beforeLoad = effectBeforeLoad(options.beforeLoad)
-  }
+	if (typeof options.beforeLoad === "function") {
+		result.beforeLoad = effectBeforeLoad(options.beforeLoad)
+	}
 
-  return result
+	return result
 }

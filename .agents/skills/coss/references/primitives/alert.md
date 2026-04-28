@@ -33,10 +33,8 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/u
 
 ```tsx
 <Alert>
-  <AlertTitle>Heads up!</AlertTitle>
-  <AlertDescription>
-    You can add components and dependencies to your app using the cli.
-  </AlertDescription>
+	<AlertTitle>Heads up!</AlertTitle>
+	<AlertDescription>You can add components and dependencies to your app using the cli.</AlertDescription>
 </Alert>
 ```
 
@@ -48,9 +46,9 @@ Alert with semantic icon (do NOT use `aria-hidden` — icon conveys status):
 
 ```tsx
 <Alert variant="info">
-  <InfoIcon />
-  <AlertTitle>Heads up!</AlertTitle>
-  <AlertDescription>You can add components using the CLI.</AlertDescription>
+	<InfoIcon />
+	<AlertTitle>Heads up!</AlertTitle>
+	<AlertDescription>You can add components using the CLI.</AlertDescription>
 </Alert>
 ```
 
@@ -60,13 +58,15 @@ Alert with action buttons (use `AlertAction`):
 
 ```tsx
 <Alert>
-  <InfoIcon />
-  <AlertTitle>Heads up!</AlertTitle>
-  <AlertDescription>Describe what can be done about it here.</AlertDescription>
-  <AlertAction>
-    <Button size="xs" variant="ghost">Dismiss</Button>
-    <Button size="xs">Ok</Button>
-  </AlertAction>
+	<InfoIcon />
+	<AlertTitle>Heads up!</AlertTitle>
+	<AlertDescription>Describe what can be done about it here.</AlertDescription>
+	<AlertAction>
+		<Button size="xs" variant="ghost">
+			Dismiss
+		</Button>
+		<Button size="xs">Ok</Button>
+	</AlertAction>
 </Alert>
 ```
 

@@ -14,59 +14,48 @@ import * as Effect from "effect/Effect"
 import { WorkerEnvironment } from "./worker-environment.ts"
 
 export interface D1DatabaseToken {
-  readonly Type: "Cloudflare.D1Database"
-  readonly LogicalId: string
+	readonly Type: "Cloudflare.D1Database"
+	readonly LogicalId: string
 }
 
 const makeToken = (logicalId: string): D1DatabaseToken => ({
-  Type: "Cloudflare.D1Database",
-  LogicalId: logicalId,
+	Type: "Cloudflare.D1Database",
+	LogicalId: logicalId,
 })
 
 export interface D1ConnectionClient {
-  /**
-   * Resolves to the raw underlying Cloudflare `D1Database` binding. Use this
-   * when a driver (e.g. drizzle, better-auth) needs direct access.
-   */
-  raw: Effect.Effect<runtime.D1Database, never, WorkerEnvironment>
-  /**
-   * Prepare a SQL statement for parameterised execution.
-   */
-  prepare: (
-    query: string,
-  ) => Effect.Effect<runtime.D1PreparedStatement, never, WorkerEnvironment>
-  /**
-   * Execute raw SQL without prepared statements.
-   */
-  exec: (
-    query: string,
-  ) => Effect.Effect<runtime.D1ExecResult, never, WorkerEnvironment>
-  /**
-   * Batch multiple prepared statements — rolled back on failure.
-   */
-  batch: <T = unknown>(
-    statements: runtime.D1PreparedStatement[],
-  ) => Effect.Effect<runtime.D1Result<T>[], never, WorkerEnvironment>
+	/**
+	 * Resolves to the raw underlying Cloudflare `D1Database` binding. Use this
+	 * when a driver (e.g. drizzle, better-auth) needs direct access.
+	 */
+	raw: Effect.Effect<runtime.D1Database, never, WorkerEnvironment>
+	/**
+	 * Prepare a SQL statement for parameterised execution.
+	 */
+	prepare: (query: string) => Effect.Effect<runtime.D1PreparedStatement, never, WorkerEnvironment>
+	/**
+	 * Execute raw SQL without prepared statements.
+	 */
+	exec: (query: string) => Effect.Effect<runtime.D1ExecResult, never, WorkerEnvironment>
+	/**
+	 * Batch multiple prepared statements — rolled back on failure.
+	 */
+	batch: <T = unknown>(
+		statements: runtime.D1PreparedStatement[],
+	) => Effect.Effect<runtime.D1Result<T>[], never, WorkerEnvironment>
 }
 
 const makeClient = (token: D1DatabaseToken): D1ConnectionClient => {
-  const env = WorkerEnvironment.asEffect()
-  const d1 = env.pipe(
-    Effect.map(
-      (e) => (e as Record<string, runtime.D1Database>)[token.LogicalId],
-    ),
-  )
+	const env = WorkerEnvironment.asEffect()
+	const d1 = env.pipe(Effect.map((e) => (e as Record<string, runtime.D1Database>)[token.LogicalId]))
 
-  return {
-    raw: d1,
-    prepare: (query: string) => d1.pipe(Effect.map((db) => db.prepare(query))),
-    exec: (query: string) =>
-      d1.pipe(Effect.flatMap((db) => Effect.promise(() => db.exec(query)))),
-    batch: <T = unknown>(statements: runtime.D1PreparedStatement[]) =>
-      d1.pipe(
-        Effect.flatMap((db) => Effect.promise(() => db.batch<T>(statements))),
-      ),
-  }
+	return {
+		raw: d1,
+		prepare: (query: string) => d1.pipe(Effect.map((db) => db.prepare(query))),
+		exec: (query: string) => d1.pipe(Effect.flatMap((db) => Effect.promise(() => db.exec(query)))),
+		batch: <T = unknown>(statements: runtime.D1PreparedStatement[]) =>
+			d1.pipe(Effect.flatMap((db) => Effect.promise(() => db.batch<T>(statements)))),
+	}
 }
 
 /**
@@ -80,15 +69,10 @@ const makeClient = (token: D1DatabaseToken): D1ConnectionClient => {
  * const stmt = yield* conn.prepare("SELECT ?").bind(1)
  * ```
  */
-export const D1Database = Object.assign(
-  (logicalId: string): D1DatabaseToken => makeToken(logicalId),
-  {
-    bind: (
-      token: D1DatabaseToken,
-    ): Effect.Effect<D1ConnectionClient, never, never> =>
-      Effect.succeed(makeClient(token)),
-  },
-)
+export const D1Database = Object.assign((logicalId: string): D1DatabaseToken => makeToken(logicalId), {
+	bind: (token: D1DatabaseToken): Effect.Effect<D1ConnectionClient, never, never> =>
+		Effect.succeed(makeClient(token)),
+})
 
 // Alias preserving alchemy's `D1Connection` export name. Both surface the
 // same `.bind()` API so either import style works during migration.

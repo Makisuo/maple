@@ -8,18 +8,18 @@ import { InstructionsResource } from "./resources/instructions"
 import { sessionStore } from "./lib/session-store"
 
 export const McpLive = Layer.mergeAll(
-  McpToolsLive,
-  DebugErrorsPrompt,
-  LatencyAnalysisPrompt,
-  IncidentTriagePrompt,
-  InstructionsResource,
+	McpToolsLive,
+	DebugErrorsPrompt,
+	LatencyAnalysisPrompt,
+	IncidentTriagePrompt,
+	InstructionsResource,
 ).pipe(
-  Layer.provide(
-    McpServer.layerHttp({
-      name: "maple-observability",
-      version: "1.0.0",
-      path: "/mcp",
-      clientSessions: sessionStore,
-    }),
-  ),
+	Layer.provide(
+		McpServer.layerHttp({
+			name: "maple-observability",
+			version: "1.0.0",
+			path: "/mcp",
+			clientSessions: sessionStore,
+		}),
+	),
 )

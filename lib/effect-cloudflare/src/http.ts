@@ -15,27 +15,25 @@ import type { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 
 export type HttpEffect<Req = never> = Effect.Effect<
-  HttpServerResponse.HttpServerResponse,
-  HttpServerError | HttpBodyError,
-  HttpServerRequest | Scope | Req
+	HttpServerResponse.HttpServerResponse,
+	HttpServerError | HttpBodyError,
+	HttpServerRequest | Scope | Req
 >
 
 export const safeHttpEffect = <Req = never>(handler: HttpEffect<Req>) =>
-  Effect.catchCause(handler, (cause) => {
-    const message = Option.match(Cause.findErrorOption(cause), {
-      onNone: () => "Internal Server Error",
-      onSome: (error) => error.message ?? "Internal Server Error",
-    })
+	Effect.catchCause(handler, (cause) => {
+		const message = Option.match(Cause.findErrorOption(cause), {
+			onNone: () => "Internal Server Error",
+			onSome: (error) => error.message ?? "Internal Server Error",
+		})
 
-    return Effect.map(
-      Effect.all([Effect.logInfo(message), Effect.logInfo(cause)]),
-      () =>
-        HttpServerResponse.text(message, {
-          status: 500,
-          statusText: message,
-        }),
-    )
-  })
+		return Effect.map(Effect.all([Effect.logInfo(message), Effect.logInfo(cause)]), () =>
+			HttpServerResponse.text(message, {
+				status: 500,
+				statusText: message,
+			}),
+		)
+	})
 
 // Request moved to ./request.ts to match upstream layout. Re-exported here so
 // existing imports of `@maple/effect-cloudflare`'s Request continue to resolve.

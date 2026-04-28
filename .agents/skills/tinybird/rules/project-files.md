@@ -10,6 +10,7 @@
 Use `tb info` to confirm CLI context, especially for credentials issues.
 
 It reports information about Local and Cloud environments:
+
 - Where the CLI is loading the `.tinyb` file from
 - Current logged workspace
 - API URL

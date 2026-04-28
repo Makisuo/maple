@@ -33,8 +33,8 @@ import { Switch } from "@/components/ui/switch"
 
 ```tsx
 <Label>
-  <Switch />
-  Enable notifications
+	<Switch />
+	Enable notifications
 </Label>
 ```
 
@@ -62,8 +62,8 @@ Disabled switch:
 
 ```tsx
 <Label>
-  <Switch disabled />
-  Marketing emails
+	<Switch disabled />
+	Marketing emails
 </Label>
 ```
 

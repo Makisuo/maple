@@ -77,16 +77,10 @@ export function ToolCallCard({ toolName, state, input, output, errorText }: Tool
 		>
 			<View className="flex-row items-center gap-2 px-3 py-2.5">
 				<StatusDot color={meta.color} pulsing={meta.pulsing} />
-				<Text
-					className="font-mono text-[11px] text-foreground flex-1"
-					style={{ letterSpacing: 1.5 }}
-				>
+				<Text className="font-mono text-[11px] text-foreground flex-1" style={{ letterSpacing: 1.5 }}>
 					{toolName.toUpperCase()}
 				</Text>
-				<Text
-					className="font-mono text-[10px]"
-					style={{ color: meta.color, letterSpacing: 1.2 }}
-				>
+				<Text className="font-mono text-[10px]" style={{ color: meta.color, letterSpacing: 1.2 }}>
 					{meta.label.toUpperCase()}
 				</Text>
 			</View>
@@ -134,10 +128,7 @@ export function ToolCallCard({ toolName, state, input, output, errorText }: Tool
 							>
 								ERROR
 							</Text>
-							<Text
-								className="font-mono text-[11px] text-destructive"
-								selectable
-							>
+							<Text className="font-mono text-[11px] text-destructive" selectable>
 								{errorText}
 							</Text>
 						</View>

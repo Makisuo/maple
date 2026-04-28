@@ -12,58 +12,61 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 
 const servicesSearchSchema = Schema.Struct({
-  environments: OptionalStringArrayParam,
-  commitShas: OptionalStringArrayParam,
-  startTime: Schema.optional(Schema.String),
-  endTime: Schema.optional(Schema.String),
-  timePreset: Schema.optional(Schema.String),
+	environments: OptionalStringArrayParam,
+	commitShas: OptionalStringArrayParam,
+	startTime: Schema.optional(Schema.String),
+	endTime: Schema.optional(Schema.String),
+	timePreset: Schema.optional(Schema.String),
 })
 
 export type ServicesSearchParams = Schema.Schema.Type<typeof servicesSearchSchema>
 
 export const Route = effectRoute(createFileRoute("/services/"))({
-  component: ServicesPage,
-  validateSearch: Schema.toStandardSchemaV1(servicesSearchSchema),
+	component: ServicesPage,
+	validateSearch: Schema.toStandardSchemaV1(servicesSearchSchema),
 })
 
 export function ServicesPage() {
-  const search = Route.useSearch()
-  const navigate = useNavigate({ from: Route.fullPath })
-  const { startTime: effectiveStartTime, endTime: effectiveEndTime } =
-    useEffectiveTimeRange(search.startTime, search.endTime, search.timePreset ?? "12h")
+	const search = Route.useSearch()
+	const navigate = useNavigate({ from: Route.fullPath })
+	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
+		search.startTime,
+		search.endTime,
+		search.timePreset ?? "12h",
+	)
 
-  const handleTimeChange = (
-    range: {
-      startTime?: string
-      endTime?: string
-      presetValue?: string
-    },
-    options?: { replace?: boolean },
-  ) => {
-    navigate({
-      replace: options?.replace,
-      search: (prev: Record<string, unknown>) => applyTimeRangeSearch(prev, range),
-    })
-  }
+	const handleTimeChange = (
+		range: {
+			startTime?: string
+			endTime?: string
+			presetValue?: string
+		},
+		options?: { replace?: boolean },
+	) => {
+		navigate({
+			replace: options?.replace,
+			search: (prev: Record<string, unknown>) => applyTimeRangeSearch(prev, range),
+		})
+	}
 
-  return (
-    <PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
-      <DashboardLayout
-        breadcrumbs={[{ label: "Services" }]}
-        title="Services"
-        description="Overview of all services with key metrics."
-        filterSidebar={<ServicesFilterSidebar />}
-        headerActions={
-          <TimeRangeHeaderControls
-            startTime={search.startTime ?? effectiveStartTime}
-            endTime={search.endTime ?? effectiveEndTime}
-            presetValue={search.timePreset ?? "12h"}
-            onTimeChange={handleTimeChange}
-          />
-        }
-      >
-        <ServicesTable filters={search} />
-      </DashboardLayout>
-    </PageRefreshProvider>
-  )
+	return (
+		<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
+			<DashboardLayout
+				breadcrumbs={[{ label: "Services" }]}
+				title="Services"
+				description="Overview of all services with key metrics."
+				filterSidebar={<ServicesFilterSidebar />}
+				headerActions={
+					<TimeRangeHeaderControls
+						startTime={search.startTime ?? effectiveStartTime}
+						endTime={search.endTime ?? effectiveEndTime}
+						presetValue={search.timePreset ?? "12h"}
+						onTimeChange={handleTimeChange}
+					/>
+				}
+			>
+				<ServicesTable filters={search} />
+			</DashboardLayout>
+		</PageRefreshProvider>
+	)
 }

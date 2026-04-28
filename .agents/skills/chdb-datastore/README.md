@@ -10,17 +10,18 @@ npx skills add clickhouse/agent-skills
 
 ## What's Included
 
-| File | Purpose |
-|------|---------|
-| `SKILL.md` | Skill definition and quick-start guide |
-| `references/api-reference.md` | Full DataStore method signatures |
-| `references/connectors.md` | All 16+ data source connection methods |
-| `examples/examples.md` | 11 runnable examples with expected output |
-| `scripts/verify_install.py` | Environment verification script |
+| File                          | Purpose                                   |
+| ----------------------------- | ----------------------------------------- |
+| `SKILL.md`                    | Skill definition and quick-start guide    |
+| `references/api-reference.md` | Full DataStore method signatures          |
+| `references/connectors.md`    | All 16+ data source connection methods    |
+| `examples/examples.md`        | 11 runnable examples with expected output |
+| `scripts/verify_install.py`   | Environment verification script           |
 
 ## Trigger Phrases
 
 This skill activates when you:
+
 - "Analyze this file with pandas"
 - "Speed up my pandas code"
 - "Query this MySQL/PostgreSQL/S3 table as a DataFrame"

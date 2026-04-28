@@ -1,47 +1,47 @@
 {
-  "name": "@maple/api",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./agent": "./src/agent.ts",
-    "./alerting": "./src/alerting.ts"
-  },
-  "scripts": {
-    "db:generate": "bun run --cwd ../../packages/db db:generate",
-    "dev": "if [ -n \"$PORTLESS_PREFIX\" ]; then portless \"$PORTLESS_PREFIX-api\" sh -c 'wrangler dev --env-file ../../.env.local --port $PORT --inspector-port=$((PORT + 10000))'; else wrangler dev --env-file ../../.env.local --inspector-port=9229; fi",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
-    "tinybird:dev": "tinybird dev",
-    "tinybird:build": "tinybird build",
-    "tinybird:deploy": "tinybird deploy"
-  },
-  "dependencies": {
-    "@clerk/backend": "^2.30.1",
-    "@effect/opentelemetry": "catalog:effect",
-    "@libsql/client": "0.15.15",
-    "@maple/db": "workspace:*",
-    "@maple/domain": "workspace:*",
-    "@maple/effect-cloudflare": "workspace:*",
-    "@maple/email": "workspace:*",
-    "@maple/infra": "workspace:*",
-    "@maple/query-engine": "workspace:*",
-    "alchemy": "^0.91.2",
-    "@react-email/components": "^1.0.11",
-    "@tinybirdco/sdk": "catalog:tinybird",
-    "autumn-js": "^1.2.5",
-    "date-fns": "^4.1.0",
-    "drizzle-orm": "^0.45.1",
-    "effect": "catalog:effect"
-  },
-  "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260405.0",
-    "@effect/language-service": "catalog:effect",
-    "@types/node": "catalog:tooling",
-    "atmn": "^1.0.1",
-    "typescript": "catalog:tooling",
-    "vitest": "catalog:",
-    "wrangler": "^4.41.0"
-  }
+	"name": "@maple/api",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./agent": "./src/agent.ts",
+		"./alerting": "./src/alerting.ts"
+	},
+	"scripts": {
+		"db:generate": "bun run --cwd ../../packages/db db:generate",
+		"dev": "if [ -n \"$PORTLESS_PREFIX\" ]; then portless \"$PORTLESS_PREFIX-api\" sh -c 'wrangler dev --env-file ../../.env.local --port $PORT --inspector-port=$((PORT + 10000))'; else wrangler dev --env-file ../../.env.local --inspector-port=9229; fi",
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit",
+		"typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+		"tinybird:dev": "tinybird dev",
+		"tinybird:build": "tinybird build",
+		"tinybird:deploy": "tinybird deploy"
+	},
+	"dependencies": {
+		"@clerk/backend": "^2.30.1",
+		"@effect/opentelemetry": "catalog:effect",
+		"@libsql/client": "0.15.15",
+		"@maple/db": "workspace:*",
+		"@maple/domain": "workspace:*",
+		"@maple/effect-cloudflare": "workspace:*",
+		"@maple/email": "workspace:*",
+		"@maple/infra": "workspace:*",
+		"@maple/query-engine": "workspace:*",
+		"@react-email/components": "^1.0.11",
+		"@tinybirdco/sdk": "catalog:tinybird",
+		"alchemy": "^0.91.2",
+		"autumn-js": "^1.2.5",
+		"date-fns": "^4.1.0",
+		"drizzle-orm": "^0.45.1",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20260405.0",
+		"@effect/language-service": "catalog:effect",
+		"@types/node": "catalog:tooling",
+		"atmn": "^1.0.1",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:",
+		"wrangler": "^4.41.0"
+	}
 }

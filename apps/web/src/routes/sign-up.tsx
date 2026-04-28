@@ -7,22 +7,22 @@ import { AuthLayout } from "@/components/layout/auth-layout"
 import { clerkAppearance } from "@/lib/clerk-appearance"
 
 const SignUpSearch = Schema.Struct({
-  redirect_url: Schema.optional(Schema.String),
+	redirect_url: Schema.optional(Schema.String),
 })
 
 export const Route = effectRoute(createFileRoute("/sign-up"))({
-  component: SignUpPage,
-  validateSearch: Schema.toStandardSchemaV1(SignUpSearch),
+	component: SignUpPage,
+	validateSearch: Schema.toStandardSchemaV1(SignUpSearch),
 })
 
 function SignUpPage() {
-  if (!isClerkAuthEnabled) {
-    return <Navigate to="/" replace />
-  }
+	if (!isClerkAuthEnabled) {
+		return <Navigate to="/" replace />
+	}
 
-  return (
-    <AuthLayout>
-      <SignUp appearance={clerkAppearance} />
-    </AuthLayout>
-  )
+	return (
+		<AuthLayout>
+			<SignUp appearance={clerkAppearance} />
+		</AuthLayout>
+	)
 }

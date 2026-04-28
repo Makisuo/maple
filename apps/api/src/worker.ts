@@ -1,9 +1,9 @@
 import {
-  logTelemetryConfigOnce,
-  makeTelemetryLayer,
-  WorkerConfigProviderLive,
-  WorkerEnvironmentLive,
-  withRequestRuntime,
+	logTelemetryConfigOnce,
+	makeTelemetryLayer,
+	WorkerConfigProviderLive,
+	WorkerEnvironmentLive,
+	withRequestRuntime,
 } from "@maple/effect-cloudflare"
 import { FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
@@ -11,38 +11,34 @@ import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
-import {
-  runWithSessionBindings,
-  sessionStore,
-} from "./mcp/lib/session-store"
+import { runWithSessionBindings, sessionStore } from "./mcp/lib/session-store"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
 
 const WorkerHttpPlatformLive = Layer.effect(
-  HttpPlatform.HttpPlatform,
-  HttpPlatform.make({
-    fileResponse: (_path, status, statusText, headers) =>
-      HttpServerResponse.text(
-        "File responses are unavailable in the worker runtime",
-        { status, statusText, headers },
-      ),
-    fileWebResponse: (_file, status, statusText, headers) =>
-      HttpServerResponse.text(
-        "File responses are unavailable in the worker runtime",
-        { status, statusText, headers },
-      ),
-  }),
-).pipe(
-  Layer.provideMerge(WorkerFileSystemLive),
-  Layer.provideMerge(Etag.layer),
-)
+	HttpPlatform.HttpPlatform,
+	HttpPlatform.make({
+		fileResponse: (_path, status, statusText, headers) =>
+			HttpServerResponse.text("File responses are unavailable in the worker runtime", {
+				status,
+				statusText,
+				headers,
+			}),
+		fileWebResponse: (_file, status, statusText, headers) =>
+			HttpServerResponse.text("File responses are unavailable in the worker runtime", {
+				status,
+				statusText,
+				headers,
+			}),
+	}),
+).pipe(Layer.provideMerge(WorkerFileSystemLive), Layer.provideMerge(Etag.layer))
 
 const WorkerPlatformLive = Layer.mergeAll(
-  Path.layer,
-  Etag.layer,
-  WorkerFileSystemLive,
-  WorkerHttpPlatformLive,
+	Path.layer,
+	Etag.layer,
+	WorkerFileSystemLive,
+	WorkerHttpPlatformLive,
 )
 
 // POST /mcp hangs indefinitely when `toWebHandler` is called with no `middleware`
@@ -53,92 +49,69 @@ const WorkerPlatformLive = Layer.mergeAll(
 const passthroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
 
 const buildHandler = (_env: Record<string, unknown>) =>
-  HttpRouter.toWebHandler(
-    AllRoutes.pipe(
-      Layer.provideMerge(MainLive),
-      Layer.provideMerge(ApiAuthLive),
-      Layer.provideMerge(ApiObservabilityLive),
-      Layer.provideMerge(WorkerPlatformLive),
-      Layer.provideMerge(DatabaseD1Live),
-      Layer.provideMerge(WorkerEnvironmentLive),
-      Layer.provideMerge(WorkerConfigProviderLive),
-    ),
-    { middleware: passthroughMiddleware },
-  )
+	HttpRouter.toWebHandler(
+		AllRoutes.pipe(
+			Layer.provideMerge(MainLive),
+			Layer.provideMerge(ApiAuthLive),
+			Layer.provideMerge(ApiObservabilityLive),
+			Layer.provideMerge(WorkerPlatformLive),
+			Layer.provideMerge(DatabaseD1Live),
+			Layer.provideMerge(WorkerEnvironmentLive),
+			Layer.provideMerge(WorkerConfigProviderLive),
+		),
+		{ middleware: passthroughMiddleware },
+	)
 
 const handlerCache = new WeakMap<object, ReturnType<typeof buildHandler>>()
 
 const getHandler = (env: Record<string, unknown>) => {
-  const key = env as object
-  const existing = handlerCache.get(key)
-  if (existing) return existing
-  const built = buildHandler(env)
-  handlerCache.set(key, built)
-  return built
+	const key = env as object
+	const existing = handlerCache.get(key)
+	if (existing) return existing
+	const built = buildHandler(env)
+	handlerCache.set(key, built)
+	return built
 }
 
 const makeRequestTelemetryLayer = (env: Record<string, unknown>) => {
-  logTelemetryConfigOnce(env)
-  return makeTelemetryLayer("maple-api").pipe(
-    Layer.provide(WorkerConfigProviderLive),
-  )
+	logTelemetryConfigOnce(env)
+	return makeTelemetryLayer("maple-api").pipe(Layer.provide(WorkerConfigProviderLive))
 }
 
 export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"
 
 const isMcpPost = (request: Request): boolean => {
-  if (request.method !== "POST") return false
-  try {
-    return new URL(request.url).pathname === "/mcp"
-  } catch {
-    return false
-  }
+	if (request.method !== "POST") return false
+	try {
+		return new URL(request.url).pathname === "/mcp"
+	} catch {
+		return false
+	}
 }
 
-const inner = withRequestRuntime(
-  makeRequestTelemetryLayer,
-  async (request, services, env) => {
-    if (isMcpPost(request)) {
-      const sid = request.headers.get("mcp-session-id")
-      if (sid) await sessionStore.preload(sid)
-    }
-    const { handler } = getHandler(env)
-    return handler(request, services as any)
-  },
-)
+const inner = withRequestRuntime(makeRequestTelemetryLayer, async (request, services, env) => {
+	if (isMcpPost(request)) {
+		const sid = request.headers.get("mcp-session-id")
+		if (sid) await sessionStore.preload(sid)
+	}
+	const { handler } = getHandler(env)
+	return handler(request, services as any)
+})
 
 interface McpSessionsBinding {
-  readonly get: (key: string, type: "json") => Promise<unknown>
-  readonly put: (
-    key: string,
-    value: string,
-    options?: { readonly expirationTtl?: number },
-  ) => Promise<void>
+	readonly get: (key: string, type: "json") => Promise<unknown>
+	readonly put: (key: string, value: string, options?: { readonly expirationTtl?: number }) => Promise<void>
 }
 
-const readMcpSessionsBinding = (
-  env: Record<string, unknown>,
-): McpSessionsBinding | undefined => {
-  const candidate = env.MCP_SESSIONS
-  if (
-    candidate &&
-    typeof candidate === "object" &&
-    "get" in candidate &&
-    "put" in candidate
-  ) {
-    return candidate as McpSessionsBinding
-  }
-  return undefined
+const readMcpSessionsBinding = (env: Record<string, unknown>): McpSessionsBinding | undefined => {
+	const candidate = env.MCP_SESSIONS
+	if (candidate && typeof candidate === "object" && "get" in candidate && "put" in candidate) {
+		return candidate as McpSessionsBinding
+	}
+	return undefined
 }
 
 export default {
-  fetch: (
-    request: Request,
-    env: Record<string, unknown>,
-    ctx: ExecutionContext,
-  ) =>
-    runWithSessionBindings(
-      { ctx, kv: readMcpSessionsBinding(env) },
-      () => inner(request, env, ctx),
-    ),
+	fetch: (request: Request, env: Record<string, unknown>, ctx: ExecutionContext) =>
+		runWithSessionBindings({ ctx, kv: readMcpSessionsBinding(env) }, () => inner(request, env, ctx)),
 }

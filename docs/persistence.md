@@ -68,6 +68,7 @@ LIMIT 50
 ```
 
 Decision rule:
+
 - p99 < 1K distinct → keep `SpanName` in MV dimensions (current setup)
 - p99 1K–10K → keep but only route to MV when query has a `SpanName` filter
 - p99 > 10K → drop `SpanName` from MV dimensions; group-by-span-name queries fall back to raw `traces`

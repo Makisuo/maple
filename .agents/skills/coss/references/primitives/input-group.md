@@ -20,22 +20,17 @@ npm install @base-ui/react
 ## Canonical imports
 
 ```tsx
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText,
-} from "@/components/ui/input-group"
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group"
 ```
 
 ## Minimal pattern
 
 ```tsx
 <InputGroup>
-  <InputGroupInput type="email" placeholder="Email" />
-  <InputGroupAddon>
-    <MailIcon />
-  </InputGroupAddon>
+	<InputGroupInput type="email" placeholder="Email" />
+	<InputGroupAddon>
+		<MailIcon />
+	</InputGroupAddon>
 </InputGroup>
 ```
 
@@ -51,10 +46,10 @@ Search input with icon:
 
 ```tsx
 <InputGroup>
-  <InputGroupInput aria-label="Search" placeholder="Search..." type="search" />
-  <InputGroupAddon>
-    <SearchIcon aria-hidden="true" />
-  </InputGroupAddon>
+	<InputGroupInput aria-label="Search" placeholder="Search..." type="search" />
+	<InputGroupAddon>
+		<SearchIcon aria-hidden="true" />
+	</InputGroupAddon>
 </InputGroup>
 ```
 
@@ -62,10 +57,10 @@ URL prefix with text addon:
 
 ```tsx
 <InputGroup>
-  <InputGroupAddon>
-    <InputGroupText>https://</InputGroupText>
-  </InputGroupAddon>
-  <InputGroupInput placeholder="example.com" />
+	<InputGroupAddon>
+		<InputGroupText>https://</InputGroupText>
+	</InputGroupAddon>
+	<InputGroupInput placeholder="example.com" />
 </InputGroup>
 ```
 
@@ -73,12 +68,12 @@ Input with interactive button addon:
 
 ```tsx
 <InputGroup>
-  <InputGroupInput placeholder="Enter value..." />
-  <InputGroupAddon>
-    <Button size="icon" variant="ghost" aria-label="Clear">
-      <XIcon aria-hidden="true" />
-    </Button>
-  </InputGroupAddon>
+	<InputGroupInput placeholder="Enter value..." />
+	<InputGroupAddon>
+		<Button size="icon" variant="ghost" aria-label="Clear">
+			<XIcon aria-hidden="true" />
+		</Button>
+	</InputGroupAddon>
 </InputGroup>
 ```
 
@@ -101,4 +96,3 @@ See `p-input-group-1` through `p-input-group-29` for icons, text prefixes, inter
 - interactive addons (buttons/badge/kbd/menu/clear/voice): `p-input-group-7`, `p-input-group-8`, `p-input-group-9`, `p-input-group-10`, `p-input-group-11`, `p-input-group-12`, `p-input-group-18`, `p-input-group-21`, `p-input-group-22`, `p-input-group-23`
 - textarea/editor-style layouts with block-end/start addons: `p-input-group-17`, `p-input-group-19`, `p-input-group-27`, `p-input-group-28`, `p-input-group-29`
 - stateful/validation patterns (disabled/loading/password strength): `p-input-group-15`, `p-input-group-16`, `p-input-group-24`, `p-input-group-26`
-

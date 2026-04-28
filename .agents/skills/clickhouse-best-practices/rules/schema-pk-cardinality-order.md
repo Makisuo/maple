@@ -33,12 +33,12 @@ ORDER BY (event_type, event_date, event_id);
 
 **Column Order Guidelines:**
 
-| Position | Cardinality | Examples |
-|----------|-------------|----------|
-| 1st | Low (few distinct values) | event_type, status, country |
-| 2nd | Date (coarse granularity) | toDate(timestamp) |
-| 3rd+ | Medium-High | user_id, session_id |
-| Last | High (if needed) | event_id, uuid |
+| Position | Cardinality               | Examples                    |
+| -------- | ------------------------- | --------------------------- |
+| 1st      | Low (few distinct values) | event_type, status, country |
+| 2nd      | Date (coarse granularity) | toDate(timestamp)           |
+| 3rd+     | Medium-High               | user_id, session_id         |
+| Last     | High (if needed)          | event_id, uuid              |
 
 **Tip:** Use `toDate(timestamp)` instead of raw `DateTime` columns when day-level filtering suffices - this reduces index size from 32-bit to 16-bit representations.
 

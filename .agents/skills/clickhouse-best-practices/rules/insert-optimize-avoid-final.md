@@ -37,21 +37,23 @@ SELECT * FROM events FINAL WHERE user_id = 123;
 ```
 
 **Problems with OPTIMIZE FINAL:**
+
 - Rewrites entire partition regardless of need
 - Ignores the ~150 GB part size safeguard
 - Can cause memory pressure or OOM errors
 - Lengthy execution time for large datasets
 
 **When OPTIMIZE FINAL may be acceptable:**
+
 - Finalizing data before table freezing
 - Preparing data for export operations
 - One-time operations, not regular workflows
 
 **Better alternatives:**
 
-| Need | Alternative |
-|------|-------------|
+| Need                           | Alternative                    |
+| ------------------------------ | ------------------------------ |
 | Deduplicate ReplacingMergeTree | Use `FINAL` modifier in SELECT |
-| Reduce part count | Rely on background merges |
+| Reduce part count              | Rely on background merges      |
 
 Reference: [Avoid OPTIMIZE FINAL](https://clickhouse.com/docs/best-practices/avoid-optimize-final)

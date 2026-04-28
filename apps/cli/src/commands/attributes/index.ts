@@ -3,6 +3,6 @@ import { keys } from "./keys"
 import { values } from "./values"
 
 export const attributes = Command.make("attributes").pipe(
-  Command.withDescription("Discover available attribute keys and values"),
-  Command.withSubcommands([keys, values]),
+	Command.withDescription("Discover available attribute keys and values"),
+	Command.withSubcommands([keys, values]),
 )

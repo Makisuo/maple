@@ -54,6 +54,7 @@ The `p` object provides parameter definitions:
 - `.describe(text)` - Add description for documentation
 
 Example:
+
 ```python
 params = {
     "limit": p.int32().optional(10),

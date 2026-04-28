@@ -5,11 +5,7 @@ import { useDashboards } from "../../../hooks/use-dashboards"
 import { formatRelativeTime } from "../../../lib/format"
 import { Screen, useScreenBottomPadding } from "../../../components/ui/screen"
 import { ScreenHeader } from "../../../components/ui/screen-header"
-import {
-	EmptyView,
-	ErrorView,
-	LoadingView,
-} from "../../../components/ui/state-view"
+import { EmptyView, ErrorView, LoadingView } from "../../../components/ui/state-view"
 import type { DashboardDocument } from "../../../lib/api"
 
 export default function DashboardsScreen() {
@@ -43,16 +39,11 @@ export default function DashboardsScreen() {
 function DashboardsList({ dashboards }: { dashboards: DashboardDocument[] }) {
 	const bottomPadding = useScreenBottomPadding()
 	return (
-		<ScrollView
-			className="flex-1"
-			contentContainerStyle={{ paddingBottom: bottomPadding }}
-		>
+		<ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: bottomPadding }}>
 			{dashboards.map((dashboard, i) => (
 				<View key={dashboard.id}>
 					<DashboardRow dashboard={dashboard} />
-					{i < dashboards.length - 1 && (
-						<View className="h-px bg-border mx-5" />
-					)}
+					{i < dashboards.length - 1 && <View className="h-px bg-border mx-5" />}
 				</View>
 			))}
 		</ScrollView>

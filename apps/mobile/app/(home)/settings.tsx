@@ -6,10 +6,7 @@ import { Screen } from "../../components/ui/screen"
 import { ScreenHeader } from "../../components/ui/screen-header"
 import { SectionHeader } from "../../components/ui/section-header"
 import { Card } from "../../components/ui/card"
-import {
-	DestructiveButton,
-	SecondaryButton,
-} from "../../components/ui/button"
+import { DestructiveButton, SecondaryButton } from "../../components/ui/button"
 import { OrgSwitcherModal } from "../../components/org-switcher-modal"
 import { hapticWarning } from "../../lib/haptics"
 import { colors } from "../../lib/theme"
@@ -42,9 +39,7 @@ export default function SettingsScreen() {
 								</Text>
 							</View>
 						</View>
-						<SecondaryButton onPress={presentUserProfile}>
-							Manage Profile
-						</SecondaryButton>
+						<SecondaryButton onPress={presentUserProfile}>Manage Profile</SecondaryButton>
 					</Card>
 				</View>
 
@@ -140,7 +135,10 @@ export default function SettingsScreen() {
 												await user?.delete()
 												signOut()
 											} catch {
-												Alert.alert("Error", "Failed to delete account. Please try again.")
+												Alert.alert(
+													"Error",
+													"Failed to delete account. Please try again.",
+												)
 											}
 										},
 									},
@@ -153,10 +151,7 @@ export default function SettingsScreen() {
 				</View>
 			</View>
 
-			<OrgSwitcherModal
-				visible={orgModalVisible}
-				onClose={() => setOrgModalVisible(false)}
-			/>
+			<OrgSwitcherModal visible={orgModalVisible} onClose={() => setOrgModalVisible(false)} />
 		</Screen>
 	)
 }

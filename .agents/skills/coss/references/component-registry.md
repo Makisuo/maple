@@ -5,6 +5,7 @@ Use this file to quickly identify the right coss primitive for a UI task. Each e
 For optional **`portalProps`** on composed `*Popup` components (Base UI portal forwarding), see `./references/portal-props.md`.
 
 ## Overlays & Popups
+
 - **Dialog** — Centered modal requiring user focus. `./references/primitives/dialog.md`
 - **AlertDialog** — Destructive/critical confirmation modal. `./references/primitives/alert-dialog.md`
 - **Sheet** — Side-panel overlay for settings/details. `./references/primitives/sheet.md`
@@ -16,6 +17,7 @@ For optional **`portalProps`** on composed `*Popup` components (Base UI portal f
 - **Command** — Searchable command palette (not cmdk). `./references/primitives/command.md`
 
 ## Selection & Input
+
 - **Select** — Single-choice from predefined list (no search). `./references/primitives/select.md`
 - **Combobox** — Searchable selection with filtering. `./references/primitives/combobox.md`
 - **Autocomplete** — Free-text with suggestions. `./references/primitives/autocomplete.md`
@@ -28,12 +30,14 @@ For optional **`portalProps`** on composed `*Popup` components (Base UI portal f
 - **Calendar** — Date picker / calendar views. `./references/primitives/calendar.md`
 
 ## Forms & Validation
+
 - **Form** — Form validation/submission with Zod. `./references/primitives/form.md`
 - **Field** — Label + description + error wiring. `./references/primitives/field.md`
 - **Fieldset** — Grouped form controls with legend. `./references/primitives/fieldset.md`
 - **Label** — Accessible label for controls. `./references/primitives/label.md`
 
 ## Toggle & Choice
+
 - **Checkbox** — Single boolean toggle. `./references/primitives/checkbox.md`
 - **CheckboxGroup** — Multiple-selection set. `./references/primitives/checkbox-group.md`
 - **RadioGroup** — Mutually exclusive single choice. `./references/primitives/radio-group.md`
@@ -42,6 +46,7 @@ For optional **`portalProps`** on composed `*Popup` components (Base UI portal f
 - **ToggleGroup** — Grouped pressed-state controls. `./references/primitives/toggle-group.md`
 
 ## Layout & Navigation
+
 - **Tabs** — Mutually exclusive tabbed panels. `./references/primitives/tabs.md`
 - **Accordion** — Collapsible content sections. `./references/primitives/accordion.md`
 - **Collapsible** — Single expand/collapse region. `./references/primitives/collapsible.md`
@@ -52,6 +57,7 @@ For optional **`portalProps`** on composed `*Popup` components (Base UI portal f
 - **ScrollArea** — Styled scroll container. `./references/primitives/scroll-area.md`
 
 ## Content & Display
+
 - **Card** — Content container with sections. `./references/primitives/card.md`
 - **Frame** — Bordered content surface. `./references/primitives/frame.md`
 - **Table** — Tabular data presentation. `./references/primitives/table.md`
@@ -63,6 +69,7 @@ For optional **`portalProps`** on composed `*Popup` components (Base UI portal f
 - **Empty** — Empty-state placeholder. `./references/primitives/empty.md`
 
 ## Feedback & Status
+
 - **Alert** — Inline persistent status message. `./references/primitives/alert.md`
 - **Toast** — Transient notification (toastManager). `./references/primitives/toast.md`
 - **Progress** — Task completion / async progress bar. `./references/primitives/progress.md`
@@ -71,4 +78,5 @@ For optional **`portalProps`** on composed `*Popup` components (Base UI portal f
 - **Skeleton** — Loading placeholder. `./references/primitives/skeleton.md`
 
 ## Actions
+
 - **Button** — Primary/secondary action trigger. `./references/primitives/button.md`

@@ -53,13 +53,13 @@ WHERE event_type = 'page_view' AND properties.url = '/home';
 
 **When to use JSON:**
 
-| Scenario | Use JSON? |
-|----------|-----------|
-| Data structure varies unpredictably | Yes |
-| Field types/schemas change over time | Yes |
-| Need field-level querying | Yes |
-| Fixed, known schema | No (use typed columns) |
-| JSON as opaque blob (no field queries) | No (use String) |
+| Scenario                               | Use JSON?              |
+| -------------------------------------- | ---------------------- |
+| Data structure varies unpredictably    | Yes                    |
+| Field types/schemas change over time   | Yes                    |
+| Need field-level querying              | Yes                    |
+| Fixed, known schema                    | No (use typed columns) |
+| JSON as opaque blob (no field queries) | No (use String)        |
 
 **Optimization: specify types for known paths:**
 

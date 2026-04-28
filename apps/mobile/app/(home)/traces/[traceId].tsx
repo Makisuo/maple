@@ -3,11 +3,7 @@ import { FlatList, Pressable, ScrollView, Text, View } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useSpanHierarchy } from "../../../hooks/use-span-hierarchy"
 import { getHttpInfo } from "../../../lib/api"
-import {
-	HTTP_METHOD_COLORS,
-	getStatusBgColor,
-	getStatusColor,
-} from "../../../lib/colors"
+import { HTTP_METHOD_COLORS, getStatusBgColor, getStatusColor } from "../../../lib/colors"
 import { hapticSelection } from "../../../lib/haptics"
 import { colors } from "../../../lib/theme"
 import { formatDuration } from "../../../lib/format"
@@ -15,11 +11,7 @@ import { flattenSpanTree, collectExpandedIds } from "../../../lib/span-tree"
 import { SpanRowDetail } from "../../../components/traces/span-row-detail"
 import { Screen, useScreenBottomPadding } from "../../../components/ui/screen"
 import { ScreenHeader } from "../../../components/ui/screen-header"
-import {
-	EmptyView,
-	ErrorView,
-	LoadingView,
-} from "../../../components/ui/state-view"
+import { EmptyView, ErrorView, LoadingView } from "../../../components/ui/state-view"
 
 type Tab = "waterfall" | "details" | "logs"
 
@@ -62,8 +54,7 @@ export default function TraceDetailScreen() {
 		const root = state.data.rootSpans[0]
 		const http = getHttpInfo(root.spanName, root.spanAttributes)
 		const httpStatusCode =
-			root.spanAttributes["http.status_code"] ||
-			root.spanAttributes["http.response.status_code"]
+			root.spanAttributes["http.status_code"] || root.spanAttributes["http.response.status_code"]
 		const statusCode = httpStatusCode ? parseInt(httpStatusCode, 10) : null
 		return {
 			method: http?.method ?? null,
@@ -91,8 +82,7 @@ export default function TraceDetailScreen() {
 							<View
 								className="rounded px-2 py-1 mr-2"
 								style={{
-									backgroundColor:
-										HTTP_METHOD_COLORS[headerInfo.method] ?? "#5A5248",
+									backgroundColor: HTTP_METHOD_COLORS[headerInfo.method] ?? "#5A5248",
 								}}
 							>
 								<Text className="text-xs font-bold text-white font-mono">
@@ -119,10 +109,7 @@ export default function TraceDetailScreen() {
 								<Text
 									className="text-xs font-bold font-mono"
 									style={{
-										color: getStatusColor(
-											headerInfo.statusCode,
-											headerInfo.hasError,
-										),
+										color: getStatusColor(headerInfo.statusCode, headerInfo.hasError),
 									}}
 								>
 									{headerInfo.statusCode}
@@ -144,11 +131,7 @@ export default function TraceDetailScreen() {
 					active={activeTab === "details"}
 					onPress={() => setActiveTab("details")}
 				/>
-				<TabButton
-					label="Logs"
-					active={activeTab === "logs"}
-					onPress={() => setActiveTab("logs")}
-				/>
+				<TabButton label="Logs" active={activeTab === "logs"} onPress={() => setActiveTab("logs")} />
 			</View>
 
 			{state.status === "loading" ? (
@@ -182,46 +165,34 @@ export default function TraceDetailScreen() {
 
 function Pill({ label }: { label: string }) {
 	return (
-		<View
-			className="rounded px-2.5 py-1"
-			style={{ backgroundColor: "rgba(255,255,255,0.08)" }}
-		>
+		<View className="rounded px-2.5 py-1" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
 			<Text className="text-xs text-muted-foreground font-mono">{label}</Text>
 		</View>
 	)
 }
 
-function TabButton({
-	label,
-	active,
-	onPress,
-}: {
-	label: string
-	active: boolean
-	onPress: () => void
-}) {
+function TabButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
 	return (
-		<Pressable onPress={() => { hapticSelection(); onPress() }} className="mr-5 pb-2.5">
+		<Pressable
+			onPress={() => {
+				hapticSelection()
+				onPress()
+			}}
+			className="mr-5 pb-2.5"
+		>
 			<Text
 				className={`text-sm font-mono ${active ? "text-foreground font-medium" : "text-muted-foreground"}`}
 			>
 				{label}
 			</Text>
 			{active && (
-				<View
-					className="h-0.5 rounded-full mt-1.5"
-					style={{ backgroundColor: colors.primary }}
-				/>
+				<View className="h-0.5 rounded-full mt-1.5" style={{ backgroundColor: colors.primary }} />
 			)}
 		</Pressable>
 	)
 }
 
-function DetailsTab({
-	rootSpans,
-}: {
-	rootSpans: import("../../../lib/api").SpanNode[]
-}) {
+function DetailsTab({ rootSpans }: { rootSpans: import("../../../lib/api").SpanNode[] }) {
 	const bottomPadding = useScreenBottomPadding()
 	if (rootSpans.length === 0) return null
 	const root = rootSpans[0]
@@ -229,10 +200,7 @@ function DetailsTab({
 	const resourceAttrs = Object.entries(root.resourceAttributes)
 
 	return (
-		<ScrollView
-			className="flex-1"
-			contentContainerStyle={{ paddingBottom: bottomPadding }}
-		>
+		<ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: bottomPadding }}>
 			{spanAttrs.length > 0 && (
 				<View className="px-5 pt-4">
 					<Text className="text-xs font-bold text-muted-foreground font-mono mb-2 uppercase">
@@ -240,16 +208,10 @@ function DetailsTab({
 					</Text>
 					{spanAttrs.map(([key, value]) => (
 						<View key={key} className="flex-row py-1.5">
-							<Text
-								className="text-xs text-muted-foreground font-mono w-2/5"
-								numberOfLines={1}
-							>
+							<Text className="text-xs text-muted-foreground font-mono w-2/5" numberOfLines={1}>
 								{key}
 							</Text>
-							<Text
-								className="text-xs text-foreground font-mono flex-1"
-								numberOfLines={2}
-							>
+							<Text className="text-xs text-foreground font-mono flex-1" numberOfLines={2}>
 								{value}
 							</Text>
 						</View>
@@ -263,16 +225,10 @@ function DetailsTab({
 					</Text>
 					{resourceAttrs.map(([key, value]) => (
 						<View key={key} className="flex-row py-1.5">
-							<Text
-								className="text-xs text-muted-foreground font-mono w-2/5"
-								numberOfLines={1}
-							>
+							<Text className="text-xs text-muted-foreground font-mono w-2/5" numberOfLines={1}>
 								{key}
 							</Text>
-							<Text
-								className="text-xs text-foreground font-mono flex-1"
-								numberOfLines={2}
-							>
+							<Text className="text-xs text-foreground font-mono flex-1" numberOfLines={2}>
 								{value}
 							</Text>
 						</View>

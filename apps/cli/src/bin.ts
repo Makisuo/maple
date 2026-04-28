@@ -8,11 +8,8 @@ import { CliConfig } from "./services/CliConfig"
 import { MapleClient } from "./services/MapleClient"
 
 const MainLayer = MapleClient.layer.pipe(
-  Layer.provideMerge(CliConfig.layer),
-  Layer.provideMerge(BunServices.layer),
+	Layer.provideMerge(CliConfig.layer),
+	Layer.provideMerge(BunServices.layer),
 )
 
-Command.run(cli, { version: "0.1.0" }).pipe(
-  Effect.provide(MainLayer),
-  BunRuntime.runMain,
-)
+Command.run(cli, { version: "0.1.0" }).pipe(Effect.provide(MainLayer), BunRuntime.runMain)

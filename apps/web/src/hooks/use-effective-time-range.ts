@@ -3,8 +3,8 @@ import { useOptionalPageRefreshContext } from "@/components/time-range-picker/pa
 import { relativeToAbsolute } from "@/lib/time-utils"
 
 interface TimeRange {
-  startTime: string
-  endTime: string
+	startTime: string
+	endTime: string
 }
 
 /**
@@ -17,20 +17,20 @@ interface TimeRange {
  * @param defaultRange - shorthand like "12h", "7d" etc. Defaults to "12h".
  */
 export function useEffectiveTimeRange(
-  startTime?: string,
-  endTime?: string,
-  defaultRange: string = "12h",
+	startTime?: string,
+	endTime?: string,
+	defaultRange: string = "12h",
 ): TimeRange {
-  const pageRefresh = useOptionalPageRefreshContext()
-  const refreshVersion = pageRefresh?.refreshVersion ?? 0
+	const pageRefresh = useOptionalPageRefreshContext()
+	const refreshVersion = pageRefresh?.refreshVersion ?? 0
 
-  return useMemo(() => {
-    if (startTime && endTime) {
-      return { startTime, endTime }
-    }
-    const resolved = relativeToAbsolute(defaultRange)
-    if (resolved) return resolved
-    return relativeToAbsolute("12h")!
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startTime, endTime, defaultRange, refreshVersion])
+	return useMemo(() => {
+		if (startTime && endTime) {
+			return { startTime, endTime }
+		}
+		const resolved = relativeToAbsolute(defaultRange)
+		if (resolved) return resolved
+		return relativeToAbsolute("12h")!
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [startTime, endTime, defaultRange, refreshVersion])
 }

@@ -4,17 +4,17 @@
 
 ```typescript
 // src/tinybird/client.ts
-import { createTinybirdClient } from "@tinybirdco/sdk";
-import { pageViews, type PageViewsRow } from "./datasources";
-import { topPages, type TopPagesParams, type TopPagesOutput } from "./pipes";
+import { createTinybirdClient } from "@tinybirdco/sdk"
+import { pageViews, type PageViewsRow } from "./datasources"
+import { topPages, type TopPagesParams, type TopPagesOutput } from "./pipes"
 
 export const tinybird = createTinybirdClient({
-  datasources: { pageViews },
-  pipes: { topPages },
-});
+	datasources: { pageViews },
+	pipes: { topPages },
+})
 
-export type { PageViewsRow, TopPagesParams, TopPagesOutput };
-export { pageViews, topPages };
+export type { PageViewsRow, TopPagesParams, TopPagesOutput }
+export { pageViews, topPages }
 ```
 
 ## Using the Typed Client
@@ -22,38 +22,38 @@ export { pageViews, topPages };
 ### Type-Safe Ingestion
 
 ```typescript
-import { tinybird, type PageViewsRow } from "@tinybird/client";
+import { tinybird, type PageViewsRow } from "@tinybird/client"
 
 // Autocomplete and type checking for all fields
 await tinybird.ingest.pageViews({
-  timestamp: new Date(),
-  pathname: "/home",
-  session_id: "abc123",
-  country: "US",
-});
+	timestamp: new Date(),
+	pathname: "/home",
+	session_id: "abc123",
+	country: "US",
+})
 
 // Batch ingestion
 await tinybird.ingest.pageViews([
-  { timestamp: new Date(), pathname: "/home", session_id: "abc", country: "US" },
-  { timestamp: new Date(), pathname: "/about", session_id: "abc", country: "US" },
-]);
+	{ timestamp: new Date(), pathname: "/home", session_id: "abc", country: "US" },
+	{ timestamp: new Date(), pathname: "/about", session_id: "abc", country: "US" },
+])
 ```
 
 ### Type-Safe Queries
 
 ```typescript
-import { tinybird } from "@tinybird/client";
+import { tinybird } from "@tinybird/client"
 
 // Autocomplete for parameters, typed results
 const result = await tinybird.query.topPages({
-  start_date: new Date("2024-01-01"),
-  end_date: new Date(),
-  limit: 5,
-});
+	start_date: new Date("2024-01-01"),
+	end_date: new Date(),
+	limit: 5,
+})
 
 // result.data is fully typed: { pathname: string, views: bigint }[]
 for (const row of result.data) {
-  console.log(`${row.pathname}: ${row.views} views`);
+	console.log(`${row.pathname}: ${row.views} views`)
 }
 ```
 

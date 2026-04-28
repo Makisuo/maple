@@ -1,12 +1,12 @@
 import { Effect, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import {
-  DashboardDocument,
-  DashboardWidgetSchema,
-  IsoDateTimeString,
-  WidgetDataSourceSchema,
-  WidgetDisplayConfigSchema,
-  WidgetLayoutSchema,
+	DashboardDocument,
+	DashboardWidgetSchema,
+	IsoDateTimeString,
+	WidgetDataSourceSchema,
+	WidgetDisplayConfigSchema,
+	WidgetLayoutSchema,
 } from "@maple/domain/http"
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
@@ -25,30 +25,30 @@ const DisplayFromJson = Schema.fromJsonString(WidgetDisplayConfigSchema)
 const LayoutFromJson = Schema.fromJsonString(WidgetLayoutSchema)
 
 const jsonDecodeError = (field: string, tool: string) => (error: unknown) =>
-  new McpQueryError({
-    message: `Invalid ${field}: ${String(error)}`,
-    pipe: tool,
-  })
+	new McpQueryError({
+		message: `Invalid ${field}: ${String(error)}`,
+		pipe: tool,
+	})
 
 export const decodeWidgetJson = (json: string, tool: string) =>
-  Schema.decodeUnknownEffect(WidgetFromJson)(json).pipe(
-    Effect.mapError(jsonDecodeError("widget_json", tool)),
-  )
+	Schema.decodeUnknownEffect(WidgetFromJson)(json).pipe(
+		Effect.mapError(jsonDecodeError("widget_json", tool)),
+	)
 
 export const decodeDataSourceJson = (json: string, tool: string) =>
-  Schema.decodeUnknownEffect(DataSourceFromJson)(json).pipe(
-    Effect.mapError(jsonDecodeError("data_source_json", tool)),
-  )
+	Schema.decodeUnknownEffect(DataSourceFromJson)(json).pipe(
+		Effect.mapError(jsonDecodeError("data_source_json", tool)),
+	)
 
 export const decodeDisplayJson = (json: string, tool: string) =>
-  Schema.decodeUnknownEffect(DisplayFromJson)(json).pipe(
-    Effect.mapError(jsonDecodeError("display_json", tool)),
-  )
+	Schema.decodeUnknownEffect(DisplayFromJson)(json).pipe(
+		Effect.mapError(jsonDecodeError("display_json", tool)),
+	)
 
 export const decodeLayoutJson = (json: string, tool: string) =>
-  Schema.decodeUnknownEffect(LayoutFromJson)(json).pipe(
-    Effect.mapError(jsonDecodeError("layout_json", tool)),
-  )
+	Schema.decodeUnknownEffect(LayoutFromJson)(json).pipe(
+		Effect.mapError(jsonDecodeError("layout_json", tool)),
+	)
 
 export const generateWidgetId = (): string => randomUUID()
 
@@ -56,18 +56,16 @@ export const generateWidgetId = (): string => randomUUID()
  * Default grid size per visualization type. Mirrors the web store so
  * auto-placed widgets match what the "Add widget" UI would produce.
  */
-export const defaultSizeForVisualization = (
-  visualization: string,
-): { w: number; h: number } => {
-  switch (visualization) {
-    case "stat":
-      return { w: 3, h: 4 }
-    case "table":
-    case "list":
-      return { w: 6, h: 4 }
-    default:
-      return { w: 4, h: 4 }
-  }
+export const defaultSizeForVisualization = (visualization: string): { w: number; h: number } => {
+	switch (visualization) {
+		case "stat":
+			return { w: 3, h: 4 }
+		case "table":
+		case "list":
+			return { w: 6, h: 4 }
+		default:
+			return { w: 4, h: 4 }
+	}
 }
 
 /**
@@ -76,30 +74,28 @@ export const defaultSizeForVisualization = (
  * behavior identical between UI-added and MCP-added widgets.
  */
 export const findNextWidgetPosition = (
-  widgets: ReadonlyArray<DashboardWidget>,
-  newWidth: number,
+	widgets: ReadonlyArray<DashboardWidget>,
+	newWidth: number,
 ): { x: number; y: number } => {
-  if (widgets.length === 0) {
-    return { x: 0, y: 0 }
-  }
+	if (widgets.length === 0) {
+		return { x: 0, y: 0 }
+	}
 
-  const maxY = Math.max(...widgets.map((w) => w.layout.y))
-  const bottomRowWidgets = widgets.filter((w) => w.layout.y === maxY)
-  const rightEdge = Math.max(
-    ...bottomRowWidgets.map((w) => w.layout.x + w.layout.w),
-  )
+	const maxY = Math.max(...widgets.map((w) => w.layout.y))
+	const bottomRowWidgets = widgets.filter((w) => w.layout.y === maxY)
+	const rightEdge = Math.max(...bottomRowWidgets.map((w) => w.layout.x + w.layout.w))
 
-  if (rightEdge + newWidth <= GRID_COLS) {
-    return { x: rightEdge, y: maxY }
-  }
+	if (rightEdge + newWidth <= GRID_COLS) {
+		return { x: rightEdge, y: maxY }
+	}
 
-  const maxBottom = Math.max(...widgets.map((w) => w.layout.y + w.layout.h))
-  return { x: 0, y: maxBottom }
+	const maxBottom = Math.max(...widgets.map((w) => w.layout.y + w.layout.h))
+	return { x: 0, y: maxBottom }
 }
 
 export class DashboardMutationNotFound {
-  readonly _tag = "DashboardMutationNotFound"
-  constructor(readonly message: string) {}
+	readonly _tag = "DashboardMutationNotFound"
+	constructor(readonly message: string) {}
 }
 
 /**
@@ -110,61 +106,59 @@ export class DashboardMutationNotFound {
  * tool.
  */
 export const withDashboardMutation = <E, R>(
-  dashboardId: string,
-  tool: string,
-  transform: (
-    existingWidgets: ReadonlyArray<DashboardWidget>,
-  ) => Effect.Effect<ReadonlyArray<DashboardWidget>, E, R>,
+	dashboardId: string,
+	tool: string,
+	transform: (
+		existingWidgets: ReadonlyArray<DashboardWidget>,
+	) => Effect.Effect<ReadonlyArray<DashboardWidget>, E, R>,
 ) =>
-  Effect.gen(function* () {
-    const tenant = yield* resolveTenant
-    const persistence = yield* DashboardPersistenceService
+	Effect.gen(function* () {
+		const tenant = yield* resolveTenant
+		const persistence = yield* DashboardPersistenceService
 
-    const result = yield* persistence.list(tenant.orgId).pipe(
-      Effect.mapError(
-        (error) =>
-          new McpQueryError({
-            message: error.message,
-            pipe: tool,
-          }),
-      ),
-    )
+		const result = yield* persistence.list(tenant.orgId).pipe(
+			Effect.mapError(
+				(error) =>
+					new McpQueryError({
+						message: error.message,
+						pipe: tool,
+					}),
+			),
+		)
 
-    const existing = result.dashboards.find((d) => d.id === dashboardId)
+		const existing = result.dashboards.find((d) => d.id === dashboardId)
 
-    if (!existing) {
-      return {
-        ok: false as const,
-        notFound: `Dashboard not found: ${dashboardId}. Use list_dashboards to find available dashboard IDs.`,
-      }
-    }
+		if (!existing) {
+			return {
+				ok: false as const,
+				notFound: `Dashboard not found: ${dashboardId}. Use list_dashboards to find available dashboard IDs.`,
+			}
+		}
 
-    const nextWidgets = yield* transform(existing.widgets)
-    const now = decodeIsoDateTimeString(new Date().toISOString())
+		const nextWidgets = yield* transform(existing.widgets)
+		const now = decodeIsoDateTimeString(new Date().toISOString())
 
-    const updated = new DashboardDocument({
-      id: existing.id,
-      name: existing.name,
-      description: existing.description,
-      tags: existing.tags,
-      timeRange: existing.timeRange,
-      variables: existing.variables,
-      widgets: nextWidgets,
-      createdAt: existing.createdAt,
-      updatedAt: now,
-    })
+		const updated = new DashboardDocument({
+			id: existing.id,
+			name: existing.name,
+			description: existing.description,
+			tags: existing.tags,
+			timeRange: existing.timeRange,
+			variables: existing.variables,
+			widgets: nextWidgets,
+			createdAt: existing.createdAt,
+			updatedAt: now,
+		})
 
-    const dashboard = yield* persistence
-      .upsert(tenant.orgId, tenant.userId, updated)
-      .pipe(
-        Effect.mapError(
-          (error) =>
-            new McpQueryError({
-              message: error.message,
-              pipe: tool,
-            }),
-        ),
-      )
+		const dashboard = yield* persistence.upsert(tenant.orgId, tenant.userId, updated).pipe(
+			Effect.mapError(
+				(error) =>
+					new McpQueryError({
+						message: error.message,
+						pipe: tool,
+					}),
+			),
+		)
 
-    return { ok: true as const, dashboard }
-  })
+		return { ok: true as const, dashboard }
+	})

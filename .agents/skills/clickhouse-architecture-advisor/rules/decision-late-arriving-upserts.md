@@ -2,11 +2,11 @@
 title: Handle late-arriving data and mutable state without defaulting to heavy mutations
 impact: CRITICAL
 tags:
-  - upserts
-  - late-arriving
-  - replacingmergetree
-  - collapsingmergetree
-  - mutable-state
+    - upserts
+    - late-arriving
+    - replacingmergetree
+    - collapsingmergetree
+    - mutable-state
 ---
 
 # Handle late-arriving data and mutable state without defaulting to heavy mutations
@@ -17,16 +17,17 @@ Frequent `ALTER TABLE UPDATE` and `ALTER TABLE DELETE` operations are usually th
 
 ## Decision framework
 
-| Condition | Recommendation | Category |
-|---|---|---|
-| Immutable event log with latest-state queries | Raw append table + latest-state query or MV | derived |
-| Natural replacement semantics with version ordering | ReplacingMergeTree | official |
-| Explicit row-state transitions are modeled | CollapsingMergeTree or VersionedCollapsingMergeTree | official |
-| Small correction workload, infrequent and operationally bounded | Targeted mutation may be acceptable | field |
+| Condition                                                       | Recommendation                                      | Category |
+| --------------------------------------------------------------- | --------------------------------------------------- | -------- |
+| Immutable event log with latest-state queries                   | Raw append table + latest-state query or MV         | derived  |
+| Natural replacement semantics with version ordering             | ReplacingMergeTree                                  | official |
+| Explicit row-state transitions are modeled                      | CollapsingMergeTree or VersionedCollapsingMergeTree | official |
+| Small correction workload, infrequent and operationally bounded | Targeted mutation may be acceptable                 | field    |
 
 ## Guidance
 
 ### Recommendation: prefer append + latest-state logic for event streams
+
 **Why**
 Many real-time systems do not need in-place updates if the application can compute current state from ordered events.
 
@@ -34,21 +35,26 @@ Many real-time systems do not need in-place updates if the application can compu
 derived
 
 **Official context**
+
 - https://clickhouse.com/docs/en/guides/replacing-merge-tree
 
 ### Recommendation: use ReplacingMergeTree for replacement semantics
+
 **Why**
 ReplacingMergeTree is the standard documented pattern for row replacement based on version ordering.
 
 **Official sources**
+
 - https://clickhouse.com/docs/en/guides/replacing-merge-tree
 - `insert-mutation-avoid-update`
 
 ### Recommendation: avoid defaulting to mutations
+
 **Why**
 Heavy mutation usage often becomes the bottleneck in otherwise append-friendly systems.
 
 **Official sources**
+
 - `insert-mutation-avoid-update`
 - `insert-mutation-avoid-delete`
 

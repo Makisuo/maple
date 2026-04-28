@@ -21,23 +21,23 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupAction,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarRail,
-  SidebarSeparator,
-  SidebarTrigger,
-  useSidebar,
+	Sidebar,
+	SidebarContent,
+	SidebarFooter,
+	SidebarGroup,
+	SidebarGroupAction,
+	SidebarGroupContent,
+	SidebarGroupLabel,
+	SidebarHeader,
+	SidebarInset,
+	SidebarMenu,
+	SidebarMenuButton,
+	SidebarMenuItem,
+	SidebarProvider,
+	SidebarRail,
+	SidebarSeparator,
+	SidebarTrigger,
+	useSidebar,
 } from "@/components/ui/sidebar"
 ```
 
@@ -45,22 +45,22 @@ import {
 
 ```tsx
 <SidebarProvider>
-  <Sidebar>
-    <SidebarHeader>Workspace</SidebarHeader>
-    <SidebarContent>
-      <SidebarGroup>
-        <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton>Dashboard</SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    </SidebarContent>
-  </Sidebar>
-  <SidebarInset>{/* Main page content */}</SidebarInset>
+	<Sidebar>
+		<SidebarHeader>Workspace</SidebarHeader>
+		<SidebarContent>
+			<SidebarGroup>
+				<SidebarGroupLabel>Navigation</SidebarGroupLabel>
+				<SidebarGroupContent>
+					<SidebarMenu>
+						<SidebarMenuItem>
+							<SidebarMenuButton>Dashboard</SidebarMenuButton>
+						</SidebarMenuItem>
+					</SidebarMenu>
+				</SidebarGroupContent>
+			</SidebarGroup>
+		</SidebarContent>
+	</Sidebar>
+	<SidebarInset>{/* Main page content */}</SidebarInset>
 </SidebarProvider>
 ```
 
@@ -72,43 +72,40 @@ Sidebar with grouped navigation and footer:
 
 ```tsx
 <SidebarProvider>
-  <Sidebar>
-    <SidebarHeader>
-      <h2 className="text-lg font-semibold">App Name</h2>
-    </SidebarHeader>
-    <SidebarContent>
-      <SidebarGroup>
-        <SidebarGroupLabel>Main</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton render={<a href="/dashboard" />}>
-                Dashboard
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton render={<a href="/projects" />}>
-                Projects
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    </SidebarContent>
-    <SidebarFooter>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton>Settings</SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    </SidebarFooter>
-    <SidebarRail />
-  </Sidebar>
-  <SidebarInset>{/* Page content */}</SidebarInset>
+	<Sidebar>
+		<SidebarHeader>
+			<h2 className="text-lg font-semibold">App Name</h2>
+		</SidebarHeader>
+		<SidebarContent>
+			<SidebarGroup>
+				<SidebarGroupLabel>Main</SidebarGroupLabel>
+				<SidebarGroupContent>
+					<SidebarMenu>
+						<SidebarMenuItem>
+							<SidebarMenuButton render={<a href="/dashboard" />}>Dashboard</SidebarMenuButton>
+						</SidebarMenuItem>
+						<SidebarMenuItem>
+							<SidebarMenuButton render={<a href="/projects" />}>Projects</SidebarMenuButton>
+						</SidebarMenuItem>
+					</SidebarMenu>
+				</SidebarGroupContent>
+			</SidebarGroup>
+		</SidebarContent>
+		<SidebarFooter>
+			<SidebarMenu>
+				<SidebarMenuItem>
+					<SidebarMenuButton>Settings</SidebarMenuButton>
+				</SidebarMenuItem>
+			</SidebarMenu>
+		</SidebarFooter>
+		<SidebarRail />
+	</Sidebar>
+	<SidebarInset>{/* Page content */}</SidebarInset>
 </SidebarProvider>
 ```
 
 Key composition rules:
+
 - Wrap app with `SidebarProvider` at the layout level.
 - Use `SidebarContent` (not "SidebarPanel") as the scrollable body between header/footer.
 - Navigation items use `SidebarMenu` > `SidebarMenuItem` > `SidebarMenuButton`.

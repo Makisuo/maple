@@ -37,12 +37,12 @@ Card skeleton composition (match the final layout geometry):
 
 ```tsx
 <div className="flex items-center gap-4">
-  <Skeleton className="size-10 rounded-full" />
-  <div className="flex flex-1 flex-col">
-    <Skeleton className="my-0.5 h-4 max-w-54" />
-    <Skeleton className="my-0.5 h-4 w-1/2" />
-  </div>
-  <Skeleton className="h-7 w-19" />
+	<Skeleton className="size-10 rounded-full" />
+	<div className="flex flex-1 flex-col">
+		<Skeleton className="my-0.5 h-4 max-w-54" />
+		<Skeleton className="my-0.5 h-4 w-1/2" />
+	</div>
+	<Skeleton className="h-7 w-19" />
 </div>
 ```
 

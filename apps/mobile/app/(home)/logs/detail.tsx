@@ -14,15 +14,9 @@ export default function LogDetailScreen() {
 	if (!log) {
 		return (
 			<Screen>
-				<ScreenHeader
-					title="Log Detail"
-					backLabel="Logs"
-					onBack={() => router.back()}
-				/>
+				<ScreenHeader title="Log Detail" backLabel="Logs" onBack={() => router.back()} />
 				<View className="flex-1 items-center justify-center px-5">
-					<Text className="text-sm text-muted-foreground font-mono">
-						Log not found
-					</Text>
+					<Text className="text-sm text-muted-foreground font-mono">Log not found</Text>
 				</View>
 			</Screen>
 		)
@@ -35,11 +29,7 @@ export default function LogDetailScreen() {
 
 	return (
 		<Screen>
-			<ScreenHeader
-				title="Log Detail"
-				backLabel="Logs"
-				onBack={() => router.back()}
-			/>
+			<ScreenHeader title="Log Detail" backLabel="Logs" onBack={() => router.back()} />
 
 			{/* Header pills */}
 			<View className="px-5 pb-3">
@@ -54,17 +44,11 @@ export default function LogDetailScreen() {
 				</View>
 			</View>
 
-			<ScrollView
-				className="flex-1"
-				contentContainerStyle={{ paddingBottom: bottomPadding }}
-			>
+			<ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: bottomPadding }}>
 				{/* Message */}
 				<View className="px-5 pt-4">
 					<SectionLabel>Message</SectionLabel>
-					<Text
-						className="text-sm text-foreground font-mono leading-5"
-						selectable
-					>
+					<Text className="text-sm text-foreground font-mono leading-5" selectable>
 						{log.body}
 					</Text>
 				</View>
@@ -91,9 +75,7 @@ export default function LogDetailScreen() {
 						)}
 						{log.spanId !== "" && (
 							<View className="flex-row py-1.5">
-								<Text className="text-xs text-muted-foreground font-mono w-2/5">
-									Span ID
-								</Text>
+								<Text className="text-xs text-muted-foreground font-mono w-2/5">Span ID</Text>
 								<Text className="text-xs text-foreground font-mono flex-1" numberOfLines={1}>
 									{log.spanId}
 								</Text>
@@ -114,10 +96,7 @@ export default function LogDetailScreen() {
 								>
 									{key}
 								</Text>
-								<Text
-									className="text-xs text-foreground font-mono flex-1"
-									numberOfLines={2}
-								>
+								<Text className="text-xs text-foreground font-mono flex-1" numberOfLines={2}>
 									{value}
 								</Text>
 							</View>
@@ -137,10 +116,7 @@ export default function LogDetailScreen() {
 								>
 									{key}
 								</Text>
-								<Text
-									className="text-xs text-foreground font-mono flex-1"
-									numberOfLines={2}
-								>
+								<Text className="text-xs text-foreground font-mono flex-1" numberOfLines={2}>
 									{value}
 								</Text>
 							</View>
@@ -154,10 +130,7 @@ export default function LogDetailScreen() {
 
 function Pill({ label }: { label: string }) {
 	return (
-		<View
-			className="rounded px-2.5 py-1"
-			style={{ backgroundColor: "rgba(255,255,255,0.08)" }}
-		>
+		<View className="rounded px-2.5 py-1" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
 			<Text className="text-xs text-muted-foreground font-mono">{label}</Text>
 		</View>
 	)
@@ -165,8 +138,6 @@ function Pill({ label }: { label: string }) {
 
 function SectionLabel({ children }: { children: string }) {
 	return (
-		<Text className="text-xs font-bold text-muted-foreground font-mono mb-2 uppercase">
-			{children}
-		</Text>
+		<Text className="text-xs font-bold text-muted-foreground font-mono mb-2 uppercase">{children}</Text>
 	)
 }

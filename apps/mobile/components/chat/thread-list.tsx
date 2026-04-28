@@ -48,18 +48,12 @@ function ThreadRow({ thread: t }: ThreadRowProps) {
 					</Text>
 				</View>
 				{t.lastMessagePreview ? (
-					<Text
-						className="font-mono text-[12px] text-muted-foreground"
-						numberOfLines={2}
-					>
+					<Text className="font-mono text-[12px] text-muted-foreground" numberOfLines={2}>
 						{t.lastMessagePreview}
 					</Text>
 				) : null}
 				{t.alertContext ? (
-					<Text
-						className="font-mono text-[10px] text-destructive"
-						style={{ letterSpacing: 1.2 }}
-					>
+					<Text className="font-mono text-[10px] text-destructive" style={{ letterSpacing: 1.2 }}>
 						ALERT · {t.alertContext.ruleName.slice(0, 40)}
 					</Text>
 				) : null}

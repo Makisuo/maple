@@ -35,11 +35,11 @@ import { Maple } from "@maple-dev/effect-sdk"
 import { Effect } from "effect"
 
 const TracerLive = Maple.layer({
-  serviceName: "my-effect-app",
+	serviceName: "my-effect-app",
 })
 
 const program = Effect.gen(function* () {
-  yield* Effect.log("Hello from Effect!")
+	yield* Effect.log("Hello from Effect!")
 }).pipe(Effect.withSpan("hello-maple"))
 
 Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
@@ -56,9 +56,9 @@ import { Maple } from "@maple-dev/effect-sdk/client"
 import { Effect } from "effect"
 
 const TracerLive = Maple.layer({
-  serviceName: "my-frontend",
-  endpoint: "https://ingest.maple.dev",
-  ingestKey: "maple_pk_...",
+	serviceName: "my-frontend",
+	endpoint: "https://ingest.maple.dev",
+	ingestKey: "maple_pk_...",
 })
 ```
 
@@ -72,12 +72,12 @@ Use `Effect.withSpan` to trace operations. Add attributes with `Effect.annotateC
 import { Effect } from "effect"
 
 const processOrder = (orderId: string) =>
-  Effect.gen(function* () {
-    yield* Effect.annotateCurrentSpan("order.id", orderId)
-    yield* Effect.annotateCurrentSpan("peer.service", "payment-api")
-    const result = yield* chargePayment(orderId)
-    return result
-  }).pipe(Effect.withSpan("process-order"))
+	Effect.gen(function* () {
+		yield* Effect.annotateCurrentSpan("order.id", orderId)
+		yield* Effect.annotateCurrentSpan("peer.service", "payment-api")
+		const result = yield* chargePayment(orderId)
+		return result
+	}).pipe(Effect.withSpan("process-order"))
 ```
 
 Setting `peer.service` on outgoing calls makes them visible on Maple's [service map](/docs/concepts/otel-conventions#service-map).
@@ -88,9 +88,9 @@ Setting `peer.service` on outgoing calls makes them visible on Maple's [service 
 
 ```typescript
 const program = Effect.gen(function* () {
-  yield* Effect.log("Processing started")
-  yield* doWork()
-  yield* Effect.log("Processing complete")
+	yield* Effect.log("Processing started")
+	yield* doWork()
+	yield* Effect.log("Processing complete")
 }).pipe(Effect.withSpan("process"))
 ```
 
@@ -100,19 +100,19 @@ Logs emitted inside spans are correlated with the active trace in the Maple dash
 
 All options for `Maple.layer()`:
 
-| Option | Type | Required | Description |
-|---|---|---|---|
-| `serviceName` | `string` | Yes | Service name reported in traces, logs, and metrics |
-| `endpoint` | `string` | No (server) / Yes (client) | Maple ingest endpoint URL. Server auto-detects from `MAPLE_ENDPOINT` |
-| `ingestKey` | `string` | No | Maple ingest key. Server auto-detects from `MAPLE_INGEST_KEY` |
-| `serviceVersion` | `string` | No | Override auto-detected commit SHA |
-| `environment` | `string` | No | Override auto-detected deployment environment |
-| `attributes` | `Record<string, unknown>` | No | Additional resource attributes merged into telemetry |
-| `maxBatchSize` | `number` | No | Max telemetry items per export batch |
-| `loggerExportInterval` | `Duration.Input` | No | Export interval for logs |
-| `metricsExportInterval` | `Duration.Input` | No | Export interval for metrics |
-| `tracerExportInterval` | `Duration.Input` | No | Export interval for traces |
-| `shutdownTimeout` | `Duration.Input` | No | Graceful shutdown timeout |
+| Option                  | Type                      | Required                   | Description                                                          |
+| ----------------------- | ------------------------- | -------------------------- | -------------------------------------------------------------------- |
+| `serviceName`           | `string`                  | Yes                        | Service name reported in traces, logs, and metrics                   |
+| `endpoint`              | `string`                  | No (server) / Yes (client) | Maple ingest endpoint URL. Server auto-detects from `MAPLE_ENDPOINT` |
+| `ingestKey`             | `string`                  | No                         | Maple ingest key. Server auto-detects from `MAPLE_INGEST_KEY`        |
+| `serviceVersion`        | `string`                  | No                         | Override auto-detected commit SHA                                    |
+| `environment`           | `string`                  | No                         | Override auto-detected deployment environment                        |
+| `attributes`            | `Record<string, unknown>` | No                         | Additional resource attributes merged into telemetry                 |
+| `maxBatchSize`          | `number`                  | No                         | Max telemetry items per export batch                                 |
+| `loggerExportInterval`  | `Duration.Input`          | No                         | Export interval for logs                                             |
+| `metricsExportInterval` | `Duration.Input`          | No                         | Export interval for metrics                                          |
+| `tracerExportInterval`  | `Duration.Input`          | No                         | Export interval for traces                                           |
+| `shutdownTimeout`       | `Duration.Input`          | No                         | Graceful shutdown timeout                                            |
 
 > In Effect 3, duration fields use the `Duration.DurationInput` type instead of `Duration.Input`.
 
@@ -125,6 +125,7 @@ The server layer automatically resolves configuration from environment variables
 **Ingest key:** `MAPLE_INGEST_KEY`
 
 **Commit SHA** (first match wins):
+
 1. `COMMIT_SHA`
 2. `RAILWAY_GIT_COMMIT_SHA`
 3. `VERCEL_GIT_COMMIT_SHA`
@@ -132,6 +133,7 @@ The server layer automatically resolves configuration from environment variables
 5. `RENDER_GIT_COMMIT`
 
 **Deployment environment** (first match wins):
+
 1. `MAPLE_ENVIRONMENT`
 2. `RAILWAY_ENVIRONMENT`
 3. `VERCEL_ENV`
@@ -146,6 +148,7 @@ The SDK also auto-detects **runtime** (Node.js, Bun, Deno) and **cloud provider*
 3. Open the Maple dashboard and check that traces appear in the traces view
 
 If traces aren't appearing, verify:
+
 - `MAPLE_ENDPOINT` is set correctly
 - `MAPLE_INGEST_KEY` is valid
 - Your application can reach `ingest.maple.dev` (or your self-hosted URL)

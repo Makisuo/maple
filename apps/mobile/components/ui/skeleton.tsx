@@ -17,10 +17,7 @@ export function TelemetrySkeleton({ rows = 4 }: TelemetrySkeletonProps) {
 	return (
 		<View className="bg-card rounded-xl overflow-hidden">
 			{Array.from({ length: rows }).map((_, i) => (
-				<View
-					key={i}
-					className={`px-4 py-3.5 ${i < rows - 1 ? "border-b border-border" : ""}`}
-				>
+				<View key={i} className={`px-4 py-3.5 ${i < rows - 1 ? "border-b border-border" : ""}`}>
 					<SkeletonBlock height={12} />
 					<View style={{ height: 6 }} />
 					<SkeletonBlock height={24} />

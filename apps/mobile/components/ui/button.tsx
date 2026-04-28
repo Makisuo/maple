@@ -38,14 +38,7 @@ const HAPTIC: Record<ButtonVariant, () => void> = {
 	destructive: hapticWarning,
 }
 
-export function Button({
-	children,
-	onPress,
-	disabled,
-	loading,
-	variant = "primary",
-	icon,
-}: ButtonProps) {
+export function Button({ children, onPress, disabled, loading, variant = "primary", icon }: ButtonProps) {
 	const isInactive = disabled || loading
 	const handlePress = onPress
 		? () => {
@@ -65,18 +58,10 @@ export function Button({
 			) : icon ? (
 				<View className="flex-row items-center gap-2">
 					{icon}
-					<Text
-						className={`text-sm font-medium font-mono ${TEXT_CLASS[variant]}`}
-					>
-						{children}
-					</Text>
+					<Text className={`text-sm font-medium font-mono ${TEXT_CLASS[variant]}`}>{children}</Text>
 				</View>
 			) : (
-				<Text
-					className={`text-sm font-medium font-mono ${TEXT_CLASS[variant]}`}
-				>
-					{children}
-				</Text>
+				<Text className={`text-sm font-medium font-mono ${TEXT_CLASS[variant]}`}>{children}</Text>
 			)}
 		</Pressable>
 	)

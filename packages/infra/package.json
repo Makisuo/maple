@@ -1,19 +1,19 @@
 {
-  "name": "@maple/infra",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./cloudflare": "./src/cloudflare/index.ts"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "alchemy": "^0.91.2"
-  },
-  "devDependencies": {
-    "@types/node": "catalog:tooling",
-    "typescript": "catalog:tooling"
-  }
+	"name": "@maple/infra",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./cloudflare": "./src/cloudflare/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"alchemy": "^0.91.2"
+	},
+	"devDependencies": {
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling"
+	}
 }

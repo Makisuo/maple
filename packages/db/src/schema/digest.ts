@@ -1,10 +1,4 @@
-import {
-	index,
-	integer,
-	sqliteTable,
-	text,
-	uniqueIndex,
-} from "drizzle-orm/sqlite-core"
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 export const digestSubscriptions = sqliteTable(
 	"digest_subscriptions",
@@ -22,14 +16,8 @@ export const digestSubscriptions = sqliteTable(
 		updatedAt: integer("updated_at", { mode: "number" }).notNull(),
 	},
 	(table) => [
-		uniqueIndex("digest_subscriptions_org_user_idx").on(
-			table.orgId,
-			table.userId,
-		),
-		index("digest_subscriptions_org_enabled_idx").on(
-			table.orgId,
-			table.enabled,
-		),
+		uniqueIndex("digest_subscriptions_org_user_idx").on(table.orgId, table.userId),
+		index("digest_subscriptions_org_enabled_idx").on(table.orgId, table.enabled),
 	],
 )
 

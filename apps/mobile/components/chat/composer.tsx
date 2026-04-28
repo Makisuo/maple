@@ -55,7 +55,10 @@ export function Composer({ onSend, onStop, isStreaming, placeholder }: ComposerP
 
 	return (
 		<View className="px-4 pb-2 pt-1">
-			<View className="flex-row items-center rounded-full border border-border bg-card pl-4 pr-1 py-1" style={{ minHeight: 44 }}>
+			<View
+				className="flex-row items-center rounded-full border border-border bg-card pl-4 pr-1 py-1"
+				style={{ minHeight: 44 }}
+			>
 				<Animated.View
 					pointerEvents="none"
 					style={{

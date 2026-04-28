@@ -5,193 +5,193 @@
 @import "@fontsource-variable/geist";
 
 :root {
-    --background: oklch(0.207 0.008 67);
-    --foreground: oklch(0.91 0.016 74);
-    --card: oklch(0.224 0.009 75);
-    --card-foreground: oklch(0.91 0.016 74);
-    --popover: oklch(0.224 0.009 75);
-    --popover-foreground: oklch(0.91 0.016 74);
-    --primary: oklch(0.714 0.154 59);
-    --primary-foreground: oklch(0.207 0.008 67);
-    --secondary: oklch(0.26 0.012 67);
-    --secondary-foreground: oklch(0.91 0.016 74);
-    --muted: oklch(0.26 0.012 67);
-    --muted-foreground: oklch(0.603 0.023 72);
-    --accent: oklch(0.714 0.154 59);
-    --accent-foreground: oklch(0.207 0.008 67);
-    --destructive: oklch(0.654 0.176 30);
-    --destructive-foreground: oklch(0.91 0.016 74);
-    --border: oklch(0.268 0.012 67);
-    --input: oklch(0.33 0.015 72);
-    --ring: oklch(0.58 0.02 65);
-    --chart-1: oklch(0.714 0.154 59);
-    --chart-2: oklch(0.693 0.165 254);
-    --chart-3: oklch(0.658 0.134 151);
-    --chart-4: oklch(0.654 0.176 30);
-    --chart-5: oklch(0.70 0.12 310);
-    --chart-p99:        oklch(0.654 0.176 30);
-    --chart-p95:        oklch(0.714 0.154 59);
-    --chart-p50:        oklch(0.693 0.165 254);
-    --chart-error:      oklch(0.654 0.176 30);
-    --chart-throughput: oklch(0.714 0.154 59);
-    --chart-apdex:      oklch(0.658 0.134 151);
-    --bg-elevated: oklch(0.224 0.009 75);
-    --radius: 8px;
-    --border-hairline: 1px;
-    --severity-trace: oklch(0.603 0.023 72);
-    --severity-debug: oklch(0.693 0.165 254);
-    --severity-info:  oklch(0.658 0.134 151);
-    --severity-warn:  oklch(0.714 0.154 59);
-    --severity-error: oklch(0.654 0.176 30);
-    --severity-fatal: oklch(0.555 0.174 30);
-    --service-1:  oklch(0.68 0.17 250);
-    --service-2:  oklch(0.65 0.12 185);
-    --service-3:  oklch(0.65 0.15 155);
-    --service-4:  oklch(0.65 0.15 130);
-    --service-5:  oklch(0.70 0.14 90);
-    --service-6:  oklch(0.70 0.16 60);
-    --service-7:  oklch(0.65 0.15 45);
-    --service-8:  oklch(0.65 0.18 25);
-    --service-9:  oklch(0.62 0.16 0);
-    --service-10: oklch(0.62 0.14 340);
-    --service-11: oklch(0.60 0.14 320);
-    --service-12: oklch(0.62 0.14 290);
-    --service-13: oklch(0.62 0.16 270);
-    --service-14: oklch(0.64 0.16 260);
-    --service-15: oklch(0.65 0.13 210);
-    --service-16: oklch(0.60 0.10 230);
+	--background: oklch(0.207 0.008 67);
+	--foreground: oklch(0.91 0.016 74);
+	--card: oklch(0.224 0.009 75);
+	--card-foreground: oklch(0.91 0.016 74);
+	--popover: oklch(0.224 0.009 75);
+	--popover-foreground: oklch(0.91 0.016 74);
+	--primary: oklch(0.714 0.154 59);
+	--primary-foreground: oklch(0.207 0.008 67);
+	--secondary: oklch(0.26 0.012 67);
+	--secondary-foreground: oklch(0.91 0.016 74);
+	--muted: oklch(0.26 0.012 67);
+	--muted-foreground: oklch(0.603 0.023 72);
+	--accent: oklch(0.714 0.154 59);
+	--accent-foreground: oklch(0.207 0.008 67);
+	--destructive: oklch(0.654 0.176 30);
+	--destructive-foreground: oklch(0.91 0.016 74);
+	--border: oklch(0.268 0.012 67);
+	--input: oklch(0.33 0.015 72);
+	--ring: oklch(0.58 0.02 65);
+	--chart-1: oklch(0.714 0.154 59);
+	--chart-2: oklch(0.693 0.165 254);
+	--chart-3: oklch(0.658 0.134 151);
+	--chart-4: oklch(0.654 0.176 30);
+	--chart-5: oklch(0.7 0.12 310);
+	--chart-p99: oklch(0.654 0.176 30);
+	--chart-p95: oklch(0.714 0.154 59);
+	--chart-p50: oklch(0.693 0.165 254);
+	--chart-error: oklch(0.654 0.176 30);
+	--chart-throughput: oklch(0.714 0.154 59);
+	--chart-apdex: oklch(0.658 0.134 151);
+	--bg-elevated: oklch(0.224 0.009 75);
+	--radius: 8px;
+	--border-hairline: 1px;
+	--severity-trace: oklch(0.603 0.023 72);
+	--severity-debug: oklch(0.693 0.165 254);
+	--severity-info: oklch(0.658 0.134 151);
+	--severity-warn: oklch(0.714 0.154 59);
+	--severity-error: oklch(0.654 0.176 30);
+	--severity-fatal: oklch(0.555 0.174 30);
+	--service-1: oklch(0.68 0.17 250);
+	--service-2: oklch(0.65 0.12 185);
+	--service-3: oklch(0.65 0.15 155);
+	--service-4: oklch(0.65 0.15 130);
+	--service-5: oklch(0.7 0.14 90);
+	--service-6: oklch(0.7 0.16 60);
+	--service-7: oklch(0.65 0.15 45);
+	--service-8: oklch(0.65 0.18 25);
+	--service-9: oklch(0.62 0.16 0);
+	--service-10: oklch(0.62 0.14 340);
+	--service-11: oklch(0.6 0.14 320);
+	--service-12: oklch(0.62 0.14 290);
+	--service-13: oklch(0.62 0.16 270);
+	--service-14: oklch(0.64 0.16 260);
+	--service-15: oklch(0.65 0.13 210);
+	--service-16: oklch(0.6 0.1 230);
 }
 
 @media only screen and (min-device-pixel-ratio: 2), only screen and (min-resolution: 192dpi) {
-  :root {
-    --border-hairline: 0.5px;
-  }
+	:root {
+		--border-hairline: 0.5px;
+	}
 }
 
 @theme inline {
-    --font-sans: 'Geist Mono Variable', ui-monospace, monospace;
-    --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
-    --font-display: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
-    /* Landing-specific aliases */
-    --color-bg: var(--background);
-    --color-fg: var(--foreground);
-    --color-fg-muted: var(--muted-foreground);
-    --color-bg-elevated: var(--bg-elevated);
-    /* Standard shadcn/Tailwind color mappings (needed by imported React components) */
-    --color-background: var(--background);
-    --color-foreground: var(--foreground);
-    --color-card: var(--card);
-    --color-card-foreground: var(--card-foreground);
-    --color-popover: var(--popover);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-primary: var(--primary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-secondary: var(--secondary);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-muted: var(--muted);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-accent: var(--accent);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-destructive: var(--destructive);
-    --color-destructive-foreground: var(--destructive-foreground);
-    --color-border: var(--border);
-    --color-input: var(--input);
-    --color-ring: var(--ring);
-    --color-chart-1: var(--chart-1);
-    --color-chart-2: var(--chart-2);
-    --color-chart-3: var(--chart-3);
-    --color-chart-4: var(--chart-4);
-    --color-chart-5: var(--chart-5);
-    --color-chart-p99: var(--chart-p99);
-    --color-chart-p95: var(--chart-p95);
-    --color-chart-p50: var(--chart-p50);
-    --color-chart-error: var(--chart-error);
-    --color-chart-throughput: var(--chart-throughput);
-    --color-chart-apdex: var(--chart-apdex);
-    --color-severity-trace: var(--severity-trace);
-    --color-severity-debug: var(--severity-debug);
-    --color-severity-info: var(--severity-info);
-    --color-severity-warn: var(--severity-warn);
-    --color-severity-error: var(--severity-error);
-    --color-severity-fatal: var(--severity-fatal);
-    --color-service-1: var(--service-1);
-    --color-service-2: var(--service-2);
-    --color-service-3: var(--service-3);
-    --color-service-4: var(--service-4);
-    --color-service-5: var(--service-5);
-    --color-service-6: var(--service-6);
-    --color-service-7: var(--service-7);
-    --color-service-8: var(--service-8);
-    --color-service-9: var(--service-9);
-    --color-service-10: var(--service-10);
-    --color-service-11: var(--service-11);
-    --color-service-12: var(--service-12);
-    --color-service-13: var(--service-13);
-    --color-service-14: var(--service-14);
-    --color-service-15: var(--service-15);
-    --color-service-16: var(--service-16);
-    --radius-sm: calc(var(--radius) - 4px);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) + 4px);
-    --radius-2xl: calc(var(--radius) + 8px);
-    --radius-3xl: calc(var(--radius) + 12px);
-    --radius-4xl: calc(var(--radius) + 16px);
+	--font-sans: "Geist Mono Variable", ui-monospace, monospace;
+	--font-mono: "Geist Mono Variable", ui-monospace, monospace;
+	--font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+	/* Landing-specific aliases */
+	--color-bg: var(--background);
+	--color-fg: var(--foreground);
+	--color-fg-muted: var(--muted-foreground);
+	--color-bg-elevated: var(--bg-elevated);
+	/* Standard shadcn/Tailwind color mappings (needed by imported React components) */
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--color-chart-1: var(--chart-1);
+	--color-chart-2: var(--chart-2);
+	--color-chart-3: var(--chart-3);
+	--color-chart-4: var(--chart-4);
+	--color-chart-5: var(--chart-5);
+	--color-chart-p99: var(--chart-p99);
+	--color-chart-p95: var(--chart-p95);
+	--color-chart-p50: var(--chart-p50);
+	--color-chart-error: var(--chart-error);
+	--color-chart-throughput: var(--chart-throughput);
+	--color-chart-apdex: var(--chart-apdex);
+	--color-severity-trace: var(--severity-trace);
+	--color-severity-debug: var(--severity-debug);
+	--color-severity-info: var(--severity-info);
+	--color-severity-warn: var(--severity-warn);
+	--color-severity-error: var(--severity-error);
+	--color-severity-fatal: var(--severity-fatal);
+	--color-service-1: var(--service-1);
+	--color-service-2: var(--service-2);
+	--color-service-3: var(--service-3);
+	--color-service-4: var(--service-4);
+	--color-service-5: var(--service-5);
+	--color-service-6: var(--service-6);
+	--color-service-7: var(--service-7);
+	--color-service-8: var(--service-8);
+	--color-service-9: var(--service-9);
+	--color-service-10: var(--service-10);
+	--color-service-11: var(--service-11);
+	--color-service-12: var(--service-12);
+	--color-service-13: var(--service-13);
+	--color-service-14: var(--service-14);
+	--color-service-15: var(--service-15);
+	--color-service-16: var(--service-16);
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) + 4px);
+	--radius-2xl: calc(var(--radius) + 8px);
+	--radius-3xl: calc(var(--radius) + 12px);
+	--radius-4xl: calc(var(--radius) + 16px);
 }
 
 @layer base {
-    * {
-        @apply border-border outline-ring/50;
-    }
-    body {
-        @apply font-sans bg-background text-foreground;
-    }
+	* {
+		@apply border-border outline-ring/50;
+	}
+	body {
+		@apply font-sans bg-background text-foreground;
+	}
 }
 
 /* ReactFlow Controls styling */
 .react-flow__controls {
-    box-shadow: none !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 0 !important;
-    overflow: hidden;
+	box-shadow: none !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 0 !important;
+	overflow: hidden;
 }
 
 .react-flow__controls-button {
-    background: var(--muted) !important;
-    border: none !important;
-    border-bottom: 1px solid var(--border) !important;
-    fill: var(--foreground) !important;
+	background: var(--muted) !important;
+	border: none !important;
+	border-bottom: 1px solid var(--border) !important;
+	fill: var(--foreground) !important;
 }
 
 .react-flow__controls-button:hover {
-    background: var(--accent) !important;
+	background: var(--accent) !important;
 }
 
 .react-flow__controls-button:last-child {
-    border-bottom: none !important;
+	border-bottom: none !important;
 }
 
 .react-flow__controls-button svg {
-    fill: var(--foreground) !important;
+	fill: var(--foreground) !important;
 }
 
 .react-flow__controls-button svg path {
-    fill: var(--foreground) !important;
+	fill: var(--foreground) !important;
 }
 
 /* App mock interactive sidebar — CSS-only tab switching */
 .mock-radio {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
 }
 
 .app-mock .mock-view {
-    display: none;
+	display: none;
 }
 
 .app-mock:has(.mock-radio-overview:checked) .mock-view-overview,
@@ -199,7 +199,7 @@
 .app-mock:has(.mock-radio-traces:checked) .mock-view-traces,
 .app-mock:has(.mock-radio-logs:checked) .mock-view-logs,
 .app-mock:has(.mock-radio-metrics:checked) .mock-view-metrics {
-    display: block;
+	display: block;
 }
 
 .app-mock:has(.mock-radio-overview:checked) nav .mock-nav-overview,
@@ -207,8 +207,8 @@
 .app-mock:has(.mock-radio-traces:checked) nav .mock-nav-traces,
 .app-mock:has(.mock-radio-logs:checked) nav .mock-nav-logs,
 .app-mock:has(.mock-radio-metrics:checked) nav .mock-nav-metrics {
-    background-color: var(--muted);
-    color: var(--foreground);
+	background-color: var(--muted);
+	color: var(--foreground);
 }
 
 .app-mock:has(.mock-radio-overview:checked) nav .mock-nav-overview svg,
@@ -216,94 +216,99 @@
 .app-mock:has(.mock-radio-traces:checked) nav .mock-nav-traces svg,
 .app-mock:has(.mock-radio-logs:checked) nav .mock-nav-logs svg,
 .app-mock:has(.mock-radio-metrics:checked) nav .mock-nav-metrics svg {
-    opacity: 1;
+	opacity: 1;
 }
 
 /* Gradient text utility */
 .text-gradient-accent {
-    background: linear-gradient(to right, var(--accent), oklch(0.75 0.15 90));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+	background: linear-gradient(to right, var(--accent), oklch(0.75 0.15 90));
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	background-clip: text;
 }
 
 /* Pulse animation for live indicator */
 @keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.4;
+	}
 }
 
 .animate-pulse-dot {
-    animation: pulse-dot 2s ease-in-out infinite;
+	animation: pulse-dot 2s ease-in-out infinite;
 }
 
 /* Docs prose styling */
 .docs-content h2 {
-    @apply text-lg font-semibold text-fg mt-10 mb-4;
+	@apply text-lg font-semibold text-fg mt-10 mb-4;
 }
 
 .docs-content h3 {
-    @apply text-base font-semibold text-fg mt-8 mb-3;
+	@apply text-base font-semibold text-fg mt-8 mb-3;
 }
 
 .docs-content p {
-    @apply text-sm text-fg-muted leading-relaxed mb-4;
+	@apply text-sm text-fg-muted leading-relaxed mb-4;
 }
 
 .docs-content a {
-    @apply text-accent underline underline-offset-2 hover:text-fg transition-colors;
+	@apply text-accent underline underline-offset-2 hover:text-fg transition-colors;
 }
 
 .docs-content ul {
-    @apply list-disc list-outside text-sm text-fg-muted mb-4 space-y-1 pl-4;
+	@apply list-disc list-outside text-sm text-fg-muted mb-4 space-y-1 pl-4;
 }
 
 .docs-content ol {
-    @apply list-decimal list-outside text-sm text-fg-muted mb-4 space-y-1 pl-4;
+	@apply list-decimal list-outside text-sm text-fg-muted mb-4 space-y-1 pl-4;
 }
 
 .docs-content li {
-    @apply leading-relaxed;
+	@apply leading-relaxed;
 }
 
 .docs-content code:not(pre code) {
-    @apply bg-bg-elevated text-accent text-[13px] px-1.5 py-0.5 border border-border;
+	@apply bg-bg-elevated text-accent text-[13px] px-1.5 py-0.5 border border-border;
 }
 
 .docs-content pre {
-    @apply bg-bg-elevated border border-border overflow-x-auto p-4 mb-4 text-[13px];
+	@apply bg-bg-elevated border border-border overflow-x-auto p-4 mb-4 text-[13px];
 }
 
 .docs-content blockquote {
-    @apply border-l-2 border-accent pl-4 text-sm text-fg-muted italic my-4;
+	@apply border-l-2 border-accent pl-4 text-sm text-fg-muted italic my-4;
 }
 
 .docs-content hr {
-    @apply border-border my-8;
+	@apply border-border my-8;
 }
 
 .docs-content table {
-    @apply w-full text-sm text-fg-muted border-collapse mb-4;
+	@apply w-full text-sm text-fg-muted border-collapse mb-4;
 }
 
 .docs-content th {
-    @apply text-left text-[10px] text-fg uppercase tracking-wider font-medium p-2 border-b border-border;
+	@apply text-left text-[10px] text-fg uppercase tracking-wider font-medium p-2 border-b border-border;
 }
 
 .docs-content td {
-    @apply p-2 border-b border-border;
+	@apply p-2 border-b border-border;
 }
 
 .docs-content strong {
-    @apply text-fg font-semibold;
+	@apply text-fg font-semibold;
 }
 
 /* details/summary toggle arrow for mobile nav */
 details[open] > summary .details-open\:rotate-180 {
-    transform: rotate(180deg);
+	transform: rotate(180deg);
 }
 
 /* Smooth scroll */
 html {
-    scroll-behavior: smooth;
+	scroll-behavior: smooth;
 }

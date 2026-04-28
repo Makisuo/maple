@@ -20,35 +20,45 @@ Official documentation is the source of truth. Every recommendation must be labe
 ## Decision areas
 
 ### 1. Ingestion strategy
+
 Use when deciding between:
+
 - direct inserts
 - async inserts
 - Kafka engine + MV
 - upstream buffering
 
 ### 2. Time-series partitioning
+
 Use when deciding:
+
 - whether to partition
 - partition granularity
 - how retention and TTL affect design
 - how to avoid excessive partition counts
 
 ### 3. Enrichment path selection
+
 Use when deciding between:
+
 - runtime JOINs
 - dictionaries
 - denormalization
 - materialized enrichment
 
 ### 4. Late-arriving data and mutable state
+
 Use when reasoning about:
+
 - immutable append-only events
 - latest-state queries
 - replacing or collapsing semantics
 - whether frequent mutations should be avoided
 
 ### 5. Real-time pre-aggregation
+
 Use when deciding:
+
 - raw-only design
 - incremental materialized views
 - refreshable MVs
@@ -57,6 +67,7 @@ Use when deciding:
 ## Output standard
 
 A valid architecture response should include:
+
 - workload summary
 - key decisions
 - recommendations with provenance labels
@@ -79,6 +90,7 @@ See `schemas/recommendation_schema.yaml`.
 ## Implementation notes
 
 This skill is intentionally narrow:
+
 - it does not replace low-level rule enforcement
 - it does not make commercial recommendations
 - it does not claim field heuristics are official policy

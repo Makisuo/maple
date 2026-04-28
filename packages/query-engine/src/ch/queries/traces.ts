@@ -12,12 +12,12 @@ import { ServiceOverviewSpans, Traces } from "../tables"
 import { METRIC_NEEDS } from "../../traces-shared"
 import type { ColumnDefs } from "../types"
 import {
-  apdexExprs,
-  canUseServiceOverviewMv,
-  canUseTracesAggregatesMv,
-  serviceOverviewWhereConditions,
-  tracesBaseWhereConditions,
-  type TracesBaseWhereOpts,
+	apdexExprs,
+	canUseServiceOverviewMv,
+	canUseTracesAggregatesMv,
+	serviceOverviewWhereConditions,
+	tracesBaseWhereConditions,
+	type TracesBaseWhereOpts,
 } from "./query-helpers"
 
 // ---------------------------------------------------------------------------
@@ -29,47 +29,45 @@ import {
  * `Traces` and `ServiceOverviewSpans` (the MV pre-projects these three).
  */
 interface MetricCols {
-  Duration: CH.Expr<number>
-  StatusCode: CH.Expr<string>
-  TraceState: CH.Expr<string>
+	Duration: CH.Expr<number>
+	StatusCode: CH.Expr<string>
+	TraceState: CH.Expr<string>
 }
 
 function metricSelectExprs(
-  $: MetricCols,
-  metric: TracesMetric,
-  apdexThresholdMs: number,
-  needsSampling: boolean,
-  allMetrics?: boolean,
+	$: MetricCols,
+	metric: TracesMetric,
+	apdexThresholdMs: number,
+	needsSampling: boolean,
+	allMetrics?: boolean,
 ) {
-  const needs = allMetrics
-    ? new Set<string>(["count", "avg_duration", "quantiles", "error_rate", "apdex"])
-    : new Set(METRIC_NEEDS[metric])
-  const durationMs = $.Duration.div(1000000)
+	const needs = allMetrics
+		? new Set<string>(["count", "avg_duration", "quantiles", "error_rate", "apdex"])
+		: new Set(METRIC_NEEDS[metric])
+	const durationMs = $.Duration.div(1000000)
 
-  const apdex = needs.has("apdex")
-    ? apdexExprs(durationMs, apdexThresholdMs)
-    : { satisfiedCount: CH.lit(0), toleratingCount: CH.lit(0), apdexScore: CH.lit(0) }
+	const apdex = needs.has("apdex")
+		? apdexExprs(durationMs, apdexThresholdMs)
+		: { satisfiedCount: CH.lit(0), toleratingCount: CH.lit(0), apdexScore: CH.lit(0) }
 
-  return {
-    count: CH.count(),
-    avgDuration: needs.has("avg_duration") ? CH.avg($.Duration).div(1000000) : CH.lit(0),
-    p50Duration: needs.has("quantiles") ? CH.quantile(0.5)($.Duration).div(1000000) : CH.lit(0),
-    p95Duration: needs.has("quantiles") ? CH.quantile(0.95)($.Duration).div(1000000) : CH.lit(0),
-    p99Duration: needs.has("quantiles") ? CH.quantile(0.99)($.Duration).div(1000000) : CH.lit(0),
-    errorRate: needs.has("error_rate")
-      ? CH.if_(CH.count().gt(0), CH.countIf($.StatusCode.eq("Error")).div(CH.count()), CH.lit(0))
-      : CH.lit(0),
-    ...apdex,
-    sampledSpanCount: needsSampling
-      ? CH.countIf($.TraceState.like("%th:%"))
-      : CH.lit(0),
-    unsampledSpanCount: needsSampling
-      ? CH.countIf($.TraceState.eq("").or($.TraceState.notLike("%th:%")))
-      : CH.lit(0),
-    dominantThreshold: needsSampling
-      ? CH.anyIf(CH.extract_($.TraceState, "th:([0-9a-f]+)"), $.TraceState.like("%th:%"))
-      : CH.lit(""),
-  }
+	return {
+		count: CH.count(),
+		avgDuration: needs.has("avg_duration") ? CH.avg($.Duration).div(1000000) : CH.lit(0),
+		p50Duration: needs.has("quantiles") ? CH.quantile(0.5)($.Duration).div(1000000) : CH.lit(0),
+		p95Duration: needs.has("quantiles") ? CH.quantile(0.95)($.Duration).div(1000000) : CH.lit(0),
+		p99Duration: needs.has("quantiles") ? CH.quantile(0.99)($.Duration).div(1000000) : CH.lit(0),
+		errorRate: needs.has("error_rate")
+			? CH.if_(CH.count().gt(0), CH.countIf($.StatusCode.eq("Error")).div(CH.count()), CH.lit(0))
+			: CH.lit(0),
+		...apdex,
+		sampledSpanCount: needsSampling ? CH.countIf($.TraceState.like("%th:%")) : CH.lit(0),
+		unsampledSpanCount: needsSampling
+			? CH.countIf($.TraceState.eq("").or($.TraceState.notLike("%th:%")))
+			: CH.lit(0),
+		dominantThreshold: needsSampling
+			? CH.anyIf(CH.extract_($.TraceState, "th:([0-9a-f]+)"), $.TraceState.like("%th:%"))
+			: CH.lit(""),
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -77,61 +75,58 @@ function metricSelectExprs(
 // ---------------------------------------------------------------------------
 
 function buildGroupNameExpr(
-  $: ColumnAccessor<typeof Traces.columns>,
-  groupBy: readonly string[] | undefined,
-  groupByAttributeKeys: readonly string[] | undefined,
+	$: ColumnAccessor<typeof Traces.columns>,
+	groupBy: readonly string[] | undefined,
+	groupByAttributeKeys: readonly string[] | undefined,
 ): CH.Expr<string> {
-  if (!groupBy || groupBy.length === 0) {
-    return CH.lit("all")
-  }
+	if (!groupBy || groupBy.length === 0) {
+		return CH.lit("all")
+	}
 
-  const parts: CH.Expr<string>[] = []
-  for (const g of groupBy) {
-    switch (g) {
-      case "service":
-        parts.push(CH.toString_($.ServiceName))
-        break
-      case "span_name":
-        parts.push(CH.toString_($.SpanName))
-        break
-      case "status_code":
-        parts.push(CH.toString_($.StatusCode))
-        break
-      case "http_method":
-        parts.push(CH.toString_($.SpanAttributes.get("http.method")))
-        break
-      case "attribute":
-        if (groupByAttributeKeys?.length) {
-          const keys: CH.Expr<string>[] = groupByAttributeKeys.map((k) =>
-            CH.toString_($.SpanAttributes.get(k)),
-          )
-          // When multiple attribute keys, join them into a single part
-          if (keys.length === 1) {
-            parts.push(keys[0])
-          } else {
-            parts.push(CH.arrayStringConcat(keys, " \u00b7 "))
-          }
-        }
-        break
-      case "none":
-        break
-    }
-  }
+	const parts: CH.Expr<string>[] = []
+	for (const g of groupBy) {
+		switch (g) {
+			case "service":
+				parts.push(CH.toString_($.ServiceName))
+				break
+			case "span_name":
+				parts.push(CH.toString_($.SpanName))
+				break
+			case "status_code":
+				parts.push(CH.toString_($.StatusCode))
+				break
+			case "http_method":
+				parts.push(CH.toString_($.SpanAttributes.get("http.method")))
+				break
+			case "attribute":
+				if (groupByAttributeKeys?.length) {
+					const keys: CH.Expr<string>[] = groupByAttributeKeys.map((k) =>
+						CH.toString_($.SpanAttributes.get(k)),
+					)
+					// When multiple attribute keys, join them into a single part
+					if (keys.length === 1) {
+						parts.push(keys[0])
+					} else {
+						parts.push(CH.arrayStringConcat(keys, " \u00b7 "))
+					}
+				}
+				break
+			case "none":
+				break
+		}
+	}
 
-  if (parts.length === 0) {
-    return CH.lit("all")
-  }
+	if (parts.length === 0) {
+		return CH.lit("all")
+	}
 
-  if (parts.length === 1) {
-    return CH.coalesce(CH.nullIf(parts[0], ""), CH.lit("all"))
-  }
+	if (parts.length === 1) {
+		return CH.coalesce(CH.nullIf(parts[0], ""), CH.lit("all"))
+	}
 
-  // Multi-part: filter empty strings before joining with separator
-  const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
-  return CH.coalesce(
-    CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""),
-    CH.lit("all"),
-  )
+	// Multi-part: filter empty strings before joining with separator
+	const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
+	return CH.coalesce(CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""), CH.lit("all"))
 }
 
 /**
@@ -141,55 +136,50 @@ function buildGroupNameExpr(
  * `canUseServiceOverviewMv`.
  */
 function buildMvGroupNameExpr(
-  $: ColumnAccessor<typeof ServiceOverviewSpans.columns>,
-  groupBy: readonly string[] | undefined,
+	$: ColumnAccessor<typeof ServiceOverviewSpans.columns>,
+	groupBy: readonly string[] | undefined,
 ): CH.Expr<string> {
-  if (!groupBy || groupBy.length === 0) return CH.lit("all")
+	if (!groupBy || groupBy.length === 0) return CH.lit("all")
 
-  const parts: CH.Expr<string>[] = []
-  for (const g of groupBy) {
-    switch (g) {
-      case "service":
-        parts.push(CH.toString_($.ServiceName))
-        break
-      case "status_code":
-        parts.push(CH.toString_($.StatusCode))
-        break
-      case "none":
-        break
-    }
-  }
+	const parts: CH.Expr<string>[] = []
+	for (const g of groupBy) {
+		switch (g) {
+			case "service":
+				parts.push(CH.toString_($.ServiceName))
+				break
+			case "status_code":
+				parts.push(CH.toString_($.StatusCode))
+				break
+			case "none":
+				break
+		}
+	}
 
-  if (parts.length === 0) return CH.lit("all")
-  if (parts.length === 1) return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
-  const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
-  return CH.coalesce(
-    CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""),
-    CH.lit("all"),
-  )
+	if (parts.length === 0) return CH.lit("all")
+	if (parts.length === 1) return CH.coalesce(CH.nullIf(parts[0]!, ""), CH.lit("all"))
+	const filtered = CH.arrayFilter("x -> x != ''", CH.arrayOf(...parts))
+	return CH.coalesce(CH.nullIf(CH.arrayStringConcat(filtered, " \u00b7 "), ""), CH.lit("all"))
 }
 
 function buildBreakdownGroupExpr(
-  $: ColumnAccessor<typeof Traces.columns>,
-  groupBy: string,
-  groupByAttributeKey: string | undefined,
+	$: ColumnAccessor<typeof Traces.columns>,
+	groupBy: string,
+	groupByAttributeKey: string | undefined,
 ): CH.Expr<string> {
-  switch (groupBy) {
-    case "service":
-      return $.ServiceName
-    case "span_name":
-      return $.SpanName
-    case "status_code":
-      return $.StatusCode
-    case "http_method":
-      return $.SpanAttributes.get("http.method")
-    case "attribute":
-      return groupByAttributeKey
-        ? $.SpanAttributes.get(groupByAttributeKey)
-        : $.ServiceName
-    default:
-      return $.ServiceName
-  }
+	switch (groupBy) {
+		case "service":
+			return $.ServiceName
+		case "span_name":
+			return $.SpanName
+		case "status_code":
+			return $.StatusCode
+		case "http_method":
+			return $.SpanAttributes.get("http.method")
+		case "attribute":
+			return groupByAttributeKey ? $.SpanAttributes.get(groupByAttributeKey) : $.ServiceName
+		default:
+			return $.ServiceName
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -197,10 +187,10 @@ function buildBreakdownGroupExpr(
 // ---------------------------------------------------------------------------
 
 function buildWhereConditions(
-  $: ColumnAccessor<typeof Traces.columns>,
-  opts: TracesQueryOpts,
+	$: ColumnAccessor<typeof Traces.columns>,
+	opts: TracesQueryOpts,
 ): Array<CH.Condition | undefined> {
-  return tracesBaseWhereConditions($, opts)
+	return tracesBaseWhereConditions($, opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -214,80 +204,80 @@ interface TracesQueryOpts extends TracesBaseWhereOpts {}
 // ---------------------------------------------------------------------------
 
 export interface TracesTimeseriesOpts extends TracesQueryOpts {
-  metric: TracesMetric
-  needsSampling: boolean
-  groupBy?: readonly string[]
-  groupByAttributeKeys?: readonly string[]
-  apdexThresholdMs?: number
-  /** When true, emit all metric columns regardless of the selected metric. Used by custom charts. */
-  allMetrics?: boolean
+	metric: TracesMetric
+	needsSampling: boolean
+	groupBy?: readonly string[]
+	groupByAttributeKeys?: readonly string[]
+	apdexThresholdMs?: number
+	/** When true, emit all metric columns regardless of the selected metric. Used by custom charts. */
+	allMetrics?: boolean
 }
 
 export interface TracesTimeseriesOutput {
-  readonly bucket: string
-  readonly groupName: string
-  readonly count: number
-  readonly avgDuration: number
-  readonly p50Duration: number
-  readonly p95Duration: number
-  readonly p99Duration: number
-  readonly errorRate: number
-  readonly satisfiedCount: number
-  readonly toleratingCount: number
-  readonly apdexScore: number
-  readonly sampledSpanCount: number
-  readonly unsampledSpanCount: number
-  readonly dominantThreshold: string
+	readonly bucket: string
+	readonly groupName: string
+	readonly count: number
+	readonly avgDuration: number
+	readonly p50Duration: number
+	readonly p95Duration: number
+	readonly p99Duration: number
+	readonly errorRate: number
+	readonly satisfiedCount: number
+	readonly toleratingCount: number
+	readonly apdexScore: number
+	readonly sampledSpanCount: number
+	readonly unsampledSpanCount: number
+	readonly dominantThreshold: string
 }
 
 export function tracesTimeseriesQuery(
-  opts: TracesTimeseriesOpts,
+	opts: TracesTimeseriesOpts,
 ): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
-  const apdexThresholdMs = opts.apdexThresholdMs ?? 500
+	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
 
-  // FUTURE: when canUseTracesAggregatesMv(opts, opts.groupBy, bucketSeconds)
-  // returns true, route to traces_aggregates_hourly with -Merge combinators
-  // (quantilesTDigestWeightedMerge, sumMerge, minMerge, maxMerge — note the
-  // plural `quantiles*` for multi-level state). This gives
-  // sample-correct quantiles + counts for free and reads thousands of rows
-  // instead of billions over 7d+ ranges. Wiring this requires:
-  //   - bucketSeconds passed as a query opt (currently set inside CH at param-bind time)
-  //   - rawExpr-built SELECT for the merge calls (no DSL helpers for *Merge yet)
-  //   - shadow-mode validation against the raw path
-  // See plan: ~/.claude/plans/research-things-that-hyperdx-indexed-nygaard.md (P2.9 deep-dive).
-  void canUseTracesAggregatesMv
+	// FUTURE: when canUseTracesAggregatesMv(opts, opts.groupBy, bucketSeconds)
+	// returns true, route to traces_aggregates_hourly with -Merge combinators
+	// (quantilesTDigestWeightedMerge, sumMerge, minMerge, maxMerge — note the
+	// plural `quantiles*` for multi-level state). This gives
+	// sample-correct quantiles + counts for free and reads thousands of rows
+	// instead of billions over 7d+ ranges. Wiring this requires:
+	//   - bucketSeconds passed as a query opt (currently set inside CH at param-bind time)
+	//   - rawExpr-built SELECT for the merge calls (no DSL helpers for *Merge yet)
+	//   - shadow-mode validation against the raw path
+	// See plan: ~/.claude/plans/research-things-that-hyperdx-indexed-nygaard.md (P2.9 deep-dive).
+	void canUseTracesAggregatesMv
 
-  // Fast path: when no filter or groupBy references span-level columns
-  // (span name, attributes, http method), route the query to
-  // service_overview_spans_mv. The MV pre-filters at write time to the same
-  // span set that tracesBaseWhereConditions applies when rootOnly is set
-  // (Server/Consumer OR root), and has Duration/StatusCode/TraceState ready,
-  // so the query reads orders of magnitude fewer rows and bytes.
-  if (canUseServiceOverviewMv(opts, opts.groupBy)) {
-    const mv = from(ServiceOverviewSpans)
-      .select(($) => ({
-        bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
-        groupName: buildMvGroupNameExpr($, opts.groupBy),
-        ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
-      }))
-      .where(($) => serviceOverviewWhereConditions($, opts))
-      .groupBy("bucket", "groupName")
-      .orderBy(["bucket", "asc"], ["groupName", "asc"])
-      .format("JSON")
-    return mv as unknown as CHQuery<ColumnDefs, TracesTimeseriesOutput, {}>
-  }
+	// Fast path: when no filter or groupBy references span-level columns
+	// (span name, attributes, http method), route the query to
+	// service_overview_spans_mv. The MV pre-filters at write time to the same
+	// span set that tracesBaseWhereConditions applies when rootOnly is set
+	// (Server/Consumer OR root), and has Duration/StatusCode/TraceState ready,
+	// so the query reads orders of magnitude fewer rows and bytes.
+	if (canUseServiceOverviewMv(opts, opts.groupBy)) {
+		const mv = from(ServiceOverviewSpans)
+			.select(($) => ({
+				bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+				groupName: buildMvGroupNameExpr($, opts.groupBy),
+				...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
+			}))
+			.where(($) => serviceOverviewWhereConditions($, opts))
+			.groupBy("bucket", "groupName")
+			.orderBy(["bucket", "asc"], ["groupName", "asc"])
+			.format("JSON")
+		return mv as unknown as CHQuery<ColumnDefs, TracesTimeseriesOutput, {}>
+	}
 
-  const raw = from(Traces)
-    .select(($) => ({
-      bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
-      groupName: buildGroupNameExpr($, opts.groupBy, opts.groupByAttributeKeys),
-      ...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
-    }))
-    .where(($) => buildWhereConditions($, opts))
-    .groupBy("bucket", "groupName")
-    .orderBy(["bucket", "asc"], ["groupName", "asc"])
-    .format("JSON")
-  return raw as unknown as CHQuery<ColumnDefs, TracesTimeseriesOutput, {}>
+	const raw = from(Traces)
+		.select(($) => ({
+			bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+			groupName: buildGroupNameExpr($, opts.groupBy, opts.groupByAttributeKeys),
+			...metricSelectExprs($, opts.metric, apdexThresholdMs, opts.needsSampling, opts.allMetrics),
+		}))
+		.where(($) => buildWhereConditions($, opts))
+		.groupBy("bucket", "groupName")
+		.orderBy(["bucket", "asc"], ["groupName", "asc"])
+		.format("JSON")
+	return raw as unknown as CHQuery<ColumnDefs, TracesTimeseriesOutput, {}>
 }
 
 // ---------------------------------------------------------------------------
@@ -295,48 +285,51 @@ export function tracesTimeseriesQuery(
 // ---------------------------------------------------------------------------
 
 export interface TracesBreakdownOpts extends TracesQueryOpts {
-  metric: TracesMetric
-  groupBy: string
-  groupByAttributeKey?: string
-  limit?: number
-  apdexThresholdMs?: number
-  /** When true, emit all metric columns regardless of the selected metric. Used by custom charts. */
-  allMetrics?: boolean
+	metric: TracesMetric
+	groupBy: string
+	groupByAttributeKey?: string
+	limit?: number
+	apdexThresholdMs?: number
+	/** When true, emit all metric columns regardless of the selected metric. Used by custom charts. */
+	allMetrics?: boolean
 }
 
 export interface TracesBreakdownOutput {
-  readonly name: string
-  readonly count: number
-  readonly avgDuration: number
-  readonly p50Duration: number
-  readonly p95Duration: number
-  readonly p99Duration: number
-  readonly errorRate: number
-  readonly satisfiedCount: number
-  readonly toleratingCount: number
-  readonly apdexScore: number
+	readonly name: string
+	readonly count: number
+	readonly avgDuration: number
+	readonly p50Duration: number
+	readonly p95Duration: number
+	readonly p99Duration: number
+	readonly errorRate: number
+	readonly satisfiedCount: number
+	readonly toleratingCount: number
+	readonly apdexScore: number
 }
 
-export function tracesBreakdownQuery(
-  opts: TracesBreakdownOpts,
-) {
-  const apdexThresholdMs = opts.apdexThresholdMs ?? 500
-  const limit = opts.limit ?? 10
+export function tracesBreakdownQuery(opts: TracesBreakdownOpts) {
+	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
+	const limit = opts.limit ?? 10
 
-  return from(Traces)
-    .select(($) => {
-      const { sampledSpanCount, unsampledSpanCount, dominantThreshold, ...metrics } =
-        metricSelectExprs($, opts.metric, apdexThresholdMs, false, opts.allMetrics)
-      return {
-        name: buildBreakdownGroupExpr($, opts.groupBy, opts.groupByAttributeKey),
-        ...metrics,
-      }
-    })
-    .where(($) => buildWhereConditions($, opts))
-    .groupBy("name")
-    .orderBy(["count", "desc"])
-    .limit(limit)
-    .format("JSON")
+	return from(Traces)
+		.select(($) => {
+			const { sampledSpanCount, unsampledSpanCount, dominantThreshold, ...metrics } = metricSelectExprs(
+				$,
+				opts.metric,
+				apdexThresholdMs,
+				false,
+				opts.allMetrics,
+			)
+			return {
+				name: buildBreakdownGroupExpr($, opts.groupBy, opts.groupByAttributeKey),
+				...metrics,
+			}
+		})
+		.where(($) => buildWhereConditions($, opts))
+		.groupBy("name")
+		.orderBy(["count", "desc"])
+		.limit(limit)
+		.format("JSON")
 }
 
 // ---------------------------------------------------------------------------
@@ -344,104 +337,99 @@ export function tracesBreakdownQuery(
 // ---------------------------------------------------------------------------
 
 export interface TracesListOpts extends TracesQueryOpts {
-  limit?: number
-  offset?: number
-  /**
-   * Keyset pagination cursor. When set, only spans with `Timestamp < cursor`
-   * are returned. Mutually exclusive with `offset` in practice — the DSL applies
-   * both, but callers should pick one. Cursor is strictly preferred for deep
-   * pages: offset still scans all skipped rows.
-   */
-  cursor?: string
-  columns?: readonly string[]
+	limit?: number
+	offset?: number
+	/**
+	 * Keyset pagination cursor. When set, only spans with `Timestamp < cursor`
+	 * are returned. Mutually exclusive with `offset` in practice — the DSL applies
+	 * both, but callers should pick one. Cursor is strictly preferred for deep
+	 * pages: offset still scans all skipped rows.
+	 */
+	cursor?: string
+	columns?: readonly string[]
 }
 
 export interface TracesListOutput {
-  readonly traceId: string
-  readonly timestamp: string
-  readonly spanId: string
-  readonly serviceName: string
-  readonly spanName: string
-  readonly durationMs: number
-  readonly statusCode: string
-  readonly spanKind: string
-  readonly hasError: number
-  readonly spanAttributes: Record<string, string>
-  readonly resourceAttributes: Record<string, string>
+	readonly traceId: string
+	readonly timestamp: string
+	readonly spanId: string
+	readonly serviceName: string
+	readonly spanName: string
+	readonly durationMs: number
+	readonly statusCode: string
+	readonly spanKind: string
+	readonly hasError: number
+	readonly spanAttributes: Record<string, string>
+	readonly resourceAttributes: Record<string, string>
 }
 
 /**
  * Build a ClickHouse map() literal that extracts only the requested attribute keys.
  */
 function buildProjectedMapExpr(
-  requestedKeys: string[],
-  mapName: "SpanAttributes" | "ResourceAttributes",
+	requestedKeys: string[],
+	mapName: "SpanAttributes" | "ResourceAttributes",
 ): CH.Expr<Record<string, string>> {
-  if (requestedKeys.length === 0) return CH.mapLiteral()
-  const pairs: Array<[string, CH.Expr<string>]> = requestedKeys.map((key) => {
-    const valueExpr: CH.Expr<string> = CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), key)
-    return [key, valueExpr]
-  })
-  return CH.mapLiteral(...pairs)
+	if (requestedKeys.length === 0) return CH.mapLiteral()
+	const pairs: Array<[string, CH.Expr<string>]> = requestedKeys.map((key) => {
+		const valueExpr: CH.Expr<string> = CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), key)
+		return [key, valueExpr]
+	})
+	return CH.mapLiteral(...pairs)
 }
 
-export function tracesListQuery(
-  opts: TracesListOpts,
-) {
-  const limit = opts.limit ?? 25
-  const offset = opts.offset ?? 0
+export function tracesListQuery(opts: TracesListOpts) {
+	const limit = opts.limit ?? 25
+	const offset = opts.offset ?? 0
 
-  // Parse requested columns to determine which attribute keys are needed
-  const requestedSpanAttrKeys: string[] = []
-  const requestedResourceAttrKeys: string[] = []
-  let needsFullMaps = !opts.columns
+	// Parse requested columns to determine which attribute keys are needed
+	const requestedSpanAttrKeys: string[] = []
+	const requestedResourceAttrKeys: string[] = []
+	let needsFullMaps = !opts.columns
 
-  if (opts.columns) {
-    for (const col of opts.columns) {
-      if (col.startsWith("spanAttributes.")) {
-        requestedSpanAttrKeys.push(col.slice("spanAttributes.".length))
-      } else if (col.startsWith("resourceAttributes.")) {
-        requestedResourceAttrKeys.push(col.slice("resourceAttributes.".length))
-      }
-    }
-  }
+	if (opts.columns) {
+		for (const col of opts.columns) {
+			if (col.startsWith("spanAttributes.")) {
+				requestedSpanAttrKeys.push(col.slice("spanAttributes.".length))
+			} else if (col.startsWith("resourceAttributes.")) {
+				requestedResourceAttrKeys.push(col.slice("resourceAttributes.".length))
+			}
+		}
+	}
 
-  const spanAttrExpr = needsFullMaps
-    ? undefined // use $.SpanAttributes directly
-    : buildProjectedMapExpr(requestedSpanAttrKeys, "SpanAttributes")
-  const resourceAttrExpr = needsFullMaps
-    ? undefined // use $.ResourceAttributes directly
-    : buildProjectedMapExpr(requestedResourceAttrKeys, "ResourceAttributes")
+	const spanAttrExpr = needsFullMaps
+		? undefined // use $.SpanAttributes directly
+		: buildProjectedMapExpr(requestedSpanAttrKeys, "SpanAttributes")
+	const resourceAttrExpr = needsFullMaps
+		? undefined // use $.ResourceAttributes directly
+		: buildProjectedMapExpr(requestedResourceAttrKeys, "ResourceAttributes")
 
-  const cursor = opts.cursor
+	const cursor = opts.cursor
 
-  let q = from(Traces)
-    .select(($) => ({
-      traceId: $.TraceId,
-      timestamp: $.Timestamp,
-      spanId: $.SpanId,
-      serviceName: $.ServiceName,
-      spanName: $.SpanName,
-      durationMs: $.Duration.div(1000000),
-      statusCode: $.StatusCode,
-      spanKind: $.SpanKind,
-      hasError: CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
-      spanAttributes: spanAttrExpr ?? $.SpanAttributes,
-      resourceAttributes: resourceAttrExpr ?? $.ResourceAttributes,
-    }))
-    .where(($) => [
-      ...buildWhereConditions($, opts),
-      CH.when(cursor, (v: string) => $.Timestamp.lt(v)),
-    ])
-    .orderBy(["timestamp", "desc"])
-    .limit(limit)
-    .format("JSON")
+	let q = from(Traces)
+		.select(($) => ({
+			traceId: $.TraceId,
+			timestamp: $.Timestamp,
+			spanId: $.SpanId,
+			serviceName: $.ServiceName,
+			spanName: $.SpanName,
+			durationMs: $.Duration.div(1000000),
+			statusCode: $.StatusCode,
+			spanKind: $.SpanKind,
+			hasError: CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
+			spanAttributes: spanAttrExpr ?? $.SpanAttributes,
+			resourceAttributes: resourceAttrExpr ?? $.ResourceAttributes,
+		}))
+		.where(($) => [...buildWhereConditions($, opts), CH.when(cursor, (v: string) => $.Timestamp.lt(v))])
+		.orderBy(["timestamp", "desc"])
+		.limit(limit)
+		.format("JSON")
 
-  if (offset > 0) {
-    q = q.offset(offset)
-  }
+	if (offset > 0) {
+		q = q.offset(offset)
+	}
 
-  return q
+	return q
 }
 
 // ---------------------------------------------------------------------------
@@ -449,66 +437,64 @@ export function tracesListQuery(
 // ---------------------------------------------------------------------------
 
 export interface TracesRootListOpts extends TracesQueryOpts {
-  limit?: number
-  offset?: number
-  /**
-   * Keyset pagination cursor. When set, only root spans with `Timestamp < cursor`
-   * are returned. Strictly preferred over `offset` for deep pagination.
-   */
-  cursor?: string
+	limit?: number
+	offset?: number
+	/**
+	 * Keyset pagination cursor. When set, only root spans with `Timestamp < cursor`
+	 * are returned. Strictly preferred over `offset` for deep pagination.
+	 */
+	cursor?: string
 }
 
 export interface TracesRootListOutput {
-  readonly traceId: string
-  readonly startTime: string
-  readonly endTime: string
-  readonly durationMicros: number
-  readonly spanCount: number
-  readonly services: readonly string[]
-  readonly rootSpanName: string
-  readonly rootSpanKind: string
-  readonly rootSpanStatusCode: string
-  readonly rootHttpMethod: string
-  readonly rootHttpRoute: string
-  readonly rootHttpStatusCode: string
-  readonly hasError: number
+	readonly traceId: string
+	readonly startTime: string
+	readonly endTime: string
+	readonly durationMicros: number
+	readonly spanCount: number
+	readonly services: readonly string[]
+	readonly rootSpanName: string
+	readonly rootSpanKind: string
+	readonly rootSpanStatusCode: string
+	readonly rootHttpMethod: string
+	readonly rootHttpRoute: string
+	readonly rootHttpStatusCode: string
+	readonly hasError: number
 }
 
-export function tracesRootListQuery(
-  opts: TracesRootListOpts,
-) {
-  const limit = opts.limit ?? 25
-  const offset = opts.offset ?? 0
+export function tracesRootListQuery(opts: TracesRootListOpts) {
+	const limit = opts.limit ?? 25
+	const offset = opts.offset ?? 0
 
-  const cursor = opts.cursor
+	const cursor = opts.cursor
 
-  let q = from(Traces)
-    .select(($) => ({
-      traceId: $.TraceId,
-      startTime: $.Timestamp,
-      endTime: $.Timestamp,
-      durationMicros: CH.intDiv($.Duration, 1000),
-      spanCount: CH.toUInt64(CH.lit(1)),
-      services: CH.arrayOf($.ServiceName),
-      rootSpanName: $.SpanName,
-      rootSpanKind: $.SpanKind,
-      rootSpanStatusCode: $.StatusCode,
-      rootHttpMethod: $.SpanAttributes.get("http.method"),
-      rootHttpRoute: $.SpanAttributes.get("http.route"),
-      rootHttpStatusCode: $.SpanAttributes.get("http.status_code"),
-      hasError: CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
-    }))
-    .where(($) => [
-      ...buildWhereConditions($, { ...opts, rootOnly: true }),
-      CH.when(cursor, (v: string) => $.Timestamp.lt(v)),
-    ])
-    .orderBy(["startTime", "desc"])
-    .limit(limit)
-    .format("JSON")
+	let q = from(Traces)
+		.select(($) => ({
+			traceId: $.TraceId,
+			startTime: $.Timestamp,
+			endTime: $.Timestamp,
+			durationMicros: CH.intDiv($.Duration, 1000),
+			spanCount: CH.toUInt64(CH.lit(1)),
+			services: CH.arrayOf($.ServiceName),
+			rootSpanName: $.SpanName,
+			rootSpanKind: $.SpanKind,
+			rootSpanStatusCode: $.StatusCode,
+			rootHttpMethod: $.SpanAttributes.get("http.method"),
+			rootHttpRoute: $.SpanAttributes.get("http.route"),
+			rootHttpStatusCode: $.SpanAttributes.get("http.status_code"),
+			hasError: CH.if_($.StatusCode.eq("Error"), CH.lit(1), CH.lit(0)),
+		}))
+		.where(($) => [
+			...buildWhereConditions($, { ...opts, rootOnly: true }),
+			CH.when(cursor, (v: string) => $.Timestamp.lt(v)),
+		])
+		.orderBy(["startTime", "desc"])
+		.limit(limit)
+		.format("JSON")
 
-  if (offset > 0) {
-    q = q.offset(offset)
-  }
+	if (offset > 0) {
+		q = q.offset(offset)
+	}
 
-  return q
+	return q
 }

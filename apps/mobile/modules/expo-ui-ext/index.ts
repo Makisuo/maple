@@ -5,5 +5,4 @@ import { createModifier, type ModifierConfig } from "@expo/ui/swift-ui/modifiers
  * Applied globally via `UISegmentedControl.appearance()`, so it stays
  * consistent across every segmented picker in the app.
  */
-export const segmentedTint = (color: string): ModifierConfig =>
-	createModifier("segmentedTint", { color })
+export const segmentedTint = (color: string): ModifierConfig => createModifier("segmentedTint", { color })

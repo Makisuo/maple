@@ -19,11 +19,7 @@ function formatLabel(bucket: string) {
 	}
 }
 
-export function TimeseriesChart({
-	points,
-	height = DEFAULT_HEIGHT,
-	colorOverrides,
-}: TimeseriesChartProps) {
+export function TimeseriesChart({ points, height = DEFAULT_HEIGHT, colorOverrides }: TimeseriesChartProps) {
 	if (points.length === 0) {
 		return (
 			<View className="items-center justify-center" style={{ height }}>
@@ -44,8 +40,7 @@ export function TimeseriesChart({
 		}
 	}
 
-	const colorFor = (key: string) =>
-		colorOverrides?.[key] ?? getServiceColor(key)
+	const colorFor = (key: string) => colorOverrides?.[key] ?? getServiceColor(key)
 
 	// Find the max stacked total across buckets so all bars share a scale.
 	let max = 0
@@ -85,13 +80,8 @@ export function TimeseriesChart({
 					const barHeight = Math.max((total / max) * height, total > 0 ? 1 : 0)
 
 					return (
-						<View
-							key={i}
-							style={{ flex: 1, justifyContent: "flex-end", height }}
-						>
-							<View
-								style={{ width: "100%", borderRadius: 2, overflow: "hidden" }}
-							>
+						<View key={i} style={{ flex: 1, justifyContent: "flex-end", height }}>
+							<View style={{ width: "100%", borderRadius: 2, overflow: "hidden" }}>
 								{seriesKeys.map((key) => {
 									const v = point.series[key]
 									if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
@@ -125,11 +115,7 @@ export function TimeseriesChart({
 				}}
 			>
 				{labelIndices.map((idx) => (
-					<Text
-						key={idx}
-						className="text-muted-foreground font-mono"
-						style={{ fontSize: 10 }}
-					>
+					<Text key={idx} className="text-muted-foreground font-mono" style={{ fontSize: 10 }}>
 						{formatLabel(points[idx].bucket)}
 					</Text>
 				))}
@@ -145,10 +131,7 @@ export function TimeseriesChart({
 					}}
 				>
 					{seriesKeys.map((key) => (
-						<View
-							key={key}
-							style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
-						>
+						<View key={key} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
 							<View
 								style={{
 									width: 8,

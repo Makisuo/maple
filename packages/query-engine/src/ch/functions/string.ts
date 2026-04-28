@@ -7,7 +7,9 @@ import type { Expr } from "../expr"
 
 export const toString_ = defineFn<[Expr<any>], string>("toString")
 export const length_ = defineFn<[Expr<string>], number>("length")
-export const positionCaseInsensitive = defineFn<[Expr<string>, Expr<string>], number>("positionCaseInsensitive")
+export const positionCaseInsensitive = defineFn<[Expr<string>, Expr<string>], number>(
+	"positionCaseInsensitive",
+)
 export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left")
 
 // ---------------------------------------------------------------------------
@@ -15,19 +17,15 @@ export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left")
 // ---------------------------------------------------------------------------
 
 export function position_(haystack: Expr<string>, needle: string): Expr<number> {
-  return compileFnCall<number>("position", haystack, needle)
+	return compileFnCall<number>("position", haystack, needle)
 }
 
 export function extract_(expr: Expr<string>, pattern: string): Expr<string> {
-  return compileFnCall<string>("extract", expr, pattern)
+	return compileFnCall<string>("extract", expr, pattern)
 }
 
-export function replaceOne(
-  haystack: Expr<string>,
-  pattern: string,
-  replacement: string,
-): Expr<string> {
-  return compileFnCall<string>("replaceOne", haystack, pattern, replacement)
+export function replaceOne(haystack: Expr<string>, pattern: string, replacement: string): Expr<string> {
+	return compileFnCall<string>("replaceOne", haystack, pattern, replacement)
 }
 
 // ---------------------------------------------------------------------------
@@ -35,5 +33,5 @@ export function replaceOne(
 // ---------------------------------------------------------------------------
 
 export function concat(...exprs: Array<Expr<string> | string>): Expr<string> {
-  return compileFnCall<string>("concat", ...exprs)
+	return compileFnCall<string>("concat", ...exprs)
 }

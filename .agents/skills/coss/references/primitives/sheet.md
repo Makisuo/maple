@@ -27,15 +27,15 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-  SheetTrigger,
+	Sheet,
+	SheetContent,
+	SheetDescription,
+	SheetFooter,
+	SheetHeader,
+	SheetPanel,
+	SheetPopup,
+	SheetTitle,
+	SheetTrigger,
 } from "@/components/ui/sheet"
 ```
 
@@ -43,20 +43,20 @@ import {
 
 ```tsx
 <Sheet>
-  <SheetTrigger>Open</SheetTrigger>
-  <SheetPopup>
-    <SheetHeader>
-      <SheetTitle>Are you absolutely sure?</SheetTitle>
-      <SheetDescription>
-        This action cannot be undone. This will permanently delete your account
-        and remove your data from our servers.
-      </SheetDescription>
-    </SheetHeader>
-    <SheetPanel>Content</SheetPanel>
-    <SheetFooter>
-      <SheetClose>Close</SheetClose>
-    </SheetFooter>
-  </SheetPopup>
+	<SheetTrigger>Open</SheetTrigger>
+	<SheetPopup>
+		<SheetHeader>
+			<SheetTitle>Are you absolutely sure?</SheetTitle>
+			<SheetDescription>
+				This action cannot be undone. This will permanently delete your account and remove your data
+				from our servers.
+			</SheetDescription>
+		</SheetHeader>
+		<SheetPanel>Content</SheetPanel>
+		<SheetFooter>
+			<SheetClose>Close</SheetClose>
+		</SheetFooter>
+	</SheetPopup>
 </Sheet>
 ```
 
@@ -70,23 +70,23 @@ Sheet from the right side with form:
 
 ```tsx
 <Sheet>
-  <SheetTrigger render={<Button variant="outline" />}>Edit Profile</SheetTrigger>
-  <SheetPopup side="right">
-    <SheetHeader>
-      <SheetTitle>Edit Profile</SheetTitle>
-      <SheetDescription>Make changes to your profile here.</SheetDescription>
-    </SheetHeader>
-    <SheetPanel className="flex flex-col gap-4">
-      <Field name="name">
-        <FieldLabel>Name</FieldLabel>
-        <Input type="text" />
-      </Field>
-    </SheetPanel>
-    <SheetFooter>
-      <SheetClose render={<Button variant="ghost" />}>Cancel</SheetClose>
-      <Button>Save</Button>
-    </SheetFooter>
-  </SheetPopup>
+	<SheetTrigger render={<Button variant="outline" />}>Edit Profile</SheetTrigger>
+	<SheetPopup side="right">
+		<SheetHeader>
+			<SheetTitle>Edit Profile</SheetTitle>
+			<SheetDescription>Make changes to your profile here.</SheetDescription>
+		</SheetHeader>
+		<SheetPanel className="flex flex-col gap-4">
+			<Field name="name">
+				<FieldLabel>Name</FieldLabel>
+				<Input type="text" />
+			</Field>
+		</SheetPanel>
+		<SheetFooter>
+			<SheetClose render={<Button variant="ghost" />}>Cancel</SheetClose>
+			<Button>Save</Button>
+		</SheetFooter>
+	</SheetPopup>
 </Sheet>
 ```
 

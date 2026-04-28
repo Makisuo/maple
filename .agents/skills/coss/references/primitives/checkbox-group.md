@@ -28,18 +28,18 @@ import { CheckboxGroup } from "@/components/ui/checkbox-group"
 
 ```tsx
 <CheckboxGroup>
-  <Label>
-    <Checkbox defaultChecked />
-    Next.js
-  </Label>
-  <Label>
-    <Checkbox />
-    Vite
-  </Label>
-  <Label>
-    <Checkbox />
-    Astro
-  </Label>
+	<Label>
+		<Checkbox defaultChecked />
+		Next.js
+	</Label>
+	<Label>
+		<Checkbox />
+		Vite
+	</Label>
+	<Label>
+		<Checkbox />
+		Astro
+	</Label>
 </CheckboxGroup>
 ```
 
@@ -53,14 +53,14 @@ Group with `aria-label` and `defaultValue`:
 
 ```tsx
 <CheckboxGroup aria-label="Select frameworks" defaultValue={["next"]}>
-  <Label>
-    <Checkbox value="next" />
-    Next.js
-  </Label>
-  <Label>
-    <Checkbox value="vite" />
-    Vite
-  </Label>
+	<Label>
+		<Checkbox value="next" />
+		Next.js
+	</Label>
+	<Label>
+		<Checkbox value="vite" />
+		Vite
+	</Label>
 </CheckboxGroup>
 ```
 

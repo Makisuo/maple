@@ -7,8 +7,8 @@
 // ---------------------------------------------------------------------------
 
 export interface CHType<Tag extends string, TSType> {
-  readonly _tag: Tag
-  readonly _phantom?: TSType
+	readonly _tag: Tag
+	readonly _phantom?: TSType
 }
 
 // ---------------------------------------------------------------------------
@@ -30,20 +30,14 @@ export type CHBool = CHType<"Bool", boolean>
 // Compound types
 // ---------------------------------------------------------------------------
 
-export type CHMap<
-  _K extends CHType<string, string>,
-  V extends CHType<string, any>,
-> = CHType<"Map", Record<string, InferTS<V>>>
-
-export type CHArray<E extends CHType<string, any>> = CHType<
-  "Array",
-  ReadonlyArray<InferTS<E>>
+export type CHMap<_K extends CHType<string, string>, V extends CHType<string, any>> = CHType<
+	"Map",
+	Record<string, InferTS<V>>
 >
 
-export type CHNullable<T extends CHType<string, any>> = CHType<
-  "Nullable",
-  InferTS<T> | null
->
+export type CHArray<E extends CHType<string, any>> = CHType<"Array", ReadonlyArray<InferTS<E>>>
+
+export type CHNullable<T extends CHType<string, any>> = CHType<"Nullable", InferTS<T> | null>
 
 // ---------------------------------------------------------------------------
 // Type-level TS extraction
@@ -55,12 +49,12 @@ export type ColumnDefs = Record<string, CHType<string, any>>
 
 /** Convert a query's Output record to synthetic ColumnDefs for subquery-as-table usage. */
 export type OutputToColumnDefs<O extends Record<string, any>> = {
-  readonly [K in keyof O & string]: CHType<"Inferred", O[K]>
+	readonly [K in keyof O & string]: CHType<"Inferred", O[K]>
 }
 
 /** Wrap each column type with `| null` for LEFT JOIN results. */
 export type NullableColumnDefs<Cols extends ColumnDefs> = {
-  readonly [K in keyof Cols & string]: CHType<"Nullable", InferTS<Cols[K]> | null>
+	readonly [K in keyof Cols & string]: CHType<"Nullable", InferTS<Cols[K]> | null>
 }
 
 // ---------------------------------------------------------------------------
@@ -79,14 +73,11 @@ export const dateTime64: CHDateTime64 = { _tag: "DateTime64" }
 export const bool: CHBool = { _tag: "Bool" }
 
 export const map = <K extends CHType<string, string>, V extends CHType<string, any>>(
-  _k: K,
-  _v: V,
+	_k: K,
+	_v: V,
 ): CHMap<K, V> => ({ _tag: "Map" }) as CHMap<K, V>
 
-export const array = <E extends CHType<string, any>>(
-  _e: E,
-): CHArray<E> => ({ _tag: "Array" }) as CHArray<E>
+export const array = <E extends CHType<string, any>>(_e: E): CHArray<E> => ({ _tag: "Array" }) as CHArray<E>
 
-export const nullable = <T extends CHType<string, any>>(
-  _t: T,
-): CHNullable<T> => ({ _tag: "Nullable" }) as CHNullable<T>
+export const nullable = <T extends CHType<string, any>>(_t: T): CHNullable<T> =>
+	({ _tag: "Nullable" }) as CHNullable<T>

@@ -27,13 +27,13 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Popover,
-  PopoverClose,
-  PopoverCreateHandle,
-  PopoverDescription,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
+	Popover,
+	PopoverClose,
+	PopoverCreateHandle,
+	PopoverDescription,
+	PopoverPopup,
+	PopoverTitle,
+	PopoverTrigger,
 } from "@/components/ui/popover"
 ```
 
@@ -41,12 +41,12 @@ import {
 
 ```tsx
 <Popover>
-  <PopoverTrigger render={<Button variant="outline" />}>Open Popover</PopoverTrigger>
-  <PopoverPopup>
-    <PopoverTitle>Popover Title</PopoverTitle>
-    <PopoverDescription>Popover Description</PopoverDescription>
-    <PopoverClose render={<Button variant="outline" />}>Close</PopoverClose>
-  </PopoverPopup>
+	<PopoverTrigger render={<Button variant="outline" />}>Open Popover</PopoverTrigger>
+	<PopoverPopup>
+		<PopoverTitle>Popover Title</PopoverTitle>
+		<PopoverDescription>Popover Description</PopoverDescription>
+		<PopoverClose render={<Button variant="outline" />}>Close</PopoverClose>
+	</PopoverPopup>
 </Popover>
 ```
 

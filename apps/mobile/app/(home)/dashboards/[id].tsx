@@ -6,17 +6,9 @@ import { DashboardWidgetView } from "../../../components/dashboards/dashboard-wi
 import { Screen, useScreenBottomPadding } from "../../../components/ui/screen"
 import { ScreenHeader } from "../../../components/ui/screen-header"
 import { TimeRangePicker } from "../../../components/ui/time-range-picker"
-import {
-	EmptyView,
-	ErrorView,
-	LoadingView,
-} from "../../../components/ui/state-view"
+import { EmptyView, ErrorView, LoadingView } from "../../../components/ui/state-view"
 import type { TimeRangeKey } from "../../../lib/time-utils"
-import type {
-	DashboardDocument,
-	DashboardWidget,
-	WidgetTimeRange,
-} from "../../../lib/api"
+import type { DashboardDocument, DashboardWidget, WidgetTimeRange } from "../../../lib/api"
 
 const TIME_OPTIONS: TimeRangeKey[] = ["1h", "24h", "7d", "30d"]
 
@@ -79,11 +71,7 @@ export default function DashboardDetailScreen() {
 	if (!dashboard) {
 		return (
 			<Screen>
-				<ScreenHeader
-					title="Dashboard"
-					backLabel="Dashboards"
-					onBack={() => router.back()}
-				/>
+				<ScreenHeader title="Dashboard" backLabel="Dashboards" onBack={() => router.back()} />
 				<EmptyView title="Dashboard not found." />
 			</Screen>
 		)
@@ -92,19 +80,13 @@ export default function DashboardDetailScreen() {
 	return <DashboardDetailContent dashboard={dashboard} />
 }
 
-function DashboardDetailContent({
-	dashboard,
-}: {
-	dashboard: DashboardDocument
-}) {
+function DashboardDetailContent({ dashboard }: { dashboard: DashboardDocument }) {
 	const router = useRouter()
 	const widgets = sortWidgets(dashboard.widgets)
 	const rows = useMemo(() => buildRows(widgets), [widgets])
 	const bottomPadding = useScreenBottomPadding()
 
-	const [selectedIndex, setSelectedIndex] = useState(() =>
-		defaultTimeIndex(dashboard.timeRange),
-	)
+	const [selectedIndex, setSelectedIndex] = useState(() => defaultTimeIndex(dashboard.timeRange))
 	const timeKey = TIME_OPTIONS[selectedIndex]
 
 	const effectiveTimeRange = useMemo<WidgetTimeRange>(
@@ -142,11 +124,7 @@ function DashboardDetailContent({
 						if (row.kind === "stat-pair") {
 							const [a, b] = row.widgets
 							return (
-								<View
-									key={`row-${idx}`}
-									className="px-5 pb-3 flex-row"
-									style={{ gap: 12 }}
-								>
+								<View key={`row-${idx}`} className="px-5 pb-3 flex-row" style={{ gap: 12 }}>
 									<View style={{ flex: 1 }}>
 										<DashboardWidgetView
 											widget={a}
@@ -166,10 +144,7 @@ function DashboardDetailContent({
 						}
 						return (
 							<View key={row.widget.id} className="px-5 pb-3">
-								<DashboardWidgetView
-									widget={row.widget}
-									timeRange={effectiveTimeRange}
-								/>
+								<DashboardWidgetView widget={row.widget} timeRange={effectiveTimeRange} />
 							</View>
 						)
 					})}

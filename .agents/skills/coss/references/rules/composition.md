@@ -15,13 +15,13 @@ Use this when composing complex UI from coss primitives and particles.
 
 ```tsx
 <Dialog>
-  <DialogTrigger render={<Button variant="outline" />}>Open</DialogTrigger>
-  <DialogPopup>
-    <DialogHeader>
-      <DialogTitle>Title</DialogTitle>
-    </DialogHeader>
-    <DialogPanel>Body</DialogPanel>
-  </DialogPopup>
+	<DialogTrigger render={<Button variant="outline" />}>Open</DialogTrigger>
+	<DialogPopup>
+		<DialogHeader>
+			<DialogTitle>Title</DialogTitle>
+		</DialogHeader>
+		<DialogPanel>Body</DialogPanel>
+	</DialogPopup>
 </Dialog>
 ```
 
@@ -33,9 +33,9 @@ Only specific composed wrappers accept optional `portalProps` (spread onto Base 
 
 ```tsx
 <Group>
-  <Button variant="outline">A</Button>
-  <GroupSeparator />
-  <Button variant="outline">B</Button>
+	<Button variant="outline">A</Button>
+	<GroupSeparator />
+	<Button variant="outline">B</Button>
 </Group>
 ```
 

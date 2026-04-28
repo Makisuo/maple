@@ -3,23 +3,19 @@
 ## Basic Endpoint Definition
 
 ```typescript
-import {
-  defineEndpoint, node, t, p,
-  type InferParams,
-  type InferOutputRow
-} from "@tinybirdco/sdk";
+import { defineEndpoint, node, t, p, type InferParams, type InferOutputRow } from "@tinybirdco/sdk"
 
 export const topPages = defineEndpoint("top_pages", {
-  description: "Get the most visited pages",
-  params: {
-    start_date: p.dateTime(),
-    end_date: p.dateTime(),
-    limit: p.int32().optional(10),
-  },
-  nodes: [
-    node({
-      name: "aggregated",
-      sql: `
+	description: "Get the most visited pages",
+	params: {
+		start_date: p.dateTime(),
+		end_date: p.dateTime(),
+		limit: p.int32().optional(10),
+	},
+	nodes: [
+		node({
+			name: "aggregated",
+			sql: `
         SELECT pathname, count() AS views
         FROM page_views
         WHERE timestamp >= {{DateTime(start_date)}}
@@ -28,16 +24,16 @@ export const topPages = defineEndpoint("top_pages", {
         ORDER BY views DESC
         LIMIT {{Int32(limit, 10)}}
       `,
-    }),
-  ],
-  output: {
-    pathname: t.string(),
-    views: t.uint64(),
-  },
-});
+		}),
+	],
+	output: {
+		pathname: t.string(),
+		views: t.uint64(),
+	},
+})
 
-export type TopPagesParams = InferParams<typeof topPages>;
-export type TopPagesOutput = InferOutputRow<typeof topPages>;
+export type TopPagesParams = InferParams<typeof topPages>
+export type TopPagesOutput = InferOutputRow<typeof topPages>
 ```
 
 ## Parameter Types
@@ -55,6 +51,7 @@ The `p` object provides parameter definitions:
 - `.optional(defaultValue)` - Make parameter optional with a default value
 
 Example:
+
 ```typescript
 params: {
   limit: p.int32().optional(10),
@@ -102,9 +99,9 @@ LIMIT {{Int32(limit, 100)}}
 ## Type Inference
 
 ```typescript
-export type TopPagesParams = InferParams<typeof topPages>;
+export type TopPagesParams = InferParams<typeof topPages>
 // Results in: { start_date: Date; end_date: Date; limit?: number }
 
-export type TopPagesOutput = InferOutputRow<typeof topPages>;
+export type TopPagesOutput = InferOutputRow<typeof topPages>
 // Results in: { pathname: string; views: bigint }
 ```

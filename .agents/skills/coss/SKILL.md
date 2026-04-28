@@ -4,7 +4,7 @@ description: Helps implement coss UI components correctly. Use when building UIs
 compatibility: Requires Tailwind CSS v4 and @base-ui/react. Designed for React projects using the coss component registry.
 license: MIT
 metadata:
-  author: cosscom
+    author: cosscom
 ---
 
 # coss ui
@@ -23,9 +23,9 @@ Use this skill to:
 ## Source of truth
 
 - coss components docs: `apps/ui/content/docs/components/*.mdx`
-  - `https://github.com/cosscom/coss/tree/main/apps/ui/content/docs/components`
+    - `https://github.com/cosscom/coss/tree/main/apps/ui/content/docs/components`
 - coss particle examples: `apps/ui/registry/default/particles/p-*.tsx`
-  - `https://github.com/cosscom/coss/tree/main/apps/ui/registry/default/particles`
+    - `https://github.com/cosscom/coss/tree/main/apps/ui/registry/default/particles`
 - coss particles catalog: `https://coss.com/ui/particles`
 - docs map for agents: `https://coss.com/ui/llms.txt`
 
@@ -114,4 +114,3 @@ Before returning code:
 - composition structure is valid for selected primitive(s)
 - accessibility and explicit control types (`button`, `input`, etc.) are present
 - migration-sensitive flows are verified (type/lint, keyboard/a11y behavior, and SSR-sensitive primitives like Select/Command)
-

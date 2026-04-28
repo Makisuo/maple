@@ -62,10 +62,7 @@ export function ChatScreen({ threadId, alertContext, topInset }: ChatScreenProps
 
 			{error ? (
 				<View className="mx-4 mb-2 rounded-md bg-destructive/10 px-3 py-2">
-					<Text
-						className="font-mono text-[11px] text-destructive"
-						numberOfLines={3}
-					>
+					<Text className="font-mono text-[11px] text-destructive" numberOfLines={3}>
 						{error}
 					</Text>
 				</View>

@@ -39,9 +39,9 @@ top_events = define_endpoint(
 
 ### Token Scopes
 
-| Scope | Description |
-|-------|-------------|
-| `READ` | Read access |
+| Scope    | Description          |
+| -------- | -------------------- |
+| `READ`   | Read access          |
 | `APPEND` | Append/ingest access |
 
 ## JWT Token Creation
@@ -79,19 +79,19 @@ jwt_token = result["token"]
 
 ### JWT Scope Types
 
-| Scope | Description |
-|-------|-------------|
-| `PIPES:READ` | Read access to a specific pipe endpoint |
-| `DATASOURCES:READ` | Read access to a datasource |
-| `DATASOURCES:APPEND` | Append access to a datasource |
+| Scope                | Description                             |
+| -------------------- | --------------------------------------- |
+| `PIPES:READ`         | Read access to a specific pipe endpoint |
+| `DATASOURCES:READ`   | Read access to a datasource             |
+| `DATASOURCES:APPEND` | Append access to a datasource           |
 
 ### JWT Scope Options
 
-| Option | Description |
-|--------|-------------|
-| `resource` | Name of the pipe or datasource |
+| Option         | Description                                         |
+| -------------- | --------------------------------------------------- |
+| `resource`     | Name of the pipe or datasource                      |
 | `fixed_params` | Parameters embedded in token (cannot be overridden) |
-| `filter` | SQL WHERE clause for datasource filtering |
+| `filter`       | SQL WHERE clause for datasource filtering           |
 
 ### Example: Multi-Tenant Access
 
@@ -120,6 +120,6 @@ org_token = client.tokens.create_jwt(
 
 ### JWT Limits
 
-| Option | Description |
-|--------|-------------|
-| `rps` | Requests per second limit |
+| Option | Description               |
+| ------ | ------------------------- |
+| `rps`  | Requests per second limit |

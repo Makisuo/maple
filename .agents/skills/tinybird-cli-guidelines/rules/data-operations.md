@@ -36,6 +36,7 @@ tb datasource replace events data.csv --sql-condition "toDate(date) >= '2019-11-
 **⚠️ Critical**: Never replace data in partitions where you are actively ingesting. You may lose data inserted during the operation.
 
 **Rules**:
+
 - **Always include the partition key** in the SQL condition
 - The condition determines: (1) which partitions to operate on, (2) which rows from new data to append
 - **Cascades automatically** to downstream Materialized Views (all must have compatible partition keys)
@@ -44,9 +45,11 @@ tb datasource replace events data.csv --sql-condition "toDate(date) >= '2019-11-
 ### Why Partition Key Matters
 
 If your Data Source uses `ENGINE_PARTITION_KEY "country"` and you run:
+
 ```bash
 tb datasource replace events data.csv --sql-condition "status='active'"
 ```
+
 This will **not work as expected**—the replace process uses payload rows to identify partitions. Always match the partition key.
 
 ## Replace Data Completely (Full Replace)

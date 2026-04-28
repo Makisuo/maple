@@ -20,13 +20,7 @@ npm install @base-ui/react
 ## Canonical imports
 
 ```tsx
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  FieldValidity,
-} from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldLabel, FieldValidity } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 ```
 
@@ -54,10 +48,10 @@ Required field with error:
 
 ```tsx
 <Field name="email">
-  <FieldLabel>Email *</FieldLabel>
-  <Input type="email" required placeholder="name@company.com" />
-  <FieldDescription>We'll never share your email.</FieldDescription>
-  <FieldError>Please enter a valid email.</FieldError>
+	<FieldLabel>Email *</FieldLabel>
+	<Input type="email" required placeholder="name@company.com" />
+	<FieldDescription>We'll never share your email.</FieldDescription>
+	<FieldError>Please enter a valid email.</FieldError>
 </Field>
 ```
 
@@ -65,16 +59,20 @@ Field wrapping an autocomplete:
 
 ```tsx
 <Field name="framework">
-  <FieldLabel>Framework</FieldLabel>
-  <Autocomplete items={items}>
-    <AutocompleteInput placeholder="Search..." />
-    <AutocompletePopup>
-      <AutocompleteList>
-        {(item) => <AutocompleteItem key={item.value} value={item}>{item.label}</AutocompleteItem>}
-      </AutocompleteList>
-    </AutocompletePopup>
-  </Autocomplete>
-  <FieldError />
+	<FieldLabel>Framework</FieldLabel>
+	<Autocomplete items={items}>
+		<AutocompleteInput placeholder="Search..." />
+		<AutocompletePopup>
+			<AutocompleteList>
+				{(item) => (
+					<AutocompleteItem key={item.value} value={item}>
+						{item.label}
+					</AutocompleteItem>
+				)}
+			</AutocompleteList>
+		</AutocompletePopup>
+	</Autocomplete>
+	<FieldError />
 </Field>
 ```
 

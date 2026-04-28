@@ -1,48 +1,48 @@
 {
-  "version": "7",
-  "dialect": "sqlite",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "6",
-      "when": 1776292962494,
-      "tag": "0000_shiny_venus",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1776644022082,
-      "tag": "0001_purple_big_bertha",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1776723447868,
-      "tag": "0002_errors_workflow",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1776807065333,
-      "tag": "0003_slimy_moira_mactaggert",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1777204738595,
-      "tag": "0004_cheerful_paibok",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1777216816116,
-      "tag": "0005_heavy_william_stryker",
-      "breakpoints": true
-    }
-  ]
+	"version": "7",
+	"dialect": "sqlite",
+	"entries": [
+		{
+			"idx": 0,
+			"version": "6",
+			"when": 1776292962494,
+			"tag": "0000_shiny_venus",
+			"breakpoints": true
+		},
+		{
+			"idx": 1,
+			"version": "6",
+			"when": 1776644022082,
+			"tag": "0001_purple_big_bertha",
+			"breakpoints": true
+		},
+		{
+			"idx": 2,
+			"version": "6",
+			"when": 1776723447868,
+			"tag": "0002_errors_workflow",
+			"breakpoints": true
+		},
+		{
+			"idx": 3,
+			"version": "6",
+			"when": 1776807065333,
+			"tag": "0003_slimy_moira_mactaggert",
+			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "6",
+			"when": 1777204738595,
+			"tag": "0004_cheerful_paibok",
+			"breakpoints": true
+		},
+		{
+			"idx": 5,
+			"version": "6",
+			"when": 1777216816116,
+			"tag": "0005_heavy_william_stryker",
+			"breakpoints": true
+		}
+	]
 }

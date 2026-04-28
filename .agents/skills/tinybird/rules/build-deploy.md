@@ -8,10 +8,8 @@ Example:
 
 ```json
 {
-  "dev_mode": "branch",
-  "include": [
-    "tinybird"
-  ]
+	"dev_mode": "branch",
+	"include": ["tinybird"]
 }
 ```
 

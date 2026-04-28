@@ -5,25 +5,32 @@ For cases requiring a decoupled API wrapper without the typed client:
 ## Creating the API Client
 
 ```typescript
-import { createTinybirdApi } from "@tinybirdco/sdk";
+import { createTinybirdApi } from "@tinybirdco/sdk"
 
 const api = createTinybirdApi({
-  baseUrl: "https://api.tinybird.co",
-  token: process.env.TINYBIRD_TOKEN!,
-});
+	baseUrl: "https://api.tinybird.co",
+	token: process.env.TINYBIRD_TOKEN!,
+})
 ```
 
 ## Querying Endpoints
 
 ```typescript
-interface TopPagesRow { pathname: string; visits: number }
-interface TopPagesParams { start_date: string; end_date: string; limit?: number }
+interface TopPagesRow {
+	pathname: string
+	visits: number
+}
+interface TopPagesParams {
+	start_date: string
+	end_date: string
+	limit?: number
+}
 
 const topPages = await api.query<TopPagesRow, TopPagesParams>("top_pages", {
-  start_date: "2024-01-01",
-  end_date: "2024-01-31",
-  limit: 5,
-});
+	start_date: "2024-01-01",
+	end_date: "2024-01-31",
+	limit: 5,
+})
 
 // topPages.data is typed as TopPagesRow[]
 ```
@@ -31,29 +38,33 @@ const topPages = await api.query<TopPagesRow, TopPagesParams>("top_pages", {
 ## Ingesting Data
 
 ```typescript
-interface EventRow { timestamp: Date; event_name: string; pathname: string }
+interface EventRow {
+	timestamp: Date
+	event_name: string
+	pathname: string
+}
 
 await api.ingest<EventRow>("events", {
-  timestamp: new Date(),
-  event_name: "page_view",
-  pathname: "/home",
-});
+	timestamp: new Date(),
+	event_name: "page_view",
+	pathname: "/home",
+})
 
 // Batch ingestion
 await api.ingest<EventRow>("events", [
-  { timestamp: new Date(), event_name: "page_view", pathname: "/home" },
-  { timestamp: new Date(), event_name: "click", pathname: "/home" },
-]);
+	{ timestamp: new Date(), event_name: "page_view", pathname: "/home" },
+	{ timestamp: new Date(), event_name: "click", pathname: "/home" },
+])
 ```
 
 ## Executing Raw SQL
 
 ```typescript
-interface CountResult { total: number }
+interface CountResult {
+	total: number
+}
 
-const sqlResult = await api.sql<CountResult>(
-  "SELECT count() AS total FROM events"
-);
+const sqlResult = await api.sql<CountResult>("SELECT count() AS total FROM events")
 
 // sqlResult.data[0].total
 ```
@@ -62,8 +73,8 @@ const sqlResult = await api.sql<CountResult>(
 
 ```typescript
 await api.request("/v1/workspace", {
-  token: process.env.TINYBIRD_BRANCH_TOKEN,
-});
+	token: process.env.TINYBIRD_BRANCH_TOKEN,
+})
 ```
 
 ## When to Use Low-Level API

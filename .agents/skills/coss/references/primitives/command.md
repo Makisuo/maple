@@ -27,21 +27,21 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  Command,
-  CommandCollection,
-  CommandDialog,
-  CommandDialogPopup,
-  CommandDialogTrigger,
-  CommandEmpty,
-  CommandFooter,
-  CommandGroup,
-  CommandGroupLabel,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandPanel,
-  CommandSeparator,
-  CommandShortcut,
+	Command,
+	CommandCollection,
+	CommandDialog,
+	CommandDialogPopup,
+	CommandDialogTrigger,
+	CommandEmpty,
+	CommandFooter,
+	CommandGroup,
+	CommandGroupLabel,
+	CommandInput,
+	CommandItem,
+	CommandList,
+	CommandPanel,
+	CommandSeparator,
+	CommandShortcut,
 } from "@/components/ui/command"
 import { Button } from "@/components/ui/button"
 ```
@@ -86,20 +86,20 @@ Command with grouped sections:
 
 ```tsx
 <Command items={items}>
-  <CommandInput placeholder="Type a command..." />
-  <CommandEmpty>No results found.</CommandEmpty>
-  <CommandList>
-    <CommandGroup>
-      <CommandGroupLabel>Suggestions</CommandGroupLabel>
-      <CommandCollection>
-        {(item) => (
-          <CommandItem key={item.value} value={item.value}>
-            {item.label}
-          </CommandItem>
-        )}
-      </CommandCollection>
-    </CommandGroup>
-  </CommandList>
+	<CommandInput placeholder="Type a command..." />
+	<CommandEmpty>No results found.</CommandEmpty>
+	<CommandList>
+		<CommandGroup>
+			<CommandGroupLabel>Suggestions</CommandGroupLabel>
+			<CommandCollection>
+				{(item) => (
+					<CommandItem key={item.value} value={item.value}>
+						{item.label}
+					</CommandItem>
+				)}
+			</CommandCollection>
+		</CommandGroup>
+	</CommandList>
 </Command>
 ```
 

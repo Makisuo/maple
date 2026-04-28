@@ -68,7 +68,7 @@ function MessageBubbleImpl({ message, isStreaming, isLast }: MessageBubbleProps)
 						const tool = part as unknown as ToolPartShape
 						const name = part.type.startsWith("tool-")
 							? part.type.replace(/^tool-/, "")
-							: tool.toolName ?? "tool"
+							: (tool.toolName ?? "tool")
 						return (
 							<ToolCallCard
 								key={tool.toolCallId ?? `tool-${i}`}

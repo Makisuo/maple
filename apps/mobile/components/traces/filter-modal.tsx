@@ -45,8 +45,7 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 		})
 	}
 
-	const hasActiveFilters =
-		draft.serviceName !== "" || draft.spanName !== "" || draft.errorsOnly
+	const hasActiveFilters = draft.serviceName !== "" || draft.spanName !== "" || draft.errorsOnly
 
 	return (
 		<Modal
@@ -79,7 +78,9 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 								{/* Reset */}
 								{hasActiveFilters && (
 									<TouchableOpacity onPress={handleReset} className="mb-4">
-										<Text className="text-xs text-destructive font-mono">Reset all filters</Text>
+										<Text className="text-xs text-destructive font-mono">
+											Reset all filters
+										</Text>
 									</TouchableOpacity>
 								)}
 
@@ -89,7 +90,10 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 									<Text className="text-sm text-foreground font-mono">Errors only</Text>
 									<Switch
 										value={draft.errorsOnly}
-										onValueChange={(v) => { hapticLight(); setDraft((d) => ({ ...d, errorsOnly: v })) }}
+										onValueChange={(v) => {
+											hapticLight()
+											setDraft((d) => ({ ...d, errorsOnly: v }))
+										}}
 									/>
 								</View>
 
@@ -109,7 +113,10 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 										{facets.services.slice(0, 10).map((s) => (
 											<TouchableOpacity
 												key={s.name}
-												onPress={() => { hapticLight(); setDraft((d) => ({ ...d, serviceName: s.name })) }}
+												onPress={() => {
+													hapticLight()
+													setDraft((d) => ({ ...d, serviceName: s.name }))
+												}}
 												className="flex-row items-center justify-between py-2.5 px-1"
 											>
 												<Text
@@ -142,7 +149,10 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 										{facets.spanNames.slice(0, 10).map((s) => (
 											<TouchableOpacity
 												key={s.name}
-												onPress={() => { hapticLight(); setDraft((d) => ({ ...d, spanName: s.name })) }}
+												onPress={() => {
+													hapticLight()
+													setDraft((d) => ({ ...d, spanName: s.name }))
+												}}
 												className="flex-row items-center justify-between py-2.5 px-1"
 											>
 												<Text

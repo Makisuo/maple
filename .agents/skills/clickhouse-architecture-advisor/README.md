@@ -25,6 +25,7 @@ Every recommendation must be labeled as exactly one of:
 ## When this skill should activate
 
 Use this skill when the user is:
+
 - designing a real-time architecture
 - choosing between ingestion patterns
 - deciding whether to use joins, dictionaries, denormalization, or MVs
@@ -36,11 +37,13 @@ Use this skill when the user is:
 ## Relationship to `clickhouse-best-practices`
 
 Use `clickhouse-best-practices` for:
+
 - concrete schema and query rule checks
 - low-level design validation
 - docs-backed enforcement
 
 Use this skill for:
+
 - when / why / how decisioning
 - architecture shape
 - system-level tradeoffs
@@ -57,6 +60,7 @@ Use this skill for:
 ## Output contract
 
 Responses should typically include:
+
 1. workload summary
 2. key decisions
 3. recommendations with provenance labels

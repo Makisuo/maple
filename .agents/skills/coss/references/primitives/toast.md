@@ -41,7 +41,7 @@ Wrap app content with both:
 
 ```tsx
 <ToastProvider>
-  <AnchoredToastProvider>{children}</AnchoredToastProvider>
+	<AnchoredToastProvider>{children}</AnchoredToastProvider>
 </ToastProvider>
 ```
 
@@ -49,10 +49,10 @@ Wrap app content with both:
 
 ```tsx
 import {
-  AnchoredToastProvider,
-  ToastProvider,
-  anchoredToastManager,
-  toastManager,
+	AnchoredToastProvider,
+	ToastProvider,
+	anchoredToastManager,
+	toastManager,
 } from "@/components/ui/toast"
 ```
 
@@ -60,8 +60,8 @@ import {
 
 ```tsx
 toastManager.add({
-  title: "Saved",
-  description: "Your changes have been updated.",
+	title: "Saved",
+	description: "Your changes have been updated.",
 })
 ```
 
@@ -76,9 +76,9 @@ toastManager.add({
 
 ```tsx
 toastManager.add({
-  id: "autosave",
-  title: "Saved",
-  description: "Draft updated.",
+	id: "autosave",
+	title: "Saved",
+	description: "Draft updated.",
 })
 ```
 
@@ -88,8 +88,8 @@ toastManager.add({
 import { toastManager } from "@/components/ui/toast"
 
 toastManager.add({
-  title: "Event has been created",
-  description: "Monday, January 3rd at 6:00pm",
+	title: "Event has been created",
+	description: "Monday, January 3rd at 6:00pm",
 })
 ```
 
@@ -99,8 +99,8 @@ toastManager.add({
 import { anchoredToastManager } from "@/components/ui/toast"
 
 anchoredToastManager.add({
-  title: "Copied!",
-  positionerProps: { anchor: buttonRef.current },
+	title: "Copied!",
+	positionerProps: { anchor: buttonRef.current },
 })
 ```
 
@@ -122,4 +122,3 @@ anchoredToastManager.add({
 - anchored tooltip-style confirmation: `p-toast-7`
 - anchored error toast with manual lifecycle handling: `p-toast-8`
 - anchored toast pattern in a non-toast primitive: `p-toggle-8`
-

@@ -37,8 +37,8 @@ Multi-key shortcut with `KbdGroup` (each key gets its own `Kbd`):
 
 ```tsx
 <KbdGroup>
-  <Kbd>⌘</Kbd>
-  <Kbd>K</Kbd>
+	<Kbd>⌘</Kbd>
+	<Kbd>K</Kbd>
 </KbdGroup>
 ```
 
@@ -46,11 +46,11 @@ Button with keyboard shortcut:
 
 ```tsx
 <Button variant="outline">
-  Print
-  <KbdGroup className="-me-1">
-    <Kbd>⌘</Kbd>
-    <Kbd>P</Kbd>
-  </KbdGroup>
+	Print
+	<KbdGroup className="-me-1">
+		<Kbd>⌘</Kbd>
+		<Kbd>P</Kbd>
+	</KbdGroup>
 </Button>
 ```
 
@@ -58,8 +58,8 @@ Single key shortcut in a button:
 
 ```tsx
 <Button variant="outline">
-  Save
-  <Kbd className="-me-1">⌘S</Kbd>
+	Save
+	<Kbd className="-me-1">⌘S</Kbd>
 </Button>
 ```
 

@@ -13,11 +13,11 @@ Data format affects insert performance. Native format is column-oriented with mi
 
 **Performance Ranking (fastest to slowest):**
 
-| Format | Notes |
-|--------|-------|
-| **Native** | Most efficient. Column-oriented, minimal parsing. Recommended. |
-| **RowBinary** | Efficient row-based alternative |
-| **JSONEachRow** | Easier to use but expensive to parse |
+| Format          | Notes                                                          |
+| --------------- | -------------------------------------------------------------- |
+| **Native**      | Most efficient. Column-oriented, minimal parsing. Recommended. |
+| **RowBinary**   | Efficient row-based alternative                                |
+| **JSONEachRow** | Easier to use but expensive to parse                           |
 
 **Example:**
 

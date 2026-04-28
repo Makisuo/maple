@@ -21,13 +21,13 @@ Manual deps from docs:
 
 ```tsx
 import {
-  Breadcrumb,
-  BreadcrumbEllipsis,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
+	Breadcrumb,
+	BreadcrumbEllipsis,
+	BreadcrumbItem,
+	BreadcrumbLink,
+	BreadcrumbList,
+	BreadcrumbPage,
+	BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 ```
 
@@ -35,22 +35,22 @@ import {
 
 ```tsx
 <Breadcrumb>
-  <BreadcrumbList>
-    <BreadcrumbItem>
-      <BreadcrumbLink href="/">Home</BreadcrumbLink>
-    </BreadcrumbItem>
-    <BreadcrumbSeparator />
-    <BreadcrumbItem>
-      <BreadcrumbEllipsis />
-    </BreadcrumbItem>
-    <BreadcrumbItem>
-      <BreadcrumbLink href="/components">Components</BreadcrumbLink>
-    </BreadcrumbItem>
-    <BreadcrumbSeparator />
-    <BreadcrumbItem>
-      <BreadcrumbPage>Breadcrumb</BreadcrumbPage>
-    </BreadcrumbItem>
-  </BreadcrumbList>
+	<BreadcrumbList>
+		<BreadcrumbItem>
+			<BreadcrumbLink href="/">Home</BreadcrumbLink>
+		</BreadcrumbItem>
+		<BreadcrumbSeparator />
+		<BreadcrumbItem>
+			<BreadcrumbEllipsis />
+		</BreadcrumbItem>
+		<BreadcrumbItem>
+			<BreadcrumbLink href="/components">Components</BreadcrumbLink>
+		</BreadcrumbItem>
+		<BreadcrumbSeparator />
+		<BreadcrumbItem>
+			<BreadcrumbPage>Breadcrumb</BreadcrumbPage>
+		</BreadcrumbItem>
+	</BreadcrumbList>
 </Breadcrumb>
 ```
 
@@ -62,9 +62,9 @@ Icon-only home link (requires `aria-label`):
 
 ```tsx
 <BreadcrumbItem>
-  <BreadcrumbLink aria-label="Home" href="/">
-    <HomeIcon aria-hidden="true" className="size-4" />
-  </BreadcrumbLink>
+	<BreadcrumbLink aria-label="Home" href="/">
+		<HomeIcon aria-hidden="true" className="size-4" />
+	</BreadcrumbLink>
 </BreadcrumbItem>
 ```
 
@@ -72,7 +72,7 @@ Custom separator:
 
 ```tsx
 <BreadcrumbSeparator>
-  <SlashIcon className="size-3.5" />
+	<SlashIcon className="size-3.5" />
 </BreadcrumbSeparator>
 ```
 

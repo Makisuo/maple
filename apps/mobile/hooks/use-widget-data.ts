@@ -12,11 +12,7 @@ import {
 	type WidgetTimeRange,
 	type WidgetTimeseriesParams,
 } from "../lib/api"
-import {
-	computeBucketSeconds,
-	getTimeRange,
-	type TimeRangeKey,
-} from "../lib/time-utils"
+import { computeBucketSeconds, getTimeRange, type TimeRangeKey } from "../lib/time-utils"
 import {
 	getQueryErrorMessage,
 	mobileQueryKeys,
@@ -35,26 +31,14 @@ export type WidgetDataState =
 	| { status: "unsupported"; reason: string }
 	| { status: "success"; data: WidgetData }
 
-type WidgetQueryData =
-	| { kind: "unsupported"; reason: string }
-	| { kind: "success"; data: WidgetData }
+type WidgetQueryData = { kind: "unsupported"; reason: string } | { kind: "success"; data: WidgetData }
 
-const SUPPORTED_TIMESERIES_ENDPOINTS = new Set([
-	"custom_timeseries",
-])
-const SUPPORTED_BREAKDOWN_ENDPOINTS = new Set([
-	"custom_breakdown",
-])
-const QUERY_BUILDER_TIMESERIES_ENDPOINTS = new Set([
-	"custom_query_builder_timeseries",
-])
-const QUERY_BUILDER_BREAKDOWN_ENDPOINTS = new Set([
-	"custom_query_builder_breakdown",
-])
+const SUPPORTED_TIMESERIES_ENDPOINTS = new Set(["custom_timeseries"])
+const SUPPORTED_BREAKDOWN_ENDPOINTS = new Set(["custom_breakdown"])
+const QUERY_BUILDER_TIMESERIES_ENDPOINTS = new Set(["custom_query_builder_timeseries"])
+const QUERY_BUILDER_BREAKDOWN_ENDPOINTS = new Set(["custom_query_builder_breakdown"])
 
-function resolveTimeRange(
-	timeRange: WidgetTimeRange,
-): { startTime: string; endTime: string } | null {
+function resolveTimeRange(timeRange: WidgetTimeRange): { startTime: string; endTime: string } | null {
 	if (timeRange.type === "absolute") {
 		// API expects "YYYY-MM-DD HH:MM:SS"; the absolute strings are ISO,
 		// so normalise the same way time-utils does.
@@ -106,10 +90,7 @@ function reduceTimeseriesToValue(
 	}
 }
 
-function reduceBreakdownToValue(
-	items: CustomBreakdownItem[],
-	aggregate: string | undefined,
-): number {
+function reduceBreakdownToValue(items: CustomBreakdownItem[], aggregate: string | undefined): number {
 	if (items.length === 0) return 0
 	switch (aggregate) {
 		case "avg":
@@ -136,109 +117,101 @@ export function useWidgetData(
 	const query = useQuery<WidgetQueryData>({
 		queryKey: mobileQueryKeys.widgetData(widget, timeRange),
 		queryFn: async () => {
-		const range = resolveTimeRange(timeRange)
-		if (!range) {
-			throw new Error("Invalid time range")
-		}
-
-		const endpoint = widget.dataSource.endpoint
-		const params = (widget.dataSource.params ?? {}) as Record<string, unknown>
-		const isStat = widget.visualization === "stat"
-
-		if (SUPPORTED_TIMESERIES_ENDPOINTS.has(endpoint)) {
-			const bucketSeconds = computeBucketSeconds(range.startTime, range.endTime)
-			const points = await fetchCustomTimeseries(
-				range.startTime,
-				range.endTime,
-				bucketSeconds,
-				params as unknown as WidgetTimeseriesParams,
-			)
-
-			if (isStat) {
-				const reducer = widget.dataSource.transform?.reduceToValue
-				const field = reducer?.field ?? "value"
-				const value = reduceTimeseriesToValue(points, field, reducer?.aggregate)
-				return { kind: "success", data: { kind: "stat", value } }
+			const range = resolveTimeRange(timeRange)
+			if (!range) {
+				throw new Error("Invalid time range")
 			}
 
-			return { kind: "success", data: { kind: "timeseries", points } }
-		}
+			const endpoint = widget.dataSource.endpoint
+			const params = (widget.dataSource.params ?? {}) as Record<string, unknown>
+			const isStat = widget.visualization === "stat"
 
-		if (SUPPORTED_BREAKDOWN_ENDPOINTS.has(endpoint)) {
-			const items = await fetchCustomBreakdown(
-				range.startTime,
-				range.endTime,
-				params as unknown as WidgetBreakdownParams,
-			)
+			if (SUPPORTED_TIMESERIES_ENDPOINTS.has(endpoint)) {
+				const bucketSeconds = computeBucketSeconds(range.startTime, range.endTime)
+				const points = await fetchCustomTimeseries(
+					range.startTime,
+					range.endTime,
+					bucketSeconds,
+					params as unknown as WidgetTimeseriesParams,
+				)
 
-			if (isStat) {
-				const reducer = widget.dataSource.transform?.reduceToValue
-				const value = reduceBreakdownToValue(items, reducer?.aggregate)
-				return { kind: "success", data: { kind: "stat", value } }
-			}
-
-			return { kind: "success", data: { kind: "breakdown", items } }
-		}
-
-		if (QUERY_BUILDER_TIMESERIES_ENDPOINTS.has(endpoint)) {
-			const queries = Array.isArray(params.queries)
-				? (params.queries as QueryBuilderQueryDraft[])
-				: []
-
-			if (queries.length === 0) {
-				return {
-					kind: "unsupported",
-					reason: "Widget has no queries configured",
+				if (isStat) {
+					const reducer = widget.dataSource.transform?.reduceToValue
+					const field = reducer?.field ?? "value"
+					const value = reduceTimeseriesToValue(points, field, reducer?.aggregate)
+					return { kind: "success", data: { kind: "stat", value } }
 				}
+
+				return { kind: "success", data: { kind: "timeseries", points } }
 			}
 
-			const points = await fetchQueryBuilderTimeseries(
-				range.startTime,
-				range.endTime,
-				queries,
-			)
+			if (SUPPORTED_BREAKDOWN_ENDPOINTS.has(endpoint)) {
+				const items = await fetchCustomBreakdown(
+					range.startTime,
+					range.endTime,
+					params as unknown as WidgetBreakdownParams,
+				)
 
-			if (isStat) {
-				const reducer = widget.dataSource.transform?.reduceToValue
-				const field = reducer?.field ?? "value"
-				const value = reduceTimeseriesToValue(points, field, reducer?.aggregate)
-				return { kind: "success", data: { kind: "stat", value } }
-			}
-
-			return { kind: "success", data: { kind: "timeseries", points } }
-		}
-
-		if (QUERY_BUILDER_BREAKDOWN_ENDPOINTS.has(endpoint)) {
-			const queries = Array.isArray(params.queries)
-				? (params.queries as QueryBuilderQueryDraft[])
-				: []
-
-			if (queries.length === 0) {
-				return {
-					kind: "unsupported",
-					reason: "Widget has no queries configured",
+				if (isStat) {
+					const reducer = widget.dataSource.transform?.reduceToValue
+					const value = reduceBreakdownToValue(items, reducer?.aggregate)
+					return { kind: "success", data: { kind: "stat", value } }
 				}
+
+				return { kind: "success", data: { kind: "breakdown", items } }
 			}
 
-			const items = await fetchQueryBuilderBreakdown(
-				range.startTime,
-				range.endTime,
-				queries,
-			)
+			if (QUERY_BUILDER_TIMESERIES_ENDPOINTS.has(endpoint)) {
+				const queries = Array.isArray(params.queries)
+					? (params.queries as QueryBuilderQueryDraft[])
+					: []
 
-			if (isStat) {
-				const reducer = widget.dataSource.transform?.reduceToValue
-				const value = reduceBreakdownToValue(items, reducer?.aggregate)
-				return { kind: "success", data: { kind: "stat", value } }
+				if (queries.length === 0) {
+					return {
+						kind: "unsupported",
+						reason: "Widget has no queries configured",
+					}
+				}
+
+				const points = await fetchQueryBuilderTimeseries(range.startTime, range.endTime, queries)
+
+				if (isStat) {
+					const reducer = widget.dataSource.transform?.reduceToValue
+					const field = reducer?.field ?? "value"
+					const value = reduceTimeseriesToValue(points, field, reducer?.aggregate)
+					return { kind: "success", data: { kind: "stat", value } }
+				}
+
+				return { kind: "success", data: { kind: "timeseries", points } }
 			}
 
-			return { kind: "success", data: { kind: "breakdown", items } }
-		}
+			if (QUERY_BUILDER_BREAKDOWN_ENDPOINTS.has(endpoint)) {
+				const queries = Array.isArray(params.queries)
+					? (params.queries as QueryBuilderQueryDraft[])
+					: []
 
-		return {
-			kind: "unsupported",
-			reason: `Endpoint "${endpoint}" not supported on mobile yet`,
-		}
+				if (queries.length === 0) {
+					return {
+						kind: "unsupported",
+						reason: "Widget has no queries configured",
+					}
+				}
+
+				const items = await fetchQueryBuilderBreakdown(range.startTime, range.endTime, queries)
+
+				if (isStat) {
+					const reducer = widget.dataSource.transform?.reduceToValue
+					const value = reduceBreakdownToValue(items, reducer?.aggregate)
+					return { kind: "success", data: { kind: "stat", value } }
+				}
+
+				return { kind: "success", data: { kind: "breakdown", items } }
+			}
+
+			return {
+				kind: "unsupported",
+				reason: `Endpoint "${endpoint}" not supported on mobile yet`,
+			}
 		},
 		staleTime: mobileQueryStaleTimes.widgetData,
 		placeholderData: preservePreviousData,

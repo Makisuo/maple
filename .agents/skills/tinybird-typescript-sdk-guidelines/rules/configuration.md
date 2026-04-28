@@ -13,15 +13,15 @@ Create a configuration file in your project root. Supported formats (in priority
 
 ```json
 {
-  "include": [
-    "src/tinybird/datasources.ts",
-    "src/tinybird/pipes.ts",
-    "src/tinybird/legacy.datasource",
-    "src/tinybird/legacy.pipe"
-  ],
-  "token": "${TINYBIRD_TOKEN}",
-  "baseUrl": "https://api.tinybird.co",
-  "devMode": "branch"
+	"include": [
+		"src/tinybird/datasources.ts",
+		"src/tinybird/pipes.ts",
+		"src/tinybird/legacy.datasource",
+		"src/tinybird/legacy.pipe"
+	],
+	"token": "${TINYBIRD_TOKEN}",
+	"baseUrl": "https://api.tinybird.co",
+	"devMode": "branch"
 }
 ```
 
@@ -38,12 +38,12 @@ You can combine TypeScript files with legacy `.datasource` and `.pipe` files for
 
 ```json
 {
-  "include": [
-    "src/tinybird/datasources.ts",
-    "src/tinybird/pipes.ts",
-    "legacy/events.datasource",
-    "legacy/analytics.pipe"
-  ]
+	"include": [
+		"src/tinybird/datasources.ts",
+		"src/tinybird/pipes.ts",
+		"legacy/events.datasource",
+		"legacy/analytics.pipe"
+	]
 }
 ```
 
@@ -53,10 +53,10 @@ Add to `tsconfig.json` for cleaner imports:
 
 ```json
 {
-  "compilerOptions": {
-    "paths": {
-      "@tinybird/client": ["./src/tinybird/client.ts"]
-    }
-  }
+	"compilerOptions": {
+		"paths": {
+			"@tinybird/client": ["./src/tinybird/client.ts"]
+		}
+	}
 }
 ```

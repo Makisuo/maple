@@ -10,11 +10,11 @@
 - DateTime64 requires precision (use DateTime64(3)).
 - Only include ENGINE_PARTITION_KEY and ENGINE_PRIMARY_KEY when explicitly requested.
 - Import configuration:
-  - S3/GCS: set IMPORT_CONNECTION_NAME, IMPORT_BUCKET_URI, IMPORT_SCHEDULE (GCS supports @on-demand only, S3 supports @auto).
-  - Kafka: set KAFKA_CONNECTION_NAME, KAFKA_TOPIC, KAFKA_GROUP_ID.
+    - S3/GCS: set IMPORT_CONNECTION_NAME, IMPORT_BUCKET_URI, IMPORT_SCHEDULE (GCS supports @on-demand only, S3 supports @auto).
+    - Kafka: set KAFKA_CONNECTION_NAME, KAFKA_TOPIC, KAFKA_GROUP_ID.
 - For landing datasources created from a .ndjson file with no schema specified, use:
-  - `SCHEMA >`
-  - `` `data` String `json:$` ``
+    - `SCHEMA >`
+    - `` `data` String `json:$` ``
 
 Example:
 
@@ -51,6 +51,7 @@ SHARED_WITH >
 ```
 
 Limitations:
+
 - Shared datasources are read-only.
 - You cannot share a shared datasource.
 - You cannot create a materialized view from a shared datasource.

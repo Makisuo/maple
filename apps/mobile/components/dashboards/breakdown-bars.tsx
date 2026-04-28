@@ -18,11 +18,7 @@ function formatValue(n: number): string {
 	return n.toFixed(2)
 }
 
-export function BreakdownBars({
-	items,
-	limit = DEFAULT_LIMIT,
-	colorOverrides,
-}: BreakdownBarsProps) {
+export function BreakdownBars({ items, limit = DEFAULT_LIMIT, colorOverrides }: BreakdownBarsProps) {
 	if (items.length === 0) {
 		return (
 			<View className="items-center justify-center" style={{ height: 80 }}>
@@ -36,8 +32,7 @@ export function BreakdownBars({
 	const remaining = sorted.length - visible.length
 	const max = Math.max(...visible.map((i) => i.value), 1)
 
-	const colorFor = (key: string) =>
-		colorOverrides?.[key] ?? getServiceColor(key)
+	const colorFor = (key: string) => colorOverrides?.[key] ?? getServiceColor(key)
 
 	return (
 		<View style={{ gap: 10 }}>
@@ -83,9 +78,7 @@ export function BreakdownBars({
 				)
 			})}
 			{remaining > 0 ? (
-				<Text className="text-[10px] text-muted-foreground font-mono mt-1">
-					+{remaining} more
-				</Text>
+				<Text className="text-[10px] text-muted-foreground font-mono mt-1">+{remaining} more</Text>
 			) : null}
 		</View>
 	)

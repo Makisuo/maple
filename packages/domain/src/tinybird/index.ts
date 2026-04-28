@@ -18,13 +18,13 @@
  */
 
 // Export all endpoints and their types
-export * from "./endpoints";
+export * from "./endpoints"
 
 // Export all datasources and their types
-export * from "./datasources";
+export * from "./datasources"
 
 // Export all materialized views
-export * from "./materializations";
+export * from "./materializations"
 
 // Export TTL override helpers for BYO Tinybird raw retention
-export * from "./ttl-override";
+export * from "./ttl-override"

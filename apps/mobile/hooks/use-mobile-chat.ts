@@ -95,9 +95,11 @@ export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) 
 				const next = [...prev, userMsg]
 				persist(next)
 				const firstUserText =
-					(next.find((m) => m.role === "user")?.parts.find((p) => p.type === "text") as
-						| { type: "text"; text: string }
-						| undefined)?.text ?? userText
+					(
+						next.find((m) => m.role === "user")?.parts.find((p) => p.type === "text") as
+							| { type: "text"; text: string }
+							| undefined
+					)?.text ?? userText
 				updateSummary(firstUserText, userMsg)
 				return next
 			})
@@ -141,7 +143,9 @@ export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) 
 					},
 					onToolInputStart: (toolCallId, toolName) => {
 						setMessages((prev) =>
-							updateLastAssistant(prev, (msg) => addOrUpdateToolPart(msg, toolCallId, toolName, "input-streaming")),
+							updateLastAssistant(prev, (msg) =>
+								addOrUpdateToolPart(msg, toolCallId, toolName, "input-streaming"),
+							),
 						)
 					},
 					onToolInputAvailable: (toolCallId, toolName, input) => {
@@ -154,14 +158,18 @@ export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) 
 					onToolOutputAvailable: (toolCallId, output) => {
 						setMessages((prev) =>
 							updateLastAssistant(prev, (msg) =>
-								addOrUpdateToolPart(msg, toolCallId, undefined, "output-available", { output }),
+								addOrUpdateToolPart(msg, toolCallId, undefined, "output-available", {
+									output,
+								}),
 							),
 						)
 					},
 					onToolError: (toolCallId, errorText) => {
 						setMessages((prev) =>
 							updateLastAssistant(prev, (msg) =>
-								addOrUpdateToolPart(msg, toolCallId, undefined, "output-error", { errorText }),
+								addOrUpdateToolPart(msg, toolCallId, undefined, "output-error", {
+									errorText,
+								}),
 							),
 						)
 					},
@@ -201,10 +209,7 @@ export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) 
 	return { messages, status, error, hydrated, sendMessage, stop }
 }
 
-function updateLastAssistant(
-	messages: UIMessage[],
-	updater: (msg: UIMessage) => UIMessage,
-): UIMessage[] {
+function updateLastAssistant(messages: UIMessage[], updater: (msg: UIMessage) => UIMessage): UIMessage[] {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const m = messages[i]
 		if (m.role === "assistant") {

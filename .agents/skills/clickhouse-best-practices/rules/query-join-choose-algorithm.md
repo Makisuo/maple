@@ -13,15 +13,15 @@ ClickHouse's default hash join loads the RIGHT table entirely into memory. Choos
 
 **Algorithm selection:**
 
-| Algorithm | Best For | Trade-off |
-|-----------|----------|-----------|
-| `parallel_hash` | Small-to-medium in-memory tables | Default since 24.11; fast, concurrent |
-| `hash` | General purpose, all join types | Single-threaded hash table build |
-| `direct` | Dictionary lookups (INNER/LEFT only) | Fastest; no hash table construction |
-| `full_sorting_merge` | Tables already sorted on join key | Skips sort if pre-ordered; low memory |
-| `partial_merge` | Large tables, memory-constrained | Minimized memory; slower execution |
-| `grace_hash` | Large datasets, tunable memory | Flexible; disk-spilling capability |
-| `auto` | Adaptive algorithm selection | Tries hash first, falls back on memory pressure |
+| Algorithm            | Best For                             | Trade-off                                       |
+| -------------------- | ------------------------------------ | ----------------------------------------------- |
+| `parallel_hash`      | Small-to-medium in-memory tables     | Default since 24.11; fast, concurrent           |
+| `hash`               | General purpose, all join types      | Single-threaded hash table build                |
+| `direct`             | Dictionary lookups (INNER/LEFT only) | Fastest; no hash table construction             |
+| `full_sorting_merge` | Tables already sorted on join key    | Skips sort if pre-ordered; low memory           |
+| `partial_merge`      | Large tables, memory-constrained     | Minimized memory; slower execution              |
+| `grace_hash`         | Large datasets, tunable memory       | Flexible; disk-spilling capability              |
+| `auto`               | Adaptive algorithm selection         | Tries hash first, falls back on memory pressure |
 
 **Example usage:**
 

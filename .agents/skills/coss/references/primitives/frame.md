@@ -21,12 +21,12 @@ Manual deps from docs:
 
 ```tsx
 import {
-  Frame,
-  FrameDescription,
-  FrameFooter,
-  FrameHeader,
-  FramePanel,
-  FrameTitle,
+	Frame,
+	FrameDescription,
+	FrameFooter,
+	FrameHeader,
+	FramePanel,
+	FrameTitle,
 } from "@/components/ui/frame"
 ```
 
@@ -34,12 +34,12 @@ import {
 
 ```tsx
 <Frame>
-  <FrameHeader>
-    <FrameTitle>Title</FrameTitle>
-    <FrameDescription>Description</FrameDescription>
-  </FrameHeader>
-  <FramePanel>Content</FramePanel>
-  <FrameFooter>Footer</FrameFooter>
+	<FrameHeader>
+		<FrameTitle>Title</FrameTitle>
+		<FrameDescription>Description</FrameDescription>
+	</FrameHeader>
+	<FramePanel>Content</FramePanel>
+	<FrameFooter>Footer</FrameFooter>
 </Frame>
 ```
 
@@ -51,17 +51,17 @@ Frame with header actions:
 
 ```tsx
 <Frame>
-  <FrameHeader className="flex items-center justify-between">
-    <div>
-      <FrameTitle>Users</FrameTitle>
-      <FrameDescription>Manage team members.</FrameDescription>
-    </div>
-    <Button size="sm">Add User</Button>
-  </FrameHeader>
-  <FramePanel>{/* Table or list content */}</FramePanel>
-  <FrameFooter>
-    <p className="text-muted-foreground text-sm">Showing 1-10 of 100</p>
-  </FrameFooter>
+	<FrameHeader className="flex items-center justify-between">
+		<div>
+			<FrameTitle>Users</FrameTitle>
+			<FrameDescription>Manage team members.</FrameDescription>
+		</div>
+		<Button size="sm">Add User</Button>
+	</FrameHeader>
+	<FramePanel>{/* Table or list content */}</FramePanel>
+	<FrameFooter>
+		<p className="text-muted-foreground text-sm">Showing 1-10 of 100</p>
+	</FrameFooter>
 </Frame>
 ```
 

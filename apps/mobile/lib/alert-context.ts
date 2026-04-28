@@ -161,11 +161,7 @@ export function alertPromptSuggestions(alert: AlertContext): string[] {
 		]
 	}
 
-	return [
-		`Diagnose ${group}`,
-		`Recent errors in ${group}`,
-		`Slowest traces in ${group}`,
-	]
+	return [`Diagnose ${group}`, `Recent errors in ${group}`, `Slowest traces in ${group}`]
 }
 
 export function severityColor(severity: string): string {

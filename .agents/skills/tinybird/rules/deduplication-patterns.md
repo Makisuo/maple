@@ -4,12 +4,12 @@ Strategies for handling duplicates and combining batch with real-time processing
 
 ## Deduplication Strategy Selection
 
-| Strategy | When to use |
-|----------|-------------|
-| Query-time (`argMax`, `LIMIT BY`, subquery) | Prototyping or small datasets |
-| ReplacingMergeTree | Large datasets, need latest row per key |
-| Periodic snapshots (Copy Pipes) | Freshness not critical, need rollups or different sorting keys |
-| Lambda architecture | Need freshness + complex transformations that MVs can't handle |
+| Strategy                                    | When to use                                                    |
+| ------------------------------------------- | -------------------------------------------------------------- |
+| Query-time (`argMax`, `LIMIT BY`, subquery) | Prototyping or small datasets                                  |
+| ReplacingMergeTree                          | Large datasets, need latest row per key                        |
+| Periodic snapshots (Copy Pipes)             | Freshness not critical, need rollups or different sorting keys |
+| Lambda architecture                         | Need freshness + complex transformations that MVs can't handle |
 
 For dimensional/small tables, periodic full replace is usually best.
 
@@ -49,6 +49,7 @@ SELECT * FROM posts FINAL WHERE post_id = {{Int64(post_id)}}
 ## Snapshot-based Deduplication (Copy Pipes)
 
 Use Copy Pipes when:
+
 - ReplacingMergeTree + FINAL is too slow
 - You need different sorting keys that change with updates
 - You need downstream Materialized Views for rollups
@@ -72,6 +73,7 @@ COPY_MODE replace
 ## Lambda Architecture
 
 Combine batch snapshots with real-time queries when:
+
 - Aggregating over ReplacingMergeTree (MVs fail—they only see blocks, not merged state)
 - Window functions requiring full table scans
 - CDC workloads
@@ -81,7 +83,7 @@ Combine batch snapshots with real-time queries when:
 ### Pattern
 
 1. **Batch layer**: Copy Pipe creates periodic deduplicated snapshots or intermediate tables.
-2. **Real-time layer**: Query fresh data since last snapshot  
+2. **Real-time layer**: Query fresh data since last snapshot
 3. **Serving layer**: UNION ALL combines both
 
 ```sql
@@ -104,6 +106,7 @@ GROUP BY post_id
 **Warning**: `argMaxMerge` prefers non-null values over null, even with lower timestamps.
 
 Workaround—convert nulls to epoch before aggregation:
+
 ```sql
 SELECT post_id,
     argMaxState(CASE WHEN flagged_at IS NULL THEN toDateTime('1970-01-01 00:00:00') ELSE flagged_at END, updated_at) as flagged_at

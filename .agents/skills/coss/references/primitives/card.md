@@ -20,26 +20,19 @@ Manual deps from docs:
 ## Canonical imports
 
 ```tsx
-import {
-  Card,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardPanel,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardDescription, CardFooter, CardHeader, CardPanel, CardTitle } from "@/components/ui/card"
 ```
 
 ## Minimal pattern
 
 ```tsx
 <Card>
-  <CardHeader>
-    <CardTitle>Title</CardTitle>
-    <CardDescription>Description</CardDescription>
-  </CardHeader>
-  <CardPanel>Content</CardPanel>
-  <CardFooter>Footer</CardFooter>
+	<CardHeader>
+		<CardTitle>Title</CardTitle>
+		<CardDescription>Description</CardDescription>
+	</CardHeader>
+	<CardPanel>Content</CardPanel>
+	<CardFooter>Footer</CardFooter>
 </Card>
 ```
 
@@ -51,20 +44,20 @@ Card with form content:
 
 ```tsx
 <Card className="w-full max-w-sm">
-  <CardHeader>
-    <CardTitle>Create project</CardTitle>
-    <CardDescription>Deploy your new project in one click.</CardDescription>
-  </CardHeader>
-  <CardPanel className="flex flex-col gap-4">
-    <Field>
-      <FieldLabel>Name</FieldLabel>
-      <Input type="text" placeholder="My project" />
-    </Field>
-  </CardPanel>
-  <CardFooter className="flex justify-end gap-2">
-    <Button variant="ghost">Cancel</Button>
-    <Button>Create</Button>
-  </CardFooter>
+	<CardHeader>
+		<CardTitle>Create project</CardTitle>
+		<CardDescription>Deploy your new project in one click.</CardDescription>
+	</CardHeader>
+	<CardPanel className="flex flex-col gap-4">
+		<Field>
+			<FieldLabel>Name</FieldLabel>
+			<Input type="text" placeholder="My project" />
+		</Field>
+	</CardPanel>
+	<CardFooter className="flex justify-end gap-2">
+		<Button variant="ghost">Cancel</Button>
+		<Button>Create</Button>
+	</CardFooter>
 </Card>
 ```
 

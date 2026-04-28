@@ -37,19 +37,19 @@ CREATE TABLE users (
 
 **When Nullable IS appropriate:**
 
-| Use Case | Why |
-|----------|-----|
-| `deleted_at` | NULL = "not deleted", timestamp = "deleted at X" |
-| `parent_id` | NULL = "no parent", value = "has parent" |
-| `discount_percent` | NULL = "no discount", 0 = "0% discount" |
+| Use Case           | Why                                              |
+| ------------------ | ------------------------------------------------ |
+| `deleted_at`       | NULL = "not deleted", timestamp = "deleted at X" |
+| `parent_id`        | NULL = "no parent", value = "has parent"         |
+| `discount_percent` | NULL = "no discount", 0 = "0% discount"          |
 
 **Defaults instead of Nullable:**
 
-| Type | Default |
-|------|---------|
-| String | `''` (empty string) |
-| UInt*/Int* | `0` |
-| DateTime | `now()` or `toDateTime(0)` |
-| UUID | `generateUUIDv4()` |
+| Type       | Default                    |
+| ---------- | -------------------------- |
+| String     | `''` (empty string)        |
+| UInt*/Int* | `0`                        |
+| DateTime   | `now()` or `toDateTime(0)` |
+| UUID       | `generateUUIDv4()`         |
 
 Reference: [Select Data Types](https://clickhouse.com/docs/best-practices/select-data-types)

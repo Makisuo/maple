@@ -1,460 +1,536 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Maple OG Image</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Maple OG Image</title>
+		<style>
+			@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap");
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+			* {
+				margin: 0;
+				padding: 0;
+				box-sizing: border-box;
+			}
 
-  html, body {
-    width: 1200px;
-    height: 630px;
-    overflow: hidden;
-    font-family: 'JetBrains Mono', monospace;
-    background: oklch(0.207 0.008 67);
-    color: oklch(0.91 0.016 74);
-    position: relative;
-  }
+			html,
+			body {
+				width: 1200px;
+				height: 630px;
+				overflow: hidden;
+				font-family: "JetBrains Mono", monospace;
+				background: oklch(0.207 0.008 67);
+				color: oklch(0.91 0.016 74);
+				position: relative;
+			}
 
-  .canvas {
-    width: 1200px;
-    height: 630px;
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
+			.canvas {
+				width: 1200px;
+				height: 630px;
+				position: relative;
+				overflow: hidden;
+				display: flex;
+				flex-direction: column;
+			}
 
-  /* Subtle grid background */
-  .grid-bg {
-    position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(oklch(0.91 0.016 74 / 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, oklch(0.91 0.016 74 / 0.025) 1px, transparent 1px);
-    background-size: 40px 40px;
-    mask-image: radial-gradient(ellipse 70% 60% at 60% 50%, black 20%, transparent 70%);
-  }
+			/* Subtle grid background */
+			.grid-bg {
+				position: absolute;
+				inset: 0;
+				background-image:
+					linear-gradient(oklch(0.91 0.016 74 / 0.025) 1px, transparent 1px),
+					linear-gradient(90deg, oklch(0.91 0.016 74 / 0.025) 1px, transparent 1px);
+				background-size: 40px 40px;
+				mask-image: radial-gradient(ellipse 70% 60% at 60% 50%, black 20%, transparent 70%);
+			}
 
-  /* Glow orbs */
-  .orb {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(100px);
-    opacity: 0.35;
-  }
-  .orb-1 {
-    width: 500px; height: 500px;
-    background: oklch(0.714 0.154 59);
-    top: -150px; right: -50px;
-    opacity: 0.2;
-  }
-  .orb-2 {
-    width: 350px; height: 350px;
-    background: oklch(0.654 0.176 30);
-    bottom: -100px; left: 100px;
-    opacity: 0.15;
-  }
-  .orb-3 {
-    width: 200px; height: 200px;
-    background: oklch(0.70 0.16 60);
-    top: 200px; left: 500px;
-    opacity: 0.1;
-  }
+			/* Glow orbs */
+			.orb {
+				position: absolute;
+				border-radius: 50%;
+				filter: blur(100px);
+				opacity: 0.35;
+			}
+			.orb-1 {
+				width: 500px;
+				height: 500px;
+				background: oklch(0.714 0.154 59);
+				top: -150px;
+				right: -50px;
+				opacity: 0.2;
+			}
+			.orb-2 {
+				width: 350px;
+				height: 350px;
+				background: oklch(0.654 0.176 30);
+				bottom: -100px;
+				left: 100px;
+				opacity: 0.15;
+			}
+			.orb-3 {
+				width: 200px;
+				height: 200px;
+				background: oklch(0.7 0.16 60);
+				top: 200px;
+				left: 500px;
+				opacity: 0.1;
+			}
 
-  /* Main content */
-  .content {
-    position: relative;
-    z-index: 10;
-    flex: 1;
-    display: flex;
-    padding: 36px 72px 0;
-    gap: 60px;
-    min-height: 0;
-  }
+			/* Main content */
+			.content {
+				position: relative;
+				z-index: 10;
+				flex: 1;
+				display: flex;
+				padding: 36px 72px 0;
+				gap: 60px;
+				min-height: 0;
+			}
 
-  .left {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 22px;
-  }
+			.left {
+				flex: 1;
+				display: flex;
+				flex-direction: column;
+				justify-content: center;
+				gap: 22px;
+			}
 
-  .logo-row {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
+			.logo-row {
+				display: flex;
+				align-items: center;
+				gap: 16px;
+			}
 
-  .logo-icon {
-    width: 48px;
-    height: 48px;
-    background: oklch(0.714 0.154 59);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 800;
-    font-size: 26px;
-    color: oklch(0.207 0.008 67);
-    letter-spacing: -1px;
-  }
+			.logo-icon {
+				width: 48px;
+				height: 48px;
+				background: oklch(0.714 0.154 59);
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				font-weight: 800;
+				font-size: 26px;
+				color: oklch(0.207 0.008 67);
+				letter-spacing: -1px;
+			}
 
-  .logo-text {
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-    color: oklch(0.91 0.016 74);
-  }
+			.logo-text {
+				font-size: 22px;
+				font-weight: 700;
+				letter-spacing: -0.5px;
+				color: oklch(0.91 0.016 74);
+			}
 
-  h1 {
-    font-size: 52px;
-    font-weight: 800;
-    line-height: 1.1;
-    letter-spacing: -2px;
-    background: linear-gradient(135deg, oklch(0.91 0.016 74) 0%, oklch(0.80 0.12 62) 50%, oklch(0.714 0.154 59) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
+			h1 {
+				font-size: 52px;
+				font-weight: 800;
+				line-height: 1.1;
+				letter-spacing: -2px;
+				background: linear-gradient(
+					135deg,
+					oklch(0.91 0.016 74) 0%,
+					oklch(0.8 0.12 62) 50%,
+					oklch(0.714 0.154 59) 100%
+				);
+				-webkit-background-clip: text;
+				-webkit-text-fill-color: transparent;
+				background-clip: text;
+			}
 
-  .tagline {
-    font-size: 17px;
-    color: oklch(0.603 0.023 72);
-    font-weight: 400;
-    line-height: 1.6;
-    max-width: 420px;
-    letter-spacing: -0.3px;
-  }
+			.tagline {
+				font-size: 17px;
+				color: oklch(0.603 0.023 72);
+				font-weight: 400;
+				line-height: 1.6;
+				max-width: 420px;
+				letter-spacing: -0.3px;
+			}
 
-  .pills {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-top: 4px;
-  }
+			.pills {
+				display: flex;
+				gap: 8px;
+				flex-wrap: wrap;
+				margin-top: 4px;
+			}
 
-  .pill {
-    padding: 6px 14px;
-    font-size: 12px;
-    font-weight: 500;
-    border: 1px solid oklch(0.268 0.012 67);
-    color: oklch(0.603 0.023 72);
-    letter-spacing: -0.2px;
-    background: oklch(0.26 0.012 67);
-  }
+			.pill {
+				padding: 6px 14px;
+				font-size: 12px;
+				font-weight: 500;
+				border: 1px solid oklch(0.268 0.012 67);
+				color: oklch(0.603 0.023 72);
+				letter-spacing: -0.2px;
+				background: oklch(0.26 0.012 67);
+			}
 
-  .pill.accent {
-    border-color: oklch(0.714 0.154 59 / 0.3);
-    color: oklch(0.714 0.154 59);
-    background: oklch(0.714 0.154 59 / 0.08);
-  }
+			.pill.accent {
+				border-color: oklch(0.714 0.154 59 / 0.3);
+				color: oklch(0.714 0.154 59);
+				background: oklch(0.714 0.154 59 / 0.08);
+			}
 
-  /* Right side - mock dashboard */
-  .right {
-    flex: 0 0 440px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 10px;
-  }
+			/* Right side - mock dashboard */
+			.right {
+				flex: 0 0 440px;
+				display: flex;
+				flex-direction: column;
+				justify-content: center;
+				gap: 10px;
+			}
 
-  .mock-card {
-    background: oklch(0.224 0.009 75);
-    border: 1px solid oklch(0.268 0.012 67);
-    padding: 12px 16px;
-    position: relative;
-    overflow: hidden;
-  }
+			.mock-card {
+				background: oklch(0.224 0.009 75);
+				border: 1px solid oklch(0.268 0.012 67);
+				padding: 12px 16px;
+				position: relative;
+				overflow: hidden;
+			}
 
-  .mock-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-  }
+			.mock-card-header {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				margin-bottom: 8px;
+			}
 
-  .mock-card-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: oklch(0.603 0.023 72);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
+			.mock-card-title {
+				font-size: 11px;
+				font-weight: 600;
+				color: oklch(0.603 0.023 72);
+				text-transform: uppercase;
+				letter-spacing: 1px;
+			}
 
-  .mock-card-value {
-    font-size: 11px;
-    font-weight: 500;
-    color: oklch(0.658 0.134 151);
-  }
+			.mock-card-value {
+				font-size: 11px;
+				font-weight: 500;
+				color: oklch(0.658 0.134 151);
+			}
 
-  /* Mini bar chart */
-  .bars {
-    display: flex;
-    align-items: flex-end;
-    gap: 3px;
-    height: 40px;
-  }
+			/* Mini bar chart */
+			.bars {
+				display: flex;
+				align-items: flex-end;
+				gap: 3px;
+				height: 40px;
+			}
 
-  .bar {
-    flex: 1;
-    background: linear-gradient(to top, oklch(0.714 0.154 59), oklch(0.80 0.12 62));
-    opacity: 0.7;
-    min-width: 6px;
-  }
+			.bar {
+				flex: 1;
+				background: linear-gradient(to top, oklch(0.714 0.154 59), oklch(0.8 0.12 62));
+				opacity: 0.7;
+				min-width: 6px;
+			}
 
-  /* Sparkline rows */
-  .trace-rows {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
+			/* Sparkline rows */
+			.trace-rows {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+			}
 
-  .trace-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    height: 20px;
-  }
+			.trace-row {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+				height: 20px;
+			}
 
-  .trace-label {
-    font-size: 10px;
-    color: oklch(0.603 0.023 72 / 0.7);
-    width: 80px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+			.trace-label {
+				font-size: 10px;
+				color: oklch(0.603 0.023 72 / 0.7);
+				width: 80px;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
 
-  .trace-bar-container {
-    flex: 1;
-    height: 8px;
-    background: oklch(0.26 0.012 67);
-    position: relative;
-    overflow: hidden;
-  }
+			.trace-bar-container {
+				flex: 1;
+				height: 8px;
+				background: oklch(0.26 0.012 67);
+				position: relative;
+				overflow: hidden;
+			}
 
-  .trace-bar-fill {
-    height: 100%;
-    position: absolute;
-    left: 0;
-    top: 0;
-  }
+			.trace-bar-fill {
+				height: 100%;
+				position: absolute;
+				left: 0;
+				top: 0;
+			}
 
-  .trace-duration {
-    font-size: 10px;
-    color: oklch(0.603 0.023 72 / 0.6);
-    width: 42px;
-    text-align: right;
-  }
+			.trace-duration {
+				font-size: 10px;
+				color: oklch(0.603 0.023 72 / 0.6);
+				width: 42px;
+				text-align: right;
+			}
 
-  /* Status dots */
-  .status-row {
-    display: flex;
-    gap: 16px;
-    align-items: center;
-  }
+			/* Status dots */
+			.status-row {
+				display: flex;
+				gap: 16px;
+				align-items: center;
+			}
 
-  .status-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: oklch(0.603 0.023 72 / 0.7);
-  }
+			.status-item {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				font-size: 11px;
+				color: oklch(0.603 0.023 72 / 0.7);
+			}
 
-  .status-dot {
-    width: 6px;
-    height: 6px;
-  }
+			.status-dot {
+				width: 6px;
+				height: 6px;
+			}
 
-  .status-dot.green { background: oklch(0.658 0.134 151); }
-  .status-dot.blue { background: oklch(0.693 0.165 254); }
-  .status-dot.amber { background: oklch(0.714 0.154 59); }
+			.status-dot.green {
+				background: oklch(0.658 0.134 151);
+			}
+			.status-dot.blue {
+				background: oklch(0.693 0.165 254);
+			}
+			.status-dot.amber {
+				background: oklch(0.714 0.154 59);
+			}
 
-  /* Bottom bar */
-  .bottom-bar {
-    position: relative;
-    z-index: 30;
-    padding: 16px 72px 24px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
+			/* Bottom bar */
+			.bottom-bar {
+				position: relative;
+				z-index: 30;
+				padding: 16px 72px 24px;
+				flex-shrink: 0;
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+			}
 
-  .bottom-url {
-    font-size: 13px;
-    color: oklch(0.91 0.016 74 / 0.4);
-    letter-spacing: -0.3px;
-  }
+			.bottom-url {
+				font-size: 13px;
+				color: oklch(0.91 0.016 74 / 0.4);
+				letter-spacing: -0.3px;
+			}
 
-  .bottom-badge {
-    font-size: 11px;
-    color: oklch(0.91 0.016 74 / 0.5);
-    border: 1px solid oklch(0.268 0.012 67);
-    padding: 4px 12px;
-    letter-spacing: 0.5px;
-  }
+			.bottom-badge {
+				font-size: 11px;
+				color: oklch(0.91 0.016 74 / 0.5);
+				border: 1px solid oklch(0.268 0.012 67);
+				padding: 4px 12px;
+				letter-spacing: 0.5px;
+			}
 
-  /* Subtle scan line effect */
-  .scanlines {
-    position: absolute;
-    inset: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0,0,0,0.03) 2px,
-      rgba(0,0,0,0.03) 4px
-    );
-    pointer-events: none;
-    z-index: 20;
-  }
+			/* Subtle scan line effect */
+			.scanlines {
+				position: absolute;
+				inset: 0;
+				background: repeating-linear-gradient(
+					0deg,
+					transparent,
+					transparent 2px,
+					rgba(0, 0, 0, 0.03) 2px,
+					rgba(0, 0, 0, 0.03) 4px
+				);
+				pointer-events: none;
+				z-index: 20;
+			}
 
-  /* Border glow on top */
-  .top-line {
-    position: absolute;
-    top: 0;
-    left: 72px;
-    right: 72px;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, oklch(0.714 0.154 59 / 0.4) 30%, oklch(0.654 0.176 30 / 0.4) 70%, transparent);
-    z-index: 10;
-  }
-</style>
-</head>
-<body>
-<div class="canvas">
-  <div class="grid-bg"></div>
-  <div class="orb orb-1"></div>
-  <div class="orb orb-2"></div>
-  <div class="orb orb-3"></div>
-  <div class="top-line"></div>
-  <div class="scanlines"></div>
+			/* Border glow on top */
+			.top-line {
+				position: absolute;
+				top: 0;
+				left: 72px;
+				right: 72px;
+				height: 1px;
+				background: linear-gradient(
+					90deg,
+					transparent,
+					oklch(0.714 0.154 59 / 0.4) 30%,
+					oklch(0.654 0.176 30 / 0.4) 70%,
+					transparent
+				);
+				z-index: 10;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="canvas">
+			<div class="grid-bg"></div>
+			<div class="orb orb-1"></div>
+			<div class="orb orb-2"></div>
+			<div class="orb orb-3"></div>
+			<div class="top-line"></div>
+			<div class="scanlines"></div>
 
-  <div class="content">
-    <div class="left">
-      <div class="logo-row">
-        <div class="logo-icon">M</div>
-        <div class="logo-text">maple</div>
-      </div>
+			<div class="content">
+				<div class="left">
+					<div class="logo-row">
+						<div class="logo-icon">M</div>
+						<div class="logo-text">maple</div>
+					</div>
 
-      <h1>Open-source<br>observability</h1>
+					<h1>Open-source<br />observability</h1>
 
-      <p class="tagline">
-        Traces, logs, and metrics for your distributed systems. Powered by OpenTelemetry and Tinybird.
-      </p>
+					<p class="tagline">
+						Traces, logs, and metrics for your distributed systems. Powered by OpenTelemetry and
+						Tinybird.
+					</p>
 
-      <div class="pills">
-        <span class="pill accent">OpenTelemetry</span>
-        <span class="pill">Traces</span>
-        <span class="pill">Logs</span>
-        <span class="pill">Metrics</span>
-        <span class="pill">Real-time</span>
-      </div>
-    </div>
+					<div class="pills">
+						<span class="pill accent">OpenTelemetry</span>
+						<span class="pill">Traces</span>
+						<span class="pill">Logs</span>
+						<span class="pill">Metrics</span>
+						<span class="pill">Real-time</span>
+					</div>
+				</div>
 
-    <div class="right">
-      <!-- Request throughput card -->
-      <div class="mock-card">
-        <div class="mock-card-header">
-          <span class="mock-card-title">Request Throughput</span>
-          <span class="mock-card-value">2.4k/s</span>
-        </div>
-        <div class="bars">
-          <div class="bar" style="height:35%"></div>
-          <div class="bar" style="height:42%"></div>
-          <div class="bar" style="height:38%"></div>
-          <div class="bar" style="height:55%"></div>
-          <div class="bar" style="height:48%"></div>
-          <div class="bar" style="height:62%"></div>
-          <div class="bar" style="height:58%"></div>
-          <div class="bar" style="height:70%"></div>
-          <div class="bar" style="height:65%"></div>
-          <div class="bar" style="height:72%"></div>
-          <div class="bar" style="height:80%"></div>
-          <div class="bar" style="height:75%"></div>
-          <div class="bar" style="height:85%"></div>
-          <div class="bar" style="height:78%"></div>
-          <div class="bar" style="height:90%"></div>
-          <div class="bar" style="height:82%"></div>
-          <div class="bar" style="height:95%"></div>
-          <div class="bar" style="height:88%"></div>
-          <div class="bar" style="height:92%"></div>
-          <div class="bar" style="height:100%"></div>
-          <div class="bar" style="height:94%"></div>
-          <div class="bar" style="height:88%"></div>
-          <div class="bar" style="height:85%"></div>
-          <div class="bar" style="height:90%"></div>
-        </div>
-      </div>
+				<div class="right">
+					<!-- Request throughput card -->
+					<div class="mock-card">
+						<div class="mock-card-header">
+							<span class="mock-card-title">Request Throughput</span>
+							<span class="mock-card-value">2.4k/s</span>
+						</div>
+						<div class="bars">
+							<div class="bar" style="height: 35%"></div>
+							<div class="bar" style="height: 42%"></div>
+							<div class="bar" style="height: 38%"></div>
+							<div class="bar" style="height: 55%"></div>
+							<div class="bar" style="height: 48%"></div>
+							<div class="bar" style="height: 62%"></div>
+							<div class="bar" style="height: 58%"></div>
+							<div class="bar" style="height: 70%"></div>
+							<div class="bar" style="height: 65%"></div>
+							<div class="bar" style="height: 72%"></div>
+							<div class="bar" style="height: 80%"></div>
+							<div class="bar" style="height: 75%"></div>
+							<div class="bar" style="height: 85%"></div>
+							<div class="bar" style="height: 78%"></div>
+							<div class="bar" style="height: 90%"></div>
+							<div class="bar" style="height: 82%"></div>
+							<div class="bar" style="height: 95%"></div>
+							<div class="bar" style="height: 88%"></div>
+							<div class="bar" style="height: 92%"></div>
+							<div class="bar" style="height: 100%"></div>
+							<div class="bar" style="height: 94%"></div>
+							<div class="bar" style="height: 88%"></div>
+							<div class="bar" style="height: 85%"></div>
+							<div class="bar" style="height: 90%"></div>
+						</div>
+					</div>
 
-      <!-- Trace spans card -->
-      <div class="mock-card">
-        <div class="mock-card-header">
-          <span class="mock-card-title">Trace Waterfall</span>
-          <span class="mock-card-value" style="color: oklch(0.693 0.165 254);">12ms</span>
-        </div>
-        <div class="trace-rows">
-          <div class="trace-row">
-            <span class="trace-label">GET /api</span>
-            <div class="trace-bar-container">
-              <div class="trace-bar-fill" style="width:100%;background:linear-gradient(90deg,oklch(0.714 0.154 59),oklch(0.80 0.12 62));opacity:0.6;"></div>
-            </div>
-            <span class="trace-duration">12ms</span>
-          </div>
-          <div class="trace-row">
-            <span class="trace-label">&nbsp;&nbsp;db.query</span>
-            <div class="trace-bar-container">
-              <div class="trace-bar-fill" style="width:55%;left:10%;background:linear-gradient(90deg,oklch(0.693 0.165 254),oklch(0.75 0.14 254));opacity:0.6;"></div>
-            </div>
-            <span class="trace-duration">6ms</span>
-          </div>
-          <div class="trace-row">
-            <span class="trace-label">&nbsp;&nbsp;cache.get</span>
-            <div class="trace-bar-container">
-              <div class="trace-bar-fill" style="width:15%;left:8%;background:linear-gradient(90deg,oklch(0.658 0.134 151),oklch(0.72 0.11 151));opacity:0.6;"></div>
-            </div>
-            <span class="trace-duration">1ms</span>
-          </div>
-          <div class="trace-row">
-            <span class="trace-label">&nbsp;&nbsp;serialize</span>
-            <div class="trace-bar-container">
-              <div class="trace-bar-fill" style="width:20%;left:72%;background:linear-gradient(90deg,oklch(0.654 0.176 30),oklch(0.72 0.14 30));opacity:0.6;"></div>
-            </div>
-            <span class="trace-duration">2ms</span>
-          </div>
-        </div>
-      </div>
+					<!-- Trace spans card -->
+					<div class="mock-card">
+						<div class="mock-card-header">
+							<span class="mock-card-title">Trace Waterfall</span>
+							<span class="mock-card-value" style="color: oklch(0.693 0.165 254)">12ms</span>
+						</div>
+						<div class="trace-rows">
+							<div class="trace-row">
+								<span class="trace-label">GET /api</span>
+								<div class="trace-bar-container">
+									<div
+										class="trace-bar-fill"
+										style="
+											width: 100%;
+											background: linear-gradient(
+												90deg,
+												oklch(0.714 0.154 59),
+												oklch(0.8 0.12 62)
+											);
+											opacity: 0.6;
+										"
+									></div>
+								</div>
+								<span class="trace-duration">12ms</span>
+							</div>
+							<div class="trace-row">
+								<span class="trace-label">&nbsp;&nbsp;db.query</span>
+								<div class="trace-bar-container">
+									<div
+										class="trace-bar-fill"
+										style="
+											width: 55%;
+											left: 10%;
+											background: linear-gradient(
+												90deg,
+												oklch(0.693 0.165 254),
+												oklch(0.75 0.14 254)
+											);
+											opacity: 0.6;
+										"
+									></div>
+								</div>
+								<span class="trace-duration">6ms</span>
+							</div>
+							<div class="trace-row">
+								<span class="trace-label">&nbsp;&nbsp;cache.get</span>
+								<div class="trace-bar-container">
+									<div
+										class="trace-bar-fill"
+										style="
+											width: 15%;
+											left: 8%;
+											background: linear-gradient(
+												90deg,
+												oklch(0.658 0.134 151),
+												oklch(0.72 0.11 151)
+											);
+											opacity: 0.6;
+										"
+									></div>
+								</div>
+								<span class="trace-duration">1ms</span>
+							</div>
+							<div class="trace-row">
+								<span class="trace-label">&nbsp;&nbsp;serialize</span>
+								<div class="trace-bar-container">
+									<div
+										class="trace-bar-fill"
+										style="
+											width: 20%;
+											left: 72%;
+											background: linear-gradient(
+												90deg,
+												oklch(0.654 0.176 30),
+												oklch(0.72 0.14 30)
+											);
+											opacity: 0.6;
+										"
+									></div>
+								</div>
+								<span class="trace-duration">2ms</span>
+							</div>
+						</div>
+					</div>
 
-      <!-- Status card -->
-      <div class="mock-card" style="padding: 12px 20px;">
-        <div class="status-row">
-          <div class="status-item">
-            <div class="status-dot green"></div>
-            <span>5 services healthy</span>
-          </div>
-          <div class="status-item">
-            <div class="status-dot blue"></div>
-            <span>P99: 24ms</span>
-          </div>
-          <div class="status-item">
-            <div class="status-dot amber"></div>
-            <span>0.02% errors</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+					<!-- Status card -->
+					<div class="mock-card" style="padding: 12px 20px">
+						<div class="status-row">
+							<div class="status-item">
+								<div class="status-dot green"></div>
+								<span>5 services healthy</span>
+							</div>
+							<div class="status-item">
+								<div class="status-dot blue"></div>
+								<span>P99: 24ms</span>
+							</div>
+							<div class="status-item">
+								<div class="status-dot amber"></div>
+								<span>0.02% errors</span>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
 
-  <div class="bottom-bar">
-    <span class="bottom-url">github.com/Makisuo/maple</span>
-    <span class="bottom-badge">v1.0</span>
-  </div>
-</div>
-</body>
+			<div class="bottom-bar">
+				<span class="bottom-url">github.com/Makisuo/maple</span>
+				<span class="bottom-badge">v1.0</span>
+			</div>
+		</div>
+	</body>
 </html>

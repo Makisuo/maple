@@ -10,6 +10,7 @@ tags: [schema, partitioning, simplicity]
 **Impact: MEDIUM**
 
 Start without partitioning and add it later only if:
+
 - You have clear data lifecycle requirements (retention, archiving)
 - Your access patterns clearly benefit from partition pruning
 - You understand the cardinality implications
@@ -32,11 +33,11 @@ ORDER BY (event_type, timestamp);
 
 **When to add partitioning:**
 
-| Need | Add Partitioning? |
-|------|-------------------|
-| Time-based data retention | Yes |
-| Archive old data to cold storage | Yes |
+| Need                             | Add Partitioning?  |
+| -------------------------------- | ------------------ |
+| Time-based data retention        | Yes                |
+| Archive old data to cold storage | Yes                |
 | Query performance on time ranges | Maybe (test first) |
-| No specific lifecycle needs | No |
+| No specific lifecycle needs      | No                 |
 
 Reference: [Choosing a Partitioning Key](https://clickhouse.com/docs/best-practices/choosing-a-partitioning-key)

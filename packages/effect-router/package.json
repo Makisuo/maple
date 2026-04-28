@@ -1,29 +1,29 @@
 {
-  "name": "@effect-router/core",
-  "version": "0.1.0",
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./react": "./src/react.ts"
-  },
-  "peerDependencies": {
-    "@effect/atom-react": ">=4.0.0-beta.0",
-    "@tanstack/react-router": ">=1.150.0",
-    "effect": ">=4.0.0-beta.0",
-    "react": ">=19.0.0"
-  },
-  "devDependencies": {
-    "@effect/atom-react": "catalog:effect",
-    "@effect/language-service": "catalog:effect",
-    "@standard-schema/spec": "^1.1.0",
-    "@tanstack/react-router": "^1.168.10",
-    "@types/node": "catalog:tooling",
-    "@types/react": "catalog:react",
-    "effect": "catalog:effect",
-    "react": "catalog:react",
-    "typescript": "catalog:tooling"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  }
+	"name": "@effect-router/core",
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./react": "./src/react.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@effect/atom-react": "catalog:effect",
+		"@effect/language-service": "catalog:effect",
+		"@standard-schema/spec": "^1.1.0",
+		"@tanstack/react-router": "^1.168.10",
+		"@types/node": "catalog:tooling",
+		"@types/react": "catalog:react",
+		"effect": "catalog:effect",
+		"react": "catalog:react",
+		"typescript": "catalog:tooling"
+	},
+	"peerDependencies": {
+		"@effect/atom-react": ">=4.0.0-beta.0",
+		"@tanstack/react-router": ">=1.150.0",
+		"effect": ">=4.0.0-beta.0",
+		"react": ">=19.0.0"
+	}
 }

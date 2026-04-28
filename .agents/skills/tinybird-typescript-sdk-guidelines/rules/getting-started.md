@@ -25,6 +25,7 @@ npx tinybird init --skip-login     # Skip browser authentication
 ```
 
 This generates:
+
 - `tinybird.config.json` - Configuration file
 - `src/tinybird/datasources.ts` - Data source definitions
 - `src/tinybird/pipes.ts` - Pipe/endpoint definitions
@@ -33,6 +34,7 @@ This generates:
 ## Environment Setup
 
 Create `.env.local`:
+
 ```
 TINYBIRD_TOKEN=p.your_token_here
 ```

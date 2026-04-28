@@ -65,6 +65,7 @@ for row in result["data"]:
 The client provides several operations for managing datasource data:
 
 ### Append from URL
+
 ```python
 tinybird.page_views.append(
     {
@@ -74,6 +75,7 @@ tinybird.page_views.append(
 ```
 
 ### Replace (Full Snapshot)
+
 ```python
 tinybird.page_views.replace(
     {
@@ -83,6 +85,7 @@ tinybird.page_views.replace(
 ```
 
 ### Delete Rows
+
 ```python
 # Delete matching rows
 tinybird.page_views.delete(
@@ -101,6 +104,7 @@ tinybird.page_views.delete(
 ```
 
 ### Truncate
+
 ```python
 tinybird.page_views.truncate()
 ```

@@ -71,6 +71,7 @@ api.ingest(
 ## Datasource Operations
 
 ### Append from URL
+
 ```python
 api.append_datasource(
     "events",
@@ -79,6 +80,7 @@ api.append_datasource(
 ```
 
 ### Delete Rows
+
 ```python
 api.delete_datasource(
     "events",
@@ -93,6 +95,7 @@ api.delete_datasource(
 ```
 
 ### Truncate
+
 ```python
 api.truncate_datasource("events")
 ```

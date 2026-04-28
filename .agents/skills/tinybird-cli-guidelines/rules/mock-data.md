@@ -2,14 +2,14 @@
 
 Tinybird mock data flow (as implemented by the agent) for a datasource:
 
-1) Build a SQL query that returns mock rows.
-2) Execute locally with a limit and format using `tb --output=json|csv '<sql>' --rows-limit <rows>` command.
-3) Preview the generated output.
-4) Confirm creation of a fixture file under `fixtures/`.
-5) Write the fixture file:
-   - `fixtures/<datasource_name>.ndjson` or `fixtures/<datasource_name>.csv`
-6) Confirm append.
-7) Append the fixture to the datasource in Tinybird Local.
+1. Build a SQL query that returns mock rows.
+2. Execute locally with a limit and format using `tb --output=json|csv '<sql>' --rows-limit <rows>` command.
+3. Preview the generated output.
+4. Confirm creation of a fixture file under `fixtures/`.
+5. Write the fixture file:
+    - `fixtures/<datasource_name>.ndjson` or `fixtures/<datasource_name>.csv`
+6. Confirm append.
+7. Append the fixture to the datasource in Tinybird Local.
 
 ## Example Mock Query
 
@@ -26,6 +26,7 @@ FROM numbers(ROWS)
 ```
 
 Notes:
+
 - The query must return exactly `ROWS` rows via `FROM numbers(ROWS)`.
 - Do not add FORMAT or a trailing semicolon in the mock query itself.
 

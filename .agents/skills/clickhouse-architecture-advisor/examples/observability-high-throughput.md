@@ -11,6 +11,7 @@
 ## Workload Summary
 
 This is a high-ingest, append-friendly, time-series workload. The main architectural risks are:
+
 - excessive small parts
 - merge pressure
 - slow tail queries if rollups are not used for dashboards
@@ -31,7 +32,8 @@ Use Kafka as the decoupling layer and load ClickHouse through Kafka engine table
 **Why**  
 The producer fleet is bursty and distributed. This pattern improves replayability and isolates producers from storage behavior.
 
-**How**  
+**How**
+
 - Kafka topic per stream family
 - Kafka engine source table
 - MV into MergeTree raw table
@@ -43,6 +45,7 @@ derived
 medium
 
 **Source**
+
 - https://clickhouse.com/docs/engines/table-engines/integrations/kafka
 - https://clickhouse.com/docs/materialized-view/incremental-materialized-view
 
@@ -61,6 +64,7 @@ derived
 medium
 
 **Source**
+
 - https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/custom-partitioning-key
 
 ### 3. Incremental MVs for hot service dashboards
@@ -78,6 +82,7 @@ official
 high
 
 **Source**
+
 - https://clickhouse.com/docs/materialized-view/incremental-materialized-view
 
 ## Example raw table

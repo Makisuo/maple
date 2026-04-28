@@ -72,27 +72,27 @@ For a self-hosted Maple deployment, add `--set maple.ingest.endpoint=https://you
 
 ```yaml
 global:
-  clusterName: production
-  deploymentEnvironment: prod
+    clusterName: production
+    deploymentEnvironment: prod
 
 maple:
-  ingest:
-    endpoint: https://ingest.example.com
-  ingestKey:
-    existingSecret:
-      name: maple-ingest-key
-      key: ingest-key
+    ingest:
+        endpoint: https://ingest.example.com
+    ingestKey:
+        existingSecret:
+            name: maple-ingest-key
+            key: ingest-key
 
 presets:
-  podLogs:
-    enabled: true
-  k8sEvents:
-    enabled: true
-  otlpReceiver:
-    grpc:
-      hostPort: null
-    http:
-      hostPort: null
+    podLogs:
+        enabled: true
+    k8sEvents:
+        enabled: true
+    otlpReceiver:
+        grpc:
+            hostPort: null
+        http:
+            hostPort: null
 ```
 
 ## EKS Fargate

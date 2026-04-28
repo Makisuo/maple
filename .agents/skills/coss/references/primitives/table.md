@@ -23,14 +23,14 @@ npm install @tanstack/react-table
 
 ```tsx
 import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
+	Table,
+	TableBody,
+	TableCaption,
+	TableCell,
+	TableFooter,
+	TableHead,
+	TableHeader,
+	TableRow,
 } from "@/components/ui/table"
 ```
 
@@ -38,16 +38,16 @@ import {
 
 ```tsx
 <Table>
-  <TableHeader>
-    <TableRow>
-      <TableHead>Name</TableHead>
-    </TableRow>
-  </TableHeader>
-  <TableBody>
-    <TableRow>
-      <TableCell>Ada Lovelace</TableCell>
-    </TableRow>
-  </TableBody>
+	<TableHeader>
+		<TableRow>
+			<TableHead>Name</TableHead>
+		</TableRow>
+	</TableHeader>
+	<TableBody>
+		<TableRow>
+			<TableCell>Ada Lovelace</TableCell>
+		</TableRow>
+	</TableBody>
 </Table>
 ```
 
@@ -78,4 +78,3 @@ import {
 - `CardFrame` + static table: `p-table-7`
 - `CardFrame` + TanStack + checkboxes: `p-table-6`
 - `CardFrame` + TanStack + sort + pagination: `p-table-8`
-

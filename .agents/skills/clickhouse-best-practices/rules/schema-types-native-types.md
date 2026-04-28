@@ -37,15 +37,15 @@ CREATE TABLE events (
 
 **Type Selection Quick Reference:**
 
-| Data | Use | Avoid |
-|------|-----|-------|
-| Sequential IDs | UInt32/UInt64 | String |
-| UUIDs | UUID | String |
-| Status/Category | Enum8 or LowCardinality(String) | String |
-| Timestamps | DateTime | DateTime64, String |
-| Dates only | Date or Date32 | DateTime, String |
-| Counts | UInt8/16/32 (smallest that fits) | Int64, String |
-| Money | Decimal(P,S) or Int64 (cents) | Float64, String |
-| Booleans | Bool or UInt8 | String |
+| Data            | Use                              | Avoid              |
+| --------------- | -------------------------------- | ------------------ |
+| Sequential IDs  | UInt32/UInt64                    | String             |
+| UUIDs           | UUID                             | String             |
+| Status/Category | Enum8 or LowCardinality(String)  | String             |
+| Timestamps      | DateTime                         | DateTime64, String |
+| Dates only      | Date or Date32                   | DateTime, String   |
+| Counts          | UInt8/16/32 (smallest that fits) | Int64, String      |
+| Money           | Decimal(P,S) or Int64 (cents)    | Float64, String    |
+| Booleans        | Bool or UInt8                    | String             |
 
 Reference: [Select Data Types](https://clickhouse.com/docs/best-practices/select-data-types)

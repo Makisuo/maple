@@ -13,27 +13,35 @@ import { type EffectRouterContext, getCurrentNavigationSpan } from "./router.ts"
  * LoaderFnContext via function parameter contravariance.
  */
 interface RouterLoaderContext {
-  readonly params: Record<string, string>
-  readonly search?: Record<string, unknown>
-  readonly abortController: AbortController
-  readonly preload: boolean
-  readonly cause: "preload" | "enter" | "stay"
-  readonly location: { readonly pathname: string; readonly search: Record<string, unknown>; readonly hash: string }
-  readonly context: Record<string, unknown>
-  readonly route: { readonly fullPath: string; readonly id: string }
+	readonly params: Record<string, string>
+	readonly search?: Record<string, unknown>
+	readonly abortController: AbortController
+	readonly preload: boolean
+	readonly cause: "preload" | "enter" | "stay"
+	readonly location: {
+		readonly pathname: string
+		readonly search: Record<string, unknown>
+		readonly hash: string
+	}
+	readonly context: Record<string, unknown>
+	readonly route: { readonly fullPath: string; readonly id: string }
 }
 
 /**
  * Structural type matching TanStack Router's beforeLoad context.
  */
 interface RouterBeforeLoadContext {
-  readonly params: Record<string, string>
-  readonly search?: Record<string, unknown>
-  readonly abortController: AbortController
-  readonly cause: "preload" | "enter" | "stay"
-  readonly location: { readonly pathname: string; readonly search: Record<string, unknown>; readonly hash: string }
-  readonly context: Record<string, unknown>
-  readonly route?: { readonly fullPath: string; readonly id: string }
+	readonly params: Record<string, string>
+	readonly search?: Record<string, unknown>
+	readonly abortController: AbortController
+	readonly cause: "preload" | "enter" | "stay"
+	readonly location: {
+		readonly pathname: string
+		readonly search: Record<string, unknown>
+		readonly hash: string
+	}
+	readonly context: Record<string, unknown>
+	readonly route?: { readonly fullPath: string; readonly id: string }
 }
 
 // ---------------------------------------------------------------------------
@@ -41,19 +49,23 @@ interface RouterBeforeLoadContext {
 // ---------------------------------------------------------------------------
 
 interface EffectRouteContextBase {
-  readonly params: Record<string, string>
-  readonly search: Record<string, unknown>
-  readonly abortController: AbortController
-  readonly cause: "preload" | "enter" | "stay"
-  readonly location: { readonly pathname: string; readonly search: Record<string, unknown>; readonly hash: string }
-  readonly context: Record<string, unknown>
+	readonly params: Record<string, string>
+	readonly search: Record<string, unknown>
+	readonly abortController: AbortController
+	readonly cause: "preload" | "enter" | "stay"
+	readonly location: {
+		readonly pathname: string
+		readonly search: Record<string, unknown>
+		readonly hash: string
+	}
+	readonly context: Record<string, unknown>
 }
 
 /**
  * The context passed to an effect loader function.
  */
 export interface EffectLoaderContext extends EffectRouteContextBase {
-  readonly preload: boolean
+	readonly preload: boolean
 }
 
 /**
@@ -71,7 +83,7 @@ export type EffectLoaderFn<A, E = never> = (ctx: EffectLoaderContext) => Effect.
  * that produces additional context to merge.
  */
 export type EffectBeforeLoadFn<A extends Record<string, unknown>, E = never> = (
-  ctx: EffectBeforeLoadContext,
+	ctx: EffectBeforeLoadContext,
 ) => Effect.Effect<A, E>
 
 // ---------------------------------------------------------------------------
@@ -102,38 +114,38 @@ export type EffectBeforeLoadFn<A extends Record<string, unknown>, E = never> = (
  * ```
  */
 export function effectLoader<A, E = never>(
-  fn: EffectLoaderFn<A, E>,
+	fn: EffectLoaderFn<A, E>,
 ): (ctx: RouterLoaderContext) => Promise<A> {
-  return (ctx) => {
-    const effectCtx = getEffectContext(ctx.context)
+	return (ctx) => {
+		const effectCtx = getEffectContext(ctx.context)
 
-    const effect = fn({
-      params: ctx.params,
-      search: ctx.search ?? {},
-      abortController: ctx.abortController,
-      preload: ctx.preload,
-      cause: ctx.cause,
-      location: ctx.location,
-      context: ctx.context,
-    })
+		const effect = fn({
+			params: ctx.params,
+			search: ctx.search ?? {},
+			abortController: ctx.abortController,
+			preload: ctx.preload,
+			cause: ctx.cause,
+			location: ctx.location,
+			context: ctx.context,
+		})
 
-    let traced = effect.pipe(
-      Effect.withSpan(`route.loader ${ctx.route.fullPath}`, {
-        attributes: {
-          "route.path": ctx.route.fullPath,
-          "route.cause": ctx.cause,
-          "route.preload": ctx.preload,
-        },
-      }),
-    )
+		let traced = effect.pipe(
+			Effect.withSpan(`route.loader ${ctx.route.fullPath}`, {
+				attributes: {
+					"route.path": ctx.route.fullPath,
+					"route.cause": ctx.cause,
+					"route.preload": ctx.preload,
+				},
+			}),
+		)
 
-    const navSpan = getCurrentNavigationSpan()
-    if (navSpan) {
-      traced = Effect.withParentSpan(traced, navSpan)
-    }
+		const navSpan = getCurrentNavigationSpan()
+		if (navSpan) {
+			traced = Effect.withParentSpan(traced, navSpan)
+		}
 
-    return runWithAbort(effectCtx.effectManagedRuntime, traced, ctx.abortController.signal)
-  }
+		return runWithAbort(effectCtx.effectManagedRuntime, traced, ctx.abortController.signal)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -162,38 +174,38 @@ export function effectLoader<A, E = never>(
  * ```
  */
 export function effectBeforeLoad<A extends Record<string, unknown>, E = never>(
-  fn: EffectBeforeLoadFn<A, E>,
+	fn: EffectBeforeLoadFn<A, E>,
 ): (ctx: RouterBeforeLoadContext) => Promise<A> {
-  return (ctx) => {
-    const effectCtx = getEffectContext(ctx.context)
-    const routePath = ctx.route?.fullPath ?? "unknown"
+	return (ctx) => {
+		const effectCtx = getEffectContext(ctx.context)
+		const routePath = ctx.route?.fullPath ?? "unknown"
 
-    const effect = fn({
-      params: ctx.params,
-      search: ctx.search ?? {},
-      abortController: ctx.abortController,
-      location: ctx.location,
-      context: ctx.context,
-      cause: ctx.cause,
-    })
+		const effect = fn({
+			params: ctx.params,
+			search: ctx.search ?? {},
+			abortController: ctx.abortController,
+			location: ctx.location,
+			context: ctx.context,
+			cause: ctx.cause,
+		})
 
-    let traced = effect.pipe(
-      Effect.withSpan(`route.beforeLoad ${routePath}`, {
-        attributes: {
-          "route.path": routePath,
-          "route.id": ctx.route?.id ?? "unknown",
-          "route.cause": ctx.cause,
-        },
-      }),
-    )
+		let traced = effect.pipe(
+			Effect.withSpan(`route.beforeLoad ${routePath}`, {
+				attributes: {
+					"route.path": routePath,
+					"route.id": ctx.route?.id ?? "unknown",
+					"route.cause": ctx.cause,
+				},
+			}),
+		)
 
-    const navSpan = getCurrentNavigationSpan()
-    if (navSpan) {
-      traced = Effect.withParentSpan(traced, navSpan)
-    }
+		const navSpan = getCurrentNavigationSpan()
+		if (navSpan) {
+			traced = Effect.withParentSpan(traced, navSpan)
+		}
 
-    return runWithAbort(effectCtx.effectManagedRuntime, traced, ctx.abortController.signal)
-  }
+		return runWithAbort(effectCtx.effectManagedRuntime, traced, ctx.abortController.signal)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -205,17 +217,17 @@ export function effectBeforeLoad<A extends Record<string, unknown>, E = never>(
  * check, avoiding an unsafe `as` cast.
  */
 export function getEffectContext(context: Record<string, unknown>): EffectRouterContext {
-  if (
-    !("effectManagedRuntime" in context) ||
-    !("effectAtomRuntime" in context) ||
-    !("effectRegistry" in context)
-  ) {
-    throw new Error(
-      "effect-router: effectLoader/effectBeforeLoad requires a router created with createEffectRouter()",
-    )
-  }
-  // Safe after runtime guard validates all required keys exist
-  return context as unknown as EffectRouterContext
+	if (
+		!("effectManagedRuntime" in context) ||
+		!("effectAtomRuntime" in context) ||
+		!("effectRegistry" in context)
+	) {
+		throw new Error(
+			"effect-router: effectLoader/effectBeforeLoad requires a router created with createEffectRouter()",
+		)
+	}
+	// Safe after runtime guard validates all required keys exist
+	return context as unknown as EffectRouterContext
 }
 
 /**
@@ -224,29 +236,29 @@ export function getEffectContext(context: Record<string, unknown>): EffectRouter
  * cleanup and result retrieval.
  */
 function runWithAbort<A, E>(
-  managedRuntime: ManagedRuntime.ManagedRuntime<any, any>,
-  effect: Effect.Effect<A, E>,
-  signal: AbortSignal,
+	managedRuntime: ManagedRuntime.ManagedRuntime<any, any>,
+	effect: Effect.Effect<A, E>,
+	signal: AbortSignal,
 ): Promise<A> {
-  if (signal.aborted) {
-    return Promise.reject(new DOMException("Aborted", "AbortError"))
-  }
+	if (signal.aborted) {
+		return Promise.reject(new DOMException("Aborted", "AbortError"))
+	}
 
-  const fiber = managedRuntime.runFork(effect)
+	const fiber = managedRuntime.runFork(effect)
 
-  const onAbort = () => {
-    Effect.runFork(Fiber.interrupt(fiber))
-  }
-  signal.addEventListener("abort", onAbort, { once: true })
+	const onAbort = () => {
+		Effect.runFork(Fiber.interrupt(fiber))
+	}
+	signal.addEventListener("abort", onAbort, { once: true })
 
-  return Effect.runPromise(
-    Fiber.join(fiber).pipe(
-      Effect.onInterrupt(() =>
-        Effect.logWarning("Route fiber interrupted").pipe(
-          Effect.annotateLogs("signal.aborted", signal.aborted),
-        ),
-      ),
-      Effect.ensuring(Effect.sync(() => signal.removeEventListener("abort", onAbort))),
-    ),
-  )
+	return Effect.runPromise(
+		Fiber.join(fiber).pipe(
+			Effect.onInterrupt(() =>
+				Effect.logWarning("Route fiber interrupted").pipe(
+					Effect.annotateLogs("signal.aborted", signal.aborted),
+				),
+			),
+			Effect.ensuring(Effect.sync(() => signal.removeEventListener("abort", onAbort))),
+		),
+	)
 }

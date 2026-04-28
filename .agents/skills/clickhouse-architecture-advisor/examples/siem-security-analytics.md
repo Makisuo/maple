@@ -4,14 +4,15 @@
 
 - Workload: endpoint, identity, cloud, and network telemetry
 - Query pattern:
-  - repeated detection logic
-  - time-bounded investigations
-  - lookup-heavy enrichments
+    - repeated detection logic
+    - time-bounded investigations
+    - lookup-heavy enrichments
 - Freshness target: near real-time
 
 ## Workload Summary
 
 This workload is time-series heavy, multi-source, and often enrichment-bound. The two common failure modes are:
+
 - expensive runtime JOINs on slow-changing dimension data
 - micro-batched ingest that creates excessive parts
 
@@ -38,6 +39,7 @@ official
 high
 
 **Source**
+
 - https://clickhouse.com/docs/en/operations/settings/settings#async_insert
 - https://clickhouse.com/docs/optimize/asynchronous-inserts
 
@@ -56,6 +58,7 @@ official
 high
 
 **Source**
+
 - https://clickhouse.com/docs/en/sql-reference/dictionaries
 
 ### 3. Use incremental MVs for repeated aggregated detection views
@@ -73,4 +76,5 @@ official
 high
 
 **Source**
+
 - https://clickhouse.com/docs/materialized-view/incremental-materialized-view

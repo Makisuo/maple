@@ -34,15 +34,15 @@ import { Radio, RadioGroup } from "@/components/ui/radio-group"
 
 ```tsx
 <RadioGroup defaultValue="next">
-  <Label>
-    <Radio value="next" /> Next.js
-  </Label>
-  <Label>
-    <Radio value="vite" /> Vite
-  </Label>
-  <Label>
-    <Radio value="astro" /> Astro
-  </Label>
+	<Label>
+		<Radio value="next" /> Next.js
+	</Label>
+	<Label>
+		<Radio value="vite" /> Vite
+	</Label>
+	<Label>
+		<Radio value="astro" /> Astro
+	</Label>
 </RadioGroup>
 ```
 
@@ -56,20 +56,20 @@ Radio group with descriptions:
 
 ```tsx
 <RadioGroup defaultValue="comfortable" aria-label="Spacing preference">
-  <Label className="flex items-start gap-3">
-    <Radio value="default" />
-    <div>
-      <span className="font-medium">Default</span>
-      <p className="text-muted-foreground text-xs">Standard spacing for most layouts.</p>
-    </div>
-  </Label>
-  <Label className="flex items-start gap-3">
-    <Radio value="comfortable" />
-    <div>
-      <span className="font-medium">Comfortable</span>
-      <p className="text-muted-foreground text-xs">Extra padding for readability.</p>
-    </div>
-  </Label>
+	<Label className="flex items-start gap-3">
+		<Radio value="default" />
+		<div>
+			<span className="font-medium">Default</span>
+			<p className="text-muted-foreground text-xs">Standard spacing for most layouts.</p>
+		</div>
+	</Label>
+	<Label className="flex items-start gap-3">
+		<Radio value="comfortable" />
+		<div>
+			<span className="font-medium">Comfortable</span>
+			<p className="text-muted-foreground text-xs">Extra padding for readability.</p>
+		</div>
+	</Label>
 </RadioGroup>
 ```
 

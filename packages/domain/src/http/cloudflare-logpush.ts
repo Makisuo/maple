@@ -1,178 +1,173 @@
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
-import { Schema } from "effect";
-import {
-  CloudflareLogpushConnectorId,
-  IsoDateTimeString,
-} from "../primitives";
-import { Authorization } from "./current-tenant";
+import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { Schema } from "effect"
+import { CloudflareLogpushConnectorId, IsoDateTimeString } from "../primitives"
+import { Authorization } from "./current-tenant"
 
 export class CloudflareLogpushConnectorResponse extends Schema.Class<CloudflareLogpushConnectorResponse>(
-  "CloudflareLogpushConnectorResponse",
+	"CloudflareLogpushConnectorResponse",
 )({
-  id: CloudflareLogpushConnectorId,
-  name: Schema.String,
-  zoneName: Schema.String,
-  serviceName: Schema.String,
-  dataset: Schema.String,
-  enabled: Schema.Boolean,
-  lastReceivedAt: Schema.NullOr(IsoDateTimeString),
-  lastError: Schema.NullOr(Schema.String),
-  secretRotatedAt: IsoDateTimeString,
-  createdAt: IsoDateTimeString,
-  updatedAt: IsoDateTimeString,
+	id: CloudflareLogpushConnectorId,
+	name: Schema.String,
+	zoneName: Schema.String,
+	serviceName: Schema.String,
+	dataset: Schema.String,
+	enabled: Schema.Boolean,
+	lastReceivedAt: Schema.NullOr(IsoDateTimeString),
+	lastError: Schema.NullOr(Schema.String),
+	secretRotatedAt: IsoDateTimeString,
+	createdAt: IsoDateTimeString,
+	updatedAt: IsoDateTimeString,
 }) {}
 
 export class CloudflareLogpushListResponse extends Schema.Class<CloudflareLogpushListResponse>(
-  "CloudflareLogpushListResponse",
+	"CloudflareLogpushListResponse",
 )({
-  connectors: Schema.Array(CloudflareLogpushConnectorResponse),
+	connectors: Schema.Array(CloudflareLogpushConnectorResponse),
 }) {}
 
 export class CloudflareLogpushSetupResponse extends Schema.Class<CloudflareLogpushSetupResponse>(
-  "CloudflareLogpushSetupResponse",
+	"CloudflareLogpushSetupResponse",
 )({
-  connectorId: CloudflareLogpushConnectorId,
-  dataset: Schema.String,
-  destinationConf: Schema.String,
-  recommendedOutputType: Schema.String,
-  recommendedTimestampFormat: Schema.String,
-  recommendedFieldNames: Schema.Array(Schema.String),
-  validationNote: Schema.String,
-  cloudflareSetupSteps: Schema.Array(Schema.String),
+	connectorId: CloudflareLogpushConnectorId,
+	dataset: Schema.String,
+	destinationConf: Schema.String,
+	recommendedOutputType: Schema.String,
+	recommendedTimestampFormat: Schema.String,
+	recommendedFieldNames: Schema.Array(Schema.String),
+	validationNote: Schema.String,
+	cloudflareSetupSteps: Schema.Array(Schema.String),
 }) {}
 
 export class CloudflareLogpushCreateResponse extends Schema.Class<CloudflareLogpushCreateResponse>(
-  "CloudflareLogpushCreateResponse",
+	"CloudflareLogpushCreateResponse",
 )({
-  connector: CloudflareLogpushConnectorResponse,
-  setup: CloudflareLogpushSetupResponse,
+	connector: CloudflareLogpushConnectorResponse,
+	setup: CloudflareLogpushSetupResponse,
 }) {}
 
 export class CloudflareLogpushDeleteResponse extends Schema.Class<CloudflareLogpushDeleteResponse>(
-  "CloudflareLogpushDeleteResponse",
+	"CloudflareLogpushDeleteResponse",
 )({
-  id: CloudflareLogpushConnectorId,
+	id: CloudflareLogpushConnectorId,
 }) {}
 
 export class CreateCloudflareLogpushConnectorRequest extends Schema.Class<CreateCloudflareLogpushConnectorRequest>(
-  "CreateCloudflareLogpushConnectorRequest",
+	"CreateCloudflareLogpushConnectorRequest",
 )({
-  name: Schema.String,
-  zoneName: Schema.String,
-  serviceName: Schema.optional(Schema.NullOr(Schema.String)),
-  enabled: Schema.optional(Schema.Boolean),
+	name: Schema.String,
+	zoneName: Schema.String,
+	serviceName: Schema.optional(Schema.NullOr(Schema.String)),
+	enabled: Schema.optional(Schema.Boolean),
 }) {}
 
 export class UpdateCloudflareLogpushConnectorRequest extends Schema.Class<UpdateCloudflareLogpushConnectorRequest>(
-  "UpdateCloudflareLogpushConnectorRequest",
+	"UpdateCloudflareLogpushConnectorRequest",
 )({
-  name: Schema.optional(Schema.String),
-  zoneName: Schema.optional(Schema.String),
-  serviceName: Schema.optional(Schema.NullOr(Schema.String)),
-  enabled: Schema.optional(Schema.Boolean),
+	name: Schema.optional(Schema.String),
+	zoneName: Schema.optional(Schema.String),
+	serviceName: Schema.optional(Schema.NullOr(Schema.String)),
+	enabled: Schema.optional(Schema.Boolean),
 }) {}
 
 export class CloudflareLogpushPersistenceError extends Schema.TaggedErrorClass<CloudflareLogpushPersistenceError>()(
-  "@maple/http/errors/CloudflareLogpushPersistenceError",
-  {
-    message: Schema.String,
-  },
-  { httpApiStatus: 503 },
+	"@maple/http/errors/CloudflareLogpushPersistenceError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 503 },
 ) {}
 
 export class CloudflareLogpushNotFoundError extends Schema.TaggedErrorClass<CloudflareLogpushNotFoundError>()(
-  "@maple/http/errors/CloudflareLogpushNotFoundError",
-  {
-    connectorId: CloudflareLogpushConnectorId,
-    message: Schema.String,
-  },
-  { httpApiStatus: 404 },
+	"@maple/http/errors/CloudflareLogpushNotFoundError",
+	{
+		connectorId: CloudflareLogpushConnectorId,
+		message: Schema.String,
+	},
+	{ httpApiStatus: 404 },
 ) {}
 
 export class CloudflareLogpushValidationError extends Schema.TaggedErrorClass<CloudflareLogpushValidationError>()(
-  "@maple/http/errors/CloudflareLogpushValidationError",
-  {
-    message: Schema.String,
-  },
-  { httpApiStatus: 400 },
+	"@maple/http/errors/CloudflareLogpushValidationError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 400 },
 ) {}
 
 export class CloudflareLogpushEncryptionError extends Schema.TaggedErrorClass<CloudflareLogpushEncryptionError>()(
-  "@maple/http/errors/CloudflareLogpushEncryptionError",
-  {
-    message: Schema.String,
-  },
-  { httpApiStatus: 500 },
+	"@maple/http/errors/CloudflareLogpushEncryptionError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 500 },
 ) {}
 
-export class CloudflareLogpushApiGroup extends HttpApiGroup.make(
-  "cloudflareLogpush",
-)
-  .add(
-    HttpApiEndpoint.get("list", "/connectors", {
-      success: CloudflareLogpushListResponse,
-      error: CloudflareLogpushPersistenceError,
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("create", "/connectors", {
-      payload: CreateCloudflareLogpushConnectorRequest,
-      success: CloudflareLogpushCreateResponse,
-      error: [
-        CloudflareLogpushValidationError,
-        CloudflareLogpushPersistenceError,
-        CloudflareLogpushEncryptionError,
-      ],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.patch("update", "/connectors/:connectorId", {
-      params: {
-        connectorId: CloudflareLogpushConnectorId,
-      },
-      payload: UpdateCloudflareLogpushConnectorRequest,
-      success: CloudflareLogpushConnectorResponse,
-      error: [
-        CloudflareLogpushNotFoundError,
-        CloudflareLogpushValidationError,
-        CloudflareLogpushPersistenceError,
-      ],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.delete("delete", "/connectors/:connectorId", {
-      params: {
-        connectorId: CloudflareLogpushConnectorId,
-      },
-      success: CloudflareLogpushDeleteResponse,
-      error: [CloudflareLogpushNotFoundError, CloudflareLogpushPersistenceError],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.get("getSetup", "/connectors/:connectorId/setup", {
-      params: {
-        connectorId: CloudflareLogpushConnectorId,
-      },
-      success: CloudflareLogpushSetupResponse,
-      error: [
-        CloudflareLogpushNotFoundError,
-        CloudflareLogpushPersistenceError,
-        CloudflareLogpushEncryptionError,
-      ],
-    }),
-  )
-  .add(
-    HttpApiEndpoint.post("rotateSecret", "/connectors/:connectorId/rotate-secret", {
-      params: {
-        connectorId: CloudflareLogpushConnectorId,
-      },
-      success: CloudflareLogpushSetupResponse,
-      error: [
-        CloudflareLogpushNotFoundError,
-        CloudflareLogpushPersistenceError,
-        CloudflareLogpushEncryptionError,
-      ],
-    }),
-  )
-  .prefix("/api/cloudflare-logpush")
-  .middleware(Authorization) {}
+export class CloudflareLogpushApiGroup extends HttpApiGroup.make("cloudflareLogpush")
+	.add(
+		HttpApiEndpoint.get("list", "/connectors", {
+			success: CloudflareLogpushListResponse,
+			error: CloudflareLogpushPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("create", "/connectors", {
+			payload: CreateCloudflareLogpushConnectorRequest,
+			success: CloudflareLogpushCreateResponse,
+			error: [
+				CloudflareLogpushValidationError,
+				CloudflareLogpushPersistenceError,
+				CloudflareLogpushEncryptionError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.patch("update", "/connectors/:connectorId", {
+			params: {
+				connectorId: CloudflareLogpushConnectorId,
+			},
+			payload: UpdateCloudflareLogpushConnectorRequest,
+			success: CloudflareLogpushConnectorResponse,
+			error: [
+				CloudflareLogpushNotFoundError,
+				CloudflareLogpushValidationError,
+				CloudflareLogpushPersistenceError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.delete("delete", "/connectors/:connectorId", {
+			params: {
+				connectorId: CloudflareLogpushConnectorId,
+			},
+			success: CloudflareLogpushDeleteResponse,
+			error: [CloudflareLogpushNotFoundError, CloudflareLogpushPersistenceError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("getSetup", "/connectors/:connectorId/setup", {
+			params: {
+				connectorId: CloudflareLogpushConnectorId,
+			},
+			success: CloudflareLogpushSetupResponse,
+			error: [
+				CloudflareLogpushNotFoundError,
+				CloudflareLogpushPersistenceError,
+				CloudflareLogpushEncryptionError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("rotateSecret", "/connectors/:connectorId/rotate-secret", {
+			params: {
+				connectorId: CloudflareLogpushConnectorId,
+			},
+			success: CloudflareLogpushSetupResponse,
+			error: [
+				CloudflareLogpushNotFoundError,
+				CloudflareLogpushPersistenceError,
+				CloudflareLogpushEncryptionError,
+			],
+		}),
+	)
+	.prefix("/api/cloudflare-logpush")
+	.middleware(Authorization) {}

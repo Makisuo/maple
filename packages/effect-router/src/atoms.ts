@@ -6,13 +6,13 @@ import type * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
  * Options for creating a route atom.
  */
 export interface RouteAtomOptions {
-  /**
-   * How long the atom's result should be kept alive after all subscribers
-   * unmount, in milliseconds. Prevents refetching on quick back-navigation.
-   *
-   * @default undefined (no TTL, garbage collected when unreferenced)
-   */
-  readonly staleTime?: number
+	/**
+	 * How long the atom's result should be kept alive after all subscribers
+	 * unmount, in milliseconds. Prevents refetching on quick back-navigation.
+	 *
+	 * @default undefined (no TTL, garbage collected when unreferenced)
+	 */
+	readonly staleTime?: number
 }
 
 /**
@@ -50,21 +50,19 @@ export type RouteAtomFn<Params, A, E> = Atom.AtomResultFn<Params, A, E>
  * ```
  */
 export function routeAtom<Params, A, E>(
-  atomRuntime: Atom.AtomRuntime<any, any>,
-  effectFn: (params: Params) => Effect.Effect<A, E>,
-  options?: RouteAtomOptions,
+	atomRuntime: Atom.AtomRuntime<any, any>,
+	effectFn: (params: Params) => Effect.Effect<A, E>,
+	options?: RouteAtomOptions,
 ): RouteAtomFn<Params, A, E> {
-  // atomRuntime.fn returns AtomResultFn<Params, A, E | ER> where ER is the
-  // runtime's error type. Since the runtime uses `any`, the cast narrows
-  // ER back to the user's E for correct external typing.
-  const atom = atomRuntime.fn<Params>()(
-    (params, _get) => effectFn(params),
-    options?.staleTime !== undefined
-      ? { reactivityKeys: undefined }
-      : undefined,
-  )
+	// atomRuntime.fn returns AtomResultFn<Params, A, E | ER> where ER is the
+	// runtime's error type. Since the runtime uses `any`, the cast narrows
+	// ER back to the user's E for correct external typing.
+	const atom = atomRuntime.fn<Params>()(
+		(params, _get) => effectFn(params),
+		options?.staleTime !== undefined ? { reactivityKeys: undefined } : undefined,
+	)
 
-  return atom as RouteAtomFn<Params, A, E>
+	return atom as RouteAtomFn<Params, A, E>
 }
 
 /**
@@ -89,12 +87,12 @@ export function routeAtom<Params, A, E>(
  * ```
  */
 export function routeAtomDerived<Params, A, E>(
-  atomRuntime: Atom.AtomRuntime<any, any>,
-  deriveParams: (get: Atom.AtomContext) => Params,
-  effectFn: (params: Params) => Effect.Effect<A, E>,
+	atomRuntime: Atom.AtomRuntime<any, any>,
+	deriveParams: (get: Atom.AtomContext) => Params,
+	effectFn: (params: Params) => Effect.Effect<A, E>,
 ): Atom.Atom<AsyncResult.AsyncResult<A, E>> {
-  return atomRuntime.atom((get) => {
-    const params = deriveParams(get)
-    return effectFn(params)
-  })
+	return atomRuntime.atom((get) => {
+		const params = deriveParams(get)
+		return effectFn(params)
+	})
 }

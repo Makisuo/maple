@@ -12,11 +12,7 @@ interface DashboardWidgetViewProps {
 	compact?: boolean
 }
 
-export function DashboardWidgetView({
-	widget,
-	timeRange,
-	compact = false,
-}: DashboardWidgetViewProps) {
+export function DashboardWidgetView({ widget, timeRange, compact = false }: DashboardWidgetViewProps) {
 	const { state } = useWidgetData(widget, timeRange)
 	const title = widget.display.title ?? widget.id
 
@@ -28,27 +24,11 @@ export function DashboardWidgetView({
 	} else if (state.status === "unsupported") {
 		body = <WidgetPlaceholder kind="unsupported" message={state.reason} />
 	} else if (state.data.kind === "stat") {
-		body = (
-			<StatTile
-				value={state.data.value}
-				display={widget.display}
-				compact={compact}
-			/>
-		)
+		body = <StatTile value={state.data.value} display={widget.display} compact={compact} />
 	} else if (state.data.kind === "timeseries") {
-		body = (
-			<TimeseriesChart
-				points={state.data.points}
-				colorOverrides={widget.display.colorOverrides}
-			/>
-		)
+		body = <TimeseriesChart points={state.data.points} colorOverrides={widget.display.colorOverrides} />
 	} else if (state.data.kind === "breakdown") {
-		body = (
-			<BreakdownBars
-				items={state.data.items}
-				colorOverrides={widget.display.colorOverrides}
-			/>
-		)
+		body = <BreakdownBars items={state.data.items} colorOverrides={widget.display.colorOverrides} />
 	}
 
 	return (

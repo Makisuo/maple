@@ -20,24 +20,20 @@ npm install @base-ui/react lucide-react
 ## Canonical imports
 
 ```tsx
-import {
-  OTPField,
-  OTPFieldInput,
-  OTPFieldSeparator,
-} from "@/components/ui/otp-field"
+import { OTPField, OTPFieldInput, OTPFieldSeparator } from "@/components/ui/otp-field"
 ```
 
 ## Minimal pattern
 
 ```tsx
 <OTPField aria-label="Verification code" length={6}>
-  <OTPFieldInput aria-label="Character 1 of 6" />
-  <OTPFieldInput aria-label="Character 2 of 6" />
-  <OTPFieldInput aria-label="Character 3 of 6" />
-  <OTPFieldSeparator />
-  <OTPFieldInput aria-label="Character 4 of 6" />
-  <OTPFieldInput aria-label="Character 5 of 6" />
-  <OTPFieldInput aria-label="Character 6 of 6" />
+	<OTPFieldInput aria-label="Character 1 of 6" />
+	<OTPFieldInput aria-label="Character 2 of 6" />
+	<OTPFieldInput aria-label="Character 3 of 6" />
+	<OTPFieldSeparator />
+	<OTPFieldInput aria-label="Character 4 of 6" />
+	<OTPFieldInput aria-label="Character 5 of 6" />
+	<OTPFieldInput aria-label="Character 6 of 6" />
 </OTPField>
 ```
 

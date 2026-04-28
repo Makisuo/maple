@@ -3,10 +3,10 @@ import { useQuery } from "@tanstack/react-query"
 import { fetchSpanHierarchy, type Span, type SpanNode } from "../lib/api"
 import { buildSpanTree, transformSpan } from "../lib/span-tree"
 import {
-  getQueryErrorMessage,
-  mobileQueryKeys,
-  mobileQueryStaleTimes,
-  preservePreviousData,
+	getQueryErrorMessage,
+	mobileQueryKeys,
+	mobileQueryStaleTimes,
+	preservePreviousData,
 } from "../lib/query"
 
 interface SpanHierarchyData {

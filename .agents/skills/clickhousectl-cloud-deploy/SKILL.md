@@ -3,8 +3,8 @@ name: clickhousectl-cloud-deploy
 description: Use when a user wants to deploy ClickHouse to the cloud, go to production, use ClickHouse Cloud, host a managed ClickHouse service, or migrate from a local ClickHouse setup to ClickHouse Cloud.
 license: Apache-2.0
 metadata:
-  author: ClickHouse Inc
-  version: "0.1.0"
+    author: ClickHouse Inc
+    version: "0.1.0"
 ---
 
 # Deploy to ClickHouse Cloud
@@ -14,6 +14,7 @@ This skill walks through deploying to ClickHouse Cloud using `clickhousectl`. It
 ## When to Apply
 
 Use this skill when the user wants to:
+
 - Deploy their ClickHouse application to production
 - Host ClickHouse as a managed cloud service
 - Migrate from a local ClickHouse setup to ClickHouse Cloud
@@ -83,6 +84,7 @@ clickhousectl cloud login --api-key <key> --api-secret <secret>
 If the user doesn't have API keys yet, guide them to create one:
 
 > In the ClickHouse Cloud console:
+>
 > 1. Click the **gear icon** (Settings) in the left sidebar
 > 2. Go to **API Keys**
 > 3. Click **Create API Key**
@@ -119,6 +121,7 @@ clickhousectl cloud service create --name <service-name>
 ```bash
 clickhousectl cloud service get <service-id>
 ```
+
 You can grep the "state" field to see if it is "running".
 
 ---
@@ -184,6 +187,7 @@ Provide the user with the connection details:
 **Example connection strings** (adapt to the user's language/framework):
 
 **Python (clickhouse-connect):**
+
 ```python
 import clickhouse_connect
 
@@ -197,17 +201,19 @@ client = clickhouse_connect.get_client(
 ```
 
 **Node.js (@clickhouse/client):**
+
 ```javascript
-import { createClient } from '@clickhouse/client'
+import { createClient } from "@clickhouse/client"
 
 const client = createClient({
-  url: 'https://<cloud-host>:8443',
-  username: 'default',
-  password: '<password>',
+	url: "https://<cloud-host>:8443",
+	username: "default",
+	password: "<password>",
 })
 ```
 
 **Go (clickhouse-go):**
+
 ```go
 conn, err := clickhouse.Open(&clickhouse.Options{
     Addr: []string{"<cloud-host>:9440"},

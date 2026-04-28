@@ -13,35 +13,35 @@ import { DurableObjectState } from "./durable-object-state.ts"
 export type RawWebSocket = cf.WebSocket
 
 export interface DurableWebSocket {
-  readonly ws: RawWebSocket
-  send(data: string | Uint8Array): Effect.Effect<void>
-  close(code: number, reason: string): Effect.Effect<void>
-  serializeAttachment<T>(value: T): void
-  deserializeAttachment<T>(): T | null
+	readonly ws: RawWebSocket
+	send(data: string | Uint8Array): Effect.Effect<void>
+	close(code: number, reason: string): Effect.Effect<void>
+	serializeAttachment<T>(value: T): void
+	deserializeAttachment<T>(): T | null
 }
 
 export const fromWebSocket = (ws: RawWebSocket): DurableWebSocket => ({
-  ws,
-  send: (data) => Effect.sync(() => ws.send(data as any)),
-  close: (code, reason) => Effect.sync(() => ws.close(code, reason)),
-  serializeAttachment: (value) => ws.serializeAttachment(value),
-  deserializeAttachment: () => ws.deserializeAttachment() as any,
+	ws,
+	send: (data) => Effect.sync(() => ws.send(data as any)),
+	close: (code, reason) => Effect.sync(() => ws.close(code, reason)),
+	serializeAttachment: (value) => ws.serializeAttachment(value),
+	deserializeAttachment: () => ws.deserializeAttachment() as any,
 })
 
 export const upgrade = Effect.fnUntraced(function* () {
-  const _Response = Response as any as typeof cf.Response
-  const ctx = yield* DurableObjectState
-  // @ts-expect-error — WebSocketPair is a Worker global
-  const [client, server] = new WebSocketPair()
-  const serverSocket = fromWebSocket(server)
-  yield* ctx.acceptWebSocket(serverSocket)
-  const rawResponse = new _Response(null, {
-    status: 101,
-    webSocket: client,
-  })
-  const effectResponse = HttpServerResponse.setBody(
-    HttpServerResponse.empty({ status: 101 }),
-    HttpBody.raw(rawResponse),
-  )
-  return [effectResponse, serverSocket] as const
+	const _Response = Response as any as typeof cf.Response
+	const ctx = yield* DurableObjectState
+	// @ts-expect-error — WebSocketPair is a Worker global
+	const [client, server] = new WebSocketPair()
+	const serverSocket = fromWebSocket(server)
+	yield* ctx.acceptWebSocket(serverSocket)
+	const rawResponse = new _Response(null, {
+		status: 101,
+		webSocket: client,
+	})
+	const effectResponse = HttpServerResponse.setBody(
+		HttpServerResponse.empty({ status: 101 }),
+		HttpBody.raw(rawResponse),
+	)
+	return [effectResponse, serverSocket] as const
 })

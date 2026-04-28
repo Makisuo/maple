@@ -60,12 +60,12 @@ JOIN customers c ON c.id = o.customer_id;
 
 **Approach comparison:**
 
-| Approach | Use Case | Performance |
-|----------|----------|-------------|
-| Dictionary | Frequent lookups to small dimension | Fastest (in-memory) |
+| Approach        | Use Case                            | Performance             |
+| --------------- | ----------------------------------- | ----------------------- |
+| Dictionary      | Frequent lookups to small dimension | Fastest (in-memory)     |
 | Denormalization | Analytics always need enriched data | Fast (no join at query) |
-| IN subquery | Existence filtering | Often faster than JOIN |
-| JOIN | Infrequent or complex joins | Acceptable |
+| IN subquery     | Existence filtering                 | Often faster than JOIN  |
+| JOIN            | Infrequent or complex joins         | Acceptable              |
 
 **Critical dictionary caveat:** Dictionaries silently deduplicate duplicate keys, retaining only the final value. Only use when source has unique keys.
 

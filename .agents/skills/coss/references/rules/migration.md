@@ -27,7 +27,7 @@ Use these snippets as fast conversion templates when migrating shadcn/Radix code
 ```tsx
 // shadcn/Radix
 <DialogTrigger asChild>
-  <Button variant="outline">Open</Button>
+	<Button variant="outline">Open</Button>
 </DialogTrigger>
 ```
 
@@ -53,34 +53,34 @@ Use these snippets as fast conversion templates when migrating shadcn/Radix code
 ```tsx
 // shadcn/Radix
 <Select>
-  <SelectTrigger>
-    <SelectValue placeholder="Select a framework" />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value="next">Next.js</SelectItem>
-    <SelectItem value="vite">Vite</SelectItem>
-  </SelectContent>
+	<SelectTrigger>
+		<SelectValue placeholder="Select a framework" />
+	</SelectTrigger>
+	<SelectContent>
+		<SelectItem value="next">Next.js</SelectItem>
+		<SelectItem value="vite">Vite</SelectItem>
+	</SelectContent>
 </Select>
 ```
 
 ```tsx
 // coss/Base UI
 const items = [
-  { label: "Next.js", value: "next" },
-  { label: "Vite", value: "vite" },
-];
+	{ label: "Next.js", value: "next" },
+	{ label: "Vite", value: "vite" },
+]
 
-<Select items={items}>
-  <SelectTrigger>
-    <SelectValue placeholder="Select a framework" />
-  </SelectTrigger>
-  <SelectPopup alignItemWithTrigger={false}>
-    {items.map((item) => (
-      <SelectItem key={item.value} value={item.value}>
-        {item.label}
-      </SelectItem>
-    ))}
-  </SelectPopup>
+;<Select items={items}>
+	<SelectTrigger>
+		<SelectValue placeholder="Select a framework" />
+	</SelectTrigger>
+	<SelectPopup alignItemWithTrigger={false}>
+		{items.map((item) => (
+			<SelectItem key={item.value} value={item.value}>
+				{item.label}
+			</SelectItem>
+		))}
+	</SelectPopup>
 </Select>
 ```
 
@@ -89,16 +89,16 @@ const items = [
 ```tsx
 // shadcn/Radix
 <ToggleGroup type="single" defaultValue="daily">
-  <ToggleGroupItem value="daily">Daily</ToggleGroupItem>
-  <ToggleGroupItem value="weekly">Weekly</ToggleGroupItem>
+	<ToggleGroupItem value="daily">Daily</ToggleGroupItem>
+	<ToggleGroupItem value="weekly">Weekly</ToggleGroupItem>
 </ToggleGroup>
 ```
 
 ```tsx
 // coss/Base UI
 <ToggleGroup defaultValue={["daily"]}>
-  <ToggleGroupItem value="daily">Daily</ToggleGroupItem>
-  <ToggleGroupItem value="weekly">Weekly</ToggleGroupItem>
+	<ToggleGroupItem value="daily">Daily</ToggleGroupItem>
+	<ToggleGroupItem value="weekly">Weekly</ToggleGroupItem>
 </ToggleGroup>
 ```
 
@@ -119,14 +119,14 @@ const items = [
 ```tsx
 // shadcn/Radix
 <Accordion type="single" collapsible defaultValue="item-1">
-  <AccordionItem value="item-1">...</AccordionItem>
+	<AccordionItem value="item-1">...</AccordionItem>
 </Accordion>
 ```
 
 ```tsx
 // coss/Base UI
 <Accordion defaultValue={["item-1"]}>
-  <AccordionItem value="item-1">...</AccordionItem>
+	<AccordionItem value="item-1">...</AccordionItem>
 </Accordion>
 ```
 
@@ -137,18 +137,18 @@ coss wraps [Base UI OTP Field](https://base-ui.com/react/components/otp-field) (
 ```tsx
 // shadcn / input-otp
 <InputOTP maxLength={6} value={value} onChange={setValue}>
-  <InputOTPGroup>
-    <InputOTPSlot index={0} />
-    <InputOTPSlot index={1} />
-  </InputOTPGroup>
+	<InputOTPGroup>
+		<InputOTPSlot index={0} />
+		<InputOTPSlot index={1} />
+	</InputOTPGroup>
 </InputOTP>
 ```
 
 ```tsx
 // coss
 <OTPField length={6} value={value} onValueChange={setValue}>
-  <OTPFieldInput aria-label="Character 1 of 6" />
-  <OTPFieldInput aria-label="Character 2 of 6" />
+	<OTPFieldInput aria-label="Character 1 of 6" />
+	<OTPFieldInput aria-label="Character 2 of 6" />
 </OTPField>
 ```
 

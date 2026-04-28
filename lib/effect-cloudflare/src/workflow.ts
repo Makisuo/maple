@@ -32,81 +32,71 @@ import { WorkerEnvironment } from "./worker-environment.ts"
 // ---------------------------------------------------------------------------
 
 export class WorkflowEvent extends Context.Service<
-  WorkflowEvent,
-  {
-    payload: unknown
-    timestamp: Date
-    instanceId: string
-  }
+	WorkflowEvent,
+	{
+		payload: unknown
+		timestamp: Date
+		instanceId: string
+	}
 >()("Cloudflare.WorkflowEvent") {}
 
 export class WorkflowStep extends Context.Service<
-  WorkflowStep,
-  {
-    do<T>(name: string, effect: Effect.Effect<T>): Effect.Effect<T>
-    sleep(name: string, duration: string | number): Effect.Effect<void>
-    sleepUntil(name: string, timestamp: Date | number): Effect.Effect<void>
-  }
+	WorkflowStep,
+	{
+		do<T>(name: string, effect: Effect.Effect<T>): Effect.Effect<T>
+		sleep(name: string, duration: string | number): Effect.Effect<void>
+		sleepUntil(name: string, timestamp: Date | number): Effect.Effect<void>
+	}
 >()("Cloudflare.WorkflowStep") {}
 
 // ---------------------------------------------------------------------------
 // Step primitives — thin wrappers over WorkflowStep methods
 // ---------------------------------------------------------------------------
 
-export const task = <T>(
-  name: string,
-  effect: Effect.Effect<T>,
-): Effect.Effect<T, never, WorkflowStep> =>
-  WorkflowStep.asEffect().pipe(Effect.flatMap((step) => step.do(name, effect)))
+export const task = <T>(name: string, effect: Effect.Effect<T>): Effect.Effect<T, never, WorkflowStep> =>
+	WorkflowStep.asEffect().pipe(Effect.flatMap((step) => step.do(name, effect)))
 
-export const sleep = (
-  name: string,
-  duration: string | number,
-): Effect.Effect<void, never, WorkflowStep> =>
-  WorkflowStep.asEffect().pipe(
-    Effect.flatMap((step) => step.sleep(name, duration)),
-    Effect.orDie,
-  )
+export const sleep = (name: string, duration: string | number): Effect.Effect<void, never, WorkflowStep> =>
+	WorkflowStep.asEffect().pipe(
+		Effect.flatMap((step) => step.sleep(name, duration)),
+		Effect.orDie,
+	)
 
 export const sleepUntil = (
-  name: string,
-  timestamp: Date | number,
+	name: string,
+	timestamp: Date | number,
 ): Effect.Effect<void, never, WorkflowStep> =>
-  WorkflowStep.asEffect().pipe(
-    Effect.flatMap((step) => step.sleepUntil(name, timestamp)),
-    Effect.orDie,
-  )
+	WorkflowStep.asEffect().pipe(
+		Effect.flatMap((step) => step.sleepUntil(name, timestamp)),
+		Effect.orDie,
+	)
 
 export type WorkflowRunServices = WorkflowEvent | WorkflowStep
 
-export type WorkflowBody<Result = unknown> = Effect.Effect<
-  Result,
-  never,
-  WorkflowRunServices
->
+export type WorkflowBody<Result = unknown> = Effect.Effect<Result, never, WorkflowRunServices>
 
 // ---------------------------------------------------------------------------
 // Handles returned to worker code for starting / inspecting instances
 // ---------------------------------------------------------------------------
 
 export interface WorkflowHandle {
-  readonly name: string
-  create(params?: unknown): Effect.Effect<WorkflowInstance>
-  get(instanceId: string): Effect.Effect<WorkflowInstance>
+	readonly name: string
+	create(params?: unknown): Effect.Effect<WorkflowInstance>
+	get(instanceId: string): Effect.Effect<WorkflowInstance>
 }
 
 export interface WorkflowInstance {
-  readonly id: string
-  status(): Effect.Effect<WorkflowInstanceStatus>
-  pause(): Effect.Effect<void>
-  resume(): Effect.Effect<void>
-  terminate(): Effect.Effect<void>
+	readonly id: string
+	status(): Effect.Effect<WorkflowInstanceStatus>
+	pause(): Effect.Effect<void>
+	resume(): Effect.Effect<void>
+	terminate(): Effect.Effect<void>
 }
 
 export interface WorkflowInstanceStatus {
-  status: string
-  output?: unknown
-  error?: { name: string; message: string } | null
+	status: string
+	output?: unknown
+	error?: { name: string; message: string } | null
 }
 
 // ---------------------------------------------------------------------------
@@ -117,11 +107,8 @@ type WorkflowImpl = Effect.Effect<WorkflowBody, never, any>
 
 const implRegistry = new Map<string, WorkflowImpl>()
 
-export const registerWorkflowImpl = (
-  name: string,
-  impl: WorkflowImpl,
-): void => {
-  implRegistry.set(name, impl)
+export const registerWorkflowImpl = (name: string, impl: WorkflowImpl): void => {
+	implRegistry.set(name, impl)
 }
 
 // ---------------------------------------------------------------------------
@@ -129,25 +116,22 @@ export const registerWorkflowImpl = (
 // ---------------------------------------------------------------------------
 
 const Bridge = makeWorkflowBridge(
-  WorkflowEntrypoint as unknown as abstract new (
-    ctx: unknown,
-    env: unknown,
-  ) => { run(event: any, step: any): Promise<unknown> },
-  async (name: string) => {
-    const impl = implRegistry.get(name)
-    if (!impl) {
-      throw new Error(
-        `Workflow impl for '${name}' is not registered. Ensure the class module is loaded before CF instantiates the workflow.`,
-      )
-    }
-    return (env: unknown) =>
-      impl.pipe(
-        Effect.provideService(
-          WorkerEnvironment,
-          env as Record<string, unknown>,
-        ),
-      ) as Effect.Effect<Effect.Effect<unknown, never, any>>
-  },
+	WorkflowEntrypoint as unknown as abstract new (
+		ctx: unknown,
+		env: unknown,
+	) => { run(event: any, step: any): Promise<unknown> },
+	async (name: string) => {
+		const impl = implRegistry.get(name)
+		if (!impl) {
+			throw new Error(
+				`Workflow impl for '${name}' is not registered. Ensure the class module is loaded before CF instantiates the workflow.`,
+			)
+		}
+		return (env: unknown) =>
+			impl.pipe(
+				Effect.provideService(WorkerEnvironment, env as Record<string, unknown>),
+			) as Effect.Effect<Effect.Effect<unknown, never, any>>
+	},
 )
 
 // ---------------------------------------------------------------------------
@@ -177,16 +161,16 @@ const Bridge = makeWorkflowBridge(
  * at runtime and start / inspect instances.
  */
 export const Workflow = <_Self = unknown>() => {
-  return <Result = unknown, InitReq = never>(
-    name: string,
-    impl: Effect.Effect<WorkflowBody<Result>, never, InitReq>,
-  ) => {
-    registerWorkflowImpl(name, impl as unknown as WorkflowImpl)
-    return Bridge(name) as unknown as new (
-      ctx: unknown,
-      env: unknown,
-    ) => { run(event: any, step: any): Promise<unknown> }
-  }
+	return <Result = unknown, InitReq = never>(
+		name: string,
+		impl: Effect.Effect<WorkflowBody<Result>, never, InitReq>,
+	) => {
+		registerWorkflowImpl(name, impl as unknown as WorkflowImpl)
+		return Bridge(name) as unknown as new (
+			ctx: unknown,
+			env: unknown,
+		) => { run(event: any, step: any): Promise<unknown> }
+	}
 }
 
 /**
@@ -194,46 +178,41 @@ export const Workflow = <_Self = unknown>() => {
  * workflow instances.
  */
 export const workflowHandle = (
-  classOrName: { name: string } | string,
+	classOrName: { name: string } | string,
 ): Effect.Effect<WorkflowHandle, never, WorkerEnvironment> =>
-  Effect.gen(function* () {
-    const env = yield* WorkerEnvironment
-    const name = typeof classOrName === "string" ? classOrName : classOrName.name
-    const binding = env[name] as any
-    if (!binding || typeof binding.create !== "function") {
-      return yield* Effect.die(
-        new Error(
-          `Worker env has no Workflow binding named '${name}'. Check wrangler.jsonc.`,
-        ),
-      )
-    }
-    return {
-      name,
-      create: (params?: unknown) =>
-        Effect.tryPromise(() => binding.create({ params })).pipe(
-          Effect.map(wrapInstance),
-          Effect.orDie,
-        ),
-      get: (instanceId: string) =>
-        Effect.tryPromise(() => binding.get(instanceId)).pipe(
-          Effect.map(wrapInstance),
-          Effect.orDie,
-        ),
-    }
-  })
+	Effect.gen(function* () {
+		const env = yield* WorkerEnvironment
+		const name = typeof classOrName === "string" ? classOrName : classOrName.name
+		const binding = env[name] as any
+		if (!binding || typeof binding.create !== "function") {
+			return yield* Effect.die(
+				new Error(`Worker env has no Workflow binding named '${name}'. Check wrangler.jsonc.`),
+			)
+		}
+		return {
+			name,
+			create: (params?: unknown) =>
+				Effect.tryPromise(() => binding.create({ params })).pipe(
+					Effect.map(wrapInstance),
+					Effect.orDie,
+				),
+			get: (instanceId: string) =>
+				Effect.tryPromise(() => binding.get(instanceId)).pipe(Effect.map(wrapInstance), Effect.orDie),
+		}
+	})
 
 const wrapInstance = (raw: any): WorkflowInstance => ({
-  id: raw.id,
-  status: () =>
-    Effect.tryPromise(() => raw.status()).pipe(
-      Effect.map((s: any) => ({
-        status: s.status as string,
-        output: s.output,
-        error: s.error,
-      })),
-      Effect.orDie,
-    ),
-  pause: () => Effect.tryPromise(() => raw.pause()).pipe(Effect.orDie),
-  resume: () => Effect.tryPromise(() => raw.resume()).pipe(Effect.orDie),
-  terminate: () => Effect.tryPromise(() => raw.terminate()).pipe(Effect.orDie),
+	id: raw.id,
+	status: () =>
+		Effect.tryPromise(() => raw.status()).pipe(
+			Effect.map((s: any) => ({
+				status: s.status as string,
+				output: s.output,
+				error: s.error,
+			})),
+			Effect.orDie,
+		),
+	pause: () => Effect.tryPromise(() => raw.pause()).pipe(Effect.orDie),
+	resume: () => Effect.tryPromise(() => raw.resume()).pipe(Effect.orDie),
+	terminate: () => Effect.tryPromise(() => raw.terminate()).pipe(Effect.orDie),
 })

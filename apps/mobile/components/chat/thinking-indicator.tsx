@@ -17,9 +17,7 @@ export function ThinkingIndicator() {
 				Animated.delay(440),
 			])
 
-		const loop = Animated.loop(
-			Animated.stagger(140, [bounce(a), bounce(b), bounce(c)]),
-		)
+		const loop = Animated.loop(Animated.stagger(140, [bounce(a), bounce(b), bounce(c)]))
 		loop.start()
 		return () => loop.stop()
 	}, [a, b, c])

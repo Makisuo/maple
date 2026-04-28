@@ -45,8 +45,7 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 		})
 	}
 
-	const hasActiveFilters =
-		draft.service !== "" || draft.severity !== "" || draft.search !== ""
+	const hasActiveFilters = draft.service !== "" || draft.severity !== "" || draft.search !== ""
 
 	return (
 		<Modal
@@ -79,7 +78,9 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 								{/* Reset */}
 								{hasActiveFilters && (
 									<TouchableOpacity onPress={handleReset} className="mb-4">
-										<Text className="text-xs text-destructive font-mono">Reset all filters</Text>
+										<Text className="text-xs text-destructive font-mono">
+											Reset all filters
+										</Text>
 									</TouchableOpacity>
 								)}
 
@@ -109,11 +110,15 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 								{facets && facets.severities.length > 0 && (
 									<View className="mb-6">
 										{facets.severities.map((s) => {
-											const color = severityColors[s.name.toUpperCase()] ?? severityColors.TRACE
+											const color =
+												severityColors[s.name.toUpperCase()] ?? severityColors.TRACE
 											return (
 												<TouchableOpacity
 													key={s.name}
-													onPress={() => { hapticLight(); setDraft((d) => ({ ...d, severity: s.name })) }}
+													onPress={() => {
+														hapticLight()
+														setDraft((d) => ({ ...d, severity: s.name }))
+													}}
 													className="flex-row items-center justify-between py-2.5 px-1"
 												>
 													<View className="flex-row items-center">
@@ -153,7 +158,10 @@ export function FilterModal({ visible, onClose, currentFilters, onApply, facets 
 										{facets.services.slice(0, 10).map((s) => (
 											<TouchableOpacity
 												key={s.name}
-												onPress={() => { hapticLight(); setDraft((d) => ({ ...d, service: s.name })) }}
+												onPress={() => {
+													hapticLight()
+													setDraft((d) => ({ ...d, service: s.name }))
+												}}
 												className="flex-row items-center justify-between py-2.5 px-1"
 											>
 												<Text

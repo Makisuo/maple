@@ -13,13 +13,8 @@ const KIND_LABEL: Record<WidgetPlaceholderProps["kind"], string> = {
 
 export function WidgetPlaceholder({ kind, message }: WidgetPlaceholderProps) {
 	return (
-		<View
-			className="items-center justify-center"
-			style={{ height: 100 }}
-		>
-			<Text className="text-xs text-muted-foreground font-mono">
-				{KIND_LABEL[kind]}
-			</Text>
+		<View className="items-center justify-center" style={{ height: 100 }}>
+			<Text className="text-xs text-muted-foreground font-mono">{KIND_LABEL[kind]}</Text>
 			{message ? (
 				<Text
 					className="text-[10px] text-muted-foreground font-mono mt-1 px-2 text-center"

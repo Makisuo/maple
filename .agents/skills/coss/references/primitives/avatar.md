@@ -27,8 +27,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 ```tsx
 <Avatar>
-  <AvatarImage src="/avatars/01.png" alt="User avatar" />
-  <AvatarFallback>JD</AvatarFallback>
+	<AvatarImage src="/avatars/01.png" alt="User avatar" />
+	<AvatarFallback>JD</AvatarFallback>
 </Avatar>
 ```
 
@@ -40,8 +40,8 @@ Custom size via Tailwind class:
 
 ```tsx
 <Avatar className="size-16">
-  <AvatarImage src="/avatar.png" alt="User avatar" />
-  <AvatarFallback>JD</AvatarFallback>
+	<AvatarImage src="/avatar.png" alt="User avatar" />
+	<AvatarFallback>JD</AvatarFallback>
 </Avatar>
 ```
 
@@ -49,14 +49,14 @@ Stacked avatar group:
 
 ```tsx
 <div className="flex -space-x-3">
-  <Avatar className="ring-2 ring-background">
-    <AvatarImage src="/user-1.png" alt="User 1" />
-    <AvatarFallback>U1</AvatarFallback>
-  </Avatar>
-  <Avatar className="ring-2 ring-background">
-    <AvatarImage src="/user-2.png" alt="User 2" />
-    <AvatarFallback>U2</AvatarFallback>
-  </Avatar>
+	<Avatar className="ring-2 ring-background">
+		<AvatarImage src="/user-1.png" alt="User 1" />
+		<AvatarFallback>U1</AvatarFallback>
+	</Avatar>
+	<Avatar className="ring-2 ring-background">
+		<AvatarImage src="/user-2.png" alt="User 2" />
+		<AvatarFallback>U2</AvatarFallback>
+	</Avatar>
 </div>
 ```
 

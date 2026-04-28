@@ -13,109 +13,105 @@ import { AuthLayout } from "@/components/layout/auth-layout"
 import { clerkAppearance } from "@/lib/clerk-appearance"
 
 const SignInSearch = Schema.Struct({
-  redirect_url: Schema.optional(Schema.String),
+	redirect_url: Schema.optional(Schema.String),
 })
 
 export const Route = effectRoute(createFileRoute("/sign-in"))({
-  component: SignInPage,
-  validateSearch: Schema.toStandardSchemaV1(SignInSearch),
+	component: SignInPage,
+	validateSearch: Schema.toStandardSchemaV1(SignInSearch),
 })
 
 export const redirectToDashboard = () => {
-  const params = new URLSearchParams(window.location.search)
-  const redirectUrl = params.get("redirect_url") || "/"
-  window.location.assign(redirectUrl)
+	const params = new URLSearchParams(window.location.search)
+	const redirectUrl = params.get("redirect_url") || "/"
+	window.location.assign(redirectUrl)
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
+	if (error instanceof Error && error.message.trim().length > 0) {
+		return error.message
+	}
 
-  return "Unable to sign in"
+	return "Unable to sign in"
 }
 
 async function loginSelfHosted(password: string) {
-  const response = await window.fetch(`${apiBaseUrl}/api/auth/login`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ password }),
-  })
+	const response = await window.fetch(`${apiBaseUrl}/api/auth/login`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+		},
+		body: JSON.stringify({ password }),
+	})
 
-  if (!response.ok) {
-    const errorBody = (await response.json().catch(() => null)) as { message?: string } | null
-    throw new Error(errorBody?.message ?? "Invalid root password")
-  }
+	if (!response.ok) {
+		const errorBody = (await response.json().catch(() => null)) as { message?: string } | null
+		throw new Error(errorBody?.message ?? "Invalid root password")
+	}
 
-  return (await response.json()) as { token: string }
+	return (await response.json()) as { token: string }
 }
 
 export function SelfHostedSignInPage() {
-  const [password, setPassword] = useState("")
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+	const [password, setPassword] = useState("")
+	const [isSubmitting, setIsSubmitting] = useState(false)
+	const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (isSubmitting) return
+	const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault()
+		if (isSubmitting) return
 
-    setIsSubmitting(true)
-    setErrorMessage(null)
+		setIsSubmitting(true)
+		setErrorMessage(null)
 
-    try {
-      const result = await loginSelfHosted(password)
-      setSelfHostedSessionToken(result.token)
-      redirectToDashboard()
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error))
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
+		try {
+			const result = await loginSelfHosted(password)
+			setSelfHostedSessionToken(result.token)
+			redirectToDashboard()
+		} catch (error) {
+			setErrorMessage(getErrorMessage(error))
+		} finally {
+			setIsSubmitting(false)
+		}
+	}
 
-  return (
-    <AuthLayout>
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold">Sign in</h1>
-          <p className="text-sm text-muted-foreground">
-            Enter the root password to access Maple.
-          </p>
-        </div>
-        <form className="space-y-3" onSubmit={onSubmit}>
-          <Input
-            type="password"
-            placeholder="Root password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
-            disabled={isSubmitting}
-            required
-          />
-          {errorMessage ? (
-            <p className="text-sm text-destructive">{errorMessage}</p>
-          ) : null}
-          <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Signing in..." : "Sign in"}
-          </Button>
-        </form>
-      </div>
-    </AuthLayout>
-  )
+	return (
+		<AuthLayout>
+			<div className="space-y-4">
+				<div className="space-y-1">
+					<h1 className="text-xl font-semibold">Sign in</h1>
+					<p className="text-sm text-muted-foreground">Enter the root password to access Maple.</p>
+				</div>
+				<form className="space-y-3" onSubmit={onSubmit}>
+					<Input
+						type="password"
+						placeholder="Root password"
+						value={password}
+						onChange={(event) => setPassword(event.target.value)}
+						autoComplete="current-password"
+						disabled={isSubmitting}
+						required
+					/>
+					{errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
+					<Button type="submit" className="w-full" disabled={isSubmitting}>
+						{isSubmitting ? "Signing in..." : "Sign in"}
+					</Button>
+				</form>
+			</div>
+		</AuthLayout>
+	)
 }
 
 export function SignInPage() {
-  if (isClerkAuthEnabled) {
-    return (
-      <AuthLayout>
-        <SignIn appearance={clerkAppearance} />
-      </AuthLayout>
-    )
-  }
+	if (isClerkAuthEnabled) {
+		return (
+			<AuthLayout>
+				<SignIn appearance={clerkAppearance} />
+			</AuthLayout>
+		)
+	}
 
-  return <SelfHostedSignInPage />
+	return <SelfHostedSignInPage />
 }
 
 export { loginSelfHosted }

@@ -22,32 +22,25 @@ npm install @base-ui/react
 ```tsx
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  Toolbar,
-  ToolbarButton,
-  ToolbarGroup,
-  ToolbarSeparator,
-} from "@/components/ui/toolbar"
+import { Toolbar, ToolbarButton, ToolbarGroup, ToolbarSeparator } from "@/components/ui/toolbar"
 ```
 
 ## Minimal pattern
 
 ```tsx
 <Toolbar>
-  <ToggleGroup className="border-none p-0" defaultValue={["left"]}>
-    <ToolbarButton aria-label="Align left" render={<ToggleGroupItem value="left" />}>
-      <AlignLeftIcon />
-    </ToolbarButton>
-    <ToolbarButton aria-label="Align center" render={<ToggleGroupItem value="center" />}>
-      <AlignCenterIcon />
-    </ToolbarButton>
-  </ToggleGroup>
-  <ToolbarSeparator />
-  <ToolbarGroup>
-    <ToolbarButton render={<Button type="button" variant="outline" />}>
-      Save
-    </ToolbarButton>
-  </ToolbarGroup>
+	<ToggleGroup className="border-none p-0" defaultValue={["left"]}>
+		<ToolbarButton aria-label="Align left" render={<ToggleGroupItem value="left" />}>
+			<AlignLeftIcon />
+		</ToolbarButton>
+		<ToolbarButton aria-label="Align center" render={<ToggleGroupItem value="center" />}>
+			<AlignCenterIcon />
+		</ToolbarButton>
+	</ToggleGroup>
+	<ToolbarSeparator />
+	<ToolbarGroup>
+		<ToolbarButton render={<Button type="button" variant="outline" />}>Save</ToolbarButton>
+	</ToolbarGroup>
 </Toolbar>
 ```
 
@@ -70,4 +63,3 @@ import {
 
 - core toolbar patterns: `p-toolbar-1`
 - related composition references: `p-toggle-group-1`, `p-group-1`, `p-select-1`
-

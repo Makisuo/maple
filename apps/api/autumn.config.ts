@@ -1,140 +1,136 @@
-import { feature, plan } from 'atmn';
+import { feature, plan } from "atmn"
 
 // Features
 export const logs = feature({
-	id: 'logs',
-	name: 'Logs',
-	type: 'metered',
+	id: "logs",
+	name: "Logs",
+	type: "metered",
 	consumable: true,
-});
+})
 
 export const metrics = feature({
-	id: 'metrics',
-	name: 'Metrics',
-	type: 'metered',
+	id: "metrics",
+	name: "Metrics",
+	type: "metered",
 	consumable: true,
-});
+})
 
 export const traces = feature({
-	id: 'traces',
-	name: 'Traces',
-	type: 'metered',
+	id: "traces",
+	name: "Traces",
+	type: "metered",
 	consumable: true,
-});
+})
 
 export const aiInputTokens = feature({
-	id: 'ai_input_tokens',
-	name: 'AI Input Tokens',
-	type: 'metered',
+	id: "ai_input_tokens",
+	name: "AI Input Tokens",
+	type: "metered",
 	consumable: true,
-});
+})
 
 export const aiOutputTokens = feature({
-	id: 'ai_output_tokens',
-	name: 'AI Output Tokens',
-	type: 'metered',
+	id: "ai_output_tokens",
+	name: "AI Output Tokens",
+	type: "metered",
 	consumable: true,
-});
+})
 
 export const bringYourOwnCloud = feature({
-	id: 'bringyourowncloud',
-	name: 'Bring Your Own Cloud',
-	type: 'boolean',
-});
-
+	id: "bringyourowncloud",
+	name: "Bring Your Own Cloud",
+	type: "boolean",
+})
 
 export const starter = plan({
-	id: 'starter',
-	name: 'Starter',
+	id: "starter",
+	name: "Starter",
 	price: {
 		amount: 19,
-		interval: 'month',
+		interval: "month",
 	},
 	items: [
-		({
-			featureId: 'logs',
+		{
+			featureId: "logs",
 			included: 50,
 			reset: {
-				interval: 'month',
+				interval: "month",
 			},
-		}),
-		({
-
-			featureId: 'metrics',
+		},
+		{
+			featureId: "metrics",
 			included: 50,
 			reset: {
-				interval: 'month',
+				interval: "month",
 			},
-		}),
-		({
-			featureId: 'traces',
+		},
+		{
+			featureId: "traces",
 			included: 50,
 			reset: {
-				interval: 'month',
+				interval: "month",
 			},
-		}),
+		},
 	],
 	freeTrial: {
 		durationLength: 14,
-		durationType: 'day',
+		durationType: "day",
 		cardRequired: true,
 	},
-});
+})
 
 export const startup = plan({
-	id: 'startup',
-	name: 'Startup',
+	id: "startup",
+	name: "Startup",
 	price: {
 		amount: 39,
-		interval: 'month',
+		interval: "month",
 	},
 	items: [
-		({
-			featureId: 'logs',
+		{
+			featureId: "logs",
 			included: 100,
 			price: {
 				amount: 0.25,
 				billingUnits: 1,
-				billingMethod: 'usage_based',
-				interval: 'month',
+				billingMethod: "usage_based",
+				interval: "month",
 			},
-		}),
-		({
-			featureId: 'metrics',
+		},
+		{
+			featureId: "metrics",
 			included: 100,
 			price: {
 				amount: 0.25,
 				billingUnits: 1,
-				billingMethod: 'usage_based',
-				interval: 'month',
+				billingMethod: "usage_based",
+				interval: "month",
 			},
-		}),
-		({
-			featureId: 'traces',
+		},
+		{
+			featureId: "traces",
 			included: 100,
 			price: {
 				amount: 0.25,
 				billingUnits: 1,
-				billingMethod: 'usage_based',
-				interval: 'month',
+				billingMethod: "usage_based",
+				interval: "month",
 			},
-		}),
+		},
 	],
-});
+})
 
 export const bringYourOwnCloudAddOn = plan({
-	id: 'bringyourowncloud',
-	name: 'Bring Your Own Cloud',
+	id: "bringyourowncloud",
+	name: "Bring Your Own Cloud",
 	addOn: true,
 	price: {
 		amount: 99,
-		interval: 'month',
+		interval: "month",
 	},
 	items: [
-		({
-			featureId: 'bringyourowncloud',
-		}),
+		{
+			featureId: "bringyourowncloud",
+		},
 	],
-});
-
-
+})

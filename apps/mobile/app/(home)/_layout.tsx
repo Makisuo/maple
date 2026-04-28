@@ -1,16 +1,16 @@
-import { useAuth } from "@clerk/expo";
-import { Redirect } from "expo-router";
-import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { useAuth } from "@clerk/expo"
+import { Redirect } from "expo-router"
+import { NativeTabs } from "expo-router/unstable-native-tabs"
 
 export default function HomeLayout() {
-	const { isSignedIn, isLoaded } = useAuth({ treatPendingAsSignedOut: false });
+	const { isSignedIn, isLoaded } = useAuth({ treatPendingAsSignedOut: false })
 
 	if (!isLoaded) {
-		return null;
+		return null
 	}
 
 	if (!isSignedIn) {
-		return <Redirect href="/(auth)" />;
+		return <Redirect href="/(auth)" />
 	}
 
 	return (
@@ -36,5 +36,5 @@ export default function HomeLayout() {
 				<NativeTabs.Trigger.Icon sf="terminal" />
 			</NativeTabs.Trigger>
 		</NativeTabs>
-	);
+	)
 }

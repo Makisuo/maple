@@ -27,15 +27,15 @@ npm install @base-ui/react
 
 ```tsx
 import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogPanel,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-  AlertDialogTrigger,
+	AlertDialog,
+	AlertDialogClose,
+	AlertDialogDescription,
+	AlertDialogPanel,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogPopup,
+	AlertDialogTitle,
+	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 ```
 
@@ -43,23 +43,17 @@ import {
 
 ```tsx
 <AlertDialog>
-  <AlertDialogTrigger render={<Button variant="destructive-outline" />}>
-    Delete Account
-  </AlertDialogTrigger>
-  <AlertDialogPopup>
-    <AlertDialogHeader>
-      <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-      <AlertDialogDescription>
-        This action cannot be undone.
-      </AlertDialogDescription>
-    </AlertDialogHeader>
-    <AlertDialogFooter>
-      <AlertDialogClose render={<Button variant="ghost" />}>Cancel</AlertDialogClose>
-      <AlertDialogClose render={<Button variant="destructive" />}>
-        Delete Account
-      </AlertDialogClose>
-    </AlertDialogFooter>
-  </AlertDialogPopup>
+	<AlertDialogTrigger render={<Button variant="destructive-outline" />}>Delete Account</AlertDialogTrigger>
+	<AlertDialogPopup>
+		<AlertDialogHeader>
+			<AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+			<AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+		</AlertDialogHeader>
+		<AlertDialogFooter>
+			<AlertDialogClose render={<Button variant="ghost" />}>Cancel</AlertDialogClose>
+			<AlertDialogClose render={<Button variant="destructive" />}>Delete Account</AlertDialogClose>
+		</AlertDialogFooter>
+	</AlertDialogPopup>
 </AlertDialog>
 ```
 

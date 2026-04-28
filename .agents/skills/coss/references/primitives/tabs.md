@@ -27,14 +27,14 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs"
 
 ```tsx
 <Tabs defaultValue="tab-1">
-  <TabsList>
-    <TabsTab value="tab-1">Tab 1</TabsTab>
-    <TabsTab value="tab-2">Tab 2</TabsTab>
-    <TabsTab value="tab-3">Tab 3</TabsTab>
-  </TabsList>
-  <TabsPanel value="tab-1">Tab 1 content</TabsPanel>
-  <TabsPanel value="tab-2">Tab 2 content</TabsPanel>
-  <TabsPanel value="tab-3">Tab 3 content</TabsPanel>
+	<TabsList>
+		<TabsTab value="tab-1">Tab 1</TabsTab>
+		<TabsTab value="tab-2">Tab 2</TabsTab>
+		<TabsTab value="tab-3">Tab 3</TabsTab>
+	</TabsList>
+	<TabsPanel value="tab-1">Tab 1 content</TabsPanel>
+	<TabsPanel value="tab-2">Tab 2 content</TabsPanel>
+	<TabsPanel value="tab-3">Tab 3 content</TabsPanel>
 </Tabs>
 ```
 
@@ -61,11 +61,11 @@ Underline variant:
 
 ```tsx
 <Tabs defaultValue="tab-1" variant="underline">
-  <TabsList>
-    <TabsTab value="tab-1">Tab 1</TabsTab>
-    <TabsTab value="tab-2">Tab 2</TabsTab>
-  </TabsList>
-  ...
+	<TabsList>
+		<TabsTab value="tab-1">Tab 1</TabsTab>
+		<TabsTab value="tab-2">Tab 2</TabsTab>
+	</TabsList>
+	...
 </Tabs>
 ```
 

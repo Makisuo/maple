@@ -12,65 +12,65 @@
 # when the resolved org has `org_tinybird_settings.sync_status = 'active'`.
 
 receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: "[::]:4317"
-      http:
-        endpoint: "[::]:4318"
+    otlp:
+        protocols:
+            grpc:
+                endpoint: "[::]:4317"
+            http:
+                endpoint: "[::]:4318"
 
 processors:
-  memory_limiter:
-    check_interval: 1s
-    limit_mib: 512
-    spike_limit_mib: 128
+    memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
 
-  batch:
-    timeout: 1s
-    send_batch_size: 5000
-    send_batch_max_size: 10000
+    batch:
+        timeout: 1s
+        send_batch_size: 5000
+        send_batch_max_size: 10000
 
 exporters:
-  debug/fallback:
-    verbosity: basic
-    sampling_initial: 5
-    sampling_thereafter: 500
+    debug/fallback:
+        verbosity: basic
+        sampling_initial: 5
+        sampling_thereafter: 500
 
 extensions:
-  file_storage/queue:
-    directory: /var/lib/otelcol/file_storage
-    create_directory: true
-    timeout: 10s
-    compaction:
-      on_start: true
-      on_rebound: true
+    file_storage/queue:
+        directory: /var/lib/otelcol/file_storage
+        create_directory: true
+        timeout: 10s
+        compaction:
+            on_start: true
+            on_rebound: true
 
-  health_check:
-    endpoint: "[::]:13133"
+    health_check:
+        endpoint: "[::]:13133"
 
 service:
-  extensions: [health_check, file_storage/queue]
+    extensions: [health_check, file_storage/queue]
 
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [memory_limiter, batch]
-      exporters: [debug/fallback]
+    pipelines:
+        traces:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [debug/fallback]
 
-    logs:
-      receivers: [otlp]
-      processors: [memory_limiter, batch]
-      exporters: [debug/fallback]
+        logs:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [debug/fallback]
 
-    metrics:
-      receivers: [otlp]
-      processors: [memory_limiter, batch]
-      exporters: [debug/fallback]
+        metrics:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [debug/fallback]
 
-  telemetry:
-    logs:
-      level: info
-    # Disable the default Prometheus self-telemetry endpoint (localhost:8888)
-    # so rapid supervisor restarts don't race on the port binding.
-    metrics:
-      level: none
+    telemetry:
+        logs:
+            level: info
+        # Disable the default Prometheus self-telemetry endpoint (localhost:8888)
+        # so rapid supervisor restarts don't race on the port binding.
+        metrics:
+            level: none

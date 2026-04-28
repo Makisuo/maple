@@ -41,15 +41,16 @@ ALTER USER my_app_user SETTINGS
 ```
 
 **Flush conditions (whichever occurs first):**
+
 - Buffer reaches `async_insert_max_data_size`
 - Time threshold `async_insert_busy_timeout_ms` elapses
 - Maximum insert queries accumulate
 
 **Return modes:**
 
-| Setting | Behavior | Use Case |
-|---------|----------|----------|
-| `wait_for_async_insert=1` | Waits for flush, confirms durability | **Recommended** |
-| `wait_for_async_insert=0` | Fire-and-forget, unaware of errors | **Risky** - only if you accept data loss |
+| Setting                   | Behavior                             | Use Case                                 |
+| ------------------------- | ------------------------------------ | ---------------------------------------- |
+| `wait_for_async_insert=1` | Waits for flush, confirms durability | **Recommended**                          |
+| `wait_for_async_insert=0` | Fire-and-forget, unaware of errors   | **Risky** - only if you accept data loss |
 
 Reference: [Selecting an Insert Strategy](https://clickhouse.com/docs/best-practices/selecting-an-insert-strategy)

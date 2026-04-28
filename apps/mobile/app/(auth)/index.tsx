@@ -1,6 +1,6 @@
-import { useSignIn, useSSO, useAuth } from "@clerk/expo";
-import { Link, useRouter, type Href } from "expo-router";
-import { useState } from "react";
+import { useSignIn, useSSO, useAuth } from "@clerk/expo"
+import { Link, useRouter, type Href } from "expo-router"
+import { useState } from "react"
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -10,21 +10,18 @@ import {
 	Text,
 	TextInput,
 	View,
-} from "react-native";
-import { GithubIcon } from "../../components/icons/github-icon";
-import { GoogleIcon } from "../../components/icons/google-icon";
-import {
-	PrimaryButton,
-	SecondaryButton,
-} from "../../components/ui/button";
-import { hapticError, hapticSuccess } from "../../lib/haptics";
+} from "react-native"
+import { GithubIcon } from "../../components/icons/github-icon"
+import { GoogleIcon } from "../../components/icons/google-icon"
+import { PrimaryButton, SecondaryButton } from "../../components/ui/button"
+import { hapticError, hapticSuccess } from "../../lib/haptics"
 
-type SsoProvider = "google" | "github";
+type SsoProvider = "google" | "github"
 
 export default function SignInScreen() {
-	const { isSignedIn } = useAuth();
+	const { isSignedIn } = useAuth()
 
-	if (isSignedIn) return null;
+	if (isSignedIn) return null
 
 	return (
 		<View className="flex-1 bg-background justify-center px-6">
@@ -33,88 +30,85 @@ export default function SignInScreen() {
 			</Text>
 			<SignInForm />
 		</View>
-	);
+	)
 }
 
 function SignInForm() {
-	const { signIn, errors, fetchStatus } = useSignIn();
-	const { startSSOFlow } = useSSO();
-	const router = useRouter();
+	const { signIn, errors, fetchStatus } = useSignIn()
+	const { startSSOFlow } = useSSO()
+	const router = useRouter()
 
-	const [emailAddress, setEmailAddress] = useState("");
-	const [password, setPassword] = useState("");
-	const [code, setCode] = useState("");
-	const [ssoLoading, setSsoLoading] = useState<SsoProvider | null>(null);
+	const [emailAddress, setEmailAddress] = useState("")
+	const [password, setPassword] = useState("")
+	const [code, setCode] = useState("")
+	const [ssoLoading, setSsoLoading] = useState<SsoProvider | null>(null)
 
-	const loading = fetchStatus === "fetching";
-	const ssoBusy = ssoLoading !== null;
+	const loading = fetchStatus === "fetching"
+	const ssoBusy = ssoLoading !== null
 
 	const finalize = async () => {
 		await signIn.finalize({
 			navigate: ({ session, decorateUrl }) => {
-				if (session?.currentTask) return;
-				const url = decorateUrl("/");
-				router.push(url as Href);
+				if (session?.currentTask) return
+				const url = decorateUrl("/")
+				router.push(url as Href)
 			},
-		});
-	};
+		})
+	}
 
 	const handleSubmit = async () => {
 		try {
-			const { error } = await signIn.password({ emailAddress, password });
-			if (error) return;
+			const { error } = await signIn.password({ emailAddress, password })
+			if (error) return
 
 			if (signIn.status === "complete") {
-				hapticSuccess();
-				await finalize();
+				hapticSuccess()
+				await finalize()
 			} else if (signIn.status === "needs_client_trust") {
 				const emailCodeFactor = signIn.supportedSecondFactors?.find(
 					(f) => f.strategy === "email_code",
-				);
+				)
 				if (emailCodeFactor) {
-					await signIn.mfa.sendEmailCode();
+					await signIn.mfa.sendEmailCode()
 				}
 			}
 		} catch (err) {
-			hapticError();
-			Alert.alert("Sign in failed", err instanceof Error ? err.message : "An unexpected error occurred");
+			hapticError()
+			Alert.alert("Sign in failed", err instanceof Error ? err.message : "An unexpected error occurred")
 		}
-	};
+	}
 
 	const handleVerify = async () => {
-		await signIn.mfa.verifyEmailCode({ code });
+		await signIn.mfa.verifyEmailCode({ code })
 		if (signIn.status === "complete") {
-			hapticSuccess();
-			await finalize();
+			hapticSuccess()
+			await finalize()
 		}
-	};
+	}
 
 	const handleSsoSignIn = async (provider: SsoProvider) => {
-		setSsoLoading(provider);
+		setSsoLoading(provider)
 		try {
 			const { createdSessionId, setActive } = await startSSOFlow({
 				strategy: provider === "google" ? "oauth_google" : "oauth_github",
-			});
+			})
 			if (createdSessionId && setActive) {
-				hapticSuccess();
-				await setActive({ session: createdSessionId });
+				hapticSuccess()
+				await setActive({ session: createdSessionId })
 			}
 		} catch (err) {
-			hapticError();
-			console.error(`${provider} sign-in error:`, err);
-			Alert.alert("Sign in failed", err instanceof Error ? err.message : "An unexpected error occurred");
+			hapticError()
+			console.error(`${provider} sign-in error:`, err)
+			Alert.alert("Sign in failed", err instanceof Error ? err.message : "An unexpected error occurred")
 		} finally {
-			setSsoLoading(null);
+			setSsoLoading(null)
 		}
-	};
+	}
 
 	// Verification code screen
 	if (signIn.status === "needs_client_trust") {
 		return (
-			<KeyboardAvoidingView
-				className="flex-1"
-				behavior={Platform.OS === "ios" ? "padding" : "height"}
-			>
+			<KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : "height"}>
 				<ScrollView
 					contentContainerClassName="flex-grow justify-center"
 					keyboardShouldPersistTaps="handled"
@@ -153,32 +147,24 @@ function SignInForm() {
 						<Text className="text-sm text-muted-foreground font-mono">
 							Didn't receive a code?
 						</Text>
-						<Pressable
-							onPress={() => signIn.mfa.sendEmailCode()}
-							hitSlop={8}
-						>
+						<Pressable onPress={() => signIn.mfa.sendEmailCode()} hitSlop={8}>
 							<Text className="text-sm text-primary font-mono">Resend</Text>
 						</Pressable>
 					</View>
 				</ScrollView>
 			</KeyboardAvoidingView>
-		);
+		)
 	}
 
 	// Main sign-in screen
 	return (
-		<KeyboardAvoidingView
-			className="flex-1"
-			behavior={Platform.OS === "ios" ? "padding" : "height"}
-		>
+		<KeyboardAvoidingView className="flex-1" behavior={Platform.OS === "ios" ? "padding" : "height"}>
 			<ScrollView
 				contentContainerClassName="flex-grow justify-center"
 				keyboardShouldPersistTaps="handled"
 			>
 				<View className="gap-1 mb-6">
-					<Text className="text-xl font-semibold text-foreground font-mono">
-						Sign in
-					</Text>
+					<Text className="text-xl font-semibold text-foreground font-mono">Sign in</Text>
 					<Text className="text-sm text-muted-foreground font-mono">
 						Sign in to your Maple account.
 					</Text>
@@ -214,9 +200,7 @@ function SignInForm() {
 				{/* Email/Password form */}
 				<View className="gap-4">
 					<View className="gap-2">
-						<Text className="text-sm font-medium text-foreground font-mono">
-							Email address
-						</Text>
+						<Text className="text-sm font-medium text-foreground font-mono">Email address</Text>
 						<TextInput
 							className="h-12 rounded-lg border border-input bg-transparent px-3 text-sm text-foreground font-mono"
 							autoCapitalize="none"
@@ -235,9 +219,7 @@ function SignInForm() {
 					</View>
 
 					<View className="gap-2">
-						<Text className="text-sm font-medium text-foreground font-mono">
-							Password
-						</Text>
+						<Text className="text-sm font-medium text-foreground font-mono">Password</Text>
 						<TextInput
 							className="h-12 rounded-lg border border-input bg-transparent px-3 text-sm text-foreground font-mono"
 							value={password}
@@ -263,9 +245,7 @@ function SignInForm() {
 				</View>
 
 				<View className="flex-row items-center gap-1 mt-6">
-					<Text className="text-sm text-muted-foreground font-mono">
-						Don't have an account?
-					</Text>
+					<Text className="text-sm text-muted-foreground font-mono">Don't have an account?</Text>
 					<Link href="/(auth)/sign-up" asChild>
 						<Pressable hitSlop={8}>
 							<Text className="text-sm text-primary font-mono">Sign up</Text>
@@ -274,5 +254,5 @@ function SignInForm() {
 				</View>
 			</ScrollView>
 		</KeyboardAvoidingView>
-	);
+	)
 }

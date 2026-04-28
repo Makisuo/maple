@@ -1,1 +1,1 @@
-declare module "./global.css";
+declare module "./global.css"

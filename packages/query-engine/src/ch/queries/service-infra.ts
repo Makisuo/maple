@@ -17,48 +17,46 @@ import { escapeClickHouseString } from "../../sql/sql-fragment"
 import type { CompiledQuery } from "../compile"
 
 export interface ServiceWorkloadsOpts {
-  services: ReadonlyArray<string>
+	services: ReadonlyArray<string>
 }
 
 export interface ServiceWorkloadsOutput {
-  readonly serviceName: string
-  readonly workloadKind: "deployment" | "statefulset" | "daemonset" | "unknown"
-  readonly workloadName: string
-  readonly namespace: string
-  readonly clusterName: string
-  readonly podCount: number
-  readonly avgCpuLimitUtilization: number | null
-  readonly avgMemoryLimitUtilization: number | null
+	readonly serviceName: string
+	readonly workloadKind: "deployment" | "statefulset" | "daemonset" | "unknown"
+	readonly workloadName: string
+	readonly namespace: string
+	readonly clusterName: string
+	readonly podCount: number
+	readonly avgCpuLimitUtilization: number | null
+	readonly avgMemoryLimitUtilization: number | null
 }
 
 export function serviceWorkloadsSQL(
-  opts: ServiceWorkloadsOpts,
-  params: { orgId: string; startTime: string; endTime: string },
+	opts: ServiceWorkloadsOpts,
+	params: { orgId: string; startTime: string; endTime: string },
 ): CompiledQuery<ServiceWorkloadsOutput> {
-  const esc = escapeClickHouseString
-  const orgId = esc(params.orgId)
-  const startTime = esc(params.startTime)
-  const endTime = esc(params.endTime)
-  const serviceList = opts.services
-    .map((s) => `'${esc(s)}'`)
-    .join(", ")
+	const esc = escapeClickHouseString
+	const orgId = esc(params.orgId)
+	const startTime = esc(params.startTime)
+	const endTime = esc(params.endTime)
+	const serviceList = opts.services.map((s) => `'${esc(s)}'`).join(", ")
 
-  // Bail early if no services were passed — return an empty result via a
-  // trivial SELECT that produces zero rows.
-  if (opts.services.length === 0) {
-    return {
-      sql: `SELECT '' AS serviceName, '' AS workloadKind, '' AS workloadName,
+	// Bail early if no services were passed — return an empty result via a
+	// trivial SELECT that produces zero rows.
+	if (opts.services.length === 0) {
+		return {
+			sql: `SELECT '' AS serviceName, '' AS workloadKind, '' AS workloadName,
        '' AS namespace, '' AS clusterName,
        toUInt64(0) AS podCount,
        toNullable(toFloat64(0)) AS avgCpuLimitUtilization,
        toNullable(toFloat64(0)) AS avgMemoryLimitUtilization
 WHERE 0
 FORMAT JSON`,
-      castRows: (rows) => rows as unknown as ReadonlyArray<ServiceWorkloadsOutput>,
-    }
-  }
+			castRows: (rows) => rows as unknown as ReadonlyArray<ServiceWorkloadsOutput>,
+		}
+	}
 
-  const sql = `WITH
+	const sql = `WITH
   service_workload_map AS (
     SELECT DISTINCT
       ServiceName AS serviceName,
@@ -137,8 +135,8 @@ ORDER BY swm.serviceName ASC, swm.workloadName ASC
 LIMIT 500
 FORMAT JSON`
 
-  return {
-    sql,
-    castRows: (rows) => rows as unknown as ReadonlyArray<ServiceWorkloadsOutput>,
-  }
+	return {
+		sql,
+		castRows: (rows) => rows as unknown as ReadonlyArray<ServiceWorkloadsOutput>,
+	}
 }

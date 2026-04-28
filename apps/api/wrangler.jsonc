@@ -1,33 +1,33 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "maple-api",
-  "main": "src/worker.ts",
-  "compatibility_date": "2026-04-08",
-  "compatibility_flags": ["nodejs_compat"],
-  "dev": {
-    "port": 3472
-  },
-  "d1_databases": [
-    {
-      "binding": "MAPLE_DB",
-      "database_name": "maple-api-local",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "preview_database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "../../packages/db/drizzle",
-      "migrations_table": "drizzle_migrations"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "MCP_SESSIONS",
-      "id": "00000000000000000000000000000000"
-    }
-  ],
-  "workflows": [
-    {
-      "name": "tinybird-sync-workflow",
-      "binding": "TINYBIRD_SYNC_WORKFLOW",
-      "class_name": "TinybirdSyncWorkflow"
-    }
-  ]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "maple-api",
+	"main": "src/worker.ts",
+	"compatibility_date": "2026-04-08",
+	"compatibility_flags": ["nodejs_compat"],
+	"dev": {
+		"port": 3472,
+	},
+	"d1_databases": [
+		{
+			"binding": "MAPLE_DB",
+			"database_name": "maple-api-local",
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"preview_database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "../../packages/db/drizzle",
+			"migrations_table": "drizzle_migrations",
+		},
+	],
+	"kv_namespaces": [
+		{
+			"binding": "MCP_SESSIONS",
+			"id": "00000000000000000000000000000000",
+		},
+	],
+	"workflows": [
+		{
+			"name": "tinybird-sync-workflow",
+			"binding": "TINYBIRD_SYNC_WORKFLOW",
+			"class_name": "TinybirdSyncWorkflow",
+		},
+	],
 }

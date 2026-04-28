@@ -8,14 +8,14 @@
 import type { ColumnDefs } from "./types"
 
 export interface Table<Name extends string, Columns extends ColumnDefs> {
-  readonly _tag: "Table"
-  readonly name: Name
-  readonly columns: Columns
+	readonly _tag: "Table"
+	readonly name: Name
+	readonly columns: Columns
 }
 
 export function table<const Name extends string, const Columns extends ColumnDefs>(
-  name: Name,
-  columns: Columns,
+	name: Name,
+	columns: Columns,
 ): Table<Name, Columns> {
-  return { _tag: "Table", name, columns }
+	return { _tag: "Table", name, columns }
 }

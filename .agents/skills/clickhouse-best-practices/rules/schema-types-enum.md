@@ -46,13 +46,13 @@ SELECT * FROM orders WHERE status > 'processing';  -- shipped and delivered
 
 **Enum Guidelines:**
 
-| Scenario | Use |
-|----------|-----|
-| Fixed set of values known at schema time | Enum8/Enum16 |
-| Values may change frequently | LowCardinality(String) |
-| Need insert-time validation | Enum |
-| Need natural ordering in queries | Enum |
-| < 256 distinct values | Enum8 (1 byte) |
-| 256-65,536 distinct values | Enum16 (2 bytes) |
+| Scenario                                 | Use                    |
+| ---------------------------------------- | ---------------------- |
+| Fixed set of values known at schema time | Enum8/Enum16           |
+| Values may change frequently             | LowCardinality(String) |
+| Need insert-time validation              | Enum                   |
+| Need natural ordering in queries         | Enum                   |
+| < 256 distinct values                    | Enum8 (1 byte)         |
+| 256-65,536 distinct values               | Enum16 (2 bytes)       |
 
 Reference: [Select Data Types](https://clickhouse.com/docs/best-practices/select-data-types)

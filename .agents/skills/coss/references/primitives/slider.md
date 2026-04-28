@@ -37,11 +37,11 @@ Slider with label and live value display:
 
 ```tsx
 <div className="flex flex-col gap-2">
-  <div className="flex justify-between text-sm">
-    <Label>Volume</Label>
-    <SliderValue />
-  </div>
-  <Slider aria-label="Volume" defaultValue={50} min={0} max={100} />
+	<div className="flex justify-between text-sm">
+		<Label>Volume</Label>
+		<SliderValue />
+	</div>
+	<Slider aria-label="Volume" defaultValue={50} min={0} max={100} />
 </div>
 ```
 

@@ -50,7 +50,7 @@ Icon-only button (always needs `aria-label`):
 
 ```tsx
 <Button aria-label="Close" size="icon" variant="ghost">
-  <XIcon aria-hidden="true" />
+	<XIcon aria-hidden="true" />
 </Button>
 ```
 
@@ -58,8 +58,8 @@ Button with icon and text (no opacity on the icon):
 
 ```tsx
 <Button>
-  <PlusIcon aria-hidden="true" />
-  Add Item
+	<PlusIcon aria-hidden="true" />
+	Add Item
 </Button>
 ```
 
@@ -70,15 +70,17 @@ Sizes: `xs`, `sm`, `default`, `lg`, `icon-xs`, `icon-sm`, `icon`, `icon-lg`.
 Built-in `loading` prop (disables and shows spinner automatically):
 
 ```tsx
-<Button loading={isLoading} onClick={handleClick}>Submit</Button>
+<Button loading={isLoading} onClick={handleClick}>
+	Submit
+</Button>
 ```
 
 Composite approach (manual `Spinner` + `disabled`):
 
 ```tsx
 <Button disabled>
-  <Spinner />
-  Loading...
+	<Spinner />
+	Loading...
 </Button>
 ```
 

@@ -1,25 +1,25 @@
 {
-  "name": "@maple/alerting",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "wrangler dev --env-file ../../.env.local --persist-to ../api/.wrangler/state --test-scheduled --port=8788 --inspector-port=9231",
-    "deploy": "wrangler deploy",
-    "test": "echo 'No tests yet'",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@maple/api": "workspace:*",
-    "@maple/db": "workspace:*",
-    "@maple/domain": "workspace:*",
-    "@maple/effect-cloudflare": "workspace:*",
-    "effect": "catalog:effect"
-  },
-  "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260405.0",
-    "@effect/language-service": "catalog:effect",
-    "@types/node": "catalog:tooling",
-    "typescript": "catalog:tooling",
-    "wrangler": "^4.41.0"
-  }
+	"name": "@maple/alerting",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "wrangler dev --env-file ../../.env.local --persist-to ../api/.wrangler/state --test-scheduled --port=8788 --inspector-port=9231",
+		"deploy": "wrangler deploy",
+		"test": "echo 'No tests yet'",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@maple/api": "workspace:*",
+		"@maple/db": "workspace:*",
+		"@maple/domain": "workspace:*",
+		"@maple/effect-cloudflare": "workspace:*",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20260405.0",
+		"@effect/language-service": "catalog:effect",
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling",
+		"wrangler": "^4.41.0"
+	}
 }

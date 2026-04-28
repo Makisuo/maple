@@ -21,12 +21,7 @@ npm install @base-ui/react zod
 ## Canonical imports
 
 ```tsx
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Form } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 ```
@@ -34,13 +29,17 @@ import { Input } from "@/components/ui/input"
 ## Minimal pattern
 
 ```tsx
-<Form onSubmit={(e) => {/* handle submit */}}>
-  <Field>
-    <FieldLabel>Email</FieldLabel>
-    <Input name="email" type="email" required />
-    <FieldDescription>Used for account updates</FieldDescription>
-    <FieldError>Please enter a valid email.</FieldError>
-  </Field>
+<Form
+	onSubmit={(e) => {
+		/* handle submit */
+	}}
+>
+	<Field>
+		<FieldLabel>Email</FieldLabel>
+		<Input name="email" type="email" required />
+		<FieldDescription>Used for account updates</FieldDescription>
+		<FieldError>Please enter a valid email.</FieldError>
+	</Field>
 </Form>
 ```
 
@@ -75,4 +74,3 @@ import { Input } from "@/components/ui/input"
 ## Further reading
 
 - Base UI Forms handbook: `https://base-ui.com/react/handbook/forms.md`
-

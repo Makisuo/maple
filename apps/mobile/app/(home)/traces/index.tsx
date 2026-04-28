@@ -13,11 +13,7 @@ import {
 import { FilterModal } from "../../../components/traces/filter-modal"
 import { Screen, useScreenBottomPadding } from "../../../components/ui/screen"
 import { ScreenHeader } from "../../../components/ui/screen-header"
-import {
-	EmptyView,
-	ErrorView,
-	LoadingView,
-} from "../../../components/ui/state-view"
+import { EmptyView, ErrorView, LoadingView } from "../../../components/ui/state-view"
 import type { TraceFilters } from "../../../lib/api"
 
 export default function TracesScreen() {
@@ -32,10 +28,7 @@ export default function TracesScreen() {
 		return Object.keys(f).length > 0 ? f : undefined
 	}, [filterState.serviceName, filterState.spanName, filterState.errorsOnly])
 
-	const { state, fetchNextPage, refresh } = useInfiniteTraces(
-		filterState.timeKey,
-		apiFilters,
-	)
+	const { state, fetchNextPage, refresh } = useInfiniteTraces(filterState.timeKey, apiFilters)
 	const { state: facetsState } = useTracesFacets(filterState.timeKey)
 	const bottomPadding = useScreenBottomPadding()
 
@@ -46,10 +39,7 @@ export default function TracesScreen() {
 		}))
 	}
 
-	const subtitle =
-		state.status === "success"
-			? `${state.data.length} traces`
-			: "Loading traces..."
+	const subtitle = state.status === "success" ? `${state.data.length} traces` : "Loading traces..."
 
 	return (
 		<Screen>
@@ -73,7 +63,13 @@ export default function TracesScreen() {
 					estimatedItemSize={85}
 					recycleItems
 					refreshControl={
-						<RefreshControl refreshing={false} onRefresh={() => { hapticSuccess(); refresh() }} />
+						<RefreshControl
+							refreshing={false}
+							onRefresh={() => {
+								hapticSuccess()
+								refresh()
+							}}
+						/>
 					}
 					ItemSeparatorComponent={() => <View className="h-px bg-border mx-5" />}
 					renderItem={({ item }) => <TraceRow trace={item} />}

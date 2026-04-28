@@ -15,7 +15,7 @@ import type { CHUnionQuery } from "./union"
  * Collapses all runs of whitespace (spaces, newlines, tabs) into single spaces.
  */
 function normalizeSQL(sql: string): string {
-  return sql.replace(/\s+/g, " ").trim()
+	return sql.replace(/\s+/g, " ").trim()
 }
 
 /**
@@ -28,52 +28,52 @@ function normalizeSQL(sql: string): string {
  *   t.sql                                    // raw SQL for ad-hoc checks
  */
 export function testSQL<O extends Record<string, any>>(
-  query: CHQuery<any, O>,
-  params: Record<string, any>,
-  options?: { skipFormat?: boolean },
+	query: CHQuery<any, O>,
+	params: Record<string, any>,
+	options?: { skipFormat?: boolean },
 ) {
-  const compiled = compileCH(query, params, options)
-  const normalized = normalizeSQL(compiled.sql)
+	const compiled = compileCH(query, params, options)
+	const normalized = normalizeSQL(compiled.sql)
 
-  return {
-    sql: compiled.sql,
-    normalizedSQL: normalized,
-    toContainSQL(fragment: string) {
-      expect(compiled.sql).toContain(fragment)
-    },
-    toMatchSQL(expected: string) {
-      expect(normalized).toBe(normalizeSQL(expected))
-    },
-    toNotContainSQL(fragment: string) {
-      expect(compiled.sql).not.toContain(fragment)
-    },
-  }
+	return {
+		sql: compiled.sql,
+		normalizedSQL: normalized,
+		toContainSQL(fragment: string) {
+			expect(compiled.sql).toContain(fragment)
+		},
+		toMatchSQL(expected: string) {
+			expect(normalized).toBe(normalizeSQL(expected))
+		},
+		toNotContainSQL(fragment: string) {
+			expect(compiled.sql).not.toContain(fragment)
+		},
+	}
 }
 
 /**
  * Same as testSQL but for UNION ALL queries.
  */
 export function testUnionSQL<O extends Record<string, any>>(
-  query: CHUnionQuery<O>,
-  params: Record<string, any>,
+	query: CHUnionQuery<O>,
+	params: Record<string, any>,
 ) {
-  const compiled = compileUnion(query, params)
-  const normalized = normalizeSQL(compiled.sql)
+	const compiled = compileUnion(query, params)
+	const normalized = normalizeSQL(compiled.sql)
 
-  return {
-    sql: compiled.sql,
-    normalizedSQL: normalized,
-    toContainSQL(fragment: string) {
-      expect(compiled.sql).toContain(fragment)
-    },
-    toMatchSQL(expected: string) {
-      expect(normalized).toBe(normalizeSQL(expected))
-    },
-    toNotContainSQL(fragment: string) {
-      expect(compiled.sql).not.toContain(fragment)
-    },
-    unionCount() {
-      return (compiled.sql.match(/UNION ALL/g) || []).length
-    },
-  }
+	return {
+		sql: compiled.sql,
+		normalizedSQL: normalized,
+		toContainSQL(fragment: string) {
+			expect(compiled.sql).toContain(fragment)
+		},
+		toMatchSQL(expected: string) {
+			expect(normalized).toBe(normalizeSQL(expected))
+		},
+		toNotContainSQL(fragment: string) {
+			expect(compiled.sql).not.toContain(fragment)
+		},
+		unionCount() {
+			return (compiled.sql.match(/UNION ALL/g) || []).length
+		},
+	}
 }

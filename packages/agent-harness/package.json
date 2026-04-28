@@ -1,22 +1,22 @@
 {
-  "name": "@maple/agent-harness",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "ai": "^6.0.146",
-    "effect": "catalog:effect"
-  },
-  "devDependencies": {
-    "@effect/language-service": "catalog:effect",
-    "@types/node": "catalog:tooling",
-    "typescript": "catalog:tooling",
-    "vitest": "catalog:"
-  }
+	"name": "@maple/agent-harness",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"ai": "^6.0.146",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	}
 }

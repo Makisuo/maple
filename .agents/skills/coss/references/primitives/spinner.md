@@ -27,8 +27,8 @@ import { Spinner } from "@/components/ui/spinner"
 
 ```tsx
 <div className="flex items-center gap-2">
-  <Spinner aria-label="Loading" />
-  <span className="text-sm text-muted-foreground">Loading data…</span>
+	<Spinner aria-label="Loading" />
+	<span className="text-sm text-muted-foreground">Loading data…</span>
 </div>
 ```
 
@@ -40,8 +40,8 @@ Spinner inside a button:
 
 ```tsx
 <Button disabled>
-  <Spinner aria-hidden="true" />
-  Loading...
+	<Spinner aria-hidden="true" />
+	Loading...
 </Button>
 ```
 
@@ -49,8 +49,8 @@ Standalone spinner with label:
 
 ```tsx
 <div className="flex items-center gap-2">
-  <Spinner aria-label="Loading" />
-  <span className="text-muted-foreground text-sm">Fetching data...</span>
+	<Spinner aria-label="Loading" />
+	<span className="text-muted-foreground text-sm">Fetching data...</span>
 </div>
 ```
 
