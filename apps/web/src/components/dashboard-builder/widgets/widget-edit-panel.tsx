@@ -33,6 +33,10 @@ export function WidgetEditPanel({
   onUpdateDisplay,
 }: WidgetEditPanelProps) {
   const isChart = widget.visualization === "chart"
+  const isMarkdown = widget.visualization === "markdown"
+  const isPie = widget.visualization === "pie"
+  const isHistogram = widget.visualization === "histogram"
+  const isHeatmap = widget.visualization === "heatmap"
   const chartId = widget.display.chartId
   const currentChart = isChart && chartId ? getChartById(chartId) : null
   const variants = currentChart
@@ -55,15 +59,200 @@ export function WidgetEditPanel({
         />
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <label className="text-[10px] font-medium text-muted-foreground">
-          Data Source
-        </label>
-        <div className="text-[10px] text-muted-foreground bg-muted px-2 py-1.5 rounded">
-          {ENDPOINT_OPTIONS.find((o) => o.value === widget.dataSource.endpoint)?.label ??
-            widget.dataSource.endpoint}
+      {!isMarkdown && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-medium text-muted-foreground">
+            Data Source
+          </label>
+          <div className="text-[10px] text-muted-foreground bg-muted px-2 py-1.5 rounded">
+            {ENDPOINT_OPTIONS.find((o) => o.value === widget.dataSource.endpoint)?.label ??
+              widget.dataSource.endpoint}
+          </div>
         </div>
-      </div>
+      )}
+
+      {isMarkdown && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-medium text-muted-foreground">
+            Content (Markdown)
+          </label>
+          <textarea
+            value={widget.display.markdown?.content ?? ""}
+            onChange={(e) =>
+              onUpdateDisplay({
+                markdown: { content: e.target.value },
+              })
+            }
+            placeholder="# Heading\n\nText with **bold**, *italic*, [links](https://example.com), and `code`."
+            className="text-xs font-mono bg-background border border-border rounded px-2 py-1.5 min-h-[160px] resize-y outline-none focus:ring-1 focus:ring-foreground/20"
+          />
+        </div>
+      )}
+
+      {isPie && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-medium text-muted-foreground">Pie style</label>
+          <label className="flex items-center gap-2 text-[10px]">
+            <input
+              type="checkbox"
+              checked={widget.display.pie?.donut ?? false}
+              onChange={(e) =>
+                onUpdateDisplay({
+                  pie: { ...widget.display.pie, donut: e.target.checked },
+                })
+              }
+            />
+            Donut mode
+          </label>
+          <label className="flex items-center gap-2 text-[10px]">
+            <input
+              type="checkbox"
+              checked={widget.display.pie?.showLabels ?? false}
+              onChange={(e) =>
+                onUpdateDisplay({
+                  pie: { ...widget.display.pie, showLabels: e.target.checked },
+                })
+              }
+            />
+            Show slice labels
+          </label>
+          <label className="flex items-center gap-2 text-[10px]">
+            <input
+              type="checkbox"
+              checked={widget.display.pie?.showPercent ?? true}
+              onChange={(e) =>
+                onUpdateDisplay({
+                  pie: { ...widget.display.pie, showPercent: e.target.checked },
+                })
+              }
+            />
+            Show percentages
+          </label>
+        </div>
+      )}
+
+      {isHistogram && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-medium text-muted-foreground">Buckets</label>
+          <Input
+            type="number"
+            min={2}
+            max={200}
+            value={widget.display.histogram?.bucketCount ?? 30}
+            onChange={(e) =>
+              onUpdateDisplay({
+                histogram: {
+                  ...widget.display.histogram,
+                  bucketCount: Number(e.target.value) || 30,
+                },
+              })
+            }
+            className="h-7 text-xs"
+          />
+          <label className="flex items-center gap-2 text-[10px]">
+            <input
+              type="checkbox"
+              checked={widget.display.histogram?.logScaleY ?? false}
+              onChange={(e) =>
+                onUpdateDisplay({
+                  histogram: {
+                    ...widget.display.histogram,
+                    logScaleY: e.target.checked,
+                  },
+                })
+              }
+            />
+            Log-scale Y axis
+          </label>
+        </div>
+      )}
+
+      {isHeatmap && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-medium text-muted-foreground">Color scale</label>
+          <select
+            value={widget.display.heatmap?.colorScale ?? "blues"}
+            onChange={(e) =>
+              onUpdateDisplay({
+                heatmap: {
+                  ...widget.display.heatmap,
+                  colorScale: e.target.value as "viridis" | "magma" | "cividis" | "blues" | "reds",
+                },
+              })
+            }
+            className="h-7 text-xs bg-background border border-border rounded px-2"
+          >
+            <option value="blues">Blues</option>
+            <option value="reds">Reds</option>
+            <option value="viridis">Viridis</option>
+            <option value="magma">Magma</option>
+            <option value="cividis">Cividis</option>
+          </select>
+        </div>
+      )}
+
+      {isChart && (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-medium text-muted-foreground">Y axis</label>
+          <label className="flex items-center gap-2 text-[10px]">
+            <input
+              type="checkbox"
+              checked={widget.display.yAxis?.logScale ?? false}
+              onChange={(e) =>
+                onUpdateDisplay({
+                  yAxis: { ...widget.display.yAxis, logScale: e.target.checked },
+                })
+              }
+            />
+            Log scale
+          </label>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Input
+              type="number"
+              placeholder="Soft min"
+              value={widget.display.yAxis?.softMin ?? ""}
+              onChange={(e) =>
+                onUpdateDisplay({
+                  yAxis: {
+                    ...widget.display.yAxis,
+                    softMin: e.target.value === "" ? undefined : Number(e.target.value),
+                  },
+                })
+              }
+              className="h-7 text-xs"
+            />
+            <Input
+              type="number"
+              placeholder="Soft max"
+              value={widget.display.yAxis?.softMax ?? ""}
+              onChange={(e) =>
+                onUpdateDisplay({
+                  yAxis: {
+                    ...widget.display.yAxis,
+                    softMax: e.target.value === "" ? undefined : Number(e.target.value),
+                  },
+                })
+              }
+              className="h-7 text-xs"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-[10px]">
+            <input
+              type="checkbox"
+              checked={widget.display.chartPresentation?.showPoints ?? false}
+              onChange={(e) =>
+                onUpdateDisplay({
+                  chartPresentation: {
+                    ...widget.display.chartPresentation,
+                    showPoints: e.target.checked,
+                  },
+                })
+              }
+            />
+            Show points (line charts)
+          </label>
+        </div>
+      )}
 
       {isChart && variants.length > 0 && (
         <div className="flex flex-col gap-1.5">

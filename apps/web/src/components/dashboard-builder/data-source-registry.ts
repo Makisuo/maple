@@ -29,6 +29,9 @@ import { getQueryBuilderList } from "@/api/tinybird/query-builder-list"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ServerFunction = (opts: { data: any }) => Effect.Effect<any, unknown, unknown>
 
+const markdownStaticServerFn: ServerFunction = () =>
+  Effect.succeed({ data: null })
+
 export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
   service_usage: getServiceUsage,
   service_overview: getServiceOverview,
@@ -53,4 +56,5 @@ export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
   custom_query_builder_timeseries: getQueryBuilderTimeseries,
   custom_query_builder_breakdown: getQueryBuilderBreakdown,
   custom_query_builder_list: getQueryBuilderList,
+  markdown_static: markdownStaticServerFn,
 }

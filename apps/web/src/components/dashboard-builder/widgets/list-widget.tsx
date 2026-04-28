@@ -33,6 +33,7 @@ type ColumnDef = {
   unit?: string
   width?: number
   align?: "left" | "center" | "right"
+  hidden?: boolean
 }
 
 export const ListWidget = memo(function ListWidget({
@@ -50,7 +51,7 @@ export const ListWidget = memo(function ListWidget({
       : []
   const columns = display.columns ?? []
 
-  const effectiveColumns: ColumnDef[] =
+  const baseColumns: ColumnDef[] =
     columns.length > 0
       ? columns
       : rows.length > 0
@@ -61,6 +62,7 @@ export const ListWidget = memo(function ListWidget({
             })
             .map((key) => ({ field: key, header: key }))
         : []
+  const effectiveColumns = baseColumns.filter((col) => !col.hidden)
 
   return (
     <WidgetFrame

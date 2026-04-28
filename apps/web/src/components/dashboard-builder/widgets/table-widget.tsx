@@ -50,6 +50,21 @@ export function formatCellValue(value: unknown, unit?: string): string {
   }
 }
 
+function getCellThresholdColor(
+  value: unknown,
+  thresholds?: Array<{ value: number; color: string }>,
+): string | undefined {
+  if (!thresholds || thresholds.length === 0) return undefined
+  if (value == null || typeof value === "object") return undefined
+  const num = typeof value === "number" ? value : Number(value)
+  if (Number.isNaN(num)) return undefined
+  const sorted = [...thresholds].sort((a, b) => b.value - a.value)
+  for (const t of sorted) {
+    if (num >= t.value) return t.color
+  }
+  return undefined
+}
+
 export const TableWidget = memo(function TableWidget({
   dataState,
   display,
@@ -71,10 +86,12 @@ export const TableWidget = memo(function TableWidget({
     unit?: string
     width?: number
     align?: "left" | "center" | "right"
+    hidden?: boolean
+    thresholds?: Array<{ value: number; color: string }>
   }
 
   // If no columns configured, auto-detect from first row
-  const effectiveColumns: ColumnDef[] =
+  const baseColumns: ColumnDef[] =
     columns.length > 0
       ? columns
       : rows.length > 0
@@ -83,6 +100,7 @@ export const TableWidget = memo(function TableWidget({
             header: key,
           }))
         : []
+  const effectiveColumns = baseColumns.filter((col) => !col.hidden)
 
   return (
     <WidgetFrame
@@ -131,15 +149,23 @@ export const TableWidget = memo(function TableWidget({
           ) : (
             rows.map((row, i) => (
               <TableRow key={i}>
-                {effectiveColumns.map((col) => (
-                  <TableCell
-                    key={col.field}
-                    className="text-xs"
-                    style={{ textAlign: col.align ?? "left" }}
-                  >
-                    {formatCellValue(row[col.field], col.unit)}
-                  </TableCell>
-                ))}
+                {effectiveColumns.map((col) => {
+                  const value = row[col.field]
+                  const thresholdColor = getCellThresholdColor(value, col.thresholds)
+                  return (
+                    <TableCell
+                      key={col.field}
+                      className="text-xs"
+                      style={{
+                        textAlign: col.align ?? "left",
+                        color: thresholdColor,
+                        fontWeight: thresholdColor ? 500 : undefined,
+                      }}
+                    >
+                      {formatCellValue(value, col.unit)}
+                    </TableCell>
+                  )
+                })}
               </TableRow>
             ))
           )}

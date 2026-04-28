@@ -9,7 +9,7 @@ import type {
   WidgetMode,
 } from "@/components/dashboard-builder/types"
 
-interface ChartWidgetProps {
+interface PieWidgetProps {
   dataState: WidgetDataState
   display: WidgetDisplayConfig
   mode: WidgetMode
@@ -18,16 +18,15 @@ interface ChartWidgetProps {
   onConfigure?: () => void
 }
 
-export const ChartWidget = memo(function ChartWidget({
+export const PieWidget = memo(function PieWidget({
   dataState,
   display,
   mode,
   onRemove,
   onClone,
   onConfigure,
-}: ChartWidgetProps) {
-  const chartId = display.chartId ?? "gradient-area"
-  const entry = getChartById(chartId)
+}: PieWidgetProps) {
+  const entry = getChartById(display.chartId ?? "query-builder-pie")
   if (!entry) return null
 
   const ChartComponent = entry.component
@@ -35,7 +34,7 @@ export const ChartWidget = memo(function ChartWidget({
     dataState.status === "ready" && Array.isArray(dataState.data)
       ? dataState.data
       : undefined
-  const legend = display.chartPresentation?.legend ?? "visible"
+  const legend = display.chartPresentation?.legend ?? "right"
   const tooltip = display.chartPresentation?.tooltip
 
   return (
@@ -54,13 +53,8 @@ export const ChartWidget = memo(function ChartWidget({
           className="h-full w-full aspect-auto"
           legend={legend}
           tooltip={tooltip}
-          stacked={display.stacked}
-          curveType={display.curveType}
           unit={display.unit}
-          logScale={display.yAxis?.logScale}
-          softMin={display.yAxis?.softMin}
-          softMax={display.yAxis?.softMax}
-          showPoints={display.chartPresentation?.showPoints}
+          pie={display.pie}
         />
       </Suspense>
     </WidgetFrame>

@@ -20,9 +20,28 @@ export interface BaseChartProps {
   curveType?: "linear" | "monotone"
   referenceLines?: ChartReferenceLine[]
   unit?: string
+  logScale?: boolean
+  softMin?: number
+  softMax?: number
+  showPoints?: boolean
+  pie?: {
+    donut?: boolean
+    innerRadius?: number
+    showLabels?: boolean
+    showPercent?: boolean
+  }
+  histogram?: {
+    bucketCount?: number
+    bucketWidth?: number
+    logScaleY?: boolean
+  }
+  heatmap?: {
+    colorScale?: "viridis" | "magma" | "cividis" | "blues" | "reds"
+    bucketCount?: number
+  }
 }
 
-export type ChartCategory = "bar" | "area" | "line"
+export type ChartCategory = "bar" | "area" | "line" | "pie" | "histogram" | "heatmap"
 
 export interface ChartRegistryEntry {
   id: string

@@ -270,9 +270,12 @@ const widgetFetchAtom = (input: {
 export function useWidgetData(widget: DashboardWidget) {
   const { state: { resolvedTimeRange } } = useDashboardTimeRange()
 
+  const isStatic = widget.dataSource.endpoint === "markdown_static"
   const hasServerFn = !!serverFunctionMap[widget.dataSource.endpoint]
 
-  const disableReason = !resolvedTimeRange
+  const disableReason = isStatic
+    ? null
+    : !resolvedTimeRange
     ? "Unable to resolve dashboard time range"
     : !hasServerFn
       ? `Unknown data source endpoint: ${widget.dataSource.endpoint}`
@@ -291,7 +294,7 @@ export function useWidgetData(widget: DashboardWidget) {
     : {}
 
   const result = useRefreshableAtomValue(
-    disableReason === null
+    disableReason === null && !isStatic
       ? widgetFetchAtom({
           endpoint: widget.dataSource.endpoint,
           params: resolvedParams,
@@ -303,6 +306,9 @@ export function useWidgetData(widget: DashboardWidget) {
 
   const dataState: WidgetDataState = useMemo(
     () => {
+      if (isStatic) {
+        return { status: "ready", data: null } as const
+      }
       if (disableReason) {
         return { status: "error", message: disableReason } as const
       }
@@ -315,7 +321,7 @@ export function useWidgetData(widget: DashboardWidget) {
         .onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) } as const))
         .orElse(() => ({ status: "error", message: "Unknown error" } as const))
     },
-    [result, transform, disableReason]
+    [result, transform, disableReason, isStatic]
   )
 
   return {

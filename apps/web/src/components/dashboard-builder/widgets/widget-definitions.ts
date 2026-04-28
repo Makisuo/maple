@@ -4,8 +4,11 @@ import {
   AlertWarningIcon,
   XmarkIcon,
   GridIcon,
+  ChartBarIcon,
+  ChartLineIcon,
   type IconComponent,
 } from "@/components/icons"
+import { createQueryDraft } from "@/lib/query-builder/model"
 import type {
   VisualizationType,
   WidgetDataSource,
@@ -257,6 +260,228 @@ export const listPresets: WidgetPresetDefinition[] = [
         { field: "serviceName", header: "Service" },
         { field: "body", header: "Message" },
       ],
+    },
+  },
+]
+
+function buildBreakdownQuery(
+  index: number,
+  overrides: Partial<ReturnType<typeof createQueryDraft>>,
+): ReturnType<typeof createQueryDraft> {
+  return {
+    ...createQueryDraft(index),
+    enabled: true,
+    addOns: { groupBy: true, having: false, orderBy: false, limit: true, legend: false },
+    limit: "10",
+    ...overrides,
+  }
+}
+
+export const piePresets: WidgetPresetDefinition[] = [
+  {
+    id: "pie-errors-by-service",
+    name: "Errors by Service",
+    description: "Distribution of errors across services",
+    icon: AlertWarningIcon,
+    visualization: "pie",
+    dataSource: {
+      endpoint: "custom_query_builder_breakdown",
+      params: {
+        queries: [
+          buildBreakdownQuery(0, {
+            dataSource: "traces",
+            whereClause: "has_error = true",
+            aggregation: "count",
+            groupBy: ["service_name"],
+          }),
+        ],
+        formulas: [],
+        comparison: { mode: "none", includePercentChange: false },
+        debug: false,
+      },
+    },
+    display: {
+      title: "Errors by Service",
+      chartId: "query-builder-pie",
+      unit: "number",
+      pie: { donut: true, showLabels: false, showPercent: true },
+    },
+  },
+  {
+    id: "pie-logs-by-severity",
+    name: "Logs by Severity",
+    description: "Distribution of log volume by severity level",
+    icon: FileIcon,
+    visualization: "pie",
+    dataSource: {
+      endpoint: "custom_query_builder_breakdown",
+      params: {
+        queries: [
+          buildBreakdownQuery(0, {
+            dataSource: "logs",
+            whereClause: "",
+            aggregation: "count",
+            groupBy: ["severity_text"],
+          }),
+        ],
+        formulas: [],
+        comparison: { mode: "none", includePercentChange: false },
+        debug: false,
+      },
+    },
+    display: {
+      title: "Logs by Severity",
+      chartId: "query-builder-pie",
+      unit: "number",
+      pie: { donut: false, showLabels: true, showPercent: true },
+    },
+  },
+  {
+    id: "pie-traces-by-service",
+    name: "Traces by Service",
+    description: "Distribution of trace volume across services",
+    icon: PulseIcon,
+    visualization: "pie",
+    dataSource: {
+      endpoint: "custom_query_builder_breakdown",
+      params: {
+        queries: [
+          buildBreakdownQuery(0, {
+            dataSource: "traces",
+            whereClause: "root_only = true",
+            aggregation: "count",
+            groupBy: ["service_name"],
+          }),
+        ],
+        formulas: [],
+        comparison: { mode: "none", includePercentChange: false },
+        debug: false,
+      },
+    },
+    display: {
+      title: "Traces by Service",
+      chartId: "query-builder-pie",
+      unit: "number",
+      pie: { donut: true, showLabels: false, showPercent: true },
+    },
+  },
+]
+
+export const histogramPresets: WidgetPresetDefinition[] = [
+  {
+    id: "histogram-trace-duration",
+    name: "Trace Duration Distribution",
+    description: "Spread of root span durations across buckets",
+    icon: ChartBarIcon,
+    visualization: "histogram",
+    dataSource: {
+      endpoint: "custom_query_builder_breakdown",
+      params: {
+        queries: [
+          buildBreakdownQuery(0, {
+            dataSource: "traces",
+            whereClause: "root_only = true",
+            aggregation: "count",
+            groupBy: ["service_name"],
+          }),
+        ],
+        formulas: [],
+        comparison: { mode: "none", includePercentChange: false },
+        debug: false,
+      },
+    },
+    display: {
+      title: "Trace Duration Distribution",
+      chartId: "query-builder-histogram",
+      unit: "number",
+      histogram: { bucketCount: 30 },
+    },
+  },
+  {
+    id: "histogram-log-volume",
+    name: "Log Volume by Service",
+    description: "Distribution of log volume across services",
+    icon: ChartBarIcon,
+    visualization: "histogram",
+    dataSource: {
+      endpoint: "custom_query_builder_breakdown",
+      params: {
+        queries: [
+          buildBreakdownQuery(0, {
+            dataSource: "logs",
+            whereClause: "",
+            aggregation: "count",
+            groupBy: ["service_name"],
+          }),
+        ],
+        formulas: [],
+        comparison: { mode: "none", includePercentChange: false },
+        debug: false,
+      },
+    },
+    display: {
+      title: "Log Volume by Service",
+      chartId: "query-builder-histogram",
+      unit: "number",
+      histogram: { bucketCount: 20 },
+    },
+  },
+]
+
+export const heatmapPresets: WidgetPresetDefinition[] = [
+  {
+    id: "heatmap-errors-by-service",
+    name: "Errors by Service",
+    description: "Density of errors across services and types",
+    icon: ChartLineIcon,
+    visualization: "heatmap",
+    dataSource: {
+      endpoint: "custom_query_builder_breakdown",
+      params: {
+        queries: [
+          buildBreakdownQuery(0, {
+            name: "A",
+            dataSource: "traces",
+            whereClause: "has_error = true",
+            aggregation: "count",
+            groupBy: ["service_name"],
+          }),
+          buildBreakdownQuery(1, {
+            name: "B",
+            dataSource: "traces",
+            whereClause: "has_error = false",
+            aggregation: "count",
+            groupBy: ["service_name"],
+          }),
+        ],
+        formulas: [],
+        comparison: { mode: "none", includePercentChange: false },
+        debug: false,
+      },
+    },
+    display: {
+      title: "Errors vs OK by Service",
+      chartId: "query-builder-heatmap",
+      unit: "number",
+      heatmap: { colorScale: "blues" },
+    },
+  },
+]
+
+export const markdownPresets: WidgetPresetDefinition[] = [
+  {
+    id: "markdown-note",
+    name: "Note",
+    description: "Static markdown note for context, links, or runbooks",
+    icon: FileIcon,
+    visualization: "markdown",
+    dataSource: { endpoint: "markdown_static" },
+    display: {
+      title: "Note",
+      markdown: {
+        content:
+          "# Dashboard notes\n\nDocument **what this dashboard tracks**, link to runbooks, or leave context for teammates.\n\n- Edit this widget to customize\n- Supports headings, lists, links, **bold**, *italic*, and `code`",
+      },
     },
   },
 ]

@@ -30,7 +30,17 @@ function formatBucketTime(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
 
-export function QueryBuilderBarChart({ data, className, legend, tooltip, stacked, unit }: BaseChartProps) {
+export function QueryBuilderBarChart({
+  data,
+  className,
+  legend,
+  tooltip,
+  stacked,
+  unit,
+  logScale,
+  softMin,
+  softMax,
+}: BaseChartProps) {
   const { chartData, seriesDefinitions } = React.useMemo(() => {
     const source = Array.isArray(data) && data.length > 0 ? data : fallbackData
     const rawSeriesKeys: string[] = []
@@ -121,6 +131,12 @@ export function QueryBuilderBarChart({ data, className, legend, tooltip, stacked
           tickLine={false}
           axisLine={false}
           tickMargin={8}
+          scale={logScale ? "log" : "auto"}
+          domain={[
+            softMin ?? (logScale ? 1 : "auto"),
+            softMax ?? "auto",
+          ]}
+          allowDataOverflow={logScale || softMin != null || softMax != null}
           tickFormatter={(value) => formatValueByUnit(asFiniteNumber(value), unit)}
         />
 

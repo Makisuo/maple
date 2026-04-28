@@ -9,7 +9,7 @@ import type {
   WidgetMode,
 } from "@/components/dashboard-builder/types"
 
-interface ChartWidgetProps {
+interface HistogramWidgetProps {
   dataState: WidgetDataState
   display: WidgetDisplayConfig
   mode: WidgetMode
@@ -18,16 +18,15 @@ interface ChartWidgetProps {
   onConfigure?: () => void
 }
 
-export const ChartWidget = memo(function ChartWidget({
+export const HistogramWidget = memo(function HistogramWidget({
   dataState,
   display,
   mode,
   onRemove,
   onClone,
   onConfigure,
-}: ChartWidgetProps) {
-  const chartId = display.chartId ?? "gradient-area"
-  const entry = getChartById(chartId)
+}: HistogramWidgetProps) {
+  const entry = getChartById(display.chartId ?? "query-builder-histogram")
   if (!entry) return null
 
   const ChartComponent = entry.component
@@ -35,7 +34,6 @@ export const ChartWidget = memo(function ChartWidget({
     dataState.status === "ready" && Array.isArray(dataState.data)
       ? dataState.data
       : undefined
-  const legend = display.chartPresentation?.legend ?? "visible"
   const tooltip = display.chartPresentation?.tooltip
 
   return (
@@ -52,15 +50,10 @@ export const ChartWidget = memo(function ChartWidget({
         <ChartComponent
           data={chartData}
           className="h-full w-full aspect-auto"
-          legend={legend}
           tooltip={tooltip}
-          stacked={display.stacked}
-          curveType={display.curveType}
           unit={display.unit}
+          histogram={display.histogram}
           logScale={display.yAxis?.logScale}
-          softMin={display.yAxis?.softMin}
-          softMax={display.yAxis?.softMax}
-          showPoints={display.chartPresentation?.showPoints}
         />
       </Suspense>
     </WidgetFrame>

@@ -34,6 +34,7 @@ export type DataSourceEndpoint =
   | "custom_query_builder_timeseries"
   | "custom_query_builder_breakdown"
   | "custom_query_builder_list"
+  | "markdown_static"
 
 // --- Widget Data Source ---
 
@@ -85,6 +86,9 @@ export interface WidgetDisplayConfig {
   chartPresentation?: {
     legend?: "visible" | "hidden" | "right"
     tooltip?: "visible" | "hidden"
+    showPoints?: boolean
+    fillNulls?: number | false
+    compareToPreviousPeriod?: boolean
   }
   xAxis?: { label?: string; unit?: ValueUnit; visible?: boolean }
   yAxis?: {
@@ -92,6 +96,9 @@ export interface WidgetDisplayConfig {
     unit?: ValueUnit
     min?: number
     max?: number
+    softMin?: number
+    softMax?: number
+    logScale?: boolean
     visible?: boolean
   }
   seriesMapping?: Record<string, string>
@@ -113,6 +120,8 @@ export interface WidgetDisplayConfig {
     unit?: ValueUnit
     width?: number
     align?: "left" | "center" | "right"
+    hidden?: boolean
+    thresholds?: Array<{ value: number; color: string }>
   }>
 
   // List-specific
@@ -120,6 +129,32 @@ export interface WidgetDisplayConfig {
   listWhereClause?: string
   listLimit?: number
   listRootOnly?: boolean
+
+  // Pie-specific
+  pie?: {
+    donut?: boolean
+    innerRadius?: number
+    showLabels?: boolean
+    showPercent?: boolean
+  }
+
+  // Histogram-specific
+  histogram?: {
+    bucketCount?: number
+    bucketWidth?: number
+    logScaleY?: boolean
+  }
+
+  // Heatmap-specific
+  heatmap?: {
+    colorScale?: "viridis" | "magma" | "cividis" | "blues" | "reds"
+    bucketCount?: number
+  }
+
+  // Markdown-specific
+  markdown?: {
+    content: string
+  }
 }
 
 // --- Widget Layout ---
@@ -137,7 +172,16 @@ export interface WidgetLayout {
 
 // --- Visualization ---
 
-export type VisualizationType = "chart" | "stat" | "table" | "list" | (string & {})
+export type VisualizationType =
+  | "chart"
+  | "stat"
+  | "table"
+  | "list"
+  | "pie"
+  | "histogram"
+  | "heatmap"
+  | "markdown"
+  | (string & {})
 export type WidgetMode = "view" | "edit"
 export type WidgetDataState =
   | { status: "loading" }

@@ -19,6 +19,10 @@ import {
   statPresets,
   tablePresets,
   listPresets,
+  piePresets,
+  histogramPresets,
+  heatmapPresets,
+  markdownPresets,
   type WidgetPresetDefinition,
 } from "@/components/dashboard-builder/widgets/widget-definitions"
 import { formatValue } from "@/components/dashboard-builder/widgets/stat-widget"
@@ -38,14 +42,27 @@ const categoryDefaults: Array<{
   { category: "line", chartId: "query-builder-line", previewChartId: "dotted-line", label: "Line Chart" },
 ]
 
-type PickerTab = "all" | "charts" | "stats" | "tables" | "lists"
+type PickerTab =
+  | "all"
+  | "charts"
+  | "stats"
+  | "tables"
+  | "lists"
+  | "pies"
+  | "histograms"
+  | "heatmaps"
+  | "notes"
 
 const tabs: { id: PickerTab; label: string }[] = [
   { id: "all", label: "All" },
   { id: "charts", label: "Charts" },
+  { id: "pies", label: "Pies" },
+  { id: "histograms", label: "Histograms" },
+  { id: "heatmaps", label: "Heatmaps" },
   { id: "stats", label: "Stats" },
   { id: "tables", label: "Tables" },
   { id: "lists", label: "Lists" },
+  { id: "notes", label: "Notes" },
 ]
 
 const chartDescriptions: Record<string, string> = {
@@ -154,6 +171,62 @@ function TablePreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
   )
 }
 
+function PiePreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
+  const entry = getChartById(preset.display.chartId ?? "query-builder-pie")
+  if (!entry) return <div className="aspect-[4/3]" />
+  const Component = entry.component
+  return (
+    <div className="aspect-[4/3] flex flex-col gap-1.5">
+      <div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
+      <ChartPreview component={Component} />
+    </div>
+  )
+}
+
+function HistogramPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
+  const entry = getChartById(preset.display.chartId ?? "query-builder-histogram")
+  if (!entry) return <div className="aspect-[4/3]" />
+  const Component = entry.component
+  return (
+    <div className="aspect-[4/3] flex flex-col gap-1.5">
+      <div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
+      <ChartPreview component={Component} />
+    </div>
+  )
+}
+
+function HeatmapPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
+  const entry = getChartById(preset.display.chartId ?? "query-builder-heatmap")
+  if (!entry) return <div className="aspect-[4/3]" />
+  const Component = entry.component
+  return (
+    <div className="aspect-[4/3] flex flex-col gap-1.5">
+      <div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
+      <ChartPreview component={Component} />
+    </div>
+  )
+}
+
+function MarkdownPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
+  const content = preset.display.markdown?.content ?? ""
+  const lines = content.split("\n").filter((l) => l.trim().length > 0).slice(0, 4)
+  return (
+    <div className="aspect-[4/3] flex flex-col gap-1 overflow-hidden p-1">
+      <div className="text-[10px] text-muted-foreground">{preset.display.title}</div>
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          className={`text-[9px] ${
+            line.startsWith("#") ? "font-semibold" : "text-muted-foreground"
+          } truncate`}
+        >
+          {line.replace(/^#+\s*/, "").replace(/[*`]/g, "")}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ListPreviewCard({ preset }: { preset: WidgetPresetDefinition }) {
   const rows = listSampleRows[preset.id] ?? []
   const columns = preset.display.columns ?? []
@@ -238,6 +311,10 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
   const showStats = activeTab === "all" || activeTab === "stats"
   const showTables = activeTab === "all" || activeTab === "tables"
   const showLists = activeTab === "all" || activeTab === "lists"
+  const showPies = activeTab === "all" || activeTab === "pies"
+  const showHistograms = activeTab === "all" || activeTab === "histograms"
+  const showHeatmaps = activeTab === "all" || activeTab === "heatmaps"
+  const showNotes = activeTab === "all" || activeTab === "notes"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -297,6 +374,126 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
                     </button>
                   )
                 })}
+              </div>
+            </div>
+          )}
+
+          {showPies && (
+            <div className="flex flex-col gap-3">
+              {activeTab === "all" && (
+                <h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
+                  Pies
+                </h3>
+              )}
+              <div className="grid grid-cols-3 gap-3">
+                {piePresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(preset)}
+                    className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+                  >
+                    <PiePreviewCard preset={preset} />
+                    <div className="flex flex-col gap-0.5">
+                      <div className="text-xs font-medium">{preset.name}</div>
+                      {preset.description && (
+                        <div className="text-[11px] text-dim">
+                          {preset.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {showHistograms && (
+            <div className="flex flex-col gap-3">
+              {activeTab === "all" && (
+                <h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
+                  Histograms
+                </h3>
+              )}
+              <div className="grid grid-cols-3 gap-3">
+                {histogramPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(preset)}
+                    className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+                  >
+                    <HistogramPreviewCard preset={preset} />
+                    <div className="flex flex-col gap-0.5">
+                      <div className="text-xs font-medium">{preset.name}</div>
+                      {preset.description && (
+                        <div className="text-[11px] text-dim">
+                          {preset.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {showHeatmaps && (
+            <div className="flex flex-col gap-3">
+              {activeTab === "all" && (
+                <h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
+                  Heatmaps
+                </h3>
+              )}
+              <div className="grid grid-cols-3 gap-3">
+                {heatmapPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(preset)}
+                    className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+                  >
+                    <HeatmapPreviewCard preset={preset} />
+                    <div className="flex flex-col gap-0.5">
+                      <div className="text-xs font-medium">{preset.name}</div>
+                      {preset.description && (
+                        <div className="text-[11px] text-dim">
+                          {preset.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {showNotes && (
+            <div className="flex flex-col gap-3">
+              {activeTab === "all" && (
+                <h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
+                  Notes
+                </h3>
+              )}
+              <div className="grid grid-cols-3 gap-3">
+                {markdownPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleSelectPreset(preset)}
+                    className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+                  >
+                    <MarkdownPreviewCard preset={preset} />
+                    <div className="flex flex-col gap-0.5">
+                      <div className="text-xs font-medium">{preset.name}</div>
+                      {preset.description && (
+                        <div className="text-[11px] text-dim">
+                          {preset.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           )}

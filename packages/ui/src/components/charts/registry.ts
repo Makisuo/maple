@@ -8,6 +8,9 @@ import {
   throughputTimeSeriesData,
   apdexTimeSeriesData,
   errorRateTimeSeriesData,
+  pieSampleData,
+  histogramSampleData,
+  heatmapSampleData,
 } from "./_shared/sample-data"
 
 export const chartRegistry: ChartRegistryEntry[] = [
@@ -137,6 +140,51 @@ export const chartRegistry: ChartRegistryEntry[] = [
     ),
     sampleData: errorRateTimeSeriesData,
     tags: ["area", "error", "rate", "service"],
+  },
+
+  // Pie Charts
+  {
+    id: "query-builder-pie",
+    name: "Query Builder Pie",
+    description: "Categorical distribution as a pie or donut",
+    category: "pie",
+    component: lazy(() =>
+      import("./pie/query-builder-pie-chart").then((m) => ({
+        default: m.QueryBuilderPieChart,
+      }))
+    ),
+    sampleData: pieSampleData,
+    tags: ["pie", "donut", "breakdown", "query-builder"],
+  },
+
+  // Histograms
+  {
+    id: "query-builder-histogram",
+    name: "Query Builder Histogram",
+    description: "Distribution of values across buckets",
+    category: "histogram",
+    component: lazy(() =>
+      import("./histogram/query-builder-histogram-chart").then((m) => ({
+        default: m.QueryBuilderHistogramChart,
+      }))
+    ),
+    sampleData: histogramSampleData,
+    tags: ["histogram", "distribution", "buckets", "query-builder"],
+  },
+
+  // Heatmaps
+  {
+    id: "query-builder-heatmap",
+    name: "Query Builder Heatmap",
+    description: "2D density visualization across two dimensions",
+    category: "heatmap",
+    component: lazy(() =>
+      import("./heatmap/query-builder-heatmap-chart").then((m) => ({
+        default: m.QueryBuilderHeatmapChart,
+      }))
+    ),
+    sampleData: heatmapSampleData,
+    tags: ["heatmap", "density", "2d", "query-builder"],
   },
 ]
 

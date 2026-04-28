@@ -1,3 +1,38 @@
+export const pieSampleData = [
+  { name: "api-gateway", value: 4820 },
+  { name: "user-service", value: 3210 },
+  { name: "order-service", value: 1740 },
+  { name: "auth-service", value: 920 },
+  { name: "billing-service", value: 540 },
+]
+
+export const histogramSampleData = [
+  { name: "0-50", value: 12 },
+  { name: "50-100", value: 41 },
+  { name: "100-150", value: 88 },
+  { name: "150-200", value: 132 },
+  { name: "200-250", value: 95 },
+  { name: "250-300", value: 64 },
+  { name: "300-350", value: 30 },
+  { name: "350-400", value: 12 },
+  { name: "400+", value: 6 },
+]
+
+export const heatmapSampleData = [
+  { x: "00:00", y: "0-100ms", value: 45 },
+  { x: "00:00", y: "100-300ms", value: 12 },
+  { x: "00:00", y: "300ms+", value: 3 },
+  { x: "06:00", y: "0-100ms", value: 78 },
+  { x: "06:00", y: "100-300ms", value: 24 },
+  { x: "06:00", y: "300ms+", value: 5 },
+  { x: "12:00", y: "0-100ms", value: 142 },
+  { x: "12:00", y: "100-300ms", value: 48 },
+  { x: "12:00", y: "300ms+", value: 12 },
+  { x: "18:00", y: "0-100ms", value: 96 },
+  { x: "18:00", y: "100-300ms", value: 32 },
+  { x: "18:00", y: "300ms+", value: 8 },
+]
+
 export const defaultBarData = [
   { name: "Jan", value: 186 },
   { name: "Feb", value: 305 },

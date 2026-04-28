@@ -19,6 +19,10 @@ import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
 import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
+import { PieWidget } from "@/components/dashboard-builder/widgets/pie-widget"
+import { HistogramWidget } from "@/components/dashboard-builder/widgets/histogram-widget"
+import { HeatmapWidget } from "@/components/dashboard-builder/widgets/heatmap-widget"
+import { MarkdownWidget } from "@/components/dashboard-builder/widgets/markdown-widget"
 
 interface DashboardCanvasProps {
   widgets: DashboardWidget[]
@@ -45,6 +49,10 @@ const visualizationRegistry: Record<
   stat: StatWidget,
   table: TableWidget,
   list: ListWidget,
+  pie: PieWidget,
+  histogram: HistogramWidget,
+  heatmap: HeatmapWidget,
+  markdown: MarkdownWidget,
 }
 
 const WidgetRenderer = memo(function WidgetRenderer({
