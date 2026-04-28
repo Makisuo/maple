@@ -33,6 +33,39 @@ export type DashboardId = Schema.Schema.Type<typeof DashboardId>
 export const DashboardVersionId = MapleUuidId("@maple/DashboardVersionId", "Dashboard Version ID")
 export type DashboardVersionId = Schema.Schema.Type<typeof DashboardVersionId>
 
+export const DashboardTemplateId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isTrimmed(),
+	Schema.isPattern(/^[a-z][a-z0-9-]*$/),
+).pipe(
+	Schema.brand("@maple/DashboardTemplateId"),
+	Schema.annotate({ identifier: "@maple/DashboardTemplateId", title: "Dashboard Template ID" }),
+)
+export type DashboardTemplateId = Schema.Schema.Type<typeof DashboardTemplateId>
+
+export const DashboardTemplateParameterKey = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isPattern(/^[a-z][a-z0-9_]*$/),
+).pipe(
+	Schema.brand("@maple/DashboardTemplateParameterKey"),
+	Schema.annotate({
+		identifier: "@maple/DashboardTemplateParameterKey",
+		title: "Dashboard Template Parameter Key",
+	}),
+)
+export type DashboardTemplateParameterKey = Schema.Schema.Type<typeof DashboardTemplateParameterKey>
+
+export const DashboardTemplateCategory = Schema.Literals([
+	"application",
+	"database",
+	"infrastructure",
+	"messaging",
+]).annotate({
+	identifier: "@maple/DashboardTemplateCategory",
+	title: "Dashboard Template Category",
+})
+export type DashboardTemplateCategory = Schema.Schema.Type<typeof DashboardTemplateCategory>
+
 export const IngestKeyId = MapleId("@maple/IngestKeyId", "Ingest Key ID")
 export type IngestKeyId = Schema.Schema.Type<typeof IngestKeyId>
 

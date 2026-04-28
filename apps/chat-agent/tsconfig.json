@@ -22,6 +22,8 @@
 			"@/mcp/*": ["../api/src/mcp/*"],
 			"@/services/*": ["../api/src/services/*"],
 			"@/lib/*": ["../api/src/lib/*"],
+			"@/dashboard-templates": ["../api/src/dashboard-templates/index.ts"],
+			"@/dashboard-templates/*": ["../api/src/dashboard-templates/*"],
 			"@/*": ["./src/*"]
 		}
 	},

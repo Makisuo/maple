@@ -1,6 +1,14 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { DashboardId, DashboardVersionId, IsoDateTimeString, UserId } from "../primitives"
+import {
+	DashboardId,
+	DashboardTemplateCategory,
+	DashboardTemplateId,
+	DashboardTemplateParameterKey,
+	DashboardVersionId,
+	IsoDateTimeString,
+	UserId,
+} from "../primitives"
 import { Authorization } from "./current-tenant"
 
 const TimeRangeSchema = Schema.Union([
@@ -277,6 +285,54 @@ export class DashboardValidationError extends Schema.TaggedErrorClass<DashboardV
 	{ httpApiStatus: 400 },
 ) {}
 
+// ---------------------------------------------------------------------------
+// Templates
+// ---------------------------------------------------------------------------
+
+export class DashboardTemplateParameter extends Schema.Class<DashboardTemplateParameter>(
+	"DashboardTemplateParameter",
+)({
+	key: DashboardTemplateParameterKey,
+	label: Schema.String,
+	description: Schema.String,
+	required: Schema.Boolean,
+	placeholder: Schema.optional(Schema.String),
+}) {}
+
+export class DashboardTemplateMetadata extends Schema.Class<DashboardTemplateMetadata>(
+	"DashboardTemplateMetadata",
+)({
+	id: DashboardTemplateId,
+	name: Schema.String,
+	description: Schema.String,
+	category: DashboardTemplateCategory,
+	tags: Schema.Array(Schema.String),
+	requirements: Schema.Array(Schema.String),
+	parameters: Schema.Array(DashboardTemplateParameter),
+}) {}
+
+export class DashboardTemplatesListResponse extends Schema.Class<DashboardTemplatesListResponse>(
+	"DashboardTemplatesListResponse",
+)({
+	templates: Schema.Array(DashboardTemplateMetadata),
+}) {}
+
+export class DashboardTemplateInstantiateRequest extends Schema.Class<DashboardTemplateInstantiateRequest>(
+	"DashboardTemplateInstantiateRequest",
+)({
+	parameters: Schema.optional(Schema.Record(DashboardTemplateParameterKey, Schema.String)),
+	name: Schema.optional(Schema.String),
+}) {}
+
+export class DashboardTemplateNotFoundError extends Schema.TaggedErrorClass<DashboardTemplateNotFoundError>()(
+	"@maple/http/errors/DashboardTemplateNotFoundError",
+	{
+		templateId: DashboardTemplateId,
+		message: Schema.String,
+	},
+	{ httpApiStatus: 404 },
+) {}
+
 export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 	.add(
 		HttpApiEndpoint.get("list", "/", {
@@ -335,6 +391,19 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				DashboardValidationError,
 				DashboardPersistenceError,
 			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("listTemplates", "/templates", {
+			success: DashboardTemplatesListResponse,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("instantiateTemplate", "/templates/:templateId/instantiate", {
+			params: { templateId: DashboardTemplateId },
+			payload: DashboardTemplateInstantiateRequest,
+			success: DashboardDocument,
+			error: [DashboardTemplateNotFoundError, DashboardValidationError, DashboardPersistenceError],
 		}),
 	)
 	.prefix("/api/dashboards")

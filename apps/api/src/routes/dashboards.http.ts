@@ -1,7 +1,17 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { CurrentTenant, DashboardValidationError, MapleApi } from "@maple/domain/http"
+import {
+	CurrentTenant,
+	DashboardTemplateMetadata,
+	DashboardTemplateNotFoundError,
+	DashboardTemplatesListResponse,
+	DashboardValidationError,
+	MapleApi,
+	PortableDashboardDocument,
+} from "@maple/domain/http"
 import { Effect } from "effect"
 import { DashboardPersistenceService } from "../services/DashboardPersistenceService"
+import { getTemplateById, listTemplateMetadata } from "../dashboard-templates"
+import type { TemplateParameterValues } from "../dashboard-templates"
 
 export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (handlers) =>
 	Effect.gen(function* () {
@@ -65,6 +75,71 @@ export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (
 						params.dashboardId,
 						params.versionId,
 					)
+				}),
+			)
+			.handle("listTemplates", () =>
+				Effect.sync(
+					() =>
+						new DashboardTemplatesListResponse({
+							templates: listTemplateMetadata().map(
+								(t) =>
+									new DashboardTemplateMetadata({
+										id: t.id,
+										name: t.name,
+										description: t.description,
+										category: t.category,
+										tags: t.tags,
+										requirements: t.requirements,
+										parameters: t.parameters,
+									}),
+							),
+						}),
+				),
+			)
+			.handle("instantiateTemplate", ({ params, payload }) =>
+				Effect.gen(function* () {
+					const template = getTemplateById(params.templateId)
+					if (!template) {
+						return yield* Effect.fail(
+							new DashboardTemplateNotFoundError({
+								templateId: params.templateId,
+								message: `Template "${params.templateId}" not found`,
+							}),
+						)
+					}
+
+					const provided: TemplateParameterValues = (payload.parameters ?? {}) as TemplateParameterValues
+					const missing = template.parameters
+						.filter((p) => p.required && !provided[p.key])
+						.map((p) => p.key)
+					if (missing.length > 0) {
+						return yield* Effect.fail(
+							new DashboardValidationError({
+								message: "Missing required template parameters",
+								details: missing,
+							}),
+						)
+					}
+
+					const built = yield* Effect.try({
+						try: () => template.build(provided),
+						catch: (error) =>
+							new DashboardValidationError({
+								message: "Template build failed",
+								details: [error instanceof Error ? error.message : String(error)],
+							}),
+					})
+
+					const portable = new PortableDashboardDocument({
+						name: payload.name ?? built.name,
+						description: built.description,
+						tags: built.tags,
+						timeRange: built.timeRange,
+						widgets: built.widgets,
+					})
+
+					const tenant = yield* CurrentTenant.Context
+					return yield* persistence.create(tenant.orgId, tenant.userId, portable)
 				}),
 			)
 	}),

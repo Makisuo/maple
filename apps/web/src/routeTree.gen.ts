@@ -34,6 +34,7 @@ import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 import { Route as ServicesServiceNameRouteImport } from './routes/services/$serviceName'
 import { Route as InfraHostNameRouteImport } from './routes/infra/$hostName'
 import { Route as ErrorsErrorTypeRouteImport } from './routes/errors/$errorType'
+import { Route as DashboardsTemplatesRouteImport } from './routes/dashboards/templates'
 import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards/$dashboardId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
@@ -172,6 +173,11 @@ const ErrorsErrorTypeRoute = ErrorsErrorTypeRouteImport.update({
   path: '/errors/$errorType',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardsTemplatesRoute = DashboardsTemplatesRouteImport.update({
+  id: '/dashboards/templates',
+  path: '/dashboards/templates',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardsDashboardIdRoute = DashboardsDashboardIdRouteImport.update({
   id: '/dashboards/$dashboardId',
   path: '/dashboards/$dashboardId',
@@ -259,6 +265,7 @@ export interface FileRoutesByFullPath {
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/dashboards/templates': typeof DashboardsTemplatesRoute
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
@@ -298,6 +305,7 @@ export interface FileRoutesByTo {
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/dashboards/templates': typeof DashboardsTemplatesRoute
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
@@ -338,6 +346,7 @@ export interface FileRoutesById {
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/dashboards/templates': typeof DashboardsTemplatesRoute
   '/errors/$errorType': typeof ErrorsErrorTypeRoute
   '/infra/$hostName': typeof InfraHostNameRoute
   '/services/$serviceName': typeof ServicesServiceNameRoute
@@ -379,6 +388,7 @@ export interface FileRouteTypes {
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/dashboards/$dashboardId'
+    | '/dashboards/templates'
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/services/$serviceName'
@@ -418,6 +428,7 @@ export interface FileRouteTypes {
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/dashboards/$dashboardId'
+    | '/dashboards/templates'
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/services/$serviceName'
@@ -457,6 +468,7 @@ export interface FileRouteTypes {
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/dashboards/$dashboardId'
+    | '/dashboards/templates'
     | '/errors/$errorType'
     | '/infra/$hostName'
     | '/services/$serviceName'
@@ -497,6 +509,7 @@ export interface RootRouteChildren {
   AlertsRuleIdRoute: typeof AlertsRuleIdRoute
   AlertsCreateRoute: typeof AlertsCreateRoute
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
+  DashboardsTemplatesRoute: typeof DashboardsTemplatesRoute
   ErrorsErrorTypeRoute: typeof ErrorsErrorTypeRoute
   InfraHostNameRoute: typeof InfraHostNameRoute
   ServicesServiceNameRoute: typeof ServicesServiceNameRoute
@@ -695,6 +708,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ErrorsErrorTypeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboards/templates': {
+      id: '/dashboards/templates'
+      path: '/dashboards/templates'
+      fullPath: '/dashboards/templates'
+      preLoaderRoute: typeof DashboardsTemplatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboards/$dashboardId': {
       id: '/dashboards/$dashboardId'
       path: '/dashboards/$dashboardId'
@@ -801,6 +821,7 @@ const rootRouteChildren: RootRouteChildren = {
   AlertsRuleIdRoute: AlertsRuleIdRoute,
   AlertsCreateRoute: AlertsCreateRoute,
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
+  DashboardsTemplatesRoute: DashboardsTemplatesRoute,
   ErrorsErrorTypeRoute: ErrorsErrorTypeRoute,
   InfraHostNameRoute: InfraHostNameRoute,
   ServicesServiceNameRoute: ServicesServiceNameRoute,

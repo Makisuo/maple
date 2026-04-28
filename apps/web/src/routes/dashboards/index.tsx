@@ -7,7 +7,7 @@ import { DashboardList } from "@/components/dashboard-builder/list/dashboard-lis
 import { parsePortableDashboardJson } from "@/components/dashboard-builder/portable-dashboard"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
-import { PlusIcon, UploadIcon } from "@/components/icons"
+import { GridIcon, PlusIcon, UploadIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 
 export const Route = createFileRoute("/dashboards/")({
@@ -92,6 +92,14 @@ function DashboardListPage() {
 			description="Create and manage custom dashboards."
 			headerActions={
 				<div className="flex items-center gap-1">
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => navigate({ to: "/dashboards/templates" })}
+					>
+						<GridIcon size={14} data-icon="inline-start" />
+						Browse templates
+					</Button>
 					<Button
 						variant="outline"
 						size="sm"
