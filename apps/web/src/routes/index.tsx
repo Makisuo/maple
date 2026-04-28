@@ -149,7 +149,7 @@ function DashboardContent() {
           data: {
             source: "logs",
             metric: "count",
-            groupBy: "severity",
+            groupBy: "none",
             startTime: effectiveStartTime,
             endTime: effectiveEndTime,
             filters: {

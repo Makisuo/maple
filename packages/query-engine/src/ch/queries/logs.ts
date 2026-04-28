@@ -65,6 +65,10 @@ export function logsTimeseriesQuery(
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
+      // TimestampTime is the partition/index key; this filter unlocks
+      // partition pruning. Timestamp filter retained for sub-second accuracy.
+      $.TimestampTime.gte(param.dateTime("startTime")),
+      $.TimestampTime.lte(param.dateTime("endTime")),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
@@ -125,6 +129,8 @@ export function logsBreakdownQuery(
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
+      $.TimestampTime.gte(param.dateTime("startTime")),
+      $.TimestampTime.lte(param.dateTime("endTime")),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
@@ -154,6 +160,8 @@ export function logsCountQuery(
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
+      $.TimestampTime.gte(param.dateTime("startTime")),
+      $.TimestampTime.lte(param.dateTime("endTime")),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
@@ -205,6 +213,8 @@ export function logsListQuery(
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
+      $.TimestampTime.gte(param.dateTime("startTime")),
+      $.TimestampTime.lte(param.dateTime("endTime")),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
       CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
@@ -243,6 +253,8 @@ export function errorRateByServiceQuery(
     }))
     .where(($) => [
       $.OrgId.eq(param.string("orgId")),
+      $.TimestampTime.gte(param.dateTime("startTime")),
+      $.TimestampTime.lte(param.dateTime("endTime")),
       $.Timestamp.gte(param.dateTime("startTime")),
       $.Timestamp.lte(param.dateTime("endTime")),
     ])
@@ -268,6 +280,8 @@ export function logsFacetsQuery(
 ): CHUnionQuery<LogsFacetsOutput> {
   const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
     $.OrgId.eq(param.string("orgId")),
+    $.TimestampTime.gte(param.dateTime("startTime")),
+    $.TimestampTime.lte(param.dateTime("endTime")),
     $.Timestamp.gte(param.dateTime("startTime")),
     $.Timestamp.lte(param.dateTime("endTime")),
     CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
