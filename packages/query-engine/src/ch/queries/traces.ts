@@ -14,6 +14,7 @@ import type { ColumnDefs } from "../types"
 import {
   apdexExprs,
   canUseServiceOverviewMv,
+  canUseTracesAggregatesMv,
   serviceOverviewWhereConditions,
   tracesBaseWhereConditions,
   type TracesBaseWhereOpts,
@@ -243,6 +244,18 @@ export function tracesTimeseriesQuery(
   opts: TracesTimeseriesOpts,
 ): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
   const apdexThresholdMs = opts.apdexThresholdMs ?? 500
+
+  // FUTURE: when canUseTracesAggregatesMv(opts, opts.groupBy, bucketSeconds)
+  // returns true, route to traces_aggregates_hourly with -Merge combinators
+  // (quantilesTDigestWeightedMerge, sumMerge, minMerge, maxMerge — note the
+  // plural `quantiles*` for multi-level state). This gives
+  // sample-correct quantiles + counts for free and reads thousands of rows
+  // instead of billions over 7d+ ranges. Wiring this requires:
+  //   - bucketSeconds passed as a query opt (currently set inside CH at param-bind time)
+  //   - rawExpr-built SELECT for the merge calls (no DSL helpers for *Merge yet)
+  //   - shadow-mode validation against the raw path
+  // See plan: ~/.claude/plans/research-things-that-hyperdx-indexed-nygaard.md (P2.9 deep-dive).
+  void canUseTracesAggregatesMv
 
   // Fast path: when no filter or groupBy references span-level columns
   // (span name, attributes, http method), route the query to

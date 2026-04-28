@@ -11,6 +11,8 @@ import {
   traceListMv,
   attributeKeysHourly,
   attributeValuesHourly,
+  tracesAggregatesHourly,
+  logsAggregatesHourly,
 } from "./datasources";
 
 /**
@@ -721,4 +723,78 @@ export const traceResourceAttributeValuesMv = defineMaterializedView(
       }),
     ],
   },
+);
+
+/**
+ * Populates traces_aggregates_hourly with sample-weighted -State aggregates.
+ * One row per (OrgId, Hour, ServiceName, SpanName, SpanKind, StatusCode,
+ * IsEntryPoint, DeploymentEnv) tuple. The query layer routes timeseries +
+ * breakdown queries here when filters/groupBy align.
+ *
+ * Cardinality note: SpanName is in the sort key. If any tenant emits high-
+ * cardinality span names (per-request data instead of templated routes),
+ * the row count grows quickly. See docs/persistence.md and the cardinality
+ * pre-flight query in the rollout plan.
+ */
+export const tracesAggregatesHourlyMv = defineMaterializedView(
+  "traces_aggregates_hourly_mv",
+  {
+    description:
+      "Pre-aggregates spans hourly with sample-weighted state columns (count, duration sum, t-digest quantiles, error count). Sample-correct from day one via SampleRate materialized column on traces.",
+    datasource: tracesAggregatesHourly,
+    nodes: [
+      node({
+        name: "traces_aggregates_hourly_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          ServiceName,
+          SpanName,
+          SpanKind,
+          StatusCode,
+          IsEntryPoint,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          sum(SampleRate) AS WeightedCount,
+          sum(toFloat64(Duration) * SampleRate) AS WeightedDurationSum,
+          sumIf(SampleRate, StatusCode = 'Error') AS WeightedErrorCount,
+          quantilesTDigestWeightedState(0.5, 0.95, 0.99)(Duration, toUInt32(SampleRate)) AS DurationQuantiles,
+          min(Duration) AS DurationMin,
+          max(Duration) AS DurationMax
+        FROM traces
+        GROUP BY OrgId, Hour, ServiceName, SpanName, SpanKind, StatusCode, IsEntryPoint, DeploymentEnv
+      `,
+      }),
+    ],
+  }
+);
+
+/**
+ * Populates logs_aggregates_hourly. Severity-aware drop-in for
+ * severity-distribution and log-volume dashboards.
+ */
+export const logsAggregatesHourlyMv = defineMaterializedView(
+  "logs_aggregates_hourly_mv",
+  {
+    description:
+      "Pre-aggregates logs hourly by service × severity × deployment env. Drop-in for severity-distribution and log-volume queries.",
+    datasource: logsAggregatesHourly,
+    nodes: [
+      node({
+        name: "logs_aggregates_hourly_mv_node",
+        sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(TimestampTime) AS Hour,
+          ServiceName,
+          SeverityText,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          count() AS Count,
+          sum(length(Body) + 200) AS SizeBytes
+        FROM logs
+        GROUP BY OrgId, Hour, ServiceName, SeverityText, DeploymentEnv
+      `,
+      }),
+    ],
+  }
 );

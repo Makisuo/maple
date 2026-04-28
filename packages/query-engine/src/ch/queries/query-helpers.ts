@@ -9,7 +9,7 @@ import type { AttributeFilter, MetricType } from "../../query-engine"
 import * as CH from "../expr"
 import { param } from "../param"
 import type { ColumnAccessor } from "../query"
-import type { ServiceOverviewSpans, Traces } from "../tables"
+import type { ServiceOverviewSpans, Traces, TracesAggregatesHourly } from "../tables"
 import {
   MetricsSum,
   MetricsGauge,
@@ -211,6 +211,84 @@ export function serviceOverviewWhereConditions(
     conditions.push(CH.inList($.CommitSha, opts.commitShas))
   }
 
+  return conditions
+}
+
+// ---------------------------------------------------------------------------
+// TracesAggregatesHourly MV compatibility
+//
+// `traces_aggregates_hourly` is the generalized aggregating MV. Its dimensions
+// are (OrgId, Hour, ServiceName, SpanName, SpanKind, StatusCode, IsEntryPoint,
+// DeploymentEnv) and it stores sample-weighted -State columns (count, duration
+// sum, t-digest quantiles, error count) plus min/max. Queries that filter and
+// group on a subset of those dimensions can be answered by reading hourly rows
+// instead of raw spans — orders of magnitude cheaper for 7d+ ranges.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true iff a query (filters + groupBy + bucketSeconds) can be served
+ * from `traces_aggregates_hourly` instead of raw `traces`.
+ *
+ * Constraints:
+ *   - bucket >= 1h (the MV is hourly; finer granularity needs raw)
+ *   - No span/resource attribute filters (MV doesn't carry the maps)
+ *   - groupBy keys must map to MV dimensions (no http_method, no attribute-based)
+ */
+export function canUseTracesAggregatesMv(
+  opts: TracesBaseWhereOpts,
+  groupBy: readonly string[] | undefined,
+  bucketSeconds: number | undefined,
+): boolean {
+  if (bucketSeconds == null || bucketSeconds < 3600) return false
+  if (opts.attributeFilters?.length) return false
+  if (opts.resourceAttributeFilters?.length) return false
+  if (opts.commitShas?.length) return false  // MV doesn't carry CommitSha
+  if (opts.minDurationMs != null || opts.maxDurationMs != null) return false
+  if (groupBy) {
+    for (const g of groupBy) {
+      if (g === "http_method" || g === "attribute") return false
+    }
+  }
+  return true
+}
+
+/** Build WHERE conditions for queries against traces_aggregates_hourly. */
+export function tracesAggregatesWhereConditions(
+  $: ColumnAccessor<typeof TracesAggregatesHourly.columns>,
+  opts: TracesBaseWhereOpts,
+): Array<CH.Condition | undefined> {
+  const mm = opts.matchModes
+  const conditions: Array<CH.Condition | undefined> = [
+    $.OrgId.eq(param.string("orgId")),
+    $.Hour.gte(param.dateTime("startTime")),
+    $.Hour.lte(param.dateTime("endTime")),
+    CH.when(opts.serviceName, (v: string) =>
+      mm?.serviceName === "contains"
+        ? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
+        : $.ServiceName.eq(v),
+    ),
+    CH.when(opts.spanName, (v: string) =>
+      mm?.spanName === "contains"
+        ? CH.positionCaseInsensitive($.SpanName, CH.lit(v)).gt(0)
+        : $.SpanName.eq(v),
+    ),
+    CH.whenTrue(!!opts.rootOnly, () => $.IsEntryPoint.eq(1)),
+    CH.whenTrue(!!opts.errorsOnly, () => $.StatusCode.eq("Error")),
+  ]
+
+  if (opts.environments?.length) {
+    if (mm?.deploymentEnv === "contains" && opts.environments.length === 1) {
+      conditions.push(CH.positionCaseInsensitive($.DeploymentEnv, CH.lit(opts.environments[0])).gt(0))
+    } else {
+      conditions.push(CH.inList($.DeploymentEnv, opts.environments))
+    }
+  }
+
+  // Note: minDurationMs/maxDurationMs filtering is intentionally *not* supported
+  // here. The MV stores aggregate state, not individual durations — filtering
+  // before merge would change which spans contribute to the t-digest, requiring
+  // a different MV partitioning scheme. Queries with duration filters route to
+  // raw traces.
   return conditions
 }
 

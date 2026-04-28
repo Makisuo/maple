@@ -444,7 +444,7 @@ function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: strin
   }))
 }
 
-function parseSamplingWeight(hex: string): number {
+export function parseSamplingWeight(hex: string): number {
   if (!hex || hex === "0") return 1
   const thresholdInt = parseInt(hex, 16)
   const maxInt = Math.pow(16, hex.length)

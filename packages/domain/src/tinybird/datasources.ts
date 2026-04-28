@@ -54,6 +54,40 @@ export const logs = defineDatasource("logs", {
 export type LogsRow = InferRow<typeof logs>;
 
 /**
+ * Sampling weight expression. Resolution priority:
+ *   1. Explicit `SpanAttributes['SampleRate']` (collector-set, takes precedence)
+ *   2. W3C TraceState `th:<hex>` threshold sampling
+ *   3. Default 1.0 (unsampled)
+ *
+ * Used in two places:
+ *   - As the `SampleRate` column DEFAULT expression on the `traces` datasource
+ *     (computes for future inserts that don't supply the field)
+ *   - In the `traces` FORWARD_QUERY (backfills existing rows when the column
+ *     is added)
+ *
+ * Both must produce identical values per row, so the expression is hoisted
+ * here. If you change one, change the other.
+ *
+ * The W3C `th:` parsing math mirrors `parseSamplingWeight()` in
+ * apps/api/src/services/QueryEngineService.ts — see
+ * QueryEngineService.sampling.test.ts for parity tests.
+ */
+const SAMPLE_RATE_EXPR =
+  "multiIf(" +
+    "SpanAttributes['SampleRate'] != '' AND toFloat64OrZero(SpanAttributes['SampleRate']) >= 1.0, " +
+      "toFloat64OrZero(SpanAttributes['SampleRate']), " +
+    "match(TraceState, 'th:[0-9a-f]+'), " +
+      "1.0 / greatest(" +
+        "1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), " +
+        "0.0001" +
+      "), " +
+    "1.0" +
+  ")";
+
+const IS_ENTRY_POINT_EXPR =
+  "if(SpanKind IN ('Server', 'Consumer') OR ParentSpanId = '', 1, 0)";
+
+/**
  * OpenTelemetry traces datasource
  * Matches the official OpenTelemetry Collector Tinybird exporter format
  */
@@ -115,7 +149,40 @@ export const traces = defineDatasource("traces", {
       t.array(t.map(t.string().lowCardinality(), t.string())),
       { jsonPath: "$.links_attributes[:]" }
     ),
+    /**
+     * Sampling weight per span. >= 1.0 means "this stored row represents
+     * SampleRate population spans". Used by `quantilesTDigestWeighted`,
+     * `sumIf(SampleRate, ...)` etc. for sample-aware aggregations.
+     *
+     * Expression hoisted to SAMPLE_RATE_EXPR — same value populated on
+     * existing rows via FORWARD_QUERY.
+     */
+    SampleRate: t.float64().defaultExpr(SAMPLE_RATE_EXPR),
+    /**
+     * Entry-point predicate as a queryable dimension. True for spans that
+     * begin a request from the perspective of the receiving service:
+     * Server/Consumer kinds, or any root span (ParentSpanId = '').
+     */
+    IsEntryPoint: t.uint8().defaultExpr(IS_ENTRY_POINT_EXPR),
   },
+  /**
+   * Backfills SampleRate + IsEntryPoint on existing rows when these columns
+   * are added. Tinybird treats new columns with DEFAULT expressions as
+   * "incompatible" changes and requires this query.
+   *
+   * Must produce identical values to the column DEFAULT expressions
+   * (SAMPLE_RATE_EXPR / IS_ENTRY_POINT_EXPR) so backfilled values match
+   * what new inserts would compute.
+   */
+  forwardQuery:
+    "SELECT " +
+    "OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, " +
+    "SpanKind, ServiceName, ResourceSchemaUrl, ResourceAttributes, " +
+    "ScopeSchemaUrl, ScopeName, ScopeVersion, ScopeAttributes, Duration, " +
+    "StatusCode, StatusMessage, SpanAttributes, EventsTimestamp, EventsName, " +
+    "EventsAttributes, LinksTraceId, LinksSpanId, LinksTraceState, LinksAttributes, " +
+    SAMPLE_RATE_EXPR + " AS SampleRate, " +
+    IS_ENTRY_POINT_EXPR + " AS IsEntryPoint",
   indexes: [
     {
       name: "idx_trace_id",
@@ -1004,3 +1071,114 @@ export const alertChecks = defineDatasource("alert_checks", {
 });
 
 export type AlertChecksRow = InferRow<typeof alertChecks>;
+
+/**
+ * Generalized hourly aggregating MV target for traces. Stores partial state
+ * (`-State` aggregates) keyed on the dimensions that show up in 90%+ of
+ * traces queries. Query layer finalizes via `-Merge` combinators at read
+ * time, so a single MV serves timeseries, breakdown, and service-overview
+ * shapes for any combination of these dimensions.
+ *
+ * Sample-aware from day one — counts and quantiles are weighted by
+ * `SampleRate`, so upstream sampling does not bias dashboards.
+ *
+ * Populated by materialized view, not direct ingestion.
+ *
+ * SOURCE TTL: 90d (matches `traces.ttl`). Update in lockstep if raw TTL
+ * changes — see docs/persistence.md.
+ */
+export const tracesAggregatesHourly = defineDatasource(
+  "traces_aggregates_hourly",
+  {
+    description:
+      "Hourly pre-aggregated trace metrics with sampling-weighted state columns. Generalized MV target for timeseries/breakdown/service-overview queries. AggregatingMergeTree.",
+    jsonPaths: false,
+    schema: {
+      OrgId: t.string().lowCardinality(),
+      Hour: t.dateTime(),
+      ServiceName: t.string().lowCardinality(),
+      SpanName: t.string().lowCardinality(),
+      SpanKind: t.string().lowCardinality(),
+      StatusCode: t.string().lowCardinality(),
+      IsEntryPoint: t.uint8(),
+      DeploymentEnv: t.string().lowCardinality(),
+      // Sample-corrected count: sum of SampleRate (1.0 for unsampled, >1 for sampled)
+      WeightedCount: t.simpleAggregateFunction("sum", t.float64()),
+      // Sample-corrected duration sum: sum(Duration * SampleRate). Pair with WeightedCount for weighted avg.
+      WeightedDurationSum: t.simpleAggregateFunction("sum", t.float64()),
+      // Sample-corrected error count: sum of SampleRate for error spans
+      WeightedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
+      // Quantile state (t-digest, weighted) — finalize with
+      // quantilesTDigestWeightedMerge(0.5, 0.95, 0.99)(DurationQuantiles),
+      // which returns Array(Float64) of [p50, p95, p99].
+      //
+      // CH type sig: AggregateFunction(quantilesTDigestWeighted(...), value_type, weight_type)
+      // Tinybird SDK's aggregateFunction(func, type) only emits one type slot,
+      // so we smuggle the value type (UInt64 for Duration) into the function
+      // name and pass the weight type (UInt32 for toUInt32(SampleRate)) as
+      // the explicit type argument. Generated SQL:
+      //   AggregateFunction(quantilesTDigestWeighted(0.5, 0.95, 0.99), UInt64, UInt32)
+      DurationQuantiles: t.aggregateFunction(
+        "quantilesTDigestWeighted(0.5, 0.95, 0.99), UInt64",
+        t.uint32()
+      ),
+      // Min/max are not weighted — true population extremes
+      DurationMin: t.simpleAggregateFunction("min", t.uint64()),
+      DurationMax: t.simpleAggregateFunction("max", t.uint64()),
+    },
+    engine: engine.aggregatingMergeTree({
+      partitionKey: "toDate(Hour)",
+      sortingKey: [
+        "OrgId",
+        "Hour",
+        "ServiceName",
+        "SpanName",
+        "SpanKind",
+        "StatusCode",
+        "IsEntryPoint",
+        "DeploymentEnv",
+      ],
+      ttl: "toDate(Hour) + INTERVAL 90 DAY",
+    }),
+  }
+);
+
+export type TracesAggregatesHourlyRow = InferRow<typeof tracesAggregatesHourly>;
+
+/**
+ * Generalized hourly aggregating MV target for logs. Severity-aware so
+ * "errors per service per hour" / "log volume by severity" queries no
+ * longer scan raw logs.
+ *
+ * SOURCE TTL: 90d (matches `logs.ttl`).
+ */
+export const logsAggregatesHourly = defineDatasource(
+  "logs_aggregates_hourly",
+  {
+    description:
+      "Hourly pre-aggregated log counts and sizes by service × severity × deployment env. AggregatingMergeTree.",
+    jsonPaths: false,
+    schema: {
+      OrgId: t.string().lowCardinality(),
+      Hour: t.dateTime(),
+      ServiceName: t.string().lowCardinality(),
+      SeverityText: t.string().lowCardinality(),
+      DeploymentEnv: t.string().lowCardinality(),
+      Count: t.simpleAggregateFunction("sum", t.uint64()),
+      SizeBytes: t.simpleAggregateFunction("sum", t.uint64()),
+    },
+    engine: engine.aggregatingMergeTree({
+      partitionKey: "toDate(Hour)",
+      sortingKey: [
+        "OrgId",
+        "Hour",
+        "ServiceName",
+        "SeverityText",
+        "DeploymentEnv",
+      ],
+      ttl: "toDate(Hour) + INTERVAL 90 DAY",
+    }),
+  }
+);
+
+export type LogsAggregatesHourlyRow = InferRow<typeof logsAggregatesHourly>;

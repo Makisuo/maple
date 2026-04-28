@@ -35,6 +35,8 @@ export const Traces = table("traces", {
   LinksSpanId: T.array(T.string),
   LinksTraceState: T.array(T.string),
   LinksAttributes: T.array(T.map(T.string, T.string)),
+  SampleRate: T.float64,
+  IsEntryPoint: T.uint8,
 })
 
 export const TraceDetailSpans = table("trace_detail_spans", {
@@ -244,6 +246,35 @@ export const ServiceMapChildren = table("service_map_children", {
   StatusCode: T.string,
   TraceState: T.string,
   DeploymentEnv: T.string,
+})
+
+export const TracesAggregatesHourly = table("traces_aggregates_hourly", {
+  OrgId: T.string,
+  Hour: T.dateTime,
+  ServiceName: T.string,
+  SpanName: T.string,
+  SpanKind: T.string,
+  StatusCode: T.string,
+  IsEntryPoint: T.uint8,
+  DeploymentEnv: T.string,
+  // The aggregate state columns are typed by their underlying scalar.
+  // SELECT-side queries finalize them via -Merge combinators built in raw CH expressions.
+  WeightedCount: T.float64,
+  WeightedDurationSum: T.float64,
+  WeightedErrorCount: T.float64,
+  DurationQuantiles: T.uint64,
+  DurationMin: T.uint64,
+  DurationMax: T.uint64,
+})
+
+export const LogsAggregatesHourly = table("logs_aggregates_hourly", {
+  OrgId: T.string,
+  Hour: T.dateTime,
+  ServiceName: T.string,
+  SeverityText: T.string,
+  DeploymentEnv: T.string,
+  Count: T.uint64,
+  SizeBytes: T.uint64,
 })
 
 export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
