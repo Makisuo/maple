@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Result } from "@/lib/effect-atom"
+import { formatBackendError } from "@/lib/error-messages"
 import { PulseIcon, XmarkIcon, PlusIcon, MagnifierIcon } from "@/components/icons"
 
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -244,7 +245,9 @@ function QueryBuilderAtomResults({ input }: { input: QueryBuilderTimeseriesInput
 							<Badge variant="destructive">error</Badge>
 							<span className="text-[11px] text-muted-foreground">query_engine</span>
 						</div>
-						<p className="text-[11px] text-destructive">{error.message}</p>
+						<p className="text-[11px] text-destructive">
+							{formatBackendError(error).description}
+						</p>
 					</div>
 				))
 				.onSuccess((response) => {

@@ -3,7 +3,7 @@ import { Result } from "@/lib/effect-atom"
 import { Effect } from "effect"
 
 import { listTraces, type Trace, type TracesResponse } from "@/api/tinybird/traces"
-import { listTracesResultAtom, type QueryAtomError } from "@/lib/services/atoms/tinybird-query-atoms"
+import { listTracesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import type { TracesSearchParams } from "@/routes/traces"
@@ -12,7 +12,7 @@ const PAGE_SIZE = 100
 const FETCH_THRESHOLD = 20
 
 export interface UseInfiniteTracesReturn {
-	firstPageResult: Result.Result<TracesResponse, QueryAtomError>
+	firstPageResult: Result.Result<TracesResponse, unknown>
 	allData: Trace[]
 	isFetchingNextPage: boolean
 	hasNextPage: boolean

@@ -9,6 +9,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Trace } from "@/api/tinybird/traces"
 import type { TracesSearchParams } from "@/routes/traces"
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import { formatRelativeTime } from "@/lib/format"
 import { HttpSpanLabel } from "./http-span-label"
@@ -383,12 +384,7 @@ export function TracesTable({ filters }: TracesTableProps) {
 
 	return Result.builder(firstPageResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => (
-			<div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-				<p className="font-medium text-destructive">Failed to load traces</p>
-				<pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">{error.message}</pre>
-			</div>
-		))
+		.onError((error) => <QueryErrorState error={error} />)
 		.onSuccess((_response, result) => (
 			<TracesTableView
 				allData={allData}

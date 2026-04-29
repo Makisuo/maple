@@ -9,6 +9,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { type ServiceOverview, type CommitBreakdown } from "@/api/tinybird/services"
 import {
 	getCustomChartServiceSparklinesResultAtom,
@@ -230,12 +231,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 
 	return Result.builder(Result.all([overviewResult, timeSeriesResult]))
 		.onInitial(() => <LoadingState />)
-		.onError((error) => (
-			<div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-				<p className="font-medium text-destructive">Failed to load services</p>
-				<pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">{error.message}</pre>
-			</div>
-		))
+		.onError((error) => <QueryErrorState error={error} />)
 		.onSuccess(([overviewResponse, timeSeriesResponse], combinedResult) => {
 			const services = overviewResponse.data
 			const timeSeriesMap = timeSeriesResponse.data

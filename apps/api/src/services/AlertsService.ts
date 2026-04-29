@@ -62,6 +62,8 @@ import {
 	type AlertDestinationId,
 	type AlertIncidentId,
 	QueryEngineExecutionError,
+	TinybirdQueryError,
+	TinybirdQuotaExceededError,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
 	RoleName,
@@ -1159,7 +1161,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 		const catchQueryEngineErrors = <A, R>(
 			effect: Effect.Effect<
 				A,
-				QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError,
+				| QueryEngineValidationError
+				| QueryEngineExecutionError
+				| QueryEngineTimeoutError
+				| TinybirdQueryError
+				| TinybirdQuotaExceededError,
 				R
 			>,
 		) =>
@@ -1171,6 +1177,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						Effect.fail(makeDeliveryError(e.message)),
 					"@maple/http/errors/QueryEngineTimeoutError": (e) =>
 						Effect.fail(makeDeliveryError(e.message ?? "Alert evaluation timed out")),
+					"@maple/http/errors/TinybirdQueryError": (e) =>
+						Effect.fail(makeDeliveryError(`Database query failed: ${e.message}`)),
+					"@maple/http/errors/TinybirdQuotaExceededError": (e) =>
+						Effect.fail(
+							makeDeliveryError(
+								`Alert query exceeded ${e.setting} quota; narrow the time window or filter`,
+							),
+						),
 				}),
 			)
 

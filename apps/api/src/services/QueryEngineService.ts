@@ -55,14 +55,19 @@ export interface GroupedAlertObservation {
 	readonly hasData: boolean
 }
 
+export type QueryEngineDirectError =
+	| QueryEngineExecutionError
+	| QueryEngineTimeoutError
+	| TinybirdQueryError
+	| TinybirdQuotaExceededError
+
+export type QueryEngineRouteError = QueryEngineValidationError | QueryEngineDirectError
+
 export interface QueryEngineServiceShape {
 	readonly execute: (
 		tenant: TenantContext,
 		request: QueryEngineExecuteRequest,
-	) => Effect.Effect<
-		QueryEngineExecuteResponse,
-		QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError
-	>
+	) => Effect.Effect<QueryEngineExecuteResponse, QueryEngineRouteError>
 	/**
 	 * Evaluate an alert query and return one observation per group. When the
 	 * spec has no group-by (or `groupBy = ["none"]`) the result is a length-1
@@ -72,16 +77,13 @@ export interface QueryEngineServiceShape {
 	readonly evaluate: (
 		tenant: TenantContext,
 		request: QueryEngineEvaluateRequest,
-	) => Effect.Effect<
-		ReadonlyArray<GroupedAlertObservation>,
-		QueryEngineValidationError | QueryEngineExecutionError | QueryEngineTimeoutError
-	>
+	) => Effect.Effect<ReadonlyArray<GroupedAlertObservation>, QueryEngineRouteError>
 	readonly cachedDirect: <A>(
 		tenant: TenantContext,
 		routeName: string,
 		payload: unknown,
-		effect: Effect.Effect<A, QueryEngineExecutionError>,
-	) => Effect.Effect<A, QueryEngineExecutionError>
+		effect: Effect.Effect<A, QueryEngineDirectError>,
+	) => Effect.Effect<A, QueryEngineDirectError>
 }
 
 const MAX_RANGE_SECONDS = 60 * 60 * 24 * 31
@@ -590,27 +592,14 @@ const validateEvaluate = Effect.fn("QueryEngineService.validateEvaluate")(functi
 const mapTinybirdError = <A, R>(
 	effect: Effect.Effect<A, TinybirdQueryError | TinybirdQuotaExceededError, R>,
 	context: string,
-): Effect.Effect<A, QueryEngineExecutionError, R> =>
+): Effect.Effect<A, TinybirdQueryError | TinybirdQuotaExceededError, R> =>
 	effect.pipe(
-		Effect.catchTag("@maple/http/errors/TinybirdQueryError", (error: TinybirdQueryError) =>
-			Effect.fail(
-				new QueryEngineExecutionError({
-					message: `${context}: ${error.message}`,
-					causeTag: error._tag,
-					pipe: error.pipe,
-				}),
-			),
-		),
-		Effect.catchTag(
-			"@maple/http/errors/TinybirdQuotaExceededError",
-			(error: TinybirdQuotaExceededError) =>
-				Effect.fail(
-					new QueryEngineExecutionError({
-						message: `${context}: query exceeded quota (${error.setting}); narrow the time range or add a service filter`,
-						causeTag: error._tag,
-						pipe: error.pipe,
-					}),
-				),
+		Effect.tapError((error) =>
+			Effect.annotateCurrentSpan({
+				"error.context": context,
+				"error.tag": error._tag,
+				"error.pipe": error.pipe,
+			}),
 		),
 	)
 
@@ -625,7 +614,7 @@ const executeCHQuery = <Output extends Record<string, any>, Params extends Recor
 	params: Params,
 	context: string,
 	profile: QueryProfileName = "aggregation",
-): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {
+): Effect.Effect<ReadonlyArray<Output>, TinybirdQueryError | TinybirdQuotaExceededError> => {
 	const compiled = CH.compile(query, params)
 	return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql, { profile }), context).pipe(
 		Effect.map((rows) => compiled.castRows(rows)),
@@ -648,7 +637,7 @@ const executeCHUnionQuery = <Output extends Record<string, any>, Params extends 
 	params: Params,
 	context: string,
 	profile: QueryProfileName = "aggregation",
-): Effect.Effect<ReadonlyArray<Output>, QueryEngineExecutionError> => {
+): Effect.Effect<ReadonlyArray<Output>, TinybirdQueryError | TinybirdQuotaExceededError> => {
 	const compiled = CH.compileUnion(query, params)
 	return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql, { profile }), context).pipe(
 		Effect.map((rows) => compiled.castRows(rows)),
@@ -864,7 +853,13 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 	Effect.fn("QueryEngineService.execute")(function* (
 		tenant: TenantContext,
 		request: QueryEngineExecuteRequest,
-	): Effect.fn.Return<QueryEngineExecuteResponse, QueryEngineValidationError | QueryEngineExecutionError> {
+	): Effect.fn.Return<
+		QueryEngineExecuteResponse,
+		| QueryEngineValidationError
+		| QueryEngineExecutionError
+		| TinybirdQueryError
+		| TinybirdQuotaExceededError
+	> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
 		yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
@@ -1527,7 +1522,10 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
 		request: QueryEngineEvaluateRequest,
 	): Effect.fn.Return<
 		ReadonlyArray<GroupedAlertObservation>,
-		QueryEngineValidationError | QueryEngineExecutionError
+		| QueryEngineValidationError
+		| QueryEngineExecutionError
+		| TinybirdQueryError
+		| TinybirdQuotaExceededError
 	> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
@@ -1849,8 +1847,8 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				tenant: TenantContext,
 				routeName: string,
 				payload: unknown,
-				effect: Effect.Effect<A, QueryEngineExecutionError>,
-			): Effect.Effect<A, QueryEngineExecutionError> =>
+				effect: Effect.Effect<A, QueryEngineDirectError>,
+			): Effect.Effect<A, QueryEngineDirectError> =>
 				withTimeout(
 					Effect.gen(function* () {
 						const startMs = Date.now()
@@ -1867,15 +1865,6 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 						Effect.withSpan("QueryEngineService.cachedDirect", {
 							attributes: { orgId: tenant.orgId, routeName },
 						}),
-					),
-				).pipe(
-					Effect.catchTag("@maple/http/errors/QueryEngineTimeoutError", (error) =>
-						Effect.fail(
-							new QueryEngineExecutionError({
-								message: error.message,
-								causeTag: error._tag,
-							}),
-						),
 					),
 				)
 

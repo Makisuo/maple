@@ -14,6 +14,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { hostInfraTimeseriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { HostInfraMetric } from "@/api/tinybird/infra"
 import { formatBytesPerSecond, formatPercent } from "./format"
+import { formatBackendError } from "@/lib/error-messages"
 
 interface HostDetailChartProps {
 	hostName: string
@@ -83,7 +84,7 @@ export function HostDetailChart({
 		.onInitial(() => <Skeleton className="h-[220px] w-full rounded-none" />)
 		.onError((err) => (
 			<div className="flex h-[220px] items-center justify-center border border-destructive/40 bg-destructive/5 font-mono text-[11px] text-destructive">
-				{err.message ?? "Failed to load chart"}
+				{formatBackendError(err).description}
 			</div>
 		))
 		.onSuccess((response, holder) => (

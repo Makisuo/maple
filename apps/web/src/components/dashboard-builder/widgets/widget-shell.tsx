@@ -130,10 +130,12 @@ export function WidgetFrame({
 						<span className="text-xs text-muted-foreground">No data in selected time range</span>
 					</div>
 				) : (
-					<div className="flex items-center justify-center h-full flex-col gap-1">
-						<span className="text-xs text-muted-foreground">Unable to load</span>
+					<div className="flex items-center justify-center h-full flex-col gap-1 px-3">
+						<span className="text-xs font-medium text-destructive">
+							{dataState.title ?? "Unable to load"}
+						</span>
 						{dataState.message && (
-							<span className="text-[10px] text-destructive/70 max-w-[90%] text-center truncate">
+							<span className="text-[10px] text-destructive/70 max-w-full text-center line-clamp-2">
 								{dataState.message}
 							</span>
 						)}

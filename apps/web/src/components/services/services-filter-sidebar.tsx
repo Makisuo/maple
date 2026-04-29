@@ -14,6 +14,7 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
+import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={2} />
@@ -61,7 +62,7 @@ export function ServicesFilterSidebar() {
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError(() => <FilterSidebarError message="Unable to load filters" />)
+		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 

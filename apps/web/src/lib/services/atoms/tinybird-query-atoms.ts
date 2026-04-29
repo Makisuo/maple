@@ -70,8 +70,16 @@ export class QueryAtomError extends Schema.TaggedErrorClass<QueryAtomError>()("Q
 	cause: Schema.optional(Schema.Unknown),
 }) {}
 
-const toQueryAtomError = (error: unknown): QueryAtomError => {
+const isTaggedBackendError = (error: unknown): boolean =>
+	typeof error === "object" &&
+	error !== null &&
+	"_tag" in error &&
+	typeof (error as { _tag: unknown })._tag === "string" &&
+	(error as { _tag: string })._tag.startsWith("@maple/http/errors/")
+
+const toQueryAtomError = (error: unknown): unknown => {
 	if (error instanceof QueryAtomError) return error
+	if (isTaggedBackendError(error)) return error
 	if (error instanceof Error) {
 		return new QueryAtomError({
 			message: error.message,

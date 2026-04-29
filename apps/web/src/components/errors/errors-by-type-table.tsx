@@ -9,6 +9,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetErrorsByTypeInput, type ErrorByType } from "@/api/tinybird/errors"
 import { formatDuration } from "@/lib/format"
+import { QueryErrorState } from "@/components/common/query-error-state"
 import {
 	getErrorDetailTracesResultAtom,
 	getErrorsByTypeResultAtom,
@@ -223,12 +224,7 @@ export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
 
 	return Result.builder(errorsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => (
-			<div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-				<p className="font-medium text-destructive">Failed to load errors</p>
-				<pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">{error.message}</pre>
-			</div>
-		))
+		.onError((error) => <QueryErrorState error={error} />)
 		.onSuccess((response, result) => {
 			const errors = response.data ?? []
 

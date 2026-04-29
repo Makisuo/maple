@@ -14,6 +14,7 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
+import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={5} sticky />
@@ -46,7 +47,9 @@ export function TracesFilterSidebarView({
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError(() => <FilterSidebarError message="Unable to load filters" sticky />)
+		.onError((error) => (
+			<FilterSidebarError message={formatBackendError(error).description} sticky />
+		))
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 

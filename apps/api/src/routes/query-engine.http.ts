@@ -5,6 +5,8 @@ import {
 	MapleApi,
 	QueryEngineExecutionError,
 	QueryEngineValidationError,
+	TinybirdQueryError,
+	TinybirdQuotaExceededError,
 	SpanHierarchyResponse,
 	ErrorsByTypeResponse,
 	ErrorsTimeseriesResponse,
@@ -47,15 +49,29 @@ import {
 	type QueryBuilderQueryDraft,
 } from "@maple/query-engine/query-builder"
 
-const mapExecError = (effect: Effect.Effect<any, any>, context: string) =>
+const isTaggedHttpError = (
+	value: unknown,
+): value is TinybirdQueryError | TinybirdQuotaExceededError =>
+	value instanceof TinybirdQueryError || value instanceof TinybirdQuotaExceededError
+
+const mapExecError = <A, R>(
+	effect: Effect.Effect<A, unknown, R>,
+	context: string,
+): Effect.Effect<
+	A,
+	QueryEngineExecutionError | TinybirdQueryError | TinybirdQuotaExceededError,
+	R
+> =>
 	effect.pipe(
-		Effect.mapError(
-			(cause) =>
-				new QueryEngineExecutionError({
-					message: context,
-					causeTag: cause instanceof Error ? cause.message : String(cause),
-				}),
-		),
+		Effect.mapError((cause) => {
+			if (isTaggedHttpError(cause)) {
+				return cause
+			}
+			return new QueryEngineExecutionError({
+				message: context,
+				causeMessage: cause instanceof Error ? cause.message : String(cause),
+			})
+		}),
 	)
 
 export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine", (handlers) =>

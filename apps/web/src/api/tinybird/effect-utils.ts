@@ -54,6 +54,13 @@ function toMessage(cause: unknown, fallback: string): string {
 	return cause instanceof Error ? cause.message : fallback
 }
 
+const isTaggedBackendError = (cause: unknown): boolean =>
+	typeof cause === "object" &&
+	cause !== null &&
+	"_tag" in cause &&
+	typeof (cause as { _tag: unknown })._tag === "string" &&
+	(cause as { _tag: string })._tag.startsWith("@maple/http/errors/")
+
 export function decodeInput<S extends Schema.Top & { readonly DecodingServices: never }>(
 	schema: S,
 	input: unknown,
@@ -74,18 +81,20 @@ export function decodeInput<S extends Schema.Top & { readonly DecodingServices: 
 export function runTinybirdQuery<A>(
 	operation: string,
 	execute: () => Effect.Effect<A, unknown, MapleApiAtomClient>,
-): Effect.Effect<A, TinybirdQueryError> {
+): Effect.Effect<A, unknown> {
 	return Effect.suspend(execute).pipe(
 		Effect.withSpan(operation),
 		Effect.provide(mapleApiClientLayer),
-		Effect.mapError(
-			(cause) =>
-				new TinybirdQueryError({
-					operation,
-					message: toMessage(cause, `Tinybird query failed for ${operation}`),
-					cause,
-				}),
-		),
+		Effect.mapError((cause) => {
+			if (isTaggedBackendError(cause)) {
+				return cause
+			}
+			return new TinybirdQueryError({
+				operation,
+				message: toMessage(cause, `Tinybird query failed for ${operation}`),
+				cause,
+			})
+		}),
 	)
 }
 
@@ -141,13 +150,15 @@ export function extractCount(response: QueryEngineExecuteResponse): number {
 export function executeQueryEngine(operation: string, payload: QueryEngineExecuteRequest) {
 	return executeQueryEngineEffect(payload).pipe(
 		Effect.provide(mapleApiClientLayer),
-		Effect.mapError(
-			(cause) =>
-				new TinybirdQueryError({
-					operation,
-					message: toMessage(cause, "Query engine request failed"),
-					cause,
-				}),
-		),
+		Effect.mapError((cause) => {
+			if (isTaggedBackendError(cause)) {
+				return cause
+			}
+			return new TinybirdQueryError({
+				operation,
+				message: toMessage(cause, "Query engine request failed"),
+				cause,
+			})
+		}),
 	)
 }

@@ -6,6 +6,7 @@ import { TraceId } from "@maple/domain"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { TraceViewTabs } from "@/components/traces/trace-view-tabs"
 import { SpanDetailPanel } from "@/components/traces/span-detail-panel"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -81,12 +82,7 @@ function TraceDetailPage() {
 				title="Error"
 				description="Failed to load trace"
 			>
-				<div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-					<p className="font-medium text-destructive">Failed to load trace details</p>
-					<pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
-						{error.message}
-					</pre>
-				</div>
+				<QueryErrorState error={error} titleOverride="Failed to load trace details" />
 			</DashboardLayout>
 		))
 		.onSuccess((data) => {

@@ -6,6 +6,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { MetricTypeBadge } from "./metric-type-badge"
 import { type Metric, type ListMetricsInput } from "@/api/tinybird/metrics"
 import { listMetricsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { QueryErrorState } from "@/components/common/query-error-state"
 
 function formatNumber(num: number): string {
 	if (num >= 1_000_000) {
@@ -91,12 +92,7 @@ export function MetricsTable({ search, metricType, selectedMetric, onSelectMetri
 
 	return Result.builder(metricsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => (
-			<div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-				<p className="font-medium text-destructive">Failed to load metrics</p>
-				<pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">{error.message}</pre>
-			</div>
-		))
+		.onError((error) => <QueryErrorState error={error} />)
 		.onSuccess((response, result) => (
 			<div className={`space-y-4 ${result.waiting ? "opacity-60" : ""}`}>
 				<div className="rounded-md border overflow-auto">

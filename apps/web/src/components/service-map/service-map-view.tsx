@@ -14,6 +14,7 @@ import "@xyflow/react/dist/style.css"
 
 import { Result } from "@/lib/effect-atom"
 import { Link } from "@tanstack/react-router"
+import { formatBackendError } from "@/lib/error-messages"
 
 import { cn } from "@maple/ui/utils"
 import { getServiceLegendColor } from "@maple/ui/colors"
@@ -865,14 +866,17 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 				<div className="text-sm text-muted-foreground animate-pulse">Loading service map...</div>
 			</div>
 		))
-		.onError((error) => (
-			<div className="flex items-center justify-center h-full">
-				<div className="text-center space-y-2">
-					<p className="text-sm font-medium text-destructive">Failed to load service map</p>
-					<p className="text-xs text-muted-foreground">{error.message}</p>
+		.onError((error) => {
+			const formatted = formatBackendError(error)
+			return (
+				<div className="flex items-center justify-center h-full">
+					<div className="text-center space-y-2">
+						<p className="text-sm font-medium text-destructive">{formatted.title}</p>
+						<p className="text-xs text-muted-foreground">{formatted.description}</p>
+					</div>
 				</div>
-			</div>
-		))
+			)
+		})
 		.onSuccess((mapResponse) => (
 			<ServiceMapCanvas
 				edges={mapResponse.edges}

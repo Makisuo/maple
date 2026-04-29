@@ -12,6 +12,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type GetMetricTimeSeriesInput, type MetricTimeSeriesResponse } from "@/api/tinybird/metrics"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { getMetricTimeSeriesResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
+import { formatBackendError } from "@/lib/error-messages"
 
 const chartConfig = {
 	avgValue: {
@@ -79,19 +80,22 @@ export function MetricsVolumeChart({ metricName, metricType }: MetricsVolumeChar
 				</CardContent>
 			</Card>
 		))
-		.onError((error) => (
-			<Card>
-				<CardHeader>
-					<CardTitle>{metricName}</CardTitle>
-					<CardDescription>Failed to load trend data</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<div className="flex h-[200px] items-center justify-center text-destructive">
-						{error.message}
-					</div>
-				</CardContent>
-			</Card>
-		))
+		.onError((error) => {
+			const formatted = formatBackendError(error)
+			return (
+				<Card>
+					<CardHeader>
+						<CardTitle>{metricName}</CardTitle>
+						<CardDescription>{formatted.title}</CardDescription>
+					</CardHeader>
+					<CardContent>
+						<div className="flex h-[200px] items-center justify-center text-destructive text-sm">
+							{formatted.description}
+						</div>
+					</CardContent>
+				</Card>
+			)
+		})
 		.onSuccess((response) => {
 			const chartData = response.data.map((point) => ({
 				time: new Date(point.bucket).toLocaleTimeString("en-US", {

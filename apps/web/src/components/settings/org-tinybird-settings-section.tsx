@@ -1,7 +1,8 @@
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Cause, Exit, Option } from "effect"
+import { Exit, Option } from "effect"
 import { toast } from "sonner"
+import { formatBackendError } from "@/lib/error-messages"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
@@ -29,25 +30,8 @@ function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string
 	if (Exit.isSuccess(exit)) return fallback
 
 	const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
-	if (failure instanceof Error && failure.message.trim().length > 0) {
-		return failure.message
-	}
-	if (
-		typeof failure === "object" &&
-		failure !== null &&
-		"message" in failure &&
-		typeof failure.message === "string" &&
-		failure.message.trim().length > 0
-	) {
-		return failure.message
-	}
-
-	const defect = Cause.squash(exit.cause)
-	if (defect instanceof Error && defect.message.trim().length > 0) {
-		return defect.message
-	}
-
-	return fallback
+	const formatted = formatBackendError(failure ?? exit)
+	return formatted.description || formatted.title || fallback
 }
 
 function formatBytes(bytes: number): string {

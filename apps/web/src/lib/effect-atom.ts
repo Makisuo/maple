@@ -69,15 +69,14 @@ class ResultBuilder<A, E, B> {
 		return new ResultBuilder(this.result, Option.none())
 	}
 
-	onError<C>(f: (error: E extends Error ? E : Error) => C): ResultBuilder<A, E, B | C> {
+	onError<C>(f: (error: E) => C): ResultBuilder<A, E, B | C> {
 		if (Option.isSome(this.mapped)) {
 			return new ResultBuilder(this.result, this.mapped as unknown as Option.Option<B | C>)
 		}
 
 		if (AsyncResult.isFailure(this.result)) {
 			const squashed = Cause.squash(this.result.cause)
-			const err = squashed instanceof Error ? squashed : new Error(String(squashed))
-			return new ResultBuilder(this.result, Option.some(f(err as E extends Error ? E : Error)))
+			return new ResultBuilder(this.result, Option.some(f(squashed as E)))
 		}
 
 		return new ResultBuilder(this.result, Option.none())

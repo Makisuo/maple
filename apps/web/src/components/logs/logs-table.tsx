@@ -12,6 +12,7 @@ import { getSeverityColor } from "@/lib/severity"
 import { useInfiniteLogs, FETCH_THRESHOLD } from "@/hooks/use-infinite-logs"
 import { pickImportantAttributes } from "@/lib/log-attributes"
 import { LogAttributeChip } from "./log-attribute-chip"
+import { QueryErrorState } from "@/components/common/query-error-state"
 
 const VISIBLE_CHIPS = 4
 const ROW_HEIGHT = 36
@@ -235,12 +236,7 @@ export function LogsTable({ filters }: LogsTableProps) {
 
 	return Result.builder(firstPageResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => (
-			<div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-				<p className="font-medium text-destructive">Failed to load logs</p>
-				<pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">{error.message}</pre>
-			</div>
-		))
+		.onError((error) => <QueryErrorState error={error} />)
 		.onSuccess((_response, result) => (
 			<LogsTableView
 				allData={allData}

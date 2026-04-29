@@ -3,7 +3,7 @@ import { Result } from "@/lib/effect-atom"
 import { Effect } from "effect"
 
 import { listLogs, type Log, type LogsResponse } from "@/api/tinybird/logs"
-import { listLogsResultAtom, type QueryAtomError } from "@/lib/services/atoms/tinybird-query-atoms"
+import { listLogsResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import type { LogsSearchParams } from "@/routes/logs"
@@ -12,7 +12,7 @@ const PAGE_SIZE = 100
 const FETCH_THRESHOLD = 20
 
 export interface UseInfiniteLogsReturn {
-	firstPageResult: Result.Result<LogsResponse, QueryAtomError>
+	firstPageResult: Result.Result<LogsResponse, unknown>
 	allData: Log[]
 	isFetchingNextPage: boolean
 	hasNextPage: boolean

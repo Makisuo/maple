@@ -3,11 +3,12 @@ import { Link, useRouter } from "@tanstack/react-router"
 import { AlertWarningIcon, CircleQuestionIcon, HouseIcon } from "@/components/icons"
 import { Button, buttonVariants } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
+import { formatBackendError } from "@/lib/error-messages"
 
 function RouteError({ error, reset }: ErrorComponentProps) {
 	const router = useRouter()
 
-	const message = error instanceof Error ? error.message : "An unexpected error occurred"
+	const { title, description } = formatBackendError(error)
 	const stack = error instanceof Error ? error.stack : undefined
 
 	return (
@@ -16,8 +17,8 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 				<EmptyMedia variant="icon" className="bg-destructive/10 text-destructive">
 					<AlertWarningIcon size={18} />
 				</EmptyMedia>
-				<EmptyTitle>Something went wrong</EmptyTitle>
-				<EmptyDescription>{message}</EmptyDescription>
+				<EmptyTitle>{title}</EmptyTitle>
+				<EmptyDescription>{description}</EmptyDescription>
 			</EmptyHeader>
 			<div className="mt-2 flex items-center gap-2">
 				<Button

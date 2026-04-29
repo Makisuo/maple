@@ -7,6 +7,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { OptionalStringArrayParam } from "@/lib/search-params"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { GridIcon, MagnifierIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import { cn } from "@maple/ui/lib/utils"
@@ -190,14 +191,7 @@ function WorkloadsPageContent() {
 
 					{Result.builder(wlResult)
 						.onInitial(() => <WorkloadTableLoading />)
-						.onError((err) => (
-							<div className="rounded-md border border-destructive/50 bg-destructive/10 p-8">
-								<p className="font-medium text-destructive">Failed to load workloads</p>
-								<pre className="mt-2 text-xs text-destructive/80 whitespace-pre-wrap">
-									{err.message}
-								</pre>
-							</div>
-						))
+						.onError((err) => <QueryErrorState error={err} />)
 						.onSuccess((response, result) => {
 							const wls = response.data as ReadonlyArray<WorkloadRow>
 							const hasAnyFilter =

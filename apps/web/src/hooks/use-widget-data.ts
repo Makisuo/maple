@@ -8,6 +8,7 @@ import type { DashboardWidget, WidgetDataSource } from "@/components/dashboard-b
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { encodeKey } from "@/lib/cache-key"
+import { formatBackendError } from "@/lib/error-messages"
 
 function isSeriesNameHidden(seriesName: string, hiddenBaseNames: Set<string>): boolean {
 	for (const base of hiddenBaseNames) {
@@ -207,8 +208,16 @@ class WidgetDataAtomError extends Schema.TaggedErrorClass<WidgetDataAtomError>()
 	cause: Schema.optional(Schema.Unknown),
 }) {}
 
-const toWidgetDataAtomError = (error: unknown): WidgetDataAtomError => {
+const isTaggedBackendError = (error: unknown): boolean =>
+	typeof error === "object" &&
+	error !== null &&
+	"_tag" in error &&
+	typeof (error as { _tag: unknown })._tag === "string" &&
+	(error as { _tag: string })._tag.startsWith("@maple/http/errors/")
+
+const toWidgetDataAtomError = (error: unknown): unknown => {
 	if (error instanceof WidgetDataAtomError) return error
+	if (isTaggedBackendError(error)) return error
 	if (error instanceof Error) {
 		return new WidgetDataAtomError({
 			message: error.message,
@@ -308,13 +317,8 @@ export function useWidgetData(widget: DashboardWidget) {
 		return Result.builder(result)
 			.onInitial(() => ({ status: "loading" }) as const)
 			.onError((error) => {
-				const msg =
-					error instanceof Error
-						? error.message
-						: error && typeof error === "object" && "message" in error
-							? String((error as { message: unknown }).message)
-							: String(error)
-				return { status: "error", message: msg } as const
+				const { title, description } = formatBackendError(error)
+				return { status: "error", title, message: description } as const
 			})
 			.onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) }) as const)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)

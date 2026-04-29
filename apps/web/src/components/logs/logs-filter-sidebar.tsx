@@ -16,6 +16,7 @@ import {
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 import { SEVERITY_COLORS } from "@/lib/severity"
+import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={3} sticky />
@@ -85,7 +86,9 @@ export function LogsFilterSidebar() {
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError(() => <FilterSidebarError message="Unable to load filters" sticky />)
+		.onError((error) => (
+			<FilterSidebarError message={formatBackendError(error).description} sticky />
+		))
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 			const hasFacets =

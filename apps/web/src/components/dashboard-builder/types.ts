@@ -185,7 +185,7 @@ export type VisualizationType =
 export type WidgetMode = "view" | "edit"
 export type WidgetDataState =
 	| { status: "loading" }
-	| { status: "error"; message?: string }
+	| { status: "error"; title?: string; message?: string }
 	| { status: "ready"; data: unknown }
 
 // --- Dashboard Widget ---

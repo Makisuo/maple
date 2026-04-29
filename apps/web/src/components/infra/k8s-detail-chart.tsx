@@ -18,6 +18,7 @@ import {
 } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { PodInfraMetric, NodeInfraMetric, WorkloadInfraMetric, WorkloadKind } from "@/api/tinybird/infra"
 import { formatPercent } from "./format"
+import { formatBackendError } from "@/lib/error-messages"
 
 const CHART_HEIGHT = 280
 
@@ -310,7 +311,7 @@ export function PodDetailChart({
 		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
 		.onError((err) => (
 			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{err.message ?? "Failed to load chart"}
+				{formatBackendError(err).description}
 			</div>
 		))
 		.onSuccess((response, holder) => (
@@ -349,7 +350,7 @@ export function NodeDetailChart({
 		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
 		.onError((err) => (
 			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{err.message ?? "Failed to load chart"}
+				{formatBackendError(err).description}
 			</div>
 		))
 		.onSuccess((response, holder) => (
@@ -398,7 +399,7 @@ export function WorkloadDetailChart({
 		.onInitial(() => <Skeleton className="h-[280px] w-full rounded-lg" />)
 		.onError((err) => (
 			<div className="flex h-[280px] items-center justify-center rounded-lg border border-destructive/40 bg-destructive/5 text-xs text-destructive">
-				{err.message ?? "Failed to load chart"}
+				{formatBackendError(err).description}
 			</div>
 		))
 		.onSuccess((response, holder) => (
