@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { afterEach, describe, expect, it } from "vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { OrgId, RoleName, TinybirdQueryError, TinybirdQuotaExceededError, UserId } from "@maple/domain/http"
@@ -24,7 +25,7 @@ const createTempDbUrl = () => {
 	return { url, dbPath }
 }
 
-const makeConfig = (url: string) =>
+const makeConfig = (url: string, overrides: Record<string, unknown> = {}) =>
 	ConfigProvider.layer(
 		ConfigProvider.fromUnknown({
 			PORT: "3472",
@@ -36,8 +37,15 @@ const makeConfig = (url: string) =>
 			MAPLE_DEFAULT_ORG_ID: "default",
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+			...overrides,
 		}),
 	)
+
+const makeClickHouseConfig = (url: string, overrides: Record<string, unknown> = {}) =>
+	makeConfig(url, {
+		CLICKHOUSE_URL: "https://clickhouse.example.com:8443",
+		...overrides,
+	})
 
 const makeTinybirdLayer = (url: string, overrides: TinybirdSyncClientOverrides = {}) =>
 	TinybirdService.Default.pipe(
@@ -84,16 +92,17 @@ const makeClickHouseError = (message: string, code: string, type: string) =>
 	Object.assign(new Error(message), { code, type })
 
 describe("Tinybird routing", () => {
-	it("uses the env-backed ClickHouse client by default for raw queries", async () => {
+	it("uses Tinybird SDK fallback for managed raw queries when CLICKHOUSE_URL is absent", async () => {
 		const { url } = createTempDbUrl()
 		const calls: Array<{
-			url: string
-			username: string
-			password: string
-			database: string
+			_tag: "tinybird"
+			host: string
+			token: string
 		}> = []
 
 		tinybirdTestables.setClientFactory((config) => {
+			if (config._tag !== "tinybird")
+				throw new Error(`Expected Tinybird SDK config, got ${config._tag}`)
 			calls.push(config)
 			return {
 				sql: async () => ({
@@ -112,10 +121,9 @@ describe("Tinybird routing", () => {
 		expect(result.data).toBeDefined()
 		expect(calls).toEqual([
 			{
-				url: "https://managed.tinybird.co",
-				username: "default",
-				password: "managed-token",
-				database: "default",
+				_tag: "tinybird",
+				host: "https://managed.tinybird.co",
+				token: "managed-token",
 			},
 		])
 	})
@@ -123,6 +131,7 @@ describe("Tinybird routing", () => {
 	it("prefers explicit ClickHouse env settings for managed raw queries", async () => {
 		const { url } = createTempDbUrl()
 		const calls: Array<{
+			_tag: "clickhouse"
 			url: string
 			username: string
 			password: string
@@ -148,6 +157,9 @@ describe("Tinybird routing", () => {
 		)
 
 		tinybirdTestables.setClientFactory((clientConfig) => {
+			if (clientConfig._tag !== "clickhouse") {
+				throw new Error(`Expected ClickHouse config, got ${clientConfig._tag}`)
+			}
 			calls.push(clientConfig)
 			return {
 				sql: async () => ({
@@ -178,12 +190,51 @@ describe("Tinybird routing", () => {
 		expect(result).toEqual([{ message: "managed-clickhouse" }])
 		expect(calls).toEqual([
 			{
+				_tag: "clickhouse",
 				url: "https://clickhouse.example.com:8443",
 				username: "maple_reader",
 				password: "clickhouse-password",
 				database: "observability",
 			},
 		])
+	})
+
+	it("does not pass the Tinybird REST host to the ClickHouse client", async () => {
+		const { url } = createTempDbUrl()
+		const calls: Array<{ _tag: string; host?: string; token?: string; url?: string }> = []
+
+		tinybirdTestables.setClientFactory((config) => {
+			calls.push(config)
+			return {
+				sql: async () => ({
+					data: [{ message: "tinybird-sdk" }],
+				}),
+			}
+		})
+
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* TinybirdService
+				return yield* service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+			}).pipe(
+				Effect.provide(
+					TinybirdService.Default.pipe(
+						Layer.provide(
+							OrgTinybirdSettingsService.Live.pipe(
+								Layer.provide(makeTestTinybirdSyncClientLayer({})),
+								Layer.provide(SelfManagedCollectorConfigService.Live),
+								Layer.provide(DatabaseLibsqlLive),
+							),
+						),
+						Layer.provide(Env.Default),
+						Layer.provide(makeConfig(url, { TINYBIRD_HOST: "https://api.tinybird.co" })),
+					),
+				),
+			),
+		)
+
+		expect(result).toEqual([{ message: "tinybird-sdk" }])
+		expect(calls).toEqual([{ _tag: "tinybird", host: "https://api.tinybird.co", token: "managed-token" }])
 	})
 
 	it("sqlQuery rejects SQL without OrgId filter", async () => {
@@ -239,7 +290,21 @@ describe("Tinybird routing", () => {
 					"SELECT 1 FROM traces WHERE OrgId = 'org_a'\nFORMAT JSON;",
 					{ profile: "list" },
 				)
-			}).pipe(Effect.provide(makeTinybirdLayer(url))),
+			}).pipe(
+				Effect.provide(
+					TinybirdService.Default.pipe(
+						Layer.provide(
+							OrgTinybirdSettingsService.Live.pipe(
+								Layer.provide(makeTestTinybirdSyncClientLayer({})),
+								Layer.provide(SelfManagedCollectorConfigService.Live),
+								Layer.provide(DatabaseLibsqlLive),
+							),
+						),
+						Layer.provide(Env.Default),
+						Layer.provide(makeClickHouseConfig(url)),
+					),
+				),
+			),
 		)
 
 		expect(result).toEqual([{ result: 1 }])
@@ -270,7 +335,7 @@ describe("Tinybird routing", () => {
 			}).pipe(Effect.provide(makeTinybirdLayer(url))),
 		)
 
-		expect(error).toBeInstanceOf(TinybirdQueryError)
+		if (!(error instanceof TinybirdQueryError)) throw new Error("Expected TinybirdQueryError")
 		expect(error.category).toBe("auth")
 		expect(error.clickhouseCode).toBe("516")
 		expect(error.clickhouseType).toBe("AUTHENTICATION_FAILED")
@@ -298,7 +363,8 @@ describe("Tinybird routing", () => {
 			}).pipe(Effect.provide(makeTinybirdLayer(url))),
 		)
 
-		expect(error).toBeInstanceOf(TinybirdQuotaExceededError)
+		if (!(error instanceof TinybirdQuotaExceededError))
+			throw new Error("Expected TinybirdQuotaExceededError")
 		expect(error.setting).toBe("max_execution_time")
 		expect(error.clickhouseCode).toBe("159")
 		expect(error.clickhouseType).toBe("TIMEOUT_EXCEEDED")
@@ -322,7 +388,7 @@ describe("Tinybird routing", () => {
 			}).pipe(Effect.provide(makeTinybirdLayer(url))),
 		)
 
-		expect(error).toBeInstanceOf(TinybirdQueryError)
+		if (!(error instanceof TinybirdQueryError)) throw new Error("Expected TinybirdQueryError")
 		expect(error.category).toBe("config")
 		expect(error.clickhouseCode).toBe("81")
 		expect(error.clickhouseType).toBe("UNKNOWN_DATABASE")
@@ -346,7 +412,7 @@ describe("Tinybird routing", () => {
 			}).pipe(Effect.provide(makeTinybirdLayer(url))),
 		)
 
-		expect(error).toBeInstanceOf(TinybirdQueryError)
+		if (!(error instanceof TinybirdQueryError)) throw new Error("Expected TinybirdQueryError")
 		expect(error.category).toBe("upstream")
 	})
 
@@ -368,7 +434,7 @@ describe("Tinybird routing", () => {
 			}).pipe(Effect.provide(makeTinybirdLayer(url))),
 		)
 
-		expect(error).toBeInstanceOf(TinybirdQueryError)
+		if (!(error instanceof TinybirdQueryError)) throw new Error("Expected TinybirdQueryError")
 		expect(error.category).toBe("client")
 		expect(error.message).not.toContain("<html>")
 	})
@@ -439,14 +505,16 @@ describe("Tinybird routing", () => {
 		}
 
 		const calls: Array<{
-			url: string
-			username: string
-			password: string
-			database: string
+			_tag: "tinybird"
+			host: string
+			token: string
 			method: string
 		}> = []
 		tinybirdTestables.setClientFactory((config) => ({
 			sql: async () => {
+				if (config._tag !== "tinybird") {
+					throw new Error(`Expected Tinybird SDK config, got ${config._tag}`)
+				}
 				calls.push({ ...config, method: "sql" })
 				return { data: [{ message: "byo" }] }
 			},
@@ -475,12 +543,22 @@ describe("Tinybird routing", () => {
 		expect(rawResult.data).toEqual([{ message: "byo" }])
 		expect(calls).toEqual([
 			{
-				url: "https://customer.tinybird.co",
-				username: "default",
-				password: "customer-token",
-				database: "default",
+				_tag: "tinybird",
+				host: "https://customer.tinybird.co",
+				token: "customer-token",
 				method: "sql",
 			},
 		])
+	})
+})
+
+describe("Alchemy Worker bindings", () => {
+	it("passes ClickHouse environment bindings to the API Worker", () => {
+		const source = readFileSync(new URL("../../alchemy.run.ts", import.meta.url), "utf8")
+
+		expect(source).toContain('...optionalPlain("CLICKHOUSE_URL")')
+		expect(source).toContain('...optionalPlain("CLICKHOUSE_USER")')
+		expect(source).toContain('...optionalPlain("CLICKHOUSE_DATABASE")')
+		expect(source).toContain('...optionalSecret("CLICKHOUSE_PASSWORD")')
 	})
 })

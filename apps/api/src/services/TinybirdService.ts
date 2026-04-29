@@ -6,6 +6,7 @@ import {
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { createClient as createClickHouseClient } from "@clickhouse/client-web"
+import { Tinybird } from "@tinybirdco/sdk"
 import { Effect, Layer, Option, Redacted, Context } from "effect"
 import { Env } from "./Env"
 import type { TenantContext } from "./AuthService"
@@ -27,19 +28,25 @@ export type SqlQueryOptions = {
 const CLIENT_CACHE_TTL_MS = 30_000
 interface CachedClient {
 	client: SqlClient
-	url: string
-	username: string
-	password: string
-	database: string
+	cacheKey: string
 	expiresAt: number
 }
 
-interface SqlClientConfig {
+interface ClickHouseSqlClientConfig {
+	readonly _tag: "clickhouse"
 	readonly url: string
 	readonly username: string
 	readonly password: string
 	readonly database: string
 }
+
+interface TinybirdSdkSqlClientConfig {
+	readonly _tag: "tinybird"
+	readonly host: string
+	readonly token: string
+}
+
+type SqlClientConfig = ClickHouseSqlClientConfig | TinybirdSdkSqlClientConfig
 
 export type TinybirdSqlError = TinybirdQueryError | TinybirdQuotaExceededError
 type TinybirdQueryErrorCategory = "query" | "upstream" | "auth" | "config" | "client"
@@ -69,7 +76,7 @@ interface SqlClient {
 	readonly sql: (sql: string) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
 }
 
-const createClient = (config: SqlClientConfig): SqlClient => {
+const createClickHouseSqlClient = (config: ClickHouseSqlClientConfig): SqlClient => {
 	const client = createClickHouseClient({
 		url: config.url,
 		username: config.username,
@@ -88,7 +95,23 @@ const createClient = (config: SqlClientConfig): SqlClient => {
 	}
 }
 
-let clickHouseClientFactory: typeof createClient = createClient
+const createTinybirdSdkSqlClient = (config: TinybirdSdkSqlClientConfig): SqlClient => {
+	const client = new Tinybird({
+		baseUrl: config.host,
+		token: config.token,
+		datasources: {},
+		pipes: {},
+		devMode: false,
+	})
+	return {
+		sql: async (sql: string) => client.sql(sql),
+	}
+}
+
+const createClient = (config: SqlClientConfig): SqlClient =>
+	config._tag === "clickhouse" ? createClickHouseSqlClient(config) : createTinybirdSdkSqlClient(config)
+
+let sqlClientFactory: typeof createClient = createClient
 
 const normalizeSqlForClickHouseClient = (sql: string): string =>
 	sql
@@ -269,21 +292,20 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				})
 			}
 
+			const sqlClientCacheKey = (config: SqlClientConfig): string =>
+				config._tag === "clickhouse"
+					? `clickhouse:${config.url}:${config.username}:${config.password}:${config.database}`
+					: `tinybird:${config.host}:${config.token}`
+
 			const getCachedOrCreateClient = (orgId: OrgId | "__managed__", config: SqlClientConfig) => {
 				const now = Date.now()
+				const cacheKey = sqlClientCacheKey(config)
 				const cached = clientCache.get(orgId)
-				if (
-					cached &&
-					cached.url === config.url &&
-					cached.username === config.username &&
-					cached.password === config.password &&
-					cached.database === config.database &&
-					cached.expiresAt > now
-				) {
+				if (cached && cached.cacheKey === cacheKey && cached.expiresAt > now) {
 					return cached.client
 				}
-				const client = clickHouseClientFactory(config)
-				clientCache.set(orgId, { client, ...config, expiresAt: now + CLIENT_CACHE_TTL_MS })
+				const client = sqlClientFactory(config)
+				clientCache.set(orgId, { client, cacheKey, expiresAt: now + CLIENT_CACHE_TTL_MS })
 				return client
 			}
 
@@ -322,42 +344,54 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 
 				if (Option.isSome(override)) {
 					yield* Effect.annotateCurrentSpan("clientSource", "org_override")
+					yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
 					return {
 						config: {
-							url: override.value.host,
-							username: env.CLICKHOUSE_USER,
-							password: override.value.token,
-							database: env.CLICKHOUSE_DATABASE,
+							_tag: "tinybird" as const,
+							host: override.value.host,
+							token: override.value.token,
 						},
 						source: "org_override" as const,
 					}
 				}
 
 				yield* Effect.annotateCurrentSpan("clientSource", "managed")
+				if (Option.isSome(env.CLICKHOUSE_URL)) {
+					yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
+					return {
+						config: {
+							_tag: "clickhouse" as const,
+							url: env.CLICKHOUSE_URL.value,
+							username: env.CLICKHOUSE_USER,
+							password: Option.match(env.CLICKHOUSE_PASSWORD, {
+								onNone: () => Redacted.value(env.TINYBIRD_TOKEN),
+								onSome: Redacted.value,
+							}),
+							database: env.CLICKHOUSE_DATABASE,
+						},
+						source: "managed" as const,
+					}
+				}
+
+				yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
 				return {
 					config: {
-						url: Option.getOrElse(env.CLICKHOUSE_URL, () => env.TINYBIRD_HOST),
-						username: env.CLICKHOUSE_USER,
-						password: Option.match(env.CLICKHOUSE_PASSWORD, {
-							onNone: () => Redacted.value(env.TINYBIRD_TOKEN),
-							onSome: Redacted.value,
-						}),
-						database: env.CLICKHOUSE_DATABASE,
+						_tag: "tinybird" as const,
+						host: env.TINYBIRD_HOST,
+						token: Redacted.value(env.TINYBIRD_TOKEN),
 					},
 					source: "managed" as const,
 				}
 			})
 
-			const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
+			const resolveClientConfig = Effect.fn("TinybirdService.resolveClientConfig")(function* (
 				tenant: TenantContext,
 				pipe: string,
 			) {
 				yield* Effect.annotateCurrentSpan("pipe", pipe)
 				yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 
-				const resolved = yield* resolveSqlConfig(tenant, pipe)
-				const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
-				return getCachedOrCreateClient(cacheKey, resolved.config)
+				return yield* resolveSqlConfig(tenant, pipe)
 			})
 
 			const truncateSql = (s: string, maxLen = 1000) =>
@@ -369,7 +403,6 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				pipe: string,
 				options?: SqlQueryOptions,
 			) {
-				yield* Effect.annotateCurrentSpan("db.system", "clickhouse")
 				yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 
 				const leftoverParam = sql.match(/__PARAM_(\w+)__/)
@@ -380,14 +413,21 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 					})
 				}
 
+				const resolved = yield* resolveClientConfig(tenant, pipe)
+				yield* Effect.annotateCurrentSpan(
+					"db.system",
+					resolved.config._tag === "clickhouse" ? "clickhouse" : "tinybird",
+				)
 				const settings = resolveSettings(options)
-				const sqlForClient = normalizeSqlForClickHouseClient(sql)
+				const sqlForClient =
+					resolved.config._tag === "clickhouse" ? normalizeSqlForClickHouseClient(sql) : sql
 				const finalSql = appendSettings(sqlForClient, settings)
 				yield* Effect.annotateCurrentSpan("db.statement", truncateSql(finalSql))
 				if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 				if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
 
-				const client = yield* resolveClient(tenant, pipe)
+				const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
+				const client = getCachedOrCreateClient(cacheKey, resolved.config)
 				const result = yield* Effect.tryPromise({
 					try: () => client.sql(finalSql),
 					catch: (error) => mapTinybirdError(pipe, error),
@@ -531,11 +571,11 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 
 export const __testables = {
 	setClientFactory: (factory: typeof createClient) => {
-		clickHouseClientFactory = factory
+		sqlClientFactory = factory
 		clientCache.clear()
 	},
 	reset: () => {
-		clickHouseClientFactory = createClient
+		sqlClientFactory = createClient
 		clientCache.clear()
 	},
 }
