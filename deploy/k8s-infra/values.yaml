@@ -402,6 +402,37 @@ agent:
         enabled: true
         type: ClusterIP
         annotations: {}
+    # Public Ingress in front of the agent's OTLP HTTP receiver. Use this to
+    # accept OTLP from off-cluster sources (Cloudflare Workers, Vercel apps,
+    # anything outside the EKS cluster). One Ingress with multiple `hosts`
+    # generates a shared TLS cert and routes /v1/{traces,logs,metrics} to the
+    # in-cluster agent Service on its OTLP HTTP port.
+    #
+    # Bring your own ingress controller + cert issuer — this chart doesn't
+    # install them. Defaults assume nginx-ingress + cert-manager.
+    ingress:
+        enabled: false
+        ingressClassName: nginx
+        # cert-manager.io ClusterIssuer name. Set to empty string to skip the
+        # cert-manager annotation (e.g. for ALBs handling TLS via ACM).
+        clusterIssuer: letsencrypt-production
+        # External hostnames the ingress should accept. cert-manager issues a
+        # single cert covering all of them. Add aliases here for backwards-
+        # compatible URLs (e.g. an old `signoz.example.com` redirected to the
+        # new collector).
+        hosts: []
+        # Path prefix to match. OTLP HTTP receivers expose
+        # /v1/{traces,logs,metrics}; the default prefix `/v1/` covers all
+        # three signals while leaving the root unrouted.
+        path: /v1/
+        pathType: Prefix
+        # Free-form annotations merged onto the Ingress (auth, rate-limits,
+        # CORS, body-size, source-range allowlist, etc.). The chart adds
+        # cert-manager.io/cluster-issuer and a 0-byte body-size by default.
+        annotations: {}
+        # Optional override for the TLS Secret name. Empty = derived from the
+        # agent fullname.
+        tlsSecretName: ""
     resources:
         requests:
             cpu: 100m

@@ -5,10 +5,8 @@ import {
 	MapleApi,
 	QueryEngineExecutionError,
 	QueryEngineValidationError,
-	TinybirdAuthError,
 	TinybirdQueryError,
 	TinybirdQuotaExceededError,
-	TinybirdUpstreamUnavailableError,
 	SpanHierarchyResponse,
 	ErrorsByTypeResponse,
 	ErrorsTimeseriesResponse,
@@ -53,26 +51,15 @@ import {
 
 const isTaggedHttpError = (
 	value: unknown,
-): value is
-	| TinybirdQueryError
-	| TinybirdQuotaExceededError
-	| TinybirdUpstreamUnavailableError
-	| TinybirdAuthError =>
-	value instanceof TinybirdQueryError ||
-	value instanceof TinybirdQuotaExceededError ||
-	value instanceof TinybirdUpstreamUnavailableError ||
-	value instanceof TinybirdAuthError
+): value is TinybirdQueryError | TinybirdQuotaExceededError =>
+	value instanceof TinybirdQueryError || value instanceof TinybirdQuotaExceededError
 
 const mapExecError = <A, R>(
 	effect: Effect.Effect<A, unknown, R>,
 	context: string,
 ): Effect.Effect<
 	A,
-	| QueryEngineExecutionError
-	| TinybirdQueryError
-	| TinybirdQuotaExceededError
-	| TinybirdUpstreamUnavailableError
-	| TinybirdAuthError,
+	QueryEngineExecutionError | TinybirdQueryError | TinybirdQuotaExceededError,
 	R
 > =>
 	effect.pipe(

@@ -97,38 +97,40 @@ export const formatBackendError = (input: unknown): FormattedError => {
 			}
 			case "@maple/http/errors/TinybirdQueryError": {
 				const message = stringField(error, "message") ?? "Database query failed"
-				const leakedStatus = message.match(/status[:\s]+(\d{3})/i)
-				if (leakedStatus) {
-					const status = Number(leakedStatus[1])
-					if (status >= 500 && status < 600) {
-						return {
-							title: "Tinybird is temporarily unavailable",
-							description: `The query backend returned ${status}. Retry in a few seconds.`,
-						}
+				const category = stringField(error, "category")
+				const upstreamStatus =
+					numberField(error, "upstreamStatus") ??
+					(message.match(/status[:\s]+(\d{3})/i)?.[1]
+						? Number(message.match(/status[:\s]+(\d{3})/i)?.[1])
+						: undefined)
+				if (
+					category === "auth" ||
+					upstreamStatus === 401 ||
+					upstreamStatus === 403
+				) {
+					return {
+						title: "Tinybird rejected our credentials",
+						description:
+							upstreamStatus === 403
+								? "The configured Tinybird token is missing required permissions."
+								: "The configured Tinybird token is invalid or expired. Update it in settings.",
+					}
+				}
+				if (
+					category === "upstream" ||
+					(upstreamStatus !== undefined && upstreamStatus >= 500 && upstreamStatus < 600)
+				) {
+					return {
+						title: "Tinybird is temporarily unavailable",
+						description:
+							upstreamStatus !== undefined
+								? `The query backend returned ${upstreamStatus}. Retry in a few seconds.`
+								: "The query backend is unreachable. Retry in a few seconds.",
 					}
 				}
 				return {
 					title: "Database query failed",
 					description: message,
-				}
-			}
-			case "@maple/http/errors/TinybirdUpstreamUnavailableError": {
-				const status = numberField(error, "upstreamStatus")
-				return {
-					title: "Tinybird is temporarily unavailable",
-					description: status
-						? `The query backend returned ${status}. Retry in a few seconds.`
-						: "The query backend is unreachable. Retry in a few seconds.",
-				}
-			}
-			case "@maple/http/errors/TinybirdAuthError": {
-				const status = numberField(error, "upstreamStatus")
-				return {
-					title: "Tinybird rejected our credentials",
-					description:
-						status === 403
-							? "The configured Tinybird token is missing required permissions."
-							: "The configured Tinybird token is invalid or expired. Update it in settings.",
 				}
 			}
 			case "@maple/http/errors/UnauthorizedError": {

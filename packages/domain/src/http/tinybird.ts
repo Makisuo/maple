@@ -18,11 +18,21 @@ export class TinybirdQueryResponse extends Schema.Class<TinybirdQueryResponse>("
 	data: Schema.Array(Schema.Unknown),
 }) {}
 
+// `category` discriminates query failures without inflating the per-endpoint
+// error union: every endpoint already declares TinybirdQueryError, so adding a
+// field is free at deploy-time vs. adding new TaggedError classes (each new
+// class on every endpoint costs measurable script-startup CPU on Cloudflare —
+// hit error 10021 at ~7 errors × 30 endpoints).
+//   - "query"        → ClickHouse/SQL error (default)
+//   - "upstream"     → Tinybird/CDN gateway 5xx (transient)
+//   - "auth"         → upstream 401/403 (token misconfigured)
 export class TinybirdQueryError extends Schema.TaggedErrorClass<TinybirdQueryError>()(
 	"@maple/http/errors/TinybirdQueryError",
 	{
 		message: Schema.String,
 		pipe: Schema.String,
+		category: Schema.optional(Schema.Literals(["query", "upstream", "auth"])),
+		upstreamStatus: Schema.optional(Schema.Number),
 	},
 	{ httpApiStatus: 502 },
 ) {}
@@ -35,26 +45,6 @@ export class TinybirdQuotaExceededError extends Schema.TaggedErrorClass<Tinybird
 		setting: Schema.Literals(["max_execution_time", "max_memory_usage", "max_threads"]),
 	},
 	{ httpApiStatus: 429 },
-) {}
-
-export class TinybirdUpstreamUnavailableError extends Schema.TaggedErrorClass<TinybirdUpstreamUnavailableError>()(
-	"@maple/http/errors/TinybirdUpstreamUnavailableError",
-	{
-		message: Schema.String,
-		pipe: Schema.String,
-		upstreamStatus: Schema.optional(Schema.Number),
-	},
-	{ httpApiStatus: 503 },
-) {}
-
-export class TinybirdAuthError extends Schema.TaggedErrorClass<TinybirdAuthError>()(
-	"@maple/http/errors/TinybirdAuthError",
-	{
-		message: Schema.String,
-		pipe: Schema.String,
-		upstreamStatus: Schema.Number,
-	},
-	{ httpApiStatus: 502 },
 ) {}
 
 export class TinybirdApiGroup extends HttpApiGroup.make("tinybird")

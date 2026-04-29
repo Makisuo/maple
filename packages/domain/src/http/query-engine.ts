@@ -2,12 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { QueryEngineExecuteRequest, QueryEngineExecuteResponse, TinybirdDateTime } from "../query-engine"
 import { Authorization } from "./current-tenant"
-import {
-	TinybirdAuthError,
-	TinybirdQueryError,
-	TinybirdQuotaExceededError,
-	TinybirdUpstreamUnavailableError,
-} from "./tinybird"
+import { TinybirdQueryError, TinybirdQuotaExceededError } from "./tinybird"
 
 // ---------------------------------------------------------------------------
 // Dedicated endpoint schemas
@@ -845,469 +840,255 @@ export class QueryEngineTimeoutError extends Schema.TaggedErrorClass<QueryEngine
 	{ httpApiStatus: 504 },
 ) {}
 
+// Shared arrays — passing the same reference to every endpoint avoids
+// constructing dozens of identical inline literals at module load (each one
+// drives Effect's HttpApi to build a Schema union internally) and keeps script-
+// startup CPU within Cloudflare Workers' 400ms validation budget (error 10021).
+const queryEngineEndpointErrors = [
+	QueryEngineExecutionError,
+	QueryEngineTimeoutError,
+	TinybirdQueryError,
+	TinybirdQuotaExceededError,
+] as const
+
+const validatedQueryEndpointErrors = [
+	QueryEngineValidationError,
+	QueryEngineExecutionError,
+	QueryEngineTimeoutError,
+	TinybirdQueryError,
+	TinybirdQuotaExceededError,
+] as const
+
 export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 	.add(
 		HttpApiEndpoint.post("execute", "/execute", {
 			payload: QueryEngineExecuteRequest,
 			success: QueryEngineExecuteResponse,
-			error: [
-				QueryEngineValidationError,
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: validatedQueryEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("spanHierarchy", "/span-hierarchy", {
 			payload: SpanHierarchyRequest,
 			success: SpanHierarchyResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("errorsByType", "/errors-by-type", {
 			payload: ErrorsByTypeRequest,
 			success: ErrorsByTypeResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("errorsTimeseries", "/errors-timeseries", {
 			payload: ErrorsTimeseriesRequest,
 			success: ErrorsTimeseriesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("errorsSummary", "/errors-summary", {
 			payload: ErrorsSummaryRequest,
 			success: ErrorsSummaryResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("errorDetailTraces", "/error-detail-traces", {
 			payload: ErrorDetailTracesRequest,
 			success: ErrorDetailTracesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("errorRateByService", "/error-rate-by-service", {
 			payload: ErrorRateByServiceRequest,
 			success: ErrorRateByServiceResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("serviceOverview", "/service-overview", {
 			payload: ServiceOverviewRequest,
 			success: ServiceOverviewResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("serviceApdex", "/service-apdex", {
 			payload: ServiceApdexRequest,
 			success: ServiceApdexResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("serviceReleases", "/service-releases", {
 			payload: ServiceReleasesRequest,
 			success: ServiceReleasesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("serviceDependencies", "/service-dependencies", {
 			payload: ServiceDependenciesRequest,
 			success: ServiceDependenciesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("serviceWorkloads", "/service-workloads", {
 			payload: ServiceWorkloadsRequest,
 			success: ServiceWorkloadsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("serviceUsage", "/service-usage", {
 			payload: ServiceUsageRequest,
 			success: ServiceUsageResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("listLogs", "/list-logs", {
 			payload: ListLogsRequest,
 			success: ListLogsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("listMetrics", "/list-metrics", {
 			payload: ListMetricsRequest,
 			success: ListMetricsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("metricsSummary", "/metrics-summary", {
 			payload: MetricsSummaryRequest,
 			success: MetricsSummaryResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("executeQueryBuilder", "/execute-query-builder", {
 			payload: ExecuteQueryBuilderRequest,
 			success: ExecuteQueryBuilderResponse,
-			error: [
-				QueryEngineValidationError,
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: validatedQueryEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("listHosts", "/list-hosts", {
 			payload: ListHostsRequest,
 			success: ListHostsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("hostDetailSummary", "/host-detail-summary", {
 			payload: HostDetailSummaryRequest,
 			success: HostDetailSummaryResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("hostInfraTimeseries", "/host-infra-timeseries", {
 			payload: HostInfraTimeseriesRequest,
 			success: HostInfraTimeseriesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("fleetUtilizationTimeseries", "/fleet-utilization-timeseries", {
 			payload: FleetUtilizationTimeseriesRequest,
 			success: FleetUtilizationTimeseriesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("listPods", "/list-pods", {
 			payload: ListPodsRequest,
 			success: ListPodsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("podDetailSummary", "/pod-detail-summary", {
 			payload: PodDetailSummaryRequest,
 			success: PodDetailSummaryResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("podInfraTimeseries", "/pod-infra-timeseries", {
 			payload: PodInfraTimeseriesRequest,
 			success: PodInfraTimeseriesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("listNodes", "/list-nodes", {
 			payload: ListNodesRequest,
 			success: ListNodesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("nodeDetailSummary", "/node-detail-summary", {
 			payload: NodeDetailSummaryRequest,
 			success: NodeDetailSummaryResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("nodeInfraTimeseries", "/node-infra-timeseries", {
 			payload: NodeInfraTimeseriesRequest,
 			success: NodeInfraTimeseriesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("listWorkloads", "/list-workloads", {
 			payload: ListWorkloadsRequest,
 			success: ListWorkloadsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("workloadDetailSummary", "/workload-detail-summary", {
 			payload: WorkloadDetailSummaryRequest,
 			success: WorkloadDetailSummaryResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("workloadInfraTimeseries", "/workload-infra-timeseries", {
 			payload: WorkloadInfraTimeseriesRequest,
 			success: WorkloadInfraTimeseriesResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("podFacets", "/pod-facets", {
 			payload: PodFacetsRequest,
 			success: PodFacetsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("nodeFacets", "/node-facets", {
 			payload: NodeFacetsRequest,
 			success: NodeFacetsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("workloadFacets", "/workload-facets", {
 			payload: WorkloadFacetsRequest,
 			success: WorkloadFacetsResponse,
-			error: [
-				QueryEngineExecutionError,
-				QueryEngineTimeoutError,
-				TinybirdQueryError,
-				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
-			],
+			error: queryEngineEndpointErrors,
 		}),
 	)
 	.prefix("/api/query-engine")

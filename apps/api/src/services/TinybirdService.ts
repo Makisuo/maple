@@ -1,10 +1,8 @@
 import {
-	TinybirdAuthError,
 	TinybirdQueryError,
 	type TinybirdQueryRequest,
 	TinybirdQueryResponse,
 	TinybirdQuotaExceededError,
-	TinybirdUpstreamUnavailableError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Tinybird } from "@tinybirdco/sdk"
@@ -34,11 +32,7 @@ interface CachedClient {
 	expiresAt: number
 }
 
-export type TinybirdSqlError =
-	| TinybirdQueryError
-	| TinybirdQuotaExceededError
-	| TinybirdUpstreamUnavailableError
-	| TinybirdAuthError
+export type TinybirdSqlError = TinybirdQueryError | TinybirdQuotaExceededError
 
 export interface TinybirdServiceShape {
 	readonly query: (
@@ -117,14 +111,19 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				}
 				const upstreamStatus = extractUpstreamStatus(rawMessage)
 				if (upstreamStatus === 401 || upstreamStatus === 403) {
-					return new TinybirdAuthError({ pipe, message, upstreamStatus })
+					return new TinybirdQueryError({ pipe, message, category: "auth", upstreamStatus })
 				}
 				// Any upstream 5xx (502/503/504, Cloudflare 520-530, etc.) is treated
 				// as a transient infrastructure failure rather than a user query bug.
 				if (upstreamStatus !== undefined && upstreamStatus >= 500 && upstreamStatus < 600) {
-					return new TinybirdUpstreamUnavailableError({ pipe, message, upstreamStatus })
+					return new TinybirdQueryError({
+						pipe,
+						message,
+						category: "upstream",
+						upstreamStatus,
+					})
 				}
-				return new TinybirdQueryError({ pipe, message })
+				return new TinybirdQueryError({ pipe, message, category: "query" })
 			}
 
 			const getCachedOrCreateClient = (orgId: OrgId | "__managed__", host: string, token: string) => {

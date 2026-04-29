@@ -65,22 +65,24 @@ describe("formatBackendError", () => {
 		expect(result.description).not.toContain("spanHierarchy")
 	})
 
-	it("formats TinybirdUpstreamUnavailableError with status", () => {
+	it("formats TinybirdQueryError with upstream category as transient", () => {
 		const result = formatBackendError({
-			_tag: "@maple/http/errors/TinybirdUpstreamUnavailableError",
+			_tag: "@maple/http/errors/TinybirdQueryError",
 			message: "Request failed with status 503",
 			pipe: "listLogs",
+			category: "upstream",
 			upstreamStatus: 503,
 		})
 		expect(result.title).toBe("Tinybird is temporarily unavailable")
 		expect(result.description).toContain("503")
 	})
 
-	it("formats TinybirdAuthError 401", () => {
+	it("formats TinybirdQueryError with auth category as credentials issue", () => {
 		const result = formatBackendError({
-			_tag: "@maple/http/errors/TinybirdAuthError",
+			_tag: "@maple/http/errors/TinybirdQueryError",
 			message: "Request failed with status 401",
 			pipe: "listLogs",
+			category: "auth",
 			upstreamStatus: 401,
 		})
 		expect(result.title).toBe("Tinybird rejected our credentials")

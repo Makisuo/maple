@@ -62,10 +62,8 @@ import {
 	type AlertDestinationId,
 	type AlertIncidentId,
 	QueryEngineExecutionError,
-	TinybirdAuthError,
 	TinybirdQueryError,
 	TinybirdQuotaExceededError,
-	TinybirdUpstreamUnavailableError,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
 	RoleName,
@@ -862,8 +860,6 @@ export interface AlertsServiceShape {
 		| AlertDeliveryError
 		| TinybirdQueryError
 		| TinybirdQuotaExceededError
-		| TinybirdUpstreamUnavailableError
-		| TinybirdAuthError
 	>
 	readonly listIncidents: (orgId: OrgId) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
 	readonly listRuleChecks: (
@@ -1169,10 +1165,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 		// Collapse alert-domain semantic errors (validation/execution/timeout from
 		// the query engine layer) into AlertValidation/AlertDelivery, but let the
-		// Tinybird tagged errors (TinybirdQueryError, TinybirdQuotaExceededError,
-		// TinybirdUpstreamUnavailableError, TinybirdAuthError) propagate so the
-		// client receives the tag + structured fields (upstreamStatus, setting,
-		// pipe). formatBackendError on the frontend handles them.
+		// Tinybird tagged errors (TinybirdQueryError + TinybirdQuotaExceededError)
+		// propagate so the client receives the tag + structured fields
+		// (upstreamStatus, setting, pipe). formatBackendError on the frontend
+		// handles them.
 		const catchQueryEngineErrors = <A, R>(
 			effect: Effect.Effect<
 				A,
@@ -1180,9 +1176,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				| QueryEngineExecutionError
 				| QueryEngineTimeoutError
 				| TinybirdQueryError
-				| TinybirdQuotaExceededError
-				| TinybirdUpstreamUnavailableError
-				| TinybirdAuthError,
+				| TinybirdQuotaExceededError,
 				R
 			>,
 		) =>
@@ -1213,8 +1207,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			| AlertDeliveryError
 			| TinybirdQueryError
 			| TinybirdQuotaExceededError
-			| TinybirdUpstreamUnavailableError
-			| TinybirdAuthError
 		> {
 			const endMs = now()
 			const startMs = endMs - rule.windowMinutes * 60_000
@@ -3320,25 +3312,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 												? "evaluation"
 												: error instanceof TinybirdQuotaExceededError
 													? "tinybird_quota"
-													: error instanceof TinybirdUpstreamUnavailableError
-														? "tinybird_unavailable"
-														: error instanceof TinybirdAuthError
-															? "tinybird_auth"
-															: error instanceof TinybirdQueryError
-																? "tinybird_query"
-																: "unknown"
+													: error instanceof TinybirdQueryError
+														? `tinybird_${error.category ?? "query"}`
+														: "unknown"
 									const upstreamStatus =
-										error instanceof TinybirdUpstreamUnavailableError ||
-										error instanceof TinybirdAuthError
-											? error.upstreamStatus
-											: undefined
+										error instanceof TinybirdQueryError ? error.upstreamStatus : undefined
 									const quotaSetting =
 										error instanceof TinybirdQuotaExceededError ? error.setting : undefined
 									const pipe =
 										error instanceof TinybirdQueryError ||
-										error instanceof TinybirdQuotaExceededError ||
-										error instanceof TinybirdUpstreamUnavailableError ||
-										error instanceof TinybirdAuthError
+										error instanceof TinybirdQuotaExceededError
 											? error.pipe
 											: undefined
 									yield* Effect.logError("Alert rule evaluation failed").pipe(

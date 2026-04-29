@@ -11,12 +11,7 @@ import {
 	RoleName,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
-import {
-	TinybirdAuthError,
-	TinybirdQueryError,
-	TinybirdQuotaExceededError,
-	TinybirdUpstreamUnavailableError,
-} from "./tinybird"
+import { TinybirdQueryError, TinybirdQuotaExceededError } from "./tinybird"
 
 export const AlertDestinationType = Schema.Literals([
 	"slack",
@@ -768,8 +763,6 @@ export class AlertsApiGroup extends HttpApiGroup.make("alerts")
 				AlertDeliveryError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
-				TinybirdUpstreamUnavailableError,
-				TinybirdAuthError,
 			],
 		}),
 	)
