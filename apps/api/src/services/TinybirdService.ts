@@ -5,7 +5,7 @@ import {
 	TinybirdQuotaExceededError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
-import { Tinybird } from "@tinybirdco/sdk"
+import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Effect, Layer, Option, Redacted, Context } from "effect"
 import { Env } from "./Env"
 import type { TenantContext } from "./AuthService"
@@ -27,9 +27,18 @@ export type SqlQueryOptions = {
 const CLIENT_CACHE_TTL_MS = 30_000
 interface CachedClient {
 	client: SqlClient
-	host: string
-	token: string
+	url: string
+	username: string
+	password: string
+	database: string
 	expiresAt: number
+}
+
+interface SqlClientConfig {
+	readonly url: string
+	readonly username: string
+	readonly password: string
+	readonly database: string
 }
 
 export type TinybirdSqlError = TinybirdQueryError | TinybirdQuotaExceededError
@@ -59,18 +68,32 @@ interface SqlClient {
 	readonly sql: (sql: string) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
 }
 
-const createClient = (baseUrl: string, token: string): SqlClient => {
-	const tb = new Tinybird({
-		baseUrl,
-		token,
-		datasources: {},
-		pipes: {},
-		devMode: false,
+const createClient = (config: SqlClientConfig): SqlClient => {
+	const client = createClickHouseClient({
+		url: config.url,
+		username: config.username,
+		password: config.password,
+		database: config.database,
 	})
-	return { sql: (sql: string) => tb.sql(sql) }
+	return {
+		sql: async (sql: string) => {
+			const resultSet = await client.query({
+				query: sql,
+				format: "JSONEachRow",
+			})
+			const data = await resultSet.json<Record<string, unknown>>()
+			return { data }
+		},
+	}
 }
 
-let tinybirdClientFactory: typeof createClient = createClient
+let clickHouseClientFactory: typeof createClient = createClient
+
+const normalizeSqlForClickHouseClient = (sql: string): string =>
+	sql
+		.replace(/;\s*$/, "")
+		.replace(/\s+FORMAT\s+(?:JSONEachRow|JSON)\s*$/i, "")
+		.replace(/;\s*$/, "")
 
 export class TinybirdService extends Context.Service<TinybirdService, TinybirdServiceShape>()(
 	"TinybirdService",
@@ -83,7 +106,10 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				let cleaned = raw
 				const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
 				if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
-				cleaned = cleaned.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+				cleaned = cleaned
+					.replace(/<[^>]+>/g, " ")
+					.replace(/\s+/g, " ")
+					.trim()
 				if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
 				return cleaned || raw.slice(0, 200)
 			}
@@ -126,18 +152,25 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				return new TinybirdQueryError({ pipe, message, category: "query" })
 			}
 
-			const getCachedOrCreateClient = (orgId: OrgId | "__managed__", host: string, token: string) => {
+			const getCachedOrCreateClient = (orgId: OrgId | "__managed__", config: SqlClientConfig) => {
 				const now = Date.now()
 				const cached = clientCache.get(orgId)
-				if (cached && cached.host === host && cached.token === token && cached.expiresAt > now) {
+				if (
+					cached &&
+					cached.url === config.url &&
+					cached.username === config.username &&
+					cached.password === config.password &&
+					cached.database === config.database &&
+					cached.expiresAt > now
+				) {
 					return cached.client
 				}
-				const client = tinybirdClientFactory(host, token)
-				clientCache.set(orgId, { client, host, token, expiresAt: now + CLIENT_CACHE_TTL_MS })
+				const client = clickHouseClientFactory(config)
+				clientCache.set(orgId, { client, ...config, expiresAt: now + CLIENT_CACHE_TTL_MS })
 				return client
 			}
 
-			const resolveHostToken = Effect.fn("TinybirdService.resolveHostToken")(function* (
+			const resolveTinybirdHostToken = Effect.fn("TinybirdService.resolveTinybirdHostToken")(function* (
 				tenant: TenantContext,
 				label: string,
 			) {
@@ -162,6 +195,42 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				}
 			})
 
+			const resolveSqlConfig = Effect.fn("TinybirdService.resolveSqlConfig")(function* (
+				tenant: TenantContext,
+				label: string,
+			) {
+				const override = yield* orgTinybirdSettings
+					.resolveRuntimeConfig(tenant.orgId)
+					.pipe(Effect.mapError((error) => toTinybirdQueryError(label, error)))
+
+				if (Option.isSome(override)) {
+					yield* Effect.annotateCurrentSpan("clientSource", "org_override")
+					return {
+						config: {
+							url: override.value.host,
+							username: env.CLICKHOUSE_USER,
+							password: override.value.token,
+							database: env.CLICKHOUSE_DATABASE,
+						},
+						source: "org_override" as const,
+					}
+				}
+
+				yield* Effect.annotateCurrentSpan("clientSource", "managed")
+				return {
+					config: {
+						url: Option.getOrElse(env.CLICKHOUSE_URL, () => env.TINYBIRD_HOST),
+						username: env.CLICKHOUSE_USER,
+						password: Option.match(env.CLICKHOUSE_PASSWORD, {
+							onNone: () => Redacted.value(env.TINYBIRD_TOKEN),
+							onSome: Redacted.value,
+						}),
+						database: env.CLICKHOUSE_DATABASE,
+					},
+					source: "managed" as const,
+				}
+			})
+
 			const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
 				tenant: TenantContext,
 				pipe: string,
@@ -169,9 +238,9 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				yield* Effect.annotateCurrentSpan("pipe", pipe)
 				yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 
-				const resolved = yield* resolveHostToken(tenant, pipe)
+				const resolved = yield* resolveSqlConfig(tenant, pipe)
 				const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
-				return getCachedOrCreateClient(cacheKey, resolved.host, resolved.token)
+				return getCachedOrCreateClient(cacheKey, resolved.config)
 			})
 
 			const truncateSql = (s: string, maxLen = 1000) =>
@@ -195,7 +264,8 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				}
 
 				const settings = resolveSettings(options)
-				const finalSql = appendSettings(sql, settings)
+				const sqlForClient = normalizeSqlForClickHouseClient(sql)
+				const finalSql = appendSettings(sqlForClient, settings)
 				yield* Effect.annotateCurrentSpan("db.statement", truncateSql(finalSql))
 				if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 				if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
@@ -286,7 +356,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				if (rows.length === 0) return
 
 				const label = `ingest:${datasource}`
-				const resolved = yield* resolveHostToken(tenant, label)
+				const resolved = yield* resolveTinybirdHostToken(tenant, label)
 				const ndjson = rows.map((row) => JSON.stringify(row)).join("\n")
 				const url = `${resolved.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`
 
@@ -344,11 +414,11 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 
 export const __testables = {
 	setClientFactory: (factory: typeof createClient) => {
-		tinybirdClientFactory = factory
+		clickHouseClientFactory = factory
 		clientCache.clear()
 	},
 	reset: () => {
-		tinybirdClientFactory = createClient
+		clickHouseClientFactory = createClient
 		clientCache.clear()
 	},
 }
