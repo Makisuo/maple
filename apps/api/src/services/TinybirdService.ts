@@ -119,14 +119,9 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				if (upstreamStatus === 401 || upstreamStatus === 403) {
 					return new TinybirdAuthError({ pipe, message, upstreamStatus })
 				}
-				if (
-					upstreamStatus !== undefined &&
-					(upstreamStatus === 502 ||
-						upstreamStatus === 503 ||
-						upstreamStatus === 504 ||
-						upstreamStatus === 522 ||
-						upstreamStatus === 524)
-				) {
+				// Any upstream 5xx (502/503/504, Cloudflare 520-530, etc.) is treated
+				// as a transient infrastructure failure rather than a user query bug.
+				if (upstreamStatus !== undefined && upstreamStatus >= 500 && upstreamStatus < 600) {
 					return new TinybirdUpstreamUnavailableError({ pipe, message, upstreamStatus })
 				}
 				return new TinybirdQueryError({ pipe, message })

@@ -54,15 +54,15 @@ describe("formatBackendError", () => {
 		expect(result.description).toContain("Syntax error")
 	})
 
-	it("formats TinybirdQueryError", () => {
+	it("formats TinybirdQueryError without leaking the internal pipe label", () => {
 		const result = formatBackendError({
 			_tag: "@maple/http/errors/TinybirdQueryError",
-			message: "DB::Exception: error",
+			message: "DB::Exception: syntax error",
 			pipe: "spanHierarchy",
 		})
 		expect(result.title).toBe("Database query failed")
-		expect(result.description).toContain("DB::Exception")
-		expect(result.description).toContain("spanHierarchy")
+		expect(result.description).toBe("DB::Exception: syntax error")
+		expect(result.description).not.toContain("spanHierarchy")
 	})
 
 	it("formats TinybirdUpstreamUnavailableError with status", () => {
@@ -87,7 +87,27 @@ describe("formatBackendError", () => {
 		expect(result.description).toContain("invalid or expired")
 	})
 
-	it("strips raw nginx HTML out of leaked messages", () => {
+	it("rewrites TinybirdQueryError when message leaks a 5xx status", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/TinybirdQueryError",
+			message: "Request failed with status 521: error code: 521",
+			pipe: "sqlQuery",
+		})
+		expect(result.title).toBe("Tinybird is temporarily unavailable")
+		expect(result.description).toContain("521")
+	})
+
+	it("does not leak the (sqlQuery) pipe suffix", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/TinybirdQueryError",
+			message: "DB::Exception: out of memory",
+			pipe: "sqlQuery",
+		})
+		expect(result.description).not.toContain("sqlQuery")
+		expect(result.description).toBe("DB::Exception: out of memory")
+	})
+
+	it("strips raw nginx HTML and converts leaked 503 to a friendly message", () => {
 		const result = formatBackendError({
 			_tag: "@maple/http/errors/TinybirdQueryError",
 			message:
@@ -96,7 +116,8 @@ describe("formatBackendError", () => {
 		})
 		expect(result.description).not.toContain("<html>")
 		expect(result.description).not.toContain("<title>")
-		expect(result.description).toMatch(/Request failed with status 503/)
+		expect(result.title).toBe("Tinybird is temporarily unavailable")
+		expect(result.description).toContain("503")
 	})
 
 	it("formats UnauthorizedError", () => {

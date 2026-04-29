@@ -97,10 +97,19 @@ export const formatBackendError = (input: unknown): FormattedError => {
 			}
 			case "@maple/http/errors/TinybirdQueryError": {
 				const message = stringField(error, "message") ?? "Database query failed"
-				const pipe = stringField(error, "pipe")
+				const leakedStatus = message.match(/status[:\s]+(\d{3})/i)
+				if (leakedStatus) {
+					const status = Number(leakedStatus[1])
+					if (status >= 500 && status < 600) {
+						return {
+							title: "Tinybird is temporarily unavailable",
+							description: `The query backend returned ${status}. Retry in a few seconds.`,
+						}
+					}
+				}
 				return {
 					title: "Database query failed",
-					description: pipe ? `${message} (${pipe})` : message,
+					description: message,
 				}
 			}
 			case "@maple/http/errors/TinybirdUpstreamUnavailableError": {
