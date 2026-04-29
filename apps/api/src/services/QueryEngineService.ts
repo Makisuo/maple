@@ -12,8 +12,10 @@ import {
 	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
+	TinybirdAuthError,
 	TinybirdQueryError,
 	TinybirdQuotaExceededError,
+	TinybirdUpstreamUnavailableError,
 } from "@maple/domain/http"
 import { Array as Arr, Duration, Effect, Layer, Match, Metric, Option, Result, Context } from "effect"
 import type { TenantContext } from "./AuthService"
@@ -60,6 +62,8 @@ export type QueryEngineDirectError =
 	| QueryEngineTimeoutError
 	| TinybirdQueryError
 	| TinybirdQuotaExceededError
+	| TinybirdUpstreamUnavailableError
+	| TinybirdAuthError
 
 export type QueryEngineRouteError = QueryEngineValidationError | QueryEngineDirectError
 
@@ -590,9 +594,9 @@ const validateEvaluate = Effect.fn("QueryEngineService.validateEvaluate")(functi
 })
 
 const mapTinybirdError = <A, R>(
-	effect: Effect.Effect<A, TinybirdQueryError | TinybirdQuotaExceededError, R>,
+	effect: Effect.Effect<A, TinybirdQueryError | TinybirdQuotaExceededError | TinybirdUpstreamUnavailableError | TinybirdAuthError, R>,
 	context: string,
-): Effect.Effect<A, TinybirdQueryError | TinybirdQuotaExceededError, R> =>
+): Effect.Effect<A, TinybirdQueryError | TinybirdQuotaExceededError | TinybirdUpstreamUnavailableError | TinybirdAuthError, R> =>
 	effect.pipe(
 		Effect.tapError((error) =>
 			Effect.annotateCurrentSpan({
@@ -614,7 +618,7 @@ const executeCHQuery = <Output extends Record<string, any>, Params extends Recor
 	params: Params,
 	context: string,
 	profile: QueryProfileName = "aggregation",
-): Effect.Effect<ReadonlyArray<Output>, TinybirdQueryError | TinybirdQuotaExceededError> => {
+): Effect.Effect<ReadonlyArray<Output>, TinybirdQueryError | TinybirdQuotaExceededError | TinybirdUpstreamUnavailableError | TinybirdAuthError> => {
 	const compiled = CH.compile(query, params)
 	return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql, { profile }), context).pipe(
 		Effect.map((rows) => compiled.castRows(rows)),
@@ -637,7 +641,7 @@ const executeCHUnionQuery = <Output extends Record<string, any>, Params extends 
 	params: Params,
 	context: string,
 	profile: QueryProfileName = "aggregation",
-): Effect.Effect<ReadonlyArray<Output>, TinybirdQueryError | TinybirdQuotaExceededError> => {
+): Effect.Effect<ReadonlyArray<Output>, TinybirdQueryError | TinybirdQuotaExceededError | TinybirdUpstreamUnavailableError | TinybirdAuthError> => {
 	const compiled = CH.compileUnion(query, params)
 	return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql, { profile }), context).pipe(
 		Effect.map((rows) => compiled.castRows(rows)),
@@ -859,6 +863,8 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 		| QueryEngineExecutionError
 		| TinybirdQueryError
 		| TinybirdQuotaExceededError
+		| TinybirdUpstreamUnavailableError
+		| TinybirdAuthError
 	> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
@@ -1526,6 +1532,8 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
 		| QueryEngineExecutionError
 		| TinybirdQueryError
 		| TinybirdQuotaExceededError
+		| TinybirdUpstreamUnavailableError
+		| TinybirdAuthError
 	> {
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		yield* Effect.annotateCurrentSpan("query.source", request.query.source)

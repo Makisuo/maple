@@ -65,6 +65,40 @@ describe("formatBackendError", () => {
 		expect(result.description).toContain("spanHierarchy")
 	})
 
+	it("formats TinybirdUpstreamUnavailableError with status", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/TinybirdUpstreamUnavailableError",
+			message: "Request failed with status 503",
+			pipe: "listLogs",
+			upstreamStatus: 503,
+		})
+		expect(result.title).toBe("Tinybird is temporarily unavailable")
+		expect(result.description).toContain("503")
+	})
+
+	it("formats TinybirdAuthError 401", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/TinybirdAuthError",
+			message: "Request failed with status 401",
+			pipe: "listLogs",
+			upstreamStatus: 401,
+		})
+		expect(result.title).toBe("Tinybird rejected our credentials")
+		expect(result.description).toContain("invalid or expired")
+	})
+
+	it("strips raw nginx HTML out of leaked messages", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/TinybirdQueryError",
+			message:
+				"Request failed with status 503: <html><head><title>503 Service Temporarily Unavailable</title></head><body><center><h1>503 Service Temporarily Unavailable</h1></center><hr><center>nginx</center></body></html>",
+			pipe: "sqlQuery",
+		})
+		expect(result.description).not.toContain("<html>")
+		expect(result.description).not.toContain("<title>")
+		expect(result.description).toMatch(/Request failed with status 503/)
+	})
+
 	it("formats UnauthorizedError", () => {
 		const result = formatBackendError({
 			_tag: "@maple/http/errors/UnauthorizedError",

@@ -15,10 +15,19 @@ const QUOTA_DESCRIPTIONS: Record<string, string> = {
 const hasTag = (value: unknown): value is { _tag: string; [key: string]: unknown } =>
 	typeof value === "object" && value !== null && "_tag" in value && typeof (value as { _tag: unknown })._tag === "string"
 
+const sanitizeMessage = (raw: string): string => {
+	let cleaned = raw
+	const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
+	if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
+	cleaned = cleaned.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+	if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
+	return cleaned || raw.slice(0, 200)
+}
+
 const stringField = (value: unknown, key: string): string | undefined => {
 	if (typeof value === "object" && value !== null && key in value) {
 		const v = (value as Record<string, unknown>)[key]
-		if (typeof v === "string") return v
+		if (typeof v === "string") return sanitizeMessage(v)
 	}
 	return undefined
 }
@@ -27,6 +36,14 @@ const stringArrayField = (value: unknown, key: string): ReadonlyArray<string> | 
 	if (typeof value === "object" && value !== null && key in value) {
 		const v = (value as Record<string, unknown>)[key]
 		if (Array.isArray(v)) return v.filter((item): item is string => typeof item === "string")
+	}
+	return undefined
+}
+
+const numberField = (value: unknown, key: string): number | undefined => {
+	if (typeof value === "object" && value !== null && key in value) {
+		const v = (value as Record<string, unknown>)[key]
+		if (typeof v === "number") return v
 	}
 	return undefined
 }
@@ -84,6 +101,25 @@ export const formatBackendError = (input: unknown): FormattedError => {
 				return {
 					title: "Database query failed",
 					description: pipe ? `${message} (${pipe})` : message,
+				}
+			}
+			case "@maple/http/errors/TinybirdUpstreamUnavailableError": {
+				const status = numberField(error, "upstreamStatus")
+				return {
+					title: "Tinybird is temporarily unavailable",
+					description: status
+						? `The query backend returned ${status}. Retry in a few seconds.`
+						: "The query backend is unreachable. Retry in a few seconds.",
+				}
+			}
+			case "@maple/http/errors/TinybirdAuthError": {
+				const status = numberField(error, "upstreamStatus")
+				return {
+					title: "Tinybird rejected our credentials",
+					description:
+						status === 403
+							? "The configured Tinybird token is missing required permissions."
+							: "The configured Tinybird token is invalid or expired. Update it in settings.",
 				}
 			}
 			case "@maple/http/errors/UnauthorizedError": {

@@ -2,7 +2,12 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { QueryEngineExecuteRequest, QueryEngineExecuteResponse, TinybirdDateTime } from "../query-engine"
 import { Authorization } from "./current-tenant"
-import { TinybirdQueryError, TinybirdQuotaExceededError } from "./tinybird"
+import {
+	TinybirdAuthError,
+	TinybirdQueryError,
+	TinybirdQuotaExceededError,
+	TinybirdUpstreamUnavailableError,
+} from "./tinybird"
 
 // ---------------------------------------------------------------------------
 // Dedicated endpoint schemas
@@ -851,6 +856,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -863,6 +870,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -875,6 +884,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -887,6 +898,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -899,6 +912,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -911,6 +926,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -923,6 +940,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -935,6 +954,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -947,6 +968,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -959,6 +982,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -971,6 +996,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -983,6 +1010,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -995,6 +1024,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1007,6 +1038,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1019,6 +1052,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1031,6 +1066,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1044,6 +1081,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1056,6 +1095,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1068,6 +1109,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1080,6 +1123,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1092,6 +1137,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1104,6 +1151,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1116,6 +1165,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1128,6 +1179,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1140,6 +1193,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1152,6 +1207,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1164,6 +1221,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1176,6 +1235,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1188,6 +1249,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1200,6 +1263,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1212,6 +1277,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1224,6 +1291,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)
@@ -1236,6 +1305,8 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 				QueryEngineTimeoutError,
 				TinybirdQueryError,
 				TinybirdQuotaExceededError,
+				TinybirdUpstreamUnavailableError,
+				TinybirdAuthError,
 			],
 		}),
 	)

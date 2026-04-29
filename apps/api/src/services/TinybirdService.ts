@@ -1,8 +1,10 @@
 import {
+	TinybirdAuthError,
 	TinybirdQueryError,
 	type TinybirdQueryRequest,
 	TinybirdQueryResponse,
 	TinybirdQuotaExceededError,
+	TinybirdUpstreamUnavailableError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Tinybird } from "@tinybirdco/sdk"
@@ -32,20 +34,23 @@ interface CachedClient {
 	expiresAt: number
 }
 
+export type TinybirdSqlError =
+	| TinybirdQueryError
+	| TinybirdQuotaExceededError
+	| TinybirdUpstreamUnavailableError
+	| TinybirdAuthError
+
 export interface TinybirdServiceShape {
 	readonly query: (
 		tenant: TenantContext,
 		payload: TinybirdQueryRequest,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<TinybirdQueryResponse, TinybirdQueryError | TinybirdQuotaExceededError>
+	) => Effect.Effect<TinybirdQueryResponse, TinybirdSqlError>
 	readonly sqlQuery: (
 		tenant: TenantContext,
 		sql: string,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<
-		ReadonlyArray<Record<string, unknown>>,
-		TinybirdQueryError | TinybirdQuotaExceededError
-	>
+	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, TinybirdSqlError>
 	readonly ingest: <T>(
 		tenant: TenantContext,
 		datasource: string,
@@ -80,17 +85,49 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 			const env = yield* Env
 			const orgTinybirdSettings = yield* OrgTinybirdSettingsService
 
+			const cleanErrorMessage = (raw: string): string => {
+				let cleaned = raw
+				const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
+				if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
+				cleaned = cleaned.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+				if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
+				return cleaned || raw.slice(0, 200)
+			}
+
+			const extractUpstreamStatus = (message: string): number | undefined => {
+				const match = message.match(/status[:\s]+(\d{3})/i)
+				if (match) return Number(match[1])
+				return undefined
+			}
+
 			const toTinybirdQueryError = (pipe: string, error: unknown) =>
 				new TinybirdQueryError({
-					message: error instanceof Error ? error.message : "Tinybird query failed",
+					message: cleanErrorMessage(
+						error instanceof Error ? error.message : "Tinybird query failed",
+					),
 					pipe,
 				})
 
 			const mapTinybirdError = (pipe: string, error: unknown) => {
-				const message = error instanceof Error ? error.message : "Tinybird query failed"
-				const setting = detectQuotaSetting(message)
+				const rawMessage = error instanceof Error ? error.message : "Tinybird query failed"
+				const message = cleanErrorMessage(rawMessage)
+				const setting = detectQuotaSetting(rawMessage)
 				if (setting) {
 					return new TinybirdQuotaExceededError({ pipe, message, setting })
+				}
+				const upstreamStatus = extractUpstreamStatus(rawMessage)
+				if (upstreamStatus === 401 || upstreamStatus === 403) {
+					return new TinybirdAuthError({ pipe, message, upstreamStatus })
+				}
+				if (
+					upstreamStatus !== undefined &&
+					(upstreamStatus === 502 ||
+						upstreamStatus === 503 ||
+						upstreamStatus === 504 ||
+						upstreamStatus === 522 ||
+						upstreamStatus === 524)
+				) {
+					return new TinybirdUpstreamUnavailableError({ pipe, message, upstreamStatus })
 				}
 				return new TinybirdQueryError({ pipe, message })
 			}

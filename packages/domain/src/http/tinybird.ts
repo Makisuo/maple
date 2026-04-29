@@ -37,6 +37,26 @@ export class TinybirdQuotaExceededError extends Schema.TaggedErrorClass<Tinybird
 	{ httpApiStatus: 429 },
 ) {}
 
+export class TinybirdUpstreamUnavailableError extends Schema.TaggedErrorClass<TinybirdUpstreamUnavailableError>()(
+	"@maple/http/errors/TinybirdUpstreamUnavailableError",
+	{
+		message: Schema.String,
+		pipe: Schema.String,
+		upstreamStatus: Schema.optional(Schema.Number),
+	},
+	{ httpApiStatus: 503 },
+) {}
+
+export class TinybirdAuthError extends Schema.TaggedErrorClass<TinybirdAuthError>()(
+	"@maple/http/errors/TinybirdAuthError",
+	{
+		message: Schema.String,
+		pipe: Schema.String,
+		upstreamStatus: Schema.Number,
+	},
+	{ httpApiStatus: 502 },
+) {}
+
 export class TinybirdApiGroup extends HttpApiGroup.make("tinybird")
 	.add(
 		HttpApiEndpoint.post("query", "/query", {

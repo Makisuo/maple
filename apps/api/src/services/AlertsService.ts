@@ -62,8 +62,10 @@ import {
 	type AlertDestinationId,
 	type AlertIncidentId,
 	QueryEngineExecutionError,
+	TinybirdAuthError,
 	TinybirdQueryError,
 	TinybirdQuotaExceededError,
+	TinybirdUpstreamUnavailableError,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
 	RoleName,
@@ -858,6 +860,10 @@ export interface AlertsServiceShape {
 		| AlertPersistenceError
 		| AlertNotFoundError
 		| AlertDeliveryError
+		| TinybirdQueryError
+		| TinybirdQuotaExceededError
+		| TinybirdUpstreamUnavailableError
+		| TinybirdAuthError
 	>
 	readonly listIncidents: (orgId: OrgId) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
 	readonly listRuleChecks: (
@@ -881,6 +887,9 @@ export interface AlertsServiceShape {
 			readonly deliveryFailureCount: number
 		},
 		AlertPersistenceError | AlertDeliveryError | AlertValidationError | AlertNotFoundError
+		// Note: tinybird tagged errors flow up from evaluateRule but are caught
+		// inside the per-rule Effect.catchAll in the scheduler tick, so the tick
+		// itself never surfaces them.
 	>
 }
 
@@ -1158,6 +1167,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			authMode: "self_hosted",
 		})
 
+		// Collapse alert-domain semantic errors (validation/execution/timeout from
+		// the query engine layer) into AlertValidation/AlertDelivery, but let the
+		// Tinybird tagged errors (TinybirdQueryError, TinybirdQuotaExceededError,
+		// TinybirdUpstreamUnavailableError, TinybirdAuthError) propagate so the
+		// client receives the tag + structured fields (upstreamStatus, setting,
+		// pipe). formatBackendError on the frontend handles them.
 		const catchQueryEngineErrors = <A, R>(
 			effect: Effect.Effect<
 				A,
@@ -1165,7 +1180,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				| QueryEngineExecutionError
 				| QueryEngineTimeoutError
 				| TinybirdQueryError
-				| TinybirdQuotaExceededError,
+				| TinybirdQuotaExceededError
+				| TinybirdUpstreamUnavailableError
+				| TinybirdAuthError,
 				R
 			>,
 		) =>
@@ -1177,14 +1194,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						Effect.fail(makeDeliveryError(e.message)),
 					"@maple/http/errors/QueryEngineTimeoutError": (e) =>
 						Effect.fail(makeDeliveryError(e.message ?? "Alert evaluation timed out")),
-					"@maple/http/errors/TinybirdQueryError": (e) =>
-						Effect.fail(makeDeliveryError(`Database query failed: ${e.message}`)),
-					"@maple/http/errors/TinybirdQuotaExceededError": (e) =>
-						Effect.fail(
-							makeDeliveryError(
-								`Alert query exceeded ${e.setting} quota; narrow the time window or filter`,
-							),
-						),
 				}),
 			)
 
@@ -1200,7 +1209,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			rule: NormalizedRule,
 		): Effect.fn.Return<
 			ReadonlyArray<{ evaluation: EvaluatedRule; groupKey: string }>,
-			AlertValidationError | AlertDeliveryError
+			| AlertValidationError
+			| AlertDeliveryError
+			| TinybirdQueryError
+			| TinybirdQuotaExceededError
+			| TinybirdUpstreamUnavailableError
+			| TinybirdAuthError
 		> {
 			const endMs = now()
 			const startMs = endMs - rule.windowMinutes * 60_000
@@ -3299,21 +3313,47 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								evaluationFailureCount += 1
 								return Effect.gen(function* () {
 									yield* Metric.update(AlertingMetrics.evaluationFailuresTotal, 1)
+									const taggedFailureCategory =
+										error instanceof AlertValidationError
+											? "validation"
+											: error instanceof AlertDeliveryError
+												? "evaluation"
+												: error instanceof TinybirdQuotaExceededError
+													? "tinybird_quota"
+													: error instanceof TinybirdUpstreamUnavailableError
+														? "tinybird_unavailable"
+														: error instanceof TinybirdAuthError
+															? "tinybird_auth"
+															: error instanceof TinybirdQueryError
+																? "tinybird_query"
+																: "unknown"
+									const upstreamStatus =
+										error instanceof TinybirdUpstreamUnavailableError ||
+										error instanceof TinybirdAuthError
+											? error.upstreamStatus
+											: undefined
+									const quotaSetting =
+										error instanceof TinybirdQuotaExceededError ? error.setting : undefined
+									const pipe =
+										error instanceof TinybirdQueryError ||
+										error instanceof TinybirdQuotaExceededError ||
+										error instanceof TinybirdUpstreamUnavailableError ||
+										error instanceof TinybirdAuthError
+											? error.pipe
+											: undefined
 									yield* Effect.logError("Alert rule evaluation failed").pipe(
 										Effect.annotateLogs({
 											workerId,
 											ruleId: row.id,
 											orgId: row.orgId,
-											failureCategory:
-												error instanceof AlertValidationError
-													? "validation"
-													: error instanceof AlertDeliveryError
-														? "evaluation"
-														: "unknown",
+											failureCategory: taggedFailureCategory,
 											errorMessage:
 												error instanceof Error
 													? error.message
 													: "Alert rule evaluation failed",
+											upstreamStatus,
+											quotaSetting,
+											pipe,
 										}),
 									)
 								})
