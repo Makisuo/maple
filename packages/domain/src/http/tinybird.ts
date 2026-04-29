@@ -24,15 +24,19 @@ export class TinybirdQueryResponse extends Schema.Class<TinybirdQueryResponse>("
 // class on every endpoint costs measurable script-startup CPU on Cloudflare —
 // hit error 10021 at ~7 errors × 30 endpoints).
 //   - "query"        → ClickHouse/SQL error (default)
-//   - "upstream"     → Tinybird/CDN gateway 5xx (transient)
-//   - "auth"         → upstream 401/403 (token misconfigured)
+//   - "upstream"     → query backend/CDN/network failure (transient)
+//   - "auth"         → upstream 401/403 or database credentials failure
+//   - "config"       → backend/database configuration is wrong
+//   - "client"       → Maple's query client could not decode/consume the response
 export class TinybirdQueryError extends Schema.TaggedErrorClass<TinybirdQueryError>()(
 	"@maple/http/errors/TinybirdQueryError",
 	{
 		message: Schema.String,
 		pipe: Schema.String,
-		category: Schema.optional(Schema.Literals(["query", "upstream", "auth"])),
+		category: Schema.optional(Schema.Literals(["query", "upstream", "auth", "config", "client"])),
 		upstreamStatus: Schema.optional(Schema.Number),
+		clickhouseCode: Schema.optional(Schema.String),
+		clickhouseType: Schema.optional(Schema.String),
 	},
 	{ httpApiStatus: 502 },
 ) {}
@@ -43,6 +47,8 @@ export class TinybirdQuotaExceededError extends Schema.TaggedErrorClass<Tinybird
 		message: Schema.String,
 		pipe: Schema.String,
 		setting: Schema.Literals(["max_execution_time", "max_memory_usage", "max_threads"]),
+		clickhouseCode: Schema.optional(Schema.String),
+		clickhouseType: Schema.optional(Schema.String),
 	},
 	{ httpApiStatus: 429 },
 ) {}

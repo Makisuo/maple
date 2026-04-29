@@ -13,13 +13,19 @@ const QUOTA_DESCRIPTIONS: Record<string, string> = {
 }
 
 const hasTag = (value: unknown): value is { _tag: string; [key: string]: unknown } =>
-	typeof value === "object" && value !== null && "_tag" in value && typeof (value as { _tag: unknown })._tag === "string"
+	typeof value === "object" &&
+	value !== null &&
+	"_tag" in value &&
+	typeof (value as { _tag: unknown })._tag === "string"
 
 const sanitizeMessage = (raw: string): string => {
 	let cleaned = raw
 	const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
 	if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
-	cleaned = cleaned.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+	cleaned = cleaned
+		.replace(/<[^>]+>/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
 	if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
 	return cleaned || raw.slice(0, 200)
 }
@@ -76,7 +82,8 @@ export const formatBackendError = (input: unknown): FormattedError => {
 			case "@maple/http/errors/QueryEngineTimeoutError": {
 				return {
 					title: "Query timed out",
-					description: "The query took longer than 30 seconds. Narrow the time range or add filters.",
+					description:
+						"The query took longer than 30 seconds. Narrow the time range or add filters.",
 				}
 			}
 			case "@maple/http/errors/QueryEngineValidationError": {
@@ -103,17 +110,13 @@ export const formatBackendError = (input: unknown): FormattedError => {
 					(message.match(/status[:\s]+(\d{3})/i)?.[1]
 						? Number(message.match(/status[:\s]+(\d{3})/i)?.[1])
 						: undefined)
-				if (
-					category === "auth" ||
-					upstreamStatus === 401 ||
-					upstreamStatus === 403
-				) {
+				if (category === "auth" || upstreamStatus === 401 || upstreamStatus === 403) {
 					return {
-						title: "Tinybird rejected our credentials",
+						title: "Database rejected our credentials",
 						description:
 							upstreamStatus === 403
-								? "The configured Tinybird token is missing required permissions."
-								: "The configured Tinybird token is invalid or expired. Update it in settings.",
+								? "The configured database credentials are missing required permissions."
+								: "The configured database credentials are invalid or expired. Update them in settings.",
 					}
 				}
 				if (
@@ -121,11 +124,23 @@ export const formatBackendError = (input: unknown): FormattedError => {
 					(upstreamStatus !== undefined && upstreamStatus >= 500 && upstreamStatus < 600)
 				) {
 					return {
-						title: "Tinybird is temporarily unavailable",
+						title: "Database is temporarily unavailable",
 						description:
 							upstreamStatus !== undefined
 								? `The query backend returned ${upstreamStatus}. Retry in a few seconds.`
 								: "The query backend is unreachable. Retry in a few seconds.",
+					}
+				}
+				if (category === "config") {
+					return {
+						title: "Database is not configured correctly",
+						description: message,
+					}
+				}
+				if (category === "client") {
+					return {
+						title: "Database response could not be decoded",
+						description: message,
 					}
 				}
 				return {
@@ -136,7 +151,8 @@ export const formatBackendError = (input: unknown): FormattedError => {
 			case "@maple/http/errors/UnauthorizedError": {
 				return {
 					title: "Not authorized",
-					description: "Your session may have expired. Try refreshing the page or signing in again.",
+					description:
+						"Your session may have expired. Try refreshing the page or signing in again.",
 				}
 			}
 		}

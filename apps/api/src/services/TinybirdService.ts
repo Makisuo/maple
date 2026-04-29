@@ -42,6 +42,7 @@ interface SqlClientConfig {
 }
 
 export type TinybirdSqlError = TinybirdQueryError | TinybirdQuotaExceededError
+type TinybirdQueryErrorCategory = "query" | "upstream" | "auth" | "config" | "client"
 
 export interface TinybirdServiceShape {
 	readonly query: (
@@ -95,6 +96,59 @@ const normalizeSqlForClickHouseClient = (sql: string): string =>
 		.replace(/\s+FORMAT\s+(?:JSONEachRow|JSON)\s*$/i, "")
 		.replace(/;\s*$/, "")
 
+type ClickHouseErrorDetails = {
+	readonly message: string
+	readonly code?: string
+	readonly type?: string
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null
+
+const unknownToMessage = (error: unknown, fallback = "ClickHouse query failed"): string => {
+	if (typeof error === "string") return error
+	if (error instanceof Error) return error.message
+	if (isRecord(error) && typeof error.message === "string") return error.message
+	return fallback
+}
+
+const getClickHouseErrorDetails = (error: unknown): ClickHouseErrorDetails => {
+	const message = unknownToMessage(error)
+	if (!isRecord(error)) return { message }
+	const code =
+		typeof error.code === "string"
+			? error.code
+			: typeof error.code === "number"
+				? String(error.code)
+				: undefined
+	const type = typeof error.type === "string" ? error.type : undefined
+	return { message, code, type }
+}
+
+const authClickHouseTypes = new Set([
+	"AUTHENTICATION_FAILED",
+	"ACCESS_DENIED",
+	"USER_DOESNT_EXIST",
+	"REQUIRED_PASSWORD",
+])
+
+const configClickHouseTypes = new Set([
+	"UNKNOWN_DATABASE",
+	"UNKNOWN_TABLE",
+	"TABLE_IS_DROPPED",
+	"UNKNOWN_SETTING",
+])
+
+const transientClickHouseTypes = new Set([
+	"NETWORK_ERROR",
+	"SOCKET_TIMEOUT",
+	"TOO_MANY_SIMULTANEOUS_QUERIES",
+	"SERVER_OVERLOADED",
+	"CANNOT_SCHEDULE_TASK",
+	"KEEPER_EXCEPTION",
+	"ALL_CONNECTION_TRIES_FAILED",
+])
+
 export class TinybirdService extends Context.Service<TinybirdService, TinybirdServiceShape>()(
 	"TinybirdService",
 	{
@@ -115,41 +169,104 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 			}
 
 			const extractUpstreamStatus = (message: string): number | undefined => {
-				const match = message.match(/status[:\s]+(\d{3})/i)
+				const match = message.match(/(?:status|HTTP status|response status code)[:\s]+(\d{3})/i)
 				if (match) return Number(match[1])
+				const titleMatch = message.match(/\b(\d{3})\s+(?:error|service temporarily unavailable)\b/i)
+				if (titleMatch) return Number(titleMatch[1])
 				return undefined
 			}
 
 			const toTinybirdQueryError = (pipe: string, error: unknown) =>
 				new TinybirdQueryError({
-					message: cleanErrorMessage(
-						error instanceof Error ? error.message : "Tinybird query failed",
-					),
+					message: cleanErrorMessage(unknownToMessage(error, "Tinybird query failed")),
 					pipe,
 				})
 
 			const mapTinybirdError = (pipe: string, error: unknown) => {
-				const rawMessage = error instanceof Error ? error.message : "Tinybird query failed"
+				const details = getClickHouseErrorDetails(error)
+				const rawMessage = details.message
 				const message = cleanErrorMessage(rawMessage)
 				const setting = detectQuotaSetting(rawMessage)
+				const clickhouseFields = {
+					clickhouseCode: details.code,
+					clickhouseType: details.type,
+				}
 				if (setting) {
-					return new TinybirdQuotaExceededError({ pipe, message, setting })
+					return new TinybirdQuotaExceededError({ pipe, message, setting, ...clickhouseFields })
 				}
 				const upstreamStatus = extractUpstreamStatus(rawMessage)
-				if (upstreamStatus === 401 || upstreamStatus === 403) {
-					return new TinybirdQueryError({ pipe, message, category: "auth", upstreamStatus })
+				const type = details.type
+				const isAuthFailure =
+					upstreamStatus === 401 ||
+					upstreamStatus === 403 ||
+					(type !== undefined && authClickHouseTypes.has(type)) ||
+					/authentication failed|access denied|not enough privileges|password is incorrect/i.test(
+						rawMessage,
+					)
+				if (isAuthFailure) {
+					return new TinybirdQueryError({
+						pipe,
+						message,
+						category: "auth",
+						upstreamStatus,
+						...clickhouseFields,
+					})
 				}
-				// Any upstream 5xx (502/503/504, Cloudflare 520-530, etc.) is treated
-				// as a transient infrastructure failure rather than a user query bug.
-				if (upstreamStatus !== undefined && upstreamStatus >= 500 && upstreamStatus < 600) {
+				const isTransientFailure =
+					(upstreamStatus !== undefined &&
+						(upstreamStatus === 408 ||
+							upstreamStatus === 429 ||
+							(upstreamStatus >= 500 && upstreamStatus < 600))) ||
+					(type !== undefined && transientClickHouseTypes.has(type)) ||
+					/^Timeout error\.?$/i.test(rawMessage) ||
+					/The user aborted a request|Failed to fetch|fetch failed|NetworkError|Load failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|certificate/i.test(
+						rawMessage,
+					)
+				if (isTransientFailure) {
 					return new TinybirdQueryError({
 						pipe,
 						message,
 						category: "upstream",
 						upstreamStatus,
+						...clickhouseFields,
 					})
 				}
-				return new TinybirdQueryError({ pipe, message, category: "query" })
+				const isConfigFailure =
+					(upstreamStatus !== undefined && upstreamStatus === 404) ||
+					(type !== undefined && configClickHouseTypes.has(type)) ||
+					/Invalid URL|unknown database|unknown table|table .* does not exist|database .* does not exist/i.test(
+						rawMessage,
+					)
+				if (isConfigFailure) {
+					return new TinybirdQueryError({
+						pipe,
+						message,
+						category: "config",
+						upstreamStatus,
+						...clickhouseFields,
+					})
+				}
+				const isClientFailure =
+					error instanceof SyntaxError ||
+					/Cannot decode .* as JSON|Unexpected token .* JSON|Stream has been already consumed|Failed to parse ClickHouse response/i.test(
+						rawMessage,
+					)
+				if (isClientFailure) {
+					return new TinybirdQueryError({
+						pipe,
+						message,
+						category: "client",
+						upstreamStatus,
+						...clickhouseFields,
+					})
+				}
+				return new TinybirdQueryError({
+					pipe,
+					message,
+					category: "query",
+					upstreamStatus,
+					...clickhouseFields,
+				})
 			}
 
 			const getCachedOrCreateClient = (orgId: OrgId | "__managed__", config: SqlClientConfig) => {
