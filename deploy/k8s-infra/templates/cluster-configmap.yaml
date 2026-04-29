@@ -124,6 +124,15 @@ data:
         timeout: {{ .Values.processors.batch.timeout }}
         send_batch_size: {{ .Values.processors.batch.sendBatchSize }}
         send_batch_max_size: {{ .Values.processors.batch.sendBatchMaxSize }}
+      {{- if .Values.maple.tinybirdExport.enabled }}
+      # `maple_org_id` is the routing key on every Tinybird datasource. Set as a
+      # resource attribute so it's preserved through batch + the tinybird exporter.
+      resource/maple_org:
+        attributes:
+          - key: maple_org_id
+            value: {{ required "maple.tinybirdExport.orgId is required when tinybirdExport.enabled is true" .Values.maple.tinybirdExport.orgId | quote }}
+            action: upsert
+      {{- end }}
       {{- if .Values.presets.fargateMetrics.enabled }}
       # cAdvisor exposes container_cpu_usage_seconds_total as a cumulative
       # counter in seconds. Convert it to a per-second gauge so it matches
@@ -220,6 +229,7 @@ data:
       {{- end }}
 
     exporters:
+      {{- if eq (include "maple-k8s-infra.mapleExporterEnabled" .) "true" }}
       otlphttp/maple:
         endpoint: "${env:MAPLE_INGEST_ENDPOINT}"
         compression: {{ .Values.maple.ingest.compression }}
@@ -228,6 +238,35 @@ data:
           insecure_skip_verify: {{ .Values.maple.ingest.tls.insecureSkipVerify }}
         headers:
           x-maple-ingest-key: "${env:MAPLE_INGEST_KEY}"
+      {{- end }}
+      {{- if .Values.maple.tinybirdExport.enabled }}
+      tinybird:
+        endpoint: {{ .Values.maple.tinybirdExport.endpoint | quote }}
+        token: "${env:TINYBIRD_EXPORT_TOKEN}"
+        timeout: {{ .Values.maple.tinybirdExport.timeout }}
+        traces:
+          datasource: {{ .Values.maple.tinybirdExport.datasources.traces | quote }}
+        logs:
+          datasource: {{ .Values.maple.tinybirdExport.datasources.logs | quote }}
+        metrics:
+          sum:
+            datasource: {{ .Values.maple.tinybirdExport.datasources.metrics.sum | quote }}
+          gauge:
+            datasource: {{ .Values.maple.tinybirdExport.datasources.metrics.gauge | quote }}
+          histogram:
+            datasource: {{ .Values.maple.tinybirdExport.datasources.metrics.histogram | quote }}
+          exponential_histogram:
+            datasource: {{ .Values.maple.tinybirdExport.datasources.metrics.exponentialHistogram | quote }}
+        retry_on_failure:
+          enabled: {{ .Values.maple.tinybirdExport.retryOnFailure.enabled }}
+          initial_interval: {{ .Values.maple.tinybirdExport.retryOnFailure.initialInterval }}
+          max_interval: {{ .Values.maple.tinybirdExport.retryOnFailure.maxInterval }}
+          max_elapsed_time: {{ .Values.maple.tinybirdExport.retryOnFailure.maxElapsedTime }}
+        sending_queue:
+          enabled: {{ .Values.maple.tinybirdExport.sendingQueue.enabled }}
+          num_consumers: {{ .Values.maple.tinybirdExport.sendingQueue.numConsumers }}
+          queue_size: {{ .Values.maple.tinybirdExport.sendingQueue.queueSize }}
+      {{- end }}
 
     service:
       extensions: [health_check]
@@ -236,7 +275,7 @@ data:
         metrics:
           receivers: [k8s_cluster]
           processors: {{ include "maple-k8s-infra.baseProcessors" . }}
-          exporters: [otlphttp/maple]
+          exporters: {{ include "maple-k8s-infra.pipelineExporters" . }}
         {{- end }}
         {{- if .Values.presets.fargateMetrics.enabled }}
         metrics/fargate:
@@ -257,14 +296,17 @@ data:
             {{- if .Values.processors.resourceDetection.enabled }}
             - resourcedetection
             {{- end }}
+            {{- if .Values.maple.tinybirdExport.enabled }}
+            - resource/maple_org
+            {{- end }}
             - batch
-          exporters: [otlphttp/maple]
+          exporters: {{ include "maple-k8s-infra.pipelineExporters" . }}
         {{- end }}
         {{- if .Values.presets.k8sEvents.enabled }}
         logs:
           receivers: [k8sobjects/events]
           processors: {{ include "maple-k8s-infra.baseProcessors" . }}
-          exporters: [otlphttp/maple]
+          exporters: {{ include "maple-k8s-infra.pipelineExporters" . }}
         {{- end }}
       telemetry:
         logs:

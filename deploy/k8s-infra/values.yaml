@@ -21,6 +21,60 @@ maple:
             name: ""
             key: ""
 
+    # Direct-to-Tinybird shipping. When enabled, the agent + cluster collector
+    # use the OTel `tinybird` exporter (already present in opentelemetry-
+    # collector-contrib) to write straight to a Tinybird endpoint — typically a
+    # self-hosted Tinybird-Local in the same cluster — instead of, or alongside,
+    # Maple's hosted ingest. Useful for self-hosted Maple deployments that want
+    # zero outbound internet hops for their telemetry.
+    #
+    # `mode: replace`  → ship ONLY to Tinybird. The `otlphttp/maple` exporter
+    #                    and its env vars are not rendered.
+    # `mode: also`     → ship to BOTH `otlphttp/maple` AND Tinybird. Useful for
+    #                    side-by-side validation while migrating.
+    tinybirdExport:
+        enabled: false
+        mode: replace
+        # e.g. http://tinybird.tinybird.svc.cluster.local:7181 (self-hosted) or
+        # https://api.tinybird.co (Tinybird Cloud).
+        endpoint: ""
+        # Maple org id stamped onto every span/log/metric as the
+        # `maple_org_id` resource attribute. The Tinybird datasources route on
+        # this column, so it MUST be set when tinybirdExport is enabled. Look
+        # it up in the Maple UI under Settings → Self-hosted Tinybird, or via
+        # the Maple API (org.id, the `org_*` prefixed ULID).
+        orgId: ""
+        timeout: 30s
+        # Bearer token for the Tinybird workspace. Prefer existingSecret in
+        # production — the chart-managed Secret is convenience only.
+        token:
+            value: ""
+            existingSecret:
+                name: ""
+                key: ""
+        # Datasource names per signal. Override if your Tinybird workspace uses
+        # different names.
+        datasources:
+            traces: traces
+            logs: logs
+            metrics:
+                sum: metrics_sum
+                gauge: metrics_gauge
+                histogram: metrics_histogram
+                exponentialHistogram: metrics_exponential_histogram
+        retryOnFailure:
+            enabled: true
+            initialInterval: 1s
+            maxInterval: 30s
+            maxElapsedTime: 300s
+        # In-memory queue. File-storage isn't enabled here because the agent's
+        # filesystem isn't writable by default — flip to file-backed in a later
+        # change if persistent buffering matters.
+        sendingQueue:
+            enabled: true
+            numConsumers: 8
+            queueSize: 10000
+
 image:
     repository: otel/opentelemetry-collector-contrib
     tag: "0.141.0"

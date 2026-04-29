@@ -76,6 +76,51 @@ ingest-key
 {{- end -}}
 {{- end -}}
 
+{{- define "maple-k8s-infra.tinybirdSecretName" -}}
+{{- if .Values.maple.tinybirdExport.token.existingSecret.name -}}
+{{- .Values.maple.tinybirdExport.token.existingSecret.name -}}
+{{- else -}}
+{{- printf "%s-tinybird-token" (include "maple-k8s-infra.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "maple-k8s-infra.tinybirdSecretKey" -}}
+{{- if .Values.maple.tinybirdExport.token.existingSecret.key -}}
+{{- .Values.maple.tinybirdExport.token.existingSecret.key -}}
+{{- else -}}
+token
+{{- end -}}
+{{- end -}}
+
+{{/*
+The list of exporters every pipeline ships to, as a YAML inline list. Driven
+by maple.tinybirdExport.enabled / .mode so a single switch flips both the
+agent and cluster-collector pipelines together.
+*/}}
+{{- define "maple-k8s-infra.pipelineExporters" -}}
+{{- if .Values.maple.tinybirdExport.enabled -}}
+{{- if eq .Values.maple.tinybirdExport.mode "replace" -}}
+[tinybird]
+{{- else -}}
+[otlphttp/maple, tinybird]
+{{- end -}}
+{{- else -}}
+[otlphttp/maple]
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether the otlphttp/maple exporter (and its env vars) should be rendered.
+True except when tinybirdExport replaces it entirely.
+*/}}
+{{- define "maple-k8s-infra.mapleExporterEnabled" -}}
+{{- if and .Values.maple.tinybirdExport.enabled (eq .Values.maple.tinybirdExport.mode "replace") -}}
+false
+{{- else -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "maple-k8s-infra.agent.serviceAccountName" -}}
 {{- if .Values.agent.serviceAccount.create -}}
 {{- default (include "maple-k8s-infra.agent.fullname" .) .Values.agent.serviceAccount.name -}}
@@ -135,6 +180,7 @@ presets.otlpReceiver.http.enabled.
 {{- end -}}
 
 {{- define "maple-k8s-infra.commonEnv" -}}
+{{- if eq (include "maple-k8s-infra.mapleExporterEnabled" .) "true" }}
 - name: MAPLE_INGEST_ENDPOINT
   value: {{ .Values.maple.ingest.endpoint | quote }}
 - name: MAPLE_INGEST_KEY
@@ -143,6 +189,14 @@ presets.otlpReceiver.http.enabled.
       name: {{ include "maple-k8s-infra.ingestSecretName" . }}
       key: {{ include "maple-k8s-infra.ingestSecretKey" . }}
       optional: true
+{{- end }}
+{{- if .Values.maple.tinybirdExport.enabled }}
+- name: TINYBIRD_EXPORT_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "maple-k8s-infra.tinybirdSecretName" . }}
+      key: {{ include "maple-k8s-infra.tinybirdSecretKey" . }}
+{{- end }}
 - name: K8S_CLUSTER_NAME
   value: {{ include "maple-k8s-infra.clusterName" . | quote }}
 {{- end -}}
@@ -198,6 +252,12 @@ presets.otlpReceiver.http.enabled.
 {{- end -}}
 {{- if .Values.processors.resourceDetection.enabled -}}
 {{- $processors = append $processors "resourcedetection" -}}
+{{- end -}}
+{{/* `resource/maple_org` stamps the org id onto every signal so the Tinybird
+     datasources can route. Inserted after enrichment but before batching so
+     batches share the same maple_org_id value. */}}
+{{- if and .Values.maple.tinybirdExport.enabled .Values.maple.tinybirdExport.orgId -}}
+{{- $processors = append $processors "resource/maple_org" -}}
 {{- end -}}
 {{- $processors = append $processors "batch" -}}
 {{- printf "[%s]" (join ", " $processors) -}}

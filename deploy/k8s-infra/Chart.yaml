@@ -2,7 +2,7 @@ apiVersion: v2
 name: maple-k8s-infra
 description: Kubernetes infrastructure collector for Maple using OpenTelemetry Collector Contrib.
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "0.141.0"
 keywords:
     - maple
