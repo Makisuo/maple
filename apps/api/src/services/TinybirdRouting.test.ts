@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
-import { OrgId, RoleName, UserId } from "@maple/domain/http"
+import { OrgId, RoleName, TinybirdQueryError, TinybirdQuotaExceededError, UserId } from "@maple/domain/http"
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { Env } from "./Env"
 import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
@@ -80,13 +80,21 @@ const tenant = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-describe("Tinybird routing", () => {
-	it("uses the env-backed Tinybird client by default for raw queries", async () => {
-		const { url } = createTempDbUrl()
-		const calls: Array<{ baseUrl: string; token: string }> = []
+const makeClickHouseError = (message: string, code: string, type: string) =>
+	Object.assign(new Error(message), { code, type })
 
-		tinybirdTestables.setClientFactory((baseUrl, token) => {
-			calls.push({ baseUrl, token })
+describe("Tinybird routing", () => {
+	it("uses the env-backed ClickHouse client by default for raw queries", async () => {
+		const { url } = createTempDbUrl()
+		const calls: Array<{
+			url: string
+			username: string
+			password: string
+			database: string
+		}> = []
+
+		tinybirdTestables.setClientFactory((config) => {
+			calls.push(config)
 			return {
 				sql: async () => ({
 					data: [{ message: "managed" }],
@@ -102,7 +110,80 @@ describe("Tinybird routing", () => {
 		)
 
 		expect(result.data).toBeDefined()
-		expect(calls).toEqual([{ baseUrl: "https://managed.tinybird.co", token: "managed-token" }])
+		expect(calls).toEqual([
+			{
+				url: "https://managed.tinybird.co",
+				username: "default",
+				password: "managed-token",
+				database: "default",
+			},
+		])
+	})
+
+	it("prefers explicit ClickHouse env settings for managed raw queries", async () => {
+		const { url } = createTempDbUrl()
+		const calls: Array<{
+			url: string
+			username: string
+			password: string
+			database: string
+		}> = []
+
+		const config = ConfigProvider.layer(
+			ConfigProvider.fromUnknown({
+				PORT: "3472",
+				TINYBIRD_HOST: "https://managed.tinybird.co",
+				TINYBIRD_TOKEN: "managed-token",
+				CLICKHOUSE_URL: "https://clickhouse.example.com:8443",
+				CLICKHOUSE_USER: "maple_reader",
+				CLICKHOUSE_PASSWORD: "clickhouse-password",
+				CLICKHOUSE_DATABASE: "observability",
+				MAPLE_DB_URL: url,
+				MAPLE_AUTH_MODE: "self_hosted",
+				MAPLE_ROOT_PASSWORD: "test-root-password",
+				MAPLE_DEFAULT_ORG_ID: "default",
+				MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+				MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+			}),
+		)
+
+		tinybirdTestables.setClientFactory((clientConfig) => {
+			calls.push(clientConfig)
+			return {
+				sql: async () => ({
+					data: [{ message: "managed-clickhouse" }],
+				}),
+			}
+		})
+
+		const layer = TinybirdService.Default.pipe(
+			Layer.provide(
+				OrgTinybirdSettingsService.Live.pipe(
+					Layer.provide(makeTestTinybirdSyncClientLayer({})),
+					Layer.provide(SelfManagedCollectorConfigService.Live),
+					Layer.provide(DatabaseLibsqlLive),
+				),
+			),
+			Layer.provide(Env.Default),
+			Layer.provide(config),
+		)
+
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* TinybirdService
+				return yield* service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+			}).pipe(Effect.provide(layer)),
+		)
+
+		expect(result).toEqual([{ message: "managed-clickhouse" }])
+		expect(calls).toEqual([
+			{
+				url: "https://clickhouse.example.com:8443",
+				username: "maple_reader",
+				password: "clickhouse-password",
+				database: "observability",
+			},
+		])
 	})
 
 	it("sqlQuery rejects SQL without OrgId filter", async () => {
@@ -137,6 +218,159 @@ describe("Tinybird routing", () => {
 		)
 
 		expect(result).toEqual([{ result: 1 }])
+	})
+
+	it("strips legacy FORMAT and trailing semicolon before ClickHouse client execution", async () => {
+		const { url } = createTempDbUrl()
+		const executedSql: string[] = []
+
+		tinybirdTestables.setClientFactory(() => ({
+			sql: async (sql) => {
+				executedSql.push(sql)
+				return { data: [{ result: 1 }] }
+			},
+		}))
+
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* TinybirdService
+				return yield* service.sqlQuery(
+					tenant,
+					"SELECT 1 FROM traces WHERE OrgId = 'org_a'\nFORMAT JSON;",
+					{ profile: "list" },
+				)
+			}).pipe(Effect.provide(makeTinybirdLayer(url))),
+		)
+
+		expect(result).toEqual([{ result: 1 }])
+		expect(executedSql).toEqual([
+			"SELECT 1 FROM traces WHERE OrgId = 'org_a' SETTINGS max_execution_time=15, max_memory_usage=1500000000",
+		])
+	})
+
+	it("maps ClickHouse auth errors to credential query errors", async () => {
+		const { url } = createTempDbUrl()
+
+		tinybirdTestables.setClientFactory(() => ({
+			sql: async () => {
+				throw makeClickHouseError(
+					"Authentication failed: password is incorrect",
+					"516",
+					"AUTHENTICATION_FAILED",
+				)
+			},
+		}))
+
+		const error = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* TinybirdService
+				return yield* service
+					.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+					.pipe(Effect.flip)
+			}).pipe(Effect.provide(makeTinybirdLayer(url))),
+		)
+
+		expect(error).toBeInstanceOf(TinybirdQueryError)
+		expect(error.category).toBe("auth")
+		expect(error.clickhouseCode).toBe("516")
+		expect(error.clickhouseType).toBe("AUTHENTICATION_FAILED")
+	})
+
+	it("maps ClickHouse quota errors to quota exceeded errors with ClickHouse details", async () => {
+		const { url } = createTempDbUrl()
+
+		tinybirdTestables.setClientFactory(() => ({
+			sql: async () => {
+				throw makeClickHouseError(
+					"Timeout exceeded: elapsed 15.1 seconds, maximum: 15",
+					"159",
+					"TIMEOUT_EXCEEDED",
+				)
+			},
+		}))
+
+		const error = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* TinybirdService
+				return yield* service
+					.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+					.pipe(Effect.flip)
+			}).pipe(Effect.provide(makeTinybirdLayer(url))),
+		)
+
+		expect(error).toBeInstanceOf(TinybirdQuotaExceededError)
+		expect(error.setting).toBe("max_execution_time")
+		expect(error.clickhouseCode).toBe("159")
+		expect(error.clickhouseType).toBe("TIMEOUT_EXCEEDED")
+	})
+
+	it("maps ClickHouse schema/config errors to config query errors", async () => {
+		const { url } = createTempDbUrl()
+
+		tinybirdTestables.setClientFactory(() => ({
+			sql: async () => {
+				throw makeClickHouseError("Database default does not exist", "81", "UNKNOWN_DATABASE")
+			},
+		}))
+
+		const error = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* TinybirdService
+				return yield* service
+					.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+					.pipe(Effect.flip)
+			}).pipe(Effect.provide(makeTinybirdLayer(url))),
+		)
+
+		expect(error).toBeInstanceOf(TinybirdQueryError)
+		expect(error.category).toBe("config")
+		expect(error.clickhouseCode).toBe("81")
+		expect(error.clickhouseType).toBe("UNKNOWN_DATABASE")
+	})
+
+	it("maps ClickHouse client timeout and network errors as transient upstream errors", async () => {
+		const { url } = createTempDbUrl()
+
+		tinybirdTestables.setClientFactory(() => ({
+			sql: async () => {
+				throw new Error("Timeout error.")
+			},
+		}))
+
+		const error = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* TinybirdService
+				return yield* service
+					.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+					.pipe(Effect.flip)
+			}).pipe(Effect.provide(makeTinybirdLayer(url))),
+		)
+
+		expect(error).toBeInstanceOf(TinybirdQueryError)
+		expect(error.category).toBe("upstream")
+	})
+
+	it("maps response JSON decode errors as client errors", async () => {
+		const { url } = createTempDbUrl()
+
+		tinybirdTestables.setClientFactory(() => ({
+			sql: async () => {
+				throw new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON")
+			},
+		}))
+
+		const error = await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* TinybirdService
+				return yield* service
+					.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+					.pipe(Effect.flip)
+			}).pipe(Effect.provide(makeTinybirdLayer(url))),
+		)
+
+		expect(error).toBeInstanceOf(TinybirdQueryError)
+		expect(error.category).toBe("client")
+		expect(error.message).not.toContain("<html>")
 	})
 
 	it("uses the org-specific Tinybird client for raw queries when an override exists", async () => {
@@ -204,10 +438,16 @@ describe("Tinybird routing", () => {
 			},
 		}
 
-		const calls: Array<{ baseUrl: string; token: string; method: string }> = []
-		tinybirdTestables.setClientFactory((baseUrl, token) => ({
+		const calls: Array<{
+			url: string
+			username: string
+			password: string
+			database: string
+			method: string
+		}> = []
+		tinybirdTestables.setClientFactory((config) => ({
 			sql: async () => {
-				calls.push({ baseUrl, token, method: "sql" })
+				calls.push({ ...config, method: "sql" })
 				return { data: [{ message: "byo" }] }
 			},
 		}))
@@ -235,8 +475,10 @@ describe("Tinybird routing", () => {
 		expect(rawResult.data).toEqual([{ message: "byo" }])
 		expect(calls).toEqual([
 			{
-				baseUrl: "https://customer.tinybird.co",
-				token: "customer-token",
+				url: "https://customer.tinybird.co",
+				username: "default",
+				password: "customer-token",
+				database: "default",
 				method: "sql",
 			},
 		])
