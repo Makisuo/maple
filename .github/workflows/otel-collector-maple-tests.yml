@@ -1,0 +1,47 @@
+name: OTel Collector Maple — tests
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "packages/otel-collector-maple-exporter/**"
+            - ".github/workflows/otel-collector-maple-tests.yml"
+    pull_request:
+        paths:
+            - "packages/otel-collector-maple-exporter/**"
+            - ".github/workflows/otel-collector-maple-tests.yml"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: packages/otel-collector-maple-exporter
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: actions/setup-go@v5
+              with:
+                  # Match `go 1.25.0` in packages/otel-collector-maple-exporter/go.mod.
+                  go-version-file: packages/otel-collector-maple-exporter/go.mod
+                  cache: true
+                  cache-dependency-path: packages/otel-collector-maple-exporter/go.sum
+
+            - name: gofmt -l
+              run: |
+                  diff=$(gofmt -l .)
+                  if [ -n "$diff" ]; then
+                    echo "::error::gofmt found unformatted files:"
+                    echo "$diff"
+                    exit 1
+                  fi
+
+            - name: go vet
+              run: go vet ./...
+
+            - name: go test
+              run: go test -race -count=1 ./...

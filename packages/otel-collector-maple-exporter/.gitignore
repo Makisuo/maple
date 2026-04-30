@@ -1,9 +1,3 @@
-# Tests are kept locally for now — they exercise pdata fixtures + golden
-# files and are useful for re-verifying encoder output, but they're not
-# needed to build or ship the exporter.
-*_test.go
-testdata/
-
 # Go test binaries.
 *.test
 

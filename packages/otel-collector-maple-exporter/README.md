@@ -54,15 +54,28 @@ tables.
 
 ## Org id resolution
 
-Per record:
+**Default (single-tenant):** the exporter stamps `OrgId` from `org_id` in
+the config on every record, unconditionally. No upstream processor required.
 
-1. If the **resource** has a `maple_org_id` attribute (set by the upstream
-   `resource/maple_org` processor), use it.
-2. Otherwise, fall back to `org_id` from the static config.
+**Multi-tenant fan-out (opt-in):** if you set
+`org_id_from_resource_attribute: maple_org_id` (or any other attribute name)
+in the exporter config, the exporter reads the org id from that resource
+attribute on each record. If the attribute is missing or empty for a given
+record, the static `org_id` from config is used as a fallback.
 
-This allows a single agent to serve multiple orgs (resource attribute wins),
-while keeping the simple single-org deploy that just sets `org_id` on the
-exporter.
+```yaml
+# Single-tenant deploy — typical case
+exporters:
+  maple:
+    org_id: org_3AuiNCIuD1XCbbzcjkzE3s5HoQj
+    # everything stamped with that org_id
+
+# Multi-tenant fan-out
+exporters:
+  maple:
+    org_id: org_default                              # fallback
+    org_id_from_resource_attribute: maple_org_id     # per-record override
+```
 
 ## Building
 

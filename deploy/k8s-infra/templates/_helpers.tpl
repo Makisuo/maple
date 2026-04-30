@@ -305,13 +305,11 @@ presets.otlpReceiver.http.enabled.
 {{- if .Values.processors.resourceDetection.enabled -}}
 {{- $processors = append $processors "resourcedetection" -}}
 {{- end -}}
-{{/* `resource/maple_org` stamps the org id onto every signal so the
-     Tinybird datasources OR the maple exporter can route on it. Inserted
-     after enrichment but before batching so batches share the same value. */}}
-{{- if or
-      (and .Values.maple.tinybirdExport.enabled .Values.maple.tinybirdExport.orgId)
-      (and .Values.maple.clickhouseExport.enabled .Values.maple.clickhouseExport.orgId)
--}}
+{{/* `resource/maple_org` is still required for the Tinybird path — Tinybird
+     datasources route on the `maple_org_id` resource attribute. The
+     ClickHouse path no longer needs it: the mapleexporter (>= 0.1.5)
+     stamps OrgID from its own `org_id` config unconditionally. */}}
+{{- if and .Values.maple.tinybirdExport.enabled .Values.maple.tinybirdExport.orgId -}}
 {{- $processors = append $processors "resource/maple_org" -}}
 {{- end -}}
 {{- $processors = append $processors "batch" -}}

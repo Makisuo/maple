@@ -59,7 +59,7 @@ func (m *metricsExporter) pushMetrics(ctx context.Context, md pmetric.Metrics) e
 		resourceAttrs := internal.AttrMap(resource.Attributes())
 		resourceSchemaURL := r.SchemaUrl()
 		serviceName := internal.ServiceName(resource.Attributes())
-		orgID := internal.ResolveOrgID(resource.Attributes(), m.cfg.OrgID)
+		orgID := internal.ResolveOrgID(resource.Attributes(), m.cfg.OrgID, m.cfg.OrgIDFromResourceAttribute)
 
 		sm := r.ScopeMetrics()
 		for j := 0; j < sm.Len(); j++ {
@@ -77,17 +77,17 @@ func (m *metricsExporter) pushMetrics(ctx context.Context, md pmetric.Metrics) e
 				unit := metric.Unit()
 
 				common := commonMetricFields{
-					orgID:              orgID,
-					resourceAttrs:      resourceAttrs,
-					resourceSchemaURL:  resourceSchemaURL,
-					scopeAttrs:         scopeAttrs,
-					scopeName:          scopeName,
-					scopeVersion:       scopeVersion,
-					scopeSchemaURL:     scopeSchemaURL,
-					serviceName:        serviceName,
-					metricName:         name,
-					metricDescription:  desc,
-					metricUnit:         unit,
+					orgID:             orgID,
+					resourceAttrs:     resourceAttrs,
+					resourceSchemaURL: resourceSchemaURL,
+					scopeAttrs:        scopeAttrs,
+					scopeName:         scopeName,
+					scopeVersion:      scopeVersion,
+					scopeSchemaURL:    scopeSchemaURL,
+					serviceName:       serviceName,
+					metricName:        name,
+					metricDescription: desc,
+					metricUnit:        unit,
 				}
 
 				switch metric.Type() {

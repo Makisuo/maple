@@ -18,7 +18,7 @@ dist:
   name: otel-collector-maple
   description: "OpenTelemetry Collector with Maple ClickHouse exporter"
   output_path: ./bin
-  version: 0.1.4
+  version: 0.1.5
 
 extensions:
   - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.151.0

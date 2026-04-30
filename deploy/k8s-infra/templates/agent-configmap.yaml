@@ -133,14 +133,13 @@ data:
           - key: maple_org_id
             value: {{ required "maple.tinybirdExport.orgId is required when tinybirdExport.enabled is true" .Values.maple.tinybirdExport.orgId | quote }}
             action: upsert
-      {{- else if .Values.maple.clickhouseExport.enabled }}
-      # Same routing-key pattern as Tinybird; the Maple exporter reads this
-      # resource attribute first and falls back to its own `org_id` config.
-      resource/maple_org:
-        attributes:
-          - key: maple_org_id
-            value: {{ required "maple.clickhouseExport.orgId is required when clickhouseExport.enabled is true" .Values.maple.clickhouseExport.orgId | quote }}
-            action: upsert
+      {{- end }}
+      {{- if .Values.maple.clickhouseExport.enabled }}
+      # ClickHouse-export path stamps OrgID directly inside the mapleexporter
+      # (config field `org_id`), so no separate resource processor is needed.
+      # Customers wanting per-record fan-out can set
+      # `maple.clickhouseExport.orgIdFromResourceAttribute: maple_org_id` and
+      # add their own resource processor upstream.
       {{- end }}
 
     exporters:
@@ -161,6 +160,9 @@ data:
         username: {{ .Values.maple.clickhouseExport.username | quote }}
         password: "${env:MAPLE_CLICKHOUSE_PASSWORD}"
         org_id: {{ .Values.maple.clickhouseExport.orgId | quote }}
+        {{- with .Values.maple.clickhouseExport.orgIdFromResourceAttribute }}
+        org_id_from_resource_attribute: {{ . | quote }}
+        {{- end }}
         timeout: {{ .Values.maple.clickhouseExport.timeout }}
         traces_table_name: {{ .Values.maple.clickhouseExport.tables.traces | quote }}
         logs_table_name: {{ .Values.maple.clickhouseExport.tables.logs | quote }}

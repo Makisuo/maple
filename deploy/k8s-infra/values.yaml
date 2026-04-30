@@ -100,7 +100,7 @@ maple:
         # you've forked + republished the builder.
         image:
             repository: ghcr.io/makisuo/maple/otel-collector-maple
-            tag: "0.1.0"
+            tag: "0.1.5"
             pullPolicy: IfNotPresent
         # ClickHouse HTTP endpoint. e.g. an in-cluster Altinity-operator CHI:
         # http://clickhouse-clickhouse.clickhouse.svc.cluster.local:8123
@@ -108,13 +108,16 @@ maple:
         endpoint: ""
         # Database holding Maple's tables. Default matches the migrations.
         database: default
-        # Maple org id stamped on every record's `OrgId` column. The
-        # `resource/maple_org` processor also adds it as a `maple_org_id`
-        # resource attribute upstream of the exporter; the exporter's
-        # `org_id` field acts as a fallback when an inbound record lacks
-        # the resource attribute (so the exporter still knows where to
-        # tag the row).
+        # Maple org id stamped on every record's `OrgId` column.
+        # mapleexporter (>= 0.1.5) writes this to OrgId unconditionally;
+        # no upstream resource processor is required.
         orgId: ""
+        # Optional: read the org id off a resource attribute instead of
+        # using the static `orgId` above. Used for multi-tenant fan-out
+        # where a single collector serves multiple Maple orgs and an
+        # upstream processor stamps the right id per-record. Leave
+        # empty for the typical single-tenant deploy.
+        orgIdFromResourceAttribute: ""
         timeout: 30s
         # ClickHouse HTTP basic-auth username.
         username: maple

@@ -61,7 +61,7 @@ func (t *tracesExporter) pushTraces(ctx context.Context, td ptrace.Traces) error
 		resourceAttrs := internal.AttrMap(resource.Attributes())
 		resourceSchemaURL := r.SchemaUrl()
 		serviceName := internal.ServiceName(resource.Attributes())
-		orgID := internal.ResolveOrgID(resource.Attributes(), t.cfg.OrgID)
+		orgID := internal.ResolveOrgID(resource.Attributes(), t.cfg.OrgID, t.cfg.OrgIDFromResourceAttribute)
 
 		ss := r.ScopeSpans()
 		for j := 0; j < ss.Len(); j++ {
@@ -153,32 +153,32 @@ func encodeTraceRow(
 	// `trace_list_mv` MV filter (`WHERE ParentSpanId = ''`) expects for
 	// root spans.
 	return map[string]any{
-		"OrgId":             orgID,
-		"Timestamp":         internal.FormatTimestampNano(uint64(span.StartTimestamp())),
-		"TraceId":           internal.BytesHex(tid[:]),
-		"SpanId":            internal.BytesHex(sid[:]),
-		"ParentSpanId":      internal.BytesHex(psid[:]),
-		"TraceState":        span.TraceState().AsRaw(),
-		"SpanName":          span.Name(),
-		"SpanKind":          internal.SpanKindString(int32(span.Kind())),
-		"ServiceName":       serviceName,
-		"ResourceSchemaUrl": resourceSchemaURL,
+		"OrgId":              orgID,
+		"Timestamp":          internal.FormatTimestampNano(uint64(span.StartTimestamp())),
+		"TraceId":            internal.BytesHex(tid[:]),
+		"SpanId":             internal.BytesHex(sid[:]),
+		"ParentSpanId":       internal.BytesHex(psid[:]),
+		"TraceState":         span.TraceState().AsRaw(),
+		"SpanName":           span.Name(),
+		"SpanKind":           internal.SpanKindString(int32(span.Kind())),
+		"ServiceName":        serviceName,
+		"ResourceSchemaUrl":  resourceSchemaURL,
 		"ResourceAttributes": resourceAttrs,
-		"ScopeSchemaUrl":    scopeSchemaURL,
-		"ScopeName":         scopeName,
-		"ScopeVersion":      scopeVersion,
-		"ScopeAttributes":   scopeAttrs,
-		"Duration":          durationNs,
-		"StatusCode":        internal.StatusCodeString(int32(span.Status().Code())),
-		"StatusMessage":     span.Status().Message(),
-		"SpanAttributes":    internal.AttrMap(span.Attributes()),
-		"EventsTimestamp":   eventsTimestamp,
-		"EventsName":        eventsName,
-		"EventsAttributes":  eventsAttributes,
-		"LinksTraceId":      linksTraceID,
-		"LinksSpanId":       linksSpanID,
-		"LinksTraceState":   linksTraceState,
-		"LinksAttributes":   linksAttributes,
+		"ScopeSchemaUrl":     scopeSchemaURL,
+		"ScopeName":          scopeName,
+		"ScopeVersion":       scopeVersion,
+		"ScopeAttributes":    scopeAttrs,
+		"Duration":           durationNs,
+		"StatusCode":         internal.StatusCodeString(int32(span.Status().Code())),
+		"StatusMessage":      span.Status().Message(),
+		"SpanAttributes":     internal.AttrMap(span.Attributes()),
+		"EventsTimestamp":    eventsTimestamp,
+		"EventsName":         eventsName,
+		"EventsAttributes":   eventsAttributes,
+		"LinksTraceId":       linksTraceID,
+		"LinksSpanId":        linksSpanID,
+		"LinksTraceState":    linksTraceState,
+		"LinksAttributes":    linksAttributes,
 	}
 }
 

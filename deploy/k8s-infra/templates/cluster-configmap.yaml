@@ -133,15 +133,9 @@ data:
           - key: maple_org_id
             value: {{ required "maple.tinybirdExport.orgId is required when tinybirdExport.enabled is true" .Values.maple.tinybirdExport.orgId | quote }}
             action: upsert
-      {{- else if .Values.maple.clickhouseExport.enabled }}
-      # Same routing-key pattern; the Maple exporter reads this resource
-      # attribute first and falls back to its own `org_id` config.
-      resource/maple_org:
-        attributes:
-          - key: maple_org_id
-            value: {{ required "maple.clickhouseExport.orgId is required when clickhouseExport.enabled is true" .Values.maple.clickhouseExport.orgId | quote }}
-            action: upsert
       {{- end }}
+      {{- /* ClickHouse path: org id stamping happens inside mapleexporter — no
+             resource processor needed. */}}
       {{- if .Values.presets.fargateMetrics.enabled }}
       # cAdvisor exposes container_cpu_usage_seconds_total as a cumulative
       # counter in seconds. Convert it to a per-second gauge so it matches
@@ -255,6 +249,9 @@ data:
         username: {{ .Values.maple.clickhouseExport.username | quote }}
         password: "${env:MAPLE_CLICKHOUSE_PASSWORD}"
         org_id: {{ .Values.maple.clickhouseExport.orgId | quote }}
+        {{- with .Values.maple.clickhouseExport.orgIdFromResourceAttribute }}
+        org_id_from_resource_attribute: {{ . | quote }}
+        {{- end }}
         timeout: {{ .Values.maple.clickhouseExport.timeout }}
         traces_table_name: {{ .Values.maple.clickhouseExport.tables.traces | quote }}
         logs_table_name: {{ .Values.maple.clickhouseExport.tables.logs | quote }}

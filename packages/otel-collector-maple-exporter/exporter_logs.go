@@ -55,7 +55,7 @@ func (l *logsExporter) pushLogs(ctx context.Context, ld plog.Logs) error {
 		resourceAttrs := internal.AttrMap(resource.Attributes())
 		resourceSchemaURL := r.SchemaUrl()
 		serviceName := internal.ServiceName(resource.Attributes())
-		orgID := internal.ResolveOrgID(resource.Attributes(), l.cfg.OrgID)
+		orgID := internal.ResolveOrgID(resource.Attributes(), l.cfg.OrgID, l.cfg.OrgIDFromResourceAttribute)
 
 		sl := r.ScopeLogs()
 		for j := 0; j < sl.Len(); j++ {

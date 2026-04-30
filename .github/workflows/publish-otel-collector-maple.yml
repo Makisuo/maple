@@ -1,0 +1,72 @@
+name: Publish OTel Collector Maple image
+
+on:
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: "Image tag (e.g. 0.1.5). Required when running manually. Pushed verbatim, plus `latest`."
+                required: true
+                type: string
+    push:
+        tags:
+            # Trigger automatic builds on tags like `otel-collector-maple-v0.1.5`.
+            # The image tag is derived from the bit after `-v`.
+            - "otel-collector-maple-v*"
+
+permissions:
+    contents: read
+    packages: write
+
+env:
+    REGISTRY: ghcr.io
+    IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/maple/otel-collector-maple
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Resolve image tag
+              id: tag
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                    tag="${{ inputs.tag }}"
+                  else
+                    # Strip the `otel-collector-maple-v` prefix from the git tag.
+                    tag="${GITHUB_REF_NAME#otel-collector-maple-v}"
+                  fi
+                  if [ -z "$tag" ] || [ "$tag" = "$GITHUB_REF_NAME" ]; then
+                    echo "::error::Could not resolve image tag from event"
+                    exit 1
+                  fi
+                  echo "tag=$tag" >> "$GITHUB_OUTPUT"
+                  echo "Resolved image tag: $tag"
+
+            - uses: docker/setup-qemu-action@v3
+
+            - uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            # Multi-arch build — distroless/static is multi-arch and the Go
+            # binary is statically linked, so the same Dockerfile produces a
+            # working image on both amd64 and arm64.
+            - name: Build + push (amd64, arm64)
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: deploy/k8s-infra/Dockerfile.otel-collector-maple
+                  platforms: linux/amd64,linux/arm64
+                  push: true
+                  tags: |
+                      ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+                      ${{ env.IMAGE_NAME }}:latest
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  provenance: false

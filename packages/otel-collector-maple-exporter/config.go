@@ -21,9 +21,9 @@ import (
 // the same tables directly. Materialized views inside ClickHouse fan
 // per-base-table inserts out into the derived aggregate / detail tables.
 type Config struct {
-	exporterhelper.TimeoutConfig                           `mapstructure:",squash"`
-	configretry.BackOffConfig                              `mapstructure:"retry_on_failure"`
-	QueueBatch configoptional.Optional[exporterhelper.QueueBatchConfig] `mapstructure:"sending_queue"`
+	exporterhelper.TimeoutConfig `mapstructure:",squash"`
+	configretry.BackOffConfig    `mapstructure:"retry_on_failure"`
+	QueueBatch                   configoptional.Optional[exporterhelper.QueueBatchConfig] `mapstructure:"sending_queue"`
 
 	// Endpoint is the ClickHouse HTTP base URL — no trailing slash, no path.
 	// Example: "http://clickhouse-clickhouse.clickhouse.svc.cluster.local:8123"
@@ -41,13 +41,19 @@ type Config struct {
 	Password configopaque.String `mapstructure:"password"`
 
 	// OrgID is the Maple organization id stamped onto every row's `OrgId`
-	// column. The recommended config also adds a `resource/maple_org`
-	// processor upstream of the exporter so the same value lands as a
-	// `maple_org_id` resource attribute on each record (kept for parity with
-	// the Tinybird datasources). When this exporter sees `maple_org_id` in a
-	// resource's attributes, it uses that value; otherwise it falls back to
-	// this static OrgID.
+	// column. By default this value wins unconditionally — no upstream
+	// processor required.
 	OrgID string `mapstructure:"org_id"`
+
+	// OrgIDFromResourceAttribute, when set, makes the exporter read the
+	// org id off this resource attribute on each record instead of using
+	// the static `OrgID`. Used for multi-tenant fan-out where a single
+	// collector serves several Maple orgs. If the attribute is missing or
+	// empty on a given record, the static `OrgID` is used as a fallback.
+	//
+	// Most deployments leave this empty. Set to e.g. `"maple_org_id"` if
+	// you have an upstream processor stamping per-record org ids.
+	OrgIDFromResourceAttribute string `mapstructure:"org_id_from_resource_attribute"`
 
 	// Table name overrides. Defaults match Maple's migration output.
 	TracesTableName                      string `mapstructure:"traces_table_name"`

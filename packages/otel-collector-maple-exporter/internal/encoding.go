@@ -9,9 +9,12 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 )
 
-// MapleOrgIDAttribute is the resource-attribute key Maple's pipeline uses to
-// route records to the correct organization. Set by the upstream
-// `resource/maple_org` processor.
+// MapleOrgIDAttribute is the resource-attribute key Maple historically used
+// to route records to the correct organization (set by the now-deprecated
+// upstream `resource/maple_org` processor). The exporter no longer reads it
+// by default — `Config.OrgID` always wins. Customers wiring multi-tenant
+// fan-out from a single collector can opt back in via
+// `Config.OrgIDFromResourceAttribute = "maple_org_id"`.
 const MapleOrgIDAttribute = "maple_org_id"
 
 // AttrMap converts a pdata attribute Map into a flat string→string map
@@ -27,17 +30,28 @@ func AttrMap(m pcommon.Map) map[string]string {
 	return out
 }
 
-// ResolveOrgID returns the org id for a record. Resource attribute wins over
-// the static fallback so multi-tenant agents (or cluster-collector
-// re-routing) keep working.
-func ResolveOrgID(resource pcommon.Map, fallback string) string {
-	if v, ok := resource.Get(MapleOrgIDAttribute); ok {
-		s := v.AsString()
-		if s != "" {
-			return s
+// ResolveOrgID returns the org id for a record.
+//
+// Default mode (`resourceAttribute == ""`): config OrgID wins unconditionally.
+// This is what 99% of single-tenant deployments want — no upstream processor
+// required. The customer sets `org_id` once on the exporter and every record
+// gets stamped.
+//
+// Per-record mode (`resourceAttribute != ""`): if the resource carries that
+// attribute with a non-empty value, use it. Otherwise fall back to the
+// config OrgID. This is for multi-tenant fan-out scenarios where a single
+// collector serves multiple orgs and an upstream processor (or the SDK
+// itself) already stamped the right id on each record.
+func ResolveOrgID(resource pcommon.Map, configOrgID, resourceAttribute string) string {
+	if resourceAttribute != "" {
+		if v, ok := resource.Get(resourceAttribute); ok {
+			s := v.AsString()
+			if s != "" {
+				return s
+			}
 		}
 	}
-	return fallback
+	return configOrgID
 }
 
 // ServiceName extracts `service.name` from a resource (Maple's `ServiceName`
@@ -138,7 +152,7 @@ func SeverityNumberToText(n int32) string {
 // IMPORTANT: returns the empty string for nil/empty input AND for all-zero
 // input. The all-zero case matters because OTel SDKs emit root spans with
 // an all-zero ParentSpanID, and Maple's `trace_list_mv` MV filters
-// `WHERE ParentSpanId = ''` — emitting "0000000000000000" would make every
+// `WHERE ParentSpanId = ”` — emitting "0000000000000000" would make every
 // root span invisible to the UI's trace list. Same convention as
 // otel-collector-contrib's CH exporter.
 func BytesHex(b []byte) string {
