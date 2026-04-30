@@ -6,6 +6,15 @@ import { IsoDateTimeString } from "../primitives"
 export const OrgTinybirdSyncStatus = Schema.Literals(["active", "error", "out_of_sync", "syncing"])
 export type OrgTinybirdSyncStatus = Schema.Schema.Type<typeof OrgTinybirdSyncStatus>
 
+/**
+ * Which backend an org's per-org BYO config targets.
+ * - `"tinybird"`: a Tinybird workspace; Maple deploys its project to it via TinybirdSyncClient.
+ * - `"clickhouse"`: a vanilla ClickHouse instance; the operator applies the schema themselves
+ *   via the `clickhouse:schema:apply` CLI before pointing Maple at it.
+ */
+export const OrgTinybirdBackend = Schema.Literals(["tinybird", "clickhouse"])
+export type OrgTinybirdBackend = Schema.Schema.Type<typeof OrgTinybirdBackend>
+
 export const OrgTinybirdSyncRunStatus = Schema.Literals(["queued", "running", "failed", "succeeded"])
 export type OrgTinybirdSyncRunStatus = Schema.Schema.Type<typeof OrgTinybirdSyncRunStatus>
 
@@ -39,8 +48,13 @@ export class OrgTinybirdSettingsResponse extends Schema.Class<OrgTinybirdSetting
 	"OrgTinybirdSettingsResponse",
 )({
 	configured: Schema.Boolean,
+	backend: Schema.NullOr(OrgTinybirdBackend),
 	activeHost: Schema.NullOr(Schema.String),
 	draftHost: Schema.NullOr(Schema.String),
+	// ClickHouse-specific projection (no password ever returned to the client).
+	chUrl: Schema.NullOr(Schema.String),
+	chUser: Schema.NullOr(Schema.String),
+	chDatabase: Schema.NullOr(Schema.String),
 	syncStatus: Schema.NullOr(OrgTinybirdSyncStatus),
 	lastSyncAt: Schema.NullOr(IsoDateTimeString),
 	lastSyncError: Schema.NullOr(Schema.String),
@@ -51,14 +65,30 @@ export class OrgTinybirdSettingsResponse extends Schema.Class<OrgTinybirdSetting
 	currentRun: Schema.NullOr(OrgTinybirdCurrentRunResponse),
 }) {}
 
+/**
+ * Upsert payload for per-org BYO settings.
+ *
+ * The `backend` field selects the shape: `"tinybird"` (default for backwards
+ * compatibility) requires `host` + `token`; `"clickhouse"` requires `url` +
+ * `user` + `database`, with optional `password`. Retention fields are only
+ * meaningful for Tinybird (TTL on a Maple-managed Tinybird project). For CH
+ * the operator is responsible for retention via TTL clauses in the schema.
+ */
 export class OrgTinybirdSettingsUpsertRequest extends Schema.Class<OrgTinybirdSettingsUpsertRequest>(
 	"OrgTinybirdSettingsUpsertRequest",
 )({
-	host: Schema.String,
-	token: Schema.String,
+	backend: Schema.optionalKey(OrgTinybirdBackend),
+	// Tinybird-only fields
+	host: Schema.optionalKey(Schema.String),
+	token: Schema.optionalKey(Schema.String),
 	logsRetentionDays: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	tracesRetentionDays: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	metricsRetentionDays: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	// ClickHouse-only fields
+	url: Schema.optionalKey(Schema.String),
+	user: Schema.optionalKey(Schema.String),
+	password: Schema.optionalKey(Schema.String),
+	database: Schema.optionalKey(Schema.String),
 }) {}
 
 export class OrgTinybirdDeploymentStatusResponse extends Schema.Class<OrgTinybirdDeploymentStatusResponse>(

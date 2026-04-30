@@ -113,9 +113,16 @@ function parseRetentionInput(raw: string): RetentionParse {
 const retentionOrNull = (parsed: RetentionParse): number | null =>
 	parsed.kind === "valid" ? parsed.value : null
 
+type Backend = "tinybird" | "clickhouse"
+
 export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinybirdSettingsSectionProps) {
+	const [backend, setBackend] = useState<Backend>("tinybird")
 	const [host, setHost] = useState("")
 	const [token, setToken] = useState("")
+	const [chUrl, setChUrl] = useState("")
+	const [chUser, setChUser] = useState("default")
+	const [chPassword, setChPassword] = useState("")
+	const [chDatabase, setChDatabase] = useState("default")
 	const [logsRetention, setLogsRetention] = useState("")
 	const [tracesRetention, setTracesRetention] = useState("")
 	const [metricsRetention, setMetricsRetention] = useState("")
@@ -223,6 +230,18 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 		}
 	}, [settings?.activeHost, settings?.configured, settings?.draftHost])
 
+	// Hydrate the backend selector + ClickHouse fields from the saved row when
+	// the backend is "clickhouse" — there's no draft state for CH (no sync
+	// workflow) so the active row IS the source of truth.
+	useEffect(() => {
+		if (settings?.backend != null) {
+			setBackend(settings.backend)
+		}
+		if (settings?.chUrl != null) setChUrl(settings.chUrl)
+		if (settings?.chUser != null) setChUser(settings.chUser)
+		if (settings?.chDatabase != null) setChDatabase(settings.chDatabase)
+	}, [settings?.backend, settings?.chUrl, settings?.chUser, settings?.chDatabase])
+
 	useEffect(() => {
 		setLogsRetention(settings?.logsRetentionDays != null ? String(settings.logsRetentionDays) : "")
 		setTracesRetention(settings?.tracesRetentionDays != null ? String(settings.tracesRetentionDays) : "")
@@ -265,31 +284,48 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 	}, [configured, isDeploying, settings?.syncStatus])
 
 	async function handleSave() {
-		if (retentionInvalid) {
+		if (backend === "tinybird" && retentionInvalid) {
 			toast.error("Retention values must be integers between 1 and 3650")
 			return
 		}
 		setIsSaving(true)
 		const result = await upsertMutation({
-			payload: new OrgTinybirdSettingsUpsertRequest({
-				host,
-				token,
-				logsRetentionDays: retentionOrNull(parsedLogsRetention),
-				tracesRetentionDays: retentionOrNull(parsedTracesRetention),
-				metricsRetentionDays: retentionOrNull(parsedMetricsRetention),
-			}),
+			payload:
+				backend === "clickhouse"
+					? new OrgTinybirdSettingsUpsertRequest({
+							backend: "clickhouse",
+							url: chUrl,
+							user: chUser,
+							password: chPassword,
+							database: chDatabase,
+						})
+					: new OrgTinybirdSettingsUpsertRequest({
+							backend: "tinybird",
+							host,
+							token,
+							logsRetentionDays: retentionOrNull(parsedLogsRetention),
+							tracesRetentionDays: retentionOrNull(parsedTracesRetention),
+							metricsRetentionDays: retentionOrNull(parsedMetricsRetention),
+						}),
 		})
 		setIsSaving(false)
 
 		if (Exit.isSuccess(result)) {
 			setToken("")
+			setChPassword("")
 			refreshSettings()
 			refreshDeploymentStatus()
-			toast.success(configured ? "Tinybird sync started" : "Tinybird connection saved and sync started")
+			toast.success(
+				backend === "clickhouse"
+					? "ClickHouse connection saved"
+					: configured
+						? "Tinybird sync started"
+						: "Tinybird connection saved and sync started",
+			)
 			return
 		}
 
-		toast.error(getExitErrorMessage(result, "Failed to save Tinybird settings"))
+		toast.error(getExitErrorMessage(result, "Failed to save settings"))
 	}
 
 	async function handleResync() {
@@ -335,12 +371,13 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 					<CardHeader>
 						<div className="flex items-center justify-between gap-3">
 							<div className="space-y-1">
-								<CardTitle>BYO Tinybird</CardTitle>
+								<CardTitle>Bring your own backend</CardTitle>
 								<CardDescription>
 									Route this organization&apos;s read queries through its own Tinybird
-									Enterprise project. Maple will keep the Tinybird project definition
-									synced, but your team is responsible for writing compatible data into that
-									project.
+									workspace or ClickHouse server. Tinybird mode keeps Maple&apos;s project
+									definition synced for you; ClickHouse mode expects you to apply the schema
+									yourself via the <code className="font-mono">clickhouse:schema:apply</code>{" "}
+									CLI.
 								</CardDescription>
 							</div>
 							{Result.isInitial(settingsResult) ? (
@@ -352,9 +389,99 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 					</CardHeader>
 					<CardContent className="space-y-5">
 						{!Result.isSuccess(settingsResult) && !Result.isInitial(settingsResult) ? (
-							<p className="text-sm text-muted-foreground">Failed to load Tinybird settings.</p>
+							<p className="text-sm text-muted-foreground">Failed to load settings.</p>
 						) : (
 							<>
+								<div className="grid gap-2">
+									<Label>Backend</Label>
+									<div className="flex gap-2">
+										<Button
+											type="button"
+											size="sm"
+											variant={backend === "tinybird" ? "default" : "outline"}
+											onClick={() => setBackend("tinybird")}
+											disabled={isBusy || (configured && settings?.backend === "clickhouse")}
+										>
+											Tinybird
+										</Button>
+										<Button
+											type="button"
+											size="sm"
+											variant={backend === "clickhouse" ? "default" : "outline"}
+											onClick={() => setBackend("clickhouse")}
+											disabled={isBusy || (configured && settings?.backend === "tinybird")}
+										>
+											ClickHouse
+										</Button>
+									</div>
+									{configured && settings?.backend != null && settings.backend !== backend ? (
+										<p className="text-muted-foreground text-xs">
+											To switch backends, disable the current configuration first.
+										</p>
+									) : null}
+								</div>
+
+								{backend === "clickhouse" ? (
+									<>
+										<div className="grid gap-2">
+											<Label htmlFor="ch-url">ClickHouse URL</Label>
+											<Input
+												id="ch-url"
+												placeholder="https://your-clickhouse.example.com:8123"
+												value={chUrl}
+												onChange={(event) => setChUrl(event.target.value)}
+												disabled={isBusy}
+											/>
+											<p className="text-muted-foreground text-xs">
+												HTTP interface URL (port 8123 by default).
+											</p>
+										</div>
+
+										<div className="grid gap-2 sm:grid-cols-2">
+											<div className="grid gap-2">
+												<Label htmlFor="ch-user">User</Label>
+												<Input
+													id="ch-user"
+													value={chUser}
+													onChange={(event) => setChUser(event.target.value)}
+													disabled={isBusy}
+												/>
+											</div>
+											<div className="grid gap-2">
+												<Label htmlFor="ch-database">Database</Label>
+												<Input
+													id="ch-database"
+													value={chDatabase}
+													onChange={(event) => setChDatabase(event.target.value)}
+													disabled={isBusy}
+												/>
+											</div>
+										</div>
+
+										<div className="grid gap-2">
+											<Label htmlFor="ch-password">Password</Label>
+											<Input
+												id="ch-password"
+												type="password"
+												placeholder={
+													configured && settings?.backend === "clickhouse"
+														? "Leave blank to keep the current password"
+														: "Optional"
+												}
+												value={chPassword}
+												onChange={(event) => setChPassword(event.target.value)}
+												disabled={isBusy}
+											/>
+											<p className="text-muted-foreground text-xs">
+												Leave blank for unauthenticated CH instances or to keep the
+												existing password.
+											</p>
+										</div>
+									</>
+								) : null}
+
+								{backend === "tinybird" ? (
+								<>
 								<div className="grid gap-2">
 									<Label htmlFor="tinybird-host">Tinybird host</Label>
 									<Input
@@ -509,16 +636,27 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 										</div>
 									) : null}
 								</div>
+								</>
+								) : null}
 
 								<div className="flex flex-wrap gap-2">
 									<Button
 										onClick={() => void handleSave()}
-										disabled={
-											isBusy ||
-											!isValidHost ||
-											retentionInvalid ||
-											(!hasSavedToken && token.trim().length === 0)
-										}
+										disabled={(() => {
+											if (isBusy) return true
+											if (backend === "clickhouse") {
+												return (
+													chUrl.trim().length === 0 ||
+													chUser.trim().length === 0 ||
+													chDatabase.trim().length === 0
+												)
+											}
+											return (
+												!isValidHost ||
+												retentionInvalid ||
+												(!hasSavedToken && token.trim().length === 0)
+											)
+										})()}
 									>
 										{isSaving
 											? "Saving..."
@@ -526,13 +664,15 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 												? "Update connection"
 												: "Save connection"}
 									</Button>
-									<Button
-										variant="outline"
-										onClick={() => void handleResync()}
-										disabled={isBusy || !configured}
-									>
-										{isResyncing ? "Syncing..." : "Resync project"}
-									</Button>
+									{backend === "tinybird" ? (
+										<Button
+											variant="outline"
+											onClick={() => void handleResync()}
+											disabled={isBusy || !configured}
+										>
+											{isResyncing ? "Syncing..." : "Resync project"}
+										</Button>
+									) : null}
 									<Button
 										variant="destructive"
 										onClick={() => setDisableOpen(true)}
@@ -546,7 +686,7 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 					</CardContent>
 				</Card>
 
-				{configured ? (
+				{configured && settings?.backend !== "clickhouse" ? (
 					<Card>
 						<CardHeader>
 							<div className="flex items-center justify-between gap-3">

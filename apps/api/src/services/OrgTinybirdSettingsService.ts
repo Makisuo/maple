@@ -25,6 +25,7 @@ import {
 	EMPTY_TTL_OVERRIDES,
 	type RawTableTtlOverrides,
 } from "@maple/domain/tinybird"
+import { migrations as clickHouseMigrations } from "@maple/domain/clickhouse"
 import { orgTinybirdSettings, orgTinybirdSyncRuns } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Duration, Effect, Layer, Option, Redacted, Schema, Semaphore, Context } from "effect"
@@ -34,11 +35,31 @@ import { Env } from "./Env"
 import { SelfManagedCollectorConfigService } from "./SelfManagedCollectorConfigService"
 import { TinybirdSyncClient } from "./TinybirdSyncClient"
 
-interface RuntimeTinybirdConfig {
-	readonly host: string
-	readonly token: string
-	readonly projectRevision: string
-}
+/**
+ * Resolved per-org backend config, returned to the runtime SQL layer.
+ *
+ * Self-managed orgs can bring either a Tinybird workspace (the original BYO
+ * mechanism) or a vanilla ClickHouse server (newer, schema applied via the
+ * `clickhouse:schema:apply` CLI). The discriminator lets `TinybirdService`
+ * pick the right wire protocol per query.
+ */
+export type RuntimeBackendConfig =
+	| {
+			readonly backend: "tinybird"
+			readonly host: string
+			readonly token: string
+			readonly projectRevision: string
+	  }
+	| {
+			readonly backend: "clickhouse"
+			readonly url: string
+			readonly user: string
+			readonly password: string
+			readonly database: string
+	  }
+
+/** @deprecated Use RuntimeBackendConfig — kept as an alias for migration. */
+type RuntimeTinybirdConfig = RuntimeBackendConfig
 
 type ActiveRow = typeof orgTinybirdSettings.$inferSelect
 type SyncRunRow = typeof orgTinybirdSyncRuns.$inferSelect
@@ -129,7 +150,7 @@ export interface OrgTinybirdSettingsServiceShape {
 	readonly resolveRuntimeConfig: (
 		orgId: OrgId,
 	) => Effect.Effect<
-		Option.Option<RuntimeTinybirdConfig>,
+		Option.Option<RuntimeBackendConfig>,
 		OrgTinybirdSettingsPersistenceError | OrgTinybirdSettingsEncryptionError
 	>
 }
@@ -487,8 +508,12 @@ export class OrgTinybirdSettingsService extends Context.Service<
 
 			return new OrgTinybirdSettingsResponse({
 				configured: activeRow != null,
+				backend: (activeRow?.backend as "tinybird" | "clickhouse" | undefined) ?? null,
 				activeHost: activeRow?.host ?? null,
 				draftHost: syncRun?.targetHost ?? null,
+				chUrl: activeRow?.chUrl ?? null,
+				chUser: activeRow?.chUser ?? null,
+				chDatabase: activeRow?.chDatabase ?? null,
 				syncStatus: resolveSyncStatus(activeRow, currentRevision, syncRun),
 				lastSyncAt: isIsoDateTime(
 					syncRun?.finishedAt ?? syncRun?.updatedAt ?? activeRow?.lastSyncAt ?? null,
@@ -857,7 +882,12 @@ export class OrgTinybirdSettingsService extends Context.Service<
 				)
 			}
 
-			if (Option.isSome(activeRow)) {
+			if (
+				Option.isSome(activeRow) &&
+				activeRow.value.tokenCiphertext !== null &&
+				activeRow.value.tokenIv !== null &&
+				activeRow.value.tokenTag !== null
+			) {
 				return yield* decryptToken(
 					{
 						ciphertext: activeRow.value.tokenCiphertext,
@@ -895,6 +925,231 @@ export class OrgTinybirdSettingsService extends Context.Service<
 			return toResponse(Option.getOrUndefined(refreshedActiveRow), currentRevision, syncRun)
 		})
 
+		const applyClickHouseSchema = Effect.fn("OrgTinybirdSettingsService.applyClickHouseSchema")(
+			function* (config: {
+				readonly url: string
+				readonly user: string
+				readonly password: string
+				readonly database: string
+			}) {
+				const endpoint = config.url.replace(/\/$/, "")
+				const headers: Record<string, string> = {
+					"Content-Type": "text/plain",
+					"X-ClickHouse-User": config.user,
+					"X-ClickHouse-Database": config.database,
+				}
+				if (config.password.length > 0) {
+					headers["X-ClickHouse-Key"] = config.password
+				}
+
+				const exec = (sql: string) =>
+					Effect.tryPromise({
+						try: async () => {
+							const response = await fetch(endpoint, {
+								method: "POST",
+								headers,
+								body: sql,
+							})
+							const text = await response.text()
+							if (!response.ok) {
+								const status = response.status
+								const message = text.split("\n")[0]?.slice(0, 500) ?? ""
+								if (status === 401 || status === 403) {
+									throw new OrgTinybirdSettingsUpstreamRejectedError({
+										message: `ClickHouse rejected credentials: ${message}`,
+										statusCode: status,
+									})
+								}
+								if (status >= 500) {
+									throw new OrgTinybirdSettingsUpstreamUnavailableError({
+										message: `ClickHouse upstream error (${status}): ${message}`,
+										statusCode: status,
+									})
+								}
+								throw new OrgTinybirdSettingsUpstreamRejectedError({
+									message: `ClickHouse rejected statement (${status}): ${message}`,
+									statusCode: status,
+								})
+							}
+							return text
+						},
+						catch: (error) => {
+							if (
+								error instanceof OrgTinybirdSettingsUpstreamRejectedError ||
+								error instanceof OrgTinybirdSettingsUpstreamUnavailableError
+							) {
+								return error
+							}
+							return new OrgTinybirdSettingsUpstreamUnavailableError({
+								message: `Could not reach ClickHouse: ${error instanceof Error ? error.message : String(error)}`,
+								statusCode: null,
+							})
+						},
+					})
+
+				yield* exec(
+					"CREATE TABLE IF NOT EXISTS _maple_schema_migrations (" +
+						"version UInt32, applied_at DateTime DEFAULT now(), description String" +
+						") ENGINE = MergeTree ORDER BY version",
+				)
+
+				const appliedText = yield* exec(
+					"SELECT version FROM _maple_schema_migrations ORDER BY version FORMAT JSONEachRow",
+				)
+				const applied = new Set<number>()
+				for (const line of appliedText.split("\n")) {
+					const trimmed = line.trim()
+					if (trimmed.length === 0) continue
+					try {
+						const parsed = JSON.parse(trimmed) as { version: number }
+						applied.add(parsed.version)
+					} catch {
+						// Defensive — older CH builds may emit slightly different
+						// JSONEachRow framing. Skip rows we can't parse rather than
+						// failing the whole upsert.
+					}
+				}
+
+				for (const migration of clickHouseMigrations) {
+					if (applied.has(migration.version)) continue
+					for (const stmt of migration.statements) {
+						yield* exec(stmt)
+					}
+					const escapedDesc = migration.description.replace(/'/g, "''")
+					yield* exec(
+						`INSERT INTO _maple_schema_migrations (version, description) VALUES (${migration.version}, '${escapedDesc}')`,
+					)
+				}
+			},
+		)
+
+		const upsertClickHouse = Effect.fn("OrgTinybirdSettingsService.upsertClickHouse")(function* (
+			orgId: OrgId,
+			userId: UserId,
+			payload: OrgTinybirdSettingsUpsertRequest,
+		) {
+			if (payload.url === undefined || payload.user === undefined || payload.database === undefined) {
+				return yield* new OrgTinybirdSettingsValidationError({
+					message:
+						"ClickHouse backend requires `url`, `user`, and `database` in the payload",
+				})
+			}
+			const url = yield* normalizeHost(payload.url)
+			const user = payload.user.trim()
+			const dbName = payload.database.trim()
+			if (user.length === 0) {
+				return yield* new OrgTinybirdSettingsValidationError({ message: "ClickHouse user is required" })
+			}
+			if (dbName.length === 0) {
+				return yield* new OrgTinybirdSettingsValidationError({ message: "ClickHouse database is required" })
+			}
+
+			// If the user left the password blank on a re-save, reuse the existing
+			// stored password (decrypted from the previous row) so the schema apply
+			// step can authenticate. Otherwise use the freshly-supplied password.
+			const existingRow = yield* selectActiveRow(orgId)
+			let plainPassword = (payload.password ?? "").trim()
+			if (plainPassword.length === 0 && Option.isSome(existingRow)) {
+				const row = existingRow.value
+				if (
+					row.backend === "clickhouse" &&
+					row.chPasswordCiphertext !== null &&
+					row.chPasswordIv !== null &&
+					row.chPasswordTag !== null
+				) {
+					plainPassword = yield* decryptToken(
+						{
+							ciphertext: row.chPasswordCiphertext,
+							iv: row.chPasswordIv,
+							tag: row.chPasswordTag,
+						},
+						encryptionKey,
+					)
+				}
+			}
+
+			// Connect-and-migrate before persisting: validates credentials, ensures
+			// the schema is up to date, and surfaces failures as a save-time error
+			// instead of leaving a half-configured row that can't actually serve
+			// queries.
+			yield* applyClickHouseSchema({
+				url,
+				user,
+				password: plainPassword,
+				database: dbName,
+			})
+
+			// Password is optional (some CH deployments use no auth or token-based
+			// auth via the user setting). When present we encrypt it the same way
+			// Tinybird tokens get encrypted — same key, same AES-GCM construction.
+			const encryptedPassword = plainPassword.length > 0
+				? yield* encryptToken(plainPassword, encryptionKey)
+				: null
+
+			const now = Date.now()
+			yield* database
+				.execute((db) =>
+					db
+						.insert(orgTinybirdSettings)
+						.values({
+							orgId,
+							backend: "clickhouse",
+							host: null,
+							tokenCiphertext: null,
+							tokenIv: null,
+							tokenTag: null,
+							chUrl: url,
+							chUser: user,
+							chPasswordCiphertext: encryptedPassword?.ciphertext ?? null,
+							chPasswordIv: encryptedPassword?.iv ?? null,
+							chPasswordTag: encryptedPassword?.tag ?? null,
+							chDatabase: dbName,
+							syncStatus: "active",
+							projectRevision: "clickhouse",
+							lastSyncAt: now,
+							lastSyncError: null,
+							lastDeploymentId: null,
+							logsRetentionDays: null,
+							tracesRetentionDays: null,
+							metricsRetentionDays: null,
+							createdAt: now,
+							updatedAt: now,
+							createdBy: userId,
+							updatedBy: userId,
+						})
+						.onConflictDoUpdate({
+							target: orgTinybirdSettings.orgId,
+							set: {
+								backend: "clickhouse",
+								host: null,
+								tokenCiphertext: null,
+								tokenIv: null,
+								tokenTag: null,
+								chUrl: url,
+								chUser: user,
+								chPasswordCiphertext: encryptedPassword?.ciphertext ?? null,
+								chPasswordIv: encryptedPassword?.iv ?? null,
+								chPasswordTag: encryptedPassword?.tag ?? null,
+								chDatabase: dbName,
+								syncStatus: "active",
+								projectRevision: "clickhouse",
+								lastSyncAt: now,
+								lastSyncError: null,
+								updatedAt: now,
+								updatedBy: userId,
+							},
+						}),
+				)
+				.pipe(Effect.mapError(toPersistenceError))
+
+			// Drop any prior Tinybird sync run state so it doesn't leak into the
+			// response after a backend swap.
+			yield* deleteSyncRun(orgId)
+
+			const nextActiveRow = yield* selectActiveRow(orgId)
+			return toResponse(Option.getOrUndefined(nextActiveRow), null, undefined)
+		})
+
 		const upsert = Effect.fn("OrgTinybirdSettingsService.upsert")(function* (
 			orgId: OrgId,
 			userId: UserId,
@@ -904,6 +1159,19 @@ export class OrgTinybirdSettingsService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			yield* Effect.annotateCurrentSpan("userId", userId)
 			yield* requireAdmin(roles)
+
+			const backend = payload.backend ?? "tinybird"
+			yield* Effect.annotateCurrentSpan("backend", backend)
+
+			if (backend === "clickhouse") {
+				return yield* upsertClickHouse(orgId, userId, payload)
+			}
+
+			if (payload.host === undefined || payload.token === undefined) {
+				return yield* new OrgTinybirdSettingsValidationError({
+					message: "Tinybird backend requires `host` and `token` in the payload",
+				})
+			}
 			const host = yield* normalizeHost(payload.host)
 			const activeRow = yield* selectActiveRow(orgId)
 			const syncRun = yield* selectSyncRunRow(orgId)
@@ -989,6 +1257,22 @@ export class OrgTinybirdSettingsService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("userId", userId)
 			yield* requireAdmin(roles)
 			const activeRow = yield* requireActiveRow(orgId)
+
+			// ClickHouse-backend orgs have no Tinybird project to deploy — schema is
+			// applied operator-side via the `clickhouse:schema:apply` CLI. Resync is
+			// a no-op here; surface the existing state without kicking a workflow.
+			if (
+				activeRow.backend === "clickhouse" ||
+				activeRow.tokenCiphertext === null ||
+				activeRow.tokenIv === null ||
+				activeRow.tokenTag === null ||
+				activeRow.host === null
+			) {
+				const existingRun = yield* selectSyncRunRow(orgId)
+				const currentRevision = yield* getCurrentProjectRevision()
+				return toResponse(activeRow, currentRevision, Option.getOrUndefined(existingRun))
+			}
+
 			const token = yield* decryptToken(
 				{
 					ciphertext: activeRow.tokenCiphertext,
@@ -1011,7 +1295,47 @@ export class OrgTinybirdSettingsService extends Context.Service<
 		) {
 			const row = yield* selectActiveRow(orgId)
 			if (Option.isNone(row)) {
-				return Option.none<RuntimeTinybirdConfig>()
+				return Option.none<RuntimeBackendConfig>()
+			}
+
+			if (row.value.backend === "clickhouse") {
+				if (
+					row.value.chUrl === null ||
+					row.value.chUser === null ||
+					row.value.chDatabase === null
+				) {
+					// Should never happen — `upsert` ensures these are set together.
+					return Option.none<RuntimeBackendConfig>()
+				}
+				const password =
+					row.value.chPasswordCiphertext !== null &&
+					row.value.chPasswordIv !== null &&
+					row.value.chPasswordTag !== null
+						? yield* decryptToken(
+								{
+									ciphertext: row.value.chPasswordCiphertext,
+									iv: row.value.chPasswordIv,
+									tag: row.value.chPasswordTag,
+								},
+								encryptionKey,
+							)
+						: ""
+				return Option.some<RuntimeBackendConfig>({
+					backend: "clickhouse",
+					url: row.value.chUrl,
+					user: row.value.chUser,
+					password,
+					database: row.value.chDatabase,
+				})
+			}
+
+			if (
+				row.value.host === null ||
+				row.value.tokenCiphertext === null ||
+				row.value.tokenIv === null ||
+				row.value.tokenTag === null
+			) {
+				return Option.none<RuntimeBackendConfig>()
 			}
 
 			const token = yield* decryptToken(
@@ -1023,7 +1347,8 @@ export class OrgTinybirdSettingsService extends Context.Service<
 				encryptionKey,
 			)
 
-			return Option.some({
+			return Option.some<RuntimeBackendConfig>({
+				backend: "tinybird",
 				host: row.value.host,
 				token,
 				projectRevision: row.value.projectRevision,
@@ -1051,6 +1376,28 @@ export class OrgTinybirdSettingsService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			yield* requireAdmin(roles)
 			const row = yield* requireActiveRow(orgId)
+
+			// ClickHouse-backend orgs don't expose a Tinybird workspace API. Returning
+			// an empty snapshot rather than calling Tinybird's stats endpoint matches
+			// the rest of the service: CH instance health is the operator's concern,
+			// not Maple's.
+			if (
+				row.backend === "clickhouse" ||
+				row.host === null ||
+				row.tokenCiphertext === null ||
+				row.tokenIv === null ||
+				row.tokenTag === null
+			) {
+				return new OrgTinybirdInstanceHealthResponse({
+					workspaceName: null,
+					datasources: [],
+					totalRows: 0,
+					totalBytes: 0,
+					recentErrorCount: 0,
+					avgQueryLatencyMs: null,
+				})
+			}
+
 			const token = yield* decryptToken(
 				{ ciphertext: row.tokenCiphertext, iv: row.tokenIv, tag: row.tokenTag },
 				encryptionKey,

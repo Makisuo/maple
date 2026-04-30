@@ -27,8 +27,7 @@ export type SqlQueryOptions = {
 const CLIENT_CACHE_TTL_MS = 30_000
 interface CachedClient {
 	client: SqlClient
-	host: string
-	token: string
+	signature: string
 	expiresAt: number
 }
 
@@ -59,7 +58,33 @@ interface SqlClient {
 	readonly sql: (sql: string) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
 }
 
-const createClient = (baseUrl: string, token: string): SqlClient => {
+/**
+ * Resolved upstream connection. Self-managed deployments using a vanilla
+ * ClickHouse instance get a `clickhouse` connection; everything else (managed
+ * Tinybird Cloud, BYO Tinybird per-org overrides) gets a `tinybird` connection.
+ */
+type ResolvedConnection =
+	| {
+			readonly backend: "tinybird"
+			readonly host: string
+			readonly token: string
+			readonly source: "managed" | "org_override"
+	  }
+	| {
+			readonly backend: "clickhouse"
+			readonly url: string
+			readonly user: string
+			readonly password: string
+			readonly database: string
+			readonly source: "org_override"
+	  }
+
+const signatureOf = (resolved: ResolvedConnection): string =>
+	resolved.backend === "tinybird"
+		? `tb:${resolved.host}:${resolved.token}`
+		: `ch:${resolved.url}:${resolved.user}:${resolved.database}:${resolved.password.length > 0 ? "y" : "n"}`
+
+const createTinybirdClient = (baseUrl: string, token: string): SqlClient => {
 	const tb = new Tinybird({
 		baseUrl,
 		token,
@@ -70,7 +95,50 @@ const createClient = (baseUrl: string, token: string): SqlClient => {
 	return { sql: (sql: string) => tb.sql(sql) }
 }
 
-let tinybirdClientFactory: typeof createClient = createClient
+const createClickHouseClient = (
+	url: string,
+	user: string,
+	password: string,
+	database: string,
+): SqlClient => {
+	const endpoint = url.replace(/\/$/, "")
+	const headers: Record<string, string> = {
+		"Content-Type": "text/plain",
+		"X-ClickHouse-User": user,
+		"X-ClickHouse-Database": database,
+	}
+	if (password.length > 0) headers["X-ClickHouse-Key"] = password
+
+	return {
+		sql: async (sql: string) => {
+			const response = await fetch(endpoint, { method: "POST", headers, body: sql })
+			const text = await response.text()
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status} ${response.statusText}: ${text.slice(0, 500)}`)
+			}
+			// `FORMAT JSON` (already appended by the query engine) returns a body shaped
+			// `{ meta, data, rows, statistics }` — same `data` field name Tinybird's SDK
+			// surfaces, so the rest of TinybirdService treats both backends identically.
+			const parsed = JSON.parse(text) as {
+				readonly data?: ReadonlyArray<Record<string, unknown>>
+			}
+			return { data: parsed.data ?? [] }
+		},
+	}
+}
+
+const createClient = (resolved: ResolvedConnection): SqlClient =>
+	resolved.backend === "tinybird"
+		? tinybirdClientFactory(resolved.host, resolved.token)
+		: clickHouseClientFactory(resolved.url, resolved.user, resolved.password, resolved.database)
+
+let tinybirdClientFactory: (baseUrl: string, token: string) => SqlClient = createTinybirdClient
+let clickHouseClientFactory: (
+	url: string,
+	user: string,
+	password: string,
+	database: string,
+) => SqlClient = createClickHouseClient
 
 export class TinybirdService extends Context.Service<TinybirdService, TinybirdServiceShape>()(
 	"TinybirdService",
@@ -126,14 +194,18 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				return new TinybirdQueryError({ pipe, message, category: "query" })
 			}
 
-			const getCachedOrCreateClient = (orgId: OrgId | "__managed__", host: string, token: string) => {
+			const getCachedOrCreateClient = (
+				orgId: OrgId | "__managed__",
+				resolved: ResolvedConnection,
+			) => {
 				const now = Date.now()
+				const signature = signatureOf(resolved)
 				const cached = clientCache.get(orgId)
-				if (cached && cached.host === host && cached.token === token && cached.expiresAt > now) {
+				if (cached && cached.signature === signature && cached.expiresAt > now) {
 					return cached.client
 				}
-				const client = tinybirdClientFactory(host, token)
-				clientCache.set(orgId, { client, host, token, expiresAt: now + CLIENT_CACHE_TTL_MS })
+				const client = createClient(resolved)
+				clientCache.set(orgId, { client, signature, expiresAt: now + CLIENT_CACHE_TTL_MS })
 				return client
 			}
 
@@ -147,19 +219,34 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 
 				if (Option.isSome(override)) {
 					yield* Effect.annotateCurrentSpan("clientSource", "org_override")
+					if (override.value.backend === "clickhouse") {
+						yield* Effect.annotateCurrentSpan("backend", "clickhouse")
+						return {
+							backend: "clickhouse",
+							url: override.value.url,
+							user: override.value.user,
+							password: override.value.password,
+							database: override.value.database,
+							source: "org_override",
+						} satisfies ResolvedConnection
+					}
+					yield* Effect.annotateCurrentSpan("backend", "tinybird")
 					return {
+						backend: "tinybird",
 						host: override.value.host,
 						token: override.value.token,
-						source: "org_override" as const,
-					}
+						source: "org_override",
+					} satisfies ResolvedConnection
 				}
 
 				yield* Effect.annotateCurrentSpan("clientSource", "managed")
+				yield* Effect.annotateCurrentSpan("backend", "tinybird")
 				return {
+					backend: "tinybird",
 					host: env.TINYBIRD_HOST,
 					token: Redacted.value(env.TINYBIRD_TOKEN),
-					source: "managed" as const,
-				}
+					source: "managed",
+				} satisfies ResolvedConnection
 			})
 
 			const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
@@ -171,7 +258,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 
 				const resolved = yield* resolveHostToken(tenant, pipe)
 				const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
-				return getCachedOrCreateClient(cacheKey, resolved.host, resolved.token)
+				return getCachedOrCreateClient(cacheKey, resolved)
 			})
 
 			const truncateSql = (s: string, maxLen = 1000) =>
@@ -288,16 +375,37 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				const label = `ingest:${datasource}`
 				const resolved = yield* resolveHostToken(tenant, label)
 				const ndjson = rows.map((row) => JSON.stringify(row)).join("\n")
-				const url = `${resolved.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`
+
+				const { url, headers } =
+					resolved.backend === "tinybird"
+						? {
+								url: `${resolved.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`,
+								headers: {
+									"Content-Type": "application/x-ndjson",
+									Authorization: `Bearer ${resolved.token}`,
+								} as Record<string, string>,
+							}
+						: (() => {
+								// Direct INSERT to ClickHouse using JSONEachRow — same wire format as
+								// the NDJSON we already build above. The query string carries the
+								// target table; ClickHouse parses each line as one row.
+								const ch: Record<string, string> = {
+									"Content-Type": "application/x-ndjson",
+									"X-ClickHouse-User": resolved.user,
+									"X-ClickHouse-Database": resolved.database,
+								}
+								if (resolved.password.length > 0) ch["X-ClickHouse-Key"] = resolved.password
+								return {
+									url: `${resolved.url.replace(/\/$/, "")}/?query=${encodeURIComponent(`INSERT INTO ${datasource} FORMAT JSONEachRow`)}`,
+									headers: ch,
+								}
+							})()
 
 				yield* Effect.tryPromise({
 					try: async () => {
 						const response = await fetch(url, {
 							method: "POST",
-							headers: {
-								"Content-Type": "application/x-ndjson",
-								Authorization: `Bearer ${resolved.token}`,
-							},
+							headers,
 							body: ndjson,
 						})
 						if (!response.ok) {
@@ -313,6 +421,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 						Effect.logError("TinybirdService.ingest failed", {
 							datasource,
 							rowCount: rows.length,
+							backend: resolved.backend,
 							error: String(error),
 							message: error.message,
 						}),
@@ -343,12 +452,19 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 }
 
 export const __testables = {
-	setClientFactory: (factory: typeof createClient) => {
+	setClientFactory: (factory: (baseUrl: string, token: string) => SqlClient) => {
 		tinybirdClientFactory = factory
 		clientCache.clear()
 	},
+	setClickHouseClientFactory: (
+		factory: (url: string, user: string, password: string, database: string) => SqlClient,
+	) => {
+		clickHouseClientFactory = factory
+		clientCache.clear()
+	},
 	reset: () => {
-		tinybirdClientFactory = createClient
+		tinybirdClientFactory = createTinybirdClient
+		clickHouseClientFactory = createClickHouseClient
 		clientCache.clear()
 	},
 }

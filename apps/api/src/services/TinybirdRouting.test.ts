@@ -241,4 +241,68 @@ describe("Tinybird routing", () => {
 			},
 		])
 	})
+
+	it("routes raw queries to a per-org ClickHouse backend when the BYO row is backend=clickhouse", async () => {
+		const { url, dbPath } = createTempDbUrl()
+
+		// Bypass the upsert workflow: write a CH-backed BYO row directly. We're
+		// validating that TinybirdService dispatches on `backend`, not the upsert
+		// path itself (covered separately).
+		const seedClickHouseRow = async (orgId: string) => {
+			const now = Date.now()
+			await executeSql(
+				dbPath,
+				`INSERT INTO org_tinybird_settings (
+          org_id, backend,
+          host, token_ciphertext, token_iv, token_tag,
+          ch_url, ch_user, ch_password_ciphertext, ch_password_iv, ch_password_tag, ch_database,
+          sync_status, last_sync_at, last_sync_error, project_revision, last_deployment_id,
+          created_at, updated_at, created_by, updated_by
+        ) VALUES (?, 'clickhouse',
+          NULL, NULL, NULL, NULL,
+          'http://customer-ch.example:8123', 'maple', NULL, NULL, NULL, 'maple_ch',
+          'active', ?, NULL, 'clickhouse', NULL,
+          ?, ?, 'system', 'system')
+        ON CONFLICT(org_id) DO UPDATE SET
+          backend='clickhouse',
+          ch_url=excluded.ch_url,
+          ch_user=excluded.ch_user,
+          ch_database=excluded.ch_database,
+          sync_status='active',
+          updated_at=excluded.updated_at`,
+				[orgId, now, now, now],
+			)
+		}
+
+		const tinybirdCalls: Array<{ baseUrl: string; token: string }> = []
+		const chCalls: Array<{ url: string; user: string; password: string; database: string }> = []
+
+		tinybirdTestables.setClientFactory((baseUrl, token) => {
+			tinybirdCalls.push({ baseUrl, token })
+			return { sql: async () => ({ data: [] }) }
+		})
+		tinybirdTestables.setClickHouseClientFactory((u, user, password, database) => {
+			chCalls.push({ url: u, user, password, database })
+			return { sql: async () => ({ data: [{ message: "from-clickhouse" }] }) }
+		})
+
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* Effect.promise(() => seedClickHouseRow(tenant.orgId))
+				const service = yield* TinybirdService
+				return yield* service.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_a'")
+			}).pipe(Effect.provide(makeTinybirdLayer(url))),
+		)
+
+		expect(result).toEqual([{ message: "from-clickhouse" }])
+		expect(chCalls).toEqual([
+			{
+				url: "http://customer-ch.example:8123",
+				user: "maple",
+				password: "",
+				database: "maple_ch",
+			},
+		])
+		expect(tinybirdCalls).toEqual([])
+	})
 })

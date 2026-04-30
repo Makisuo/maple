@@ -294,6 +294,20 @@ export class SelfManagedCollectorConfigService extends Context.Service<
 
 				const exporters: SelfManagedOrgExporter[] = []
 				for (const row of rows) {
+					// Only Tinybird-backend rows produce a collector exporter — the
+					// generated YAML configures the OTel `tinybird` exporter to push
+					// to per-org Tinybird workspaces. ClickHouse-backend orgs run
+					// their own ingest and don't need a Maple-managed collector
+					// config entry.
+					if (
+						row.backend !== "tinybird" ||
+						row.host === null ||
+						row.tokenCiphertext === null ||
+						row.tokenIv === null ||
+						row.tokenTag === null
+					) {
+						continue
+					}
 					const token = yield* decryptAes256Gcm(
 						{
 							ciphertext: row.tokenCiphertext,

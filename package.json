@@ -23,6 +23,8 @@
 		"test": "turbo test",
 		"tinybird:manifest": "bun run ./scripts/generate-tinybird-project-manifest.ts",
 		"tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
+		"clickhouse:schema": "bun run ./scripts/generate-clickhouse-schema.ts",
+		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check",
 		"typecheck": "turbo typecheck"
 	},
 	"dependencies": {},
