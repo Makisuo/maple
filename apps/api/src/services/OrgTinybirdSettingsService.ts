@@ -181,6 +181,61 @@ const encryptToken = (
 ): Effect.Effect<EncryptedValue, OrgTinybirdSettingsEncryptionError> =>
 	encryptAes256Gcm(plaintext, encryptionKey, () => toEncryptionError("Failed to encrypt Tinybird token"))
 
+/**
+ * Source datasources that materialized views read from. Used by
+ * `qualifyStatementForDatabase` to rewrite bare `FROM <name>` / `JOIN <name>`
+ * references in MV bodies.
+ *
+ * Exported for testing.
+ */
+export const CLICKHOUSE_MV_SOURCE_TABLES: ReadonlyArray<string> = [
+	"traces",
+	"logs",
+	"metrics_sum",
+	"metrics_gauge",
+	"metrics_histogram",
+	"metrics_exponential_histogram",
+]
+
+/**
+ * Rewrite a generated CREATE TABLE / CREATE MATERIALIZED VIEW statement to
+ * fully qualify every Maple-managed identifier with the supplied database
+ * name. Belt-and-suspenders: ClickHouse Cloud's new analyzer (24.x+) sometimes
+ * fails to resolve unqualified table identifiers in materialized view bodies
+ * even when the X-ClickHouse-Database header is set, surfacing as
+ * `Code: 60. UNKNOWN_TABLE: <db>.<table>` at MV creation. Qualifying every
+ * identifier sidesteps the analyzer's "current database" resolution entirely.
+ *
+ * Exported for testing.
+ */
+export const qualifyStatementForDatabase = (stmt: string, database: string): string => {
+	if (database.length === 0) return stmt
+	const ident = (name: string) => `\`${database}\`.\`${name}\``
+
+	// `CREATE TABLE [IF NOT EXISTS] <name>` → qualify the table name.
+	let result = stmt.replace(
+		/^(CREATE TABLE\s+(?:IF NOT EXISTS\s+)?)([A-Za-z_][A-Za-z0-9_]*)/,
+		(_match, prefix: string, name: string) => `${prefix}${ident(name)}`,
+	)
+
+	// `CREATE MATERIALIZED VIEW [IF NOT EXISTS] <view> TO <target>` → qualify both.
+	result = result.replace(
+		/^(CREATE MATERIALIZED VIEW\s+(?:IF NOT EXISTS\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s+TO\s+)([A-Za-z_][A-Za-z0-9_]*)/,
+		(_match, p1: string, view: string, mid: string, target: string) =>
+			`${p1}${ident(view)}${mid}${ident(target)}`,
+	)
+
+	// Bare `FROM <table>` / `JOIN <table>` in MV bodies for known source datasources.
+	for (const table of CLICKHOUSE_MV_SOURCE_TABLES) {
+		result = result.replace(
+			new RegExp(`(\\bFROM|\\bJOIN)\\s+${table}\\b`, "g"),
+			(_match, kw: string) => `${kw} ${ident(table)}`,
+		)
+	}
+
+	return result
+}
+
 const decryptToken = (
 	encrypted: EncryptedValue,
 	encryptionKey: Buffer,
@@ -925,49 +980,6 @@ export class OrgTinybirdSettingsService extends Context.Service<
 			return toResponse(Option.getOrUndefined(refreshedActiveRow), currentRevision, syncRun)
 		})
 
-		// Source datasources that materialized views read from. When applying the
-		// schema against a customer ClickHouse, we rewrite each MV body's
-		// `FROM <name>` / `JOIN <name>` references to `<database>.<name>` so the
-		// CH analyzer never has to resolve unqualified identifiers — that fails
-		// on Cloud / new-analyzer clusters even when the X-ClickHouse-Database
-		// header is set.
-		const MV_SOURCE_TABLES: ReadonlyArray<string> = [
-			"traces",
-			"logs",
-			"metrics_sum",
-			"metrics_gauge",
-			"metrics_histogram",
-			"metrics_exponential_histogram",
-		]
-
-		const qualifyStatementForDatabase = (stmt: string, database: string): string => {
-			if (database.length === 0) return stmt
-			const ident = (name: string) => `\`${database}\`.\`${name}\``
-
-			// `CREATE TABLE [IF NOT EXISTS] <name>` → qualify the table name.
-			let result = stmt.replace(
-				/^(CREATE TABLE\s+(?:IF NOT EXISTS\s+)?)([A-Za-z_][A-Za-z0-9_]*)/,
-				(_match, prefix: string, name: string) => `${prefix}${ident(name)}`,
-			)
-
-			// `CREATE MATERIALIZED VIEW [IF NOT EXISTS] <view> TO <target>` → qualify both.
-			result = result.replace(
-				/^(CREATE MATERIALIZED VIEW\s+(?:IF NOT EXISTS\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s+TO\s+)([A-Za-z_][A-Za-z0-9_]*)/,
-				(_match, p1: string, view: string, mid: string, target: string) =>
-					`${p1}${ident(view)}${mid}${ident(target)}`,
-			)
-
-			// Bare `FROM <table>` / `JOIN <table>` in MV bodies for known source datasources.
-			for (const table of MV_SOURCE_TABLES) {
-				result = result.replace(
-					new RegExp(`(\\bFROM|\\bJOIN)\\s+${table}\\b`, "g"),
-					(_match, kw: string) => `${kw} ${ident(table)}`,
-				)
-			}
-
-			return result
-		}
-
 		const applyClickHouseSchema = Effect.fn("OrgTinybirdSettingsService.applyClickHouseSchema")(
 			function* (config: {
 				readonly url: string
@@ -1037,14 +1049,20 @@ export class OrgTinybirdSettingsService extends Context.Service<
 						},
 					})
 
+				// `_maple_schema_migrations` is also fully qualified for the same
+				// reason as the rest of the schema — CH Cloud's new analyzer can
+				// fail to resolve bare identifiers in some scopes even when the
+				// session database is set.
+				const migrationsTable = `\`${config.database}\`.\`_maple_schema_migrations\``
+
 				yield* exec(
-					"CREATE TABLE IF NOT EXISTS _maple_schema_migrations (" +
+					`CREATE TABLE IF NOT EXISTS ${migrationsTable} (` +
 						"version UInt32, applied_at DateTime DEFAULT now(), description String" +
 						") ENGINE = MergeTree ORDER BY version",
 				)
 
 				const appliedText = yield* exec(
-					"SELECT version FROM _maple_schema_migrations ORDER BY version FORMAT JSONEachRow",
+					`SELECT version FROM ${migrationsTable} ORDER BY version FORMAT JSONEachRow`,
 				)
 				const applied = new Set<number>()
 				for (const line of appliedText.split("\n")) {
@@ -1067,7 +1085,7 @@ export class OrgTinybirdSettingsService extends Context.Service<
 					}
 					const escapedDesc = migration.description.replace(/'/g, "''")
 					yield* exec(
-						`INSERT INTO _maple_schema_migrations (version, description) VALUES (${migration.version}, '${escapedDesc}')`,
+						`INSERT INTO ${migrationsTable} (version, description) VALUES (${migration.version}, '${escapedDesc}')`,
 					)
 				}
 			},
