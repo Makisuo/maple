@@ -149,6 +149,9 @@ func encodeTraceRow(
 	sid := span.SpanID()
 	psid := span.ParentSpanID()
 
+	// BytesHex returns "" for all-zero input, which is what Maple's
+	// `trace_list_mv` MV filter (`WHERE ParentSpanId = ''`) expects for
+	// root spans.
 	return map[string]any{
 		"OrgId":             orgID,
 		"Timestamp":         internal.FormatTimestampNano(uint64(span.StartTimestamp())),

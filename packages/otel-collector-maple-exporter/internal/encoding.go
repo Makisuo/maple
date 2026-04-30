@@ -134,17 +134,33 @@ func SeverityNumberToText(n int32) string {
 // TraceId, SpanId, ParentSpanId — Maple stores these as String columns
 // containing the hex form (matching otel-collector-contrib's CH exporter
 // convention).
+//
+// IMPORTANT: returns the empty string for nil/empty input AND for all-zero
+// input. The all-zero case matters because OTel SDKs emit root spans with
+// an all-zero ParentSpanID, and Maple's `trace_list_mv` MV filters
+// `WHERE ParentSpanId = ''` — emitting "0000000000000000" would make every
+// root span invisible to the UI's trace list. Same convention as
+// otel-collector-contrib's CH exporter.
 func BytesHex(b []byte) string {
-	const hex = "0123456789abcdef"
-	if len(b) == 0 {
+	if len(b) == 0 || isAllZero(b) {
 		return ""
 	}
+	const hex = "0123456789abcdef"
 	out := make([]byte, len(b)*2)
 	for i, v := range b {
 		out[i*2] = hex[v>>4]
 		out[i*2+1] = hex[v&0x0f]
 	}
 	return string(out)
+}
+
+func isAllZero(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // MarshalRow JSON-encodes a row map, returning a single-line JSON document
