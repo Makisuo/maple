@@ -400,7 +400,7 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 											size="sm"
 											variant={backend === "tinybird" ? "default" : "outline"}
 											onClick={() => setBackend("tinybird")}
-											disabled={isBusy || (configured && settings?.backend === "clickhouse")}
+											disabled={isBusy}
 										>
 											Tinybird
 										</Button>
@@ -409,14 +409,16 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 											size="sm"
 											variant={backend === "clickhouse" ? "default" : "outline"}
 											onClick={() => setBackend("clickhouse")}
-											disabled={isBusy || (configured && settings?.backend === "tinybird")}
+											disabled={isBusy}
 										>
 											ClickHouse
 										</Button>
 									</div>
 									{configured && settings?.backend != null && settings.backend !== backend ? (
 										<p className="text-muted-foreground text-xs">
-											To switch backends, disable the current configuration first.
+											You&apos;re currently configured for{" "}
+											{settings.backend === "clickhouse" ? "ClickHouse" : "Tinybird"}. Saving
+											will replace it with the new backend.
 										</p>
 									) : null}
 								</div>

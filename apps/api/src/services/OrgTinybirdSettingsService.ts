@@ -925,6 +925,49 @@ export class OrgTinybirdSettingsService extends Context.Service<
 			return toResponse(Option.getOrUndefined(refreshedActiveRow), currentRevision, syncRun)
 		})
 
+		// Source datasources that materialized views read from. When applying the
+		// schema against a customer ClickHouse, we rewrite each MV body's
+		// `FROM <name>` / `JOIN <name>` references to `<database>.<name>` so the
+		// CH analyzer never has to resolve unqualified identifiers — that fails
+		// on Cloud / new-analyzer clusters even when the X-ClickHouse-Database
+		// header is set.
+		const MV_SOURCE_TABLES: ReadonlyArray<string> = [
+			"traces",
+			"logs",
+			"metrics_sum",
+			"metrics_gauge",
+			"metrics_histogram",
+			"metrics_exponential_histogram",
+		]
+
+		const qualifyStatementForDatabase = (stmt: string, database: string): string => {
+			if (database.length === 0) return stmt
+			const ident = (name: string) => `\`${database}\`.\`${name}\``
+
+			// `CREATE TABLE [IF NOT EXISTS] <name>` → qualify the table name.
+			let result = stmt.replace(
+				/^(CREATE TABLE\s+(?:IF NOT EXISTS\s+)?)([A-Za-z_][A-Za-z0-9_]*)/,
+				(_match, prefix: string, name: string) => `${prefix}${ident(name)}`,
+			)
+
+			// `CREATE MATERIALIZED VIEW [IF NOT EXISTS] <view> TO <target>` → qualify both.
+			result = result.replace(
+				/^(CREATE MATERIALIZED VIEW\s+(?:IF NOT EXISTS\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s+TO\s+)([A-Za-z_][A-Za-z0-9_]*)/,
+				(_match, p1: string, view: string, mid: string, target: string) =>
+					`${p1}${ident(view)}${mid}${ident(target)}`,
+			)
+
+			// Bare `FROM <table>` / `JOIN <table>` in MV bodies for known source datasources.
+			for (const table of MV_SOURCE_TABLES) {
+				result = result.replace(
+					new RegExp(`(\\bFROM|\\bJOIN)\\s+${table}\\b`, "g"),
+					(_match, kw: string) => `${kw} ${ident(table)}`,
+				)
+			}
+
+			return result
+		}
+
 		const applyClickHouseSchema = Effect.fn("OrgTinybirdSettingsService.applyClickHouseSchema")(
 			function* (config: {
 				readonly url: string
@@ -941,11 +984,18 @@ export class OrgTinybirdSettingsService extends Context.Service<
 				if (config.password.length > 0) {
 					headers["X-ClickHouse-Key"] = config.password
 				}
+				// Belt-and-suspenders: ClickHouse Cloud's new analyzer (24.x+) sometimes
+				// fails to resolve unqualified table identifiers in materialized view
+				// bodies even when the X-ClickHouse-Database header is set, surfacing
+				// as `Code: 60. UNKNOWN_TABLE: <db>.<table>` at MV creation. Sending
+				// the database as a URL query parameter is the canonical CH way and is
+				// honored consistently across analyzer modes.
+				const requestUrl = `${endpoint}/?database=${encodeURIComponent(config.database)}`
 
 				const exec = (sql: string) =>
 					Effect.tryPromise({
 						try: async () => {
-							const response = await fetch(endpoint, {
+							const response = await fetch(requestUrl, {
 								method: "POST",
 								headers,
 								body: sql,
@@ -1013,7 +1063,7 @@ export class OrgTinybirdSettingsService extends Context.Service<
 				for (const migration of clickHouseMigrations) {
 					if (applied.has(migration.version)) continue
 					for (const stmt of migration.statements) {
-						yield* exec(stmt)
+						yield* exec(qualifyStatementForDatabase(stmt, config.database))
 					}
 					const escapedDesc = migration.description.replace(/'/g, "''")
 					yield* exec(
