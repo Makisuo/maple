@@ -15,10 +15,9 @@ import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "./routes/integ
 import { HttpIngestKeysLive } from "./routes/ingest-keys.http"
 import { HttpObservabilityLive } from "./routes/observability.http"
 import { HttpOrgOpenRouterSettingsLive } from "./routes/org-openrouter-settings.http"
-import { HttpOrgTinybirdSettingsLive } from "./routes/org-tinybird-settings.http"
+import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpQueryEngineLive } from "./routes/query-engine.http"
 import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http"
-import { HttpSelfManagedCollectorLive } from "./routes/self-managed-collector.http"
 import { HttpServiceDiscoveryLive } from "./routes/sd.http"
 import { AlertRuntime, AlertsService } from "./services/AlertsService"
 import { BucketCacheService } from "./services/BucketCacheService"
@@ -36,12 +35,10 @@ import { EmailService } from "./services/EmailService"
 import { Env } from "./services/Env"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
 import { OrgOpenRouterSettingsService } from "./services/OrgOpenRouterSettingsService"
-import { OrgTinybirdSettingsService } from "./services/OrgTinybirdSettingsService"
+import { OrgClickHouseSettingsService } from "./services/OrgClickHouseSettingsService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { TinybirdService } from "./services/TinybirdService"
-import { SelfManagedCollectorConfigService } from "./services/SelfManagedCollectorConfigService"
-import { TinybirdSyncClient } from "./services/TinybirdSyncClient"
 
 export const HealthRouter = HttpRouter.use((router) =>
 	router.add("GET", "/health", HttpServerResponse.text("OK")),
@@ -65,13 +62,7 @@ export const CoreServicesLive = Layer.mergeAll(
 	HazelOAuthService.layer,
 	OrgIngestKeysService.layer,
 	OrgOpenRouterSettingsService.layer,
-	OrgTinybirdSettingsService.layer.pipe(
-		Layer.provide(TinybirdSyncClient.layer),
-		Layer.provide(SelfManagedCollectorConfigService.layer),
-	),
-	// Expose SelfManagedCollectorConfigService at the top of CoreServicesLive
-	// so the admin republish route can resolve it, not just OrgTinybirdSettingsService.
-	SelfManagedCollectorConfigService.layer,
+	OrgClickHouseSettingsService.layer,
 	ScrapeTargetsService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
@@ -127,9 +118,8 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpIntegrationsLive),
 	Layer.provide(HttpObservabilityLive),
 	Layer.provide(HttpOrgOpenRouterSettingsLive),
-	Layer.provide(HttpOrgTinybirdSettingsLive),
+	Layer.provide(HttpOrgClickHouseSettingsLive),
 	Layer.provide(HttpScrapeTargetsLive),
-	Layer.provide(HttpSelfManagedCollectorLive),
 	Layer.provide(HttpServiceDiscoveryLive),
 	Layer.provide(HttpQueryEngineLive),
 )

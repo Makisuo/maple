@@ -61,8 +61,6 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 			...optionalSecret("SD_INTERNAL_TOKEN"),
 			...optionalSecret("INTERNAL_SERVICE_TOKEN"),
 			...optionalSecret("RESEND_API_KEY"),
-			...optionalPlain("MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL"),
-			...optionalSecret("MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN"),
 		},
 	})
 

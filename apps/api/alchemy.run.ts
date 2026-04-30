@@ -1,7 +1,6 @@
 import path from "node:path"
 import alchemy from "alchemy"
-import { D1Database, KVNamespace, Worker, Workflow } from "alchemy/cloudflare"
-import type { TinybirdSyncWorkflowPayload } from "./src/workflows/TinybirdSyncWorkflow"
+import { D1Database, KVNamespace, Worker } from "alchemy/cloudflare"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import { formatMapleStage, resolveD1Name, resolveWorkerName } from "@maple/infra/cloudflare"
 
@@ -36,11 +35,6 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 		migrationsTable: "drizzle_migrations",
 	})
 
-	const tinybirdSyncWorkflow = Workflow<TinybirdSyncWorkflowPayload>("tinybird-sync-workflow", {
-		workflowName: resolveWorkerName("tinybird-sync", stage),
-		className: "TinybirdSyncWorkflow",
-	})
-
 	const mcpSessions = await KVNamespace("MCP_SESSIONS", {
 		title: resolveWorkerName("mcp-sessions", stage),
 		adopt: true,
@@ -58,7 +52,6 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 		bindings: {
 			MAPLE_DB: mapleDb,
 			MCP_SESSIONS: mcpSessions,
-			TINYBIRD_SYNC_WORKFLOW: tinybirdSyncWorkflow,
 			TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 			TINYBIRD_TOKEN: alchemy.secret(requireEnv("TINYBIRD_TOKEN")),
 			...optionalPlain("CLICKHOUSE_URL"),
@@ -90,8 +83,6 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			...optionalSecret("SD_INTERNAL_TOKEN"),
 			...optionalSecret("INTERNAL_SERVICE_TOKEN"),
 			...optionalSecret("RESEND_API_KEY"),
-			...optionalPlain("MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL"),
-			...optionalSecret("MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN"),
 			...optionalPlain("HAZEL_API_BASE_URL"),
 			...optionalPlain("HAZEL_OAUTH_DISCOVERY_URL"),
 			...optionalPlain("HAZEL_OAUTH_CLIENT_ID"),

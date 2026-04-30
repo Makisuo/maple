@@ -393,6 +393,146 @@ export const emitJsonPathSpec = (
 	})
 }
 
+// --- Runtime parsers for already-emitted statements --------------------------
+//
+// `parseEmittedCreateTable` and `parseEmittedCreateMaterializedView` consume
+// the *output* of the emitters (i.e. the SQL strings we ship in
+// `latestSnapshotStatements`) and reconstruct a structured shape suitable for
+// drift diffs against a customer's live ClickHouse `system.columns` snapshot.
+//
+// We do NOT parse arbitrary ClickHouse DDL — only the format produced by
+// `emitCreateTable` / `emitCreateMaterializedView`. The grammar is therefore
+// tightly bounded and the parser stays small.
+
+export interface EmittedTableColumn {
+	readonly name: string
+	readonly type: string
+}
+
+export interface EmittedTable {
+	readonly kind: "table"
+	readonly name: string
+	readonly columns: ReadonlyArray<EmittedTableColumn>
+}
+
+export interface EmittedMaterializedView {
+	readonly kind: "materialized_view"
+	readonly name: string
+	readonly target: string
+}
+
+export type EmittedStatement = EmittedTable | EmittedMaterializedView
+
+const COLUMN_CLAUSE_KEYWORDS = /^(DEFAULT|MATERIALIZED|ALIAS|CODEC|COMMENT|TTL|EPHEMERAL)\b/i
+
+/**
+ * Parse a single column-definition line (i.e. one entry inside the
+ * parenthesised column list of a CREATE TABLE statement). Walks the type
+ * expression while tracking parenthesis depth — necessary because
+ * `Map(LowCardinality(String), String)` contains spaces and commas that would
+ * confuse a naive split.
+ *
+ * Returns `null` for non-column lines (e.g. an `INDEX …` clause).
+ */
+const parseColumnDefinitionLine = (line: string): EmittedTableColumn | null => {
+	const trimmed = line.trim().replace(/,$/, "")
+	if (trimmed.length === 0) return null
+	if (/^INDEX\s/i.test(trimmed)) return null
+
+	const nameMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s+/.exec(trimmed)
+	if (!nameMatch) return null
+	const name = nameMatch[1] ?? ""
+	const rest = trimmed.slice(nameMatch[0].length)
+
+	let depth = 0
+	let typeEnd = rest.length
+	for (let i = 0; i < rest.length; i++) {
+		const ch = rest[i]
+		if (ch === "(") depth++
+		else if (ch === ")") depth--
+		else if (ch === " " && depth === 0) {
+			const remainder = rest.slice(i + 1)
+			if (COLUMN_CLAUSE_KEYWORDS.test(remainder)) {
+				typeEnd = i
+				break
+			}
+		}
+	}
+
+	const type = rest.slice(0, typeEnd).trim()
+	if (type.length === 0) return null
+	return { name, type }
+}
+
+const CREATE_TABLE_HEADER = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/i
+const CREATE_MV_HEADER =
+	/^CREATE\s+MATERIALIZED\s+VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+TO\s+([A-Za-z_][A-Za-z0-9_]*)\s+AS/i
+
+/**
+ * Reconstruct the structural shape of a previously-emitted CREATE TABLE or
+ * CREATE MATERIALIZED VIEW statement. Returns `null` for any other shape (so
+ * callers can skip miscellaneous statements without crashing).
+ *
+ * For tables, columns are returned with the same type strings ClickHouse
+ * stores in `system.columns.type`, which makes string-equality comparisons
+ * sufficient for drift detection.
+ */
+export const parseEmittedStatement = (sql: string): EmittedStatement | null => {
+	const tableMatch = CREATE_TABLE_HEADER.exec(sql)
+	if (tableMatch) {
+		const name = tableMatch[1] ?? ""
+		const openIndex = sql.indexOf("(")
+		// Match the closing paren of the column list (track depth so nested
+		// parens inside types like Map(...) don't terminate us early).
+		let depth = 0
+		let closeIndex = -1
+		for (let i = openIndex; i < sql.length; i++) {
+			const ch = sql[i]
+			if (ch === "(") depth++
+			else if (ch === ")") {
+				depth--
+				if (depth === 0) {
+					closeIndex = i
+					break
+				}
+			}
+		}
+		if (closeIndex < 0) return null
+		const body = sql.slice(openIndex + 1, closeIndex)
+		const columns: EmittedTableColumn[] = []
+		// Split on commas at the top level only.
+		let lineDepth = 0
+		let lineStart = 0
+		const segments: string[] = []
+		for (let i = 0; i < body.length; i++) {
+			const ch = body[i]
+			if (ch === "(") lineDepth++
+			else if (ch === ")") lineDepth--
+			else if (ch === "," && lineDepth === 0) {
+				segments.push(body.slice(lineStart, i))
+				lineStart = i + 1
+			}
+		}
+		segments.push(body.slice(lineStart))
+		for (const segment of segments) {
+			const col = parseColumnDefinitionLine(segment)
+			if (col) columns.push(col)
+		}
+		return { kind: "table", name, columns }
+	}
+
+	const mvMatch = CREATE_MV_HEADER.exec(sql)
+	if (mvMatch) {
+		return {
+			kind: "materialized_view",
+			name: mvMatch[1] ?? "",
+			target: mvMatch[2] ?? "",
+		}
+	}
+
+	return null
+}
+
 /**
  * Build the full ordered list of DDL statements for a Tinybird project
  * manifest. Order is:

@@ -78,8 +78,6 @@ const makeRequestTelemetryLayer = (env: Record<string, unknown>) => {
 	return makeTelemetryLayer("maple-api").pipe(Layer.provide(WorkerConfigProviderLive))
 }
 
-export { TinybirdSyncWorkflow } from "./workflows/TinybirdSyncWorkflow"
-
 const isMcpPost = (request: Request): boolean => {
 	if (request.method !== "POST") return false
 	try {

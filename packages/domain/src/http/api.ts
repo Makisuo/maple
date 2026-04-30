@@ -10,10 +10,9 @@ import { IngestKeysApiGroup } from "./ingest-keys"
 import { IntegrationsApiGroup } from "./integrations"
 import { ObservabilityApiGroup } from "./observability"
 import { OrgOpenrouterSettingsApiGroup } from "./org-openrouter-settings"
-import { OrgTinybirdSettingsApiGroup } from "./org-tinybird-settings"
+import { OrgClickHouseSettingsApiGroup } from "./org-clickhouse-settings"
 import { QueryEngineApiGroup } from "./query-engine"
 import { ScrapeTargetsApiGroup } from "./scrape-targets"
-import { SelfManagedCollectorApiGroup } from "./self-managed-collector"
 import { ServiceDiscoveryApiGroup } from "./service-discovery"
 export class MapleApi extends HttpApi.make("MapleApi")
 	.add(AuthPublicApiGroup)
@@ -28,10 +27,9 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(IntegrationsApiGroup)
 	.add(ObservabilityApiGroup)
 	.add(OrgOpenrouterSettingsApiGroup)
-	.add(OrgTinybirdSettingsApiGroup)
+	.add(OrgClickHouseSettingsApiGroup)
 	.add(QueryEngineApiGroup)
 	.add(ScrapeTargetsApiGroup)
-	.add(SelfManagedCollectorApiGroup)
 	.add(ServiceDiscoveryApiGroup)
 	.annotateMerge(
 		OpenApi.annotations({

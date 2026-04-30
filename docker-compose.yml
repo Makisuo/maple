@@ -37,11 +37,6 @@ services:
         environment:
             INGEST_PORT: 3474
             INGEST_FORWARD_OTLP_ENDPOINT: http://otel-collector:4318
-            # Unset by default: leave blank to route self-managed orgs through the
-            # shared pool until the second collector is brought up. Override per-env
-            # once the self-managed collector is deployed, e.g.
-            # INGEST_FORWARD_SELF_MANAGED_ENDPOINT=http://otel-collector-self-managed:4318
-            INGEST_FORWARD_SELF_MANAGED_ENDPOINT: ${INGEST_FORWARD_SELF_MANAGED_ENDPOINT:-}
             INGEST_FORWARD_TIMEOUT_MS: 10000
             INGEST_MAX_REQUEST_BODY_BYTES: 20971520
             INGEST_REQUIRE_TLS: "false"
@@ -81,31 +76,5 @@ services:
             api:
                 condition: service_healthy
 
-    # Opt-in self-managed pool: only started via
-    # `docker compose --profile self-managed up`. The ingestor routes here when
-    # INGEST_FORWARD_SELF_MANAGED_ENDPOINT is set. The image bundles a tiny
-    # Node supervisor that accepts PUT /-/reload (port 13140) with a freshly
-    # generated config YAML and gracefully restarts otelcol-contrib. On first
-    # start it uses the bootstrap template (no per-org exporters, everything
-    # drops to fallback) until the API publishes its first real config.
-    otel-collector-self-managed:
-        profiles:
-            - self-managed
-        build:
-            context: ./otel
-            dockerfile: Dockerfile.self-managed
-        ports:
-            - "4418:4318" # OTLP HTTP — ingestor forwards here
-            - "13134:13133" # otelcol health_check
-            - "13140:13140" # supervisor reload endpoint
-        environment:
-            COLLECTOR_RELOAD_BEARER: ${MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN:-}
-        volumes:
-            - otel-self-managed-queue-data:/var/lib/otelcol/file_storage
-        depends_on:
-            api:
-                condition: service_healthy
-
 volumes:
     otel-queue-data:
-    otel-self-managed-queue-data:

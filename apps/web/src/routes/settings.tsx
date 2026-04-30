@@ -18,7 +18,7 @@ import { ConnectorsSection } from "@/components/settings/connectors-section"
 import { IntegrationsSection } from "@/components/settings/integrations-section"
 import { NotificationsSection } from "@/components/settings/notifications-section"
 import { OrgOpenRouterSettingsSection } from "@/components/settings/org-openrouter-settings-section"
-import { OrgTinybirdSettingsSection } from "@/components/settings/org-tinybird-settings-section"
+import { OrgClickHouseSettingsSection } from "@/components/settings/org-clickhouse-settings-section"
 import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
@@ -253,7 +253,7 @@ export function SettingsPage() {
 			)}
 			{activeTab === "billing" && <BillingSection />}
 			{activeTab === "data-platform" && (
-				<OrgTinybirdSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessDataPlatform} />
+				<OrgClickHouseSettingsSection isAdmin={isAdmin} hasEntitlement={canAccessDataPlatform} />
 			)}
 		</DashboardLayout>
 	)

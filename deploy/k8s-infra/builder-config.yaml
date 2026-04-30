@@ -18,7 +18,7 @@ dist:
   name: otel-collector-maple
   description: "OpenTelemetry Collector with Maple ClickHouse exporter"
   output_path: ./bin
-  version: 0.1.2
+  version: 0.1.3
 
 extensions:
   - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.151.0
@@ -47,6 +47,7 @@ processors:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/deltatorateprocessor v0.151.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/cumulativetodeltaprocessor v0.151.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/groupbyattrsprocessor v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/metricsgenerationprocessor v0.151.0
 
 exporters:
   - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.151.0

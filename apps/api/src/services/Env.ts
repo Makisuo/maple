@@ -26,8 +26,6 @@ export interface EnvShape {
 	readonly INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly RESEND_API_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly RESEND_FROM_EMAIL: string
-	readonly MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL: Option.Option<string>
-	readonly MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly HAZEL_API_BASE_URL: string
 	readonly HAZEL_OAUTH_DISCOVERY_URL: string
 	readonly HAZEL_OAUTH_CLIENT_ID: Option.Option<string>
@@ -80,8 +78,6 @@ const envConfig = Config.all({
 	INTERNAL_SERVICE_TOKEN: optionalRedacted("INTERNAL_SERVICE_TOKEN"),
 	RESEND_API_KEY: optionalRedacted("RESEND_API_KEY"),
 	RESEND_FROM_EMAIL: stringWithDefault("RESEND_FROM_EMAIL", "Maple <notifications@maple.dev>"),
-	MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL: optionalString("MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_URL"),
-	MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN: optionalRedacted("MAPLE_SELF_MANAGED_COLLECTOR_RELOAD_TOKEN"),
 	HAZEL_API_BASE_URL: stringWithDefault("HAZEL_API_BASE_URL", "https://api.hazel.sh"),
 	HAZEL_OAUTH_DISCOVERY_URL: stringWithDefault(
 		"HAZEL_OAUTH_DISCOVERY_URL",

@@ -50,6 +50,13 @@
       "when": 1777563103366,
       "tag": "0006_fancy_carnage",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1777587750594,
+      "tag": "0007_clickhouse_only",
+      "breakpoints": true
     }
   ]
 }

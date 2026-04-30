@@ -10,7 +10,7 @@ import { Tinybird } from "@tinybirdco/sdk"
 import { Effect, Layer, Option, Redacted, Context } from "effect"
 import { Env } from "./Env"
 import type { TenantContext } from "./AuthService"
-import { OrgTinybirdSettingsService } from "./OrgTinybirdSettingsService"
+import { OrgClickHouseSettingsService } from "./OrgClickHouseSettingsService"
 import { compilePipeQuery } from "./PipeQueryDispatcher"
 import {
 	appendSettings,
@@ -177,7 +177,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 	{
 		make: Effect.gen(function* () {
 			const env = yield* Env
-			const orgTinybirdSettings = yield* OrgTinybirdSettingsService
+			const orgClickHouseSettings = yield* OrgClickHouseSettingsService
 
 			const cleanErrorMessage = (raw: string): string => {
 				let cleaned = raw
@@ -313,9 +313,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 			 * Resolve the upstream config for this tenant's queries.
 			 *
 			 * Resolution order:
-			 *   1. Per-org BYO row (`org_tinybird_settings.backend`):
-			 *        - "clickhouse" → ClickHouse via the org's URL + creds
-			 *        - "tinybird"   → Tinybird via the org's host + token
+			 *   1. Per-org BYO ClickHouse row (`org_clickhouse_settings`)
 			 *   2. Env-level managed ClickHouse (`CLICKHOUSE_URL` set)
 			 *   3. Env-level managed Tinybird (`TINYBIRD_HOST` + `TINYBIRD_TOKEN`)
 			 */
@@ -323,31 +321,20 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				tenant: TenantContext,
 				label: string,
 			) {
-				const override = yield* orgTinybirdSettings
+				const override = yield* orgClickHouseSettings
 					.resolveRuntimeConfig(tenant.orgId)
 					.pipe(Effect.mapError((error) => toTinybirdQueryError(label, error)))
 
 				if (Option.isSome(override)) {
 					yield* Effect.annotateCurrentSpan("clientSource", "org_override")
-					if (override.value.backend === "clickhouse") {
-						yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
-						return {
-							config: {
-								_tag: "clickhouse" as const,
-								url: override.value.url,
-								username: override.value.user,
-								password: override.value.password,
-								database: override.value.database,
-							},
-							source: "org_override" as const,
-						}
-					}
-					yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
+					yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
 					return {
 						config: {
-							_tag: "tinybird" as const,
-							host: override.value.host,
-							token: override.value.token,
+							_tag: "clickhouse" as const,
+							url: override.value.url,
+							username: override.value.user,
+							password: override.value.password,
+							database: override.value.database,
 						},
 						source: "org_override" as const,
 					}

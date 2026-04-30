@@ -10,11 +10,9 @@ import {
 	ErrorsService,
 	HazelOAuthService,
 	NotificationDispatcher,
-	OrgTinybirdSettingsService,
+	OrgClickHouseSettingsService,
 	QueryEngineService,
-	SelfManagedCollectorConfigService,
 	TinybirdService,
-	TinybirdSyncClient,
 } from "@maple/api/alerting"
 import {
 	makeTelemetryLayer,
@@ -32,18 +30,10 @@ const buildLayer = (_env: Record<string, unknown>) => {
 
 	const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 
-	const TinybirdSyncClientLive = TinybirdSyncClient.Default
-
-	const SelfManagedCollectorConfigLive = SelfManagedCollectorConfigService.Live.pipe(
-		Layer.provide(BaseLive),
-	)
-
-	const OrgTinybirdSettingsLive = OrgTinybirdSettingsService.Live.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, TinybirdSyncClientLive, SelfManagedCollectorConfigLive)),
-	)
+	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.Live.pipe(Layer.provide(BaseLive))
 
 	const TinybirdServiceLive = TinybirdService.Live.pipe(
-		Layer.provide(Layer.mergeAll(EnvLive, OrgTinybirdSettingsLive)),
+		Layer.provide(Layer.mergeAll(EnvLive, OrgClickHouseSettingsLive)),
 	)
 
 	const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provide(EdgeCacheService.layer))
