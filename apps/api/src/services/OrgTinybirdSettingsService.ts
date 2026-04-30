@@ -1049,44 +1049,18 @@ export class OrgTinybirdSettingsService extends Context.Service<
 						},
 					})
 
-				// `_maple_schema_migrations` is also fully qualified for the same
-				// reason as the rest of the schema — CH Cloud's new analyzer can
-				// fail to resolve bare identifiers in some scopes even when the
-				// session database is set.
-				const migrationsTable = `\`${config.database}\`.\`_maple_schema_migrations\``
-
-				yield* exec(
-					`CREATE TABLE IF NOT EXISTS ${migrationsTable} (` +
-						"version UInt32, applied_at DateTime DEFAULT now(), description String" +
-						") ENGINE = MergeTree ORDER BY version",
-				)
-
-				const appliedText = yield* exec(
-					`SELECT version FROM ${migrationsTable} ORDER BY version FORMAT JSONEachRow`,
-				)
-				const applied = new Set<number>()
-				for (const line of appliedText.split("\n")) {
-					const trimmed = line.trim()
-					if (trimmed.length === 0) continue
-					try {
-						const parsed = JSON.parse(trimmed) as { version: number }
-						applied.add(parsed.version)
-					} catch {
-						// Defensive — older CH builds may emit slightly different
-						// JSONEachRow framing. Skip rows we can't parse rather than
-						// failing the whole upsert.
-					}
-				}
-
+				// We don't track migration state in a bookkeeping table — every
+				// schema statement is idempotent (`IF NOT EXISTS`) so re-running on
+				// every save is safe and avoids a class of CH-Cloud bugs where a
+				// `SELECT` against a freshly-CREATED bookkeeping table fails to
+				// see the table due to DDL replication / new-analyzer quirks.
+				// When future migrations introduce non-idempotent statements
+				// (`ALTER TABLE`, `MATERIALIZE COLUMN`, etc.) we'll need a
+				// per-statement guard, but the current snapshot is pure CREATE.
 				for (const migration of clickHouseMigrations) {
-					if (applied.has(migration.version)) continue
 					for (const stmt of migration.statements) {
 						yield* exec(qualifyStatementForDatabase(stmt, config.database))
 					}
-					const escapedDesc = migration.description.replace(/'/g, "''")
-					yield* exec(
-						`INSERT INTO ${migrationsTable} (version, description) VALUES (${migration.version}, '${escapedDesc}')`,
-					)
 				}
 			},
 		)
