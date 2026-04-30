@@ -91,7 +91,11 @@ data:
       resourcedetection:
         detectors:
           {{- if eq .Values.global.cloud "aws" }}
-          - eks
+          # The contrib `eks` detector calls EC2 IMDS to look up the EKS
+          # cluster name; on Fargate / Auto Mode nodes that lookup fails
+          # hard in v0.151+ ("can't get K8s Instance Metadata; node name
+          # is empty") and crashes the pod. `k8snode` below covers the
+          # same node-level info via the K8s API and is friendlier.
           - ec2
           {{- end }}
           {{- if hasPrefix "gcp" .Values.global.cloud }}

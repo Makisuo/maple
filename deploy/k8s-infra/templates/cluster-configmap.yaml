@@ -107,7 +107,8 @@ data:
       resourcedetection:
         detectors:
           {{- if eq .Values.global.cloud "aws" }}
-          - eks
+          # See agent-configmap.yaml for why `eks` is dropped — same
+          # IMDS lookup hard-fails in contrib v0.151+ on Auto Mode nodes.
           - ec2
           {{- end }}
           {{- if hasPrefix "gcp" .Values.global.cloud }}
