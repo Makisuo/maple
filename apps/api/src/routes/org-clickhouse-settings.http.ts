@@ -35,6 +35,12 @@ export const HttpOrgClickHouseSettingsLive = HttpApiBuilder.group(
 						return yield* service.applySchema(tenant.orgId, tenant.userId, tenant.roles)
 					}),
 				)
+				.handle("collectorConfig", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						return yield* service.collectorConfig(tenant.orgId, tenant.roles)
+					}),
+				)
 				.handle("delete", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context

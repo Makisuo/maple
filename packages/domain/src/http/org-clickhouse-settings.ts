@@ -130,6 +130,33 @@ export class OrgClickHouseApplySchemaResult extends Schema.Class<OrgClickHouseAp
 	),
 }) {}
 
+/**
+ * Pre-rendered OpenTelemetry Collector YAML for an org's ClickHouse backend.
+ *
+ * Lets a customer skip the "compose your own collector config" step — they
+ * download this, set `MAPLE_CLICKHOUSE_PASSWORD`, and run the maple-otel
+ * collector image:
+ *
+ *   docker run \
+ *     -e MAPLE_CLICKHOUSE_PASSWORD=$PASS \
+ *     -v ./collector.yaml:/etc/otel/config.yaml \
+ *     -p 4317:4317 -p 4318:4318 \
+ *     ghcr.io/makisuo/maple/otel-collector-maple:latest
+ *
+ * The password is intentionally NOT inlined — the body references
+ * `${env:MAPLE_CLICKHOUSE_PASSWORD}` so the file is safe to share.
+ */
+export class OrgClickHouseCollectorConfigResponse extends Schema.Class<OrgClickHouseCollectorConfigResponse>(
+	"OrgClickHouseCollectorConfigResponse",
+)({
+	/** The full collector YAML body, ready to drop into `--config=`. */
+	yaml: Schema.String,
+	/** Image reference customers should run to consume this YAML. */
+	image: Schema.String,
+	/** Name of the env var the customer must set with the CH password. */
+	passwordEnvVar: Schema.String,
+}) {}
+
 // --- Errors ------------------------------------------------------------------
 
 export class OrgClickHouseSettingsForbiddenError extends Schema.TaggedErrorClass<OrgClickHouseSettingsForbiddenError>()(
@@ -220,6 +247,16 @@ export class OrgClickHouseSettingsApiGroup extends HttpApiGroup.make("orgClickHo
 				OrgClickHouseSettingsEncryptionError,
 				OrgClickHouseSettingsUpstreamRejectedError,
 				OrgClickHouseSettingsUpstreamUnavailableError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("collectorConfig", "/collector-config", {
+			success: OrgClickHouseCollectorConfigResponse,
+			error: [
+				OrgClickHouseSettingsForbiddenError,
+				OrgClickHouseSettingsValidationError,
+				OrgClickHouseSettingsPersistenceError,
 			],
 		}),
 	)

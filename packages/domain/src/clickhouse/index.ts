@@ -14,6 +14,10 @@ export {
 } from "./ddl-emitter"
 export { migrations, type ClickHouseMigration } from "./migrations"
 export {
+	qualifyStatementForDatabase,
+	CLICKHOUSE_MV_SOURCE_TABLES,
+} from "./qualify"
+export {
 	computeSchemaDiff,
 	type ColumnDrift,
 	type DesiredSchema,

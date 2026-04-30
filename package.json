@@ -23,8 +23,9 @@
 		"test": "turbo test",
 		"tinybird:manifest": "bun run ./scripts/generate-tinybird-project-manifest.ts",
 		"tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
-		"clickhouse:schema": "bun run ./scripts/generate-clickhouse-schema.ts",
-		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check",
+		"clickhouse:schema": "bun run ./scripts/generate-clickhouse-schema.ts && bun run ./scripts/lint-clickhouse-schema.ts",
+		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check && bun run ./scripts/lint-clickhouse-schema.ts",
+		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
 		"typecheck": "turbo typecheck"
 	},
 	"dependencies": {},

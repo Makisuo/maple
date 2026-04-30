@@ -1,0 +1,37 @@
+{
+	"name": "@maple/clickhouse-cli",
+	"version": "0.1.0",
+	"description": "Apply Maple's ClickHouse schema to a vanilla ClickHouse server. No Maple API required.",
+	"type": "module",
+	"bin": {
+		"maple-ch": "./src/cli.ts"
+	},
+	"main": "./src/cli.ts",
+	"exports": {
+		".": "./src/cli.ts"
+	},
+	"files": [
+		"src/**/*.ts",
+		"README.md"
+	],
+	"scripts": {
+		"start": "bun src/cli.ts",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@maple/domain": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling"
+	},
+	"keywords": [
+		"maple",
+		"clickhouse",
+		"cli",
+		"observability",
+		"schema",
+		"migration"
+	]
+}

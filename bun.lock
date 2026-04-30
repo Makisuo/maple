@@ -308,6 +308,20 @@
         "vitest": "catalog:",
       },
     },
+    "packages/clickhouse-cli": {
+      "name": "@maple/clickhouse-cli",
+      "version": "0.1.0",
+      "bin": {
+        "maple-ch": "./src/cli.ts",
+      },
+      "dependencies": {
+        "@maple/domain": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+      },
+    },
     "packages/db": {
       "name": "@maple/db",
       "dependencies": {
@@ -1224,6 +1238,8 @@
     "@maple/chat-agent": ["@maple/chat-agent@workspace:apps/chat-agent"],
 
     "@maple/cli": ["@maple/cli@workspace:apps/cli"],
+
+    "@maple/clickhouse-cli": ["@maple/clickhouse-cli@workspace:packages/clickhouse-cli"],
 
     "@maple/db": ["@maple/db@workspace:packages/db"],
 

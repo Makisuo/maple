@@ -44,7 +44,11 @@ On save, the API connects to the instance, creates the schema (or skips if it al
 
 ## Applying the schema
 
-Schema is applied automatically when an org saves a ClickHouse-backed BYO row. There is no separate CLI to run — the API connects to the supplied URL with the supplied credentials and:
+Two ways to apply the schema. Both run the **same migrations** from `@maple/domain/clickhouse` and use the **same** [`qualifyStatementForDatabase`](../packages/domain/src/clickhouse/qualify.ts) helper, so they're interchangeable.
+
+### Via the Maple UI (default)
+
+`Settings → BYO Backend → ClickHouse`. On save, the API connects to the supplied URL with the supplied credentials and:
 
 1. Creates `_maple_schema_migrations` (the bookkeeping table) if missing.
 2. Applies any unapplied migrations in version order.
@@ -53,6 +57,25 @@ Schema is applied automatically when an org saves a ClickHouse-backed BYO row. T
 If the connection fails or the user lacks DDL privileges, the save returns an error and the row is **not** persisted — so an unconfigured org never gets stuck pointed at a half-migrated CH instance.
 
 Re-saving is safe. Already-applied migrations are skipped, and every statement uses `IF NOT EXISTS` as a second line of defense. Future schema upgrades land the same way: pull a new Maple API release, then have the org re-save (or any other write to the BYO row) to pick up new migrations.
+
+### Via the standalone CLI
+
+For airgapped clusters, CI checks, or when your CH credentials shouldn't pass through Maple's API:
+
+```bash
+bunx @maple/clickhouse-cli@latest apply \
+  --url=https://your-ch.example.com \
+  --user=maple --password=$CH_PASSWORD \
+  --database=default
+
+# What's applied + what's pending
+bunx @maple/clickhouse-cli@latest status
+
+# Print DDL that would run, no execution
+bunx @maple/clickhouse-cli@latest dry-run
+```
+
+Connection flags fall back to `MAPLE_CH_URL`, `MAPLE_CH_USER`, `MAPLE_CH_PASSWORD`, `MAPLE_CH_DATABASE` env vars — handy in CI. See [`packages/clickhouse-cli/README.md`](../packages/clickhouse-cli/README.md).
 
 To inspect applied migrations directly on your CH server:
 
@@ -72,29 +95,88 @@ Every table is partitioned by date and carries a 90-day TTL (365 days on metrics
 
 ## Ingest options
 
-Maple's schema is what matters — the path data takes to get there is up to you. A few approaches:
+The maintained path is **Option A: Maple's prebuilt OTel Collector image** (`mapleexporter` baked in). Three escape hatches stay supported for advanced setups.
 
-### Option 1 — OTel Collector + Tinybird exporter pointed at a Tinybird-API-compatible shim
+### Option A — Maple OTel Collector (recommended)
 
-This is the "drop-in" path. Run the OTel Collector with the `tinybird` exporter (from `otelcol-contrib`) and point its `endpoint` at a small shim service that:
+A custom build of `otelcol-contrib` with the `mapleexporter` baked in. The exporter writes JSON-each-row directly into Maple's `traces` / `logs` / `metrics_*` tables, no shim required.
 
-- Accepts `POST /v0/events?name=<datasource>` with NDJSON bodies
-- Applies the JSONPath mappings from `packages/domain/src/tinybird/datasources.ts` to project each row into the right column shape
-- Issues `INSERT INTO <datasource> FORMAT JSONEachRow` against ClickHouse
+- **Image:** `ghcr.io/makisuo/maple/otel-collector-maple` (multi-arch — amd64 + arm64). Pin a tag (e.g. `0.1.5`); see [the package page](https://github.com/users/makisuo/packages/container/package/maple%2Fotel-collector-maple) for available versions.
+- **Source:** [`packages/otel-collector-maple-exporter/`](../packages/otel-collector-maple-exporter/) — builder config in [`deploy/k8s-infra/builder-config.yaml`](../deploy/k8s-infra/builder-config.yaml), Dockerfile in [`deploy/k8s-infra/Dockerfile.otel-collector-maple`](../deploy/k8s-infra/Dockerfile.otel-collector-maple).
+
+#### Step 1: apply the schema
+
+Use the standalone CLI — no Maple API required, and your CH credentials never leave the machine running it:
+
+```bash
+bunx @maple/clickhouse-cli@latest apply \
+  --url=https://your-ch.example.com \
+  --user=maple --password=$CH_PASSWORD \
+  --database=default
+```
+
+Or save credentials in the Maple UI under `Settings → BYO Backend → ClickHouse` and the API will run the same migrations on your behalf.
+
+#### Step 2: deploy the collector
+
+**Kubernetes** — install the [`maple-otel`](../deploy/maple-otel/) Helm chart:
+
+```bash
+helm install maple-otel oci://ghcr.io/makisuo/charts/maple-otel \
+  --namespace maple --create-namespace \
+  --set maple.orgId=org_xxx \
+  --set maple.clickhouse.endpoint=https://your-ch.example.com \
+  --set maple.clickhouse.password.value=$CH_PASSWORD
+```
+
+Apps then point `OTEL_EXPORTER_OTLP_ENDPOINT` at `http://maple-otel.maple.svc.cluster.local:4318`.
+
+**Anywhere else (Docker / VM / ECS / Nomad / …)** — download a pre-rendered config from Maple:
+
+1. `Settings → BYO Backend → ClickHouse → Download collector config` (or `GET /api/org-clickhouse-settings/collector-config`).
+2. Drop the YAML next to a copy of the image and run:
+
+   ```bash
+   docker run \
+     -e MAPLE_CLICKHOUSE_PASSWORD=$CH_PASSWORD \
+     -v ./collector.yaml:/etc/otel/config.yaml \
+     -p 4317:4317 -p 4318:4318 \
+     ghcr.io/makisuo/maple/otel-collector-maple:0.1.5
+   ```
+
+The rendered YAML carries your `org_id`, ClickHouse URL/user/database, and the standard memory_limiter → k8sattributes → batch → maple pipeline. The password is referenced via `${env:MAPLE_CLICKHOUSE_PASSWORD}` so the file is safe to share.
+
+#### Org id resolution
+
+The `mapleexporter` stamps `OrgId` from its own `org_id` config on every record — no upstream `resource/maple_org` processor required for the typical single-tenant deploy. For multi-tenant fan-out (one collector serving several Maple orgs) set `org_id_from_resource_attribute: maple_org_id` on the exporter and stamp the right id per-record upstream; see [`packages/otel-collector-maple-exporter/README.md`](../packages/otel-collector-maple-exporter/README.md).
+
+### Option B — Tinybird exporter + a shim service
+
+The original "drop-in for Tinybird Cloud users" path. Run otelcol-contrib's `tinybird` exporter and point it at a small shim that:
+
+- Accepts `POST /v0/events?name=<datasource>` with NDJSON bodies.
+- Applies the JSONPath mappings from `packages/domain/src/tinybird/datasources.ts` to project each row into the right column shape.
+- Issues `INSERT INTO <datasource> FORMAT JSONEachRow` against ClickHouse.
 
 The shim is not in this repo — operators write or fork their own. The JSONPath spec required to drive it is exposed via `emitJsonPathSpec()` in `@maple/domain/clickhouse`.
 
-### Option 2 — OTel Collector with the native `clickhouse` exporter
+### Option C — Tinybird-Local
 
-`otelcol-contrib` ships a built-in ClickHouse exporter. **Note:** it expects its own schema (`otel_traces`, `otel_logs`, etc.) which does **not** match Maple's schema. To use it, you'd either need to remap the exporter's table names + column overrides, or front it with an OTel `transform` processor that projects into Maple's column layout. Most operators will find the shim simpler.
+If you're not allergic to running another container, [tinybird-local](https://github.com/tinybirdco/tinybird-local) is a single-binary Tinybird-API-compatible local server backed by ClickHouse. The Tinybird exporter works against it unchanged. Heavier than Option A but useful when you want Tinybird's UI side-by-side.
 
-### Option 3 — Tinybird-Local
-
-If you're not allergic to running another container, [tinybird-local](https://github.com/tinybirdco/tinybird-local) is a single-binary Tinybird-API-compatible local server backed by ClickHouse. The Tinybird exporter works against it unchanged. This is the lowest-friction path during early self-hosted exploration.
-
-### Option 4 — Direct INSERTs from your application
+### Option D — Direct INSERTs from your application
 
 If you have a small, well-defined ingest path (e.g. you control the SDK that emits to Maple), nothing stops you from `INSERT INTO traces FORMAT JSONEachRow` directly. The JSONPath spec defines what shape the rows should be in. Each row should look like the Tinybird exporter's output — see the `$.…` paths in `datasources.ts`.
+
+### Comparing the options
+
+| | Option A (Maple OTel Collector) | Option B (shim) | Option C (Tinybird-Local) | Option D (direct INSERTs) |
+|---|---|---|---|---|
+| Setup steps | 2 (schema + collector) | Many (write shim) | 2 | Application-specific |
+| Pre-built image | ✅ | — | ✅ (Tinybird's) | — |
+| Multi-tenant fan-out | ✅ via `org_id_from_resource_attribute` | manual | manual | application |
+| k8s pod metadata enrichment | ✅ baked into the image | manual | manual | manual |
+| Standard OTel collector pipeline shape | ✅ | partial | partial | n/a |
 
 ## Schema source of truth
 
