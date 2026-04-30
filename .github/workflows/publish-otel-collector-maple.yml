@@ -19,7 +19,6 @@ permissions:
 
 env:
     REGISTRY: ghcr.io
-    IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/maple/otel-collector-maple
 
 jobs:
     publish:
@@ -27,9 +26,15 @@ jobs:
         steps:
             - uses: actions/checkout@v5
 
-            - name: Resolve image tag
-              id: tag
+            - name: Resolve image name + tag
+              id: image
               run: |
+                  # GHCR requires the repository part of the image to be
+                  # all-lowercase. github.repository_owner can be mixed-case
+                  # (e.g. "Makisuo"), so lowercase it here.
+                  owner_lc=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+                  echo "name=ghcr.io/${owner_lc}/maple/otel-collector-maple" >> "$GITHUB_OUTPUT"
+
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
                     tag="${{ inputs.tag }}"
                   else
@@ -41,7 +46,7 @@ jobs:
                     exit 1
                   fi
                   echo "tag=$tag" >> "$GITHUB_OUTPUT"
-                  echo "Resolved image tag: $tag"
+                  echo "Resolved: ghcr.io/${owner_lc}/maple/otel-collector-maple:${tag}"
 
             - uses: docker/setup-qemu-action@v3
 
@@ -65,8 +70,8 @@ jobs:
                   platforms: linux/amd64,linux/arm64
                   push: true
                   tags: |
-                      ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-                      ${{ env.IMAGE_NAME }}:latest
+                      ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+                      ${{ steps.image.outputs.name }}:latest
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
                   provenance: false
