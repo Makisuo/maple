@@ -1,0 +1,12 @@
+# Tests are kept locally for now — they exercise pdata fixtures + golden
+# files and are useful for re-verifying encoder output, but they're not
+# needed to build or ship the exporter.
+*_test.go
+testdata/
+
+# Go test binaries.
+*.test
+
+# OCB output is at the repo root (./bin), not here, but keep the conventional
+# Go ignore so future cmd/ subdirs don't accidentally check in binaries.
+bin/

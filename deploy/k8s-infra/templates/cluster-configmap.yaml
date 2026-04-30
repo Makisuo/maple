@@ -132,6 +132,14 @@ data:
           - key: maple_org_id
             value: {{ required "maple.tinybirdExport.orgId is required when tinybirdExport.enabled is true" .Values.maple.tinybirdExport.orgId | quote }}
             action: upsert
+      {{- else if .Values.maple.clickhouseExport.enabled }}
+      # Same routing-key pattern; the Maple exporter reads this resource
+      # attribute first and falls back to its own `org_id` config.
+      resource/maple_org:
+        attributes:
+          - key: maple_org_id
+            value: {{ required "maple.clickhouseExport.orgId is required when clickhouseExport.enabled is true" .Values.maple.clickhouseExport.orgId | quote }}
+            action: upsert
       {{- end }}
       {{- if .Values.presets.fargateMetrics.enabled }}
       # cAdvisor exposes container_cpu_usage_seconds_total as a cumulative
@@ -238,6 +246,30 @@ data:
           insecure_skip_verify: {{ .Values.maple.ingest.tls.insecureSkipVerify }}
         headers:
           x-maple-ingest-key: "${env:MAPLE_INGEST_KEY}"
+      {{- end }}
+      {{- if .Values.maple.clickhouseExport.enabled }}
+      maple:
+        endpoint: {{ .Values.maple.clickhouseExport.endpoint | quote }}
+        database: {{ .Values.maple.clickhouseExport.database | quote }}
+        username: {{ .Values.maple.clickhouseExport.username | quote }}
+        password: "${env:MAPLE_CLICKHOUSE_PASSWORD}"
+        org_id: {{ .Values.maple.clickhouseExport.orgId | quote }}
+        timeout: {{ .Values.maple.clickhouseExport.timeout }}
+        traces_table_name: {{ .Values.maple.clickhouseExport.tables.traces | quote }}
+        logs_table_name: {{ .Values.maple.clickhouseExport.tables.logs | quote }}
+        metrics_sum_table_name: {{ .Values.maple.clickhouseExport.tables.metricsSum | quote }}
+        metrics_gauge_table_name: {{ .Values.maple.clickhouseExport.tables.metricsGauge | quote }}
+        metrics_histogram_table_name: {{ .Values.maple.clickhouseExport.tables.metricsHistogram | quote }}
+        metrics_exponential_histogram_table_name: {{ .Values.maple.clickhouseExport.tables.metricsExponentialHistogram | quote }}
+        retry_on_failure:
+          enabled: {{ .Values.maple.clickhouseExport.retryOnFailure.enabled }}
+          initial_interval: {{ .Values.maple.clickhouseExport.retryOnFailure.initialInterval }}
+          max_interval: {{ .Values.maple.clickhouseExport.retryOnFailure.maxInterval }}
+          max_elapsed_time: {{ .Values.maple.clickhouseExport.retryOnFailure.maxElapsedTime }}
+        sending_queue:
+          enabled: {{ .Values.maple.clickhouseExport.sendingQueue.enabled }}
+          num_consumers: {{ .Values.maple.clickhouseExport.sendingQueue.numConsumers }}
+          queue_size: {{ .Values.maple.clickhouseExport.sendingQueue.queueSize }}
       {{- end }}
       {{- if .Values.maple.tinybirdExport.enabled }}
       tinybird:

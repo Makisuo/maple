@@ -75,6 +75,74 @@ maple:
             numConsumers: 8
             queueSize: 10000
 
+    # Direct-to-ClickHouse shipping. When enabled, the agent + cluster
+    # collector use Maple's custom `mapleexporter` (built into the custom
+    # collector image — see deploy/k8s-infra/builder-config.yaml) to write
+    # straight into Maple's bespoke ClickHouse schema. Use this for self-
+    # hosted Maple deployments that have run Maple's CH migrations against
+    # their own ClickHouse cluster (e.g. the in-cluster Altinity
+    # ClickHouseInstallation in `clickhouse/`).
+    #
+    # `mode: replace`  → ship ONLY to ClickHouse. Disables `otlphttp/maple`.
+    # `mode: also`     → ship to BOTH `otlphttp/maple` AND ClickHouse.
+    #
+    # `clickhouseExport` and `tinybirdExport` are mutually exclusive — set at
+    # most one. Set the chart `image` to the Maple-built collector when this
+    # mode is enabled, since the stock contrib image doesn't include
+    # `mapleexporter`.
+    clickhouseExport:
+        enabled: false
+        mode: replace
+        # Custom collector image bundling Maple's `mapleexporter`. The stock
+        # otel/opentelemetry-collector-contrib image used elsewhere in this
+        # chart does NOT include this exporter, so when `enabled: true` the
+        # chart auto-switches the pod image to this one. Override only if
+        # you've forked + republished the builder.
+        image:
+            repository: ghcr.io/makisuo/maple/otel-collector-maple
+            tag: "0.1.0"
+            pullPolicy: IfNotPresent
+        # ClickHouse HTTP endpoint. e.g. an in-cluster Altinity-operator CHI:
+        # http://clickhouse-clickhouse.clickhouse.svc.cluster.local:8123
+        # or a public-facing host: https://ch.superwall.dev
+        endpoint: ""
+        # Database holding Maple's tables. Default matches the migrations.
+        database: default
+        # Maple org id stamped on every record's `OrgId` column. The
+        # `resource/maple_org` processor also adds it as a `maple_org_id`
+        # resource attribute upstream of the exporter; the exporter's
+        # `org_id` field acts as a fallback when an inbound record lacks
+        # the resource attribute (so the exporter still knows where to
+        # tag the row).
+        orgId: ""
+        timeout: 30s
+        # ClickHouse HTTP basic-auth username.
+        username: maple
+        # Password for the CH user. Prefer existingSecret in production.
+        password:
+            value: ""
+            existingSecret:
+                name: ""
+                key: ""
+        # Per-signal table name overrides. Defaults match Maple's
+        # migrations — change only if you've renamed tables.
+        tables:
+            traces: traces
+            logs: logs
+            metricsSum: metrics_sum
+            metricsGauge: metrics_gauge
+            metricsHistogram: metrics_histogram
+            metricsExponentialHistogram: metrics_exponential_histogram
+        retryOnFailure:
+            enabled: true
+            initialInterval: 1s
+            maxInterval: 30s
+            maxElapsedTime: 300s
+        sendingQueue:
+            enabled: true
+            numConsumers: 8
+            queueSize: 10000
+
 image:
     repository: otel/opentelemetry-collector-contrib
     tag: "0.141.0"

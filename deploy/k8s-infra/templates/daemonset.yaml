@@ -52,7 +52,7 @@ spec:
       containers:
         - name: otel-collector
           image: {{ include "maple-k8s-infra.image" . | quote }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          imagePullPolicy: {{ include "maple-k8s-infra.imagePullPolicy" . }}
           args:
             - --config=/conf/config.yaml
           env:

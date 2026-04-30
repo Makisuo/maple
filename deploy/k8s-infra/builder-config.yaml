@@ -1,0 +1,63 @@
+# OpenTelemetry Collector Builder config — produces a custom collector
+# binary that bundles the standard contrib receivers/processors with our
+# Maple ClickHouse exporter (../../packages/otel-collector-maple-exporter).
+#
+# To build:
+#   go install go.opentelemetry.io/collector/cmd/builder@v0.151.0
+#   builder --config=deploy/k8s-infra/builder-config.yaml
+#
+# The output binary lives in ./bin/otel-collector-maple. Bake it into a
+# Docker image (see Dockerfile) and push to GHCR.
+#
+# Versions: pinned to OTel Collector release 0.151.x — stable APIs at v1.57.0,
+# experimental modules at v0.151.0. Keep this file's pins in lockstep with
+# packages/otel-collector-maple-exporter/go.mod.
+
+dist:
+  module: github.com/superwall/maple/cmd/otel-collector-maple
+  name: otel-collector-maple
+  description: "OpenTelemetry Collector with Maple ClickHouse exporter"
+  output_path: ./bin
+  version: 0.1.0
+
+extensions:
+  - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage v0.151.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kubeletstatsreceiver v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filelogreceiver v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.151.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.151.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/probabilisticsamplerprocessor v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/tailsamplingprocessor v0.151.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.151.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.151.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.151.0
+  # Maple's custom exporter — local module via replaces directive below.
+  - gomod: github.com/superwall/maple/packages/otel-collector-maple-exporter v0.0.0
+    name: mapleexporter
+
+connectors:
+  - gomod: go.opentelemetry.io/collector/connector/forwardconnector v0.151.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/connector/spanmetricsconnector v0.151.0
+
+# Local exporter package not yet published as a versioned module — use a
+# relative path so ocb resolves it from the working tree. The path is
+# relative to the generated go.mod which lives in `./bin`, so one `../`
+# climbs back to the maple repo root.
+replaces:
+  - github.com/superwall/maple/packages/otel-collector-maple-exporter => ../packages/otel-collector-maple-exporter

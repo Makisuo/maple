@@ -57,7 +57,24 @@ app.kubernetes.io/component: cluster-collector
 {{- end -}}
 
 {{- define "maple-k8s-infra.image" -}}
+{{- if .Values.maple.clickhouseExport.enabled -}}
+{{- $img := .Values.maple.clickhouseExport.image -}}
+{{- printf "%s:%s" $img.repository ($img.tag | default .Chart.AppVersion) -}}
+{{- else -}}
 {{- printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Resolve image pullPolicy. clickhouseExport.image.pullPolicy wins when that
+mode is enabled, falling back to the top-level image.pullPolicy otherwise.
+*/}}
+{{- define "maple-k8s-infra.imagePullPolicy" -}}
+{{- if .Values.maple.clickhouseExport.enabled -}}
+{{- default .Values.image.pullPolicy .Values.maple.clickhouseExport.image.pullPolicy -}}
+{{- else -}}
+{{- .Values.image.pullPolicy -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "maple-k8s-infra.ingestSecretName" -}}
@@ -92,17 +109,43 @@ token
 {{- end -}}
 {{- end -}}
 
+{{- define "maple-k8s-infra.clickhouseSecretName" -}}
+{{- if .Values.maple.clickhouseExport.password.existingSecret.name -}}
+{{- .Values.maple.clickhouseExport.password.existingSecret.name -}}
+{{- else -}}
+{{- printf "%s-clickhouse-password" (include "maple-k8s-infra.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "maple-k8s-infra.clickhouseSecretKey" -}}
+{{- if .Values.maple.clickhouseExport.password.existingSecret.key -}}
+{{- .Values.maple.clickhouseExport.password.existingSecret.key -}}
+{{- else -}}
+password
+{{- end -}}
+{{- end -}}
+
 {{/*
 The list of exporters every pipeline ships to, as a YAML inline list. Driven
-by maple.tinybirdExport.enabled / .mode so a single switch flips both the
-agent and cluster-collector pipelines together.
+by maple.{tinybird,clickhouse}Export.enabled / .mode so a single switch flips
+both the agent and cluster-collector pipelines together. tinybirdExport and
+clickhouseExport are mutually exclusive.
 */}}
 {{- define "maple-k8s-infra.pipelineExporters" -}}
+{{- if and .Values.maple.tinybirdExport.enabled .Values.maple.clickhouseExport.enabled -}}
+{{- fail "maple.tinybirdExport.enabled and maple.clickhouseExport.enabled are mutually exclusive — pick one" -}}
+{{- end -}}
 {{- if .Values.maple.tinybirdExport.enabled -}}
 {{- if eq .Values.maple.tinybirdExport.mode "replace" -}}
 [tinybird]
 {{- else -}}
 [otlphttp/maple, tinybird]
+{{- end -}}
+{{- else if .Values.maple.clickhouseExport.enabled -}}
+{{- if eq .Values.maple.clickhouseExport.mode "replace" -}}
+[maple]
+{{- else -}}
+[otlphttp/maple, maple]
 {{- end -}}
 {{- else -}}
 [otlphttp/maple]
@@ -111,10 +154,12 @@ agent and cluster-collector pipelines together.
 
 {{/*
 Whether the otlphttp/maple exporter (and its env vars) should be rendered.
-True except when tinybirdExport replaces it entirely.
+True except when one of the alternative exports replaces it entirely.
 */}}
 {{- define "maple-k8s-infra.mapleExporterEnabled" -}}
 {{- if and .Values.maple.tinybirdExport.enabled (eq .Values.maple.tinybirdExport.mode "replace") -}}
+false
+{{- else if and .Values.maple.clickhouseExport.enabled (eq .Values.maple.clickhouseExport.mode "replace") -}}
 false
 {{- else -}}
 true
@@ -197,6 +242,13 @@ presets.otlpReceiver.http.enabled.
       name: {{ include "maple-k8s-infra.tinybirdSecretName" . }}
       key: {{ include "maple-k8s-infra.tinybirdSecretKey" . }}
 {{- end }}
+{{- if .Values.maple.clickhouseExport.enabled }}
+- name: MAPLE_CLICKHOUSE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "maple-k8s-infra.clickhouseSecretName" . }}
+      key: {{ include "maple-k8s-infra.clickhouseSecretKey" . }}
+{{- end }}
 - name: K8S_CLUSTER_NAME
   value: {{ include "maple-k8s-infra.clusterName" . | quote }}
 {{- end -}}
@@ -253,10 +305,13 @@ presets.otlpReceiver.http.enabled.
 {{- if .Values.processors.resourceDetection.enabled -}}
 {{- $processors = append $processors "resourcedetection" -}}
 {{- end -}}
-{{/* `resource/maple_org` stamps the org id onto every signal so the Tinybird
-     datasources can route. Inserted after enrichment but before batching so
-     batches share the same maple_org_id value. */}}
-{{- if and .Values.maple.tinybirdExport.enabled .Values.maple.tinybirdExport.orgId -}}
+{{/* `resource/maple_org` stamps the org id onto every signal so the
+     Tinybird datasources OR the maple exporter can route on it. Inserted
+     after enrichment but before batching so batches share the same value. */}}
+{{- if or
+      (and .Values.maple.tinybirdExport.enabled .Values.maple.tinybirdExport.orgId)
+      (and .Values.maple.clickhouseExport.enabled .Values.maple.clickhouseExport.orgId)
+-}}
 {{- $processors = append $processors "resource/maple_org" -}}
 {{- end -}}
 {{- $processors = append $processors "batch" -}}

@@ -30,3 +30,4 @@ apps/chat-agent/.dev.vars
 
 # sst
 .sst
+/bin/
