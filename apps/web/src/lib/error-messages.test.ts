@@ -73,7 +73,7 @@ describe("formatBackendError", () => {
 			category: "upstream",
 			upstreamStatus: 503,
 		})
-		expect(result.title).toBe("Tinybird is temporarily unavailable")
+		expect(result.title).toBe("Database is temporarily unavailable")
 		expect(result.description).toContain("503")
 	})
 
@@ -85,8 +85,31 @@ describe("formatBackendError", () => {
 			category: "auth",
 			upstreamStatus: 401,
 		})
-		expect(result.title).toBe("Tinybird rejected our credentials")
+		expect(result.title).toBe("Database rejected our credentials")
 		expect(result.description).toContain("invalid or expired")
+	})
+
+	it("formats TinybirdQueryError with config category as configuration issue", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/TinybirdQueryError",
+			message: "Database default does not exist",
+			pipe: "sqlQuery",
+			category: "config",
+			clickhouseType: "UNKNOWN_DATABASE",
+		})
+		expect(result.title).toBe("Database is not configured correctly")
+		expect(result.description).toContain("Database default does not exist")
+	})
+
+	it("formats TinybirdQueryError with client category as decode issue", () => {
+		const result = formatBackendError({
+			_tag: "@maple/http/errors/TinybirdQueryError",
+			message: "Unexpected token '<'",
+			pipe: "sqlQuery",
+			category: "client",
+		})
+		expect(result.title).toBe("Database response could not be decoded")
+		expect(result.description).toContain("Unexpected token")
 	})
 
 	it("rewrites TinybirdQueryError when message leaks a 5xx status", () => {
@@ -95,7 +118,7 @@ describe("formatBackendError", () => {
 			message: "Request failed with status 521: error code: 521",
 			pipe: "sqlQuery",
 		})
-		expect(result.title).toBe("Tinybird is temporarily unavailable")
+		expect(result.title).toBe("Database is temporarily unavailable")
 		expect(result.description).toContain("521")
 	})
 
@@ -118,7 +141,7 @@ describe("formatBackendError", () => {
 		})
 		expect(result.description).not.toContain("<html>")
 		expect(result.description).not.toContain("<title>")
-		expect(result.title).toBe("Tinybird is temporarily unavailable")
+		expect(result.title).toBe("Database is temporarily unavailable")
 		expect(result.description).toContain("503")
 	})
 

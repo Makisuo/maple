@@ -4,6 +4,10 @@ export interface EnvShape {
 	readonly PORT: number
 	readonly TINYBIRD_HOST: string
 	readonly TINYBIRD_TOKEN: Redacted.Redacted<string>
+	readonly CLICKHOUSE_URL: Option.Option<string>
+	readonly CLICKHOUSE_USER: string
+	readonly CLICKHOUSE_PASSWORD: Option.Option<Redacted.Redacted<string>>
+	readonly CLICKHOUSE_DATABASE: string
 	readonly MAPLE_DB_URL: string
 	readonly MAPLE_DB_AUTH_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly MAPLE_AUTH_MODE: string
@@ -54,6 +58,10 @@ const envConfig = Config.all({
 	PORT: portConfig,
 	TINYBIRD_HOST: Config.string("TINYBIRD_HOST"),
 	TINYBIRD_TOKEN: Config.redacted("TINYBIRD_TOKEN"),
+	CLICKHOUSE_URL: optionalString("CLICKHOUSE_URL"),
+	CLICKHOUSE_USER: stringWithDefault("CLICKHOUSE_USER", "default"),
+	CLICKHOUSE_PASSWORD: optionalRedacted("CLICKHOUSE_PASSWORD"),
+	CLICKHOUSE_DATABASE: stringWithDefault("CLICKHOUSE_DATABASE", "default"),
 	MAPLE_DB_URL: stringWithDefault("MAPLE_DB_URL", ""),
 	MAPLE_DB_AUTH_TOKEN: optionalRedacted("MAPLE_DB_AUTH_TOKEN"),
 	MAPLE_AUTH_MODE: stringWithDefault("MAPLE_AUTH_MODE", "self_hosted"),

@@ -51,6 +51,9 @@
 		"vitest": "^4.1.2"
 	},
 	"catalogs": {
+		"clickhouse": {
+			"@clickhouse/client-web": "^1.18.3"
+		},
 		"effect": {
 			"@effect/atom-react": "4.0.0-beta.57",
 			"@effect/language-service": "^0.85.1",

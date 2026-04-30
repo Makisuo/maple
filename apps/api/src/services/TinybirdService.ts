@@ -5,6 +5,7 @@ import {
 	TinybirdQuotaExceededError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
+import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Tinybird } from "@tinybirdco/sdk"
 import { Effect, Layer, Option, Redacted, Context } from "effect"
 import { Env } from "./Env"
@@ -27,11 +28,28 @@ export type SqlQueryOptions = {
 const CLIENT_CACHE_TTL_MS = 30_000
 interface CachedClient {
 	client: SqlClient
-	signature: string
+	cacheKey: string
 	expiresAt: number
 }
 
+interface ClickHouseSqlClientConfig {
+	readonly _tag: "clickhouse"
+	readonly url: string
+	readonly username: string
+	readonly password: string
+	readonly database: string
+}
+
+interface TinybirdSdkSqlClientConfig {
+	readonly _tag: "tinybird"
+	readonly host: string
+	readonly token: string
+}
+
+type SqlClientConfig = ClickHouseSqlClientConfig | TinybirdSdkSqlClientConfig
+
 export type TinybirdSqlError = TinybirdQueryError | TinybirdQuotaExceededError
+type TinybirdQueryErrorCategory = "query" | "upstream" | "auth" | "config" | "client"
 
 export interface TinybirdServiceShape {
 	readonly query: (
@@ -58,87 +76,101 @@ interface SqlClient {
 	readonly sql: (sql: string) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
 }
 
-/**
- * Resolved upstream connection. Self-managed deployments using a vanilla
- * ClickHouse instance get a `clickhouse` connection; everything else (managed
- * Tinybird Cloud, BYO Tinybird per-org overrides) gets a `tinybird` connection.
- */
-type ResolvedConnection =
-	| {
-			readonly backend: "tinybird"
-			readonly host: string
-			readonly token: string
-			readonly source: "managed" | "org_override"
-	  }
-	| {
-			readonly backend: "clickhouse"
-			readonly url: string
-			readonly user: string
-			readonly password: string
-			readonly database: string
-			readonly source: "org_override"
-	  }
-
-const signatureOf = (resolved: ResolvedConnection): string =>
-	resolved.backend === "tinybird"
-		? `tb:${resolved.host}:${resolved.token}`
-		: `ch:${resolved.url}:${resolved.user}:${resolved.database}:${resolved.password.length > 0 ? "y" : "n"}`
-
-const createTinybirdClient = (baseUrl: string, token: string): SqlClient => {
-	const tb = new Tinybird({
-		baseUrl,
-		token,
-		datasources: {},
-		pipes: {},
-		devMode: false,
+const createClickHouseSqlClient = (config: ClickHouseSqlClientConfig): SqlClient => {
+	const client = createClickHouseClient({
+		url: config.url,
+		username: config.username,
+		password: config.password,
+		database: config.database,
 	})
-	return { sql: (sql: string) => tb.sql(sql) }
-}
-
-const createClickHouseClient = (
-	url: string,
-	user: string,
-	password: string,
-	database: string,
-): SqlClient => {
-	const endpoint = url.replace(/\/$/, "")
-	const headers: Record<string, string> = {
-		"Content-Type": "text/plain",
-		"X-ClickHouse-User": user,
-		"X-ClickHouse-Database": database,
-	}
-	if (password.length > 0) headers["X-ClickHouse-Key"] = password
-
 	return {
 		sql: async (sql: string) => {
-			const response = await fetch(endpoint, { method: "POST", headers, body: sql })
-			const text = await response.text()
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status} ${response.statusText}: ${text.slice(0, 500)}`)
-			}
-			// `FORMAT JSON` (already appended by the query engine) returns a body shaped
-			// `{ meta, data, rows, statistics }` — same `data` field name Tinybird's SDK
-			// surfaces, so the rest of TinybirdService treats both backends identically.
-			const parsed = JSON.parse(text) as {
-				readonly data?: ReadonlyArray<Record<string, unknown>>
-			}
-			return { data: parsed.data ?? [] }
+			const resultSet = await client.query({
+				query: sql,
+				format: "JSONEachRow",
+			})
+			const data = await resultSet.json<Record<string, unknown>>()
+			return { data }
 		},
 	}
 }
 
-const createClient = (resolved: ResolvedConnection): SqlClient =>
-	resolved.backend === "tinybird"
-		? tinybirdClientFactory(resolved.host, resolved.token)
-		: clickHouseClientFactory(resolved.url, resolved.user, resolved.password, resolved.database)
+const createTinybirdSdkSqlClient = (config: TinybirdSdkSqlClientConfig): SqlClient => {
+	const client = new Tinybird({
+		baseUrl: config.host,
+		token: config.token,
+		datasources: {},
+		pipes: {},
+		devMode: false,
+	})
+	return {
+		sql: async (sql: string) => client.sql(sql),
+	}
+}
 
-let tinybirdClientFactory: (baseUrl: string, token: string) => SqlClient = createTinybirdClient
-let clickHouseClientFactory: (
-	url: string,
-	user: string,
-	password: string,
-	database: string,
-) => SqlClient = createClickHouseClient
+const createClient = (config: SqlClientConfig): SqlClient =>
+	config._tag === "clickhouse" ? createClickHouseSqlClient(config) : createTinybirdSdkSqlClient(config)
+
+let sqlClientFactory: typeof createClient = createClient
+
+const normalizeSqlForClickHouseClient = (sql: string): string =>
+	sql
+		.replace(/;\s*$/, "")
+		.replace(/\s+FORMAT\s+(?:JSONEachRow|JSON)\s*$/i, "")
+		.replace(/;\s*$/, "")
+
+type ClickHouseErrorDetails = {
+	readonly message: string
+	readonly code?: string
+	readonly type?: string
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null
+
+const unknownToMessage = (error: unknown, fallback = "ClickHouse query failed"): string => {
+	if (typeof error === "string") return error
+	if (error instanceof Error) return error.message
+	if (isRecord(error) && typeof error.message === "string") return error.message
+	return fallback
+}
+
+const getClickHouseErrorDetails = (error: unknown): ClickHouseErrorDetails => {
+	const message = unknownToMessage(error)
+	if (!isRecord(error)) return { message }
+	const code =
+		typeof error.code === "string"
+			? error.code
+			: typeof error.code === "number"
+				? String(error.code)
+				: undefined
+	const type = typeof error.type === "string" ? error.type : undefined
+	return { message, code, type }
+}
+
+const authClickHouseTypes = new Set([
+	"AUTHENTICATION_FAILED",
+	"ACCESS_DENIED",
+	"USER_DOESNT_EXIST",
+	"REQUIRED_PASSWORD",
+])
+
+const configClickHouseTypes = new Set([
+	"UNKNOWN_DATABASE",
+	"UNKNOWN_TABLE",
+	"TABLE_IS_DROPPED",
+	"UNKNOWN_SETTING",
+])
+
+const transientClickHouseTypes = new Set([
+	"NETWORK_ERROR",
+	"SOCKET_TIMEOUT",
+	"TOO_MANY_SIMULTANEOUS_QUERIES",
+	"SERVER_OVERLOADED",
+	"CANNOT_SCHEDULE_TASK",
+	"KEEPER_EXCEPTION",
+	"ALL_CONNECTION_TRIES_FAILED",
+])
 
 export class TinybirdService extends Context.Service<TinybirdService, TinybirdServiceShape>()(
 	"TinybirdService",
@@ -151,65 +183,143 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				let cleaned = raw
 				const htmlIndex = cleaned.search(/<\s*(html|head|body|center|h1|hr|title)\b/i)
 				if (htmlIndex >= 0) cleaned = cleaned.slice(0, htmlIndex)
-				cleaned = cleaned.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+				cleaned = cleaned
+					.replace(/<[^>]+>/g, " ")
+					.replace(/\s+/g, " ")
+					.trim()
 				if (cleaned.endsWith(":")) cleaned = cleaned.slice(0, -1).trim()
 				return cleaned || raw.slice(0, 200)
 			}
 
 			const extractUpstreamStatus = (message: string): number | undefined => {
-				const match = message.match(/status[:\s]+(\d{3})/i)
+				const match = message.match(/(?:status|HTTP status|response status code)[:\s]+(\d{3})/i)
 				if (match) return Number(match[1])
+				const titleMatch = message.match(/\b(\d{3})\s+(?:error|service temporarily unavailable)\b/i)
+				if (titleMatch) return Number(titleMatch[1])
 				return undefined
 			}
 
 			const toTinybirdQueryError = (pipe: string, error: unknown) =>
 				new TinybirdQueryError({
-					message: cleanErrorMessage(
-						error instanceof Error ? error.message : "Tinybird query failed",
-					),
+					message: cleanErrorMessage(unknownToMessage(error, "Tinybird query failed")),
 					pipe,
 				})
 
 			const mapTinybirdError = (pipe: string, error: unknown) => {
-				const rawMessage = error instanceof Error ? error.message : "Tinybird query failed"
+				const details = getClickHouseErrorDetails(error)
+				const rawMessage = details.message
 				const message = cleanErrorMessage(rawMessage)
 				const setting = detectQuotaSetting(rawMessage)
+				const clickhouseFields = {
+					clickhouseCode: details.code,
+					clickhouseType: details.type,
+				}
 				if (setting) {
-					return new TinybirdQuotaExceededError({ pipe, message, setting })
+					return new TinybirdQuotaExceededError({ pipe, message, setting, ...clickhouseFields })
 				}
 				const upstreamStatus = extractUpstreamStatus(rawMessage)
-				if (upstreamStatus === 401 || upstreamStatus === 403) {
-					return new TinybirdQueryError({ pipe, message, category: "auth", upstreamStatus })
+				const type = details.type
+				const isAuthFailure =
+					upstreamStatus === 401 ||
+					upstreamStatus === 403 ||
+					(type !== undefined && authClickHouseTypes.has(type)) ||
+					/authentication failed|access denied|not enough privileges|password is incorrect/i.test(
+						rawMessage,
+					)
+				if (isAuthFailure) {
+					return new TinybirdQueryError({
+						pipe,
+						message,
+						category: "auth",
+						upstreamStatus,
+						...clickhouseFields,
+					})
 				}
-				// Any upstream 5xx (502/503/504, Cloudflare 520-530, etc.) is treated
-				// as a transient infrastructure failure rather than a user query bug.
-				if (upstreamStatus !== undefined && upstreamStatus >= 500 && upstreamStatus < 600) {
+				const isTransientFailure =
+					(upstreamStatus !== undefined &&
+						(upstreamStatus === 408 ||
+							upstreamStatus === 429 ||
+							(upstreamStatus >= 500 && upstreamStatus < 600))) ||
+					(type !== undefined && transientClickHouseTypes.has(type)) ||
+					/^Timeout error\.?$/i.test(rawMessage) ||
+					/The user aborted a request|Failed to fetch|fetch failed|NetworkError|Load failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|certificate/i.test(
+						rawMessage,
+					)
+				if (isTransientFailure) {
 					return new TinybirdQueryError({
 						pipe,
 						message,
 						category: "upstream",
 						upstreamStatus,
+						...clickhouseFields,
 					})
 				}
-				return new TinybirdQueryError({ pipe, message, category: "query" })
+				const isConfigFailure =
+					(upstreamStatus !== undefined && upstreamStatus === 404) ||
+					(type !== undefined && configClickHouseTypes.has(type)) ||
+					/Invalid URL|unknown database|unknown table|table .* does not exist|database .* does not exist/i.test(
+						rawMessage,
+					)
+				if (isConfigFailure) {
+					return new TinybirdQueryError({
+						pipe,
+						message,
+						category: "config",
+						upstreamStatus,
+						...clickhouseFields,
+					})
+				}
+				const isClientFailure =
+					error instanceof SyntaxError ||
+					/Cannot decode .* as JSON|Unexpected token .* JSON|Stream has been already consumed|Failed to parse ClickHouse response/i.test(
+						rawMessage,
+					)
+				if (isClientFailure) {
+					return new TinybirdQueryError({
+						pipe,
+						message,
+						category: "client",
+						upstreamStatus,
+						...clickhouseFields,
+					})
+				}
+				return new TinybirdQueryError({
+					pipe,
+					message,
+					category: "query",
+					upstreamStatus,
+					...clickhouseFields,
+				})
 			}
 
-			const getCachedOrCreateClient = (
-				orgId: OrgId | "__managed__",
-				resolved: ResolvedConnection,
-			) => {
+			const sqlClientCacheKey = (config: SqlClientConfig): string =>
+				config._tag === "clickhouse"
+					? `clickhouse:${config.url}:${config.username}:${config.password}:${config.database}`
+					: `tinybird:${config.host}:${config.token}`
+
+			const getCachedOrCreateClient = (orgId: OrgId | "__managed__", config: SqlClientConfig) => {
 				const now = Date.now()
-				const signature = signatureOf(resolved)
+				const cacheKey = sqlClientCacheKey(config)
 				const cached = clientCache.get(orgId)
-				if (cached && cached.signature === signature && cached.expiresAt > now) {
+				if (cached && cached.cacheKey === cacheKey && cached.expiresAt > now) {
 					return cached.client
 				}
-				const client = createClient(resolved)
-				clientCache.set(orgId, { client, signature, expiresAt: now + CLIENT_CACHE_TTL_MS })
+				const client = sqlClientFactory(config)
+				clientCache.set(orgId, { client, cacheKey, expiresAt: now + CLIENT_CACHE_TTL_MS })
 				return client
 			}
 
-			const resolveHostToken = Effect.fn("TinybirdService.resolveHostToken")(function* (
+			/**
+			 * Resolve the upstream config for this tenant's queries.
+			 *
+			 * Resolution order:
+			 *   1. Per-org BYO row (`org_tinybird_settings.backend`):
+			 *        - "clickhouse" → ClickHouse via the org's URL + creds
+			 *        - "tinybird"   → Tinybird via the org's host + token
+			 *   2. Env-level managed ClickHouse (`CLICKHOUSE_URL` set)
+			 *   3. Env-level managed Tinybird (`TINYBIRD_HOST` + `TINYBIRD_TOKEN`)
+			 */
+			const resolveSqlConfig = Effect.fn("TinybirdService.resolveSqlConfig")(function* (
 				tenant: TenantContext,
 				label: string,
 			) {
@@ -220,45 +330,56 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				if (Option.isSome(override)) {
 					yield* Effect.annotateCurrentSpan("clientSource", "org_override")
 					if (override.value.backend === "clickhouse") {
-						yield* Effect.annotateCurrentSpan("backend", "clickhouse")
+						yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
 						return {
-							backend: "clickhouse",
-							url: override.value.url,
-							user: override.value.user,
-							password: override.value.password,
-							database: override.value.database,
-							source: "org_override",
-						} satisfies ResolvedConnection
+							config: {
+								_tag: "clickhouse" as const,
+								url: override.value.url,
+								username: override.value.user,
+								password: override.value.password,
+								database: override.value.database,
+							},
+							source: "org_override" as const,
+						}
 					}
-					yield* Effect.annotateCurrentSpan("backend", "tinybird")
+					yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
 					return {
-						backend: "tinybird",
-						host: override.value.host,
-						token: override.value.token,
-						source: "org_override",
-					} satisfies ResolvedConnection
+						config: {
+							_tag: "tinybird" as const,
+							host: override.value.host,
+							token: override.value.token,
+						},
+						source: "org_override" as const,
+					}
 				}
 
 				yield* Effect.annotateCurrentSpan("clientSource", "managed")
-				yield* Effect.annotateCurrentSpan("backend", "tinybird")
+				if (Option.isSome(env.CLICKHOUSE_URL)) {
+					yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
+					return {
+						config: {
+							_tag: "clickhouse" as const,
+							url: env.CLICKHOUSE_URL.value,
+							username: env.CLICKHOUSE_USER,
+							password: Option.match(env.CLICKHOUSE_PASSWORD, {
+								onNone: () => Redacted.value(env.TINYBIRD_TOKEN),
+								onSome: Redacted.value,
+							}),
+							database: env.CLICKHOUSE_DATABASE,
+						},
+						source: "managed" as const,
+					}
+				}
+
+				yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
 				return {
-					backend: "tinybird",
-					host: env.TINYBIRD_HOST,
-					token: Redacted.value(env.TINYBIRD_TOKEN),
-					source: "managed",
-				} satisfies ResolvedConnection
-			})
-
-			const resolveClient = Effect.fn("TinybirdService.resolveClient")(function* (
-				tenant: TenantContext,
-				pipe: string,
-			) {
-				yield* Effect.annotateCurrentSpan("pipe", pipe)
-				yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
-
-				const resolved = yield* resolveHostToken(tenant, pipe)
-				const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
-				return getCachedOrCreateClient(cacheKey, resolved)
+					config: {
+						_tag: "tinybird" as const,
+						host: env.TINYBIRD_HOST,
+						token: Redacted.value(env.TINYBIRD_TOKEN),
+					},
+					source: "managed" as const,
+				}
 			})
 
 			const truncateSql = (s: string, maxLen = 1000) =>
@@ -270,7 +391,6 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				pipe: string,
 				options?: SqlQueryOptions,
 			) {
-				yield* Effect.annotateCurrentSpan("db.system", "clickhouse")
 				yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 
 				const leftoverParam = sql.match(/__PARAM_(\w+)__/)
@@ -281,13 +401,21 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 					})
 				}
 
+				const resolved = yield* resolveSqlConfig(tenant, pipe)
+				yield* Effect.annotateCurrentSpan(
+					"db.system",
+					resolved.config._tag === "clickhouse" ? "clickhouse" : "tinybird",
+				)
 				const settings = resolveSettings(options)
-				const finalSql = appendSettings(sql, settings)
+				const sqlForClient =
+					resolved.config._tag === "clickhouse" ? normalizeSqlForClickHouseClient(sql) : sql
+				const finalSql = appendSettings(sqlForClient, settings)
 				yield* Effect.annotateCurrentSpan("db.statement", truncateSql(finalSql))
 				if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 				if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
 
-				const client = yield* resolveClient(tenant, pipe)
+				const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
+				const client = getCachedOrCreateClient(cacheKey, resolved.config)
 				const result = yield* Effect.tryPromise({
 					try: () => client.sql(finalSql),
 					catch: (error) => mapTinybirdError(pipe, error),
@@ -373,30 +501,32 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				if (rows.length === 0) return
 
 				const label = `ingest:${datasource}`
-				const resolved = yield* resolveHostToken(tenant, label)
+				const resolved = yield* resolveSqlConfig(tenant, label)
 				const ndjson = rows.map((row) => JSON.stringify(row)).join("\n")
 
 				const { url, headers } =
-					resolved.backend === "tinybird"
+					resolved.config._tag === "tinybird"
 						? {
-								url: `${resolved.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`,
+								url: `${resolved.config.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`,
 								headers: {
 									"Content-Type": "application/x-ndjson",
-									Authorization: `Bearer ${resolved.token}`,
+									Authorization: `Bearer ${resolved.config.token}`,
 								} as Record<string, string>,
 							}
 						: (() => {
-								// Direct INSERT to ClickHouse using JSONEachRow — same wire format as
-								// the NDJSON we already build above. The query string carries the
+								// Direct INSERT to ClickHouse using JSONEachRow — same wire format
+								// as the NDJSON we already build above. The query string carries the
 								// target table; ClickHouse parses each line as one row.
 								const ch: Record<string, string> = {
 									"Content-Type": "application/x-ndjson",
-									"X-ClickHouse-User": resolved.user,
-									"X-ClickHouse-Database": resolved.database,
+									"X-ClickHouse-User": resolved.config.username,
+									"X-ClickHouse-Database": resolved.config.database,
 								}
-								if (resolved.password.length > 0) ch["X-ClickHouse-Key"] = resolved.password
+								if (resolved.config.password.length > 0) {
+									ch["X-ClickHouse-Key"] = resolved.config.password
+								}
 								return {
-									url: `${resolved.url.replace(/\/$/, "")}/?query=${encodeURIComponent(`INSERT INTO ${datasource} FORMAT JSONEachRow`)}`,
+									url: `${resolved.config.url.replace(/\/$/, "")}/?query=${encodeURIComponent(`INSERT INTO ${datasource} FORMAT JSONEachRow`)}`,
 									headers: ch,
 								}
 							})()
@@ -421,7 +551,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 						Effect.logError("TinybirdService.ingest failed", {
 							datasource,
 							rowCount: rows.length,
-							backend: resolved.backend,
+							backend: resolved.config._tag,
 							error: String(error),
 							message: error.message,
 						}),
@@ -452,19 +582,12 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 }
 
 export const __testables = {
-	setClientFactory: (factory: (baseUrl: string, token: string) => SqlClient) => {
-		tinybirdClientFactory = factory
-		clientCache.clear()
-	},
-	setClickHouseClientFactory: (
-		factory: (url: string, user: string, password: string, database: string) => SqlClient,
-	) => {
-		clickHouseClientFactory = factory
+	setClientFactory: (factory: typeof createClient) => {
+		sqlClientFactory = factory
 		clientCache.clear()
 	},
 	reset: () => {
-		tinybirdClientFactory = createTinybirdClient
-		clickHouseClientFactory = createClickHouseClient
+		sqlClientFactory = createClient
 		clientCache.clear()
 	},
 }
