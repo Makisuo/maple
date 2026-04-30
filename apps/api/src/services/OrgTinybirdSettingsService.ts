@@ -1300,11 +1300,53 @@ export class OrgTinybirdSettingsService extends Context.Service<
 			yield* requireAdmin(roles)
 			const activeRow = yield* requireActiveRow(orgId)
 
-			// ClickHouse-backend orgs have no Tinybird project to deploy — schema is
-			// applied operator-side via the `clickhouse:schema:apply` CLI. Resync is
-			// a no-op here; surface the existing state without kicking a workflow.
+			// ClickHouse-backend resync re-runs `applyClickHouseSchema` against the
+			// stored credentials. Useful after a Maple release that ships new
+			// migrations — every CREATE is `IF NOT EXISTS` so re-running on an
+			// up-to-date schema is a fast no-op. We also bump `lastSyncAt` so the
+			// UI shows a fresh timestamp.
+			if (activeRow.backend === "clickhouse") {
+				if (activeRow.chUrl === null || activeRow.chUser === null || activeRow.chDatabase === null) {
+					return yield* new OrgTinybirdSettingsValidationError({
+						message: "ClickHouse settings are missing credentials — re-save before resyncing",
+					})
+				}
+				const password =
+					activeRow.chPasswordCiphertext !== null &&
+					activeRow.chPasswordIv !== null &&
+					activeRow.chPasswordTag !== null
+						? yield* decryptToken(
+								{
+									ciphertext: activeRow.chPasswordCiphertext,
+									iv: activeRow.chPasswordIv,
+									tag: activeRow.chPasswordTag,
+								},
+								encryptionKey,
+							)
+						: ""
+
+				yield* applyClickHouseSchema({
+					url: activeRow.chUrl,
+					user: activeRow.chUser,
+					password,
+					database: activeRow.chDatabase,
+				})
+
+				const now = Date.now()
+				yield* database
+					.execute((db) =>
+						db
+							.update(orgTinybirdSettings)
+							.set({ lastSyncAt: now, lastSyncError: null, updatedAt: now, updatedBy: userId })
+							.where(eq(orgTinybirdSettings.orgId, orgId)),
+					)
+					.pipe(Effect.mapError(toPersistenceError))
+
+				const refreshed = yield* selectActiveRow(orgId)
+				return toResponse(Option.getOrUndefined(refreshed), null, undefined)
+			}
+
 			if (
-				activeRow.backend === "clickhouse" ||
 				activeRow.tokenCiphertext === null ||
 				activeRow.tokenIv === null ||
 				activeRow.tokenTag === null ||

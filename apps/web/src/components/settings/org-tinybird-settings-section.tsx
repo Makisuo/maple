@@ -336,11 +336,22 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 		if (Exit.isSuccess(result)) {
 			refreshSettings()
 			refreshDeploymentStatus()
-			toast.success("Tinybird resync started")
+			toast.success(
+				settings?.backend === "clickhouse"
+					? "ClickHouse schema re-applied"
+					: "Tinybird resync started",
+			)
 			return
 		}
 
-		toast.error(getExitErrorMessage(result, "Failed to sync Tinybird project"))
+		toast.error(
+			getExitErrorMessage(
+				result,
+				settings?.backend === "clickhouse"
+					? "Failed to re-apply ClickHouse schema"
+					: "Failed to sync Tinybird project",
+			),
+		)
 	}
 
 	async function handleDisable() {
@@ -666,15 +677,19 @@ export function OrgTinybirdSettingsSection({ isAdmin, hasEntitlement }: OrgTinyb
 												? "Update connection"
 												: "Save connection"}
 									</Button>
-									{backend === "tinybird" ? (
-										<Button
-											variant="outline"
-											onClick={() => void handleResync()}
-											disabled={isBusy || !configured}
-										>
-											{isResyncing ? "Syncing..." : "Resync project"}
-										</Button>
-									) : null}
+									<Button
+										variant="outline"
+										onClick={() => void handleResync()}
+										disabled={isBusy || !configured}
+									>
+										{isResyncing
+											? settings?.backend === "clickhouse"
+												? "Re-applying..."
+												: "Syncing..."
+											: settings?.backend === "clickhouse"
+												? "Re-apply schema"
+												: "Resync project"}
+									</Button>
 									<Button
 										variant="destructive"
 										onClick={() => setDisableOpen(true)}
