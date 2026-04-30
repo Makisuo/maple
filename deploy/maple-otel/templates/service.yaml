@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "maple-otel.fullname" . }}
+  labels:
+    {{- include "maple-otel.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "maple-otel.selectorLabels" . | nindent 4 }}
+  ports:
+    {{- if .Values.otlp.grpc.enabled }}
+    - name: otlp-grpc
+      port: {{ .Values.otlp.grpc.port }}
+      targetPort: otlp-grpc
+      protocol: TCP
+    {{- end }}
+    {{- if .Values.otlp.http.enabled }}
+    - name: otlp-http
+      port: {{ .Values.otlp.http.port }}
+      targetPort: otlp-http
+      protocol: TCP
+    {{- end }}

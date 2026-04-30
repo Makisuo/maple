@@ -1,0 +1,24 @@
+apiVersion: v2
+name: maple-otel
+description: |
+    Lean OpenTelemetry Collector for Maple's self-hosted ClickHouse path.
+    Receives OTLP, optionally enriches with k8s metadata, ships to a Maple-
+    schema ClickHouse via the bundled mapleexporter.
+
+    Use this chart when all you want is "OTLP in, Maple ClickHouse out."
+    For the full infrastructure-monitoring stack (kubelet stats, host
+    metrics, pod logs, auto-instrumentation operator), use `maple-k8s-infra`.
+type: application
+# Chart version — bump on every chart change.
+version: 0.1.0
+# App version — the otel-collector-maple image tag this chart defaults to.
+# Keep in lockstep with `image.tag` in values.yaml.
+appVersion: "0.1.5"
+keywords:
+    - maple
+    - observability
+    - opentelemetry
+    - clickhouse
+home: https://github.com/makisuo/maple
+sources:
+    - https://github.com/makisuo/maple

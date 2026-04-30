@@ -1,0 +1,109 @@
+{{- if not .Values.maple.orgId -}}
+{{- fail "maple.orgId is required" -}}
+{{- end -}}
+{{- if not .Values.maple.clickhouse.endpoint -}}
+{{- fail "maple.clickhouse.endpoint is required" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "maple-otel.fullname" . }}
+  labels:
+    {{- include "maple-otel.labels" . | nindent 4 }}
+data:
+  config.yaml: |-
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      otlp:
+        protocols:
+          {{- if .Values.otlp.grpc.enabled }}
+          grpc:
+            endpoint: 0.0.0.0:{{ .Values.otlp.grpc.port }}
+          {{- end }}
+          {{- if .Values.otlp.http.enabled }}
+          http:
+            endpoint: 0.0.0.0:{{ .Values.otlp.http.port }}
+          {{- end }}
+
+    processors:
+      memory_limiter:
+        check_interval: {{ .Values.memoryLimiter.checkInterval }}
+        limit_mib: {{ .Values.memoryLimiter.limitMib }}
+        spike_limit_mib: {{ .Values.memoryLimiter.spikeLimitMib }}
+      {{- if .Values.k8sattributes.enabled }}
+      k8sattributes:
+        passthrough: false
+        # Honor any IDs the SDK already set, then fall back to the
+        # connection IP. Apps connect directly to this collector so the
+        # connection IP is the originating pod's IP.
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: connection
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.deployment.name
+            - k8s.statefulset.name
+            - k8s.daemonset.name
+            - k8s.cronjob.name
+            - k8s.job.name
+            - k8s.node.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.pod.start_time
+      {{- end }}
+      batch:
+        send_batch_size: {{ .Values.batch.sendBatchSize }}
+        timeout: {{ .Values.batch.timeout }}
+
+    exporters:
+      maple:
+        endpoint: {{ .Values.maple.clickhouse.endpoint | quote }}
+        database: {{ .Values.maple.clickhouse.database | quote }}
+        username: {{ .Values.maple.clickhouse.user | quote }}
+        password: "${env:MAPLE_CLICKHOUSE_PASSWORD}"
+        org_id: {{ .Values.maple.orgId | quote }}
+        {{- with .Values.maple.orgIdFromResourceAttribute }}
+        org_id_from_resource_attribute: {{ . | quote }}
+        {{- end }}
+        timeout: {{ .Values.maple.clickhouse.timeout }}
+        traces_table_name: {{ .Values.maple.clickhouse.tables.traces | quote }}
+        logs_table_name: {{ .Values.maple.clickhouse.tables.logs | quote }}
+        metrics_sum_table_name: {{ .Values.maple.clickhouse.tables.metricsSum | quote }}
+        metrics_gauge_table_name: {{ .Values.maple.clickhouse.tables.metricsGauge | quote }}
+        metrics_histogram_table_name: {{ .Values.maple.clickhouse.tables.metricsHistogram | quote }}
+        metrics_exponential_histogram_table_name: {{ .Values.maple.clickhouse.tables.metricsExponentialHistogram | quote }}
+        retry_on_failure:
+          enabled: {{ .Values.maple.clickhouse.retryOnFailure.enabled }}
+          initial_interval: {{ .Values.maple.clickhouse.retryOnFailure.initialInterval }}
+          max_interval: {{ .Values.maple.clickhouse.retryOnFailure.maxInterval }}
+          max_elapsed_time: {{ .Values.maple.clickhouse.retryOnFailure.maxElapsedTime }}
+        sending_queue:
+          enabled: {{ .Values.maple.clickhouse.sendingQueue.enabled }}
+          num_consumers: {{ .Values.maple.clickhouse.sendingQueue.numConsumers }}
+          queue_size: {{ .Values.maple.clickhouse.sendingQueue.queueSize }}
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter{{ if .Values.k8sattributes.enabled }}, k8sattributes{{ end }}, batch]
+          exporters: [maple]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter{{ if .Values.k8sattributes.enabled }}, k8sattributes{{ end }}, batch]
+          exporters: [maple]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter{{ if .Values.k8sattributes.enabled }}, k8sattributes{{ end }}, batch]
+          exporters: [maple]
+      telemetry:
+        logs:
+          level: info

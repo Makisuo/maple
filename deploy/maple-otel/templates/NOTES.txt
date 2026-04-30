@@ -1,0 +1,26 @@
+Maple OTel Collector installed.
+
+Endpoints (in-cluster):
+{{- if .Values.otlp.grpc.enabled }}
+  OTLP gRPC: {{ include "maple-otel.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.otlp.grpc.port }}
+{{- end }}
+{{- if .Values.otlp.http.enabled }}
+  OTLP HTTP: {{ include "maple-otel.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.otlp.http.port }}
+{{- end }}
+  Health:    {{ include "maple-otel.fullname" . }}.{{ .Release.Namespace }}.svc:13133
+
+{{- if .Values.ingress.enabled }}
+
+External hostnames (TLS via Let's Encrypt HTTP01 — first issuance takes ~30–60s):
+{{- range .Values.ingress.hosts }}
+  https://{{ . }}/v1/{traces,logs,metrics}
+{{- end }}
+{{- end }}
+
+Ships to ClickHouse:
+  endpoint: {{ .Values.maple.clickhouse.endpoint }}
+  database: {{ .Values.maple.clickhouse.database }}
+  org_id:   {{ .Values.maple.orgId }}
+
+Make sure Maple's schema is present on that ClickHouse:
+  bunx @maple/clickhouse-cli@latest apply --url={{ .Values.maple.clickhouse.endpoint }} --user={{ .Values.maple.clickhouse.user }} --password=$PASS --database={{ .Values.maple.clickhouse.database }}

@@ -1,0 +1,64 @@
+{{- if .Values.ingress.enabled -}}
+{{- if not .Values.ingress.acmeEmail -}}
+{{- fail "ingress.acmeEmail is required when ingress.enabled is true" -}}
+{{- end -}}
+{{- if not .Values.ingress.hosts -}}
+{{- fail "ingress.hosts must list at least one hostname when ingress.enabled is true" -}}
+{{- end -}}
+# Namespace-scoped ACME Issuer using HTTP01. Requires the ingress class
+# named in `ingress.ingressClassName` to terminate :80 publicly so
+# Let's Encrypt can validate the challenge.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "maple-otel.issuerName" . }}
+  labels:
+    {{- include "maple-otel.labels" . | nindent 4 }}
+spec:
+  acme:
+    email: {{ .Values.ingress.acmeEmail | quote }}
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: {{ include "maple-otel.issuerName" . }}-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: {{ .Values.ingress.ingressClassName | quote }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "maple-otel.fullname" . }}
+  labels:
+    {{- include "maple-otel.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/issuer: {{ include "maple-otel.issuerName" . }}
+    # Allow large OTLP bodies + slow clients.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.ingressClassName | quote }}
+  tls:
+    - hosts:
+      {{- range .Values.ingress.hosts }}
+        - {{ . | quote }}
+      {{- end }}
+      secretName: {{ include "maple-otel.tlsSecretName" . }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /v1/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "maple-otel.fullname" $ }}
+                port:
+                  number: {{ $.Values.otlp.http.port }}
+    {{- end }}
+{{- end }}

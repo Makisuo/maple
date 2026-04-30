@@ -1,0 +1,167 @@
+# Lean Maple OTel collector chart.
+#
+# Receives OTLP, optionally enriches with k8s pod/deployment metadata, and
+# ships to a ClickHouse running Maple's schema via the bundled
+# `mapleexporter`. No host metrics, no kubelet stats, no pod log scraping —
+# use the `maple-k8s-infra` chart for that.
+
+maple:
+    # ----- required -----
+
+    # Maple organization id stamped onto every record's `OrgId` column.
+    # Look this up in the Maple UI under Settings → BYO Backend.
+    orgId: ""
+
+    # Optional: read the org id from a resource attribute on each record
+    # instead of using the static `orgId` above. Use this for multi-tenant
+    # fan-out where one collector serves several Maple orgs and an upstream
+    # processor / SDK stamps the right id per-record. Empty = single-tenant
+    # (the typical case).
+    orgIdFromResourceAttribute: ""
+
+    clickhouse:
+        # ClickHouse HTTP endpoint Maple's schema lives in.
+        # Examples:
+        #   http://clickhouse.clickhouse.svc.cluster.local:8123
+        #   https://my-instance.clickhouse.cloud
+        endpoint: ""
+
+        # Database holding the Maple schema (default: `default`).
+        database: default
+
+        # ClickHouse user. Needs SELECT + INSERT on every Maple table; does
+        # not need DDL privileges (schema is applied separately via the
+        # @maple/clickhouse-cli or Maple's API).
+        user: maple
+
+        # Password — either inline (dev convenience) or via existingSecret
+        # (production). Inline values render a chart-managed Secret.
+        password:
+            value: ""
+            existingSecret:
+                name: ""
+                key: ""
+
+        # Per-signal table name overrides. Defaults match Maple's schema —
+        # only set if you've intentionally renamed tables.
+        tables:
+            traces: traces
+            logs: logs
+            metricsSum: metrics_sum
+            metricsGauge: metrics_gauge
+            metricsHistogram: metrics_histogram
+            metricsExponentialHistogram: metrics_exponential_histogram
+
+        timeout: 30s
+
+        retryOnFailure:
+            enabled: true
+            initialInterval: 1s
+            maxInterval: 30s
+            maxElapsedTime: 300s
+
+        sendingQueue:
+            enabled: true
+            numConsumers: 8
+            queueSize: 10000
+
+# ----- collector image -----
+
+image:
+    repository: ghcr.io/makisuo/maple/otel-collector-maple
+    # Empty falls back to .Chart.AppVersion. Pin a tag for reproducible
+    # rollouts.
+    tag: ""
+    pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ----- pipeline -----
+
+# OTLP receivers. Both HTTP and gRPC are on by default.
+otlp:
+    grpc:
+        enabled: true
+        port: 4317
+    http:
+        enabled: true
+        port: 4318
+
+# `k8sattributes` enriches incoming spans/logs/metrics with the originating
+# pod's k8s metadata (namespace, deployment name, pod name, etc.) by looking
+# up the pod that opened the connection. Defaulted ON because most Maple UI
+# views need this data; ServiceAccount + ClusterRole/Binding for the lookup
+# RBAC are rendered automatically.
+#
+# Disable if your apps already emit fully-resolved k8s.* resource attributes
+# (e.g. via auto-instrumentation env vars) AND you want a stricter RBAC
+# posture.
+k8sattributes:
+    enabled: true
+
+# memory_limiter — prevents OOM under burst. Tune to fit your container
+# memory limits. Default leaves ~1Gi headroom under a 4Gi limit.
+memoryLimiter:
+    checkInterval: 1s
+    limitMib: 3000
+    spikeLimitMib: 500
+
+# batch — collects records before forwarding. The default is OK for most
+# workloads; raise `sendBatchSize` if you have very high cardinality.
+batch:
+    sendBatchSize: 2000
+    timeout: 10s
+
+# ----- workload -----
+
+replicaCount: 2
+
+resources:
+    requests:
+        cpu: 100m
+        memory: 256Mi
+    limits:
+        memory: 768Mi
+
+podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+serviceAccount:
+    create: true
+    name: ""
+podAnnotations: {}
+podLabels: {}
+extraEnv: []
+
+# ----- service -----
+
+service:
+    type: ClusterIP
+    annotations: {}
+
+# ----- ingress (optional, off-cluster traffic) -----
+#
+# Set this up if you want to accept OTLP from off-cluster clients
+# (Cloudflare workers, Vercel apps, anything outside the cluster).
+# Provisions a namespace-scoped HTTP01 ACME issuer + Ingress.
+#
+# Path is hard-coded to `/v1/` (the OTLP HTTP receiver paths).
+
+ingress:
+    enabled: false
+    ingressClassName: nginx
+    # ACME contact email for the namespace-scoped HTTP01 Issuer that
+    # provisions TLS certs. Required when `enabled: true`.
+    acmeEmail: ""
+    # Hostnames the ingress accepts. cert-manager will issue a cert
+    # covering all of them.
+    hosts: []
+    # Free-form annotations merged onto the Ingress.
+    annotations: {}
