@@ -31,8 +31,12 @@ const makeCapturingClient = (status = 200) =>
 	})
 
 describe("makeFlushableLogger", () => {
-	it("noopLogger flush is a no-op effect", async () => {
-		const result = await Effect.runPromise(noopLogger.flush)
+	it("noopLogger.flush is a no-op effect", async () => {
+		const result = await Effect.runPromise(
+			noopLogger.flush.pipe(
+				Effect.provideService(HttpClient.HttpClient, HttpClient.make(() => Effect.die("unreachable"))),
+			),
+		)
 		expect(result).toBeUndefined()
 	})
 
