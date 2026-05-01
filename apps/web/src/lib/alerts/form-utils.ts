@@ -40,6 +40,7 @@ export type RuleFormState = {
 	signalType: AlertSignalType
 	comparator: AlertComparator
 	threshold: string
+	thresholdUpper: string
 	windowMinutes: string
 	minimumSampleCount: string
 	consecutiveBreachesRequired: string
@@ -70,7 +71,15 @@ export const comparatorLabels: Record<AlertComparator, string> = {
 	gte: ">=",
 	lt: "<",
 	lte: "<=",
+	eq: "=",
+	neq: "!=",
+	between: "between",
+	not_between: "not between",
 }
+
+/** Returns true for comparators that need a second (upper) threshold. */
+export const isRangeComparator = (c: AlertComparator): c is "between" | "not_between" =>
+	c === "between" || c === "not_between"
 
 export { destinationTypeLabels } from "@/components/alerts/destination-provider"
 
@@ -148,6 +157,7 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
 		signalType: "error_rate",
 		comparator: "gt",
 		threshold: "5",
+		thresholdUpper: "",
 		windowMinutes: "5",
 		minimumSampleCount: "50",
 		consecutiveBreachesRequired: "2",
@@ -175,6 +185,7 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
 		signalType: rule.signalType,
 		comparator: rule.comparator,
 		threshold: String(rule.threshold),
+		thresholdUpper: rule.thresholdUpper == null ? "" : String(rule.thresholdUpper),
 		windowMinutes: String(rule.windowMinutes),
 		minimumSampleCount: String(rule.minimumSampleCount),
 		consecutiveBreachesRequired: String(rule.consecutiveBreachesRequired),
@@ -203,6 +214,11 @@ export function buildRuleRequest(form: RuleFormState): AlertRuleUpsertRequest {
 		signalType,
 		comparator: form.comparator,
 		threshold: Number(form.threshold),
+		thresholdUpper: isRangeComparator(form.comparator)
+			? Number.isFinite(Number(form.thresholdUpper))
+				? Number(form.thresholdUpper)
+				: null
+			: null,
 		windowMinutes: parsePositiveNumber(form.windowMinutes, 5),
 		minimumSampleCount: parseNonNegativeNumber(form.minimumSampleCount, 0),
 		consecutiveBreachesRequired: parsePositiveNumber(form.consecutiveBreachesRequired, 2),
@@ -242,6 +258,9 @@ export function buildRuleTestRequest(
 export function isRulePreviewReady(form: RuleFormState): boolean {
 	if (form.name.trim().length === 0) return false
 	if (!Number.isFinite(Number(form.threshold))) return false
+	if (isRangeComparator(form.comparator) && !Number.isFinite(Number(form.thresholdUpper))) {
+		return false
+	}
 	if (form.signalType === "query" && form.queryDataSource === "metrics") {
 		return form.metricName.trim().length > 0
 	}

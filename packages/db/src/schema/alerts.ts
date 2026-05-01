@@ -39,6 +39,7 @@ export const alertRules = sqliteTable(
 		signalType: text("signal_type").notNull(),
 		comparator: text("comparator").notNull(),
 		threshold: real("threshold").notNull(),
+		thresholdUpper: real("threshold_upper"),
 		windowMinutes: integer("window_minutes", { mode: "number" }).notNull(),
 		minimumSampleCount: integer("minimum_sample_count", { mode: "number" }).notNull().default(0),
 		consecutiveBreachesRequired: integer("consecutive_breaches_required", { mode: "number" })
@@ -113,6 +114,7 @@ export const alertIncidents = sqliteTable(
 		status: text("status").notNull(),
 		comparator: text("comparator").notNull(),
 		threshold: real("threshold").notNull(),
+		thresholdUpper: real("threshold_upper"),
 		firstTriggeredAt: integer("first_triggered_at", { mode: "number" }).notNull(),
 		lastTriggeredAt: integer("last_triggered_at", { mode: "number" }).notNull(),
 		resolvedAt: integer("resolved_at", { mode: "number" }),

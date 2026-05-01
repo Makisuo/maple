@@ -132,6 +132,7 @@ interface NormalizedRule {
 	readonly signalType: AlertSignalType
 	readonly comparator: AlertComparator
 	readonly threshold: number
+	readonly thresholdUpper: number | null
 	readonly windowMinutes: number
 	readonly minimumSampleCount: number
 	readonly consecutiveBreachesRequired: number
@@ -155,6 +156,7 @@ interface EvaluatedRule {
 	readonly value: number | null
 	readonly sampleCount: number
 	readonly threshold: number
+	readonly thresholdUpper: number | null
 	readonly comparator: AlertComparator
 	readonly reason: string
 }
@@ -171,6 +173,7 @@ interface DispatchContext {
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
+	readonly thresholdUpper: number | null
 	readonly eventType: AlertEventTypeValue
 	readonly incidentId: AlertIncidentId | null
 	readonly incidentStatus: Schema.Schema.Type<typeof AlertIncidentStatus>
@@ -199,6 +202,7 @@ interface DeliveryPayloadContext {
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
+	readonly thresholdUpper: number | null
 	readonly windowMinutes: number
 	readonly value: number | null
 	readonly sampleCount: number | null
@@ -236,6 +240,7 @@ const StoredDeliveryPayloadSchema = Schema.Struct({
 			groupKey: Schema.optional(Schema.NullOr(Schema.String)),
 			comparator: Schema.optional(Schema.String),
 			threshold: Schema.optional(Schema.Number),
+			thresholdUpper: Schema.optional(Schema.NullOr(Schema.Number)),
 			windowMinutes: Schema.optional(Schema.Number),
 		}),
 	),
@@ -324,12 +329,25 @@ const toIso = (value: number | null | undefined): IsoDateTimeValue | null =>
 
 const toTinybirdDateTime = (epochMs: number) => new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
 
-const compareThreshold = (value: number, comparator: AlertComparator, threshold: number): boolean =>
+const compareThreshold = (
+	value: number,
+	comparator: AlertComparator,
+	threshold: number,
+	thresholdUpper: number | null = null,
+): boolean =>
 	Match.value(comparator).pipe(
 		Match.when("gt", () => value > threshold),
 		Match.when("gte", () => value >= threshold),
 		Match.when("lt", () => value < threshold),
 		Match.when("lte", () => value <= threshold),
+		Match.when("eq", () => value === threshold),
+		Match.when("neq", () => value !== threshold),
+		Match.when("between", () =>
+			thresholdUpper != null && value >= threshold && value <= thresholdUpper,
+		),
+		Match.when("not_between", () =>
+			thresholdUpper != null && (value < threshold || value > thresholdUpper),
+		),
 		Match.exhaustive,
 	)
 
@@ -726,6 +744,7 @@ const rowToRuleDocument = (row: AlertRuleRow, destinationIds: ReadonlyArray<stri
 		signalType: decodeAlertSignalTypeSync(row.signalType),
 		comparator: decodeAlertComparatorSync(row.comparator),
 		threshold: row.threshold,
+		thresholdUpper: row.thresholdUpper,
 		windowMinutes: row.windowMinutes,
 		minimumSampleCount: row.minimumSampleCount,
 		consecutiveBreachesRequired: row.consecutiveBreachesRequired,
@@ -760,6 +779,7 @@ const rowToIncidentDocument = (row: AlertIncidentRow) =>
 		status: decodeAlertIncidentStatusSync(row.status),
 		comparator: decodeAlertComparatorSync(row.comparator),
 		threshold: row.threshold,
+		thresholdUpper: row.thresholdUpper,
 		firstTriggeredAt: decodeIsoDateTimeStringSync(new Date(row.firstTriggeredAt).toISOString()),
 		lastTriggeredAt: decodeIsoDateTimeStringSync(new Date(row.lastTriggeredAt).toISOString()),
 		resolvedAt: toIso(row.resolvedAt),
@@ -1005,6 +1025,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				signalType: decodeAlertSignalTypeSync(row.signalType),
 				comparator: decodeAlertComparatorSync(row.comparator),
 				threshold: row.threshold,
+				thresholdUpper: row.thresholdUpper,
 				windowMinutes: row.windowMinutes,
 				minimumSampleCount: row.minimumSampleCount,
 				consecutiveBreachesRequired: row.consecutiveBreachesRequired,
@@ -1052,6 +1073,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			}
 			if (request.threshold == null || !Number.isFinite(request.threshold)) {
 				details.push("threshold must be a finite number")
+			}
+			const isRange = request.comparator === "between" || request.comparator === "not_between"
+			if (isRange) {
+				if (request.thresholdUpper == null || !Number.isFinite(request.thresholdUpper)) {
+					details.push("thresholdUpper is required for between / not_between comparators")
+				} else if (request.threshold != null && request.thresholdUpper < request.threshold) {
+					details.push("thresholdUpper must be greater than or equal to threshold")
+				}
+			} else if (request.thresholdUpper != null) {
+				details.push("thresholdUpper is only supported for between / not_between comparators")
 			}
 			if (request.signalType === "metric") {
 				if (!metricName) details.push("metricName is required for metric alerts")
@@ -1107,6 +1138,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				signalType: request.signalType,
 				comparator: request.comparator,
 				threshold: request.threshold,
+				thresholdUpper: request.thresholdUpper ?? null,
 				windowMinutes: request.windowMinutes,
 				minimumSampleCount: request.minimumSampleCount ?? 0,
 				consecutiveBreachesRequired: request.consecutiveBreachesRequired ?? 2,
@@ -1241,6 +1273,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					value: null,
 					sampleCount,
 					threshold: rule.threshold,
+					thresholdUpper: rule.thresholdUpper,
 					comparator: rule.comparator,
 					reason:
 						rule.signalType === "metric"
@@ -1255,6 +1288,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					value,
 					sampleCount,
 					threshold: rule.threshold,
+					thresholdUpper: rule.thresholdUpper,
 					comparator: rule.comparator,
 					reason: `Sample count ${sampleCount} is below minimum ${rule.minimumSampleCount}`,
 				}
@@ -1266,20 +1300,24 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					value: null,
 					sampleCount,
 					threshold: rule.threshold,
+					thresholdUpper: rule.thresholdUpper,
 					comparator: rule.comparator,
 					reason: "Alert evaluation did not return a scalar value",
 				}
 			}
 
 			return {
-				status: compareThreshold(value, rule.comparator, rule.threshold) ? "breached" : "healthy",
+				status: compareThreshold(value, rule.comparator, rule.threshold, rule.thresholdUpper)
+					? "breached"
+					: "healthy",
 				value,
 				sampleCount,
 				threshold: rule.threshold,
+				thresholdUpper: rule.thresholdUpper,
 				comparator: rule.comparator,
 				reason:
 					reasonOverride ??
-					`${rule.signalType} ${formatComparator(rule.comparator)} ${rule.threshold}`,
+					`${rule.signalType} ${formatComparator(rule.comparator, rule.threshold, rule.thresholdUpper)}`,
 			}
 		}
 
@@ -1413,6 +1451,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				groupKey: context.groupKey,
 				comparator: context.comparator,
 				threshold: context.threshold,
+				thresholdUpper: context.thresholdUpper,
 				windowMinutes: context.windowMinutes,
 			},
 			observed: {
@@ -1511,6 +1550,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						severity: rule.severity,
 						comparator: rule.comparator,
 						threshold: rule.threshold,
+						thresholdUpper: rule.thresholdUpper,
 						windowMinutes: rule.windowMinutes,
 						value: evaluation.value,
 						sampleCount: evaluation.sampleCount,
@@ -1874,6 +1914,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				severity: "warning",
 				comparator: "lt",
 				threshold: 1,
+				thresholdUpper: null,
 				windowMinutes: 5,
 				eventType: "test",
 				incidentId: null,
@@ -1934,6 +1975,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				signalType: normalized.signalType,
 				comparator: normalized.comparator,
 				threshold: normalized.threshold,
+				thresholdUpper: normalized.thresholdUpper,
 				windowMinutes: normalized.windowMinutes,
 				minimumSampleCount: normalized.minimumSampleCount,
 				consecutiveBreachesRequired: normalized.consecutiveBreachesRequired,
@@ -2086,6 +2128,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						value: null,
 						sampleCount: 0,
 						threshold: normalized.threshold,
+						thresholdUpper: normalized.thresholdUpper,
 						comparator: normalized.comparator,
 						reason: "No groups found",
 					}
@@ -2109,6 +2152,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									value: null,
 									sampleCount: 0,
 									threshold: normalized.threshold,
+									thresholdUpper: normalized.thresholdUpper,
 									comparator: normalized.comparator,
 									reason: "No data",
 								}
@@ -2122,6 +2166,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						value: null,
 						sampleCount: 0,
 						threshold: normalized.threshold,
+						thresholdUpper: normalized.thresholdUpper,
 						comparator: normalized.comparator,
 						reason: "No data",
 					}
@@ -2132,6 +2177,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					value: null,
 					sampleCount: 0,
 					threshold: normalized.threshold,
+					thresholdUpper: normalized.thresholdUpper,
 					comparator: normalized.comparator,
 					reason: "No data",
 				}
@@ -2169,6 +2215,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							severity: normalized.severity,
 							comparator: normalized.comparator,
 							threshold: normalized.threshold,
+							thresholdUpper: normalized.thresholdUpper,
 							windowMinutes: normalized.windowMinutes,
 							eventType: "test",
 							incidentId: null,
@@ -2283,6 +2330,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							signalType: decodeAlertSignalTypeSync(String(r.signalType)),
 							comparator: decodeAlertComparatorSync(String(r.comparator)),
 							threshold: Number(r.threshold),
+							// thresholdUpper not yet recorded in the Tinybird alert_checks
+							// datasource — schema column will be backfilled with the
+							// datasource update; for now always null in the audit log.
+							thresholdUpper: null,
 							observedValue: r.observedValue == null ? null : Number(r.observedValue),
 							sampleCount: Number(r.sampleCount ?? 0),
 							windowMinutes: Number(r.windowMinutes ?? 0),
@@ -2551,6 +2602,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							incidentRow?.comparator ?? payloadRule?.comparator ?? "gt",
 						),
 						threshold: incidentRow?.threshold ?? payloadRule?.threshold ?? 0,
+						thresholdUpper:
+							incidentRow?.thresholdUpper ?? payloadRule?.thresholdUpper ?? null,
 						windowMinutes: ruleRow?.windowMinutes ?? payloadRule?.windowMinutes ?? 5,
 						eventType: decodeAlertEventTypeSync(row.eventType),
 						incidentId: row.incidentId ? decodeAlertIncidentIdSync(row.incidentId) : null,
@@ -2788,6 +2841,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						status: "open",
 						comparator: normalized.comparator,
 						threshold: normalized.threshold,
+						thresholdUpper: normalized.thresholdUpper,
 						firstTriggeredAt: timestamp,
 						lastTriggeredAt: timestamp,
 						resolvedAt: null,
@@ -2981,6 +3035,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			value: null,
 			sampleCount: 0,
 			threshold: normalized.threshold,
+			thresholdUpper: normalized.thresholdUpper,
 			comparator: normalized.comparator,
 			reason,
 		})

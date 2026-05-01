@@ -40,6 +40,7 @@ export interface NotificationRequest {
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
+	readonly thresholdUpper?: number | null
 	readonly eventType: AlertEventType
 	readonly incidentId: string | null
 	readonly incidentStatus: string
@@ -99,6 +100,7 @@ export class NotificationDispatcher extends Context.Service<
 					severity: request.severity,
 					comparator: request.comparator,
 					threshold: request.threshold,
+					thresholdUpper: request.thresholdUpper ?? null,
 					eventType: request.eventType,
 					incidentId: request.incidentId,
 					incidentStatus: request.incidentStatus,
@@ -107,7 +109,10 @@ export class NotificationDispatcher extends Context.Service<
 					value: request.value,
 					sampleCount: request.sampleCount,
 				}
-				const chatUrl = buildAlertChatUrl(env.MAPLE_APP_BASE_URL, request)
+				const chatUrl = buildAlertChatUrl(env.MAPLE_APP_BASE_URL, {
+					...request,
+					thresholdUpper: request.thresholdUpper ?? null,
+				})
 				const payloadJson = JSON.stringify({
 					eventType: request.eventType,
 					incidentId: request.incidentId,
@@ -121,6 +126,7 @@ export class NotificationDispatcher extends Context.Service<
 						groupKey: request.groupKey,
 						comparator: request.comparator,
 						threshold: request.threshold,
+						thresholdUpper: request.thresholdUpper ?? null,
 						windowMinutes: request.windowMinutes,
 					},
 					observed: {

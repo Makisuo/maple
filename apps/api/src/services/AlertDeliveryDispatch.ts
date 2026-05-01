@@ -32,6 +32,7 @@ export interface DispatchContext {
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
+	readonly thresholdUpper: number | null
 	readonly eventType: AlertEventType
 	readonly incidentId: string | null
 	readonly incidentStatus: string
@@ -61,6 +62,7 @@ export interface ChatUrlContext {
 	readonly severity: AlertSeverity
 	readonly comparator: AlertComparator
 	readonly threshold: number
+	readonly thresholdUpper: number | null
 	readonly value: number | null
 	readonly windowMinutes: number
 	readonly groupKey: string | null
@@ -80,6 +82,7 @@ export const buildAlertChatUrl = (baseUrl: string, context: ChatUrlContext): str
 		severity: context.severity,
 		comparator: context.comparator,
 		threshold: context.threshold,
+		thresholdUpper: context.thresholdUpper,
 		value: context.value,
 		windowMinutes: context.windowMinutes,
 		groupKey: context.groupKey,
@@ -103,14 +106,29 @@ const round = (value: number, decimals = 2): string => {
 	return (Math.round(value * factor) / factor).toString()
 }
 
-export const formatComparator = (value: AlertComparator): string =>
-	Match.value(value).pipe(
+export const formatComparator = (
+	value: AlertComparator,
+	threshold?: number,
+	thresholdUpper?: number | null,
+): string => {
+	const operator = Match.value(value).pipe(
 		Match.when("gt", () => ">"),
 		Match.when("gte", () => ">="),
 		Match.when("lt", () => "<"),
 		Match.when("lte", () => "<="),
+		Match.when("eq", () => "="),
+		Match.when("neq", () => "!="),
+		Match.when("between", () => "between"),
+		Match.when("not_between", () => "not between"),
 		Match.exhaustive,
 	)
+	if (threshold == null) return operator
+	if (value === "between" || value === "not_between") {
+		const upper = thresholdUpper ?? threshold
+		return `${operator} ${threshold} and ${upper}`
+	}
+	return `${operator} ${threshold}`
+}
 
 export const formatSignalLabel = (signal: string) => {
 	const labels: Record<string, string> = {
@@ -218,7 +236,11 @@ const buildSlackBlocks = (context: DispatchContext, linkUrl: string, chatUrl: st
 			{ type: "mrkdwn", text: `*Group*\n${context.groupKey ?? "all"}` },
 			{
 				type: "mrkdwn",
-				text: `*Observed*\n${formatSignalMetric(context.value, context.signalType)} ${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`,
+				text: `*Observed*\n${formatSignalMetric(context.value, context.signalType)} ${
+					context.comparator === "between" || context.comparator === "not_between"
+						? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
+						: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
+				}`,
 			},
 			{ type: "mrkdwn", text: `*Window*\n${formatWindow(context.windowMinutes)}` },
 		],
@@ -301,6 +323,7 @@ export const dispatchDelivery = (
 									signalType: context.signalType,
 									value: context.value,
 									threshold: context.threshold,
+									thresholdUpper: context.thresholdUpper,
 									comparator: context.comparator,
 									groupKey: context.groupKey,
 									linkUrl,
@@ -413,6 +436,7 @@ export const dispatchDelivery = (
 								groupKey: context.groupKey,
 								comparator: context.comparator,
 								threshold: context.threshold,
+								thresholdUpper: context.thresholdUpper,
 								windowMinutes: context.windowMinutes,
 							},
 							observed: {

@@ -84,11 +84,28 @@ export const AlertGroupBy = Schema.Array(AlertGroupByDimension)
 	})
 export type AlertGroupBy = Schema.Schema.Type<typeof AlertGroupBy>
 
-export const AlertComparator = Schema.Literals(["gt", "gte", "lt", "lte"]).annotate({
+export const AlertComparator = Schema.Literals([
+	"gt",
+	"gte",
+	"lt",
+	"lte",
+	"eq",
+	"neq",
+	"between",
+	"not_between",
+]).annotate({
 	identifier: "@maple/AlertComparator",
 	title: "Alert Comparator",
 })
 export type AlertComparator = Schema.Schema.Type<typeof AlertComparator>
+
+/**
+ * Comparators that require a second threshold (`thresholdUpper`).
+ * For these, the rule fires when the value falls inside / outside
+ * `[threshold, thresholdUpper]`.
+ */
+export const isRangeComparator = (c: AlertComparator): c is "between" | "not_between" =>
+	c === "between" || c === "not_between"
 
 export const AlertMetricType = Schema.Literals([
 	"sum",
@@ -320,6 +337,7 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	signalType: AlertSignalType,
 	comparator: AlertComparator,
 	threshold: Schema.Number,
+	thresholdUpper: Schema.NullOr(Schema.Number),
 	windowMinutes: PositiveInt,
 	minimumSampleCount: NonNegativeInt,
 	consecutiveBreachesRequired: PositiveInt,
@@ -349,6 +367,7 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
 	signalType: AlertSignalType,
 	comparator: AlertComparator,
 	threshold: Schema.Number,
+	thresholdUpper: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	windowMinutes: PositiveInt,
 	minimumSampleCount: Schema.optionalKey(NonNegativeInt),
 	consecutiveBreachesRequired: Schema.optionalKey(PositiveInt),
@@ -384,6 +403,7 @@ export class AlertEvaluationResult extends Schema.Class<AlertEvaluationResult>("
 	value: Schema.NullOr(Schema.Number),
 	sampleCount: Schema.Number,
 	threshold: Schema.Number,
+	thresholdUpper: Schema.NullOr(Schema.Number),
 	comparator: AlertComparator,
 	reason: Schema.String,
 }) {}
@@ -398,6 +418,7 @@ export class AlertIncidentDocument extends Schema.Class<AlertIncidentDocument>("
 	status: AlertIncidentStatus,
 	comparator: AlertComparator,
 	threshold: Schema.Number,
+	thresholdUpper: Schema.NullOr(Schema.Number),
 	firstTriggeredAt: IsoDateTimeString,
 	lastTriggeredAt: IsoDateTimeString,
 	resolvedAt: Schema.NullOr(IsoDateTimeString),
@@ -639,6 +660,7 @@ export class AlertCheckDocument extends Schema.Class<AlertCheckDocument>("AlertC
 	signalType: AlertSignalType,
 	comparator: AlertComparator,
 	threshold: Schema.Number,
+	thresholdUpper: Schema.NullOr(Schema.Number),
 	observedValue: Schema.NullOr(Schema.Number),
 	sampleCount: Schema.Number,
 	windowMinutes: Schema.Number,

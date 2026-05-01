@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui/popover"
 import { Input } from "@maple/ui/components/ui/input"
 import { cn } from "@maple/ui/utils"
-import { comparatorLabels, signalLabels, type RuleFormState } from "@/lib/alerts/form-utils"
+import { comparatorLabels, isRangeComparator, signalLabels, type RuleFormState } from "@/lib/alerts/form-utils"
 import type { AlertComparator, AlertSeverity, AlertSignalType } from "@maple/domain/http"
 
 /*
@@ -284,6 +284,18 @@ export function RuleSentenceBuilder({
 					placeholder="5"
 					ariaLabel="Threshold"
 				/>
+				{isRangeComparator(form.comparator) && (
+					<>
+						<span className="text-muted-foreground">and</span>
+						<NumberToken
+							value={form.thresholdUpper}
+							onChange={(v) => set("thresholdUpper", v)}
+							suffix={suffix}
+							placeholder="10"
+							ariaLabel="Upper threshold"
+						/>
+					</>
+				)}
 				<span className="text-muted-foreground">over</span>
 				<NumberToken
 					value={form.windowMinutes}
