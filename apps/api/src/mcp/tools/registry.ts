@@ -34,6 +34,7 @@ import { registerListServicesTool } from "./list-services"
 import { registerQueryDataTool } from "./query-data"
 import { registerRemoveDashboardWidgetTool } from "./remove-dashboard-widget"
 import { registerReorderDashboardWidgetsTool } from "./reorder-dashboard-widgets"
+import { registerMineLogPatternsTool } from "./mine-log-patterns"
 import { registerSearchLogsTool } from "./search-logs"
 import { registerSearchTracesTool } from "./search-traces"
 import { registerServiceMapTool } from "./service-map"
@@ -77,6 +78,7 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
 	registerFindErrorsTool(registrar)
 	registerInspectTraceTool(registrar)
 	registerSearchLogsTool(registrar)
+	registerMineLogPatternsTool(registrar)
 	registerSearchTracesTool(registrar)
 	registerDiagnoseServiceTool(registrar)
 	registerFindSlowTracesTool(registrar)

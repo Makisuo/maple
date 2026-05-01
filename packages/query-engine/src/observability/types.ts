@@ -141,6 +141,35 @@ export interface SearchLogsOutput {
 	}
 }
 
+// --- Log Pattern Mining ---
+
+export interface MineLogPatternsInput {
+	readonly timeRange: TimeRange
+	readonly service?: string
+	readonly severity?: string
+	readonly search?: string
+	readonly traceId?: string
+	/** Maximum number of logs to sample for clustering. Defaults to 10000. */
+	readonly sampleSize?: number
+	/** How many top patterns to return. Defaults to 50. */
+	readonly limit?: number
+}
+
+export interface LogPattern {
+	readonly template: string
+	readonly count: number
+	readonly sample: string
+	readonly severityCounts: Record<string, number>
+	readonly serviceCounts: Record<string, number>
+}
+
+export interface MineLogPatternsOutput {
+	readonly timeRange: TimeRange
+	readonly sampleSize: number
+	readonly totalSampled: number
+	readonly patterns: ReadonlyArray<LogPattern>
+}
+
 // --- Service Health ---
 
 export interface ServiceHealthOutput {

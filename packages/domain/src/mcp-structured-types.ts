@@ -153,6 +153,21 @@ export interface SearchLogsData {
 	}
 }
 
+export interface MineLogPatternsPattern {
+	template: string
+	count: number
+	sample: string
+	severityCounts: Record<string, number>
+	serviceCounts: Record<string, number>
+}
+
+export interface MineLogPatternsData {
+	timeRange: { start: string; end: string }
+	totalSampled: number
+	sampleSize: number
+	patterns: MineLogPatternsPattern[]
+}
+
 export interface DiagnoseServiceData {
 	serviceName: string
 	timeRange: { start: string; end: string }
@@ -697,6 +712,7 @@ export type StructuredToolOutput =
 	| { tool: "error_detail"; data: ErrorDetailData }
 	| { tool: "inspect_trace"; data: InspectTraceData }
 	| { tool: "search_logs"; data: SearchLogsData }
+	| { tool: "mine_log_patterns"; data: MineLogPatternsData }
 	| { tool: "diagnose_service"; data: DiagnoseServiceData }
 	| { tool: "list_metrics"; data: ListMetricsData }
 	| { tool: "query_data"; data: QueryDataData }
