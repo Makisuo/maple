@@ -1,5 +1,9 @@
 import { Effect, Schema } from "effect"
-import { ServiceDependenciesRequest } from "@maple/domain/http"
+import {
+	ServiceDbEdgesRequest,
+	ServiceDependenciesRequest,
+	ServicePlatformsRequest,
+} from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { estimateThroughput } from "@/lib/sampling"
 import { TinybirdDateTimeString, decodeInput, runTinybirdQuery } from "@/api/tinybird/effect-utils"
@@ -19,6 +23,38 @@ export interface ServiceEdge {
 
 export interface ServiceMapResponse {
 	edges: ServiceEdge[]
+}
+
+export interface ServiceDbEdge {
+	sourceService: string
+	dbSystem: string
+	callCount: number
+	estimatedCallCount: number
+	errorCount: number
+	errorRate: number
+	avgDurationMs: number
+	p95DurationMs: number
+	hasSampling: boolean
+	samplingWeight: number
+}
+
+export interface ServiceDbEdgesResponse {
+	edges: ServiceDbEdge[]
+}
+
+export type ServicePlatform = "kubernetes" | "cloudflare" | "lambda" | "unknown"
+
+export interface ServicePlatformInfo {
+	serviceName: string
+	platform: ServicePlatform
+	k8sCluster: string
+	cloudPlatform: string
+	cloudProvider: string
+	faasName: string
+}
+
+export interface ServicePlatformsResponse {
+	platforms: ServicePlatformInfo[]
 }
 
 const GetServiceMapInputSchema = Schema.Struct({
@@ -87,5 +123,92 @@ export const getServiceMap = Effect.fn("QueryEngine.getServiceMap")(function* ({
 
 	return {
 		edges: result.data.map((row) => transformEdge(row, durationSeconds)),
+	}
+})
+
+function transformDbEdge(row: Record<string, unknown>, durationSeconds: number): ServiceDbEdge {
+	const callCount = Number(row.callCount ?? 0)
+	const errorCount = Number(row.errorCount ?? 0)
+	const sampledSpanCount = Number(row.sampledSpanCount ?? 0)
+	const unsampledSpanCount = Number(row.unsampledSpanCount ?? 0)
+	const threshold = String(row.dominantThreshold ?? "")
+	const sampling = estimateThroughput(sampledSpanCount, unsampledSpanCount, threshold, durationSeconds)
+	const estimatedCallCount = sampling.hasSampling
+		? Math.round(sampling.estimated * durationSeconds)
+		: callCount
+	return {
+		sourceService: String(row.sourceService ?? ""),
+		dbSystem: String(row.dbSystem ?? ""),
+		callCount,
+		estimatedCallCount,
+		errorCount,
+		errorRate: callCount > 0 ? errorCount / callCount : 0,
+		avgDurationMs: Number(row.avgDurationMs ?? 0),
+		p95DurationMs: Number(row.p95DurationMs ?? 0),
+		hasSampling: sampling.hasSampling,
+		samplingWeight: sampling.weight,
+	}
+}
+
+export const getServiceMapDbEdges = Effect.fn("QueryEngine.getServiceMapDbEdges")(function* ({
+	data,
+}: {
+	data: GetServiceMapInput
+}) {
+	const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMapDbEdges")
+	const fallback = defaultTimeRange()
+
+	const result = yield* runTinybirdQuery("serviceDbEdges", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.serviceDbEdges({
+				payload: new ServiceDbEdgesRequest({
+					startTime: input.startTime ?? fallback.startTime,
+					endTime: input.endTime ?? fallback.endTime,
+					deploymentEnv: input.deploymentEnv,
+				}),
+			})
+		}),
+	)
+
+	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
+	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
+	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
+
+	return {
+		edges: result.data.map((row) => transformDbEdge(row, durationSeconds)),
+	}
+})
+
+export const getServicePlatforms = Effect.fn("QueryEngine.getServicePlatforms")(function* ({
+	data,
+}: {
+	data: GetServiceMapInput
+}) {
+	const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServicePlatforms")
+	const fallback = defaultTimeRange()
+
+	const result = yield* runTinybirdQuery("servicePlatforms", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.servicePlatforms({
+				payload: new ServicePlatformsRequest({
+					startTime: input.startTime ?? fallback.startTime,
+					endTime: input.endTime ?? fallback.endTime,
+					deploymentEnv: input.deploymentEnv,
+				}),
+			})
+		}),
+	)
+
+	return {
+		platforms: result.data.map((row) => ({
+			serviceName: row.serviceName,
+			platform: row.platform,
+			k8sCluster: row.k8sCluster,
+			cloudPlatform: row.cloudPlatform,
+			cloudProvider: row.cloudProvider,
+			faasName: row.faasName,
+		})),
 	}
 })

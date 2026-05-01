@@ -2,8 +2,8 @@ import type { Duration } from "effect"
 import { Effect, Layer, Option, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Otlp } from "effect/unstable/observability"
-import { runtime, provider } from "std-env"
 import * as EnvConfig from "./config.js"
+import { getAutoPlatformAttributes } from "./platform.js"
 
 export interface MapleConfig {
 	/**
@@ -78,15 +78,16 @@ export const layer = (config: MapleConfig = {}) =>
 
 			const envResourceAttributes = yield* EnvConfig.otelResourceAttributes
 
-			// Precedence (lowest to highest): SDK defaults → OTEL_RESOURCE_ATTRIBUTES
-			// (set externally, e.g. by the maple-k8s-infra chart's operator
-			// injection) → programmatic config.attributes (set in app code). Matches
-			// the OTel spec's "later writers win" rule.
-			const attributes: Record<string, unknown> = {
-				"maple.sdk.type": "server",
-			}
-			if (runtime) attributes["maple.runtime"] = runtime
-			if (provider) attributes["maple.provider"] = provider
+			// Precedence (lowest to highest):
+			//   1. Auto-detected OTel platform attributes (std-env + well-known env vars)
+			//   2. SDK-baked attributes (maple.sdk.type, deployment.*)
+			//   3. OTEL_RESOURCE_ATTRIBUTES env var (e.g. maple-k8s-infra chart's
+			//      downward-API pod metadata injection)
+			//   4. Programmatic `config.attributes` (set in app code)
+			// Matches the OTel spec's "later writers win" rule.
+			const attributes: Record<string, unknown> = {}
+			Object.assign(attributes, getAutoPlatformAttributes())
+			attributes["maple.sdk.type"] = "server"
 			if (environment) attributes["deployment.environment"] = environment
 			if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
 			Object.assign(attributes, envResourceAttributes)

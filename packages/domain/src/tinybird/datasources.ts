@@ -348,6 +348,76 @@ export const serviceMapEdgesHourly = defineDatasource("service_map_edges_hourly"
 export type ServiceMapEdgesHourlyRow = InferRow<typeof serviceMapEdgesHourly>
 
 /**
+ * Pre-aggregated hourly service-to-database edges for the service map.
+ * Aggregates Client/Producer spans with `db.system` set at write time so the
+ * service map's database-node query reads ~hundreds of rows per window instead
+ * of millions of individual spans. Mirrors `service_map_edges_hourly` in
+ * structure; one row per (OrgId, Hour, ServiceName, DbSystem, DeploymentEnv).
+ * Populated by materialized view, not direct ingestion.
+ */
+export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_hourly", {
+	description:
+		"Pre-aggregated hourly service-to-database edges (one row per service/db.system) for the service map's database-node query. Uses AggregatingMergeTree for incremental aggregation. Populated by materialized view.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Hour: t.dateTime(),
+		ServiceName: t.string().lowCardinality(),
+		DbSystem: t.string().lowCardinality(),
+		DeploymentEnv: t.string().lowCardinality(),
+		CallCount: t.simpleAggregateFunction("sum", t.uint64()),
+		ErrorCount: t.simpleAggregateFunction("sum", t.uint64()),
+		DurationSumMs: t.simpleAggregateFunction("sum", t.float64()),
+		MaxDurationMs: t.simpleAggregateFunction("max", t.float64()),
+		SampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		UnsampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+	},
+	engine: engine.aggregatingMergeTree({
+		partitionKey: "toDate(Hour)",
+		sortingKey: ["OrgId", "Hour", "DeploymentEnv", "ServiceName", "DbSystem"],
+		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+	}),
+})
+
+export type ServiceMapDbEdgesHourlyRow = InferRow<typeof serviceMapDbEdgesHourly>
+
+/**
+ * Pre-aggregated hourly per-service platform attributes for the service map.
+ * One row per (OrgId, Hour, ServiceName, DeploymentEnv) with the resource
+ * attributes that identify where a service runs. Uses SimpleAggregateFunction
+ * "max" on string columns: empty strings sort first, so any non-empty value
+ * wins on merge, which matches "did *any* span in this window carry this
+ * attribute" semantics — exactly what the platform classifier needs.
+ *
+ * Populated by materialized view, not direct ingestion.
+ */
+export const servicePlatformsHourly = defineDatasource("service_platforms_hourly", {
+	description:
+		"Pre-aggregated hourly per-service platform/runtime attributes (k8s, cloud, faas) for the service map's hosting-icon resolver. Populated by materialized view.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Hour: t.dateTime(),
+		ServiceName: t.string().lowCardinality(),
+		DeploymentEnv: t.string().lowCardinality(),
+		K8sCluster: t.simpleAggregateFunction("max", t.string()),
+		K8sPodName: t.simpleAggregateFunction("max", t.string()),
+		K8sDeploymentName: t.simpleAggregateFunction("max", t.string()),
+		CloudPlatform: t.simpleAggregateFunction("max", t.string()),
+		CloudProvider: t.simpleAggregateFunction("max", t.string()),
+		FaasName: t.simpleAggregateFunction("max", t.string()),
+		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+	},
+	engine: engine.aggregatingMergeTree({
+		partitionKey: "toDate(Hour)",
+		sortingKey: ["OrgId", "Hour", "ServiceName", "DeploymentEnv"],
+		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+	}),
+})
+
+export type ServicePlatformsHourlyRow = InferRow<typeof servicePlatformsHourly>
+
+/**
  * Lightweight projection of service entry point spans for service overview queries.
  * Pre-extracts deployment.environment and deployment.commit_sha from ResourceAttributes.
  * Stores Server/Consumer spans (service entry points) plus root spans as fallback.

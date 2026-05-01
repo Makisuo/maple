@@ -3,8 +3,48 @@ import { Handle, Position } from "@xyflow/react"
 import { cn } from "@maple/ui/utils"
 import { getServiceLegendColor } from "@maple/ui/colors"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
-import { CubeIcon } from "@/components/icons"
+import {
+	AwsLambdaIcon,
+	ClickhouseIcon,
+	CloudflareIcon,
+	CubeIcon,
+	DatabaseIcon,
+	KubernetesIcon,
+	MongodbIcon,
+	MysqlIcon,
+	PostgresIcon,
+	RedisIcon,
+	ServerIcon,
+	type IconComponent,
+} from "@/components/icons"
+import type { ServicePlatform } from "@/api/tinybird/service-map"
 import type { ServiceNodeData } from "./service-map-utils"
+
+function getPlatformIcon(platform: ServicePlatform | undefined): {
+	Icon: IconComponent
+	label: string
+} {
+	switch (platform) {
+		case "kubernetes":
+			return { Icon: KubernetesIcon, label: "Kubernetes" }
+		case "cloudflare":
+			return { Icon: CloudflareIcon, label: "Cloudflare Workers" }
+		case "lambda":
+			return { Icon: AwsLambdaIcon, label: "AWS Lambda" }
+		default:
+			return { Icon: ServerIcon, label: "Unknown runtime" }
+	}
+}
+
+function getDbIcon(system: string | undefined): { Icon: IconComponent; label: string } {
+	const s = (system ?? "").toLowerCase()
+	if (s === "clickhouse") return { Icon: ClickhouseIcon, label: "ClickHouse" }
+	if (s === "postgresql" || s === "postgres") return { Icon: PostgresIcon, label: "PostgreSQL" }
+	if (s === "mysql" || s === "mariadb") return { Icon: MysqlIcon, label: "MySQL" }
+	if (s === "redis") return { Icon: RedisIcon, label: "Redis" }
+	if (s === "mongodb") return { Icon: MongodbIcon, label: "MongoDB" }
+	return { Icon: DatabaseIcon, label: system ?? "Database" }
+}
 
 function formatRate(value: number): string {
 	if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
@@ -36,6 +76,7 @@ interface ServiceMapNodeProps {
 export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapNodeProps) {
 	const {
 		label,
+		kind,
 		throughput,
 		tracedThroughput,
 		hasSampling,
@@ -45,8 +86,13 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 		services,
 		selected,
 		infra,
+		platform,
+		dbSystem,
 	} = data
-	const accentColor = getServiceLegendColor(label, services)
+	const isDatabase = kind === "database"
+	const accentColor = isDatabase ? "oklch(0.55 0.05 250)" : getServiceLegendColor(label, services)
+
+	const { Icon, label: iconLabel } = isDatabase ? getDbIcon(dbSystem) : getPlatformIcon(platform)
 
 	return (
 		<>
@@ -59,7 +105,8 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 
 			<div
 				className={cn(
-					"w-[220px] rounded-lg bg-card border overflow-hidden flex cursor-pointer transition-[border-color,box-shadow] duration-150",
+					"w-[220px] rounded-lg border overflow-hidden flex cursor-pointer transition-[border-color,box-shadow] duration-150",
+					isDatabase ? "bg-muted/40" : "bg-card",
 					selected ? getSelectedBorderClass(errorRate) : "border-border hover:border-border-active",
 				)}
 			>
@@ -67,12 +114,31 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 				<div className="w-[3px] shrink-0" style={{ backgroundColor: accentColor }} />
 
 				<div className="flex flex-col gap-2 px-3 py-2.5 flex-1 min-w-0">
-					{/* Service name + health dot */}
+					{/* Service name + health dot + platform/db icon */}
 					<div className="flex items-center gap-1.5">
 						<div
 							className={cn("h-1.5 w-1.5 rounded-full shrink-0", getHealthDotClass(errorRate))}
 						/>
+						<Tooltip>
+							<TooltipTrigger>
+								<Icon
+									size={12}
+									className={cn(
+										"shrink-0",
+										isDatabase ? "text-foreground/70" : "text-muted-foreground/80",
+									)}
+								/>
+							</TooltipTrigger>
+							<TooltipContent side="bottom">
+								<p>{iconLabel}</p>
+							</TooltipContent>
+						</Tooltip>
 						<span className="text-xs font-medium text-foreground truncate">{label}</span>
+						{isDatabase && (
+							<span className="ml-auto shrink-0 text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">
+								db
+							</span>
+						)}
 					</div>
 
 					{/* Metrics row */}
@@ -81,7 +147,7 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 							<TooltipTrigger>
 								<div className="flex flex-col gap-px">
 									<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">
-										req/s
+										{isDatabase ? "calls/s" : "req/s"}
 									</span>
 									<span className="text-[11px] font-medium text-secondary-foreground font-mono tabular-nums">
 										{hasSampling ? "~" : ""}
@@ -126,35 +192,37 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 							</span>
 						</div>
 
-						{/* Pods badge — empty placeholder when no infra so widths stay stable */}
-						<div className="flex flex-col gap-px ml-auto items-end">
-							<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">
-								pods
-							</span>
-							{infra ? (
-								<Tooltip>
-									<TooltipTrigger>
-										<span className="flex items-center gap-1 text-[11px] font-medium text-secondary-foreground font-mono tabular-nums">
-											<CubeIcon size={10} className="text-muted-foreground/70" />
-											{infra.podCount}
-										</span>
-									</TooltipTrigger>
-									<TooltipContent side="bottom">
-										<p>
-											{infra.workloadCount === 1
-												? `1 Kubernetes workload`
-												: `${infra.workloadCount} Kubernetes workloads`}
-											{", "}
-											{infra.podCount === 1 ? "1 pod" : `${infra.podCount} pods`}
-										</p>
-									</TooltipContent>
-								</Tooltip>
-							) : (
-								<span className="text-[11px] font-mono tabular-nums text-muted-foreground/30">
-									—
+						{/* Pods badge — only on service nodes; empty placeholder when no infra so widths stay stable */}
+						{!isDatabase && (
+							<div className="flex flex-col gap-px ml-auto items-end">
+								<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">
+									pods
 								</span>
-							)}
-						</div>
+								{infra ? (
+									<Tooltip>
+										<TooltipTrigger>
+											<span className="flex items-center gap-1 text-[11px] font-medium text-secondary-foreground font-mono tabular-nums">
+												<CubeIcon size={10} className="text-muted-foreground/70" />
+												{infra.podCount}
+											</span>
+										</TooltipTrigger>
+										<TooltipContent side="bottom">
+											<p>
+												{infra.workloadCount === 1
+													? `1 Kubernetes workload`
+													: `${infra.workloadCount} Kubernetes workloads`}
+												{", "}
+												{infra.podCount === 1 ? "1 pod" : `${infra.podCount} pods`}
+											</p>
+										</TooltipContent>
+									</Tooltip>
+								) : (
+									<span className="text-[11px] font-mono tabular-nums text-muted-foreground/30">
+										—
+									</span>
+								)}
+							</div>
+						)}
 					</div>
 				</div>
 			</div>

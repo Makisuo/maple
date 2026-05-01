@@ -253,8 +253,14 @@ export {
 // Queries — Service Map
 export {
 	serviceDependenciesSQL,
+	serviceDbEdgesSQL,
+	servicePlatformsSQL,
 	type ServiceDependenciesOpts,
 	type ServiceDependenciesOutput,
+	type ServiceDbEdgesOpts,
+	type ServiceDbEdgesOutput,
+	type ServicePlatformsOpts,
+	type ServicePlatformsOutput,
 } from "./queries/service-map"
 
 // Queries — Service Infrastructure (service.name ↔ k8s workload join)

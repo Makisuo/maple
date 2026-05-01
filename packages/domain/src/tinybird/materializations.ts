@@ -4,6 +4,8 @@ import {
 	serviceMapSpans,
 	serviceMapChildren,
 	serviceMapEdgesHourly,
+	serviceMapDbEdgesHourly,
+	servicePlatformsHourly,
 	serviceOverviewSpans,
 	errorSpans,
 	errorEvents,
@@ -347,6 +349,76 @@ export const serviceMapEdgesHourlyMv = defineMaterializedView("service_map_edges
         WHERE SpanKind = 'Client'
           AND SpanAttributes['peer.service'] != ''
         GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
+      `,
+		}),
+	],
+})
+
+/**
+ * Materialized view pre-aggregating service-to-database edges per hour.
+ * Aggregates Client/Producer spans with `db.system` set into hourly buckets at
+ * write time so the database-node query reads pre-aggregated rows instead of
+ * scanning raw span attributes.
+ */
+export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_edges_hourly_mv", {
+	description:
+		"Pre-aggregates Client/Producer spans with db.system into hourly service-to-database edge buckets for fast service map db-node queries.",
+	datasource: serviceMapDbEdgesHourly,
+	nodes: [
+		node({
+			name: "service_map_db_edges_hourly_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          ServiceName,
+          SpanAttributes['db.system'] AS DbSystem,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          count() AS CallCount,
+          countIf(StatusCode = 'Error') AS ErrorCount,
+          sum(Duration / 1000000) AS DurationSumMs,
+          max(Duration / 1000000) AS MaxDurationMs,
+          countIf(TraceState LIKE '%th:%') AS SampledSpanCount,
+          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount
+        FROM traces
+        WHERE SpanKind IN ('Client', 'Producer')
+          AND SpanAttributes['db.system'] != ''
+          AND ServiceName != ''
+        GROUP BY OrgId, Hour, ServiceName, DbSystem, DeploymentEnv
+      `,
+		}),
+	],
+})
+
+/**
+ * Materialized view pre-aggregating per-service hosting-platform attributes per hour.
+ * Picks `max()` per attribute string so non-empty values dominate empty ones —
+ * "did any span in this window carry this resource attribute" semantics, which
+ * is what the platform classifier needs (kubernetes / cloudflare / lambda).
+ */
+export const servicePlatformsHourlyMv = defineMaterializedView("service_platforms_hourly_mv", {
+	description:
+		"Pre-aggregates per-service hosting-platform resource attributes (k8s.*, cloud.*, faas.*) into hourly buckets for the service map's runtime-icon resolver.",
+	datasource: servicePlatformsHourly,
+	nodes: [
+		node({
+			name: "service_platforms_hourly_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          ServiceName,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          max(ResourceAttributes['k8s.cluster.name']) AS K8sCluster,
+          max(ResourceAttributes['k8s.pod.name']) AS K8sPodName,
+          max(ResourceAttributes['k8s.deployment.name']) AS K8sDeploymentName,
+          max(ResourceAttributes['cloud.platform']) AS CloudPlatform,
+          max(ResourceAttributes['cloud.provider']) AS CloudProvider,
+          max(ResourceAttributes['faas.name']) AS FaasName,
+          count() AS SpanCount
+        FROM traces
+        WHERE ServiceName != ''
+        GROUP BY OrgId, Hour, ServiceName, DeploymentEnv
       `,
 		}),
 	],

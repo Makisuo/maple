@@ -212,6 +212,39 @@ export class ServiceDependenciesResponse extends Schema.Class<ServiceDependencie
 	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
+export class ServiceDbEdgesRequest extends Schema.Class<ServiceDbEdgesRequest>("ServiceDbEdgesRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	deploymentEnv: Schema.optional(Schema.String),
+}) {}
+
+export class ServiceDbEdgesResponse extends Schema.Class<ServiceDbEdgesResponse>("ServiceDbEdgesResponse")({
+	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+}) {}
+
+const ServicePlatformLiteral = Schema.Literals(["kubernetes", "cloudflare", "lambda", "unknown"])
+
+export class ServicePlatformsRequest extends Schema.Class<ServicePlatformsRequest>("ServicePlatformsRequest")({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	deploymentEnv: Schema.optional(Schema.String),
+}) {}
+
+export class ServicePlatformsResponse extends Schema.Class<ServicePlatformsResponse>(
+	"ServicePlatformsResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			serviceName: Schema.String,
+			platform: ServicePlatformLiteral,
+			k8sCluster: Schema.String,
+			cloudPlatform: Schema.String,
+			cloudProvider: Schema.String,
+			faasName: Schema.String,
+		}),
+	),
+}) {}
+
 const ServiceWorkloadKindLiteral = Schema.Literals(["deployment", "statefulset", "daemonset", "unknown"])
 
 export class ServiceWorkloadsRequest extends Schema.Class<ServiceWorkloadsRequest>("ServiceWorkloadsRequest")(
@@ -934,6 +967,20 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceDependencies", "/service-dependencies", {
 			payload: ServiceDependenciesRequest,
 			success: ServiceDependenciesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("serviceDbEdges", "/service-db-edges", {
+			payload: ServiceDbEdgesRequest,
+			success: ServiceDbEdgesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("servicePlatforms", "/service-platforms", {
+			payload: ServicePlatformsRequest,
+			success: ServicePlatformsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

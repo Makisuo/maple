@@ -23,13 +23,20 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { Button } from "@maple/ui/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
-import { ArrowRightIcon, CubeIcon, NetworkNodesIcon, XmarkIcon } from "@/components/icons"
+import { ArrowRightIcon, CubeIcon, DatabaseIcon, NetworkNodesIcon, XmarkIcon } from "@/components/icons"
 import {
+	getServiceMapDbEdgesResultAtom,
 	getServiceMapResultAtom,
 	getServiceOverviewResultAtom,
+	getServicePlatformsResultAtom,
 	getServiceWorkloadsResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
-import type { GetServiceMapInput, ServiceEdge } from "@/api/tinybird/service-map"
+import type {
+	GetServiceMapInput,
+	ServiceDbEdge,
+	ServiceEdge,
+	ServicePlatform,
+} from "@/api/tinybird/service-map"
 import type { GetServiceOverviewInput, ServiceOverview } from "@/api/tinybird/services"
 import type { ServiceWorkload } from "@/api/tinybird/service-infra"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
@@ -37,6 +44,7 @@ import { ServiceMapNode } from "./service-map-node"
 import { ServiceMapEdge } from "./service-map-edge"
 import {
 	buildFlowElements,
+	DB_NODE_PREFIX,
 	layoutNodes,
 	DEFAULT_LAYOUT_CONFIG,
 	type LayoutConfig,
@@ -494,6 +502,160 @@ function ServiceInfraEmptyState() {
 	)
 }
 
+interface DatabaseDetailPanelProps {
+	dbSystem: string
+	dbEdges: ServiceDbEdge[]
+	services: string[]
+	durationSeconds: number
+	onClose: () => void
+}
+
+function DatabaseDetailPanel({
+	dbSystem,
+	dbEdges,
+	services,
+	durationSeconds,
+	onClose,
+}: DatabaseDetailPanelProps) {
+	const callers = dbEdges.filter((e) => e.dbSystem === dbSystem)
+	const totalCalls = callers.reduce((sum, e) => sum + e.callCount, 0)
+	const totalErrors = callers.reduce((sum, e) => sum + e.errorCount, 0)
+	const errorRate = totalCalls > 0 ? totalErrors / totalCalls : 0
+	const callsPerSecond = totalCalls / Math.max(durationSeconds, 1)
+	const avgLatencyMs =
+		totalCalls > 0
+			? callers.reduce((sum, e) => sum + e.avgDurationMs * e.callCount, 0) / totalCalls
+			: 0
+	const p95LatencyMs = callers.reduce((max, e) => Math.max(max, e.p95DurationMs), 0)
+
+	return (
+		<div className="flex flex-col h-full bg-background overflow-hidden">
+			{/* Header */}
+			<div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+				<div className="flex items-center gap-2 min-w-0">
+					<div
+						className="w-[3px] h-[18px] rounded-sm shrink-0"
+						style={{ backgroundColor: "oklch(0.55 0.05 250)" }}
+					/>
+					<DatabaseIcon size={14} className="text-muted-foreground/80 shrink-0" />
+					<span className="text-sm font-semibold text-foreground truncate">{dbSystem}</span>
+					<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase shrink-0">
+						database
+					</span>
+				</div>
+				<Button variant="ghost" size="icon-xs" onClick={onClose}>
+					<XmarkIcon size={14} />
+				</Button>
+			</div>
+
+			<ScrollArea className="flex-1 min-h-0">
+				<div className="p-4 space-y-5">
+					<div className="space-y-3">
+						<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+							Metrics
+						</h4>
+						<div className="grid grid-cols-2 gap-x-6 gap-y-4">
+							<div className="space-y-0.5">
+								<span className="text-[10px] text-muted-foreground">Throughput</span>
+								<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+									{formatRate(callsPerSecond)}
+								</p>
+								<span className="text-[10px] text-muted-foreground">calls/s</span>
+							</div>
+							<div className="space-y-0.5">
+								<span className="text-[10px] text-muted-foreground">Error Rate</span>
+								<p
+									className={cn(
+										"text-xl font-semibold tabular-nums font-mono",
+										errorRate > 0.05
+											? "text-severity-error"
+											: errorRate > 0.01
+												? "text-severity-warn"
+												: "text-foreground",
+									)}
+								>
+									{(errorRate * 100).toFixed(1)}%
+								</p>
+							</div>
+							<div className="space-y-0.5">
+								<span className="text-[10px] text-muted-foreground">Avg Latency</span>
+								<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+									{formatLatency(avgLatencyMs)}
+								</p>
+							</div>
+							<div className="space-y-0.5">
+								<span className="text-[10px] text-muted-foreground">P95 Latency</span>
+								<p
+									className={cn(
+										"text-xl font-semibold tabular-nums font-mono",
+										p95LatencyMs > avgLatencyMs * 3
+											? "text-severity-warn"
+											: "text-foreground",
+									)}
+								>
+									{formatLatency(p95LatencyMs)}
+								</p>
+							</div>
+						</div>
+					</div>
+
+					{callers.length > 0 && (
+						<div className="space-y-3">
+							<div className="h-px bg-border" />
+							<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+								Called By
+							</h4>
+							<div className="space-y-1.5">
+								{callers.map((caller) => {
+									const callerColor = getServiceLegendColor(caller.sourceService, services)
+									const safeDuration = Math.max(durationSeconds, 1)
+									const reqPerSec = caller.hasSampling
+										? caller.estimatedCallCount / safeDuration
+										: caller.callCount / safeDuration
+									return (
+										<div
+											key={caller.sourceService}
+											className="flex items-center justify-between px-2.5 py-2 rounded-md border bg-card border-border text-xs"
+										>
+											<div className="flex items-center gap-1.5 min-w-0">
+												<div
+													className="w-[3px] h-3.5 rounded-sm shrink-0"
+													style={{ backgroundColor: callerColor }}
+												/>
+												<span className="text-foreground truncate">
+													{caller.sourceService}
+												</span>
+											</div>
+											<div className="flex items-center gap-2 shrink-0 text-[10px]">
+												<span className="text-muted-foreground tabular-nums font-mono">
+													{caller.hasSampling ? "~" : ""}
+													{formatRate(reqPerSec)} calls/s
+												</span>
+												<span
+													className={cn(
+														"tabular-nums font-mono",
+														caller.errorRate > 0.05
+															? "text-severity-error"
+															: caller.errorRate > 0.01
+																? "text-severity-warn"
+																: "text-severity-info",
+													)}
+												>
+													{(caller.errorRate * 100).toFixed(1)}%
+												</span>
+											</div>
+										</div>
+									)
+								})}
+							</div>
+						</div>
+					)}
+				</div>
+			</ScrollArea>
+		</div>
+	)
+}
+
 // --- Main Canvas ---
 
 interface ServiceMapViewProps {
@@ -578,12 +740,16 @@ function LayoutDebugPanel({
 
 function ServiceMapCanvas({
 	edges: serviceEdges,
+	dbEdges,
+	platforms,
 	overviews,
 	workloads,
 	showInfraTab,
 	durationSeconds,
 }: {
 	edges: ServiceEdge[]
+	dbEdges: ServiceDbEdge[]
+	platforms: Map<string, ServicePlatform>
 	overviews: ServiceOverview[]
 	workloads: ServiceWorkload[]
 	showInfraTab: boolean
@@ -593,16 +759,21 @@ function ServiceMapCanvas({
 	const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>({ ...DEFAULT_LAYOUT_CONFIG })
 
 	const { layoutedNodes, flowEdges, services } = useMemo(() => {
-		const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(
-			serviceEdges,
-			overviews,
+		const { nodes: rawNodes, edges: rawEdges } = buildFlowElements({
+			edges: serviceEdges,
+			dbEdges,
+			serviceOverviews: overviews,
 			durationSeconds,
-			workloads,
-		)
+			serviceWorkloads: workloads,
+			platforms,
+		})
 		const positioned = layoutNodes(rawNodes, rawEdges, layoutConfig)
-		const allServices = [...new Set(positioned.map((n) => n.id))].sort()
+		// Service legend should only include real services, not synthetic db: nodes
+		const allServices = [
+			...new Set(positioned.filter((n) => !n.id.startsWith(DB_NODE_PREFIX)).map((n) => n.id)),
+		].sort()
 		return { layoutedNodes: positioned, flowEdges: rawEdges, services: allServices }
-	}, [serviceEdges, overviews, workloads, durationSeconds, layoutConfig])
+	}, [serviceEdges, dbEdges, platforms, overviews, workloads, durationSeconds, layoutConfig])
 
 	// Merge layout positions with selection state
 	const nodesWithSelection = useMemo(() => {
@@ -793,23 +964,37 @@ function ServiceMapCanvas({
 					</div>
 				</ResizablePanel>
 
-				{selectedServiceId && (
-					<>
-						<ResizableHandle withHandle />
-						<ResizablePanel defaultSize={35} minSize={25}>
-							<ServiceDetailPanel
-								serviceId={selectedServiceId}
-								services={services}
-								edges={serviceEdges}
-								overviews={overviews}
-								workloads={workloads}
-								showInfraTab={showInfraTab}
-								durationSeconds={durationSeconds}
-								onClose={() => setSelectedServiceId(null)}
-							/>
-						</ResizablePanel>
-					</>
-				)}
+				{selectedServiceId &&
+					(selectedServiceId.startsWith(DB_NODE_PREFIX) ? (
+						<>
+							<ResizableHandle withHandle />
+							<ResizablePanel defaultSize={35} minSize={25}>
+								<DatabaseDetailPanel
+									dbSystem={selectedServiceId.slice(DB_NODE_PREFIX.length)}
+									dbEdges={dbEdges}
+									services={services}
+									durationSeconds={durationSeconds}
+									onClose={() => setSelectedServiceId(null)}
+								/>
+							</ResizablePanel>
+						</>
+					) : (
+						<>
+							<ResizableHandle withHandle />
+							<ResizablePanel defaultSize={35} minSize={25}>
+								<ServiceDetailPanel
+									serviceId={selectedServiceId}
+									services={services}
+									edges={serviceEdges}
+									overviews={overviews}
+									workloads={workloads}
+									showInfraTab={showInfraTab}
+									durationSeconds={durationSeconds}
+									onClose={() => setSelectedServiceId(null)}
+								/>
+							</ResizablePanel>
+						</>
+					))}
 			</ResizablePanelGroup>
 		</div>
 	)
@@ -834,9 +1019,21 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 
 	const mapResult = useRefreshableAtomValue(getServiceMapResultAtom(mapInput))
 	const overviewResult = useRefreshableAtomValue(getServiceOverviewResultAtom(overviewInput))
+	const dbEdgesResult = useRefreshableAtomValue(getServiceMapDbEdgesResultAtom(mapInput))
+	const platformsResult = useRefreshableAtomValue(getServicePlatformsResultAtom(mapInput))
 
 	// Render map as soon as edges arrive — don't wait for overview metrics
 	const overviews = Result.isSuccess(overviewResult) ? overviewResult.value.data : []
+	const dbEdges = Result.isSuccess(dbEdgesResult) ? dbEdgesResult.value.edges : []
+	const platforms = useMemo(() => {
+		const map = new Map<string, ServicePlatform>()
+		if (Result.isSuccess(platformsResult)) {
+			for (const p of platformsResult.value.platforms) {
+				map.set(p.serviceName, p.platform)
+			}
+		}
+		return map
+	}, [platformsResult])
 
 	// Bulk fetch workloads keyed off the same set of services that appear in edges.
 	// Gated on infraEnabled so we don't issue this query on plans without the
@@ -880,6 +1077,8 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 		.onSuccess((mapResponse) => (
 			<ServiceMapCanvas
 				edges={mapResponse.edges}
+				dbEdges={dbEdges}
+				platforms={platforms}
 				overviews={overviews}
 				workloads={workloads}
 				showInfraTab={infraEnabled}

@@ -40,7 +40,7 @@ import {
 	workloadInfraTimeseries,
 } from "@/api/tinybird/infra"
 import { getServiceUsage } from "@/api/tinybird/service-usage"
-import { getServiceMap } from "@/api/tinybird/service-map"
+import { getServiceMap, getServiceMapDbEdges, getServicePlatforms } from "@/api/tinybird/service-map"
 import { getServiceWorkloads } from "@/api/tinybird/service-infra"
 import {
 	getServiceApdexTimeSeries,
@@ -277,6 +277,14 @@ export const getQueryBuilderTimeseriesResultAtom = makeQueryAtomFamily(getQueryB
 
 export const getServiceMapResultAtom = makeQueryAtomFamily(getServiceMap, {
 	staleTime: 15_000,
+})
+
+export const getServiceMapDbEdgesResultAtom = makeQueryAtomFamily(getServiceMapDbEdges, {
+	staleTime: 15_000,
+})
+
+export const getServicePlatformsResultAtom = makeQueryAtomFamily(getServicePlatforms, {
+	staleTime: 60_000,
 })
 
 export const getServiceWorkloadsResultAtom = makeQueryAtomFamily(getServiceWorkloads, {

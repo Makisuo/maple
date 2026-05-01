@@ -17,6 +17,8 @@ import {
 	ServiceApdexResponse,
 	ServiceReleasesResponse,
 	ServiceDependenciesResponse,
+	ServiceDbEdgesResponse,
+	ServicePlatformsResponse,
 	ServiceWorkloadsResponse,
 	ServiceUsageResponse,
 	ListLogsResponse,
@@ -343,6 +345,62 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceDependencies query failed",
 					)
 					return new ServiceDependenciesResponse({ data: compiled.castRows(rows) as any[] })
+				}),
+			)
+			.handle("serviceDbEdges", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const compiled = CH.serviceDbEdgesSQL(
+						{ deploymentEnv: payload.deploymentEnv },
+						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+					)
+					const rows = yield* mapExecError(
+						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						"serviceDbEdges query failed",
+					)
+					return new ServiceDbEdgesResponse({ data: compiled.castRows(rows) as any[] })
+				}),
+			)
+			.handle("servicePlatforms", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const compiled = CH.servicePlatformsSQL(
+						{ deploymentEnv: payload.deploymentEnv },
+						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+					)
+					const rows = yield* mapExecError(
+						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						"servicePlatforms query failed",
+					)
+					const typedRows = compiled.castRows(rows)
+					return new ServicePlatformsResponse({
+						data: typedRows.map((row) => {
+							const k8sCluster = String(row.k8sCluster ?? "")
+							const k8sPodName = String(row.k8sPodName ?? "")
+							const k8sDeploymentName = String(row.k8sDeploymentName ?? "")
+							const cloudPlatform = String(row.cloudPlatform ?? "")
+							const cloudProvider = String(row.cloudProvider ?? "")
+							const faasName = String(row.faasName ?? "")
+							// Require pod/deployment, not just cluster.name — see SQL comment.
+							const isKubernetes = k8sPodName !== "" || k8sDeploymentName !== ""
+							const platform: "kubernetes" | "cloudflare" | "lambda" | "unknown" =
+								cloudPlatform === "cloudflare.workers" || cloudProvider === "cloudflare"
+									? "cloudflare"
+									: faasName !== "" || cloudPlatform === "aws_lambda"
+										? "lambda"
+										: isKubernetes
+											? "kubernetes"
+											: "unknown"
+							return {
+								serviceName: String(row.serviceName ?? ""),
+								platform,
+								k8sCluster,
+								cloudPlatform,
+								cloudProvider,
+								faasName,
+							}
+						}),
+					})
 				}),
 			)
 			.handle("serviceWorkloads", ({ payload }) =>

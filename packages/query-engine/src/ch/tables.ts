@@ -291,6 +291,34 @@ export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
 	UnsampledSpanCount: T.uint64,
 })
 
+export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	DbSystem: T.string,
+	DeploymentEnv: T.string,
+	CallCount: T.uint64,
+	ErrorCount: T.uint64,
+	DurationSumMs: T.float64,
+	MaxDurationMs: T.float64,
+	SampledSpanCount: T.uint64,
+	UnsampledSpanCount: T.uint64,
+})
+
+export const ServicePlatformsHourly = table("service_platforms_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	DeploymentEnv: T.string,
+	K8sCluster: T.string,
+	K8sPodName: T.string,
+	K8sDeploymentName: T.string,
+	CloudPlatform: T.string,
+	CloudProvider: T.string,
+	FaasName: T.string,
+	SpanCount: T.uint64,
+})
+
 export const AlertChecks = table("alert_checks", {
 	OrgId: T.string,
 	RuleId: T.string,

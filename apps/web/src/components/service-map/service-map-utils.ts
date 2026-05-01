@@ -1,5 +1,5 @@
 import type { Node, Edge } from "@xyflow/react"
-import type { ServiceEdge } from "@/api/tinybird/service-map"
+import type { ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/tinybird/service-map"
 import type { ServiceOverview } from "@/api/tinybird/services"
 import type { ServiceWorkload } from "@/api/tinybird/service-infra"
 
@@ -8,8 +8,11 @@ export interface ServiceNodeInfra {
 	workloadCount: number
 }
 
+export type ServiceNodeKind = "service" | "database"
+
 export interface ServiceNodeData {
 	label: string
+	kind: ServiceNodeKind
 	throughput: number
 	tracedThroughput: number
 	hasSampling: boolean
@@ -19,6 +22,8 @@ export interface ServiceNodeData {
 	services: string[]
 	selected: boolean
 	infra?: ServiceNodeInfra
+	platform?: ServicePlatform
+	dbSystem?: string
 	[key: string]: unknown
 }
 
@@ -34,6 +39,9 @@ export interface ServiceEdgeData {
 	services: string[]
 	[key: string]: unknown
 }
+
+export const DB_NODE_PREFIX = "db:"
+export const dbNodeId = (system: string) => `${DB_NODE_PREFIX}${system}`
 
 // Layout constants (defaults)
 export const DEFAULT_LAYOUT_CONFIG = {
@@ -65,15 +73,30 @@ export function deriveServiceList(edges: ServiceEdge[], serviceOverviews: Servic
 	return Array.from(services).sort()
 }
 
+export interface BuildFlowElementsInput {
+	edges: ServiceEdge[]
+	dbEdges?: ServiceDbEdge[]
+	serviceOverviews: ServiceOverview[]
+	durationSeconds: number
+	serviceWorkloads?: ServiceWorkload[]
+	platforms?: Map<string, ServicePlatform>
+}
+
 /**
- * Build ReactFlow nodes and edges from service map data
+ * Build ReactFlow nodes and edges from service map data.
+ *
+ * Service-to-service edges become application nodes; service-to-db edges
+ * (one per `db.system`) become database nodes that share the layout pipeline,
+ * so the existing barycenter pass naturally pushes them to the rightmost layer.
  */
-export function buildFlowElements(
-	edges: ServiceEdge[],
-	serviceOverviews: ServiceOverview[],
-	durationSeconds: number,
-	serviceWorkloads: ServiceWorkload[] = [],
-): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
+export function buildFlowElements({
+	edges,
+	dbEdges = [],
+	serviceOverviews,
+	durationSeconds,
+	serviceWorkloads = [],
+	platforms,
+}: BuildFlowElementsInput): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
 	const services = deriveServiceList(edges, serviceOverviews)
 
 	// Build lookup of service overview metrics
@@ -98,6 +121,29 @@ export function buildFlowElements(
 		infraMap.set(wl.serviceName, existing)
 	}
 
+	// Aggregate by `db.system` so multiple services calling the same database
+	// land on a single node. Sum of call/error counts; weighted-average latency.
+	const dbAgg = new Map<
+		string,
+		{ callCount: number; errorCount: number; durationSumMs: number; maxP95: number }
+	>()
+	for (const e of dbEdges) {
+		if (!e.dbSystem) continue
+		const existing = dbAgg.get(e.dbSystem) ?? {
+			callCount: 0,
+			errorCount: 0,
+			durationSumMs: 0,
+			maxP95: 0,
+		}
+		existing.callCount += e.callCount
+		existing.errorCount += e.errorCount
+		existing.durationSumMs += e.avgDurationMs * e.callCount
+		existing.maxP95 = Math.max(existing.maxP95, e.p95DurationMs)
+		dbAgg.set(e.dbSystem, existing)
+	}
+
+	const safeDuration = Math.max(durationSeconds, 1)
+
 	const flowNodes: Node<ServiceNodeData>[] = services.map((service) => {
 		const overview = overviewMap.get(service)
 		const infra = infraMap.get(service)
@@ -107,6 +153,7 @@ export function buildFlowElements(
 			position: { x: 0, y: 0 }, // will be set by layout
 			data: {
 				label: service,
+				kind: "service",
 				throughput: overview?.throughput ?? 0,
 				tracedThroughput: overview?.tracedThroughput ?? 0,
 				hasSampling: overview?.hasSampling ?? false,
@@ -116,11 +163,31 @@ export function buildFlowElements(
 				services,
 				selected: false,
 				infra,
+				platform: platforms?.get(service),
 			},
 		}
 	})
 
-	const safeDuration = Math.max(durationSeconds, 1)
+	for (const [dbSystem, agg] of dbAgg) {
+		flowNodes.push({
+			id: dbNodeId(dbSystem),
+			type: "serviceNode",
+			position: { x: 0, y: 0 },
+			data: {
+				label: dbSystem,
+				kind: "database",
+				throughput: agg.callCount / safeDuration,
+				tracedThroughput: agg.callCount / safeDuration,
+				hasSampling: false,
+				samplingWeight: 1,
+				errorRate: agg.callCount > 0 ? agg.errorCount / agg.callCount : 0,
+				avgLatencyMs: agg.callCount > 0 ? agg.durationSumMs / agg.callCount : 0,
+				services,
+				selected: false,
+				dbSystem,
+			},
+		})
+	}
 
 	const flowEdges: Edge<ServiceEdgeData>[] = edges.map((edge) => ({
 		id: `${edge.sourceService}->${edge.targetService}`,
@@ -139,6 +206,27 @@ export function buildFlowElements(
 			services,
 		},
 	}))
+
+	for (const e of dbEdges) {
+		if (!e.dbSystem || !e.sourceService) continue
+		flowEdges.push({
+			id: `${e.sourceService}->${dbNodeId(e.dbSystem)}`,
+			source: e.sourceService,
+			target: dbNodeId(e.dbSystem),
+			type: "serviceEdge",
+			data: {
+				callCount: e.callCount,
+				callsPerSecond: e.callCount / safeDuration,
+				estimatedCallsPerSecond: e.estimatedCallCount / safeDuration,
+				errorCount: e.errorCount,
+				errorRate: e.errorRate,
+				avgDurationMs: e.avgDurationMs,
+				p95DurationMs: e.p95DurationMs,
+				hasSampling: e.hasSampling,
+				services,
+			},
+		})
+	}
 
 	return { nodes: flowNodes, edges: flowEdges }
 }
