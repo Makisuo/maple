@@ -1,9 +1,8 @@
 import type { Duration } from "effect"
-import { Effect, Layer, Option, Redacted } from "effect"
+import { Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Otlp } from "effect/unstable/observability"
-import * as EnvConfig from "./config.js"
-import { getAutoPlatformAttributes } from "./platform.js"
+import { resolveResource } from "./resource.js"
 
 export interface MapleConfig {
 	/**
@@ -44,6 +43,12 @@ export interface MapleConfig {
  * env vars (Railway, Vercel, Cloudflare Pages, Render). Returns a no-op layer
  * when no endpoint is configured, making it safe for local development.
  *
+ * For Cloudflare Workers, prefer `@maple-dev/effect-sdk/cloudflare`'s `make()`
+ * — it has no background fiber and exposes an explicit `flush` Effect that
+ * `@maple/effect-cloudflare`'s `withRequestRuntime` schedules in
+ * `ctx.waitUntil`. This layer's `Otlp.layerJson` background-export fiber
+ * doesn't tick on Workers between invocations.
+ *
  * @example
  * ```typescript
  * import { Maple } from "@maple-dev/effect-sdk/server"
@@ -58,49 +63,15 @@ export interface MapleConfig {
 export const layer = (config: MapleConfig = {}) =>
 	Layer.unwrap(
 		Effect.gen(function* () {
-			const envEndpoint = yield* EnvConfig.endpoint
-			const endpoint = config.endpoint ?? Option.getOrUndefined(envEndpoint)
-			if (!endpoint) return Layer.empty
-
-			const envIngestKey = yield* EnvConfig.ingestKey
-			const ingestKey = config.ingestKey
-				? Redacted.make(config.ingestKey)
-				: Option.getOrUndefined(envIngestKey)
-
-			const envServiceVersion = yield* EnvConfig.serviceVersion
-			const serviceVersion = config.serviceVersion ?? Option.getOrUndefined(envServiceVersion)
-
-			const envEnvironment = yield* EnvConfig.environment
-			const environment = config.environment ?? Option.getOrUndefined(envEnvironment)
-
-			const envOtelServiceName = yield* EnvConfig.otelServiceName
-			const serviceName = config.serviceName ?? Option.getOrUndefined(envOtelServiceName) ?? "unknown"
-
-			const envResourceAttributes = yield* EnvConfig.otelResourceAttributes
-
-			// Precedence (lowest to highest):
-			//   1. Auto-detected OTel platform attributes (std-env + well-known env vars)
-			//   2. SDK-baked attributes (maple.sdk.type, deployment.*)
-			//   3. OTEL_RESOURCE_ATTRIBUTES env var (e.g. maple-k8s-infra chart's
-			//      downward-API pod metadata injection)
-			//   4. Programmatic `config.attributes` (set in app code)
-			// Matches the OTel spec's "later writers win" rule.
-			const attributes: Record<string, unknown> = {}
-			Object.assign(attributes, getAutoPlatformAttributes())
-			attributes["maple.sdk.type"] = "server"
-			if (environment) attributes["deployment.environment"] = environment
-			if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
-			Object.assign(attributes, envResourceAttributes)
-			if (config.attributes) Object.assign(attributes, config.attributes)
+			const resolved = yield* resolveResource({ ...config, sdkType: "server" })
+			if (!resolved.endpoint) return Layer.empty
 
 			return Otlp.layerJson({
-				baseUrl: endpoint,
-				resource: {
-					serviceName,
-					serviceVersion,
-					attributes,
-				},
-				headers: ingestKey ? { Authorization: `Bearer ${Redacted.value(ingestKey)}` } : undefined,
+				baseUrl: resolved.endpoint,
+				resource: resolved.resource,
+				headers: resolved.ingestKey
+					? { Authorization: `Bearer ${Redacted.value(resolved.ingestKey)}` }
+					: undefined,
 				maxBatchSize: config.maxBatchSize,
 				loggerExportInterval: config.loggerExportInterval,
 				metricsExportInterval: config.metricsExportInterval,

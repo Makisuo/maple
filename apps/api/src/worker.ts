@@ -1,4 +1,4 @@
-import { Maple } from "@maple-dev/effect-sdk/server"
+import * as Cloudflare from "@maple-dev/effect-sdk/cloudflare"
 import {
 	WorkerConfigProviderLive,
 	WorkerEnvironmentLive,
@@ -72,20 +72,18 @@ const getHandler = (env: Record<string, unknown>) => {
 	return built
 }
 
-// Telemetry tuned for CF Workers: long export intervals so the shutdown
-// finalizer (bounded by `shutdownTimeout`) is the only flush path — the OTLP
-// background fiber doesn't tick between Worker invocations. Resource attrs
-// (cloud.platform, process.runtime.name, etc.) are auto-stamped by the SDK
-// from std-env. `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` /
-// `COMMIT_SHA` are read by the SDK via the worker's ConfigProvider.
-const makeRequestTelemetryLayer = (_env: Record<string, unknown>) =>
-	Maple.layer({
-		serviceName: "maple-api",
-		tracerExportInterval: "1 hour",
-		loggerExportInterval: "1 hour",
-		metricsExportInterval: "1 hour",
-		shutdownTimeout: "15 seconds",
-	}).pipe(Layer.provide(WorkerConfigProviderLive))
+// `Cloudflare.make` builds a custom flushable OTLP tracer + Effect logger
+// (no upstream background fiber — explicit flush only). Cached once per
+// isolate so the in-isolate buffer coalesces concurrent requests into one
+// POST per signal. `withRequestRuntime` schedules `telemetry.flush` inside
+// `ctx.waitUntil` after the response is sent.
+let cachedTelemetry: Cloudflare.CloudflareTelemetry | undefined
+const getTelemetry = (env: Record<string, unknown>): Cloudflare.CloudflareTelemetry => {
+	if (!cachedTelemetry) cachedTelemetry = Cloudflare.make(env, { serviceName: "maple-api" })
+	return cachedTelemetry
+}
+
+const makeRequestTelemetryLayer = (env: Record<string, unknown>) => getTelemetry(env).layer
 
 const isMcpPost = (request: Request): boolean => {
 	if (request.method !== "POST") return false
@@ -96,14 +94,18 @@ const isMcpPost = (request: Request): boolean => {
 	}
 }
 
-const inner = withRequestRuntime(makeRequestTelemetryLayer, async (request, services, env) => {
-	if (isMcpPost(request)) {
-		const sid = request.headers.get("mcp-session-id")
-		if (sid) await sessionStore.preload(sid)
-	}
-	const { handler } = getHandler(env)
-	return handler(request, services as any)
-})
+const inner = withRequestRuntime(
+	makeRequestTelemetryLayer,
+	async (request, services, env) => {
+		if (isMcpPost(request)) {
+			const sid = request.headers.get("mcp-session-id")
+			if (sid) await sessionStore.preload(sid)
+		}
+		const { handler } = getHandler(env)
+		return handler(request, services as any)
+	},
+	{ flushables: (env) => [getTelemetry(env)] },
+)
 
 interface McpSessionsBinding {
 	readonly get: (key: string, type: "json") => Promise<unknown>

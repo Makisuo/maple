@@ -1,6 +1,6 @@
 {
 	"name": "@maple-dev/effect-sdk",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"description": "Maple observability SDK for Effect applications",
 	"license": "MIT",
 	"files": [
@@ -26,6 +26,10 @@
 		"./client": {
 			"types": "./dist/client/index.d.mts",
 			"import": "./dist/client/index.mjs"
+		},
+		"./cloudflare": {
+			"types": "./dist/cloudflare/index.d.mts",
+			"import": "./dist/cloudflare/index.mjs"
 		}
 	},
 	"scripts": {

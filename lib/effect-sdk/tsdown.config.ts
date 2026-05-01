@@ -7,6 +7,7 @@ export default defineConfig({
 		"index.types": "./src/index.types.ts",
 		"server/index": "./src/server/index.ts",
 		"client/index": "./src/client/index.ts",
+		"cloudflare/index": "./src/cloudflare/index.ts",
 	},
 	format: "esm",
 	dts: true,

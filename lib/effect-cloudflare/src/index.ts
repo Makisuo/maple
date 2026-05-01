@@ -10,6 +10,7 @@ export { serveWebRequest } from "./http-server.ts"
 export {
 	buildRequestRuntime,
 	type ExecutionContextLike,
+	type Flushable,
 	layerFromEnv,
 	runScheduledEffect,
 	withRequestRuntime,
