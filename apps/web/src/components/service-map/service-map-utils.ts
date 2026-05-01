@@ -2,6 +2,7 @@ import type { Node, Edge } from "@xyflow/react"
 import type { ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/tinybird/service-map"
 import type { ServiceOverview } from "@/api/tinybird/services"
 import type { ServiceWorkload } from "@/api/tinybird/service-infra"
+import { getServiceLegendColor } from "@maple/ui/colors"
 
 export interface ServiceNodeInfra {
 	podCount: number
@@ -9,6 +10,8 @@ export interface ServiceNodeInfra {
 }
 
 export type ServiceNodeKind = "service" | "database"
+
+export type ServiceMapColorMode = "service" | "health" | "platform"
 
 export interface ServiceNodeData {
 	label: string
@@ -24,7 +27,50 @@ export interface ServiceNodeData {
 	infra?: ServiceNodeInfra
 	platform?: ServicePlatform
 	dbSystem?: string
+	colorMode?: ServiceMapColorMode
 	[key: string]: unknown
+}
+
+const DB_NODE_COLOR = "oklch(0.55 0.05 250)"
+
+const PLATFORM_COLORS: Record<ServicePlatform | "unknown", string> = {
+	kubernetes: "oklch(0.62 0.16 250)",
+	cloudflare: "oklch(0.7 0.16 50)",
+	lambda: "oklch(0.7 0.18 60)",
+	unknown: "oklch(0.55 0.02 270)",
+}
+
+export function getPlatformColor(platform: ServicePlatform | undefined): string {
+	return PLATFORM_COLORS[platform ?? "unknown"]
+}
+
+export function getHealthColor(errorRate: number): string {
+	if (errorRate > 0.05) return "var(--severity-error)"
+	if (errorRate > 0.01) return "var(--severity-warn)"
+	return "var(--severity-info)"
+}
+
+/**
+ * Color used for a service-map node's accent stripe / minimap fill / legend swatch.
+ *
+ * Database nodes always use the dedicated db color regardless of mode — the
+ * "color by" affordance is for slicing service nodes only.
+ */
+export function getServiceMapNodeColor(
+	data: Pick<ServiceNodeData, "label" | "kind" | "errorRate" | "platform">,
+	services: string[],
+	mode: ServiceMapColorMode,
+): string {
+	if (data.kind === "database") return DB_NODE_COLOR
+	switch (mode) {
+		case "health":
+			return getHealthColor(data.errorRate)
+		case "platform":
+			return getPlatformColor(data.platform)
+		case "service":
+		default:
+			return getServiceLegendColor(data.label, services)
+	}
 }
 
 export interface ServiceEdgeData {

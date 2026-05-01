@@ -22,6 +22,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@maple/ui/components/ui
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/components/ui/resizable"
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { Button } from "@maple/ui/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
 import { ArrowRightIcon, CubeIcon, DatabaseIcon, NetworkNodesIcon, XmarkIcon } from "@/components/icons"
 import {
@@ -45,9 +46,12 @@ import { ServiceMapEdge } from "./service-map-edge"
 import {
 	buildFlowElements,
 	DB_NODE_PREFIX,
+	getPlatformColor,
+	getServiceMapNodeColor,
 	layoutNodes,
 	DEFAULT_LAYOUT_CONFIG,
 	type LayoutConfig,
+	type ServiceMapColorMode,
 	type ServiceNodeData,
 } from "./service-map-utils"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
@@ -110,6 +114,8 @@ interface ServiceDetailPanelProps {
 	workloads: ServiceWorkload[]
 	durationSeconds: number
 	showInfraTab: boolean
+	platforms: Map<string, ServicePlatform>
+	colorMode: ServiceMapColorMode
 	onClose: () => void
 }
 
@@ -121,11 +127,22 @@ function ServiceDetailPanel({
 	workloads,
 	durationSeconds,
 	showInfraTab,
+	platforms,
+	colorMode,
 	onClose,
 }: ServiceDetailPanelProps) {
 	const overview = overviews.find((o) => o.serviceName === serviceId)
-	const accentColor = getServiceLegendColor(serviceId, services)
 	const errorRate = overview?.errorRate ?? 0
+	const accentColor = getServiceMapNodeColor(
+		{
+			label: serviceId,
+			kind: "service",
+			errorRate,
+			platform: platforms.get(serviceId),
+		},
+		services,
+		colorMode,
+	)
 
 	const throughput = overview?.throughput ?? 0
 	const hasSampling = overview?.hasSampling ?? false
@@ -757,6 +774,7 @@ function ServiceMapCanvas({
 }) {
 	const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
 	const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>({ ...DEFAULT_LAYOUT_CONFIG })
+	const [colorMode, setColorMode] = useState<ServiceMapColorMode>("service")
 
 	const { layoutedNodes, flowEdges, services } = useMemo(() => {
 		const { nodes: rawNodes, edges: rawEdges } = buildFlowElements({
@@ -775,16 +793,17 @@ function ServiceMapCanvas({
 		return { layoutedNodes: positioned, flowEdges: rawEdges, services: allServices }
 	}, [serviceEdges, dbEdges, platforms, overviews, workloads, durationSeconds, layoutConfig])
 
-	// Merge layout positions with selection state
+	// Merge layout positions with selection + color-mode state
 	const nodesWithSelection = useMemo(() => {
 		return layoutedNodes.map((node) => ({
 			...node,
 			data: {
 				...node.data,
 				selected: node.id === selectedServiceId,
+				colorMode,
 			},
 		}))
-	}, [layoutedNodes, selectedServiceId])
+	}, [layoutedNodes, selectedServiceId, colorMode])
 
 	// Track nodes with full ReactFlow state (dimensions, positions from drag, etc.)
 	const [nodes, setNodes] = useState(nodesWithSelection)
@@ -858,6 +877,27 @@ function ServiceMapCanvas({
 					<div className="flex flex-col h-full">
 						<div className="flex-1 min-h-0 relative">
 							<LayoutDebugPanel config={layoutConfig} onChange={setLayoutConfig} />
+							<div className="absolute top-2 left-2 z-50 flex items-center gap-2 bg-card/90 backdrop-blur-sm border border-border rounded-md px-2 py-1">
+								<span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+									Color by
+								</span>
+								<Select
+									value={colorMode}
+									onValueChange={(v) => setColorMode(v as ServiceMapColorMode)}
+								>
+									<SelectTrigger
+										size="sm"
+										className="h-6 text-[11px] capitalize border-0 bg-transparent px-1.5"
+									>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="service">Service</SelectItem>
+										<SelectItem value="health">Health</SelectItem>
+										<SelectItem value="platform">Platform</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
 							<ReactFlow
 								nodes={nodes}
 								edges={flowEdges}
@@ -881,7 +921,7 @@ function ServiceMapCanvas({
 								<MiniMap
 									nodeColor={(node: Node) => {
 										const data = node.data as ServiceNodeData
-										return getServiceLegendColor(data.label, data.services)
+										return getServiceMapNodeColor(data, data.services, colorMode)
 									}}
 									nodeComponent={ServiceMiniMapNode}
 									nodeStrokeWidth={0}
@@ -899,7 +939,7 @@ function ServiceMapCanvas({
 							<span className="font-medium">Drag nodes to arrange</span>
 							<span className="text-foreground/30">|</span>
 							<span className="font-medium">Scroll to zoom</span>
-							{services.length > 0 && (
+							{colorMode === "service" && services.length > 0 && (
 								<>
 									<span className="text-foreground/30">|</span>
 									{services.slice(0, 3).map((service) => (
@@ -907,7 +947,11 @@ function ServiceMapCanvas({
 											<div
 												className="h-2.5 w-2.5 rounded-sm shrink-0"
 												style={{
-													backgroundColor: getServiceLegendColor(service, services),
+													backgroundColor: getServiceMapNodeColor(
+														{ label: service, kind: "service", errorRate: 0 },
+														services,
+														"service",
+													),
 												}}
 											/>
 											<span className="font-medium">{service}</span>
@@ -928,9 +972,14 @@ function ServiceMapCanvas({
 															<div
 																className="h-2.5 w-2.5 rounded-sm shrink-0"
 																style={{
-																	backgroundColor: getServiceLegendColor(
-																		service,
+																	backgroundColor: getServiceMapNodeColor(
+																		{
+																			label: service,
+																			kind: "service",
+																			errorRate: 0,
+																		},
 																		services,
+																		"service",
 																	),
 																}}
 															/>
@@ -943,6 +992,24 @@ function ServiceMapCanvas({
 											</PopoverContent>
 										</Popover>
 									)}
+								</>
+							)}
+							{colorMode === "platform" && (
+								<>
+									<span className="text-foreground/30">|</span>
+									{(["kubernetes", "cloudflare", "lambda", "unknown"] as const).map((p) => (
+										<div key={p} className="flex items-center gap-1.5">
+											<div
+												className="h-2.5 w-2.5 rounded-sm shrink-0"
+												style={{
+													backgroundColor: getPlatformColor(
+														p === "unknown" ? undefined : p,
+													),
+												}}
+											/>
+											<span className="font-medium capitalize">{p}</span>
+										</div>
+									))}
 								</>
 							)}
 							<span className="flex-1" />
@@ -989,6 +1056,8 @@ function ServiceMapCanvas({
 									overviews={overviews}
 									workloads={workloads}
 									showInfraTab={showInfraTab}
+									platforms={platforms}
+									colorMode={colorMode}
 									durationSeconds={durationSeconds}
 									onClose={() => setSelectedServiceId(null)}
 								/>

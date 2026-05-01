@@ -1,7 +1,6 @@
 import { memo } from "react"
 import { Handle, Position } from "@xyflow/react"
 import { cn } from "@maple/ui/utils"
-import { getServiceLegendColor } from "@maple/ui/colors"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
 import {
 	AwsLambdaIcon,
@@ -18,7 +17,7 @@ import {
 	type IconComponent,
 } from "@/components/icons"
 import type { ServicePlatform } from "@/api/tinybird/service-map"
-import type { ServiceNodeData } from "./service-map-utils"
+import { getServiceMapNodeColor, type ServiceNodeData } from "./service-map-utils"
 
 function getPlatformIcon(platform: ServicePlatform | undefined): {
 	Icon: IconComponent
@@ -88,9 +87,14 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 		infra,
 		platform,
 		dbSystem,
+		colorMode,
 	} = data
 	const isDatabase = kind === "database"
-	const accentColor = isDatabase ? "oklch(0.55 0.05 250)" : getServiceLegendColor(label, services)
+	const accentColor = getServiceMapNodeColor(
+		{ label, kind, errorRate, platform },
+		services,
+		colorMode ?? "service",
+	)
 
 	const { Icon, label: iconLabel } = isDatabase ? getDbIcon(dbSystem) : getPlatformIcon(platform)
 
