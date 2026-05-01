@@ -1005,4 +1005,22 @@ describe("converted queries", () => {
 		expect(sql).toContain("'target'")
 		expect(sql).toContain("'related'")
 	})
+
+	it("spanHierarchyQuery without narrowByTime omits Timestamp filter", () => {
+		const q = spanHierarchyQuery({ traceId: "abc" })
+		const { sql } = compileCH(q, { orgId: "org_1" })
+		expect(sql).not.toContain("Timestamp >=")
+		expect(sql).not.toContain("Timestamp <=")
+	})
+
+	it("spanHierarchyQuery with narrowByTime adds Timestamp BETWEEN filter", () => {
+		const q = spanHierarchyQuery({ traceId: "abc", narrowByTime: true })
+		const { sql } = compileCH(q, {
+			orgId: "org_1",
+			startTime: "2026-04-15 13:00:00",
+			endTime: "2026-04-15 15:00:00",
+		})
+		expect(sql).toContain("Timestamp >= '2026-04-15 13:00:00'")
+		expect(sql).toContain("Timestamp <= '2026-04-15 15:00:00'")
+	})
 })

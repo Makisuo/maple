@@ -114,14 +114,23 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 					),
 				),
 			),
-			Match.when("span_hierarchy", () =>
-				eraseType(
+			Match.when("span_hierarchy", () => {
+				// Caller may pass `start_time` / `end_time` (typically a tight ±1h
+				// window around the parent span timestamp). Without them, the query
+				// scans the full retention window — present for correctness, but
+				// strongly recommended.
+				const narrowByTime = params.start_time != null && params.end_time != null
+				return eraseType(
 					CH.compile(
-						CH.spanHierarchyQuery({ traceId: String(params.trace_id), spanId: str("span_id") }),
-						{ orgId },
+						CH.spanHierarchyQuery({
+							traceId: String(params.trace_id),
+							spanId: str("span_id"),
+							narrowByTime,
+						}),
+						narrowByTime ? { orgId, startTime, endTime } : { orgId },
 					),
-				),
-			),
+				)
+			}),
 			Match.when("traces_duration_stats", () =>
 				eraseType(
 					CH.compile(

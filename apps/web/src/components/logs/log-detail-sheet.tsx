@@ -51,7 +51,9 @@ function TraceTimeline({ currentLog, onLogSelect }: { currentLog: Log; onLogSele
 	)
 	const spansResult = useAtomValue(
 		currentLog.traceId
-			? getSpanHierarchyResultAtom({ data: { traceId: currentLog.traceId } })
+			? getSpanHierarchyResultAtom({
+					data: { traceId: currentLog.traceId, timestamp: currentLog.timestamp },
+				})
 			: disabledResultAtom<SpanHierarchyResponse>(),
 	)
 	const currentLogRef = useRef<HTMLDivElement>(null)

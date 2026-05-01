@@ -11,6 +11,8 @@ import { TinybirdQueryError, TinybirdQuotaExceededError } from "./tinybird"
 export class SpanHierarchyRequest extends Schema.Class<SpanHierarchyRequest>("SpanHierarchyRequest")({
 	traceId: Schema.String,
 	spanId: Schema.optional(Schema.String),
+	startTime: Schema.optional(TinybirdDateTime),
+	endTime: Schema.optional(TinybirdDateTime),
 }) {}
 
 export class SpanHierarchyResponse extends Schema.Class<SpanHierarchyResponse>("SpanHierarchyResponse")({

@@ -255,9 +255,29 @@ export interface SpanHierarchyResponse {
 const GetSpanHierarchyInputSchema = Schema.Struct({
 	traceId: TraceId,
 	spanId: Schema.optional(SpanId),
+	/**
+	 * Any timestamp from the trace (e.g. parent log/span). When provided, the
+	 * query is bounded to a ±1h window around this so ClickHouse can prune
+	 * partitions instead of scanning full retention.
+	 */
+	timestamp: Schema.optional(Schema.String),
 })
 
 export type GetSpanHierarchyInput = Schema.Schema.Type<typeof GetSpanHierarchyInputSchema>
+
+const SPAN_HIERARCHY_RANGE_HOURS = 1
+const tinybirdDateTime = (d: Date): string => d.toISOString().replace("T", " ").slice(0, 19)
+
+function computeSpanHierarchyRange(timestamp: string | undefined): { startTime: string; endTime: string } | undefined {
+	if (!timestamp) return undefined
+	const t = new Date(timestamp.includes("T") ? timestamp : `${timestamp.replace(" ", "T")}Z`)
+	if (Number.isNaN(t.getTime())) return undefined
+	const halfWidthMs = SPAN_HIERARCHY_RANGE_HOURS * 60 * 60 * 1000
+	return {
+		startTime: tinybirdDateTime(new Date(t.getTime() - halfWidthMs)),
+		endTime: tinybirdDateTime(new Date(t.getTime() + halfWidthMs)),
+	}
+}
 
 function parseAttributes(value: string | null | undefined): Record<string, string> {
 	if (!value) return {}
@@ -389,6 +409,8 @@ const getSpanHierarchyEffect = Effect.fn("QueryEngine.getSpanHierarchy")(functio
 	yield* Effect.annotateCurrentSpan("traceId", input.traceId)
 	if (input.spanId) yield* Effect.annotateCurrentSpan("spanId", input.spanId)
 
+	const range = computeSpanHierarchyRange(input.timestamp)
+
 	const result = yield* runTinybirdQuery("spanHierarchy", () =>
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
@@ -396,6 +418,7 @@ const getSpanHierarchyEffect = Effect.fn("QueryEngine.getSpanHierarchy")(functio
 				payload: new SpanHierarchyRequest({
 					traceId: input.traceId,
 					spanId: input.spanId,
+					...(range && { startTime: range.startTime, endTime: range.endTime }),
 				}),
 			})
 		}),

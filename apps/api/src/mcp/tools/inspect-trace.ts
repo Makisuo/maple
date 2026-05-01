@@ -1,4 +1,4 @@
-import { requiredStringParam, McpQueryError, type McpToolRegistrar } from "./types"
+import { requiredStringParam, optionalStringParam, McpQueryError, type McpToolRegistrar } from "./types"
 import { withTenantExecutor } from "../lib/query-tinybird"
 import { formatDurationFromMs, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
@@ -9,14 +9,29 @@ import { inspectTrace, type SpanNode } from "@maple/query-engine/observability"
 export function registerInspectTraceTool(server: McpToolRegistrar) {
 	server.tool(
 		"inspect_trace",
-		"Get the full span tree and logs for a single trace. Use this to understand request flow, find bottlenecks, and see error context.",
+		"Get the full span tree and logs for a single trace. Use this to understand request flow, find bottlenecks, and see error context. Pass `timestamp` (any timestamp from the trace) so the query can prune ClickHouse partitions to a ±1h window — without it the query scans the full retention window.",
 		Schema.Struct({
 			trace_id: requiredStringParam("The trace ID to inspect"),
+			timestamp: optionalStringParam(
+				"ISO-8601 timestamp of any span in the trace (e.g. from `search_traces` results). Used to narrow the ClickHouse scan to a ±1h window — strongly recommended.",
+			),
 		}),
-		Effect.fn("McpTool.inspectTrace")(function* ({ trace_id }) {
+		Effect.fn("McpTool.inspectTrace")(function* ({ trace_id, timestamp }) {
 			yield* Effect.annotateCurrentSpan("traceId", trace_id)
 
-			const result = yield* withTenantExecutor(inspectTrace(trace_id)).pipe(
+			const timestampHint = timestamp ? new Date(timestamp) : undefined
+			if (timestampHint && Number.isNaN(timestampHint.getTime())) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `Invalid timestamp: ${timestamp}. Expected ISO-8601 (e.g. 2026-04-15T14:30:00Z).`,
+						},
+					],
+				}
+			}
+
+			const result = yield* withTenantExecutor(inspectTrace(trace_id, { timestampHint })).pipe(
 				Effect.catchTag("@maple/query-engine/errors/ObservabilityError", (e) =>
 					Effect.fail(
 						new McpQueryError({ message: e.message, pipe: e.pipe ?? "span_hierarchy", cause: e }),

@@ -52,16 +52,51 @@ const parseJsonAttributes = (raw: string): Effect.Effect<Record<string, string>>
 
 type MutableSpanNode = SpanNode & { children: MutableSpanNode[] }
 
-export const inspectTrace = Effect.fn("Observability.inspectTrace")(function* (traceId: string) {
+export interface InspectTraceOptions {
+	/**
+	 * Approximate timestamp for the trace. When provided, the underlying
+	 * `span_hierarchy` and `list_logs` queries are bounded to a window around
+	 * it so ClickHouse can prune partitions instead of scanning the full
+	 * retention window. Strongly recommended.
+	 */
+	readonly timestampHint?: Date
+	/** Half-width of the time window in hours. Defaults to 1. */
+	readonly rangeHours?: number
+}
+
+const DEFAULT_RANGE_HOURS = 1
+
+const tinybirdDateTime = (d: Date): string => d.toISOString().replace("T", " ").slice(0, 19)
+
+export const inspectTrace = Effect.fn("Observability.inspectTrace")(function* (
+	traceId: string,
+	options?: InspectTraceOptions,
+) {
 	const executor = yield* TinybirdExecutor
 	yield* Effect.annotateCurrentSpan("traceId", traceId)
 
+	const range = options?.timestampHint
+		? (() => {
+				const halfWidthMs = (options.rangeHours ?? DEFAULT_RANGE_HOURS) * 60 * 60 * 1000
+				return {
+					start_time: tinybirdDateTime(new Date(options.timestampHint.getTime() - halfWidthMs)),
+					end_time: tinybirdDateTime(new Date(options.timestampHint.getTime() + halfWidthMs)),
+				}
+			})()
+		: undefined
+
+	yield* Effect.annotateCurrentSpan("narrowByTime", range != null)
+
 	const [spansResult, logsResult] = yield* Effect.all(
 		[
-			executor.query<SpanHierarchyOutput>("span_hierarchy", { trace_id: traceId }, { profile: "list" }),
+			executor.query<SpanHierarchyOutput>(
+				"span_hierarchy",
+				{ trace_id: traceId, ...range },
+				{ profile: "list" },
+			),
 			executor.query<ListLogsOutput>(
 				"list_logs",
-				{ trace_id: traceId, limit: 50 },
+				{ trace_id: traceId, limit: 50, ...range },
 				{ profile: "list" },
 			),
 		],

@@ -91,9 +91,16 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("spanHierarchy", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const narrowByTime = payload.startTime != null && payload.endTime != null
 					const compiled = CH.compile(
-						CH.spanHierarchyQuery({ traceId: payload.traceId, spanId: payload.spanId }),
-						{ orgId: tenant.orgId },
+						CH.spanHierarchyQuery({
+							traceId: payload.traceId,
+							spanId: payload.spanId,
+							narrowByTime,
+						}),
+						narrowByTime
+							? { orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime }
+							: { orgId: tenant.orgId },
 					)
 					const rows = yield* queryEngine.cachedDirect(
 						tenant,

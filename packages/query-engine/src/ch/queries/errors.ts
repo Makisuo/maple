@@ -135,6 +135,13 @@ export function errorsTimeseriesQuery(opts: ErrorsTimeseriesOpts) {
 export interface SpanHierarchyOpts {
 	traceId: string
 	spanId?: string
+	/**
+	 * When true, the generated SQL adds `Timestamp BETWEEN startTime AND endTime`
+	 * filters using parameter placeholders. Callers must then pass `startTime`
+	 * and `endTime` to `compile()`. Without this, ClickHouse cannot prune
+	 * partitions and scans the full retention window for the trace ID.
+	 */
+	narrowByTime?: boolean
 }
 
 export interface SpanHierarchyOutput {
@@ -195,7 +202,12 @@ export function spanHierarchyQuery(opts: SpanHierarchyOpts) {
 				relationship: relationshipExpr,
 			}
 		})
-		.where(($) => [$.TraceId.eq(opts.traceId), $.OrgId.eq(param.string("orgId"))])
+		.where(($) => [
+			$.TraceId.eq(opts.traceId),
+			$.OrgId.eq(param.string("orgId")),
+			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.gte(param.dateTime("startTime"))),
+			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.lte(param.dateTime("endTime"))),
+		])
 		.orderBy(["startTime", "asc"])
 		.format("JSON")
 }
