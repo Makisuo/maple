@@ -46,6 +46,7 @@ export function QueryBuilderLineChart({
 	softMin,
 	softMax,
 	showPoints,
+	syncId,
 }: BaseChartProps) {
 	const { chartData, seriesDefinitions } = React.useMemo(() => {
 		const source = Array.isArray(data) && data.length > 0 ? data : fallbackData
@@ -139,7 +140,7 @@ export function QueryBuilderLineChart({
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<LineChart data={processedData} accessibilityLayer>
+			<LineChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
 				<CartesianGrid vertical={false} />
 				<XAxis
 					dataKey="bucket"

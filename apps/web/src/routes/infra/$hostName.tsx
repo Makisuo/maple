@@ -124,6 +124,7 @@ function HostDetailPageContent() {
 								startTime={startTime}
 								endTime={endTime}
 								bucketSeconds={bucketSeconds}
+								syncId={`host-${hostName}`}
 							/>
 						))}
 					</div>

@@ -22,7 +22,14 @@ const baseChartConfig = {
 	p50LatencyMs: { label: "P50", color: "var(--chart-p50)" },
 } satisfies ChartConfig
 
-export function LatencyLineChart({ data, className, legend, tooltip, referenceLines }: BaseChartProps) {
+export function LatencyLineChart({
+	data,
+	className,
+	legend,
+	tooltip,
+	referenceLines,
+	syncId,
+}: BaseChartProps) {
 	const chartData = data ?? latencyTimeSeriesData
 
 	const {
@@ -46,7 +53,7 @@ export function LatencyLineChart({ data, className, legend, tooltip, referenceLi
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<LineChart data={processedData} accessibilityLayer>
+			<LineChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
 				<CartesianGrid vertical={false} />
 				{referenceLines?.map((rl, i) => (
 					<ReferenceLine

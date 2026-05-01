@@ -40,6 +40,7 @@ export function QueryBuilderBarChart({
 	logScale,
 	softMin,
 	softMax,
+	syncId,
 }: BaseChartProps) {
 	const { chartData, seriesDefinitions } = React.useMemo(() => {
 		const source = Array.isArray(data) && data.length > 0 ? data : fallbackData
@@ -117,7 +118,7 @@ export function QueryBuilderBarChart({
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<BarChart data={displayData} accessibilityLayer>
+			<BarChart data={displayData} accessibilityLayer syncId={syncId} syncMethod="value">
 				<CartesianGrid vertical={false} />
 				<XAxis
 					dataKey="bucket"

@@ -208,7 +208,7 @@ function ServiceDetailContent() {
 				</div>
 			}
 		>
-			<MetricsGrid items={metrics} waiting={!!isWaiting} />
+			<MetricsGrid items={metrics} waiting={!!isWaiting} syncId={`service-${serviceName}`} />
 		</DashboardLayout>
 	)
 }

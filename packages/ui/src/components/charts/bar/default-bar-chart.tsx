@@ -11,13 +11,13 @@ const chartConfig = {
 	value: { label: "Value", color: "var(--chart-1)" },
 } satisfies ChartConfig
 
-export function DefaultBarChart({ data = defaultBarData, className }: BaseChartProps) {
+export function DefaultBarChart({ data = defaultBarData, className, syncId }: BaseChartProps) {
 	const id = useId()
 	const patternId = `default-bar-dots-${id}`
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<BarChart data={data}>
+			<BarChart data={data} syncId={syncId} syncMethod="value">
 				<defs>
 					<DottedPattern id={patternId} />
 				</defs>

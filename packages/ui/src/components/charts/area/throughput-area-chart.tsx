@@ -30,6 +30,7 @@ export function ThroughputAreaChart({
 	tooltip,
 	rateMode,
 	referenceLines,
+	syncId,
 }: BaseChartProps) {
 	const id = useId()
 	const gradientId = `throughputGradient-${id.replace(/:/g, "")}`
@@ -124,7 +125,7 @@ export function ThroughputAreaChart({
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<AreaChart data={displayData} accessibilityLayer>
+			<AreaChart data={displayData} accessibilityLayer syncId={syncId} syncMethod="value">
 				<defs>
 					<VerticalGradient id={gradientId} color="var(--color-throughput)" />
 					{hasIncomplete && (

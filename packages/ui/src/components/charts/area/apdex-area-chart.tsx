@@ -21,7 +21,14 @@ const baseChartConfig = {
 	apdexScore: { label: "Apdex", color: "var(--chart-apdex)" },
 } satisfies ChartConfig
 
-export function ApdexAreaChart({ data, className, legend, tooltip, referenceLines }: BaseChartProps) {
+export function ApdexAreaChart({
+	data,
+	className,
+	legend,
+	tooltip,
+	referenceLines,
+	syncId,
+}: BaseChartProps) {
 	const id = useId()
 	const gradientId = `apdexGradient-${id.replace(/:/g, "")}`
 	const fadedGradientId = `apdexGradientFaded-${id.replace(/:/g, "")}`
@@ -48,7 +55,7 @@ export function ApdexAreaChart({ data, className, legend, tooltip, referenceLine
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<AreaChart data={processedData} accessibilityLayer>
+			<AreaChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
 				<defs>
 					<VerticalGradient id={gradientId} color="var(--color-apdexScore)" />
 					{hasIncomplete && (

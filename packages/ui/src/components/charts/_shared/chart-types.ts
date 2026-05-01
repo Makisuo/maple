@@ -24,6 +24,12 @@ export interface BaseChartProps {
 	softMin?: number
 	softMax?: number
 	showPoints?: boolean
+	/**
+	 * Synchronizes hover state across charts that share the same id.
+	 * Pass the same id to every chart in a dashboard / detail page so the
+	 * tooltip cursor lines up to the same time bucket on hover.
+	 */
+	syncId?: string
 	pie?: {
 		donut?: boolean
 		innerRadius?: number

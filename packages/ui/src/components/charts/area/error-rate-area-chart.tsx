@@ -21,7 +21,14 @@ const baseChartConfig = {
 	errorRate: { label: "Error Rate", color: "var(--chart-error)" },
 } satisfies ChartConfig
 
-export function ErrorRateAreaChart({ data, className, legend, tooltip, referenceLines }: BaseChartProps) {
+export function ErrorRateAreaChart({
+	data,
+	className,
+	legend,
+	tooltip,
+	referenceLines,
+	syncId,
+}: BaseChartProps) {
 	const id = useId()
 	const gradientId = `errorRateGradient-${id.replace(/:/g, "")}`
 	const fadedGradientId = `errorRateGradientFaded-${id.replace(/:/g, "")}`
@@ -48,7 +55,7 @@ export function ErrorRateAreaChart({ data, className, legend, tooltip, reference
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<AreaChart data={processedData} accessibilityLayer>
+			<AreaChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
 				<defs>
 					<VerticalGradient id={gradientId} color="var(--color-errorRate)" />
 					{hasIncomplete && (

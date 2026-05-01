@@ -11,14 +11,14 @@ const chartConfig = {
 	mobile: { label: "Mobile", color: "var(--chart-2)" },
 } satisfies ChartConfig
 
-export function GradientAreaChart({ data, className }: BaseChartProps) {
+export function GradientAreaChart({ data, className, syncId }: BaseChartProps) {
 	const id = useId()
 	const desktopGradientId = `desktopGradient-${id.replace(/:/g, "")}`
 	const mobileGradientId = `mobileGradient-${id.replace(/:/g, "")}`
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<AreaChart data={data ?? areaTimeSeriesData} accessibilityLayer>
+			<AreaChart data={data ?? areaTimeSeriesData} accessibilityLayer syncId={syncId} syncMethod="value">
 				<defs>
 					<VerticalGradient id={desktopGradientId} color="var(--color-desktop)" />
 					<VerticalGradient id={mobileGradientId} color="var(--color-mobile)" />

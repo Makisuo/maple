@@ -27,9 +27,14 @@ interface MetricsGridProps {
 	items: MetricsGridItem[]
 	className?: string
 	waiting?: boolean
+	/**
+	 * If provided, every chart in the grid is given the same syncId so
+	 * hovering one chart highlights the same time bucket on the others.
+	 */
+	syncId?: string
 }
 
-export function MetricsGrid({ items, className, waiting }: MetricsGridProps) {
+export function MetricsGrid({ items, className, waiting, syncId }: MetricsGridProps) {
 	return (
 		<div
 			className={cn(
@@ -61,6 +66,7 @@ export function MetricsGrid({ items, className, waiting }: MetricsGridProps) {
 										tooltip={item.tooltip}
 										rateMode={item.rateMode}
 										referenceLines={item.referenceLines}
+										syncId={syncId}
 									/>
 								</Suspense>
 							)}

@@ -42,6 +42,7 @@ export function QueryBuilderAreaChart({
 	logScale,
 	softMin,
 	softMax,
+	syncId,
 }: BaseChartProps) {
 	const { chartData, seriesDefinitions } = React.useMemo(() => {
 		const source = Array.isArray(data) && data.length > 0 ? data : fallbackData
@@ -128,7 +129,7 @@ export function QueryBuilderAreaChart({
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
-			<AreaChart data={processedData} accessibilityLayer>
+			<AreaChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
 				<defs>
 					{seriesDefinitions.map((definition) => (
 						<linearGradient

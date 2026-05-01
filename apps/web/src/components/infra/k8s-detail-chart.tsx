@@ -82,9 +82,10 @@ interface ChartViewProps {
 	isStacked?: boolean
 	showThreshold?: boolean
 	waiting: boolean
+	syncId?: string
 }
 
-function ChartView({ rows, unit, isStacked, showThreshold, waiting }: ChartViewProps) {
+function ChartView({ rows, unit, isStacked, showThreshold, waiting, syncId }: ChartViewProps) {
 	const gradientPrefix = useId().replace(/:/g, "")
 	const { data, series } = useMemo(() => transformRows(rows), [rows])
 
@@ -163,7 +164,7 @@ function ChartView({ rows, unit, isStacked, showThreshold, waiting }: ChartViewP
 			</div>
 			<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
 				{isStacked ? (
-					<AreaChart data={data} margin={margin}>
+					<AreaChart data={data} margin={margin} syncId={syncId} syncMethod="value">
 						<defs>
 							{series.map((s) => {
 								const id = `${gradientPrefix}-${s.replace(/\W+/g, "_")}`
@@ -238,7 +239,7 @@ function ChartView({ rows, unit, isStacked, showThreshold, waiting }: ChartViewP
 						})}
 					</AreaChart>
 				) : (
-					<LineChart data={data} margin={margin}>
+					<LineChart data={data} margin={margin} syncId={syncId} syncMethod="value">
 						<CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
 						<XAxis
 							dataKey="time"
@@ -291,6 +292,7 @@ interface PodDetailChartProps {
 	startTime: string
 	endTime: string
 	bucketSeconds?: number
+	syncId?: string
 }
 
 export function PodDetailChart({
@@ -300,6 +302,7 @@ export function PodDetailChart({
 	startTime,
 	endTime,
 	bucketSeconds,
+	syncId,
 }: PodDetailChartProps) {
 	const result = useAtomValue(
 		podInfraTimeseriesResultAtom({
@@ -320,6 +323,7 @@ export function PodDetailChart({
 				unit={response.unit}
 				showThreshold={metric.startsWith("cpu_") || metric.startsWith("memory_")}
 				waiting={Boolean(holder.waiting)}
+				syncId={syncId}
 			/>
 		))
 		.render()
@@ -331,6 +335,7 @@ interface NodeDetailChartProps {
 	startTime: string
 	endTime: string
 	bucketSeconds?: number
+	syncId?: string
 }
 
 export function NodeDetailChart({
@@ -339,6 +344,7 @@ export function NodeDetailChart({
 	startTime,
 	endTime,
 	bucketSeconds,
+	syncId,
 }: NodeDetailChartProps) {
 	const result = useAtomValue(
 		nodeInfraTimeseriesResultAtom({
@@ -354,7 +360,12 @@ export function NodeDetailChart({
 			</div>
 		))
 		.onSuccess((response, holder) => (
-			<ChartView rows={response.data} unit={response.unit} waiting={Boolean(holder.waiting)} />
+			<ChartView
+				rows={response.data}
+				unit={response.unit}
+				waiting={Boolean(holder.waiting)}
+				syncId={syncId}
+			/>
 		))
 		.render()
 }
@@ -368,6 +379,7 @@ interface WorkloadDetailChartProps {
 	startTime: string
 	endTime: string
 	bucketSeconds?: number
+	syncId?: string
 }
 
 export function WorkloadDetailChart({
@@ -379,6 +391,7 @@ export function WorkloadDetailChart({
 	startTime,
 	endTime,
 	bucketSeconds,
+	syncId,
 }: WorkloadDetailChartProps) {
 	const result = useAtomValue(
 		workloadInfraTimeseriesResultAtom({
@@ -408,6 +421,7 @@ export function WorkloadDetailChart({
 				unit={response.unit}
 				showThreshold={metric === "cpu_limit" || metric === "memory_limit"}
 				waiting={Boolean(holder.waiting)}
+				syncId={syncId}
 			/>
 		))
 		.render()

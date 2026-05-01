@@ -275,7 +275,7 @@ function DashboardContent() {
 			}
 		>
 			<ServiceUsageCards startTime={effectiveStartTime} endTime={effectiveEndTime} />
-			<MetricsGrid items={metrics} className="mt-4" waiting={!!isWaiting} />
+			<MetricsGrid items={metrics} className="mt-4" waiting={!!isWaiting} syncId="home-overview" />
 		</DashboardLayout>
 	)
 }

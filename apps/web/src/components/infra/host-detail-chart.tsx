@@ -22,6 +22,7 @@ interface HostDetailChartProps {
 	startTime: string
 	endTime: string
 	bucketSeconds?: number
+	syncId?: string
 }
 
 function isoToLabel(iso: string): string {
@@ -73,6 +74,7 @@ export function HostDetailChart({
 	startTime,
 	endTime,
 	bucketSeconds,
+	syncId,
 }: HostDetailChartProps) {
 	const result = useAtomValue(
 		hostInfraTimeseriesResultAtom({
@@ -93,6 +95,7 @@ export function HostDetailChart({
 				unit={response.unit}
 				metric={metric}
 				waiting={Boolean(holder.waiting)}
+				syncId={syncId}
 			/>
 		))
 		.render()
@@ -103,9 +106,10 @@ interface ChartViewProps {
 	unit: "percent" | "load" | "bytes_per_second"
 	metric: HostInfraMetric
 	waiting: boolean
+	syncId?: string
 }
 
-function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
+function ChartView({ rows, unit, metric, waiting, syncId }: ChartViewProps) {
 	const gradientPrefix = useId().replace(/:/g, "")
 
 	const { data, series } = useMemo(() => transformRows(rows), [rows])
@@ -185,7 +189,7 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
 			</div>
 			<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
 				{isStacked ? (
-					<AreaChart data={data} margin={margin}>
+					<AreaChart data={data} margin={margin} syncId={syncId} syncMethod="value">
 						<defs>
 							{series.map((s) => {
 								const id = `${gradientPrefix}-${s.replace(/\W+/g, "_")}`
@@ -260,7 +264,7 @@ function ChartView({ rows, unit, metric, waiting }: ChartViewProps) {
 						})}
 					</AreaChart>
 				) : (
-					<LineChart data={data} margin={margin}>
+					<LineChart data={data} margin={margin} syncId={syncId} syncMethod="value">
 						<CartesianGrid strokeDasharray="2 4" stroke="var(--border)" vertical={false} />
 						<XAxis
 							dataKey="time"
@@ -314,6 +318,7 @@ interface MetricStripProps {
 	startTime: string
 	endTime: string
 	bucketSeconds?: number
+	syncId?: string
 }
 
 export function MetricStrip({
@@ -324,6 +329,7 @@ export function MetricStrip({
 	startTime,
 	endTime,
 	bucketSeconds,
+	syncId,
 }: MetricStripProps) {
 	return (
 		<section className="grid grid-cols-1 gap-0 border-t first:border-t-0 lg:grid-cols-[160px_1fr]">
@@ -340,6 +346,7 @@ export function MetricStrip({
 					startTime={startTime}
 					endTime={endTime}
 					bucketSeconds={bucketSeconds}
+					syncId={syncId}
 				/>
 			</div>
 		</section>
