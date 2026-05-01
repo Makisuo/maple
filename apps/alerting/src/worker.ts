@@ -14,8 +14,8 @@ import {
 	QueryEngineService,
 	TinybirdService,
 } from "@maple/api/alerting"
+import { Maple } from "@maple-dev/effect-sdk/server"
 import {
-	makeTelemetryLayer,
 	runScheduledEffect,
 	WorkerConfigProviderLive,
 	WorkerEnvironmentLive,
@@ -72,7 +72,15 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(BaseLive, TinybirdServiceLive, EmailServiceLive)),
 	)
 
-	const TelemetryLive = makeTelemetryLayer("alerting").pipe(Layer.provide(ConfigLive))
+	// CF-Workers-tuned export intervals: shutdown finalizer is the only flush
+	// path because the OTLP background fiber doesn't tick between invocations.
+	const TelemetryLive = Maple.layer({
+		serviceName: "alerting",
+		tracerExportInterval: "1 hour",
+		loggerExportInterval: "1 hour",
+		metricsExportInterval: "1 hour",
+		shutdownTimeout: "15 seconds",
+	}).pipe(Layer.provide(ConfigLive))
 
 	return Layer.mergeAll(AlertsServiceLive, DigestServiceLive, ErrorsServiceLive).pipe(
 		Layer.provideMerge(TelemetryLive),

@@ -119,7 +119,7 @@ export const runScheduledEffect = <A, E, R>(
 
 /**
  * Convenience: wrap `env` as an Effect `ConfigProvider` layer. Useful when
- * composing `makeTelemetryLayer` (which reads config) inside `makeLayer`.
+ * composing telemetry / config-reading layers inside `makeLayer`.
  */
 export const layerFromEnv = (env: Record<string, unknown>): Layer.Layer<never, never, never> =>
 	ConfigProvider.layer(ConfigProvider.fromUnknown(env))

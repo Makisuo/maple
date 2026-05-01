@@ -22,6 +22,7 @@
 		"@clerk/backend": "^2.30.1",
 		"@effect/opentelemetry": "catalog:effect",
 		"@libsql/client": "0.15.15",
+		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/db": "workspace:*",
 		"@maple/domain": "workspace:*",
 		"@maple/effect-cloudflare": "workspace:*",

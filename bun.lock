@@ -22,6 +22,7 @@
     "apps/alerting": {
       "name": "@maple/alerting",
       "dependencies": {
+        "@maple-dev/effect-sdk": "workspace:*",
         "@maple/api": "workspace:*",
         "@maple/db": "workspace:*",
         "@maple/domain": "workspace:*",
@@ -43,6 +44,7 @@
         "@clickhouse/client-web": "catalog:clickhouse",
         "@effect/opentelemetry": "catalog:effect",
         "@libsql/client": "0.15.15",
+        "@maple-dev/effect-sdk": "workspace:*",
         "@maple/db": "workspace:*",
         "@maple/domain": "workspace:*",
         "@maple/effect-cloudflare": "workspace:*",
@@ -279,7 +281,7 @@
     },
     "lib/effect-sdk": {
       "name": "@maple-dev/effect-sdk",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "std-env": "^4.0.0",
       },

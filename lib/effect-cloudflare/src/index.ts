@@ -16,11 +16,6 @@ export {
 } from "./runtime.ts"
 
 // ---------------------------------------------------------------------------
-// Telemetry (maple-specific OTLP layer)
-// ---------------------------------------------------------------------------
-export { logTelemetryConfigOnce, type MakeTelemetryLayerOptions, makeTelemetryLayer } from "./telemetry.ts"
-
-// ---------------------------------------------------------------------------
 // Worker env + config (from alchemy-effect)
 // ---------------------------------------------------------------------------
 export { default as cloudflareWorkers } from "./cloudflare-workers.ts"

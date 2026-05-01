@@ -9,6 +9,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/api": "workspace:*",
 		"@maple/db": "workspace:*",
 		"@maple/domain": "workspace:*",

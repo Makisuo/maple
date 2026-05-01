@@ -1,6 +1,5 @@
+import { Maple } from "@maple-dev/effect-sdk/server"
 import {
-	logTelemetryConfigOnce,
-	makeTelemetryLayer,
 	WorkerConfigProviderLive,
 	WorkerEnvironmentLive,
 	withRequestRuntime,
@@ -73,10 +72,20 @@ const getHandler = (env: Record<string, unknown>) => {
 	return built
 }
 
-const makeRequestTelemetryLayer = (env: Record<string, unknown>) => {
-	logTelemetryConfigOnce(env)
-	return makeTelemetryLayer("maple-api").pipe(Layer.provide(WorkerConfigProviderLive))
-}
+// Telemetry tuned for CF Workers: long export intervals so the shutdown
+// finalizer (bounded by `shutdownTimeout`) is the only flush path — the OTLP
+// background fiber doesn't tick between Worker invocations. Resource attrs
+// (cloud.platform, process.runtime.name, etc.) are auto-stamped by the SDK
+// from std-env. `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` /
+// `COMMIT_SHA` are read by the SDK via the worker's ConfigProvider.
+const makeRequestTelemetryLayer = (_env: Record<string, unknown>) =>
+	Maple.layer({
+		serviceName: "maple-api",
+		tracerExportInterval: "1 hour",
+		loggerExportInterval: "1 hour",
+		metricsExportInterval: "1 hour",
+		shutdownTimeout: "15 seconds",
+	}).pipe(Layer.provide(WorkerConfigProviderLive))
 
 const isMcpPost = (request: Request): boolean => {
 	if (request.method !== "POST") return false
