@@ -108,11 +108,14 @@ memoryLimiter:
     limitMib: 3000
     spikeLimitMib: 500
 
-# batch — collects records before forwarding. The default is OK for most
-# workloads; raise `sendBatchSize` if you have very high cardinality.
+# batch — collects records before forwarding. Defaults match the upstream
+# ClickHouse exporter recommendation of ~10k rows per insert / ≤1 req/sec to
+# avoid MergeTree part inflation. `sendBatchMaxSize: 0` leaves batches
+# unbounded so traffic spikes can flush larger inserts.
 batch:
-    sendBatchSize: 2000
-    timeout: 10s
+    sendBatchSize: 10000
+    sendBatchMaxSize: 0
+    timeout: 5s
 
 # ----- workload -----
 

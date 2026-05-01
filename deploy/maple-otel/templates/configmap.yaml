@@ -60,6 +60,7 @@ data:
       {{- end }}
       batch:
         send_batch_size: {{ .Values.batch.sendBatchSize }}
+        send_batch_max_size: {{ .Values.batch.sendBatchMaxSize | default 0 }}
         timeout: {{ .Values.batch.timeout }}
 
     exporters:

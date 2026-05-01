@@ -10,7 +10,7 @@ description: |
     metrics, pod logs, auto-instrumentation operator), use `maple-k8s-infra`.
 type: application
 # Chart version — bump on every chart change.
-version: 0.1.0
+version: 0.2.0
 # App version — the otel-collector-maple image tag this chart defaults to.
 # Keep in lockstep with `image.tag` in values.yaml.
 appVersion: "0.1.5"
