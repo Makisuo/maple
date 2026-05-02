@@ -52,7 +52,7 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 			...optionalPlain("MAPLE_ENDPOINT"),
 			...optionalPlain("MAPLE_ENVIRONMENT", formatMapleStage(stage)),
 			...optionalPlain("COMMIT_SHA"),
-			MAPLE_INGEST_KEY: alchemy.secret(requireEnv("MAPLE_INGEST_KEY")),
+			MAPLE_INGEST_KEY: alchemy.secret(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 			...optionalSecret("MAPLE_ROOT_PASSWORD"),
 			...optionalSecret("CLERK_SECRET_KEY"),
 			...optionalPlain("CLERK_PUBLISHABLE_KEY"),
