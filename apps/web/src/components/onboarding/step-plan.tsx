@@ -3,9 +3,18 @@ import { motion } from "motion/react"
 import { useCustomer } from "autumn-js/react"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
 import { PricingCards } from "@/components/settings/pricing-cards"
-import { PulseIcon } from "@/components/icons"
+import { Button } from "@maple/ui/components/ui/button"
+import { ArrowLeftIcon, PulseIcon } from "@/components/icons"
 
-export function StepPlan({ isComplete, onComplete }: { isComplete: boolean; onComplete: () => void }) {
+export function StepPlan({
+	isComplete,
+	onComplete,
+	onBack,
+}: {
+	isComplete: boolean
+	onComplete: () => void
+	onBack?: () => void
+}) {
 	const { data: customer, isLoading } = useCustomer()
 	const selectedPlan = hasSelectedPlan(customer)
 
@@ -23,24 +32,34 @@ export function StepPlan({ isComplete, onComplete }: { isComplete: boolean; onCo
 				transition={{ duration: 0.3 }}
 				className="w-full max-w-5xl"
 			>
-				{/* Heading */}
 				<div className="text-center mb-10">
 					<span className="text-[11px] font-semibold uppercase tracking-widest text-primary">
-						Almost there
+						Pick a plan
 					</span>
-					<h2 className="text-3xl font-semibold tracking-tight mt-2">Start your free trial</h2>
+					<h2 className="text-3xl font-semibold tracking-tight mt-2">
+						Pick a plan to keep going
+					</h2>
 					<p className="text-muted-foreground text-[15px] mt-3 max-w-lg mx-auto">
-						Try any plan free for 30 days. No credit card required. Downgrade anytime.
+						Start a 30-day free trial — we'll save your card now and won't charge until day 30.
+						Cancel anytime from settings.
 					</p>
 				</div>
 
-				{/* Pricing Cards */}
 				{isLoading ? (
 					<div className="flex items-center justify-center py-12">
 						<PulseIcon className="animate-spin text-muted-foreground" size={24} />
 					</div>
 				) : (
 					<PricingCards />
+				)}
+
+				{onBack && (
+					<div className="mt-8 flex items-center justify-start">
+						<Button variant="ghost" onClick={onBack} className="gap-2">
+							<ArrowLeftIcon size={14} />
+							Back
+						</Button>
+					</div>
 				)}
 			</motion.div>
 		</div>

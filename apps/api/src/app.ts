@@ -10,6 +10,7 @@ import { HttpApiKeysLive } from "./routes/api-keys.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpCloudflareLogpushLive } from "./routes/cloudflare-logpush.http"
 import { HttpDashboardsLive } from "./routes/dashboards.http"
+import { HttpDemoLive } from "./routes/demo.http"
 import { HttpDigestLive } from "./routes/digest.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "./routes/integrations.http"
 import { HttpIngestKeysLive } from "./routes/ingest-keys.http"
@@ -29,6 +30,7 @@ import { AuthService } from "./services/AuthService"
 import { AuthorizationLive } from "./services/AuthorizationLive"
 import { CloudflareLogpushService } from "./services/CloudflareLogpushService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
+import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
 import { EdgeCacheService } from "./services/EdgeCacheService"
 import { EmailService } from "./services/EmailService"
@@ -65,6 +67,8 @@ export const CoreServicesLive = Layer.mergeAll(
 	OrgClickHouseSettingsService.layer,
 	ScrapeTargetsService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
+
+export const DemoServiceLive = DemoService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
 export const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
@@ -103,6 +107,7 @@ export const MainLive = Layer.mergeAll(
 	AlertsServiceLive,
 	ErrorsServiceLive,
 	DigestServiceLive,
+	DemoServiceLive,
 )
 
 export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
@@ -113,6 +118,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpErrorsLive),
 	Layer.provide(HttpCloudflareLogpushLive),
 	Layer.provide(HttpDashboardsLive),
+	Layer.provide(HttpDemoLive),
 	Layer.provide(HttpDigestLive),
 	Layer.provide(HttpIngestKeysLive),
 	Layer.provide(HttpIntegrationsLive),

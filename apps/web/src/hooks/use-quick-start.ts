@@ -1,7 +1,13 @@
 import { useCallback } from "react"
 import { useAtom } from "@/lib/effect-atom"
 import type { FrameworkId } from "@/components/quick-start/sdk-snippets"
-import { quickStartAtomFamily, STEP_IDS, type StepId } from "@/atoms/quick-start-atoms"
+import {
+	DEFAULT_QUICK_START_STATE,
+	quickStartAtomFamily,
+	STEP_IDS,
+	type QualifyAnswers,
+	type StepId,
+} from "@/atoms/quick-start-atoms"
 
 export type { StepId }
 
@@ -19,10 +25,12 @@ export function useQuickStart(orgId?: string | null) {
 	const completeStep = useCallback(
 		(id: StepId) => {
 			setState((prev) => {
-				// Auto-advance to next step if not complete
 				const currentIndex = STEP_IDS.indexOf(id)
+				const onThisStep = prev.activeStep === id
 				const nextStep =
-					currentIndex < STEP_IDS.length - 1 ? STEP_IDS[currentIndex + 1] : prev.activeStep
+					onThisStep && currentIndex < STEP_IDS.length - 1
+						? STEP_IDS[currentIndex + 1]
+						: prev.activeStep
 
 				return {
 					...prev,
@@ -51,6 +59,35 @@ export function useQuickStart(orgId?: string | null) {
 		[setState],
 	)
 
+	const setQualifyAnswers = useCallback(
+		(answers: QualifyAnswers) => {
+			setState((prev) => ({ ...prev, qualifyAnswers: answers }))
+		},
+		[setState],
+	)
+
+	const setDemoDataRequested = useCallback(
+		(requested: boolean) => {
+			setState((prev) => ({ ...prev, demoDataRequested: requested }))
+		},
+		[setState],
+	)
+
+	const dismissChecklist = useCallback(() => {
+		setState((prev) => ({ ...prev, checklistDismissed: true }))
+	}, [setState])
+
+	const setChecklistExpanded = useCallback(
+		(expanded: boolean) => {
+			setState((prev) => ({ ...prev, checklistExpanded: expanded }))
+		},
+		[setState],
+	)
+
+	const dismissFirstActionHint = useCallback(() => {
+		setState((prev) => ({ ...prev, firstActionHintDismissed: true }))
+	}, [setState])
+
 	const dismiss = useCallback(() => {
 		setState((prev) => ({ ...prev, dismissed: true }))
 	}, [setState])
@@ -60,12 +97,7 @@ export function useQuickStart(orgId?: string | null) {
 	}, [setState])
 
 	const reset = useCallback(() => {
-		setState({
-			completedSteps: {},
-			dismissed: false,
-			selectedFramework: null,
-			activeStep: "welcome",
-		})
+		setState(DEFAULT_QUICK_START_STATE)
 	}, [setState])
 
 	const isStepComplete = useCallback((id: StepId) => !!state.completedSteps[id], [state.completedSteps])
@@ -92,5 +124,15 @@ export function useQuickStart(orgId?: string | null) {
 		isComplete,
 		selectedFramework: state.selectedFramework as FrameworkId | null,
 		setSelectedFramework,
+		qualifyAnswers: state.qualifyAnswers,
+		setQualifyAnswers,
+		demoDataRequested: state.demoDataRequested,
+		setDemoDataRequested,
+		checklistDismissed: state.checklistDismissed,
+		dismissChecklist,
+		checklistExpanded: state.checklistExpanded,
+		setChecklistExpanded,
+		firstActionHintDismissed: state.firstActionHintDismissed,
+		dismissFirstActionHint,
 	}
 }

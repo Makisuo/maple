@@ -449,7 +449,7 @@ export function PricingCards() {
 									{loadingPlanId === plan.id ? (
 										<Spinner className="size-4" />
 									) : trialAvailable && !btn.disabled ? (
-										`Start ${plan.freeTrial?.durationLength}-day free trial`
+										`Start trial · card required`
 									) : isActive && isTrialing ? (
 										"Trialing"
 									) : (
@@ -458,8 +458,8 @@ export function PricingCards() {
 								</Button>
 								{trialAvailable && !btn.disabled && (
 									<p className="text-[11px] text-muted-foreground text-center">
-										$0 due today · You won't be charged for{" "}
-										{plan.freeTrial?.durationLength} days
+										$0 due today · We won't charge for{" "}
+										{plan.freeTrial?.durationLength} days · Cancel anytime
 									</p>
 								)}
 							</CardFooter>

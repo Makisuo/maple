@@ -12,6 +12,8 @@ import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { ServiceUsageCards } from "@/components/dashboard/service-usage-cards"
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
+import { SetupChecklist } from "@/components/dashboard/setup-checklist"
+import { FirstActionHint } from "@/components/dashboard/first-action-hint"
 import type { ChartLegendMode, ChartTooltipMode } from "@maple/ui/components/charts/_shared/chart-types"
 import {
 	getCustomChartTimeSeriesResultAtom,
@@ -274,6 +276,8 @@ function DashboardContent() {
 				</div>
 			}
 		>
+			<FirstActionHint />
+			<SetupChecklist />
 			<ServiceUsageCards startTime={effectiveStartTime} endTime={effectiveEndTime} />
 			<MetricsGrid items={metrics} className="mt-4" waiting={!!isWaiting} syncId="home-overview" />
 		</DashboardLayout>
