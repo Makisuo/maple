@@ -19,6 +19,10 @@ export default defineConfig(({ mode }) => {
 		process.env.VITE_CLERK_PUBLISHABLE_KEY = env.CLERK_PUBLISHABLE_KEY?.trim() || ""
 	}
 
+	if (!process.env.VITE_MAPLE_INGEST_KEY) {
+		process.env.VITE_MAPLE_INGEST_KEY = env.MAPLE_OTEL_PUBLIC_INGEST_KEY?.trim() || ""
+	}
+
 	// Vite's loadEnv gives `.env*` files higher precedence than `process.env` for
 	// VITE_* keys. During a deploy build we inject VITE_* via process.env, so
 	// override the Vite default with `define` to make process.env win.
@@ -28,6 +32,7 @@ export default defineConfig(({ mode }) => {
 		"VITE_CHAT_AGENT_URL",
 		"VITE_MAPLE_AUTH_MODE",
 		"VITE_CLERK_PUBLISHABLE_KEY",
+		"VITE_MAPLE_INGEST_KEY",
 	] as const
 	const define: Record<string, string> = {}
 	for (const key of overrideKeys) {
