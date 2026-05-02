@@ -1,7 +1,7 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { WorkerConfigProviderLive, WorkerEnvironmentLive } from "@maple/effect-cloudflare"
 import { Context, FileSystem, Layer, Path } from "effect"
-import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
+import { HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
@@ -36,13 +36,6 @@ const WorkerPlatformLive = Layer.mergeAll(
 	WorkerHttpPlatformLive,
 )
 
-// POST /mcp hangs indefinitely when `toWebHandler` is called with no `middleware`
-// option (Cloudflare 1101 worker timeout in prod, miniflare "worker hung" locally).
-// Providing ANY middleware — even a pass-through — unsticks it. Suspected Effect
-// RpcServer / HttpRouter scope-propagation bug when only the default logger is
-// installed. Remove this once upstream fixes it.
-const passthroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
-
 // Construct telemetry once at module scope — `layer` is stable, `flush(env)`
 // resolves env lazily on first call. Including `telemetry.layer` in the
 // handler's layer composition is the critical bit: the Tracer reference must
@@ -52,6 +45,12 @@ const telemetry = MapleCloudflareSDK.make({
 	dropSpanNames: ["McpServer/Notifications."],
 })
 
+// `disableLogger: true` skips Effect's default `HttpMiddleware.logger`. When it
+// wraps the MCP route the RpcServer's response queue never closes, so the
+// Promise from `toWebHandler` never resolves (Cloudflare 1101 in prod,
+// miniflare "worker hung" locally). The upstream Effect McpServer test uses
+// the same flag. Application logs still flow through the OTLP logger installed
+// by `telemetry.layer`.
 const buildHandler = () =>
 	HttpRouter.toWebHandler(
 		AllRoutes.pipe(
@@ -64,7 +63,7 @@ const buildHandler = () =>
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLive),
 		),
-		{ middleware: passthroughMiddleware },
+		{ disableLogger: true },
 	)
 
 // Single isolate-wide handler — `toWebHandler` builds its own ManagedRuntime
