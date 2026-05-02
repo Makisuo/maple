@@ -35,5 +35,9 @@
 		"tailwind-merge": "catalog:tailwind",
 		"tailwindcss": "catalog:tailwind",
 		"tw-animate-css": "catalog:tailwind"
+	},
+	"devDependencies": {
+		"@astrojs/check": "^0.9.9",
+		"typescript": "^6.0.3"
 	}
 }

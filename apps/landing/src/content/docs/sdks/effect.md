@@ -1,18 +1,22 @@
 ---
-title: "Effect Instrumentation"
-description: "Instrument an Effect application with the Maple SDK to send traces, logs, and metrics."
-group: "Guides"
-order: 4
+title: "Quick start"
+description: "OpenTelemetry traces, logs, and metrics for Effect applications across Node.js, Bun, Deno, browsers, and Cloudflare Workers."
+group: "Effect SDK"
+order: 2
+sdk: "effect"
 ---
 
-The `@maple-dev/effect-sdk` provides a pre-configured Effect Layer that sets up OpenTelemetry traces, logs, and metrics for Maple. It auto-detects platform environment variables and returns a no-op layer when no endpoint is configured, making it safe for local development.
+`@maple-dev/effect-sdk` provides a pre-configured Effect Layer that sets up OpenTelemetry traces, logs, and metrics for Maple. It wraps Effect's built-in `Otlp.layerJson` exporter, fills in resource attributes from the runtime, and returns a no-op layer when no endpoint is configured — so the same code runs locally without exporting telemetry.
 
-## Prerequisites
+<div class="flex flex-wrap gap-2 mb-8 not-prose">
+    <span class="text-[10px] uppercase tracking-wider px-2 py-1 border border-border text-fg-muted">Node.js</span>
+    <span class="text-[10px] uppercase tracking-wider px-2 py-1 border border-border text-fg-muted">Bun</span>
+    <span class="text-[10px] uppercase tracking-wider px-2 py-1 border border-border text-fg-muted">Deno</span>
+    <span class="text-[10px] uppercase tracking-wider px-2 py-1 border border-border text-fg-muted">Browsers</span>
+    <span class="text-[10px] uppercase tracking-wider px-2 py-1 border border-border text-fg-muted">Cloudflare Workers</span>
+</div>
 
-- Effect 4+ (or Effect 3 — see below)
-- A Maple project with an API key
-
-## Install Dependencies
+## Install
 
 **Effect 4+**
 
@@ -28,41 +32,13 @@ npm install @maple-dev/effect-sdk@effect-v3 effect @effect/platform @effect/open
 
 > The API and import paths are identical between versions. The only differences are the install command and that duration config types use `Duration.DurationInput` instead of `Duration.Input` in Effect 3.
 
-## Server Setup
+## Pick your platform
 
-```typescript
-import { Maple } from "@maple-dev/effect-sdk"
-import { Effect } from "effect"
+The SDK ships three platform-specific entry points. Each one has its own setup story:
 
-const TracerLive = Maple.layer({
-	serviceName: "my-effect-app",
-})
-
-const program = Effect.gen(function* () {
-	yield* Effect.log("Hello from Effect!")
-}).pipe(Effect.withSpan("hello-maple"))
-
-Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
-```
-
-Set `MAPLE_ENDPOINT` and `MAPLE_INGEST_KEY` in your environment and the SDK picks them up automatically. If `MAPLE_ENDPOINT` is not set, the layer is a no-op -- your app runs without exporting telemetry.
-
-## Client Setup
-
-For browser environments, use the client import. All configuration must be provided explicitly since browsers can't read environment variables:
-
-```typescript
-import { Maple } from "@maple-dev/effect-sdk/client"
-import { Effect } from "effect"
-
-const TracerLive = Maple.layer({
-	serviceName: "my-frontend",
-	endpoint: "https://ingest.maple.dev",
-	ingestKey: "maple_pk_...",
-})
-```
-
-The client layer automatically captures `browser.user_agent`, `browser.language`, and `browser.timezone` as resource attributes.
+- [**Server**](/docs/sdks/effect-server) — Node.js, Bun, Deno. Background-export fiber, env-var auto-detection, graceful shutdown.
+- [**Browser**](/docs/sdks/effect-client) — single-page apps. Explicit config (no env vars), browser metadata baked into resource attributes.
+- [**Cloudflare Workers**](/docs/sdks/effect-cloudflare) — short-lived isolates. Manual `flush()` in `ctx.waitUntil`, lazy env resolution, in-isolate buffering.
 
 ## Custom Spans
 
@@ -84,7 +60,7 @@ Setting `peer.service` on outgoing calls makes them visible on Maple's [service 
 
 ## Log Correlation
 
-`Effect.log` automatically includes trace context when called inside a span -- no additional setup needed:
+`Effect.log` automatically includes trace context when called inside a span — no additional setup needed:
 
 ```typescript
 const program = Effect.gen(function* () {
@@ -98,7 +74,7 @@ Logs emitted inside spans are correlated with the active trace in the Maple dash
 
 ## Configuration Reference
 
-All options for `Maple.layer()`:
+All options for `Maple.layer()` (server and browser entry points). The Cloudflare entry point accepts a slightly different shape — see the [Cloudflare page](/docs/sdks/effect-cloudflare) for its config table.
 
 | Option                  | Type                      | Required                   | Description                                                          |
 | ----------------------- | ------------------------- | -------------------------- | -------------------------------------------------------------------- |
@@ -115,40 +91,3 @@ All options for `Maple.layer()`:
 | `shutdownTimeout`       | `Duration.Input`          | No                         | Graceful shutdown timeout                                            |
 
 > In Effect 3, duration fields use the `Duration.DurationInput` type instead of `Duration.Input`.
-
-## Environment Variable Auto-Detection
-
-The server layer automatically resolves configuration from environment variables:
-
-**Ingest endpoint:** `MAPLE_ENDPOINT`
-
-**Ingest key:** `MAPLE_INGEST_KEY`
-
-**Commit SHA** (first match wins):
-
-1. `COMMIT_SHA`
-2. `RAILWAY_GIT_COMMIT_SHA`
-3. `VERCEL_GIT_COMMIT_SHA`
-4. `CF_PAGES_COMMIT_SHA`
-5. `RENDER_GIT_COMMIT`
-
-**Deployment environment** (first match wins):
-
-1. `MAPLE_ENVIRONMENT`
-2. `RAILWAY_ENVIRONMENT`
-3. `VERCEL_ENV`
-4. `NODE_ENV`
-
-The SDK also auto-detects **runtime** (Node.js, Bun, Deno) and **cloud provider** (Railway, Vercel, Cloudflare, etc.) and includes them as `maple.runtime` and `maple.provider` resource attributes.
-
-## Verify
-
-1. Start your application
-2. Generate some traffic (send a request, trigger an operation)
-3. Open the Maple dashboard and check that traces appear in the traces view
-
-If traces aren't appearing, verify:
-
-- `MAPLE_ENDPOINT` is set correctly
-- `MAPLE_INGEST_KEY` is valid
-- Your application can reach `ingest.maple.dev` (or your self-hosted URL)

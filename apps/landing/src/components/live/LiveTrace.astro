@@ -1,0 +1,153 @@
+---
+/**
+ * LiveTrace — deeper version of the waterfall, with a side-panel inspector
+ * that shows span attributes on hover. The animation reuses the same loop
+ * as LiveWaterfall (live-waterfall.client.ts) but adds a hover handler that
+ * routes attributes into the inspector.
+ */
+interface SpanRow {
+	id: string;
+	service: string;
+	op: string;
+	startMs: number;
+	durationMs: number;
+	colorVar: string;
+	depth: number;
+	attrs: Record<string, string>;
+}
+
+const rows: SpanRow[] = [
+	{
+		id: "s1", service: "edge", op: "GET /api/orders/8421",
+		startMs: 0, durationMs: 412, colorVar: "var(--service-1)", depth: 0,
+		attrs: {
+			"http.route": "/api/orders/:id",
+			"http.status_code": "200",
+			"client.address": "203.0.113.42",
+			"region": "iad",
+		},
+	},
+	{
+		id: "s2", service: "orders-api", op: "load_order",
+		startMs: 24, durationMs: 366, colorVar: "var(--service-3)", depth: 1,
+		attrs: {
+			"order.id": "8421",
+			"user.tier": "pro",
+			"feature.flag.fast_path": "false",
+		},
+	},
+	{
+		id: "s3", service: "auth", op: "verify_jwt",
+		startMs: 32, durationMs: 38, colorVar: "var(--service-6)", depth: 2,
+		attrs: { "auth.scheme": "Bearer", "jwt.iss": "auth.maple.dev" },
+	},
+	{
+		id: "s4", service: "orders-api", op: "fetch_line_items",
+		startMs: 80, durationMs: 184, colorVar: "var(--service-3)", depth: 2,
+		attrs: { "db.system": "postgres", "db.statement.fingerprint": "f8a91" },
+	},
+	{
+		id: "s5", service: "postgres", op: "SELECT * FROM line_items",
+		startMs: 96, durationMs: 158, colorVar: "var(--service-15)", depth: 3,
+		attrs: {
+			"db.statement": "SELECT * FROM line_items WHERE order_id = $1",
+			"db.rows": "12",
+			"db.duration_ms": "158",
+		},
+	},
+	{
+		id: "s6", service: "shipping", op: "rate_quote",
+		startMs: 270, durationMs: 96, colorVar: "var(--service-7)", depth: 2,
+		attrs: { "carrier": "ups", "shipping.zone": "domestic" },
+	},
+	{
+		id: "s7", service: "fedex-api", op: "POST /rates",
+		startMs: 288, durationMs: 72, colorVar: "var(--service-9)", depth: 3,
+		attrs: { "http.status_code": "200", "external": "true" },
+	},
+	{
+		id: "s8", service: "redis", op: "SET order:8421:rate",
+		startMs: 376, durationMs: 14, colorVar: "var(--service-2)", depth: 2,
+		attrs: { "cache.op": "set", "cache.ttl_s": "3600" },
+	},
+];
+
+const totalMs = 412;
+---
+
+<div class="grid lg:grid-cols-[1fr_280px] gap-4">
+	<div class="live-frame" data-live-waterfall data-trace-id="lt" data-total={totalMs}>
+		<div class="live-frame__head">
+			<span>trace 9f3c · order fetch</span>
+			<span class="live-frame__live">
+				<span class="live-frame__live-dot"></span>
+				LIVE
+			</span>
+		</div>
+		<div class="px-1 py-2">
+			{rows.map((r, i) => {
+				const startPct = (r.startMs / totalMs) * 100;
+				const widthPct = (r.durationMs / totalMs) * 100;
+				const attrJson = JSON.stringify(r.attrs);
+				return (
+					<div
+						class="waterfall-row hover:bg-bg-elevated/40 cursor-default transition-colors"
+						data-row-index={i}
+						data-span-id={r.id}
+						data-service={r.service}
+						data-op={r.op}
+						data-duration={r.durationMs}
+						data-attrs={attrJson}
+					>
+						<span class="span-name truncate" style={`padding-left:${r.depth * 8}px`}>
+							<span style={`color:${r.colorVar}`}>●</span>&nbsp;{r.service}
+						</span>
+						<span class="text-fg-muted truncate">{r.op}</span>
+						<span class="span-bar-track">
+							<span
+								class="span-bar"
+								style={`left:${startPct}%; width:${widthPct}%; --service-color:${r.colorVar}; --bar-progress:1;`}
+							></span>
+						</span>
+						<span class="text-fg-muted text-right tabular-nums">{r.durationMs}ms</span>
+					</div>
+				);
+			})}
+		</div>
+		<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
+			<span>{rows.length} spans · {totalMs}ms wall</span>
+			<span>queried 12.8B rows in 198ms</span>
+		</div>
+	</div>
+
+	<aside class="live-frame" data-trace-inspector="lt">
+		<div class="live-frame__head">
+			<span>span inspector</span>
+			<span class="text-fg-muted normal-case tracking-normal">hover a row</span>
+		</div>
+		<div class="p-3.5 text-[12px]">
+			<div class="text-fg font-medium" data-inspector-title>postgres · SELECT * FROM line_items</div>
+			<div class="text-fg-muted mt-0.5" data-inspector-duration>158ms</div>
+			<dl class="mt-4 space-y-2" data-inspector-attrs>
+				<div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+					<dt class="text-fg-muted">db.system</dt><dd class="text-fg break-all">postgres</dd>
+					<dt class="text-fg-muted">db.rows</dt><dd class="text-fg">12</dd>
+					<dt class="text-fg-muted">db.duration_ms</dt><dd class="text-fg">158</dd>
+				</div>
+			</dl>
+		</div>
+	</aside>
+</div>
+
+<script>
+	import { startWaterfall } from "./live-waterfall.client";
+	import { wireInspector } from "./live-trace-inspector.client";
+
+	const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	if (!reduced) {
+		document.querySelectorAll<HTMLElement>("[data-trace-id='lt']").forEach((el) => {
+			startWaterfall(el);
+		});
+	}
+	wireInspector("lt");
+</script>

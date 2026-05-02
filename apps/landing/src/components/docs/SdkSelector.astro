@@ -1,0 +1,121 @@
+---
+import EffectLogo from "../icons/EffectLogo.astro";
+
+type SdkIcon = "effect" | "letter";
+
+interface Sdk {
+    id: string;
+    name: string;
+    icon: SdkIcon;
+    letter?: string;
+    available: boolean;
+    note?: string;
+}
+
+const sdks: Sdk[] = [
+    { id: "effect", name: "Effect", icon: "effect", available: true },
+    { id: "node", name: "Node.js", icon: "letter", letter: "N", available: false, note: "Coming soon" },
+    { id: "python", name: "Python", icon: "letter", letter: "Py", available: false, note: "Coming soon" },
+];
+
+interface Props {
+    activeSdk?: string;
+}
+
+const { activeSdk = "effect" } = Astro.props;
+const current = sdks.find((s) => s.id === activeSdk) ?? sdks[0];
+---
+
+<div class="mb-5">
+    <div class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-2 px-2">
+        Select your SDK
+    </div>
+    <details class="group relative sdk-selector">
+        <summary class="flex items-center justify-between gap-2 px-2.5 py-2 border border-border bg-bg hover:border-fg-muted/50 cursor-pointer transition-colors list-none [&::-webkit-details-marker]:hidden">
+            <span class="flex items-center gap-2.5 min-w-0">
+                <span class="w-5 h-5 shrink-0 bg-accent flex items-center justify-center text-accent-foreground">
+                    {current.icon === "effect" ? (
+                        <EffectLogo class="w-3 h-3" />
+                    ) : (
+                        <span class="text-[9px] font-bold">{current.letter}</span>
+                    )}
+                </span>
+                <span class="text-xs text-fg font-medium truncate">{current.name}</span>
+            </span>
+            <svg class="w-3 h-3 text-fg-muted transition-transform group-open:rotate-180 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M3 5l3 3 3-3" />
+            </svg>
+        </summary>
+        <div class="absolute z-30 left-0 right-0 mt-1 border border-border bg-bg shadow-lg">
+            <ul class="py-1">
+                {sdks.map((sdk) => (
+                    <li>
+                        {sdk.available ? (
+                            <button
+                                type="button"
+                                data-sdk-option
+                                data-sdk-id={sdk.id}
+                                class:list={[
+                                    "w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left transition-colors",
+                                    sdk.id === current.id
+                                        ? "bg-accent/5 text-accent"
+                                        : "text-fg hover:bg-fg/5",
+                                ]}
+                            >
+                                <span class="flex items-center gap-2.5 min-w-0">
+                                    <span class="w-5 h-5 shrink-0 bg-accent flex items-center justify-center text-accent-foreground">
+                                        {sdk.icon === "effect" ? (
+                                            <EffectLogo class="w-3 h-3" />
+                                        ) : (
+                                            <span class="text-[9px] font-bold">{sdk.letter}</span>
+                                        )}
+                                    </span>
+                                    <span class="text-xs font-medium truncate">{sdk.name}</span>
+                                </span>
+                                {sdk.id === current.id && (
+                                    <svg class="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <path d="M2.5 6l2.5 2.5 4.5-5" />
+                                    </svg>
+                                )}
+                            </button>
+                        ) : (
+                            <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 text-fg-muted/60 cursor-not-allowed">
+                                <span class="flex items-center gap-2.5 min-w-0">
+                                    <span class="w-5 h-5 shrink-0 border border-border flex items-center justify-center text-fg-muted/60 text-[9px] font-bold">
+                                        {sdk.letter}
+                                    </span>
+                                    <span class="text-xs truncate">{sdk.name}</span>
+                                </span>
+                                <span class="text-[9px] uppercase tracking-wider shrink-0">
+                                    {sdk.note}
+                                </span>
+                            </div>
+                        )}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    </details>
+</div>
+
+<script is:inline>
+    document.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const option = target.closest("[data-sdk-option]");
+        if (option) {
+            const id = option.getAttribute("data-sdk-id");
+            if (id) {
+                try {
+                    localStorage.setItem("maple.docs.sdk", id);
+                } catch {}
+            }
+            const details = option.closest("details");
+            if (details) details.removeAttribute("open");
+            return;
+        }
+        document.querySelectorAll("details.sdk-selector[open]").forEach((d) => {
+            if (!d.contains(target)) d.removeAttribute("open");
+        });
+    });
+</script>

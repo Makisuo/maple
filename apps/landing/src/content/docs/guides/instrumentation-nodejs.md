@@ -156,7 +156,7 @@ export default {
 
 ## Effect
 
-If you're using Effect, see the dedicated [Effect Instrumentation](/docs/guides/instrumentation-effect) guide.
+If you're using Effect, see the dedicated [Effect SDK](/docs/sdks/effect) -- it's the official Maple library for Effect apps.
 
 ## Verify
 

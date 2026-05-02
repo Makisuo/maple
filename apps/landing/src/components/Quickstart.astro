@@ -1,0 +1,60 @@
+---
+/**
+ * Quickstart + bookend CTA.
+ * Three real shell commands stacked vertically (numbered, no card grid),
+ * then a drenched-amber bookend with the primary CTA.
+ */
+import * as m from "../paraglide/messages";
+
+const steps = [
+	{ n: "01", label: m.start_step_1_label(), code: `curl -sSL https://maple.dev/install.sh | sh` },
+	{ n: "02", label: m.start_step_2_label(), code: `export OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.maple.dev\nexport OTEL_EXPORTER_OTLP_HEADERS=\"authorization=Bearer $MAPLE_TOKEN\"` },
+	{ n: "03", label: m.start_step_3_label(), code: `node -r @opentelemetry/auto-instrumentations-node/register server.js` },
+];
+---
+
+<section class="relative bg-bg">
+	<div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+		<div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-4">{m.start_eyebrow()}</div>
+		<h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.05] tracking-tight max-w-3xl">
+			{m.start_title()}
+		</h2>
+		<p class="mt-4 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed">{m.start_lede()}</p>
+
+		<ol class="mt-12 space-y-6">
+			{steps.map((s) => (
+				<li class="grid grid-cols-[auto_1fr] gap-x-6 md:gap-x-10">
+					<div class="text-[11px] tabular-nums text-primary tracking-wider pt-3">{s.n}</div>
+					<div>
+						<div class="text-[11px] uppercase tracking-wider text-fg-muted mb-2">{s.label}</div>
+						<pre class="bg-bg-deep border border-border px-4 py-3 text-[12.5px] text-fg overflow-x-auto"><code>{s.code}</code></pre>
+					</div>
+				</li>
+			))}
+		</ol>
+
+		<p class="mt-10 text-[12px] text-fg-muted max-w-xl leading-relaxed">
+			{m.start_footnote()}
+		</p>
+	</div>
+
+	<!-- bookend -->
+	<div class="relative overflow-hidden drenched-amber">
+		<div class="relative mx-auto max-w-6xl px-6 py-24 md:py-32">
+			<h2 class="font-display text-4xl sm:text-5xl md:text-6xl font-semibold leading-[1.04] tracking-tight max-w-3xl">
+				{m.cta_bookend_title()}
+			</h2>
+			<p class="mt-5 text-base md:text-lg max-w-xl opacity-85 leading-relaxed">{m.cta_bookend_lede()}</p>
+			<div class="mt-10 flex flex-wrap items-center gap-3">
+				<a href="https://app.maple.dev"
+				   class="inline-flex items-center justify-center h-11 px-5 bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors">
+					{m.cta_bookend_primary()}
+				</a>
+				<a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer"
+				   class="inline-flex items-center justify-center h-11 px-5 border border-current/40 text-sm font-medium hover:bg-current/10 transition-colors">
+					{m.cta_bookend_secondary()}
+				</a>
+			</div>
+		</div>
+	</div>
+</section>

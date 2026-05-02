@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from "astro:content";
 import DocsLayout from "../../layouts/DocsLayout.astro";
+import Breadcrumb from "../../components/docs/Breadcrumb.astro";
 
 export async function getStaticPaths() {
     const docs = await getCollection("docs", ({ data }) => !data.draft);
@@ -21,6 +22,7 @@ const { Content, headings } = await render(doc);
     currentSlug={doc.id}
 >
     <article class="docs-content max-w-none">
+        <Breadcrumb sdk={doc.data.sdk} group={doc.data.group} title={doc.data.title} />
         <h1 class="text-xl font-bold text-fg mb-1.5">{doc.data.title}</h1>
         <p class="text-xs text-fg-muted mb-8 leading-relaxed">{doc.data.description}</p>
         <div class="border-t border-border pt-8">

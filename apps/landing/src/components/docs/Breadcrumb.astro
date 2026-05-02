@@ -1,0 +1,28 @@
+---
+interface Props {
+    sdk?: string;
+    group: string;
+    title: string;
+}
+
+const sdkLabels: Record<string, string> = {
+    effect: "Effect",
+};
+
+const { sdk, group, title } = Astro.props;
+const sdkLabel = sdk ? sdkLabels[sdk] ?? sdk : null;
+---
+
+<nav aria-label="Breadcrumb" class="flex items-center gap-1.5 text-[10px] text-fg-muted uppercase tracking-wider mb-4">
+    <a href="/docs" class="hover:text-fg transition-colors">Docs</a>
+    {sdkLabel && (
+        <>
+            <span class="text-border">/</span>
+            <span>{sdkLabel}</span>
+        </>
+    )}
+    <span class="text-border">/</span>
+    <span>{group}</span>
+    <span class="text-border">/</span>
+    <span class="text-fg-muted/80 truncate normal-case tracking-normal text-xs">{title}</span>
+</nav>

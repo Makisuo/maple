@@ -36,6 +36,9 @@
 	--chart-throughput: oklch(0.714 0.154 59);
 	--chart-apdex: oklch(0.658 0.134 151);
 	--bg-elevated: oklch(0.224 0.009 75);
+	--bg-deep: oklch(0.165 0.007 67);
+	--amber-deep: oklch(0.55 0.16 55);
+	--amber-soft: oklch(0.78 0.12 65);
 	--radius: 8px;
 	--border-hairline: 1px;
 	--severity-trace: oklch(0.603 0.023 72);
@@ -72,12 +75,13 @@
 	--font-sans: "Geist Mono Variable", ui-monospace, monospace;
 	--font-mono: "Geist Mono Variable", ui-monospace, monospace;
 	--font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
-	/* Landing-specific aliases */
 	--color-bg: var(--background);
 	--color-fg: var(--foreground);
 	--color-fg-muted: var(--muted-foreground);
 	--color-bg-elevated: var(--bg-elevated);
-	/* Standard shadcn/Tailwind color mappings (needed by imported React components) */
+	--color-bg-deep: var(--bg-deep);
+	--color-amber-deep: var(--amber-deep);
+	--color-amber-soft: var(--amber-soft);
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
 	--color-card: var(--card);
@@ -179,70 +183,351 @@
 	fill: var(--foreground) !important;
 }
 
-/* App mock interactive sidebar — CSS-only tab switching */
-.mock-radio {
+/* ──────────────────────────────────────────────────────────────
+   Drenched amber identity surface.
+   Used twice on the page — sovereignty section, bookend CTA.
+   Color strategy: Committed (≥30% of surface).
+   ────────────────────────────────────────────────────────────── */
+.drenched-amber {
+	background: var(--primary);
+	color: var(--primary-foreground);
+}
+.drenched-amber a,
+.drenched-amber strong {
+	color: var(--primary-foreground);
+}
+.drenched-amber .ink-link {
+	color: var(--primary-foreground);
+	border-bottom: 1px solid color-mix(in oklab, var(--primary-foreground) 35%, transparent);
+	padding-bottom: 1px;
+	transition: border-color 160ms ease;
+}
+.drenched-amber .ink-link:hover {
+	border-bottom-color: var(--primary-foreground);
+}
+
+/* Cross-bar grain motif on drenched sections (subtle horizontal scan). */
+.drenched-amber::before {
+	content: "";
 	position: absolute;
-	width: 1px;
-	height: 1px;
+	inset: 0;
+	pointer-events: none;
+	background-image: linear-gradient(
+		to bottom,
+		transparent 0,
+		transparent 23px,
+		color-mix(in oklab, var(--primary-foreground) 4%, transparent) 23px,
+		color-mix(in oklab, var(--primary-foreground) 4%, transparent) 24px
+	);
+	background-size: 100% 24px;
+	mix-blend-mode: multiply;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Live artifact frame.
+   Container around every live demo. Sharp 1px border, no glass,
+   no blur, deep-ink background, generous padding, monospace inset.
+   ────────────────────────────────────────────────────────────── */
+.live-frame {
+	background: var(--bg-deep);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
 	overflow: hidden;
-	clip: rect(0, 0, 0, 0);
-	white-space: nowrap;
-	border: 0;
+	font-family: var(--font-mono);
+}
+.live-frame__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--border);
+	background: var(--bg-elevated);
+	font-size: 10px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+}
+.live-frame__live {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--primary);
+}
+.live-frame__live-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--primary);
+	animation: pulse-dot 1.6s ease-in-out infinite;
 }
 
-.app-mock .mock-view {
-	display: none;
+/* ──────────────────────────────────────────────────────────────
+   Live waterfall span animation.
+   Bars grow with `--bar-progress` set per-frame from the rAF loop.
+   On reset, the loop fades the whole frame via `--frame-opacity`
+   (soft fade-and-rewind), then snaps progress to 0 and re-plays.
+   ────────────────────────────────────────────────────────────── */
+.waterfall-stage {
+	position: relative;
+	opacity: var(--frame-opacity, 1);
+	transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-
-.app-mock:has(.mock-radio-overview:checked) .mock-view-overview,
-.app-mock:has(.mock-radio-services:checked) .mock-view-services,
-.app-mock:has(.mock-radio-traces:checked) .mock-view-traces,
-.app-mock:has(.mock-radio-logs:checked) .mock-view-logs,
-.app-mock:has(.mock-radio-metrics:checked) .mock-view-metrics {
-	display: block;
+.waterfall-row {
+	position: relative;
+	display: grid;
+	grid-template-columns: 18ch 7ch 1fr 6ch;
+	align-items: center;
+	gap: 12px;
+	padding: 6px 14px;
+	font-size: 12px;
+	color: var(--muted-foreground);
+	border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
 }
-
-.app-mock:has(.mock-radio-overview:checked) nav .mock-nav-overview,
-.app-mock:has(.mock-radio-services:checked) nav .mock-nav-services,
-.app-mock:has(.mock-radio-traces:checked) nav .mock-nav-traces,
-.app-mock:has(.mock-radio-logs:checked) nav .mock-nav-logs,
-.app-mock:has(.mock-radio-metrics:checked) nav .mock-nav-metrics {
-	background-color: var(--muted);
+.waterfall-row:last-child { border-bottom: none; }
+.waterfall-row .span-name {
+	position: relative;
 	color: var(--foreground);
+	transition: color 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-
-.app-mock:has(.mock-radio-overview:checked) nav .mock-nav-overview svg,
-.app-mock:has(.mock-radio-services:checked) nav .mock-nav-services svg,
-.app-mock:has(.mock-radio-traces:checked) nav .mock-nav-traces svg,
-.app-mock:has(.mock-radio-logs:checked) nav .mock-nav-logs svg,
-.app-mock:has(.mock-radio-metrics:checked) nav .mock-nav-metrics svg {
+.waterfall-row .span-name.is-active { color: var(--primary); }
+.waterfall-row .span-name::after {
+	content: "";
+	position: absolute;
+	left: var(--name-underline-left, 0);
+	right: 0;
+	bottom: -2px;
+	height: 1px;
+	background: var(--primary);
+	opacity: 0;
+	transform: scaleX(0);
+	transform-origin: left center;
+	transition: opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
+	            transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.waterfall-row .span-name.is-active::after {
 	opacity: 1;
+	transform: scaleX(1);
+	transition-duration: 120ms;
+}
+.waterfall-row .span-dur {
+	transition: color 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.waterfall-row .span-dur.is-active { color: var(--primary); }
+.waterfall-row .span-bar-track {
+	position: relative;
+	height: 8px;
+	background: color-mix(in oklab, var(--bg-elevated) 80%, transparent);
+	border-radius: 2px;
+	overflow: hidden;
+}
+.waterfall-row .span-bar {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	background: var(--service-color, var(--primary));
+	border-radius: 2px;
+	transform-origin: left center;
+	transform: scaleX(var(--bar-progress, 0));
+	transition: transform 120ms linear;
+}
+.waterfall-row .span-bar.is-active {
+	box-shadow: 0 0 0 1px var(--primary);
 }
 
-/* Gradient text utility */
-.text-gradient-accent {
-	background: linear-gradient(to right, var(--accent), oklch(0.75 0.15 90));
-	-webkit-background-clip: text;
-	-webkit-text-fill-color: transparent;
-	background-clip: text;
+/* Tree connector lines drawn at each indent level inside the span-name cell. */
+.trace-connector {
+	position: absolute;
+	top: 0;
+	bottom: -1px;
+	width: 1px;
+	background: color-mix(in oklab, var(--border) 70%, transparent);
+	pointer-events: none;
+}
+.waterfall-row:last-child .trace-connector { bottom: 50%; }
+
+/* Slowest-span annotation, revealed during the cycle pause. */
+.waterfall-row.is-slowest::after {
+	content: "↑ slowest";
+	position: absolute;
+	right: 14px;
+	bottom: -14px;
+	font-size: 10px;
+	font-family: var(--font-mono);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--primary);
+	opacity: 0;
+	pointer-events: none;
+	transform: translateY(-2px);
+	animation: slowest-reveal 1300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes slowest-reveal {
+	0%   { opacity: 0; transform: translateY(-2px); }
+	18%  { opacity: 1; transform: translateY(0); }
+	78%  { opacity: 1; transform: translateY(0); }
+	100% { opacity: 0; transform: translateY(0); }
 }
 
-/* Pulse animation for live indicator */
+/* Trace clock — vertical cursor sweeping across the bar-track column. */
+.trace-cursor {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	left: var(--cursor-x, 0%);
+	background: color-mix(in oklab, var(--primary) 60%, transparent);
+	opacity: var(--cursor-opacity, 0);
+	transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1);
+	pointer-events: none;
+}
+.trace-cursor::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: -2px;
+	width: 5px;
+	height: 5px;
+	border-radius: 999px;
+	background: var(--primary);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Auto-scrolling log stream.
+   Two copies of the log list stacked vertically; container
+   translates upward by exactly the height of one copy, then
+   the keyframe restarts. Continuous illusion of an infinite feed.
+   ────────────────────────────────────────────────────────────── */
+@keyframes log-scroll {
+	0%   { transform: translate3d(0, 0, 0); }
+	100% { transform: translate3d(0, -50%, 0); }
+}
+.log-stream__viewport { position: relative; height: 320px; overflow: hidden; }
+.log-stream__viewport::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: linear-gradient(
+		to bottom,
+		var(--bg-deep) 0%,
+		transparent 14%,
+		transparent 86%,
+		var(--bg-deep) 100%
+	);
+}
+.log-stream__belt {
+	display: flex;
+	flex-direction: column;
+	animation: log-scroll 32s linear infinite;
+	will-change: transform;
+}
+.log-row {
+	display: grid;
+	grid-template-columns: 9ch 6ch 14ch 1fr 6ch;
+	gap: 12px;
+	padding: 4px 14px;
+	font-size: 11.5px;
+	line-height: 1.55;
+	color: var(--muted-foreground);
+	border-bottom: 1px solid color-mix(in oklab, var(--border) 40%, transparent);
+}
+.log-row__lvl { font-weight: 600; }
+.log-row[data-level="info"] .log-row__lvl  { color: var(--severity-info); }
+.log-row[data-level="warn"] .log-row__lvl  { color: var(--severity-warn); }
+.log-row[data-level="error"] .log-row__lvl { color: var(--severity-error); }
+.log-row[data-level="debug"] .log-row__lvl { color: var(--severity-debug); }
+.log-row[data-level="error"] {
+	background: color-mix(in oklab, var(--primary) 6%, transparent);
+}
+.log-row__svc { color: var(--foreground); }
+.log-row__msg { color: var(--foreground); }
+.log-row__dur { color: var(--muted-foreground); justify-self: end; }
+
+/* ──────────────────────────────────────────────────────────────
+   Service-map edge flow.
+   Continuous dash flow — same vocabulary as the in-product service map.
+   No opacity fade, no per-edge stagger; synchronized ambient motion.
+   ────────────────────────────────────────────────────────────── */
+@keyframes service-map-flow {
+	to { stroke-dashoffset: -28; }
+}
+.svc-edge {
+	stroke: color-mix(in oklab, var(--border) 90%, transparent);
+	stroke-width: 1;
+	fill: none;
+}
+.svc-edge--pulse {
+	stroke: var(--primary);
+	stroke-width: 1.25;
+	stroke-dasharray: 3 6;
+	opacity: 0.75;
+	animation: service-map-flow 1.5s linear infinite;
+	fill: none;
+}
+.svc-node {
+	fill: var(--bg-elevated);
+	stroke: var(--border);
+	stroke-width: 1;
+}
+.svc-node--hot { stroke: var(--primary); stroke-width: 1.5; }
+.svc-node-label {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	fill: var(--foreground);
+	text-anchor: middle;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   MCP transcript caret + typing cursor.
+   ────────────────────────────────────────────────────────────── */
+@keyframes caret-blink {
+	0%, 49%   { opacity: 1; }
+	50%, 100% { opacity: 0; }
+}
+.mcp-caret {
+	display: inline-block;
+	width: 7px;
+	height: 1em;
+	background: var(--primary);
+	vertical-align: -0.15em;
+	margin-left: 2px;
+	animation: caret-blink 1.05s steps(1) infinite;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Live indicator pulse (reused from prior design).
+   ────────────────────────────────────────────────────────────── */
 @keyframes pulse-dot {
-	0%,
-	100% {
-		opacity: 1;
+	0%, 100% { opacity: 1; }
+	50%      { opacity: 0.35; }
+}
+.animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* ──────────────────────────────────────────────────────────────
+   Reduced-motion override.
+   Every live artifact freezes at a sensible static frame.
+   ────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+	.log-stream__belt,
+	.svc-edge--pulse,
+	.mcp-caret,
+	.animate-pulse-dot,
+	.live-frame__live-dot,
+	.waterfall-row.is-slowest::after {
+		animation: none !important;
 	}
-	50% {
-		opacity: 0.4;
-	}
+	.waterfall-stage { opacity: 1 !important; transition: none !important; }
+	.waterfall-row .span-bar { transform: scaleX(1) !important; }
+	.svc-edge--pulse { stroke-dashoffset: 0 !important; opacity: 0.6 !important; }
+	.mcp-caret { opacity: 0.3 !important; }
+	.trace-cursor { display: none !important; }
+	.waterfall-row.is-slowest::after { opacity: 1 !important; transform: translateY(0) !important; }
 }
 
-.animate-pulse-dot {
-	animation: pulse-dot 2s ease-in-out infinite;
-}
-
-/* Docs prose styling */
+/* ──────────────────────────────────────────────────────────────
+   Docs prose styling (unchanged — used by docs pages, not landing).
+   ────────────────────────────────────────────────────────────── */
 .docs-content h2 {
 	@apply text-lg font-semibold text-fg mt-10 mb-4;
 }

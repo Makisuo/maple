@@ -1,0 +1,49 @@
+---
+/**
+ * Sovereignty — drenched-amber identity section.
+ * The first big amber moment on the page. Single statement, three pillars.
+ * No cards, no gradient text, full-width amber background.
+ */
+import * as m from "../paraglide/messages";
+---
+
+<section class="relative overflow-hidden drenched-amber">
+	<div class="relative mx-auto max-w-6xl px-6 py-24 md:py-32">
+		<div class="text-[10px] uppercase tracking-[0.18em] opacity-70 mb-6">
+			{m.sov_eyebrow()}
+		</div>
+		<h2 class="font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-semibold leading-[1.02] tracking-tight max-w-4xl">
+			{m.sov_title()}
+		</h2>
+		<p class="mt-6 text-base md:text-lg max-w-xl opacity-85 leading-relaxed">
+			{m.sov_lede()}
+		</p>
+
+		<dl class="mt-16 md:mt-20 grid grid-cols-1 md:grid-cols-3 border-t border-current/30">
+			<div class="py-8 md:py-10 md:pr-8 md:border-r border-current/30">
+				<dt class="text-[10px] uppercase tracking-[0.16em] opacity-70 mb-3">01 · {m.sov_pillar_1_label()}</dt>
+				<dd class="font-display text-xl md:text-2xl font-semibold leading-snug">{m.sov_pillar_1_body()}</dd>
+			</div>
+			<div class="py-8 md:py-10 md:px-8 md:border-r border-current/30 border-t md:border-t-0 border-current/30">
+				<dt class="text-[10px] uppercase tracking-[0.16em] opacity-70 mb-3">02 · {m.sov_pillar_2_label()}</dt>
+				<dd class="font-display text-xl md:text-2xl font-semibold leading-snug">{m.sov_pillar_2_body()}</dd>
+			</div>
+			<div class="py-8 md:py-10 md:pl-8 border-t md:border-t-0 border-current/30">
+				<dt class="text-[10px] uppercase tracking-[0.16em] opacity-70 mb-3">03 · {m.sov_pillar_3_label()}</dt>
+				<dd class="font-display text-xl md:text-2xl font-semibold leading-snug">{m.sov_pillar_3_body()}</dd>
+			</div>
+		</dl>
+
+		<div class="mt-12 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+			<a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="ink-link">
+				{m.sov_link_source()}
+			</a>
+			<a href="/opentelemetry" class="ink-link">
+				{m.sov_link_otel()}
+			</a>
+			<a href="/pricing" class="ink-link">
+				{m.sov_link_pricing()}
+			</a>
+		</div>
+	</div>
+</section>

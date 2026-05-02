@@ -1,26 +1,35 @@
 ---
 import { getCollection } from "astro:content";
 import DocsLayout from "../../layouts/DocsLayout.astro";
+import EffectLogo from "../../components/icons/EffectLogo.astro";
 
 const allDocs = await getCollection("docs", ({ data }) => !data.draft);
 
-const groups = new Map<string, typeof allDocs>();
-for (const doc of allDocs) {
-    const group = doc.data.group;
-    if (!groups.has(group)) groups.set(group, []);
-    groups.get(group)!.push(doc);
-}
+const groupBy = (docs: typeof allDocs) => {
+    const groups = new Map<string, typeof allDocs>();
+    for (const doc of docs) {
+        const group = doc.data.group;
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group)!.push(doc);
+    }
+    for (const [, items] of groups) {
+        items.sort((a, b) => a.data.order - b.data.order);
+    }
+    return groups;
+};
 
-for (const [, items] of groups) {
-    items.sort((a, b) => a.data.order - b.data.order);
-}
+const orderGroups = (groups: Map<string, typeof allDocs>, groupOrder: string[]) =>
+    [...groups.entries()].sort((a, b) => {
+        const ai = groupOrder.indexOf(a[0]);
+        const bi = groupOrder.indexOf(b[0]);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
 
-const groupOrder = ["Getting Started", "Guides", "Concepts"];
-const sortedGroups = [...groups.entries()].sort((a, b) => {
-    const ai = groupOrder.indexOf(a[0]);
-    const bi = groupOrder.indexOf(b[0]);
-    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-});
+const sdkScoped = allDocs.filter((d) => d.data.sdk === "effect");
+const universal = allDocs.filter((d) => !d.data.sdk);
+
+const sdkGroups = orderGroups(groupBy(sdkScoped), ["Effect SDK", "Platforms"]);
+const universalGroups = orderGroups(groupBy(universal), ["Getting Started", "Concepts", "Guides"]);
 ---
 
 <DocsLayout
@@ -32,28 +41,65 @@ const sortedGroups = [...groups.entries()].sort((a, b) => {
     <h1 class="text-xl font-bold text-fg mb-1.5">Documentation</h1>
     <p class="text-xs text-fg-muted mb-8 leading-relaxed">Technical documentation for the Maple observability platform.</p>
 
-    <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {sortedGroups.map(([groupName, items]) => (
-            <div>
-                <h2 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-3">
-                    {groupName}
-                </h2>
-                <div class="space-y-2">
-                    {items.map((doc) => (
-                        <a
-                            href={`/docs/${doc.id}`}
-                            class="block border border-border p-3 hover:border-accent/50 transition-colors group"
-                        >
-                            <span class="text-sm text-fg group-hover:text-accent transition-colors font-medium block">
-                                {doc.data.title}
-                            </span>
-                            <span class="text-xs text-fg-muted mt-1 leading-relaxed block">
-                                {doc.data.description}
-                            </span>
-                        </a>
-                    ))}
-                </div>
+    <section class="mb-10">
+        <div class="flex items-center gap-3 mb-4">
+            <div class="w-6 h-6 bg-accent flex items-center justify-center text-accent-foreground">
+                <EffectLogo class="w-3.5 h-3.5" />
             </div>
-        ))}
-    </div>
+            <h2 class="text-sm font-medium text-fg">Effect SDK</h2>
+            <span class="text-[10px] uppercase tracking-wider text-fg-muted px-1.5 py-0.5 border border-border">Stable</span>
+        </div>
+        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {sdkGroups.map(([groupName, items]) => (
+                <div>
+                    <h3 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-3">
+                        {groupName}
+                    </h3>
+                    <div class="space-y-2">
+                        {items.map((doc) => (
+                            <a
+                                href={`/docs/${doc.id}`}
+                                class="block border border-border p-3 hover:border-accent/50 transition-colors group"
+                            >
+                                <span class="text-sm text-fg group-hover:text-accent transition-colors font-medium block">
+                                    {doc.data.title}
+                                </span>
+                                <span class="text-xs text-fg-muted mt-1 leading-relaxed block">
+                                    {doc.data.description}
+                                </span>
+                            </a>
+                        ))}
+                    </div>
+                </div>
+            ))}
+        </div>
+    </section>
+
+    <section>
+        <h2 class="text-sm font-medium text-fg mb-4">Universal</h2>
+        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {universalGroups.map(([groupName, items]) => (
+                <div>
+                    <h3 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-3">
+                        {groupName === "Guides" ? "Other languages" : groupName}
+                    </h3>
+                    <div class="space-y-2">
+                        {items.map((doc) => (
+                            <a
+                                href={`/docs/${doc.id}`}
+                                class="block border border-border p-3 hover:border-accent/50 transition-colors group"
+                            >
+                                <span class="text-sm text-fg group-hover:text-accent transition-colors font-medium block">
+                                    {doc.data.title}
+                                </span>
+                                <span class="text-xs text-fg-muted mt-1 leading-relaxed block">
+                                    {doc.data.description}
+                                </span>
+                            </a>
+                        ))}
+                    </div>
+                </div>
+            ))}
+        </div>
+    </section>
 </DocsLayout>

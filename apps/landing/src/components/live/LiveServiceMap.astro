@@ -1,0 +1,103 @@
+---
+/**
+ * LiveServiceMap — animated SVG dependency graph.
+ * Pure CSS animation (pulse-edge keyframe). Each edge declares a path
+ * twice: once as a static line, once as a pulse with an inline delay so
+ * the graph breathes asynchronously. No JS island.
+ */
+
+interface Node {
+	id: string;
+	label: string;
+	x: number;
+	y: number;
+	hot?: boolean;
+}
+
+interface Edge {
+	from: string;
+	to: string;
+	delay: number; // seconds
+}
+
+const nodes: Node[] = [
+	{ id: "edge",     label: "edge",     x:  60, y: 170 },
+	{ id: "checkout", label: "checkout", x: 230, y:  90 },
+	{ id: "cart",     label: "cart",     x: 230, y: 250 },
+	{ id: "auth",     label: "auth",     x: 400, y:  40 },
+	{ id: "pricing",  label: "pricing",  x: 400, y: 170, hot: true },
+	{ id: "payments", label: "payments", x: 580, y:  90 },
+	{ id: "redis",    label: "redis",    x: 580, y: 250 },
+	{ id: "postgres", label: "postgres", x: 750, y: 170 },
+];
+
+const edges: Edge[] = [
+	{ from: "edge",     to: "checkout", delay: 0.0 },
+	{ from: "edge",     to: "cart",     delay: 0.4 },
+	{ from: "checkout", to: "auth",     delay: 0.9 },
+	{ from: "checkout", to: "pricing",  delay: 1.3 },
+	{ from: "cart",     to: "pricing",  delay: 1.6 },
+	{ from: "pricing",  to: "payments", delay: 1.9 },
+	{ from: "pricing",  to: "postgres", delay: 2.2 },
+	{ from: "pricing",  to: "redis",    delay: 2.5 },
+	{ from: "payments", to: "redis",    delay: 2.8 },
+];
+
+const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
+
+const pathFor = (e: Edge) => {
+	const a = nodeById[e.from];
+	const b = nodeById[e.to];
+	const mx = (a.x + b.x) / 2;
+	return `M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}`;
+};
+---
+
+<div class="live-frame">
+	<div class="live-frame__head">
+		<span>service map · last 60s</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			LIVE
+		</span>
+	</div>
+	<div class="px-3 pt-3 pb-1">
+		<svg viewBox="0 0 820 340" class="w-full h-auto" role="img" aria-label="Service dependency graph with live request pulses">
+			<defs>
+				<filter id="svc-glow" x="-50%" y="-50%" width="200%" height="200%">
+					<feGaussianBlur stdDeviation="2.5" result="b"></feGaussianBlur>
+					<feMerge>
+						<feMergeNode in="b"></feMergeNode>
+						<feMergeNode in="SourceGraphic"></feMergeNode>
+					</feMerge>
+				</filter>
+			</defs>
+
+			{edges.map((e) => (
+				<>
+					<path d={pathFor(e)} class="svc-edge" />
+					<path d={pathFor(e)} class="svc-edge svc-edge--pulse" style={`animation-delay:${e.delay}s`} />
+				</>
+			))}
+
+			{nodes.map((n) => (
+				<g transform={`translate(${n.x} ${n.y})`}>
+					<rect
+						x="-46" y="-16" width="92" height="32" rx="3"
+						class={n.hot ? "svc-node svc-node--hot" : "svc-node"}
+					/>
+					{n.hot && (
+						<rect x="-46" y="-16" width="92" height="32" rx="3"
+						      fill="none" stroke="var(--primary)" stroke-width="1"
+						      class="animate-pulse-dot" filter="url(#svc-glow)" />
+					)}
+					<text class="svc-node-label" y="4">{n.label}</text>
+				</g>
+			))}
+		</svg>
+	</div>
+	<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
+		<span>8 services · 14 edges</span>
+		<span>pricing-svc · p99 +18% vs 1h ago</span>
+	</div>
+</div>

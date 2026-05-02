@@ -247,6 +247,30 @@ export const hero_badge = () => `OpenTelemetry 네이티브`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const hero_eyebrow = () => `OpenTelemetry native`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_eyebrow_2 = () => `Open source. Self-hostable.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_keep_reading = () => `keep reading ↓`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const hero_title = () => `오픈소스 옵저버빌리티.`
 
 
@@ -272,6 +296,534 @@ export const hero_title_accent = () => `AI 네이티브.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_subtitle = () => `OpenTelemetry 기반의 트레이스, 로그, 메트릭. 수십억 행을 밀리초 단위로 쿼리 — 또는 AI 에이전트에게 맡기세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_eyebrow = () => `01 · Sovereignty`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_title = () => `Your data, your instrumentation, your bill.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_lede = () => `Maple is the observability backend you'd build if you weren't trying to extract every dollar. OpenTelemetry in. ClickHouse-grade query speed out. The source on GitHub the whole time.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_1_label = () => `Open source`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_1_body = () => `Apache-licensed. Read every line. Fork it. Self-host on your own boxes if that's what your security review needs.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_2_label = () => `OpenTelemetry native`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_2_body = () => `OTLP straight in. No proprietary agent. The instrumentation you write today moves to anywhere OTel-compatible tomorrow.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_3_label = () => `Honest pricing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_3_body = () => `Pay for the gigabytes you send. No per-host fees. No per-seat fees. The same numbers your invoice shows.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_link_source = () => `Read the source`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_link_otel = () => `Why OpenTelemetry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_link_pricing = () => `See the calculator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const trace_eyebrow = () => `02 · Trace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const trace_title = () => `Read the trace, not the chart.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const trace_lede = () => `Every request ends up as a span tree with attributes you can actually inspect. Hover any row in this trace to see what was on it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const logs_eyebrow = () => `03 · Logs`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const logs_title = () => `A log feed that doesn't crater your bill at scale.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const logs_lede = () => `Structured logs streamed straight from OTLP. Severity, service, message, duration. Searchable in seconds, retained for the window you actually care about.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const map_eyebrow = () => `04 · Service map`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const map_title = () => `See dependencies move.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const map_lede = () => `Live request flow across your services. Hot services light up. The cascade you'd otherwise reconstruct from a postmortem is right here in the foreground.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_eyebrow = () => `05 · Agents`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_title = () => `Your AI agent reads it too.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_lede = () => `Maple ships with a first-class MCP server. Any compatible agent can list services, search traces, find errors, propose fixes, open PRs. The transcript on the right is real.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_eyebrow = () => `06 · The bill`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_title = () => `We told you it was honest.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_lede = () => `Side-by-side, line-item. The questions your finance team will ask, answered before they have to ask.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_col_metric = () => `Line item`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_per_host = () => `Per-host fee`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_per_seat = () => `Per-seat fee`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_ingest = () => `Ingest pricing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_retention = () => `Default retention`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_otel = () => `OpenTelemetry support`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_oss = () => `License`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_selfhost = () => `Self-host option`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_mcp = () => `MCP / agent surface`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_none = () => `None`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_bundled = () => `Bundled in plan`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_enterprise = () => `Enterprise tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_usage = () => `$0.30 / GB ingested`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_native = () => `Native`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_partial = () => `Partial (custom agent)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_yes = () => `Yes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_apache = () => `Apache 2.0`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_proprietary = () => `Proprietary`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_supported = () => `Supported`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_no = () => `No`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_oss_only = () => `OSS components`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_first_class = () => `First-class`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_footnote = () => `Competitor numbers are public list prices summarized for comparison. Maple ingest rate is the published flat per-GB. See the calculator for projected monthly cost on your volume.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_link_calculator = () => `Pricing calculator →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_link_vs_dd = () => `Full vs Datadog`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_link_vs_gf = () => `Full vs Grafana Cloud`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_link_vs_nr = () => `Full vs New Relic`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_eyebrow = () => `07 · Start`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_title = () => `Three commands to first trace.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_lede = () => `If you can run a shell, you can have your first trace in Maple in under five minutes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_step_1_label = () => `Install the collector`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_step_2_label = () => `Point it at Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_step_3_label = () => `Restart your service`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_footnote = () => `Need a Python, Java, Go, or Rust example? The docs cover every supported language and most major frameworks.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const cta_bookend_title = () => `Run it yourself.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const cta_bookend_lede = () => `Free tier is generous. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const cta_bookend_primary = () => `Get started free`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const cta_bookend_secondary = () => `Read the source`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_manifesto = () => `Built for engineers who actually read their telemetry.`
 
 
 /**

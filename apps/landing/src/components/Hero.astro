@@ -1,54 +1,60 @@
 ---
-import AppMock from './AppMock.astro';
+/**
+ * Hero — live waterfall as the centerpiece. No screenshot, no gradient text.
+ * Sequence: small eyebrow badge → mono headline → terse subline → live
+ * waterfall that ticks forward → CTAs anchor the act after the see.
+ */
+import LiveWaterfall from "./live/LiveWaterfall.astro";
 import * as m from "../paraglide/messages";
 ---
 
-<section class="relative min-h-screen pt-[47px] overflow-hidden">
-    <!-- Grid background -->
-    <div class="absolute inset-0 pointer-events-none" style="
-        background-image:
-            linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px),
-            linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px);
-        background-size: 60px 60px;
-        mask-image: radial-gradient(ellipse 70% 50% at 50% 30%, black, transparent);
-    "></div>
+<section class="relative pt-[68px] overflow-hidden">
+	<!-- Soft top vignette -->
+	<div class="absolute inset-0 pointer-events-none" style="
+		background:
+			radial-gradient(900px 480px at 50% -120px, color-mix(in oklab, var(--primary) 14%, transparent) 0%, transparent 70%),
+			radial-gradient(600px 320px at 100% 110%, color-mix(in oklab, var(--primary) 6%, transparent) 0%, transparent 60%);
+	"></div>
 
-    <div class="relative mx-auto max-w-6xl px-6 pt-24 md:pt-32">
-        <!-- Badge -->
-        <div class="mb-6">
-            <span class="inline-flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-fg-muted">
-                <span class="inline-block size-1.5 rounded-full bg-green-400 animate-pulse-dot"></span>
-                {m.hero_badge()}
-            </span>
-        </div>
+	<div class="relative mx-auto max-w-6xl px-6 pt-12 md:pt-16 pb-24 md:pb-28">
+		<!-- Eyebrow -->
+		<div class="mb-8 flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-fg-muted">
+			<span class="inline-flex items-center gap-2">
+				<span class="inline-block size-1.5 rounded-full bg-primary animate-pulse-dot"></span>
+				{m.hero_eyebrow()}
+			</span>
+			<span class="opacity-40">/</span>
+			<span>{m.hero_eyebrow_2()}</span>
+		</div>
 
-        <!-- Headline -->
-        <h1 class="font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-fg leading-tight max-w-4xl tracking-tight">
-            {m.hero_title()}<br />
-            {m.hero_title_sub()} <span class="text-gradient-accent">{m.hero_title_accent()}</span>
-        </h1>
+		<!-- Headline -->
+		<h1 class="font-display text-[44px] sm:text-6xl md:text-7xl lg:text-8xl font-semibold text-foreground leading-[0.98] tracking-[-0.02em] max-w-5xl">
+			{m.hero_title()}
+		</h1>
 
-        <!-- Subtitle -->
-        <p class="mt-5 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed">
-            {m.hero_subtitle()}
-        </p>
+		<!-- Subtitle -->
+		<p class="mt-7 text-base md:text-lg text-fg-muted max-w-2xl leading-relaxed">
+			{m.hero_subtitle()}
+		</p>
 
-        <!-- Dual CTAs -->
-        <div class="mt-8 flex flex-wrap items-center gap-3">
-            <a href="https://app.maple.dev" class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80">
-                {m.cta_get_started()}
-            </a>
-            <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="inline-flex h-9 items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50">
-                {m.cta_github()}
-            </a>
-        </div>
+		<!-- Live waterfall -->
+		<div class="mt-14 md:mt-16">
+			<LiveWaterfall />
+		</div>
 
-        <!-- App mock with glow -->
-        <div class="mt-16 md:mt-20 relative">
-            <div class="absolute inset-0 pointer-events-none" style="
-                box-shadow: 0 0 120px 40px oklch(0.70 0.16 60 / 0.08);
-            "></div>
-            <AppMock />
-        </div>
-    </div>
+		<!-- CTAs anchor the see-then-act sequence -->
+		<div class="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3">
+			<a href="https://app.maple.dev"
+			   class="inline-flex items-center justify-center h-11 px-5 bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
+				{m.cta_get_started()}
+			</a>
+			<a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer"
+			   class="inline-flex items-center justify-center h-11 px-5 border border-border text-sm font-medium text-foreground hover:bg-bg-elevated transition-colors">
+				{m.cta_github()}
+			</a>
+			<a href="#sovereignty" class="text-xs text-fg-muted hover:text-foreground transition-colors">
+				{m.hero_keep_reading()}
+			</a>
+		</div>
+	</div>
 </section>

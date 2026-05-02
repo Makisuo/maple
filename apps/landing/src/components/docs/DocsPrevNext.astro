@@ -9,17 +9,35 @@ const { currentSlug } = Astro.props;
 
 const allDocs = await getCollection("docs", ({ data }) => !data.draft);
 
-const groupOrder = ["Getting Started", "Guides", "Concepts"];
-const sorted = [...allDocs].sort((a, b) => {
-    const ga = groupOrder.indexOf(a.data.group);
-    const gb = groupOrder.indexOf(b.data.group);
-    if (ga !== gb) return (ga === -1 ? 999 : ga) - (gb === -1 ? 999 : gb);
-    return a.data.order - b.data.order;
-});
+const currentDoc = allDocs.find((d) => d.id === currentSlug);
+const activeSdk = currentDoc?.data.sdk ?? "effect";
+
+const sdkGroupOrder = ["Effect SDK", "Platforms"];
+const universalGroupOrder = ["Getting Started", "Concepts", "Guides"];
+
+const sdkScoped = allDocs
+    .filter((d) => d.data.sdk === activeSdk)
+    .sort((a, b) => {
+        const ga = sdkGroupOrder.indexOf(a.data.group);
+        const gb = sdkGroupOrder.indexOf(b.data.group);
+        if (ga !== gb) return (ga === -1 ? 999 : ga) - (gb === -1 ? 999 : gb);
+        return a.data.order - b.data.order;
+    });
+
+const universal = allDocs
+    .filter((d) => !d.data.sdk)
+    .sort((a, b) => {
+        const ga = universalGroupOrder.indexOf(a.data.group);
+        const gb = universalGroupOrder.indexOf(b.data.group);
+        if (ga !== gb) return (ga === -1 ? 999 : ga) - (gb === -1 ? 999 : gb);
+        return a.data.order - b.data.order;
+    });
+
+const sorted = [...sdkScoped, ...universal];
 
 const currentIndex = sorted.findIndex((d) => d.id === currentSlug);
 const prev = currentIndex > 0 ? sorted[currentIndex - 1] : null;
-const next = currentIndex < sorted.length - 1 ? sorted[currentIndex + 1] : null;
+const next = currentIndex >= 0 && currentIndex < sorted.length - 1 ? sorted[currentIndex + 1] : null;
 ---
 
 <nav class="mt-12 pt-8 border-t border-border flex items-stretch gap-4" aria-label="Page navigation">
