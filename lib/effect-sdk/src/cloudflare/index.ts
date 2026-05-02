@@ -195,9 +195,6 @@ export const make = (config: Config = {}): Telemetry => {
 	const flush = async (env: Record<string, unknown>): Promise<void> => {
 		if (resolved === undefined) {
 			resolved = resolveOnce(env, config)
-			console.log(
-				`[MapleCloudflareSDK] initialized: traces=${resolved.tracesUrl} auth=${resolved.headers.authorization ? "yes" : "no (will fail at collector — set MAPLE_INGEST_KEY)"}`,
-			)
 		}
 
 		const r = resolved
