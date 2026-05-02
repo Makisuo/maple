@@ -5,6 +5,7 @@ import Hero from "../components/Hero.astro";
 import Sovereignty from "../components/Sovereignty.astro";
 import LiveTrace from "../components/live/LiveTrace.astro";
 import LiveLogStream from "../components/live/LiveLogStream.astro";
+import LiveLogsVolumeChart from "../components/live/LiveLogsVolumeChart.tsx";
 import LiveServiceMap from "../components/live/LiveServiceMap.astro";
 import LiveMcpTranscript from "../components/live/LiveMcpTranscript.astro";
 import BillComparison from "../components/BillComparison.astro";
@@ -44,10 +45,13 @@ const pageDescription = m.page_home_desc();
         </div>
     </section>
 
-    <!-- 03 — Logs. Big artifact above, prose centered below. -->
+    <!-- 03 — Logs. Volume chart + raw stream, then prose. -->
     <section class="bg-bg-deep">
         <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
-            <LiveLogStream />
+            <div class="grid gap-4">
+                <LiveLogsVolumeChart client:load />
+                <LiveLogStream />
+            </div>
             <div class="mt-12 max-w-2xl">
                 <div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-3">{m.logs_eyebrow()}</div>
                 <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
