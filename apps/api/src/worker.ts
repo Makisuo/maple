@@ -47,7 +47,10 @@ const passthroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpAp
 // resolves env lazily on first call. Including `telemetry.layer` in the
 // handler's layer composition is the critical bit: the Tracer reference must
 // live in the same runtime as the routes that emit spans.
-const telemetry = MapleCloudflareSDK.make({ serviceName: "maple-api" })
+const telemetry = MapleCloudflareSDK.make({
+	serviceName: "maple-api",
+	dropSpanNames: ["McpServer/Notifications."],
+})
 
 const buildHandler = () =>
 	HttpRouter.toWebHandler(

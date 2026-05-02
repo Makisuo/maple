@@ -19,13 +19,24 @@ export interface SpanBuffer {
 
 const MAX_BUFFER = 10_000
 
-export const makeSpanBuffer = (): SpanBuffer => {
+export interface SpanBufferOptions {
+	/**
+	 * Predicate run on each finished span before it's added to the buffer.
+	 * Returning `true` drops the span — it never reaches the OTLP exporter.
+	 * Use to suppress known-noisy span names (e.g. MCP protocol notifications).
+	 */
+	readonly dropSpan?: ((name: string) => boolean) | undefined
+}
+
+export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 	let buffer: Array<OtlpSpan> = []
 	let disabled = false
+	const dropSpan = options.dropSpan
 
 	const exportFn = (span: SpanImpl) => {
 		if (disabled) return
 		if (!span.sampled) return
+		if (dropSpan !== undefined && dropSpan(span.name)) return
 		if (buffer.length >= MAX_BUFFER) return
 		buffer.push(makeOtlpSpan(span))
 	}

@@ -58,6 +58,12 @@ export interface Config {
 	readonly attributes?: Record<string, unknown> | undefined
 	/** Skip Effect log spans in OTLP log attributes. Default `false`. */
 	readonly excludeLogSpans?: boolean | undefined
+	/**
+	 * Span names whose prefix matches an entry here are dropped before they
+	 * reach the OTLP exporter. Useful for suppressing protocol-level chatter
+	 * (e.g. `"McpServer/Notifications."` for MCP notification spam).
+	 */
+	readonly dropSpanNames?: ReadonlyArray<string> | undefined
 	/** OTLP traces path appended to `endpoint`. Default `/v1/traces`. */
 	readonly tracesPath?: string | undefined
 	/** OTLP logs path appended to `endpoint`. Default `/v1/logs`. */
@@ -196,7 +202,12 @@ const flushSignal = async (
 }
 
 export const make = (config: Config = {}): Telemetry => {
-	const spans: SpanBuffer = makeSpanBuffer()
+	const dropPrefixes = config.dropSpanNames
+	const dropSpan =
+		dropPrefixes !== undefined && dropPrefixes.length > 0
+			? (name: string) => dropPrefixes.some((prefix) => name.startsWith(prefix))
+			: undefined
+	const spans: SpanBuffer = makeSpanBuffer({ dropSpan })
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 
 	let resolved: Resolved | undefined = undefined
