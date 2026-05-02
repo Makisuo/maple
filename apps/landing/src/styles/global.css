@@ -445,38 +445,60 @@
 .log-row__dur { color: var(--muted-foreground); justify-self: end; }
 
 /* ──────────────────────────────────────────────────────────────
-   Service-map edge flow.
-   Continuous dash flow — same vocabulary as the in-product service map.
-   No opacity fade, no per-edge stagger; synchronized ambient motion.
+   Service map.
+   Mirrors the in-product service map: rounded-rect cards with health
+   dot + label + req/s · err% · avg metrics, smoothstep edges rendered
+   as multi-layer SVG (glow / tube / core / flowing dashes), dot-grid
+   background. The flow keyframe is the same 1.5s linear cadence as
+   the product (apps/web/src/styles.css).
    ────────────────────────────────────────────────────────────── */
 @keyframes service-map-flow {
-	to { stroke-dashoffset: -28; }
+	to { stroke-dashoffset: -24; }
 }
-.svc-edge {
-	stroke: color-mix(in oklab, var(--border) 90%, transparent);
-	stroke-width: 1;
-	fill: none;
-}
-.svc-edge--pulse {
-	stroke: var(--primary);
-	stroke-width: 1.25;
-	stroke-dasharray: 3 6;
-	opacity: 0.75;
+.svc-map-flow {
 	animation: service-map-flow 1.5s linear infinite;
-	fill: none;
 }
-.svc-node {
-	fill: var(--bg-elevated);
-	stroke: var(--border);
-	stroke-width: 1;
+.svc-map-edge-label {
+	font-family: var(--font-mono);
+	font-size: 9px;
+	letter-spacing: 0.02em;
+	fill: var(--foreground);
 }
-.svc-node--hot { stroke: var(--primary); stroke-width: 1.5; }
-.svc-node-label {
+.svc-map-node-halo {
+	animation: pulse-dot 2.4s ease-in-out infinite;
+}
+.svc-map-node-label {
+	font-family: var(--font-display);
+	font-size: 12px;
+	font-weight: 500;
+	fill: var(--foreground);
+}
+.svc-map-node-db {
+	font-family: var(--font-mono);
+	font-size: 8px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	fill: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+}
+.svc-map-metric-cap {
+	font-family: var(--font-mono);
+	font-size: 8px;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	fill: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+}
+.svc-map-metric-val {
 	font-family: var(--font-mono);
 	font-size: 10px;
-	fill: var(--foreground);
-	text-anchor: middle;
+	font-weight: 500;
+	fill: color-mix(in oklab, var(--foreground) 92%, transparent);
 }
+.svc-map-metric-val--warn { fill: var(--severity-warn); }
+.svc-map-health { stroke: none; }
+.svc-map-health--info  { fill: var(--severity-info); }
+.svc-map-health--warn  { fill: var(--severity-warn); }
+.svc-map-health--error { fill: var(--severity-error); }
 
 /* ──────────────────────────────────────────────────────────────
    MCP transcript caret + typing cursor.
@@ -510,7 +532,8 @@
    ────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
 	.log-stream__belt,
-	.svc-edge--pulse,
+	.svc-map-flow,
+	.svc-map-node-halo,
 	.mcp-caret,
 	.animate-pulse-dot,
 	.live-frame__live-dot,
@@ -519,7 +542,7 @@
 	}
 	.waterfall-stage { opacity: 1 !important; transition: none !important; }
 	.waterfall-row .span-bar { transform: scaleX(1) !important; }
-	.svc-edge--pulse { stroke-dashoffset: 0 !important; opacity: 0.6 !important; }
+	.svc-map-flow { stroke-dashoffset: 0 !important; opacity: 0.7 !important; }
 	.mcp-caret { opacity: 0.3 !important; }
 	.trace-cursor { display: none !important; }
 	.waterfall-row.is-slowest::after { opacity: 1 !important; transform: translateY(0) !important; }

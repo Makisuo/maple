@@ -1,56 +1,140 @@
 ---
 /**
- * LiveServiceMap — animated SVG dependency graph.
- * Pure CSS animation. Each edge is drawn twice: once static, once with the
- * `service-map-flow` keyframe (continuous dashoffset flow — same vocabulary
- * as the in-product service map). No staggered per-edge delay; the graph
- * reads as ambient synchronized motion. No JS island.
+ * LiveServiceMap — animated SVG dependency graph that mirrors the in-product
+ * service map (apps/web/src/components/service-map/). Each node is a rounded
+ * card with a left accent stripe (service color), a health dot, the service
+ * name, and a small req/s · err% · avg metrics row. Edges are smoothstep
+ * paths rendered as 4-layer SVG: an ambient blur glow, a tube outer wall, a
+ * dark core, and a flowing-dash overlay using the `service-map-flow` keyframe.
+ * Pure SVG, no JS island.
  */
 
 interface Node {
 	id: string;
 	label: string;
-	x: number;
-	y: number;
+	col: number;
+	row: number;
 	hot?: boolean;
+	db?: boolean;
+	reqLabel: string; // "req/s" or "calls/s"
+	rps: string;
+	err?: string;
+	avg: string;
 }
 
 interface Edge {
 	from: string;
 	to: string;
+	rps: number; // notional request rate, drives stroke width
+	hot?: boolean;
 }
 
+const NODE_W = 220;
+const NODE_H = 56;
+const COL_X = [120, 400, 680, 960];
+const ROWS_PER_COL = [
+	[200],
+	[120, 280],
+	[60, 200, 340],
+	[120, 280],
+];
+
+// Layout: 4 columns, services arranged left-to-right.
 const nodes: Node[] = [
-	{ id: "edge",     label: "edge",     x:  60, y: 170 },
-	{ id: "checkout", label: "checkout", x: 230, y:  90 },
-	{ id: "cart",     label: "cart",     x: 230, y: 250 },
-	{ id: "auth",     label: "auth",     x: 400, y:  40 },
-	{ id: "pricing",  label: "pricing",  x: 400, y: 170, hot: true },
-	{ id: "payments", label: "payments", x: 580, y:  90 },
-	{ id: "redis",    label: "redis",    x: 580, y: 250 },
-	{ id: "postgres", label: "postgres", x: 750, y: 170 },
+	{ id: "edge",     label: "edge",         col: 0, row: 0,            reqLabel: "req/s",   rps: "12.4k", err: "0.1", avg: "8ms" },
+	{ id: "checkout", label: "checkout-api", col: 1, row: 0,            reqLabel: "req/s",   rps: "4.2k",  err: "0.3", avg: "24ms" },
+	{ id: "cart",     label: "cart-svc",     col: 1, row: 1,            reqLabel: "req/s",   rps: "8.1k",  err: "0.1", avg: "18ms" },
+	{ id: "auth",     label: "auth-svc",     col: 2, row: 0,            reqLabel: "req/s",   rps: "4.2k",  err: "0.0", avg: "6ms" },
+	{ id: "pricing",  label: "pricing",      col: 2, row: 1, hot: true, reqLabel: "req/s",   rps: "2.8k",  err: "2.4", avg: "142ms" },
+	{ id: "payments", label: "payments",     col: 2, row: 2,            reqLabel: "req/s",   rps: "1.1k",  err: "0.5", avg: "38ms" },
+	{ id: "redis",    label: "redis",        col: 3, row: 0, db: true,  reqLabel: "calls/s", rps: "18.2k",             avg: "2ms" },
+	{ id: "postgres", label: "postgres",     col: 3, row: 1, db: true,  reqLabel: "calls/s", rps: "6.4k",              avg: "14ms" },
 ];
 
 const edges: Edge[] = [
-	{ from: "edge",     to: "checkout" },
-	{ from: "edge",     to: "cart"     },
-	{ from: "checkout", to: "auth"     },
-	{ from: "checkout", to: "pricing"  },
-	{ from: "cart",     to: "pricing"  },
-	{ from: "pricing",  to: "payments" },
-	{ from: "pricing",  to: "postgres" },
-	{ from: "pricing",  to: "redis"    },
-	{ from: "payments", to: "redis"    },
+	{ from: "edge",     to: "checkout", rps: 4200 },
+	{ from: "edge",     to: "cart",     rps: 8100 },
+	{ from: "checkout", to: "auth",     rps: 4200 },
+	{ from: "checkout", to: "pricing",  rps: 2800, hot: true },
+	{ from: "cart",     to: "pricing",  rps: 800 },
+	{ from: "pricing",  to: "payments", rps: 1100 },
+	{ from: "pricing",  to: "redis",    rps: 12400 },
+	{ from: "pricing",  to: "postgres", rps: 6400 },
 ];
+
+// Deterministic service-color via index of first occurrence (matches product).
+const orderedServices = Array.from(new Set(nodes.map((n) => n.label)));
+function serviceColorVar(label: string): string {
+	const idx = (orderedServices.indexOf(label) % 16) + 1;
+	return `var(--service-${idx})`;
+}
+
+interface Pt { x: number; y: number }
+const nodeCenter = (n: Node): Pt => ({
+	x: COL_X[n.col] + NODE_W / 2,
+	y: ROWS_PER_COL[n.col][n.row],
+});
+const nodeRight = (n: Node): Pt => ({
+	x: COL_X[n.col] + NODE_W,
+	y: ROWS_PER_COL[n.col][n.row],
+});
+const nodeLeft = (n: Node): Pt => ({
+	x: COL_X[n.col],
+	y: ROWS_PER_COL[n.col][n.row],
+});
 
 const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
 
-const pathFor = (e: Edge) => {
-	const a = nodeById[e.from];
-	const b = nodeById[e.to];
-	const mx = (a.x + b.x) / 2;
-	return `M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}`;
+/**
+ * Smoothstep path — same shape React Flow's getSmoothStepPath produces for a
+ * horizontal flow with rounded right-angle corners. Routes from source.right
+ * via two midpoint segments to target.left.
+ */
+function smoothStepPath(a: Pt, b: Pt, r = 12): string {
+	if (Math.abs(a.y - b.y) < 0.5) {
+		return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+	}
+	const midX = (a.x + b.x) / 2;
+	const dy = Math.sign(b.y - a.y);
+	return [
+		`M ${a.x} ${a.y}`,
+		`L ${midX - r} ${a.y}`,
+		`Q ${midX} ${a.y} ${midX} ${a.y + dy * r}`,
+		`L ${midX} ${b.y - dy * r}`,
+		`Q ${midX} ${b.y} ${midX + r} ${b.y}`,
+		`L ${b.x} ${b.y}`,
+	].join(" ");
+}
+
+// Stroke width formula from product: clamp(2, 8, 2 + log10(callCount) * 2)
+function strokeWidth(rps: number): number {
+	if (rps <= 0) return 2;
+	return Math.min(8, Math.max(2, 2 + Math.log10(rps) * 0.7));
+}
+
+const edgeMidpoint = (path: string): Pt => {
+	// Approx — use the average of source and target. SVG midpoint sampling
+	// would be nicer but this is good enough for the label positioning.
+	const m = path.match(/M ([\d.-]+) ([\d.-]+) .* L ([\d.-]+) ([\d.-]+)$/);
+	if (!m) return { x: 0, y: 0 };
+	return { x: (parseFloat(m[1]) + parseFloat(m[3])) / 2, y: (parseFloat(m[2]) + parseFloat(m[4])) / 2 };
 };
+
+// Pre-compute edges with derived geometry.
+const edgeRender = edges.map((e, i) => {
+	const a = nodeRight(nodeById[e.from]);
+	const b = nodeLeft(nodeById[e.to]);
+	const path = smoothStepPath(a, b);
+	const sw = strokeWidth(e.rps);
+	const sourceColor = serviceColorVar(nodeById[e.from].label);
+	const targetColor = serviceColorVar(nodeById[e.to].label);
+	const mid = edgeMidpoint(path);
+	const rpsLabel = e.rps >= 1000 ? `${(e.rps / 1000).toFixed(1)}k` : String(e.rps);
+	return { ...e, gradId: `svc-edge-grad-${i}`, path, sw, sourceColor, targetColor, mid, rpsLabel };
+});
+
+const VIEW_W = 1180;
+const VIEW_H = 400;
 ---
 
 <div class="live-frame">
@@ -62,32 +146,127 @@ const pathFor = (e: Edge) => {
 		</span>
 	</div>
 	<div class="px-3 pt-3 pb-1">
-		<svg viewBox="0 0 820 340" class="w-full h-auto" role="img" aria-label="Service dependency graph with live request flow">
-			{edges.map((e) => (
-				<>
-					<path d={pathFor(e)} class="svc-edge" />
-					<path d={pathFor(e)} class="svc-edge svc-edge--pulse" />
-				</>
-			))}
+		<svg
+			viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+			class="w-full h-auto"
+			role="img"
+			aria-label="Service dependency graph with live request flow and per-service metrics"
+		>
+			<defs>
+				<pattern id="svcmap-dots" x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
+					<circle cx="0.5" cy="0.5" r="0.5" fill="color-mix(in oklab, var(--muted-foreground) 30%, transparent)" />
+				</pattern>
+				<filter id="svcmap-glow" x="-50%" y="-50%" width="200%" height="200%">
+					<feGaussianBlur stdDeviation="6" />
+				</filter>
+				{edgeRender.map((e) => (
+					<linearGradient id={e.gradId} gradientUnits="userSpaceOnUse"
+						x1={nodeRight(nodeById[e.from]).x} y1={nodeRight(nodeById[e.from]).y}
+						x2={nodeLeft(nodeById[e.to]).x} y2={nodeLeft(nodeById[e.to]).y}>
+						<stop offset="0%" stop-color={e.sourceColor} />
+						<stop offset="100%" stop-color={e.targetColor} />
+					</linearGradient>
+				))}
+			</defs>
 
-			{nodes.map((n) => (
-				<g transform={`translate(${n.x} ${n.y})`}>
-					<rect
-						x="-46" y="-16" width="92" height="32" rx="3"
-						class={n.hot ? "svc-node svc-node--hot" : "svc-node"}
+			<!-- Dot-grid background — same vocabulary as React Flow's BackgroundVariant.Dots -->
+			<rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill="url(#svcmap-dots)" />
+
+			<!-- Edges: 4 layers each (glow, tube wall, core, flowing dashes) -->
+			{edgeRender.map((e) => (
+				<g class="svc-map-edge">
+					<!-- Layer 1: ambient glow -->
+					<path
+						d={e.path}
+						stroke={`url(#${e.gradId})`}
+						stroke-width={e.sw * 3 + 8}
+						stroke-opacity="0.08"
+						fill="none"
+						filter="url(#svcmap-glow)"
 					/>
-					{n.hot && (
-						<rect x="-46" y="-16" width="92" height="32" rx="3"
-						      fill="none" stroke="var(--primary)" stroke-width="1"
-						      class="animate-pulse-dot" />
-					)}
-					<text class="svc-node-label" y="4">{n.label}</text>
+					<!-- Layer 2: tube outer wall -->
+					<path
+						d={e.path}
+						stroke={`url(#${e.gradId})`}
+						stroke-width={e.sw + 3}
+						stroke-opacity="0.18"
+						fill="none"
+					/>
+					<!-- Layer 3: dark core -->
+					<path
+						d={e.path}
+						stroke="color-mix(in oklab, var(--bg-deep) 80%, var(--foreground) 20%)"
+						stroke-width={e.sw}
+						stroke-opacity="0.85"
+						fill="none"
+					/>
+					<!-- Layer 4: flowing dashes (the only animated layer) -->
+					<path
+						d={e.path}
+						stroke={`url(#${e.gradId})`}
+						stroke-width={Math.max(1.5, e.sw * 0.45)}
+						stroke-opacity="0.95"
+						stroke-dasharray="4 20"
+						fill="none"
+						class="svc-map-flow"
+					/>
 				</g>
 			))}
+
+			<!-- Edge labels (req/s) on the hot edge only — keeps the canvas readable -->
+			{edgeRender.filter((e) => e.hot).map((e) => (
+				<g transform={`translate(${e.mid.x} ${e.mid.y})`}>
+					<rect x="-22" y="-9" width="44" height="18" rx="2"
+						fill="color-mix(in oklab, var(--card) 92%, transparent)"
+						stroke="var(--border)" stroke-width="0.5" />
+					<text class="svc-map-edge-label" y="3" text-anchor="middle">{e.rpsLabel} req/s</text>
+				</g>
+			))}
+
+			<!-- Nodes -->
+			{nodes.map((n) => {
+				const x = COL_X[n.col];
+				const y = ROWS_PER_COL[n.col][n.row] - NODE_H / 2;
+				const accent = serviceColorVar(n.label);
+				const errNum = n.err ? parseFloat(n.err) : 0;
+				const healthClass = errNum > 1 ? "svc-map-health--warn" : errNum > 0.05 ? "svc-map-health--info" : "svc-map-health--info";
+				return (
+					<g transform={`translate(${x} ${y})`} class={n.hot ? "svc-map-node svc-map-node--hot" : "svc-map-node"}>
+						{n.hot && (
+							<rect x="-2" y="-2" width={NODE_W + 4} height={NODE_H + 4} rx="10"
+								fill="none" stroke="var(--primary)" stroke-width="1.5"
+								stroke-opacity="0.55" class="svc-map-node-halo" />
+						)}
+						<rect width={NODE_W} height={NODE_H} rx="8"
+							fill={n.db ? "color-mix(in oklab, var(--muted) 70%, transparent)" : "var(--card)"}
+							stroke={n.hot ? "var(--primary)" : "var(--border)"}
+							stroke-width={n.hot ? "1" : "1"} />
+						<!-- Left accent stripe -->
+						<rect x="0" y="0" width="3" height={NODE_H} rx="0" fill={accent} />
+						<!-- Header row: health dot, label, db badge -->
+						<circle cx="14" cy="14" r="2.25" class={`svc-map-health ${healthClass}`} />
+						<text class="svc-map-node-label" x="22" y="17">{n.label}</text>
+						{n.db && <text class="svc-map-node-db" x={NODE_W - 10} y="17" text-anchor="end">DB</text>}
+						<!-- Metrics row -->
+						<g transform="translate(11 28)">
+							<text class="svc-map-metric-cap" x="0" y="9">{n.reqLabel}</text>
+							<text class="svc-map-metric-val" x="0" y="22">{n.rps}</text>
+							{n.err !== undefined && (
+								<>
+									<text class="svc-map-metric-cap" x="64" y="9">err%</text>
+									<text class={`svc-map-metric-val ${errNum > 1 ? "svc-map-metric-val--warn" : ""}`} x="64" y="22">{n.err}%</text>
+								</>
+							)}
+							<text class="svc-map-metric-cap" x="124" y="9">avg</text>
+							<text class={`svc-map-metric-val ${parseFloat(n.avg) > 100 ? "svc-map-metric-val--warn" : ""}`} x="124" y="22">{n.avg}</text>
+						</g>
+					</g>
+				);
+			})}
 		</svg>
 	</div>
 	<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
-		<span>8 services · 14 edges</span>
+		<span>{nodes.length} services · {edges.length} edges · 60s window</span>
 		<span>pricing-svc · p99 +18% vs 1h ago</span>
 	</div>
 </div>
