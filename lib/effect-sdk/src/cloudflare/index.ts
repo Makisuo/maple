@@ -96,10 +96,13 @@ interface OtlpResourceLike {
 	readonly droppedAttributesCount: number
 }
 
-const resolveOnce = (env: Record<string, unknown>, config: Config): Resolved | null => {
+const resolveOnce = (env: Record<string, unknown>, config: Config): Resolved => {
 	const r: ResolvedResource = resolveResourceFromEnv(env, { ...config, sdkType: "cloudflare" })
-	if (!r.endpoint) return null
-	const baseUrl = r.endpoint.endsWith("/") ? r.endpoint.slice(0, -1) : r.endpoint
+	// `r.endpoint` always defined — falls back to DEFAULT_MAPLE_ENDPOINT
+	// (`https://ingest.maple.dev`) when nothing else set. Hosted SDK convention:
+	// users only need to provide an ingest key.
+	const base = r.endpoint!
+	const baseUrl = base.endsWith("/") ? base.slice(0, -1) : base
 	const tracesUrl = `${baseUrl}${config.tracesPath ?? "/v1/traces"}`
 	const logsUrl = `${baseUrl}${config.logsPath ?? "/v1/logs"}`
 	const headers: Record<string, string> = {
@@ -154,7 +157,7 @@ const post = async (url: string, headers: Record<string, string>, body: unknown)
 	}
 }
 
-const flushSignal = async <T>(
+const flushSignal = async (
 	url: string,
 	headers: Record<string, string>,
 	body: () => unknown,
@@ -163,10 +166,16 @@ const flushSignal = async <T>(
 	signal: string,
 ): Promise<void> => {
 	if (count === 0) return
-	if (state.disabledUntil && Date.now() < state.disabledUntil) return
+	if (state.disabledUntil && Date.now() < state.disabledUntil) {
+		console.warn(
+			`[MapleCloudflareSDK] ${signal} flush skipped (cooldown ${state.disabledUntil - Date.now()}ms remaining)`,
+		)
+		return
+	}
 	state.disabledUntil = 0
 	try {
 		await post(url, headers, body())
+		console.log(`[MapleCloudflareSDK] ${signal} flushed ${count} record(s) to ${url}`)
 	} catch (err) {
 		state.disabledUntil = Date.now() + COOLDOWN_MS
 		console.error(`[MapleCloudflareSDK] ${signal} flush failed; cooldown 60s:`, err)
@@ -177,7 +186,7 @@ export const make = (config: Config = {}): Telemetry => {
 	const spans: SpanBuffer = makeSpanBuffer()
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 
-	let resolved: Resolved | null | undefined = undefined
+	let resolved: Resolved | undefined = undefined
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
 
@@ -186,17 +195,16 @@ export const make = (config: Config = {}): Telemetry => {
 	const flush = async (env: Record<string, unknown>): Promise<void> => {
 		if (resolved === undefined) {
 			resolved = resolveOnce(env, config)
-			if (resolved === null) {
-				spans.setDisabled(true)
-				logs.setDisabled(true)
-				return
-			}
+			console.log(
+				`[MapleCloudflareSDK] initialized: traces=${resolved.tracesUrl} auth=${resolved.headers.authorization ? "yes" : "no (will fail at collector — set MAPLE_INGEST_KEY)"}`,
+			)
 		}
-		if (resolved === null) return
 
 		const r = resolved
 		const spanBatch = spans.drain()
 		const logBatch = logs.drain()
+
+		if (spanBatch.length === 0 && logBatch.length === 0) return
 
 		await Promise.all([
 			flushSignal(

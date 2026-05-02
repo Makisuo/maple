@@ -2,6 +2,14 @@ import { Effect, Option, Redacted } from "effect"
 import * as EnvConfig from "./config.js"
 import { getAutoPlatformAttributes } from "./platform.js"
 
+/**
+ * Public Maple ingest endpoint. Used as the default when no endpoint is
+ * configured via `config.endpoint`, `MAPLE_ENDPOINT`, or
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` — so end users only need to supply an ingest
+ * key, not an URL.
+ */
+export const DEFAULT_MAPLE_ENDPOINT = "https://ingest.maple.dev"
+
 const stringOrUndefined = (value: unknown): string | undefined =>
 	typeof value === "string" && value.length > 0 ? value : undefined
 
@@ -51,7 +59,8 @@ export interface ResolvedResource {
 export const resolveResource = (config: ResourceConfigInput): Effect.Effect<ResolvedResource> =>
 	Effect.gen(function* () {
 		const envEndpoint = yield* EnvConfig.endpoint
-		const endpoint = config.endpoint ?? Option.getOrUndefined(envEndpoint)
+		const endpoint =
+			config.endpoint ?? Option.getOrUndefined(envEndpoint) ?? DEFAULT_MAPLE_ENDPOINT
 
 		const envIngestKey = yield* EnvConfig.ingestKey
 		const ingestKey = config.ingestKey
@@ -103,7 +112,8 @@ export const resolveResourceFromEnv = (
 	const endpoint =
 		config.endpoint ??
 		stringOrUndefined(env.MAPLE_ENDPOINT) ??
-		stringOrUndefined(env.OTEL_EXPORTER_OTLP_ENDPOINT)
+		stringOrUndefined(env.OTEL_EXPORTER_OTLP_ENDPOINT) ??
+		DEFAULT_MAPLE_ENDPOINT
 
 	const rawIngestKey = stringOrUndefined(env.MAPLE_INGEST_KEY)
 	const ingestKey = config.ingestKey

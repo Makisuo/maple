@@ -125,7 +125,7 @@ describe("MapleCloudflareSDK.make", () => {
 		expect(calls.length).toBe(firstCount)
 	})
 
-	it("becomes a no-op when no endpoint is configured", async () => {
+	it("defaults to https://ingest.maple.dev when no endpoint is configured", async () => {
 		const { calls, restore: r } = setupFetch()
 		restore = r
 		const telemetry = make({ serviceName: "unit-test" })
@@ -133,9 +133,10 @@ describe("MapleCloudflareSDK.make", () => {
 		await Effect.runPromise(
 			Effect.succeed(undefined).pipe(Effect.withSpan("op"), Effect.provide(telemetry.layer)),
 		)
-		await telemetry.flush({}) // no MAPLE_ENDPOINT
+		await telemetry.flush({}) // no MAPLE_ENDPOINT — falls through to public default
 
-		expect(calls).toHaveLength(0)
+		const tracesCall = calls.find((c) => c.url.endsWith("/v1/traces"))
+		expect(tracesCall?.url).toBe("https://ingest.maple.dev/v1/traces")
 	})
 
 	it("explicit config overrides env", async () => {
