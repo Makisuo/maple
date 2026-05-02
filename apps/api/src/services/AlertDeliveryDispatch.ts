@@ -418,10 +418,13 @@ export const dispatchDelivery = (
 					}),
 				"hazel-oauth": (config) =>
 					Effect.gen(function* () {
-						// Hazel's MaplePayload schema (see hazel
-						// packages/domain/src/http/incoming-webhooks.ts). The webhook URL
-						// already includes the channel-scoped delivery token in its path,
-						// so no Authorization header is required.
+						// Hazel exposes per-integration sibling endpoints under the same
+						// `:webhookId/:token` prefix (see hazel
+						// packages/domain/src/http/incoming-webhooks.ts). The stored
+						// webhookUrl is the base; we append `/maple` to hit the
+						// `executeMaple` handler — without it, the payload routes to the
+						// Discord-style `execute` endpoint and is rejected.
+						const hazelUrl = `${config.webhookUrl.replace(/\/$/, "")}/maple`
 						const incidentStatus = context.eventType === "resolve" ? "resolved" : "open"
 						const body = JSON.stringify({
 							eventType: context.eventType,
@@ -436,7 +439,6 @@ export const dispatchDelivery = (
 								groupKey: context.groupKey,
 								comparator: context.comparator,
 								threshold: context.threshold,
-								thresholdUpper: context.thresholdUpper,
 								windowMinutes: context.windowMinutes,
 							},
 							observed: {
@@ -453,7 +455,7 @@ export const dispatchDelivery = (
 							fetchFn,
 							timeoutMs,
 							() =>
-								fetchFn(config.webhookUrl, {
+								fetchFn(hazelUrl, {
 									method: "POST",
 									headers: {
 										"content-type": "application/json",
