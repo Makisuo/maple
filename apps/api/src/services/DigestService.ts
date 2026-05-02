@@ -20,7 +20,7 @@ import { WeeklyDigest, type WeeklyDigestProps } from "@maple/email/weekly-digest
 import { Database } from "./DatabaseLive"
 import { EmailService } from "./EmailService"
 import { Env } from "./Env"
-import { TinybirdService } from "./TinybirdService"
+import { WarehouseQueryService } from "./WarehouseQueryService"
 
 const SYSTEM_DIGEST_USER = UserId.make("system-digest")
 const ROOT_ROLE = RoleName.make("root")
@@ -75,7 +75,7 @@ export class DigestService extends Context.Service<DigestService>()("DigestServi
 		const database = yield* Database
 		const email = yield* EmailService
 		const env = yield* Env
-		const tinybird = yield* TinybirdService
+		const warehouse = yield* WarehouseQueryService
 
 		const getSubscription = Effect.fn("DigestService.getSubscription")(function* (
 			orgId: OrgId,
@@ -196,7 +196,7 @@ export class DigestService extends Context.Service<DigestService>()("DigestServi
 			// into a single Tinybird query, tagging rows with a `period` column.
 			const [overviewResponse, currentErrors, usageResponse, topErrors] = yield* Effect.all(
 				[
-					tinybird.query(systemTenant, {
+					warehouse.query(systemTenant, {
 						pipe: "service_overview_compare",
 						params: {
 							current_start_time: currentStart,
@@ -205,11 +205,11 @@ export class DigestService extends Context.Service<DigestService>()("DigestServi
 							previous_end_time: currentStart,
 						},
 					}),
-					tinybird.query(systemTenant, {
+					warehouse.query(systemTenant, {
 						pipe: "errors_summary",
 						params: { start_time: currentStart, end_time: currentEnd },
 					}),
-					tinybird.query(systemTenant, {
+					warehouse.query(systemTenant, {
 						pipe: "get_service_usage_compare",
 						params: {
 							current_start_time: currentStart,
@@ -218,7 +218,7 @@ export class DigestService extends Context.Service<DigestService>()("DigestServi
 							previous_end_time: currentStart,
 						},
 					}),
-					tinybird.query(systemTenant, {
+					warehouse.query(systemTenant, {
 						pipe: "errors_by_type",
 						params: {
 							start_time: currentStart,

@@ -19,7 +19,7 @@ import { Array as Arr, Duration, Effect, Layer, Match, Metric, Option, Result, C
 import type { TenantContext } from "./AuthService"
 import { BucketCacheService } from "./BucketCacheService"
 import { EdgeCacheService } from "./EdgeCacheService"
-import { TinybirdService, type TinybirdServiceShape } from "./TinybirdService"
+import { WarehouseQueryService, type WarehouseQueryServiceShape } from "./WarehouseQueryService"
 import type { QueryProfileName } from "./TinybirdQueryProfile"
 import * as QueryEngineMetrics from "./QueryEngineMetrics"
 
@@ -603,12 +603,14 @@ const mapTinybirdError = <A, R>(
 		),
 	)
 
-const truncateSql = (s: string, maxLen = 1000) =>
-	s.length > maxLen ? s.slice(0, maxLen) + "...[truncated]" : s
-
-/** Compile a CHQuery, execute it via Tinybird SQL, and return typed rows. */
+/**
+ * Compile a CHQuery, execute it via the warehouse SQL executor, and return typed rows.
+ * The inner WarehouseQueryService.executeSql span carries the full SQL, fingerprint,
+ * length, duration, and tenant data — `query.context` is propagated through
+ * SqlQueryOptions so it lands on the same span instead of an extra wrapper.
+ */
 const executeCHQuery = <Output extends Record<string, any>, Params extends Record<string, any>>(
-	tinybird: Pick<TinybirdServiceShape, "sqlQuery">,
+	warehouse: Pick<WarehouseQueryServiceShape, "sqlQuery">,
 	tenant: TenantContext,
 	query: CH.CHQuery<any, Output>,
 	params: Params,
@@ -616,22 +618,15 @@ const executeCHQuery = <Output extends Record<string, any>, Params extends Recor
 	profile: QueryProfileName = "aggregation",
 ): Effect.Effect<ReadonlyArray<Output>, TinybirdQueryError | TinybirdQuotaExceededError> => {
 	const compiled = CH.compile(query, params)
-	return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql, { profile }), context).pipe(
-		Effect.map((rows) => compiled.castRows(rows)),
-		Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
-		Effect.withSpan("QueryEngineService.executeCHQuery", {
-			attributes: {
-				"db.statement": truncateSql(compiled.sql),
-				"query.context": context,
-				"query.profile": profile,
-			},
-		}),
-	)
+	return mapTinybirdError(
+		warehouse.sqlQuery(tenant, compiled.sql, { profile, context }),
+		context,
+	).pipe(Effect.map((rows) => compiled.castRows(rows)))
 }
 
-/** Compile a CHUnionQuery, execute it via Tinybird SQL, and return typed rows. */
+/** Same as executeCHQuery but for union queries. */
 const executeCHUnionQuery = <Output extends Record<string, any>, Params extends Record<string, any>>(
-	tinybird: Pick<TinybirdServiceShape, "sqlQuery">,
+	warehouse: Pick<WarehouseQueryServiceShape, "sqlQuery">,
 	tenant: TenantContext,
 	query: CH.CHUnionQuery<Output>,
 	params: Params,
@@ -639,20 +634,13 @@ const executeCHUnionQuery = <Output extends Record<string, any>, Params extends 
 	profile: QueryProfileName = "aggregation",
 ): Effect.Effect<ReadonlyArray<Output>, TinybirdQueryError | TinybirdQuotaExceededError> => {
 	const compiled = CH.compileUnion(query, params)
-	return mapTinybirdError(tinybird.sqlQuery(tenant, compiled.sql, { profile }), context).pipe(
-		Effect.map((rows) => compiled.castRows(rows)),
-		Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
-		Effect.withSpan("QueryEngineService.executeCHUnionQuery", {
-			attributes: {
-				"db.statement": truncateSql(compiled.sql),
-				"query.context": context,
-				"query.profile": profile,
-			},
-		}),
-	)
+	return mapTinybirdError(
+		warehouse.sqlQuery(tenant, compiled.sql, { profile, context }),
+		context,
+	).pipe(Effect.map((rows) => compiled.castRows(rows)))
 }
 
-type QueryEngineTinybird = Pick<TinybirdServiceShape, "sqlQuery">
+type QueryEngineWarehouse = Pick<WarehouseQueryServiceShape, "sqlQuery">
 
 const tracesMetricFieldMap = {
 	count: "count",
@@ -849,7 +837,7 @@ function shapeMetricsGroupRows<
 	)
 }
 
-export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
+export const makeQueryEngineExecute = (warehouse: QueryEngineWarehouse) =>
 	Effect.fn("QueryEngineService.execute")(function* (
 		tenant: TenantContext,
 		request: QueryEngineExecuteRequest,
@@ -896,7 +884,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 
 			if (request.query.allMetrics) {
 				const rows = yield* executeCHQuery(
-					tinybird,
+					warehouse,
 					tenant,
 					CH.tracesTimeseriesQuery({
 						...opts,
@@ -926,7 +914,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 			}
 
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.tracesTimeseriesQuery({
 					...opts,
@@ -957,7 +945,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 
 		if (request.query.source === "logs" && request.query.kind === "timeseries") {
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.logsTimeseriesQuery({
 					serviceName: request.query.filters?.serviceName,
@@ -1012,16 +1000,11 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 					},
 				)
 				const rawRows = yield* mapTinybirdError(
-					tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
-					"Failed to execute metrics rate/increase query",
-				).pipe(
-					Effect.tap((rows) => Effect.annotateCurrentSpan("result.rowCount", rows.length)),
-					Effect.withSpan("QueryEngineService.executeCHQuery", {
-						attributes: {
-							"db.statement": truncateSql(compiled.sql),
-							"query.context": "metrics rate/increase query",
-						},
+					warehouse.sqlQuery(tenant, compiled.sql, {
+						profile: "aggregation",
+						context: "metrics rate/increase query",
 					}),
+					"Failed to execute metrics rate/increase query",
 				)
 				const rateResult = compiled.castRows(rawRows)
 
@@ -1045,7 +1028,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 			}
 
 			const result = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.metricsTimeseriesQuery({
 					metricType: request.query.filters.metricType,
@@ -1103,7 +1086,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 		if (request.query.source === "traces" && request.query.kind === "breakdown") {
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.tracesBreakdownQuery({
 					...opts,
@@ -1134,7 +1117,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 
 		if (request.query.source === "logs" && request.query.kind === "breakdown") {
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.logsBreakdownQuery({
 					groupBy: request.query.groupBy as "service" | "severity",
@@ -1164,7 +1147,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 
 		if (request.query.source === "metrics" && request.query.kind === "breakdown") {
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.metricsBreakdownQuery({
 					metricType: request.query.filters.metricType,
@@ -1207,7 +1190,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 			const clampedLimit = Math.min(request.query.limit ?? 25, maxLimit)
 
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.tracesListQuery({
 					...opts,
@@ -1247,7 +1230,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 		if (request.query.kind === "attributeKeys") {
 			const scope = resolveAttributeScope(request.query.source, request.query.scope)
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.attributeKeysQuery({
 					scope,
@@ -1283,7 +1266,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 					request.query.filters as Record<string, unknown> | undefined,
 				)
 				const rows = yield* executeCHUnionQuery(
-					tinybird,
+					warehouse,
 					tenant,
 					CH.tracesFacetsQuery(opts),
 					baseParams,
@@ -1307,7 +1290,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 				const filters = request.query.filters as Record<string, unknown> | undefined
 				const envMatchMode = filters?.deploymentEnvMatchMode as "contains" | undefined
 				const rows = yield* executeCHUnionQuery(
-					tinybird,
+					warehouse,
 					tenant,
 					CH.logsFacetsQuery({
 						serviceName: filters?.serviceName as string | undefined,
@@ -1340,7 +1323,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 			if (request.query.source === "errors") {
 				const filters = request.query.filters as Record<string, unknown> | undefined
 				const rows = yield* executeCHUnionQuery(
-					tinybird,
+					warehouse,
 					tenant,
 					CH.errorsFacetsQuery({
 						rootOnly: filters?.rootOnly as boolean | undefined,
@@ -1367,7 +1350,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 
 			if (request.query.source === "services") {
 				const rows = yield* executeCHUnionQuery(
-					tinybird,
+					warehouse,
 					tenant,
 					CH.servicesFacetsQuery(),
 					baseParams,
@@ -1394,7 +1377,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 				request.query.filters as Record<string, unknown> | undefined,
 			)
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.tracesDurationStatsQuery(opts),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
@@ -1424,7 +1407,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 					? CH.resourceAttributeValuesQuery
 					: CH.spanAttributeValuesQuery
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
@@ -1445,7 +1428,7 @@ export const makeQueryEngineExecute = (tinybird: QueryEngineTinybird) =>
 			const filters = request.query.filters as Record<string, unknown> | undefined
 			const envMatchMode = filters?.deploymentEnvMatchMode as "contains" | undefined
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.logsCountQuery({
 					serviceName: filters?.serviceName as string | undefined,
@@ -1516,7 +1499,7 @@ const composeMetricsGroupKey = (
 	return filtered.join(" \u00b7 ")
 }
 
-export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
+export const makeQueryEngineEvaluate = (warehouse: QueryEngineWarehouse) =>
 	Effect.fn("QueryEngineService.evaluate")(function* (
 		tenant: TenantContext,
 		request: QueryEngineEvaluateRequest,
@@ -1578,7 +1561,7 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
 			const tracesQuery = request.query
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.tracesTimeseriesQuery({
 					...opts,
@@ -1609,7 +1592,7 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
 		} else if (request.query.source === "logs") {
 			const logsQuery = request.query
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.logsTimeseriesQuery({
 					serviceName: request.query.filters?.serviceName,
@@ -1645,7 +1628,7 @@ export const makeQueryEngineEvaluate = (tinybird: QueryEngineTinybird) =>
 				: undefined
 
 			const rows = yield* executeCHQuery(
-				tinybird,
+				warehouse,
 				tenant,
 				CH.metricsTimeseriesQuery({
 					metricType: metricsQuery.filters.metricType,
@@ -1695,11 +1678,11 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 	"QueryEngineService",
 	{
 		make: Effect.gen(function* () {
-			const tinybird = yield* TinybirdService
+			const warehouse = yield* WarehouseQueryService
 			const edgeCache = yield* EdgeCacheService
 			const bucketCache = yield* BucketCacheService
-			const executeImpl = makeQueryEngineExecute(tinybird)
-			const evaluateImpl = makeQueryEngineEvaluate(tinybird)
+			const executeImpl = makeQueryEngineExecute(warehouse)
+			const evaluateImpl = makeQueryEngineEvaluate(warehouse)
 
 			const recordCacheOutcome = (hit: boolean) =>
 				Metric.update(

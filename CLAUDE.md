@@ -67,29 +67,33 @@ src/
 
 - `src/routeTree.gen.ts` - Generated from route files
 
-### Tinybird Query Pattern
+### Warehouse Query Pattern
 
-**IMPORTANT:** Maple no longer uses Tinybird pipes/endpoints. All backend queries go through the ClickHouse DSL in `@maple/query-engine` and execute via `TinybirdService.sqlQuery()`. The deployed Tinybird project contains only datasources and materialized views — zero pipes.
+**IMPORTANT:** Maple no longer uses Tinybird pipes/endpoints. All backend queries go through the ClickHouse DSL in `@maple/query-engine` and execute via `WarehouseQueryService.sqlQuery()` (defined in `apps/api/src/services/WarehouseQueryService.ts`). The deployed Tinybird project contains only datasources and materialized views — zero pipes. The service routes to either Tinybird SDK or ClickHouse depending on org config.
 
 Pattern (see `apps/api/src/routes/query-engine.http.ts` and `apps/api/src/services/QueryEngineService.ts` for examples):
 
 1. **Define the query** as a DSL function in `packages/query-engine/src/ch/queries/*.ts` using `from(Table).select(...).where(...)` and `param.string/int/dateTime(name)` placeholders.
 2. **Export it** from `packages/query-engine/src/ch/index.ts` so it's reachable via `import { CH } from "@maple/query-engine"`.
-3. **Call it** from a service or route handler:
+3. **Call it** from a service or route handler. Pass a `context` string in `SqlQueryOptions` so the executeSql span carries a semantic label (`query.context`) you can filter traces on:
     ```typescript
     const compiled = CH.compile(CH.myQuery({ limit: 50 }), {
     	orgId,
     	startTime, // ISO or Tinybird datetime string — resolveParam() quotes it
     	endTime,
     })
-    const rows = yield * tinybird.sqlQuery(tenant, compiled.sql).pipe(Effect.mapError(mapTinybirdError))
+    const rows = yield * warehouse
+    	.sqlQuery(tenant, compiled.sql, { profile: "list", context: "myQuery" })
+    	.pipe(Effect.mapError(mapTinybirdError))
     const typedRows = compiled.castRows(rows)
     ```
-4. **`sqlQuery` enforces `OrgId` scoping** — every query must include an `OrgId` filter (enforced by `TinybirdService`). DSL queries satisfy this via `$.OrgId.eq(param.string("orgId"))` in their `.where()`.
+4. **`sqlQuery` enforces `OrgId` scoping** — every query must include an `OrgId` filter (enforced by `WarehouseQueryService`). DSL queries satisfy this via `$.OrgId.eq(param.string("orgId"))` in their `.where()`.
 
 `packages/domain/src/tinybird/endpoints.ts` is **type-only** — it holds `*Output` / `*Params` shapes for consumers that want to reference query result types. Do not add `defineEndpoint()` calls; they won't be deployed.
 
-Never use raw `fetch()` calls to `/v0/sql` — always go through `tinybird.sqlQuery()` with a DSL-compiled query.
+Never use raw `fetch()` calls to `/v0/sql` — always go through `warehouse.sqlQuery()` with a DSL-compiled query.
+
+**Trace annotations on `WarehouseQueryService.executeSql`:** every SQL execution leaves a span carrying `db.statement` (full SQL up to 16 KB), `db.statement.length`, `db.statement.fingerprint` (stable hash with literals normalized), `db.statement.truncated`, `db.duration_ms`, `db.system`, `result.rowCount`, `orgId`, `tenant.userId`, `query.context`, and `query.profile`. When debugging slow queries, pull a trace and filter on these.
 
 ## Environment Variables
 

@@ -3,7 +3,7 @@ import type { TinybirdPipe } from "@maple/domain"
 import { Effect } from "effect"
 import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
 import { McpAuthMissingError, McpQueryError } from "@/mcp/tools/types"
-import { TinybirdService } from "@/services/TinybirdService"
+import { WarehouseQueryService } from "@/services/WarehouseQueryService"
 import { TinybirdExecutor } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
 import type { TenantContext } from "@/services/AuthService"
@@ -26,7 +26,7 @@ export const withTenantExecutor = <A, E>(effect: Effect.Effect<A, E, TinybirdExe
 export const queryTinybird = <T = any>(pipe: TinybirdPipe, params?: Record<string, unknown>) =>
 	Effect.gen(function* () {
 		const tenant = yield* resolveTenant
-		const service = yield* TinybirdService
+		const service = yield* WarehouseQueryService
 		const response = yield* service.query(tenant, { pipe, params }).pipe(
 			Effect.mapError(
 				(error) =>

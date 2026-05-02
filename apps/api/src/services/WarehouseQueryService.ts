@@ -23,6 +23,12 @@ import {
 export type SqlQueryOptions = {
 	profile?: QueryProfileName
 	settings?: TinybirdQuerySettings
+	/**
+	 * Semantic name for the query (e.g. "errorsByType", "spanHierarchy").
+	 * Annotated on the executeSql span as `query.context` so traces can be filtered
+	 * and grouped by call site without re-running the SQL.
+	 */
+	context?: string
 }
 
 const CLIENT_CACHE_TTL_MS = 30_000
@@ -48,20 +54,25 @@ interface TinybirdSdkSqlClientConfig {
 
 type SqlClientConfig = ClickHouseSqlClientConfig | TinybirdSdkSqlClientConfig
 
-export type TinybirdSqlError = TinybirdQueryError | TinybirdQuotaExceededError
+export type WarehouseSqlError = TinybirdQueryError | TinybirdQuotaExceededError
+/**
+ * Legacy alias kept so callers that imported `TinybirdSqlError` keep compiling
+ * during the rename. Prefer `WarehouseSqlError` in new code.
+ */
+export type TinybirdSqlError = WarehouseSqlError
 type TinybirdQueryErrorCategory = "query" | "upstream" | "auth" | "config" | "client"
 
-export interface TinybirdServiceShape {
+export interface WarehouseQueryServiceShape {
 	readonly query: (
 		tenant: TenantContext,
 		payload: TinybirdQueryRequest,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<TinybirdQueryResponse, TinybirdSqlError>
+	) => Effect.Effect<TinybirdQueryResponse, WarehouseSqlError>
 	readonly sqlQuery: (
 		tenant: TenantContext,
 		sql: string,
 		options?: SqlQueryOptions,
-	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, TinybirdSqlError>
+	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseSqlError>
 	readonly ingest: <T>(
 		tenant: TenantContext,
 		datasource: string,
@@ -172,9 +183,10 @@ const transientClickHouseTypes = new Set([
 	"ALL_CONNECTION_TRIES_FAILED",
 ])
 
-export class TinybirdService extends Context.Service<TinybirdService, TinybirdServiceShape>()(
-	"TinybirdService",
-	{
+export class WarehouseQueryService extends Context.Service<
+	WarehouseQueryService,
+	WarehouseQueryServiceShape
+>()("WarehouseQueryService", {
 		make: Effect.gen(function* () {
 			const env = yield* Env
 			const orgClickHouseSettings = yield* OrgClickHouseSettingsService
@@ -317,7 +329,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 			 *   2. Env-level managed ClickHouse (`CLICKHOUSE_URL` set)
 			 *   3. Env-level managed Tinybird (`TINYBIRD_HOST` + `TINYBIRD_TOKEN`)
 			 */
-			const resolveSqlConfig = Effect.fn("TinybirdService.resolveSqlConfig")(function* (
+			const resolveSqlConfig = Effect.fn("WarehouseQueryService.resolveSqlConfig")(function* (
 				tenant: TenantContext,
 				label: string,
 			) {
@@ -369,16 +381,41 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				}
 			})
 
-			const truncateSql = (s: string, maxLen = 1000) =>
+			/**
+			 * Cap traced SQL at 16 KB. OTel's default attribute size limit is 32 KB,
+			 * and 16 KB covers the overwhelming majority of compiled DSL queries while
+			 * leaving headroom for other span attributes. Logs use a tighter cap below.
+			 */
+			const SQL_TRACE_MAX = 16_384
+			const SQL_LOG_MAX = 1_000
+
+			const truncateSql = (s: string, maxLen: number) =>
 				s.length > maxLen ? s.slice(0, maxLen) + "...[truncated]" : s
 
-			const executeSql = Effect.fn("TinybirdService.executeSql")(function* (
+			/**
+			 * Stable 32-bit FNV-1a hash over SQL with literals and numbers normalized.
+			 * Lets the same query with different params group together in trace search.
+			 */
+			const fingerprintSql = (s: string): string => {
+				const normalized = s.replace(/'[^']*'/g, "'?'").replace(/\b\d+\b/g, "?")
+				let h = 0x811c9dc5
+				for (let i = 0; i < normalized.length; i++) {
+					h ^= normalized.charCodeAt(i)
+					h = Math.imul(h, 0x01000193)
+				}
+				return (h >>> 0).toString(16).padStart(8, "0")
+			}
+
+			const executeSql = Effect.fn("WarehouseQueryService.executeSql")(function* (
 				tenant: TenantContext,
 				sql: string,
 				pipe: string,
 				options?: SqlQueryOptions,
 			) {
+				const startedAtMs = Date.now()
 				yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+				yield* Effect.annotateCurrentSpan("tenant.userId", tenant.userId)
+				yield* Effect.annotateCurrentSpan("tenant.authMode", tenant.authMode)
 
 				const leftoverParam = sql.match(/__PARAM_(\w+)__/)
 				if (leftoverParam) {
@@ -397,7 +434,14 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				const sqlForClient =
 					resolved.config._tag === "clickhouse" ? normalizeSqlForClickHouseClient(sql) : sql
 				const finalSql = appendSettings(sqlForClient, settings)
-				yield* Effect.annotateCurrentSpan("db.statement", truncateSql(finalSql))
+				const sqlLength = finalSql.length
+				const sqlTruncated = sqlLength > SQL_TRACE_MAX
+				yield* Effect.annotateCurrentSpan("db.statement", truncateSql(finalSql, SQL_TRACE_MAX))
+				yield* Effect.annotateCurrentSpan("db.statement.length", sqlLength)
+				yield* Effect.annotateCurrentSpan("db.statement.truncated", sqlTruncated)
+				yield* Effect.annotateCurrentSpan("db.statement.fingerprint", fingerprintSql(finalSql))
+				yield* Effect.annotateCurrentSpan("query.pipe", pipe)
+				if (options?.context) yield* Effect.annotateCurrentSpan("query.context", options.context)
 				if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 				if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
 
@@ -408,21 +452,32 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 					catch: (error) => mapTinybirdError(pipe, error),
 				}).pipe(
 					Effect.tapError((error) =>
-						Effect.logError("TinybirdService.executeSql failed", {
-							pipe,
-							error: String(error),
-							message: error.message,
-							sql: truncateSql(finalSql),
-							profile: options?.profile,
+						Effect.gen(function* () {
+							const elapsedMs = Date.now() - startedAtMs
+							yield* Effect.annotateCurrentSpan("db.duration_ms", elapsedMs)
+							yield* Effect.logError("WarehouseQueryService.executeSql failed", {
+								pipe,
+								context: options?.context,
+								orgId: tenant.orgId,
+								backend: resolved.config._tag,
+								durationMs: elapsedMs,
+								error: String(error),
+								message: error.message,
+								sql: truncateSql(finalSql, SQL_LOG_MAX),
+								sqlLength,
+								sqlFingerprint: fingerprintSql(finalSql),
+								profile: options?.profile,
+							})
 						}),
 					),
 				)
 
 				yield* Effect.annotateCurrentSpan("result.rowCount", result.data.length)
+				yield* Effect.annotateCurrentSpan("db.duration_ms", Date.now() - startedAtMs)
 				return result.data
 			})
 
-			const query = Effect.fn("TinybirdService.query")(function* (
+			const query = Effect.fn("WarehouseQueryService.query")(function* (
 				tenant: TenantContext,
 				payload: TinybirdQueryRequest,
 				options?: SqlQueryOptions,
@@ -456,7 +511,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				})
 			})
 
-			const sqlQuery = Effect.fn("TinybirdService.sqlQuery")(function* (
+			const sqlQuery = Effect.fn("WarehouseQueryService.sqlQuery")(function* (
 				tenant: TenantContext,
 				sql: string,
 				options?: SqlQueryOptions,
@@ -476,7 +531,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				return yield* executeSql(tenant, sql, "sqlQuery", options)
 			})
 
-			const ingest = Effect.fn("TinybirdService.ingest")(function* <T>(
+			const ingest = Effect.fn("WarehouseQueryService.ingest")(function* <T>(
 				tenant: TenantContext,
 				datasource: string,
 				rows: ReadonlyArray<T>,
@@ -535,7 +590,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 					catch: (error) => toTinybirdQueryError(label, error),
 				}).pipe(
 					Effect.tapError((error) =>
-						Effect.logError("TinybirdService.ingest failed", {
+						Effect.logError("WarehouseQueryService.ingest failed", {
 							datasource,
 							rowCount: rows.length,
 							backend: resolved.config._tag,
@@ -550,7 +605,7 @@ export class TinybirdService extends Context.Service<TinybirdService, TinybirdSe
 				query,
 				sqlQuery,
 				ingest,
-			} satisfies TinybirdServiceShape
+			} satisfies WarehouseQueryServiceShape
 		}),
 	},
 ) {

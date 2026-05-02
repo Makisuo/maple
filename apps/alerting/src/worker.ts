@@ -12,7 +12,7 @@ import {
 	NotificationDispatcher,
 	OrgClickHouseSettingsService,
 	QueryEngineService,
-	TinybirdService,
+	WarehouseQueryService,
 } from "@maple/api/alerting"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import {
@@ -37,14 +37,14 @@ const buildLayer = (_env: Record<string, unknown>) => {
 
 	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.Live.pipe(Layer.provide(BaseLive))
 
-	const TinybirdServiceLive = TinybirdService.Live.pipe(
+	const WarehouseQueryServiceLive = WarehouseQueryService.Live.pipe(
 		Layer.provide(Layer.mergeAll(EnvLive, OrgClickHouseSettingsLive)),
 	)
 
 	const BucketCacheServiceLive = BucketCacheService.layer.pipe(Layer.provide(EdgeCacheService.layer))
 
 	const QueryEngineServiceLive = QueryEngineService.layer.pipe(
-		Layer.provide(TinybirdServiceLive),
+		Layer.provide(WarehouseQueryServiceLive),
 		Layer.provide(EdgeCacheService.layer),
 		Layer.provide(BucketCacheServiceLive),
 	)
@@ -56,7 +56,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 			Layer.mergeAll(
 				BaseLive,
 				QueryEngineServiceLive,
-				TinybirdServiceLive,
+				WarehouseQueryServiceLive,
 				AlertRuntime.Default,
 				HazelOAuthServiceLive,
 			),
@@ -68,13 +68,13 @@ const buildLayer = (_env: Record<string, unknown>) => {
 	)
 
 	const ErrorsServiceLive = ErrorsService.Live.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, TinybirdServiceLive, NotificationDispatcherLive)),
+		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, NotificationDispatcherLive)),
 	)
 
 	const EmailServiceLive = EmailService.Default.pipe(Layer.provide(EnvLive))
 
 	const DigestServiceLive = DigestService.Default.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, TinybirdServiceLive, EmailServiceLive)),
+		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, EmailServiceLive)),
 	)
 
 	return Layer.mergeAll(AlertsServiceLive, DigestServiceLive, ErrorsServiceLive).pipe(

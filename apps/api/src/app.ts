@@ -38,7 +38,7 @@ import { OrgOpenRouterSettingsService } from "./services/OrgOpenRouterSettingsSe
 import { OrgClickHouseSettingsService } from "./services/OrgClickHouseSettingsService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
-import { TinybirdService } from "./services/TinybirdService"
+import { WarehouseQueryService } from "./services/WarehouseQueryService"
 
 export const HealthRouter = HttpRouter.use((router) =>
 	router.add("GET", "/health", HttpServerResponse.text("OK")),
@@ -66,14 +66,14 @@ export const CoreServicesLive = Layer.mergeAll(
 	ScrapeTargetsService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
-export const TinybirdServiceLive = TinybirdService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+export const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
 export const BucketCacheServiceLive = BucketCacheService.layer.pipe(
 	Layer.provideMerge(EdgeCacheService.layer),
 )
 
 export const QueryEngineServiceLive = QueryEngineService.layer.pipe(
-	Layer.provideMerge(TinybirdServiceLive),
+	Layer.provideMerge(WarehouseQueryServiceLive),
 	Layer.provideMerge(EdgeCacheService.layer),
 	Layer.provideMerge(BucketCacheServiceLive),
 )
@@ -87,18 +87,18 @@ export const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 )
 
 export const ErrorsServiceLive = ErrorsService.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, TinybirdServiceLive, NotificationDispatcherLive)),
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, NotificationDispatcherLive)),
 )
 
 export const EmailServiceLive = EmailService.Default.pipe(Layer.provide(Env.Default))
 
 export const DigestServiceLive = DigestService.Default.pipe(
-	Layer.provideMerge(Layer.mergeAll(InfraLive, TinybirdServiceLive, EmailServiceLive)),
+	Layer.provideMerge(Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EmailServiceLive)),
 )
 
 export const MainLive = Layer.mergeAll(
 	CoreServicesLive,
-	TinybirdServiceLive,
+	WarehouseQueryServiceLive,
 	QueryEngineServiceLive,
 	AlertsServiceLive,
 	ErrorsServiceLive,

@@ -9,8 +9,8 @@ import {
 	RoleName,
 	UserId,
 } from "@maple/domain/http"
-import type { TinybirdServiceShape } from "./TinybirdService"
-import { TinybirdService } from "./TinybirdService"
+import type { WarehouseQueryServiceShape } from "./WarehouseQueryService"
+import { WarehouseQueryService } from "./WarehouseQueryService"
 import { AlertRuntime, type AlertRuntimeShape, AlertsService, type AlertsServiceShape } from "./AlertsService"
 import { DatabaseLibsqlLive } from "./DatabaseLibsqlLive"
 import { BucketCacheService } from "./BucketCacheService"
@@ -56,14 +56,14 @@ const makeConfig = (url: string) =>
 		}),
 	)
 
-const emptyTinybirdRows = [] as ReadonlyArray<Record<string, unknown>>
+const emptyWarehouseRows = [] as ReadonlyArray<Record<string, unknown>>
 
-function makeTinybirdStub(state: {
+function makeWarehouseStub(state: {
 	tracesAggregateRows?: ReadonlyArray<Record<string, unknown>>
 	metricsAggregateRows?: ReadonlyArray<Record<string, unknown>>
 	logsAggregateRows?: ReadonlyArray<Record<string, unknown>>
 	logsAggregateByServiceRows?: ReadonlyArray<Record<string, unknown>>
-}): TinybirdServiceShape {
+}): WarehouseQueryServiceShape {
 	const succeedRows = (rows: ReadonlyArray<Record<string, unknown>>) => Effect.succeed(rows as never)
 
 	// All alert queries now go through sqlQuery (raw SQL via CH query engine).
@@ -74,7 +74,7 @@ function makeTinybirdStub(state: {
 		if (state.tracesAggregateRows?.length) return succeedRows(state.tracesAggregateRows)
 		if (state.metricsAggregateRows?.length) return succeedRows(state.metricsAggregateRows)
 		if (state.logsAggregateRows?.length) return succeedRows(state.logsAggregateRows)
-		return succeedRows(emptyTinybirdRows)
+		return succeedRows(emptyWarehouseRows)
 	}
 
 	return {
@@ -93,16 +93,16 @@ const defaultTestRuntime: AlertRuntimeShape = {
 
 const makeLayer = (
 	url: string,
-	tinybirdStub: TinybirdServiceShape,
+	warehouseStub: WarehouseQueryServiceShape,
 	runtimeOverrides?: Partial<AlertRuntimeShape>,
 ) => {
 	const configLive = makeConfig(url)
 	const envLive = Env.Default.pipe(Layer.provide(configLive))
 	const databaseLive = DatabaseLibsqlLive.pipe(Layer.provide(envLive))
-	const tinybirdLive = Layer.succeed(TinybirdService, tinybirdStub)
+	const warehouseLive = Layer.succeed(WarehouseQueryService, warehouseStub)
 	const bucketCacheLive = BucketCacheService.layer.pipe(Layer.provide(EdgeCacheService.layer))
 	const queryEngineLive = QueryEngineService.layer.pipe(
-		Layer.provide(tinybirdLive),
+		Layer.provide(warehouseLive),
 		Layer.provide(EdgeCacheService.layer),
 		Layer.provide(bucketCacheLive),
 	)
@@ -111,7 +111,7 @@ const makeLayer = (
 
 	return AlertsService.Live.pipe(
 		Layer.provide(
-			Layer.mergeAll(envLive, databaseLive, queryEngineLive, tinybirdLive, runtimeLive, hazelOAuthLive),
+			Layer.mergeAll(envLive, databaseLive, queryEngineLive, warehouseLive, runtimeLive, hazelOAuthLive),
 		),
 	) as Layer.Layer<AlertsService, never, never>
 }
@@ -295,7 +295,7 @@ describe("AlertsService", () => {
 				return { incidentsAfterFirstTick, incidentsAfterSecondTick, events }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock(), fetch: fetchImpl }),
+					makeLayer(url, makeWarehouseStub(state), { ...makeAdvancingClock(), fetch: fetchImpl }),
 				),
 			),
 		)
@@ -319,7 +319,7 @@ describe("AlertsService", () => {
 	it("skips no-data error-rate rules instead of opening incidents", async () => {
 		const { url } = createTempDbUrl()
 		const state = {
-			tracesAggregateRows: emptyTinybirdRows,
+			tracesAggregateRows: emptyWarehouseRows,
 		}
 
 		const result = await Effect.runPromise(
@@ -336,7 +336,7 @@ describe("AlertsService", () => {
 				const incidents = yield* alerts.listIncidents(orgId)
 				const events = yield* alerts.listDeliveryEvents(orgId)
 				return { incidents, events }
-			}).pipe(Effect.provide(makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock() }))),
+			}).pipe(Effect.provide(makeLayer(url, makeWarehouseStub(state), { ...makeAdvancingClock() }))),
 		)
 
 		expect(result.incidents.incidents).toHaveLength(0)
@@ -346,7 +346,7 @@ describe("AlertsService", () => {
 	it("treats no data as a breach for throughput-below-threshold rules", async () => {
 		const { url } = createTempDbUrl()
 		const state = {
-			tracesAggregateRows: emptyTinybirdRows,
+			tracesAggregateRows: emptyWarehouseRows,
 		}
 
 		const result = await Effect.runPromise(
@@ -383,7 +383,7 @@ describe("AlertsService", () => {
 				return yield* alerts.listIncidents(orgId)
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock(), fetch: okFetch }),
+					makeLayer(url, makeWarehouseStub(state), { ...makeAdvancingClock(), fetch: okFetch }),
 				),
 			),
 		)
@@ -404,7 +404,7 @@ describe("AlertsService", () => {
 				const destination = yield* createWebhookDestination(alerts, orgId, userId)
 				yield* createErrorRateRule(alerts, orgId, userId, destination.id)
 			}).pipe(
-				Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }))),
+				Effect.provide(makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
 			),
 		)
 
@@ -488,7 +488,7 @@ describe("AlertsService", () => {
 				return { incidents, events }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock(), fetch: okFetch }),
+					makeLayer(url, makeWarehouseStub(state), { ...makeAdvancingClock(), fetch: okFetch }),
 				),
 			),
 		)
@@ -521,7 +521,7 @@ describe("AlertsService", () => {
 				return yield* alerts.testDestination(orgId, userId, adminRoles, destination.id)
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), {
+					makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
 						fetch: fetchImpl,
 					}),
 				),
@@ -555,7 +555,7 @@ describe("AlertsService", () => {
 				return { orgId, destination, rule }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides),
+					makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), overrides),
 				),
 			),
 		)
@@ -608,7 +608,7 @@ describe("AlertsService", () => {
 				return { tick, events }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides),
+					makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), overrides),
 				),
 			),
 		)
@@ -640,7 +640,7 @@ describe("AlertsService", () => {
 				return { orgId, destination, rule }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides),
+					makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), overrides),
 				),
 			),
 		)
@@ -685,7 +685,7 @@ describe("AlertsService", () => {
 			}),
 		})
 
-		const stub = makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows })
+		const stub = makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })
 		const layerA = makeLayer(url, stub, overrides)
 		const layerB = makeLayer(url, stub, overrides)
 
@@ -709,7 +709,7 @@ describe("AlertsService", () => {
 				const alerts = yield* AlertsService
 				return yield* alerts.listDeliveryEvents(setup.orgId)
 			}).pipe(
-				Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }))),
+				Effect.provide(makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
 			),
 		)
 
@@ -750,7 +750,7 @@ describe("AlertsService", () => {
 			),
 			fetch: okFetch,
 		}
-		const layer = makeLayer(url, makeTinybirdStub(state), overrides)
+		const layer = makeLayer(url, makeWarehouseStub(state), overrides)
 
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
@@ -847,7 +847,7 @@ describe("AlertsService", () => {
 				return { orgId, destination, rule }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), {
+					makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
 						...makeFixedClock(fixedTime),
 					}),
 				),
@@ -897,7 +897,7 @@ describe("AlertsService", () => {
 				return { tick, events }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), {
+					makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
 						...makeFixedClock(fixedTime),
 						fetch: hangingFetch,
 						deliveryTimeoutMs: () => 10,
@@ -939,7 +939,7 @@ describe("AlertsService", () => {
 				return { orgId, destination, rule }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides),
+					makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), overrides),
 				),
 			),
 		)
@@ -1000,7 +1000,7 @@ describe("AlertsService", () => {
 				return { tick, events }
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }), overrides),
+					makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), overrides),
 				),
 			),
 		)
@@ -1052,7 +1052,7 @@ describe("AlertsService", () => {
 				Effect.provide(
 					makeLayer(
 						url,
-						makeTinybirdStub({
+						makeWarehouseStub({
 							logsAggregateRows: [{ count: 42 }],
 						}),
 					),
@@ -1099,7 +1099,7 @@ describe("AlertsService", () => {
 					}),
 				)
 			}).pipe(
-				Effect.provide(makeLayer(url, makeTinybirdStub({ metricsAggregateRows: emptyTinybirdRows }))),
+				Effect.provide(makeLayer(url, makeWarehouseStub({ metricsAggregateRows: emptyWarehouseRows }))),
 			),
 		)
 
@@ -1153,7 +1153,7 @@ describe("AlertsService", () => {
 				Effect.provide(
 					makeLayer(
 						url,
-						makeTinybirdStub({
+						makeWarehouseStub({
 							logsAggregateByServiceRows: [
 								{ bucket: "2026-01-01 00:00:00", groupName: "svc-breach", count: 14 },
 								{ bucket: "2026-01-01 00:00:00", groupName: "svc-healthy", count: 3 },
@@ -1184,7 +1184,7 @@ describe("AlertsService", () => {
 
 				return yield* alerts.deleteDestination(orgId, adminRoles, destination.id)
 			}).pipe(
-				Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }))),
+				Effect.provide(makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
 			),
 		)
 
@@ -1215,7 +1215,7 @@ describe("AlertsService", () => {
 					},
 				)
 			}).pipe(
-				Effect.provide(makeLayer(url, makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }))),
+				Effect.provide(makeLayer(url, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }))),
 			),
 		)
 
@@ -1277,7 +1277,7 @@ describe("AlertsService", () => {
 				return yield* alerts.listIncidents(orgId)
 			}).pipe(
 				Effect.provide(
-					makeLayer(url, makeTinybirdStub(state), { ...makeAdvancingClock(), fetch: okFetch }),
+					makeLayer(url, makeWarehouseStub(state), { ...makeAdvancingClock(), fetch: okFetch }),
 				),
 			),
 		)
@@ -1324,8 +1324,8 @@ describe("AlertsService", () => {
 			dominantThreshold: "0",
 		}
 
-		const stub: TinybirdServiceShape = {
-			...makeTinybirdStub({ tracesAggregateRows: emptyTinybirdRows }),
+		const stub: WarehouseQueryServiceShape = {
+			...makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }),
 			sqlQuery: () => Effect.succeed([breachingRow, healthyRow]) as never,
 		}
 

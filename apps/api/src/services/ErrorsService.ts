@@ -60,7 +60,7 @@ import type { TenantContext } from "./AuthService"
 import { Database, DatabaseError, type DatabaseClient } from "./DatabaseLive"
 import { Env } from "./Env"
 import { NotificationDispatcher } from "./NotificationDispatcher"
-import { TinybirdService } from "./TinybirdService"
+import { WarehouseQueryService } from "./WarehouseQueryService"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
@@ -280,7 +280,7 @@ export interface ErrorsServiceShape {
 export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceShape>()("ErrorsService", {
 	make: Effect.gen(function* () {
 		const database = yield* Database
-		const tinybird = yield* TinybirdService
+		const warehouse = yield* WarehouseQueryService
 		const env = yield* Env
 		const dispatcher = yield* NotificationDispatcher
 
@@ -823,10 +823,12 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
 					endTime: toTinybirdDateTime(endMs),
 					bucketSeconds,
 				})
-				const timeseriesEffect = tinybird.sqlQuery(tenant, timeseriesCompiled.sql).pipe(
-					Effect.map((rows) => timeseriesCompiled.castRows(rows)),
-					Effect.mapError((e) => makePersistenceError(e)),
-				)
+				const timeseriesEffect = warehouse
+					.sqlQuery(tenant, timeseriesCompiled.sql, { context: "errorIssueTimeseries" })
+					.pipe(
+						Effect.map((rows) => timeseriesCompiled.castRows(rows)),
+						Effect.mapError((e) => makePersistenceError(e)),
+					)
 
 				const samplesCompiled = CH.compile(CH.errorIssueSampleTracesQuery({ limit: sampleLimit }), {
 					orgId,
@@ -834,10 +836,12 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
 					startTime: toTinybirdDateTime(startMs),
 					endTime: toTinybirdDateTime(endMs),
 				})
-				const samplesEffect = tinybird.sqlQuery(tenant, samplesCompiled.sql).pipe(
-					Effect.map((rows) => samplesCompiled.castRows(rows)),
-					Effect.mapError((e) => makePersistenceError(e)),
-				)
+				const samplesEffect = warehouse
+					.sqlQuery(tenant, samplesCompiled.sql, { context: "errorIssueSampleTraces" })
+					.pipe(
+						Effect.map((rows) => samplesCompiled.castRows(rows)),
+						Effect.mapError((e) => makePersistenceError(e)),
+					)
 
 				const incidentsEffect = dbExecute((db) =>
 					db
@@ -1736,8 +1740,8 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
 				startTime: toTinybirdDateTime(windowStartMs),
 				endTime: toTinybirdDateTime(windowEndMs),
 			})
-			const issuesRaw = yield* tinybird
-				.sqlQuery(tenant, issuesCompiled.sql)
+			const issuesRaw = yield* warehouse
+				.sqlQuery(tenant, issuesCompiled.sql, { context: "errorIssuesScan" })
 				.pipe(Effect.mapError(makePersistenceError))
 
 			const rows = issuesCompiled.castRows(issuesRaw).map((raw) => ({

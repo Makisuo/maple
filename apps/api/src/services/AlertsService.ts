@@ -110,7 +110,7 @@ import {
 import { Env } from "./Env"
 import { HazelOAuthService } from "./HazelOAuthService"
 import { QueryEngineService, type GroupedAlertObservation } from "./QueryEngineService"
-import { TinybirdService } from "./TinybirdService"
+import { WarehouseQueryService } from "./WarehouseQueryService"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import {
 	PublicConfigFromJson,
@@ -903,7 +903,7 @@ export interface AlertsServiceShape {
 			readonly deliveryFailureCount: number
 		},
 		AlertPersistenceError | AlertDeliveryError | AlertValidationError | AlertNotFoundError
-		// Note: tinybird tagged errors flow up from evaluateRule but are caught
+		// Note: warehouse tagged errors flow up from evaluateRule but are caught
 		// inside the per-rule Effect.catchAll in the scheduler tick, so the tick
 		// itself never surfaces them.
 	>
@@ -914,7 +914,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 		const database = yield* Database
 		const env = yield* Env
 		const queryEngine = yield* QueryEngineService
-		const tinybird = yield* TinybirdService
+		const warehouse = yield* WarehouseQueryService
 		const runtime = yield* AlertRuntime
 		const hazelOAuth = yield* HazelOAuthService
 		const encryptionKey = yield* parseEncryptionKey(Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY))
@@ -2306,14 +2306,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			)
 
 			const tenant = systemTenant(orgId)
-			const rawRows = yield* tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }).pipe(
-				Effect.mapError(
-					(error) =>
-						new AlertPersistenceError({
-							message: `Failed to list alert checks: ${error.message}`,
-						}),
-				),
-			)
+			const rawRows = yield* warehouse
+				.sqlQuery(tenant, compiled.sql, { profile: "list", context: "listAlertChecks" })
+				.pipe(
+					Effect.mapError(
+						(error) =>
+							new AlertPersistenceError({
+								message: `Failed to list alert checks: ${error.message}`,
+							}),
+					),
+				)
 			const rows = compiled.castRows(rawRows)
 
 			const checks = yield* Effect.try({
@@ -3437,7 +3439,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				yield* Effect.forEach(
 					Array.from(byOrg.entries()),
 					([orgId, checks]) =>
-						tinybird
+						warehouse
 							.ingest(systemTenant(orgId as OrgId), "alert_checks", checks)
 							.pipe(Effect.ignore),
 					{ concurrency: "unbounded" },

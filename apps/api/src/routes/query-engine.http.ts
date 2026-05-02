@@ -43,7 +43,7 @@ import {
 } from "@maple/domain/http"
 import { Effect } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
-import { TinybirdService } from "../services/TinybirdService"
+import { WarehouseQueryService } from "../services/WarehouseQueryService"
 import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
 import {
 	buildBreakdownQuerySpec,
@@ -51,19 +51,13 @@ import {
 	type QueryBuilderQueryDraft,
 } from "@maple/query-engine/query-builder"
 
-const isTaggedHttpError = (
-	value: unknown,
-): value is TinybirdQueryError | TinybirdQuotaExceededError =>
+const isTaggedHttpError = (value: unknown): value is TinybirdQueryError | TinybirdQuotaExceededError =>
 	value instanceof TinybirdQueryError || value instanceof TinybirdQuotaExceededError
 
 const mapExecError = <A, R>(
 	effect: Effect.Effect<A, unknown, R>,
 	context: string,
-): Effect.Effect<
-	A,
-	QueryEngineExecutionError | TinybirdQueryError | TinybirdQuotaExceededError,
-	R
-> =>
+): Effect.Effect<A, QueryEngineExecutionError | TinybirdQueryError | TinybirdQuotaExceededError, R> =>
 	effect.pipe(
 		Effect.mapError((cause) => {
 			if (isTaggedHttpError(cause)) {
@@ -79,7 +73,7 @@ const mapExecError = <A, R>(
 export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine", (handlers) =>
 	Effect.gen(function* () {
 		const queryEngine = yield* QueryEngineService
-		const tinybird = yield* TinybirdService
+		const warehouse = yield* WarehouseQueryService
 
 		return handlers
 			.handle("execute", ({ payload }) =>
@@ -107,7 +101,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"spanHierarchy",
 						payload,
 						mapExecError(
-							tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }),
+							warehouse.sqlQuery(tenant, compiled.sql, {
+								profile: "list",
+								context: "spanHierarchy",
+							}),
 							"spanHierarchy query failed",
 						),
 					)
@@ -129,7 +126,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "errorsByType",
+						}),
 						"errorsByType query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -161,7 +161,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						},
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "errorsTimeseries",
+						}),
 						"errorsTimeseries query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -186,7 +189,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "errorsSummary",
+						}),
 						"errorsSummary query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -216,7 +222,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "list",
+							context: "errorDetailTraces",
+						}),
 						"errorDetailTraces query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -242,7 +251,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						endTime: payload.endTime,
 					})
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "errorRateByService",
+						}),
 						"errorRateByService query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -271,7 +283,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceOverview",
 						payload,
 						mapExecError(
-							tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+							warehouse.sqlQuery(tenant, compiled.sql, {
+								profile: "aggregation",
+								context: "serviceOverview",
+							}),
 							"serviceOverview query failed",
 						),
 					)
@@ -298,7 +313,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceApdex",
 						payload,
 						mapExecError(
-							tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+							warehouse.sqlQuery(tenant, compiled.sql, {
+								profile: "aggregation",
+								context: "serviceApdex",
+							}),
 							"serviceApdex query failed",
 						),
 					)
@@ -327,7 +345,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						},
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "list",
+							context: "serviceReleases",
+						}),
 						"serviceReleases query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -348,7 +369,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "serviceDependencies",
+						}),
 						"serviceDependencies query failed",
 					)
 					return new ServiceDependenciesResponse({ data: compiled.castRows(rows) as any[] })
@@ -362,7 +386,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "serviceDbEdges",
+						}),
 						"serviceDbEdges query failed",
 					)
 					return new ServiceDbEdgesResponse({ data: compiled.castRows(rows) as any[] })
@@ -376,7 +403,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "servicePlatforms",
+						}),
 						"servicePlatforms query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -418,7 +448,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "serviceWorkloads",
+						}),
 						"serviceWorkloads query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -455,7 +488,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceUsage",
 						payload,
 						mapExecError(
-							tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+							warehouse.sqlQuery(tenant, compiled.sql, {
+								profile: "aggregation",
+								context: "serviceUsage",
+							}),
 							"serviceUsage query failed",
 						),
 					)
@@ -487,7 +523,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"listLogs",
 						payload,
 						mapExecError(
-							tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }),
+							warehouse.sqlQuery(tenant, compiled.sql, {
+								profile: "list",
+								context: "listLogs",
+							}),
 							"listLogs query failed",
 						),
 					)
@@ -508,7 +547,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "discovery" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "discovery",
+							context: "listMetrics",
+						}),
 						"listMetrics query failed",
 					)
 					return new ListMetricsResponse({ data: rows as any[] })
@@ -522,7 +564,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "discovery" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "discovery",
+							context: "metricsSummary",
+						}),
 						"metricsSummary query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -675,7 +720,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }),
+						warehouse.sqlQuery(tenant, compiled.sql, { profile: "list", context: "listHosts" }),
 						"listHosts query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -703,7 +748,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						endTime: payload.endTime,
 					})
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "hostDetailSummary",
+						}),
 						"hostDetailSummary query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -738,7 +786,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						bucketSeconds,
 					})
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "fleetUtilizationTimeseries",
+						}),
 						"fleetUtilizationTimeseries query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -808,7 +859,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							},
 						)
 						const rows = yield* mapExecError(
-							tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+							warehouse.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
 							"hostInfraTimeseries (network) query failed",
 						)
 						const typedRows = compiled.castRows(rows)
@@ -837,7 +888,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						},
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "hostInfraTimeseries",
+						}),
 						"hostInfraTimeseries query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -876,7 +930,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }),
+						warehouse.sqlQuery(tenant, compiled.sql, { profile: "list", context: "listPods" }),
 						"listPods query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -912,7 +966,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "podDetailSummary",
+						}),
 						"podDetailSummary query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -988,7 +1045,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						},
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "podInfraTimeseries",
+						}),
 						"podInfraTimeseries query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -1017,7 +1077,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }),
+						warehouse.sqlQuery(tenant, compiled.sql, { profile: "list", context: "listNodes" }),
 						"listNodes query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -1044,7 +1104,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						endTime: payload.endTime,
 					})
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "nodeDetailSummary",
+						}),
 						"nodeDetailSummary query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -1092,7 +1155,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						},
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "nodeInfraTimeseries",
+						}),
 						"nodeInfraTimeseries query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -1124,7 +1190,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "list" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "list",
+							context: "listWorkloads",
+						}),
 						"listWorkloads query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -1155,7 +1224,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "workloadDetailSummary",
+						}),
 						"workloadDetailSummary query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -1215,7 +1287,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						},
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "aggregation" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "aggregation",
+							context: "workloadInfraTimeseries",
+						}),
 						"workloadInfraTimeseries query failed",
 					)
 					const typedRows = compiled.castRows(rows)
@@ -1249,7 +1324,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "discovery" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "discovery",
+							context: "podFacets",
+						}),
 						"podFacets query failed",
 					)
 					const typedRows = compiled.castRows(rows) as ReadonlyArray<{
@@ -1320,7 +1398,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "discovery" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "discovery",
+							context: "nodeFacets",
+						}),
 						"nodeFacets query failed",
 					)
 					const typedRows = compiled.castRows(rows) as ReadonlyArray<{
@@ -1366,7 +1447,10 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
 					)
 					const rows = yield* mapExecError(
-						tinybird.sqlQuery(tenant, compiled.sql, { profile: "discovery" }),
+						warehouse.sqlQuery(tenant, compiled.sql, {
+							profile: "discovery",
+							context: "workloadFacets",
+						}),
 						"workloadFacets query failed",
 					)
 					const typedRows = compiled.castRows(rows) as ReadonlyArray<{
