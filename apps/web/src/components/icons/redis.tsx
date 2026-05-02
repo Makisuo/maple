@@ -9,7 +9,7 @@ function RedisIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="currentColor"
+			fill="#FF4438"
 			aria-hidden="true"
 			{...props}
 		>

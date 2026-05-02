@@ -9,7 +9,7 @@ function ClickhouseIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="currentColor"
+			fill="#FFCC00"
 			aria-hidden="true"
 			{...props}
 		>

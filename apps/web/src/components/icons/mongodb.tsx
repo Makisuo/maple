@@ -9,7 +9,7 @@ function MongodbIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="currentColor"
+			fill="#47A248"
 			aria-hidden="true"
 			{...props}
 		>

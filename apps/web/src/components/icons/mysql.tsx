@@ -9,7 +9,7 @@ function MysqlIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="currentColor"
+			fill="#4479A1"
 			aria-hidden="true"
 			{...props}
 		>

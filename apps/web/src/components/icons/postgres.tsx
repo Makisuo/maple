@@ -9,7 +9,7 @@ function PostgresIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="currentColor"
+			fill="#4169E1"
 			aria-hidden="true"
 			{...props}
 		>

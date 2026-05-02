@@ -9,7 +9,7 @@ function KubernetesIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="currentColor"
+			fill="#326CE5"
 			aria-hidden="true"
 			{...props}
 		>

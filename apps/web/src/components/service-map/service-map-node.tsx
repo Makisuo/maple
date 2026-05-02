@@ -22,27 +22,33 @@ import { getServiceMapNodeColor, type ServiceNodeData } from "./service-map-util
 function getPlatformIcon(platform: ServicePlatform | undefined): {
 	Icon: IconComponent
 	label: string
+	branded: boolean
 } {
 	switch (platform) {
 		case "kubernetes":
-			return { Icon: KubernetesIcon, label: "Kubernetes" }
+			return { Icon: KubernetesIcon, label: "Kubernetes", branded: true }
 		case "cloudflare":
-			return { Icon: CloudflareIcon, label: "Cloudflare Workers" }
+			return { Icon: CloudflareIcon, label: "Cloudflare Workers", branded: true }
 		case "lambda":
-			return { Icon: AwsLambdaIcon, label: "AWS Lambda" }
+			return { Icon: AwsLambdaIcon, label: "AWS Lambda", branded: true }
 		default:
-			return { Icon: ServerIcon, label: "Unknown runtime" }
+			return { Icon: ServerIcon, label: "Unknown runtime", branded: false }
 	}
 }
 
-function getDbIcon(system: string | undefined): { Icon: IconComponent; label: string } {
+function getDbIcon(system: string | undefined): {
+	Icon: IconComponent
+	label: string
+	branded: boolean
+} {
 	const s = (system ?? "").toLowerCase()
-	if (s === "clickhouse") return { Icon: ClickhouseIcon, label: "ClickHouse" }
-	if (s === "postgresql" || s === "postgres") return { Icon: PostgresIcon, label: "PostgreSQL" }
-	if (s === "mysql" || s === "mariadb") return { Icon: MysqlIcon, label: "MySQL" }
-	if (s === "redis") return { Icon: RedisIcon, label: "Redis" }
-	if (s === "mongodb") return { Icon: MongodbIcon, label: "MongoDB" }
-	return { Icon: DatabaseIcon, label: system ?? "Database" }
+	if (s === "clickhouse") return { Icon: ClickhouseIcon, label: "ClickHouse", branded: true }
+	if (s === "postgresql" || s === "postgres")
+		return { Icon: PostgresIcon, label: "PostgreSQL", branded: true }
+	if (s === "mysql" || s === "mariadb") return { Icon: MysqlIcon, label: "MySQL", branded: true }
+	if (s === "redis") return { Icon: RedisIcon, label: "Redis", branded: true }
+	if (s === "mongodb") return { Icon: MongodbIcon, label: "MongoDB", branded: true }
+	return { Icon: DatabaseIcon, label: system ?? "Database", branded: false }
 }
 
 function formatRate(value: number): string {
@@ -96,7 +102,11 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 		colorMode ?? "service",
 	)
 
-	const { Icon, label: iconLabel } = isDatabase ? getDbIcon(dbSystem) : getPlatformIcon(platform)
+	const {
+		Icon,
+		label: iconLabel,
+		branded: isBrandIcon,
+	} = isDatabase ? getDbIcon(dbSystem) : getPlatformIcon(platform)
 
 	return (
 		<>
@@ -129,7 +139,8 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 									size={12}
 									className={cn(
 										"shrink-0",
-										isDatabase ? "text-foreground/70" : "text-muted-foreground/80",
+										!isBrandIcon &&
+											(isDatabase ? "text-foreground/70" : "text-muted-foreground/80"),
 									)}
 								/>
 							</TooltipTrigger>

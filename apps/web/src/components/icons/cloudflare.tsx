@@ -9,7 +9,7 @@ function CloudflareIcon({ size = 24, className, ...props }: IconProps) {
 			width={size}
 			height={size}
 			className={className}
-			fill="currentColor"
+			fill="#F38020"
 			aria-hidden="true"
 			{...props}
 		>
