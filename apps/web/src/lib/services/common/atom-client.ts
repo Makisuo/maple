@@ -1,12 +1,14 @@
 import { AtomHttpApi } from "@/lib/effect-atom"
 import { MapleApi } from "@maple/domain/http"
+import { Layer } from "effect"
 import { HttpClient, HttpClientError } from "effect/unstable/http"
 import { apiBaseUrl } from "./api-base-url"
 import { MapleFetchHttpClientLive } from "./http-client"
+import { mapleOtelLayer } from "./otel-layer"
 
 export class MapleApiAtomClient extends AtomHttpApi.Service<MapleApiAtomClient>()("MapleApiAtomClient", {
 	api: MapleApi,
-	httpClient: MapleFetchHttpClientLive,
+	httpClient: Layer.mergeAll(MapleFetchHttpClientLive, mapleOtelLayer),
 	baseUrl: apiBaseUrl,
 	transformClient: (client) =>
 		client.pipe(
