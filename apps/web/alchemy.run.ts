@@ -25,6 +25,10 @@ export const createMapleWeb = async ({
 		process.env.VITE_CLERK_PUBLISHABLE_KEY = process.env.CLERK_PUBLISHABLE_KEY?.trim() || ""
 	}
 
+	if (!process.env.VITE_MAPLE_INGEST_KEY) {
+		process.env.VITE_MAPLE_INGEST_KEY = process.env.MAPLE_OTEL_PUBLIC_INGEST_KEY?.trim() || ""
+	}
+
 	process.env.VITE_API_BASE_URL = apiUrl
 	process.env.VITE_INGEST_URL = ingestUrl
 	process.env.VITE_CHAT_AGENT_URL = chatAgentUrl

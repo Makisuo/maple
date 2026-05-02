@@ -43,10 +43,10 @@ if (!resolvedChatAgentUrl) {
 }
 
 // ingest is not currently deployed via alchemy; for non-custom-domain stages,
-// fall back to a caller-supplied env var or localhost.
+// fall back to a caller-supplied env var or the public Maple ingest endpoint.
 const resolvedIngestUrl = domains.ingest
 	? `https://${domains.ingest}`
-	: process.env.VITE_INGEST_URL?.trim() || "http://127.0.0.1:3474"
+	: process.env.VITE_INGEST_URL?.trim() || "https://ingest.maple.dev"
 
 const web = await createMapleWeb({
 	stage,
