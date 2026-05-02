@@ -1,105 +1,32 @@
 // ---------------------------------------------------------------------------
-// Workers-friendly OTLP tracer with explicit flush.
+// Buffer-backed OTLP tracer (Cloudflare Workers)
 //
-// Forked from `effect/unstable/observability/OtlpTracer` + `OtlpExporter`. Two
-// differences vs. upstream:
-//
-//   1. No scheduled background fiber. Upstream forks an
-//      `Effect.sleep + runExport` loop into the layer scope; on Cloudflare
-//      Workers that's a cross-request fiber (illegal I/O) and never ticks
-//      between invocations anyway.
-//   2. Returns a standalone `flush` Effect the worker calls from inside
-//      `ctx.waitUntil` after responding, instead of relying on the layer scope
-//      finalizer (which would force per-request scope teardown).
-//
-// The buffer lives at module-instance scope (closed-over by `exportFn`), so
-// concurrent requests in the same isolate coalesce into one POST. A 60-second
-// `disabledUntil` cooldown circuit-breaker prevents thrashing a broken
-// collector.
+// Pure Tracer that pushes OTLP-shaped spans into a caller-owned buffer. URL,
+// resource, and headers are NOT baked in here — the caller (`MapleCloudflareSDK`)
+// resolves them lazily from the worker `env` at first flush, so the layer
+// itself can be constructed at module scope without env.
 // ---------------------------------------------------------------------------
-import {
-	Cause,
-	type Context,
-	Duration,
-	Effect,
-	Layer,
-	Number as Num,
-	Option,
-	Schedule,
-	Tracer,
-} from "effect"
-import {
-	Headers,
-	HttpClient,
-	HttpClientError,
-	HttpClientRequest,
-} from "effect/unstable/http"
+import { Cause, type Context, Layer, type Option, Tracer } from "effect"
 import * as OtlpResource from "effect/unstable/observability/OtlpResource"
 import type { ExtractTag } from "effect/Types"
 
-export interface FlushableTracerOptions {
-	/** Full OTLP/HTTP traces URL, e.g. `https://collector/v1/traces`. */
-	readonly url: string
-	readonly resource: {
-		readonly serviceName: string
-		readonly serviceVersion?: string | undefined
-		readonly attributes?: Record<string, unknown> | undefined
-	}
-	readonly headers?: Headers.Input | undefined
-	/** User-Agent header. Defaults to `maple-effect-sdk-cf-tracer/0.0.0`. */
-	readonly userAgent?: string | undefined
+export interface SpanBuffer {
+	readonly tracerLayer: Layer.Layer<never>
+	readonly drain: () => Array<OtlpSpan>
+	readonly setDisabled: (value: boolean) => void
+	readonly size: () => number
 }
 
-export interface FlushableTracer {
-	readonly layer: Layer.Layer<never>
-	readonly flush: Effect.Effect<void, never, HttpClient.HttpClient>
-}
+const MAX_BUFFER = 10_000
 
-export const makeFlushableTracer = (options: FlushableTracerOptions): FlushableTracer => {
-	const otelResource = OtlpResource.make(options.resource)
-	const scope: Scope = { name: options.resource.serviceName }
-
-	const baseHeaders = Headers.fromRecordUnsafe({
-		"user-agent": options.userAgent ?? "maple-effect-sdk-cf-tracer/0.0.0",
-	})
-	const headers = options.headers
-		? Headers.merge(Headers.fromInput(options.headers), baseHeaders)
-		: baseHeaders
-	const request = HttpClientRequest.post(options.url, { headers })
-
+export const makeSpanBuffer = (): SpanBuffer => {
 	let buffer: Array<OtlpSpan> = []
-	let disabledUntil: number | undefined = undefined
-
-	const flush: Effect.Effect<void, never, HttpClient.HttpClient> = Effect.suspend(() => {
-		if (disabledUntil !== undefined && Date.now() < disabledUntil) return Effect.void
-		if (disabledUntil !== undefined) disabledUntil = undefined
-		if (buffer.length === 0) return Effect.void
-		const items = buffer
-		buffer = []
-		const body: TraceData = {
-			resourceSpans: [{ resource: otelResource, scopeSpans: [{ scope, spans: items }] }],
-		}
-		return Effect.flatMap(HttpClient.HttpClient.asEffect(), (raw) => {
-			const client = HttpClient.filterStatusOk(raw).pipe(
-				HttpClient.retryTransient({ schedule: retryPolicy, times: 3 }),
-			)
-			return client
-				.execute(HttpClientRequest.bodyJsonUnsafe(request, body))
-				.pipe(Effect.asVoid, Effect.withTracerEnabled(false))
-		})
-	}).pipe(
-		Effect.catchCause((cause) => {
-			if (disabledUntil !== undefined) return Effect.void
-			disabledUntil = Date.now() + 60_000
-			return Effect.logDebug("flushable-tracer export failed", cause).pipe(
-				Effect.annotateLogs({ package: "@maple-dev/effect-sdk", module: "FlushableTracer" }),
-			)
-		}),
-	)
+	let disabled = false
 
 	const exportFn = (span: SpanImpl) => {
+		if (disabled) return
 		if (!span.sampled) return
-		if (disabledUntil !== undefined) return
+		if (buffer.length >= MAX_BUFFER) return
 		buffer.push(makeOtlpSpan(span))
 	}
 
@@ -114,38 +41,23 @@ export const makeFlushableTracer = (options: FlushableTracerOptions): FlushableT
 		},
 	})
 
-	return { layer: Layer.succeed(Tracer.Tracer, tracer), flush }
+	return {
+		tracerLayer: Layer.succeed(Tracer.Tracer, tracer),
+		drain: () => {
+			const items = buffer
+			buffer = []
+			return items
+		},
+		setDisabled: (value) => {
+			disabled = value
+			if (value) buffer = []
+		},
+		size: () => buffer.length,
+	}
 }
 
-export const noopTracer: FlushableTracer = {
-	layer: Layer.empty,
-	flush: Effect.void,
-}
-
 // ---------------------------------------------------------------------------
-// Retry policy for 429s (copied from upstream OtlpExporter)
-// ---------------------------------------------------------------------------
-
-const retryPolicy = Schedule.forever.pipe(
-	Schedule.passthrough,
-	Schedule.addDelay((error: unknown) => {
-		if (
-			HttpClientError.isHttpClientError(error) &&
-			error.reason._tag === "StatusCodeError" &&
-			error.reason.response.status === 429
-		) {
-			const retryAfter = Option.fromUndefinedOr(error.reason.response.headers["retry-after"]).pipe(
-				Option.flatMap(Num.parse),
-				Option.getOrElse(() => 5),
-			)
-			return Effect.succeed(Duration.seconds(retryAfter))
-		}
-		return Effect.succeed(Duration.seconds(1))
-	}),
-)
-
-// ---------------------------------------------------------------------------
-// Span internals (adapted from `effect/unstable/observability/OtlpTracer`)
+// OTLP span construction (adapted from `effect/unstable/observability/OtlpTracer`)
 // ---------------------------------------------------------------------------
 
 const ATTR_EXCEPTION_TYPE = "exception.type"
@@ -191,9 +103,8 @@ const makeSpan = (options: {
 	readonly export: (span: SpanImpl) => void
 }): SpanImpl => {
 	const self = Object.assign(Object.create(SpanProto), options) as SpanImpl
-	;(self as { traceId: string }).traceId = Option.isSome(self.parent)
-		? self.parent.value.traceId
-		: generateId(32)
+	;(self as { traceId: string }).traceId =
+		self.parent._tag === "Some" ? self.parent.value.traceId : generateId(32)
 	;(self as { spanId: string }).spanId = generateId(16)
 	;(self as { events: unknown[] }).events = []
 	return self
@@ -252,7 +163,7 @@ const makeOtlpSpan = (self: SpanImpl): OtlpSpan => {
 	return {
 		traceId: self.traceId,
 		spanId: self.spanId,
-		parentSpanId: Option.isSome(self.parent) ? self.parent.value.spanId : undefined,
+		parentSpanId: self.parent._tag === "Some" ? self.parent.value.spanId : undefined,
 		name: self.name,
 		kind: SpanKind[self.kind],
 		startTimeUnixNano: String(status.startTime),
@@ -273,24 +184,10 @@ const makeOtlpSpan = (self: SpanImpl): OtlpSpan => {
 }
 
 // ---------------------------------------------------------------------------
-// OTLP wire types (subset of upstream — we only emit what we use)
+// OTLP wire types
 // ---------------------------------------------------------------------------
 
-interface TraceData {
-	readonly resourceSpans: Array<ResourceSpan>
-}
-interface ResourceSpan {
-	readonly resource: OtlpResource.Resource
-	readonly scopeSpans: Array<ScopeSpan>
-}
-interface ScopeSpan {
-	readonly scope: Scope
-	readonly spans: Array<OtlpSpan>
-}
-interface Scope {
-	readonly name: string
-}
-interface OtlpSpan {
+export interface OtlpSpan {
 	readonly traceId: string
 	readonly spanId: string
 	readonly parentSpanId: string | undefined

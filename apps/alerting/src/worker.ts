@@ -14,7 +14,7 @@ import {
 	QueryEngineService,
 	TinybirdService,
 } from "@maple/api/alerting"
-import * as Cloudflare from "@maple-dev/effect-sdk/cloudflare"
+import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import {
 	runScheduledEffect,
 	WorkerConfigProviderLive,
@@ -22,16 +22,12 @@ import {
 } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer } from "effect"
 
-// Cached once per isolate. The flushable tracer/logger buffer spans + log
-// records at module-instance scope so concurrent ticks coalesce; the explicit
-// flush runs in `ctx.waitUntil` after `runScheduledEffect` settles.
-let cachedTelemetry: Cloudflare.CloudflareTelemetry | undefined
-const getTelemetry = (env: Record<string, unknown>): Cloudflare.CloudflareTelemetry => {
-	if (!cachedTelemetry) cachedTelemetry = Cloudflare.make(env, { serviceName: "alerting" })
-	return cachedTelemetry
-}
+// Module-scope construction; `flush(env)` resolves env on first call. The
+// in-isolate buffers coalesce concurrent scheduled ticks into one POST per
+// signal.
+const telemetry = MapleCloudflareSDK.make({ serviceName: "alerting" })
 
-const buildLayer = (env: Record<string, unknown>) => {
+const buildLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLive
 	const EnvLive = Env.Default.pipe(Layer.provide(ConfigLive))
 
@@ -81,10 +77,8 @@ const buildLayer = (env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(BaseLive, TinybirdServiceLive, EmailServiceLive)),
 	)
 
-	const TelemetryLive = getTelemetry(env).layer
-
 	return Layer.mergeAll(AlertsServiceLive, DigestServiceLive, ErrorsServiceLive).pipe(
-		Layer.provideMerge(TelemetryLive),
+		Layer.provideMerge(telemetry.layer),
 		Layer.provideMerge(ConfigLive),
 	)
 }
@@ -168,9 +162,11 @@ export default {
 			event.cron === "*/15 * * * *"
 				? digestTick
 				: Effect.all([alertTick, errorTick], { concurrency: 2, discard: true })
-		await runScheduledEffect(buildLayer(env), program, ctx, {
-			flushables: () => [getTelemetry(env)],
-		})
+		try {
+			await runScheduledEffect(buildLayer(env), program, ctx)
+		} finally {
+			ctx.waitUntil(telemetry.flush(env))
+		}
 	},
 	fetch(_request: Request): Response {
 		return new Response("maple-alerting: scheduled only", { status: 404 })

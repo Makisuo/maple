@@ -1,6 +1,5 @@
 import type { Context, Effect } from "effect"
 import { ConfigProvider, Layer, ManagedRuntime } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 
 /**
  * Minimal shape of CF `ExecutionContext.waitUntil`. Accept any structurally
@@ -9,20 +8,6 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http"
  */
 export interface ExecutionContextLike {
 	waitUntil(promise: Promise<unknown>): void
-}
-
-/**
- * Flushable telemetry produced by `@maple-dev/effect-sdk/cloudflare`'s
- * `make()`. Decoupled from the SDK so this package can stay a leaf dep — any
- * `{ flush: Effect.Effect<void, never, HttpClient.HttpClient> }` is accepted.
- *
- * Each request wraps `flush` in `ctx.waitUntil` so spans/logs queued at
- * module-instance scope drain after the response is sent. The underlying
- * runtime is cached per isolate (see `getFlushRuntime`) so we don't pay layer
- * build costs per request.
- */
-export interface Flushable {
-	readonly flush: Effect.Effect<void, never, HttpClient.HttpClient>
 }
 
 /**
@@ -42,36 +27,6 @@ export interface Flushable {
  */
 const drainScheduler = () => new Promise<void>((r) => setTimeout(r, 0))
 
-// ---------------------------------------------------------------------------
-// Per-isolate flush runtime
-//
-// `Flushable.flush` requires `HttpClient`. We don't want to rebuild a
-// ManagedRuntime+FetchHttpClient layer per request (workers reuse isolates
-// across thousands of requests), so cache it here. Each request enqueues its
-// flush against this runtime via `runPromise` inside `ctx.waitUntil`.
-// ---------------------------------------------------------------------------
-
-let cachedFlushRuntime: ManagedRuntime.ManagedRuntime<HttpClient.HttpClient, never> | undefined
-
-const getFlushRuntime = (): ManagedRuntime.ManagedRuntime<HttpClient.HttpClient, never> => {
-	if (!cachedFlushRuntime) {
-		cachedFlushRuntime = ManagedRuntime.make(FetchHttpClient.layer)
-	}
-	return cachedFlushRuntime
-}
-
-const runFlushables = async (flushables: ReadonlyArray<Flushable>): Promise<void> => {
-	if (flushables.length === 0) return
-	const runtime = getFlushRuntime()
-	await Promise.all(
-		flushables.map((f) =>
-			runtime.runPromise(f.flush).catch((err) => {
-				console.error("[effect-cloudflare] flushable failed:", err)
-			}),
-		),
-	)
-}
-
 /**
  * Low-level primitive: build a fresh per-request `ManagedRuntime` from a
  * layer, return its services plus a `flush()` that drains the Effect
@@ -79,7 +34,7 @@ const runFlushables = async (flushables: ReadonlyArray<Flushable>): Promise<void
  * `runScheduledEffect` — they make the flush contract structural.
  *
  * `flush()` MUST be awaited inside `ctx.waitUntil` (or equivalent). Skipping
- * it leaks forked fibers and silently drops buffered OTLP spans/logs.
+ * it leaks forked fibers.
  */
 export const buildRequestRuntime = <R>(
 	layer: Layer.Layer<R, unknown, never>,
@@ -103,37 +58,21 @@ export const buildRequestRuntime = <R>(
 	return { services, flush }
 }
 
-/** Resolve a static or per-env list of flushables. */
-type FlushablesInput<Env> = ReadonlyArray<Flushable> | ((env: Env) => ReadonlyArray<Flushable>)
-const resolveFlushables = <Env>(
-	input: FlushablesInput<Env> | undefined,
-	env: Env,
-): ReadonlyArray<Flushable> => {
-	if (!input) return []
-	return typeof input === "function" ? input(env) : input
-}
-
 /**
  * Higher-order wrapper for CF Worker `fetch` handlers. Builds a fresh
  * per-request runtime from `makeLayer(env)`, injects the resolved services
  * into `handler`, and schedules `flush()` via `ctx.waitUntil` so the scope
- * is always closed after the response resolves — whether the handler
- * succeeded, threw, or returned an error response.
+ * is always closed after the response resolves.
  *
- * Pass `flushables` (typically the `CloudflareTelemetry` returned by
- * `@maple-dev/effect-sdk/cloudflare`'s `make()`) to also drain in-isolate
- * span/log buffers in `ctx.waitUntil`. Each `Flushable` runs against a cached
- * per-isolate flush runtime (with `FetchHttpClient`) so concurrent requests
- * coalesce into one POST per signal.
- *
- * Use this instead of rolling `buildRequestRuntime` + `ctx.waitUntil` by
- * hand. Forgetting the flush is the exact bug class this package exists to
- * prevent.
+ * For OTLP/MapleCloudflareSDK telemetry, prefer including the SDK's
+ * `telemetry.layer` directly in the layer composition that runs your routes
+ * (e.g. inside `HttpRouter.toWebHandler`'s layer arg) and call
+ * `ctx.waitUntil(telemetry.flush(env))` yourself — that way the Tracer
+ * reference lives in the same runtime as your handler code.
  */
 export const withRequestRuntime = <R, Env extends Record<string, unknown>, Ctx extends ExecutionContextLike>(
 	makeLayer: (env: Env) => Layer.Layer<R, unknown, never>,
 	handler: (request: Request, services: Context.Context<R>, env: Env, ctx: Ctx) => Promise<Response>,
-	options?: { readonly flushables?: FlushablesInput<Env> },
 ): ((request: Request, env: Env, ctx: Ctx) => Promise<Response>) => {
 	return async (request, env, ctx) => {
 		const { services, flush } = buildRequestRuntime(makeLayer(env))
@@ -145,11 +84,9 @@ export const withRequestRuntime = <R, Env extends Record<string, unknown>, Ctx e
 					await response
 				} catch {
 					// Swallow handler errors — the handler's own error path is
-					// responsible for surfacing them. We still need to flush so
-					// the error gets traced/logged before the runtime is torn down.
+					// responsible for surfacing them.
 				}
 				await flush()
-				await runFlushables(resolveFlushables(options?.flushables, env))
 			})(),
 		)
 		return response
@@ -163,28 +100,18 @@ export const withRequestRuntime = <R, Env extends Record<string, unknown>, Ctx e
  * Disposes the runtime after the program settles (success or failure),
  * draining the scheduler first and registering the whole thing with
  * `ctx.waitUntil`. Rethrows so the CF runtime reports the failure.
- *
- * Pass `flushables` to also drain in-isolate telemetry buffers (see
- * `withRequestRuntime`).
  */
-export const runScheduledEffect = <A, E, R, Env = Record<string, unknown>>(
+export const runScheduledEffect = <A, E, R>(
 	layer: Layer.Layer<R, unknown, never>,
 	program: Effect.Effect<A, E, R>,
 	ctx: ExecutionContextLike,
-	options?: { readonly flushables?: ReadonlyArray<Flushable> | (() => ReadonlyArray<Flushable>); readonly env?: Env },
 ): Promise<A> => {
 	const runtime = ManagedRuntime.make(layer)
-	const flushables = options?.flushables
-		? typeof options.flushables === "function"
-			? options.flushables()
-			: options.flushables
-		: []
 	const done = runtime.runPromise(program).finally(async () => {
 		await drainScheduler()
 		await runtime.dispose().catch((err) => {
 			console.error("[effect-cloudflare] scheduled runtime dispose failed:", err)
 		})
-		await runFlushables(flushables)
 	})
 	ctx.waitUntil(done.catch(() => undefined))
 	return done

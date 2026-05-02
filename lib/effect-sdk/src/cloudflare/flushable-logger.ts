@@ -1,137 +1,47 @@
 // ---------------------------------------------------------------------------
-// Workers-friendly OTLP logger with explicit flush.
+// Buffer-backed OTLP logger (Cloudflare Workers)
 //
-// Forked from `effect/unstable/observability/OtlpLogger` + `OtlpExporter` for
-// the same reasons as the flushable tracer: no background fiber, module-scoped
-// buffer for cross-request coalescing, explicit `flush` Effect for
-// `ctx.waitUntil` integration.
+// Pure Logger that pushes OTLP-shaped log records into a caller-owned buffer.
+// Same lazy-env pattern as the tracer — URL/resource/headers resolved at flush
+// time, not construction time.
 // ---------------------------------------------------------------------------
-import {
-	Array as Arr,
-	Cause,
-	Duration,
-	Effect,
-	Layer,
-	Logger,
-	type LogLevel,
-	Number as Num,
-	Option,
-	References,
-	Schedule,
-} from "effect"
-import {
-	Headers,
-	HttpClient,
-	HttpClientError,
-	HttpClientRequest,
-} from "effect/unstable/http"
+import { Array as Arr, Cause, Layer, Logger, type LogLevel, References } from "effect"
 import * as OtlpResource from "effect/unstable/observability/OtlpResource"
 
-export interface FlushableLoggerOptions {
-	/** Full OTLP/HTTP logs URL, e.g. `https://collector/v1/logs`. */
-	readonly url: string
-	readonly resource: {
-		readonly serviceName: string
-		readonly serviceVersion?: string | undefined
-		readonly attributes?: Record<string, unknown> | undefined
-	}
-	readonly headers?: Headers.Input | undefined
-	readonly userAgent?: string | undefined
-	/** Skip Effect log spans in attributes. Defaults to `false`. */
-	readonly excludeLogSpans?: boolean | undefined
-	/** Merge with existing loggers (default `true`) instead of overwriting. */
-	readonly mergeWithExisting?: boolean | undefined
+export interface LogBuffer {
+	readonly loggerLayer: Layer.Layer<never>
+	readonly drain: () => Array<LogRecord>
+	readonly setDisabled: (value: boolean) => void
+	readonly size: () => number
 }
 
-export interface FlushableLogger {
-	readonly layer: Layer.Layer<never>
-	readonly flush: Effect.Effect<void, never, HttpClient.HttpClient>
-}
+const MAX_BUFFER = 10_000
 
-export const makeFlushableLogger = (options: FlushableLoggerOptions): FlushableLogger => {
-	const otelResource = OtlpResource.make(options.resource)
-	const scope: InstrumentationScope = { name: options.resource.serviceName }
-
-	const baseHeaders = Headers.fromRecordUnsafe({
-		"user-agent": options.userAgent ?? "maple-effect-sdk-cf-logger/0.0.0",
-	})
-	const headers = options.headers
-		? Headers.merge(Headers.fromInput(options.headers), baseHeaders)
-		: baseHeaders
-	const request = HttpClientRequest.post(options.url, { headers })
-
+export const makeLogBuffer = (options: { readonly excludeLogSpans?: boolean } = {}): LogBuffer => {
 	let buffer: Array<LogRecord> = []
-	let disabledUntil: number | undefined = undefined
-
-	const flush: Effect.Effect<void, never, HttpClient.HttpClient> = Effect.suspend(() => {
-		if (disabledUntil !== undefined && Date.now() < disabledUntil) return Effect.void
-		if (disabledUntil !== undefined) disabledUntil = undefined
-		if (buffer.length === 0) return Effect.void
-		const items = buffer
-		buffer = []
-		const body: LogsData = {
-			resourceLogs: [
-				{ resource: otelResource, scopeLogs: [{ scope, logRecords: items }] },
-			],
-		}
-		return Effect.flatMap(HttpClient.HttpClient.asEffect(), (raw) => {
-			const client = HttpClient.filterStatusOk(raw).pipe(
-				HttpClient.retryTransient({ schedule: retryPolicy, times: 3 }),
-			)
-			return client
-				.execute(HttpClientRequest.bodyJsonUnsafe(request, body))
-				.pipe(Effect.asVoid, Effect.withTracerEnabled(false))
-		})
-	}).pipe(
-		Effect.catchCause((cause) => {
-			if (disabledUntil !== undefined) return Effect.void
-			disabledUntil = Date.now() + 60_000
-			return Effect.logDebug("flushable-logger export failed", cause).pipe(
-				Effect.annotateLogs({ package: "@maple-dev/effect-sdk", module: "FlushableLogger" }),
-			)
-		}),
-	)
-
+	let disabled = false
 	const excludeLogSpans = options.excludeLogSpans ?? false
 
 	const logger = Logger.make<unknown, void>((logOptions) => {
-		if (disabledUntil !== undefined) return
+		if (disabled) return
+		if (buffer.length >= MAX_BUFFER) return
 		buffer.push(makeLogRecord(logOptions, excludeLogSpans))
 	})
 
-	const layer = Logger.layer([logger], {
-		mergeWithExisting: options.mergeWithExisting ?? true,
-	})
-
-	return { layer, flush }
+	return {
+		loggerLayer: Logger.layer([logger], { mergeWithExisting: true }),
+		drain: () => {
+			const items = buffer
+			buffer = []
+			return items
+		},
+		setDisabled: (value) => {
+			disabled = value
+			if (value) buffer = []
+		},
+		size: () => buffer.length,
+	}
 }
-
-export const noopLogger: FlushableLogger = {
-	layer: Layer.empty,
-	flush: Effect.void,
-}
-
-// ---------------------------------------------------------------------------
-// Retry policy for 429s (mirrors flushable-tracer)
-// ---------------------------------------------------------------------------
-
-const retryPolicy = Schedule.forever.pipe(
-	Schedule.passthrough,
-	Schedule.addDelay((error: unknown) => {
-		if (
-			HttpClientError.isHttpClientError(error) &&
-			error.reason._tag === "StatusCodeError" &&
-			error.reason.response.status === 429
-		) {
-			const retryAfter = Option.fromUndefinedOr(error.reason.response.headers["retry-after"]).pipe(
-				Option.flatMap(Num.parse),
-				Option.getOrElse(() => 5),
-			)
-			return Effect.succeed(Duration.seconds(retryAfter))
-		}
-		return Effect.succeed(Duration.seconds(1))
-	}),
-)
 
 // ---------------------------------------------------------------------------
 // Log record conversion (adapted from `effect/unstable/observability/OtlpLogger`)
@@ -201,25 +111,10 @@ const logLevelToSeverityNumber = (logLevel: LogLevel.LogLevel): number => {
 }
 
 // ---------------------------------------------------------------------------
-// OTLP wire types (subset — only what we emit)
+// OTLP wire types
 // ---------------------------------------------------------------------------
 
-interface LogsData {
-	readonly resourceLogs: ReadonlyArray<ResourceLogs>
-}
-interface ResourceLogs {
-	readonly resource: OtlpResource.Resource
-	readonly scopeLogs: ReadonlyArray<ScopeLogs>
-}
-interface ScopeLogs {
-	readonly scope: InstrumentationScope
-	readonly logRecords: ReadonlyArray<LogRecord>
-}
-interface InstrumentationScope {
-	readonly name: string
-	readonly version?: string
-}
-interface LogRecord {
+export interface LogRecord {
 	timeUnixNano: string
 	observedTimeUnixNano: string
 	severityNumber?: number

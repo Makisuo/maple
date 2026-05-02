@@ -1,10 +1,6 @@
-import * as Cloudflare from "@maple-dev/effect-sdk/cloudflare"
-import {
-	WorkerConfigProviderLive,
-	WorkerEnvironmentLive,
-	withRequestRuntime,
-} from "@maple/effect-cloudflare"
-import { FileSystem, Layer, Path } from "effect"
+import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
+import { WorkerConfigProviderLive, WorkerEnvironmentLive } from "@maple/effect-cloudflare"
+import { Context, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
@@ -47,7 +43,13 @@ const WorkerPlatformLive = Layer.mergeAll(
 // installed. Remove this once upstream fixes it.
 const passthroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
 
-const buildHandler = (_env: Record<string, unknown>) =>
+// Construct telemetry once at module scope — `layer` is stable, `flush(env)`
+// resolves env lazily on first call. Including `telemetry.layer` in the
+// handler's layer composition is the critical bit: the Tracer reference must
+// live in the same runtime as the routes that emit spans.
+const telemetry = MapleCloudflareSDK.make({ serviceName: "maple-api" })
+
+const buildHandler = () =>
 	HttpRouter.toWebHandler(
 		AllRoutes.pipe(
 			Layer.provideMerge(MainLive),
@@ -56,34 +58,17 @@ const buildHandler = (_env: Record<string, unknown>) =>
 			Layer.provideMerge(WorkerPlatformLive),
 			Layer.provideMerge(DatabaseD1Live),
 			Layer.provideMerge(WorkerEnvironmentLive),
+			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLive),
 		),
 		{ middleware: passthroughMiddleware },
 	)
 
-const handlerCache = new WeakMap<object, ReturnType<typeof buildHandler>>()
-
-const getHandler = (env: Record<string, unknown>) => {
-	const key = env as object
-	const existing = handlerCache.get(key)
-	if (existing) return existing
-	const built = buildHandler(env)
-	handlerCache.set(key, built)
-	return built
-}
-
-// `Cloudflare.make` builds a custom flushable OTLP tracer + Effect logger
-// (no upstream background fiber — explicit flush only). Cached once per
-// isolate so the in-isolate buffer coalesces concurrent requests into one
-// POST per signal. `withRequestRuntime` schedules `telemetry.flush` inside
-// `ctx.waitUntil` after the response is sent.
-let cachedTelemetry: Cloudflare.CloudflareTelemetry | undefined
-const getTelemetry = (env: Record<string, unknown>): Cloudflare.CloudflareTelemetry => {
-	if (!cachedTelemetry) cachedTelemetry = Cloudflare.make(env, { serviceName: "maple-api" })
-	return cachedTelemetry
-}
-
-const makeRequestTelemetryLayer = (env: Record<string, unknown>) => getTelemetry(env).layer
+// Single isolate-wide handler — `toWebHandler` builds its own ManagedRuntime
+// once and keeps it for the lifetime of the isolate. Building it per-request
+// would defeat the runtime's isolate-level reuse.
+let cachedHandler: ReturnType<typeof buildHandler> | undefined
+const getHandler = () => (cachedHandler ??= buildHandler())
 
 const isMcpPost = (request: Request): boolean => {
 	if (request.method !== "POST") return false
@@ -93,19 +78,6 @@ const isMcpPost = (request: Request): boolean => {
 		return false
 	}
 }
-
-const inner = withRequestRuntime(
-	makeRequestTelemetryLayer,
-	async (request, services, env) => {
-		if (isMcpPost(request)) {
-			const sid = request.headers.get("mcp-session-id")
-			if (sid) await sessionStore.preload(sid)
-		}
-		const { handler } = getHandler(env)
-		return handler(request, services as any)
-	},
-	{ flushables: (env) => [getTelemetry(env)] },
-)
 
 interface McpSessionsBinding {
 	readonly get: (key: string, type: "json") => Promise<unknown>
@@ -120,7 +92,22 @@ const readMcpSessionsBinding = (env: Record<string, unknown>): McpSessionsBindin
 	return undefined
 }
 
+const handle = async (
+	request: Request,
+	env: Record<string, unknown>,
+	ctx: ExecutionContext,
+): Promise<Response> => {
+	if (isMcpPost(request)) {
+		const sid = request.headers.get("mcp-session-id")
+		if (sid) await sessionStore.preload(sid)
+	}
+	const { handler } = getHandler()
+	const response = await handler(request, Context.empty() as never)
+	ctx.waitUntil(telemetry.flush(env))
+	return response
+}
+
 export default {
 	fetch: (request: Request, env: Record<string, unknown>, ctx: ExecutionContext) =>
-		runWithSessionBindings({ ctx, kv: readMcpSessionsBinding(env) }, () => inner(request, env, ctx)),
+		runWithSessionBindings({ ctx, kv: readMcpSessionsBinding(env) }, () => handle(request, env, ctx)),
 }
