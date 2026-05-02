@@ -34,6 +34,7 @@ export function LogMetaStrip({ log, timeZone, jsonPayload }: LogMetaStripProps) 
 				<Link
 					to="/traces/$traceId"
 					params={{ traceId: log.traceId }}
+					search={{ t: log.timestamp }}
 					className="inline-flex items-center gap-1 rounded border border-primary/20 bg-primary/5 px-1.5 py-0.5 font-mono text-[10px] text-primary hover:bg-primary/10 transition-colors"
 					title={`View trace ${log.traceId}`}
 				>

@@ -109,10 +109,13 @@ export const ListWidget = memo(function ListWidget({
 									let content: React.ReactNode = displayValue
 									if (col.field === "traceId" && typeof value === "string" && value) {
 										const truncated = value.length > 8 ? value.slice(0, 8) : value
+										const tsRaw = row.timestamp ?? row.startTime
+										const t = typeof tsRaw === "string" ? tsRaw : undefined
 										content = (
 											<Link
 												to="/traces/$traceId"
 												params={{ traceId: value }}
+												search={t ? { t } : undefined}
 												target="_blank"
 												className="font-mono text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
 											>

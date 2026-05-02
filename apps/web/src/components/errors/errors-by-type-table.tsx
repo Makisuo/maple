@@ -136,6 +136,7 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
 										key={trace.traceId}
 										to="/traces/$traceId"
 										params={{ traceId: trace.traceId }}
+										search={{ t: trace.startTime.toISOString() }}
 										className="flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/50 transition-colors"
 									>
 										<div className="flex items-center gap-3 min-w-0">

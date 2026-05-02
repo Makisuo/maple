@@ -22,18 +22,28 @@ import { getHttpInfo } from "@maple/ui/lib/http"
 
 const TraceDetailSearchSchema = Schema.Struct({
 	spanId: Schema.optional(Schema.String),
+	// Optional timestamp (any time inside the trace) carried in from the
+	// referring page. Used to narrow the ClickHouse partition scan to a ±1h
+	// window — without it the query reads every retained daily partition.
+	t: Schema.optional(Schema.String),
 })
 
 function buildBackToTracesHref(searchStr: string): string {
 	const params = new URLSearchParams(searchStr)
 	params.delete("spanId")
+	params.delete("t")
 	const nextSearch = params.toString()
 	return nextSearch ? `/traces?${nextSearch}` : "/traces"
 }
 
-export const Route = effectRoute(createFileRoute("/traces/$traceId"), ({ params }) => [
-	getSpanHierarchyResultAtom({ data: { traceId: Schema.decodeSync(TraceId)(params.traceId) } }),
-])({
+export const Route = effectRoute(createFileRoute("/traces/$traceId"), ({ params, search }) => {
+	const t = typeof (search as { t?: unknown }).t === "string" ? ((search as { t: string }).t) : undefined
+	return [
+		getSpanHierarchyResultAtom({
+			data: { traceId: Schema.decodeSync(TraceId)(params.traceId), timestamp: t },
+		}),
+	]
+})({
 	component: TraceDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(TraceDetailSearchSchema),
 })
@@ -45,7 +55,9 @@ function TraceDetailPage() {
 	const backToTracesHref = buildBackToTracesHref(searchStr)
 	const navigate = useNavigate({ from: Route.fullPath })
 	const result = useAtomValue(
-		getSpanHierarchyResultAtom({ data: { traceId: Schema.decodeSync(TraceId)(traceId) } }),
+		getSpanHierarchyResultAtom({
+			data: { traceId: Schema.decodeSync(TraceId)(traceId), timestamp: search.t },
+		}),
 	)
 
 	return Result.builder(result)

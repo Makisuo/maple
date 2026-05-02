@@ -334,6 +334,7 @@ function ErrorDetailContent() {
 											<Link
 												to="/traces/$traceId"
 												params={{ traceId: trace.traceId }}
+												search={{ t: trace.startTime.toISOString() }}
 												className="font-mono text-xs text-primary hover:underline"
 											>
 												{trace.traceId.slice(0, 12)}

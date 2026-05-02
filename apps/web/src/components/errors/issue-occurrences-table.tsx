@@ -57,6 +57,7 @@ export function IssueOccurrencesTable({ traces }: IssueOccurrencesTableProps) {
 							<Link
 								to="/traces/$traceId"
 								params={{ traceId: trace.traceId }}
+								search={{ t: trace.timestamp }}
 								className={cn(
 									"inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5",
 									"font-mono text-[11px] text-muted-foreground tabular-nums",

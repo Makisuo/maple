@@ -21,7 +21,7 @@ export interface TracesTableViewProps {
 	hasNextPage: boolean
 	fetchNextPage: () => void
 	waiting: boolean
-	onTraceClick: (traceId: string) => void
+	onTraceClick: (traceId: string, startTime: string) => void
 }
 
 function formatDuration(ms: number): string {
@@ -151,7 +151,7 @@ export function TracesTableView({
 					<Link
 						to="/traces/$traceId"
 						params={{ traceId: row.original.traceId }}
-						search={true}
+						search={(prev: Record<string, unknown>) => ({ ...prev, t: row.original.startTime })}
 						className="font-mono text-xs text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
 						onClick={(e) => e.stopPropagation()}
 					>
@@ -318,11 +318,11 @@ export function TracesTableView({
 									data-index={virtualRow.index}
 									className="border-b transition-colors hover:bg-muted/50 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
 									tabIndex={0}
-									onClick={() => onTraceClick(row.original.traceId)}
+									onClick={() => onTraceClick(row.original.traceId, row.original.startTime)}
 									onKeyDown={(e) => {
 										if (e.key === "Enter" || e.key === " ") {
 											e.preventDefault()
-											onTraceClick(row.original.traceId)
+											onTraceClick(row.original.traceId, row.original.startTime)
 										}
 									}}
 								>
@@ -376,8 +376,12 @@ export function TracesTable({ filters }: TracesTableProps) {
 		useInfiniteTraces(filters)
 
 	const onTraceClick = React.useCallback(
-		(traceId: string) => {
-			navigate({ to: "/traces/$traceId", params: { traceId }, search: true })
+		(traceId: string, startTime: string) => {
+			navigate({
+				to: "/traces/$traceId",
+				params: { traceId },
+				search: (prev: Record<string, unknown>) => ({ ...prev, t: startTime }),
+			})
 		},
 		[navigate],
 	)

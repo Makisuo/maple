@@ -19,6 +19,7 @@ export function InlineLog({ data }: { data: InlineLogData }) {
 				<Link
 					to="/traces/$traceId"
 					params={{ traceId: data.traceId }}
+					search={data.timestamp ? { t: data.timestamp } : undefined}
 					className="shrink-0 text-primary hover:underline"
 					title={data.traceId}
 				>
