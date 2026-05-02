@@ -133,10 +133,70 @@ describe("MapleCloudflareSDK.make", () => {
 		await Effect.runPromise(
 			Effect.succeed(undefined).pipe(Effect.withSpan("op"), Effect.provide(telemetry.layer)),
 		)
-		await telemetry.flush({}) // no MAPLE_ENDPOINT — falls through to public default
+		// No MAPLE_ENDPOINT — falls through to public default. Ingest key is
+		// required to avoid the no-op short-circuit; we're testing endpoint
+		// defaulting here, not the no-op behavior.
+		await telemetry.flush({ MAPLE_INGEST_KEY: "secret" })
 
 		const tracesCall = calls.find((c) => c.url.endsWith("/v1/traces"))
 		expect(tracesCall?.url).toBe("https://ingest.maple.dev/v1/traces")
+	})
+
+	it("runs in no-op mode when no ingest key is configured", async () => {
+		const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {})
+		const { calls, restore: r } = setupFetch()
+		restore = () => {
+			r()
+			consoleInfoSpy.mockRestore()
+		}
+		const telemetry = make({ serviceName: "unit-test" })
+
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("op"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush({}) // no MAPLE_INGEST_KEY — should no-op
+
+		expect(calls.length).toBe(0)
+		expect(consoleInfoSpy).toHaveBeenCalledTimes(1)
+		expect(consoleInfoSpy.mock.calls[0][0]).toContain("no MAPLE_INGEST_KEY configured")
+
+		// A second flush within the same isolate should stay silent —
+		// the info log is one-shot.
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("op-2"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush({})
+		expect(calls.length).toBe(0)
+		expect(consoleInfoSpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("no-op flush still drains buffers (resolution is one-shot per isolate)", async () => {
+		const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {})
+		const { calls, restore: r } = setupFetch()
+		restore = () => {
+			r()
+			consoleInfoSpy.mockRestore()
+		}
+		const telemetry = make({ serviceName: "unit-test" })
+
+		// First two flushes happen with no key — buffers should be drained.
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("dropped-1"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush({})
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("dropped-2"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush({})
+
+		// Even if a key shows up later, env was resolved on first flush — the
+		// SDK is locked into no-op for this isolate. Confirms (a) no POST,
+		// (b) earlier spans were drained rather than retained.
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("also-dropped"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush({ MAPLE_INGEST_KEY: "secret" })
+		expect(calls.length).toBe(0)
 	})
 
 	it("explicit config overrides env", async () => {

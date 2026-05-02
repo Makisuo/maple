@@ -45,11 +45,15 @@ export interface Config {
 	readonly environment?: string | undefined
 	/**
 	 * Ingest endpoint URL (base, no path). Defaults to `env.MAPLE_ENDPOINT`,
-	 * then `env.OTEL_EXPORTER_OTLP_ENDPOINT`. When unset, the SDK runs in
-	 * no-op mode (spans/logs dropped, flush returns immediately).
+	 * then `env.OTEL_EXPORTER_OTLP_ENDPOINT`, then the public Maple ingest
+	 * (`https://ingest.maple.dev`).
 	 */
 	readonly endpoint?: string | undefined
-	/** Maple ingest key. Defaults to `env.MAPLE_INGEST_KEY`. */
+	/**
+	 * Maple ingest key. Defaults to `env.MAPLE_INGEST_KEY`. When unset, the
+	 * SDK runs in no-op mode (no flushes are attempted; buffers are drained
+	 * so they don't grow across the isolate's lifetime).
+	 */
 	readonly ingestKey?: string | undefined
 	readonly attributes?: Record<string, unknown> | undefined
 	/** Skip Effect log spans in OTLP log attributes. Default `false`. */
@@ -74,7 +78,8 @@ export interface Telemetry {
 	 * `ctx.waitUntil(telemetry.flush(env))` after sending the response.
 	 *
 	 * - Lazy env resolution on first call.
-	 * - No-op when no endpoint configured (and disables future buffering).
+	 * - No-op when no ingest key is configured (drains buffers, never POSTs;
+	 *   logs one info line on first call so devs know telemetry is disabled).
 	 * - Errors are caught and logged to `console.error`; cooldown of 60s
 	 *   per signal before next attempt after a failure.
 	 */
@@ -89,6 +94,7 @@ interface Resolved {
 	readonly resource: OtlpResourceLike
 	readonly scope: { readonly name: string }
 	readonly headers: Record<string, string>
+	readonly noOp: boolean
 }
 
 interface OtlpResourceLike {
@@ -111,7 +117,14 @@ const resolveOnce = (env: Record<string, unknown>, config: Config): Resolved => 
 	}
 	if (r.ingestKey) headers.authorization = `Bearer ${Redacted.value(r.ingestKey)}`
 	const otelResource = makeOtlpResource(r.resource)
-	return { tracesUrl, logsUrl, resource: otelResource, scope: { name: r.resource.serviceName }, headers }
+	return {
+		tracesUrl,
+		logsUrl,
+		resource: otelResource,
+		scope: { name: r.resource.serviceName },
+		headers,
+		noOp: r.ingestKey === undefined,
+	}
 }
 
 const makeOtlpResource = (resource: {
@@ -187,6 +200,7 @@ export const make = (config: Config = {}): Telemetry => {
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 
 	let resolved: Resolved | undefined = undefined
+	let noOpLogged = false
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
 
@@ -198,6 +212,21 @@ export const make = (config: Config = {}): Telemetry => {
 		}
 
 		const r = resolved
+
+		if (r.noOp) {
+			// Drain so the in-isolate buffers don't grow unbounded across
+			// requests, but never POST.
+			spans.drain()
+			logs.drain()
+			if (!noOpLogged) {
+				noOpLogged = true
+				console.info(
+					"[MapleCloudflareSDK] no MAPLE_INGEST_KEY configured — telemetry disabled (set MAPLE_INGEST_KEY to enable)",
+				)
+			}
+			return
+		}
+
 		const spanBatch = spans.drain()
 		const logBatch = logs.drain()
 
