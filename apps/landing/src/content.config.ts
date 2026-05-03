@@ -22,7 +22,7 @@ const docs = defineCollection({
 		group: z.string(),
 		order: z.number().default(0),
 		draft: z.boolean().default(false),
-		sdk: z.enum(["effect"]).optional(),
+		sdk: z.enum(["effect", "node", "nextjs", "python", "go", "rust", "java", "csharp", "kotlin"]).optional(),
 	}),
 })
 

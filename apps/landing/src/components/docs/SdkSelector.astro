@@ -1,21 +1,33 @@
 ---
 import EffectLogo from "../icons/EffectLogo.astro";
-
-type SdkIcon = "effect" | "letter";
+import NodeJsLogo from "../icons/NodeJsLogo.astro";
+import NextjsLogo from "../icons/NextjsLogo.astro";
+import PythonLogo from "../icons/PythonLogo.astro";
+import GoLogo from "../icons/GoLogo.astro";
+import RustLogo from "../icons/RustLogo.astro";
+import OpenJdkLogo from "../icons/OpenJdkLogo.astro";
+import CsharpLogo from "../icons/CsharpLogo.astro";
+import KotlinLogo from "../icons/KotlinLogo.astro";
 
 interface Sdk {
     id: string;
     name: string;
-    icon: SdkIcon;
-    letter?: string;
+    Icon: any;
+    href: string;
     available: boolean;
     note?: string;
 }
 
 const sdks: Sdk[] = [
-    { id: "effect", name: "Effect", icon: "effect", available: true },
-    { id: "node", name: "Node.js", icon: "letter", letter: "N", available: false, note: "Coming soon" },
-    { id: "python", name: "Python", icon: "letter", letter: "Py", available: false, note: "Coming soon" },
+    { id: "effect", name: "Effect",  Icon: EffectLogo,  href: "/docs/sdks/effect",                       available: true },
+    { id: "node",   name: "Node.js", Icon: NodeJsLogo,  href: "/docs/guides/instrumentation-nodejs",     available: true },
+    { id: "nextjs", name: "Next.js", Icon: NextjsLogo,  href: "/docs/guides/instrumentation-nextjs",     available: true },
+    { id: "python", name: "Python",  Icon: PythonLogo,  href: "/docs/guides/instrumentation-python",     available: true },
+    { id: "go",     name: "Go",      Icon: GoLogo,      href: "/docs/guides/instrumentation-go",         available: true },
+    { id: "rust",   name: "Rust",    Icon: RustLogo,    href: "/docs/guides/instrumentation-rust",       available: true },
+    { id: "java",   name: "Java",    Icon: OpenJdkLogo, href: "/docs/guides/instrumentation-java",       available: true },
+    { id: "csharp", name: "C#",      Icon: CsharpLogo,  href: "/docs/guides/instrumentation-csharp",     available: true },
+    { id: "kotlin", name: "Kotlin",  Icon: KotlinLogo,  href: "/docs/guides/instrumentation-kotlin",     available: true },
 ];
 
 interface Props {
@@ -24,21 +36,18 @@ interface Props {
 
 const { activeSdk = "effect" } = Astro.props;
 const current = sdks.find((s) => s.id === activeSdk) ?? sdks[0];
+const CurrentIcon = current.Icon;
 ---
 
 <div class="mb-5">
     <div class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-2 px-2">
-        Select your SDK
+        Select your language
     </div>
     <details class="group relative sdk-selector">
         <summary class="flex items-center justify-between gap-2 px-2.5 py-2 border border-border bg-bg hover:border-fg-muted/50 cursor-pointer transition-colors list-none [&::-webkit-details-marker]:hidden">
             <span class="flex items-center gap-2.5 min-w-0">
-                <span class="w-5 h-5 shrink-0 bg-accent flex items-center justify-center text-accent-foreground">
-                    {current.icon === "effect" ? (
-                        <EffectLogo class="w-3 h-3" />
-                    ) : (
-                        <span class="text-[9px] font-bold">{current.letter}</span>
-                    )}
+                <span class="w-5 h-5 shrink-0 flex items-center justify-center">
+                    <CurrentIcon class="w-4 h-4" />
                 </span>
                 <span class="text-xs text-fg font-medium truncate">{current.name}</span>
             </span>
@@ -46,53 +55,52 @@ const current = sdks.find((s) => s.id === activeSdk) ?? sdks[0];
                 <path d="M3 5l3 3 3-3" />
             </svg>
         </summary>
-        <div class="absolute z-30 left-0 right-0 mt-1 border border-border bg-bg shadow-lg">
+        <div class="absolute z-30 left-0 right-0 mt-1 border border-border bg-bg shadow-lg max-h-80 overflow-y-auto">
             <ul class="py-1">
-                {sdks.map((sdk) => (
-                    <li>
-                        {sdk.available ? (
-                            <button
-                                type="button"
-                                data-sdk-option
-                                data-sdk-id={sdk.id}
-                                class:list={[
-                                    "w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left transition-colors",
-                                    sdk.id === current.id
-                                        ? "bg-accent/5 text-accent"
-                                        : "text-fg hover:bg-fg/5",
-                                ]}
-                            >
-                                <span class="flex items-center gap-2.5 min-w-0">
-                                    <span class="w-5 h-5 shrink-0 bg-accent flex items-center justify-center text-accent-foreground">
-                                        {sdk.icon === "effect" ? (
-                                            <EffectLogo class="w-3 h-3" />
-                                        ) : (
-                                            <span class="text-[9px] font-bold">{sdk.letter}</span>
-                                        )}
+                {sdks.map((sdk) => {
+                    const Icon = sdk.Icon;
+                    return (
+                        <li>
+                            {sdk.available ? (
+                                <a
+                                    href={sdk.href}
+                                    data-sdk-option
+                                    data-sdk-id={sdk.id}
+                                    class:list={[
+                                        "w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left transition-colors",
+                                        sdk.id === current.id
+                                            ? "bg-accent/5 text-accent"
+                                            : "text-fg hover:bg-fg/5",
+                                    ]}
+                                >
+                                    <span class="flex items-center gap-2.5 min-w-0">
+                                        <span class="w-5 h-5 shrink-0 flex items-center justify-center">
+                                            <Icon class="w-4 h-4" />
+                                        </span>
+                                        <span class="text-xs font-medium truncate">{sdk.name}</span>
                                     </span>
-                                    <span class="text-xs font-medium truncate">{sdk.name}</span>
-                                </span>
-                                {sdk.id === current.id && (
-                                    <svg class="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-                                        <path d="M2.5 6l2.5 2.5 4.5-5" />
-                                    </svg>
-                                )}
-                            </button>
-                        ) : (
-                            <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 text-fg-muted/60 cursor-not-allowed">
-                                <span class="flex items-center gap-2.5 min-w-0">
-                                    <span class="w-5 h-5 shrink-0 border border-border flex items-center justify-center text-fg-muted/60 text-[9px] font-bold">
-                                        {sdk.letter}
+                                    {sdk.id === current.id && (
+                                        <svg class="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                                            <path d="M2.5 6l2.5 2.5 4.5-5" />
+                                        </svg>
+                                    )}
+                                </a>
+                            ) : (
+                                <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 text-fg-muted/60 cursor-not-allowed">
+                                    <span class="flex items-center gap-2.5 min-w-0">
+                                        <span class="w-5 h-5 shrink-0 flex items-center justify-center opacity-40 grayscale">
+                                            <Icon class="w-4 h-4" />
+                                        </span>
+                                        <span class="text-xs truncate">{sdk.name}</span>
                                     </span>
-                                    <span class="text-xs truncate">{sdk.name}</span>
-                                </span>
-                                <span class="text-[9px] uppercase tracking-wider shrink-0">
-                                    {sdk.note}
-                                </span>
-                            </div>
-                        )}
-                    </li>
-                ))}
+                                    <span class="text-[9px] uppercase tracking-wider shrink-0">
+                                        {sdk.note}
+                                    </span>
+                                </div>
+                            )}
+                        </li>
+                    );
+                })}
             </ul>
         </div>
     </details>
@@ -110,6 +118,7 @@ const current = sdks.find((s) => s.id === activeSdk) ?? sdks[0];
                     localStorage.setItem("maple.docs.sdk", id);
                 } catch {}
             }
+            // anchor navigates naturally; just close the dropdown
             const details = option.closest("details");
             if (details) details.removeAttribute("open");
             return;

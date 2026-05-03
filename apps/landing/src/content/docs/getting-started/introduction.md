@@ -41,9 +41,14 @@ export OTEL_SERVICE_NAME="my-service"
 
 Follow our language-specific guides:
 
-- [Node.js Instrumentation](/docs/guides/instrumentation-nodejs) -- includes Next.js setup
 - [Effect SDK](/docs/sdks/effect) -- official Maple SDK for Effect apps
-- [Python Instrumentation](/docs/guides/instrumentation-python)
+- [Node.js Instrumentation](/docs/guides/instrumentation-nodejs) -- Express, Fastify, Hono
+- [Next.js Instrumentation](/docs/guides/instrumentation-nextjs) -- App Router, Pages Router, middleware
+- [Python Instrumentation](/docs/guides/instrumentation-python) -- FastAPI and Django
 - [Go Instrumentation](/docs/guides/instrumentation-go)
+- [Rust Instrumentation](/docs/guides/instrumentation-rust) -- bridged to the `tracing` crate
+- [Java Instrumentation](/docs/guides/instrumentation-java) -- zero-code with the Java agent
+- [C# / .NET Instrumentation](/docs/guides/instrumentation-csharp)
+- [Kotlin Instrumentation](/docs/guides/instrumentation-kotlin) -- Ktor and Spring Boot
 
 For details on required attributes and data conventions, see [OpenTelemetry Conventions](/docs/concepts/otel-conventions).

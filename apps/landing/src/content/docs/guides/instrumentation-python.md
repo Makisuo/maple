@@ -3,6 +3,7 @@ title: "Python Instrumentation"
 description: "Instrument a Python application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Guides"
 order: 5
+sdk: "python"
 ---
 
 This guide covers instrumenting a Python application to send traces and logs to Maple using the OpenTelemetry SDK.
@@ -90,6 +91,41 @@ from opentelemetry.instrumentation.requests import RequestsInstrumentor
 FlaskInstrumentor().instrument()
 RequestsInstrumentor().instrument()
 ```
+
+## FastAPI
+
+FastAPI has a dedicated instrumentation package that traces every route as a span:
+
+```bash
+pip install opentelemetry-instrumentation-fastapi
+```
+
+```python
+import tracing  # Initialize OpenTelemetry first
+from fastapi import FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+app = FastAPI()
+FastAPIInstrumentor.instrument_app(app)
+```
+
+If you also use `httpx` or `requests` for outgoing calls, install the matching instrumentation packages -- they propagate trace context automatically so downstream services connect to the parent trace.
+
+## Django
+
+```bash
+pip install opentelemetry-instrumentation-django
+```
+
+```python
+# settings.py or top of wsgi.py
+import tracing  # Initialize OpenTelemetry first
+from opentelemetry.instrumentation.django import DjangoInstrumentor
+
+DjangoInstrumentor().instrument()
+```
+
+The Django instrumentation creates a span per HTTP request and integrates with the ORM through `opentelemetry-instrumentation-dbapi`-backed packages (`opentelemetry-instrumentation-psycopg2`, `opentelemetry-instrumentation-sqlite3`, etc.).
 
 ## Custom Spans
 

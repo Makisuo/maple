@@ -8,9 +8,9 @@ sdk: "effect"
 
 Maple SDKs are official, hand-built libraries that wrap OpenTelemetry with sensible defaults for the runtimes and platforms we support. They auto-detect commit SHAs, deployment environments, and runtime metadata so you can ship traces, logs, and metrics with a single `layer()` call.
 
-If your language or framework isn't covered here, fall back to the language-generic [Guides](/docs/guides/instrumentation-nodejs) — they walk through standard OpenTelemetry setup pointed at Maple's ingest endpoint.
+If your language doesn't have an official SDK yet, see the [Language guides](#language-guides) below — they walk through standard OpenTelemetry setup pointed at Maple's ingest endpoint for Node.js, Next.js, Python, Go, Rust, Java, C#, and Kotlin.
 
-## Available SDKs
+## Official SDKs
 
 | SDK                                  | Package                  | Platforms                                | Status |
 | ------------------------------------ | ------------------------ | ---------------------------------------- | ------ |
@@ -33,11 +33,19 @@ A Maple SDK is more than a thin OTel wrapper. Each SDK:
 - **Ships with platform-specific entry points** — server, browser, and serverless runtimes get their own builds with the right exporter and lifecycle wiring.
 - **Tracks the Maple ingest API** — when we add new resource attributes or signal types on the backend, the SDK gets updated to match.
 
-## Coming soon
+## Language guides
 
-We're working on dedicated SDKs for:
+Effect is the only language with a dedicated Maple SDK today. For everything else, point the upstream OpenTelemetry SDK at Maple's ingest endpoint -- our guides walk through it end-to-end:
 
-- **Node.js / TypeScript** — for apps that don't use Effect.
-- **Python** — fastapi, django, generic asyncio.
+| Language                                                       | Approach                                                            |
+| -------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [Node.js](/docs/guides/instrumentation-nodejs)                 | `@opentelemetry/sdk-node` + auto-instrumentations                   |
+| [Next.js](/docs/guides/instrumentation-nextjs)                 | `@vercel/otel` with the App Router / Pages Router instrumentation hook |
+| [Python](/docs/guides/instrumentation-python)                  | `opentelemetry-sdk` + `opentelemetry-bootstrap` (FastAPI, Django)   |
+| [Go](/docs/guides/instrumentation-go)                          | `go.opentelemetry.io/otel` + `otelhttp`, `otelgrpc`, `otelsql`      |
+| [Rust](/docs/guides/instrumentation-rust)                      | `opentelemetry-otlp` bridged to the `tracing` crate                 |
+| [Java](/docs/guides/instrumentation-java)                      | OpenTelemetry Java agent (zero-code) or manual SDK                  |
+| [C# / .NET](/docs/guides/instrumentation-csharp)               | `OpenTelemetry.Extensions.Hosting` + ASP.NET Core instrumentation   |
+| [Kotlin](/docs/guides/instrumentation-kotlin)                  | Java agent, manual SDK, or the Ktor OpenTelemetry plugin            |
 
-In the meantime, the [Node.js](/docs/guides/instrumentation-nodejs) and [Python](/docs/guides/instrumentation-python) guides cover the standard OpenTelemetry SDK pointed at Maple.
+A dedicated SDK for any of these can come later -- the guide path is identical to what an SDK would do under the hood, so you can switch in place.

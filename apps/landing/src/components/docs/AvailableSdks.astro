@@ -1,59 +1,63 @@
 ---
 import EffectLogo from "../icons/EffectLogo.astro";
-
-type SdkIcon = "effect" | "letter";
+import NodeJsLogo from "../icons/NodeJsLogo.astro";
+import NextjsLogo from "../icons/NextjsLogo.astro";
+import PythonLogo from "../icons/PythonLogo.astro";
+import GoLogo from "../icons/GoLogo.astro";
+import RustLogo from "../icons/RustLogo.astro";
+import OpenJdkLogo from "../icons/OpenJdkLogo.astro";
+import CsharpLogo from "../icons/CsharpLogo.astro";
+import KotlinLogo from "../icons/KotlinLogo.astro";
 
 interface Sdk {
     id: string;
     name: string;
-    icon: SdkIcon;
-    letter?: string;
+    Icon: any;
     href?: string;
     available: boolean;
 }
 
 const sdks: Sdk[] = [
-    { id: "effect", name: "Effect", icon: "effect", href: "/docs/sdks/effect", available: true },
-    { id: "node", name: "Node.js", icon: "letter", letter: "N", available: false },
-    { id: "python", name: "Python", icon: "letter", letter: "Py", available: false },
+    { id: "effect", name: "Effect",  Icon: EffectLogo,  href: "/docs/sdks/effect",                       available: true },
+    { id: "node",   name: "Node.js", Icon: NodeJsLogo,  href: "/docs/guides/instrumentation-nodejs",     available: true },
+    { id: "nextjs", name: "Next.js", Icon: NextjsLogo,  href: "/docs/guides/instrumentation-nextjs",     available: true },
+    { id: "python", name: "Python",  Icon: PythonLogo,  href: "/docs/guides/instrumentation-python",     available: true },
+    { id: "go",     name: "Go",      Icon: GoLogo,      href: "/docs/guides/instrumentation-go",         available: true },
+    { id: "rust",   name: "Rust",    Icon: RustLogo,    href: "/docs/guides/instrumentation-rust",       available: true },
+    { id: "java",   name: "Java",    Icon: OpenJdkLogo, href: "/docs/guides/instrumentation-java",       available: true },
+    { id: "csharp", name: "C#",      Icon: CsharpLogo,  href: "/docs/guides/instrumentation-csharp",     available: true },
+    { id: "kotlin", name: "Kotlin",  Icon: KotlinLogo,  href: "/docs/guides/instrumentation-kotlin",     available: true },
 ];
 ---
 
 <div class="mt-10 pt-5 border-t border-border">
     <h4 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-3">
-        Available in other SDKs
+        Available in other languages
     </h4>
     <div class="grid grid-cols-4 gap-1.5">
-        {sdks.map((sdk) => (
-            sdk.available && sdk.href ? (
+        {sdks.map((sdk) => {
+            const Icon = sdk.Icon;
+            return sdk.available && sdk.href ? (
                 <a
                     href={sdk.href}
                     title={sdk.name}
                     aria-label={sdk.name}
-                    class="aspect-square flex items-center justify-center border border-border bg-bg hover:border-accent/60 hover:bg-accent/5 transition-colors group text-fg group-hover:text-accent"
+                    class="aspect-square flex items-center justify-center border border-border bg-bg hover:border-accent/60 hover:bg-accent/5 transition-colors"
                 >
-                    {sdk.icon === "effect" ? (
-                        <EffectLogo class="w-3.5 h-3.5 transition-colors group-hover:text-accent" />
-                    ) : (
-                        <span class="text-[10px] font-bold transition-colors group-hover:text-accent">{sdk.letter}</span>
-                    )}
+                    <Icon class="w-4 h-4" />
                 </a>
             ) : (
                 <div
                     title={`${sdk.name} (coming soon)`}
                     aria-label={`${sdk.name} (coming soon)`}
-                    class="aspect-square flex items-center justify-center border border-border/60 bg-bg cursor-not-allowed text-fg-muted/50"
+                    class="aspect-square flex items-center justify-center border border-border/60 bg-bg cursor-not-allowed opacity-40 grayscale"
                 >
-                    {sdk.icon === "effect" ? (
-                        <EffectLogo class="w-3.5 h-3.5" />
-                    ) : (
-                        <span class="text-[10px] font-bold">{sdk.letter}</span>
-                    )}
+                    <Icon class="w-4 h-4" />
                 </div>
-            )
-        ))}
+            );
+        })}
     </div>
     <p class="text-[10px] text-fg-muted/70 mt-3 leading-relaxed">
-        More SDKs coming soon. Need a specific platform? <a href="https://github.com/Makisuo/maple/issues" target="_blank" rel="noopener" class="text-fg-muted hover:text-accent underline underline-offset-2 transition-colors">Open an issue</a>.
+        Need a language we don't cover? <a href="https://github.com/Makisuo/maple/issues" target="_blank" rel="noopener" class="text-fg-muted hover:text-accent underline underline-offset-2 transition-colors">Open an issue</a>.
     </p>
 </div>

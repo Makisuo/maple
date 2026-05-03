@@ -1,0 +1,23 @@
+---
+interface Props {
+    class?: string;
+}
+
+const { class: className = "w-3.5 h-3.5" } = Astro.props;
+---
+
+<svg
+    class={className}
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+>
+    <title>Kotlin</title>
+    <defs>
+        <linearGradient id="kotlinGradient" x1="0%" y1="100%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#0095D5" />
+            <stop offset="50%" stop-color="#7F52FF" />
+            <stop offset="100%" stop-color="#E44857" />
+        </linearGradient>
+    </defs>
+    <path d="M24 24H0V0h24L12 12Z" fill="url(#kotlinGradient)" />
+</svg>

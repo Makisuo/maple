@@ -3,6 +3,7 @@ title: "Node.js Instrumentation"
 description: "Instrument a Node.js application with OpenTelemetry and send traces, logs, and metrics to Maple."
 group: "Guides"
 order: 3
+sdk: "node"
 ---
 
 This guide covers instrumenting a Node.js application to send traces and logs to Maple using the OpenTelemetry SDK.
@@ -119,40 +120,7 @@ For structured logging with pino, use `pino-opentelemetry-transport` to bridge p
 
 ## Next.js
 
-If you're using Next.js, use the `@vercel/otel` package:
-
-```bash
-npm install @vercel/otel @opentelemetry/sdk-logs @opentelemetry/exporter-logs-otlp-http
-```
-
-```typescript
-// instrumentation.ts (project root)
-import { registerOTel } from "@vercel/otel"
-import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
-import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs"
-
-export function register() {
-	registerOTel({
-		serviceName: "my-next-app",
-		attributes: { environment: "production" },
-		traceExporter: { url: "https://ingest.maple.dev/v1/traces" },
-		logRecordProcessor: new SimpleLogRecordProcessor(
-			new OTLPLogExporter({
-				url: "https://ingest.maple.dev/v1/logs",
-				headers: { Authorization: "Bearer YOUR_API_KEY" },
-			}),
-		),
-	})
-}
-```
-
-Enable the instrumentation hook in `next.config.ts`:
-
-```typescript
-export default {
-	experimental: { instrumentationHook: true },
-}
-```
+Using Next.js? See the dedicated [Next.js Instrumentation](/docs/guides/instrumentation-nextjs) guide -- it walks through `@vercel/otel` and the App Router / Pages Router specifics.
 
 ## Effect
 
