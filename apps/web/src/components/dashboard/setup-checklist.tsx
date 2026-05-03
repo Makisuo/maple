@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
-import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
@@ -110,33 +109,30 @@ export function SetupChecklist() {
 	if (checklistDismissed || hasRealData) return null
 
 	return (
-		<Card className="mb-4 border-primary/30 bg-primary/[0.02] overflow-hidden">
-			<button
-				type="button"
-				onClick={() => setChecklistExpanded(!checklistExpanded)}
-				className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left hover:bg-muted/30 transition-colors"
-			>
-				<div className="flex items-center gap-3">
-					<div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+		<Card className="mb-4 shrink-0 border-primary/30 bg-primary/[0.02] overflow-hidden">
+			<div className="flex items-center justify-between gap-4 pr-3">
+				<button
+					type="button"
+					onClick={() => setChecklistExpanded(!checklistExpanded)}
+					className="flex flex-1 min-w-0 items-center gap-3 px-5 py-4 text-left hover:bg-muted/30 transition-colors"
+				>
+					<div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
 						<CodeIcon size={16} />
 					</div>
-					<div>
+					<div className="min-w-0">
 						<p className="text-sm font-medium">Connect your app to see real data</p>
 						<p className="text-xs text-muted-foreground">
 							Drop in the snippet and we'll auto-detect your first traces.
 						</p>
 					</div>
-				</div>
-				<div className="flex items-center gap-1">
+				</button>
+				<div className="flex items-center gap-1 shrink-0">
 					<Button
 						variant="ghost"
 						size="sm"
 						aria-label={checklistExpanded ? "Collapse" : "Expand"}
 						className="size-8 p-0"
-						onClick={(e) => {
-							e.stopPropagation()
-							setChecklistExpanded(!checklistExpanded)
-						}}
+						onClick={() => setChecklistExpanded(!checklistExpanded)}
 					>
 						{checklistExpanded ? (
 							<ChevronUpIcon size={14} />
@@ -149,8 +145,7 @@ export function SetupChecklist() {
 						size="sm"
 						aria-label="Dismiss setup checklist"
 						className="size-8 p-0"
-						onClick={(e) => {
-							e.stopPropagation()
+						onClick={() => {
 							dismissChecklist()
 							toast.success("Setup checklist hidden — you can reset it from settings later")
 						}}
@@ -158,24 +153,20 @@ export function SetupChecklist() {
 						<XmarkIcon size={14} />
 					</Button>
 				</div>
-			</button>
+			</div>
 
-			<AnimatePresence initial={false}>
-				{checklistExpanded && (
-					<motion.div
-						initial={{ height: 0, opacity: 0 }}
-						animate={{ height: "auto", opacity: 1 }}
-						exit={{ height: 0, opacity: 0 }}
-						transition={{ duration: 0.2 }}
-					>
-						<CardContent className="border-t border-primary/20 p-5 space-y-5">
-							<FrameworkPicker selected={framework} onSelect={setSelectedFramework} />
-							<ConnectInstructions framework={framework} />
-							<ListeningStatus pollCount={pollCount} />
-						</CardContent>
-					</motion.div>
-				)}
-			</AnimatePresence>
+			<div
+				className="grid transition-[grid-template-rows] duration-200 ease-out"
+				style={{ gridTemplateRows: checklistExpanded ? "1fr" : "0fr" }}
+			>
+				<div className="overflow-hidden">
+					<CardContent className="border-t border-primary/20 p-5 space-y-5">
+						<FrameworkPicker selected={framework} onSelect={setSelectedFramework} />
+						<ConnectInstructions framework={framework} />
+						<ListeningStatus pollCount={pollCount} />
+					</CardContent>
+				</div>
+			</div>
 		</Card>
 	)
 }

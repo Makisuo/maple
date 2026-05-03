@@ -27,7 +27,7 @@ export function FirstActionHint() {
 					exit={{ opacity: 0, y: -8 }}
 					transition={{ duration: 0.2 }}
 				>
-					<Card className="mb-4 border-primary/40 bg-primary/[0.04] overflow-hidden">
+					<Card className="mb-4 shrink-0 border-primary/40 bg-primary/[0.04] overflow-hidden">
 						<CardContent className="flex items-center gap-4 p-4">
 							<div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
 								<ChartLineIcon size={16} />
