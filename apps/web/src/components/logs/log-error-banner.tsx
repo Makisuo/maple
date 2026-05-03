@@ -26,16 +26,16 @@ export function LogErrorBanner({ log }: LogErrorBannerProps) {
 	return (
 		<Alert variant="destructive" className="mx-3 my-2 rounded-md border-destructive/30">
 			<CircleWarningIcon size={14} />
-			<AlertTitle className="flex items-center justify-between">
+			<AlertTitle className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
 				<span>{title}</span>
 				{exceptionType && (
-					<span className="font-mono text-[10px] text-destructive/80">{exceptionType}</span>
+					<span className="font-mono text-[10px] text-destructive/80 break-all">{exceptionType}</span>
 				)}
 			</AlertTitle>
 			<AlertDescription>
 				{isLong ? (
 					<Collapsible open={expanded} onOpenChange={setExpanded}>
-						{!expanded && <p className="font-mono text-[11px] line-clamp-2">{message}</p>}
+						{!expanded && <p className="font-mono text-[11px] line-clamp-2 break-words">{message}</p>}
 						<CollapsibleTrigger className="text-[10px] text-destructive hover:text-destructive/80 mt-1 flex items-center gap-1">
 							{expanded ? "Show less" : "Show full error"}
 							{expanded ? <ChevronUpIcon size={10} /> : <ChevronDownIcon size={10} />}
@@ -47,7 +47,7 @@ export function LogErrorBanner({ log }: LogErrorBannerProps) {
 						</CollapsibleContent>
 					</Collapsible>
 				) : (
-					<p className="font-mono text-[11px]">{message}</p>
+					<p className="font-mono text-[11px] break-words">{message}</p>
 				)}
 			</AlertDescription>
 		</Alert>
