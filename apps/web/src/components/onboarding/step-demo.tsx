@@ -20,6 +20,22 @@ import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { getServiceOverviewResultAtom } from "@/lib/services/atoms/tinybird-query-atoms"
 import { cn } from "@maple/ui/utils"
 
+const CARDS_VARIANTS = {
+	hidden: {},
+	show: {
+		transition: { staggerChildren: 0.07, delayChildren: 0.05 },
+	},
+}
+
+const CARD_ITEM_VARIANTS = {
+	hidden: { opacity: 0, y: 8 },
+	show: {
+		opacity: 1,
+		y: 0,
+		transition: { duration: 0.32, ease: [0.16, 1, 0.3, 1] as const },
+	},
+}
+
 export function StepDemo({
 	onComplete,
 	onRequestDemo,
@@ -77,12 +93,7 @@ export function StepDemo({
 	if (hasExistingData) {
 		return (
 			<div className="flex-1 flex flex-col items-center justify-center px-6 py-12 overflow-auto">
-				<motion.div
-					initial={{ opacity: 0, y: 20 }}
-					animate={{ opacity: 1, y: 0 }}
-					transition={{ duration: 0.3 }}
-					className="w-full max-w-md flex flex-col gap-8"
-				>
+				<div className="w-full max-w-md flex flex-col gap-8">
 					<div className="text-center space-y-3">
 						<span className="text-[11px] font-semibold uppercase tracking-widest text-primary">
 							You're all set
@@ -99,7 +110,7 @@ export function StepDemo({
 					<Card className="border-primary/40 bg-primary/[0.02]">
 						<CardContent className="p-6 flex flex-col gap-5">
 							<div className="flex items-center gap-3">
-								<div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+								<div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 ring-1 ring-inset ring-primary/20 text-primary">
 									<ChartBarIcon size={18} />
 								</div>
 								<div>
@@ -115,19 +126,14 @@ export function StepDemo({
 							</Button>
 						</CardContent>
 					</Card>
-				</motion.div>
+				</div>
 			</div>
 		)
 	}
 
 	return (
 		<div className="flex-1 flex flex-col items-center justify-center px-6 py-12 overflow-auto">
-			<motion.div
-				initial={{ opacity: 0, y: 20 }}
-				animate={{ opacity: 1, y: 0 }}
-				transition={{ duration: 0.3 }}
-				className="w-full max-w-3xl flex flex-col gap-10"
-			>
+			<div className="w-full max-w-3xl flex flex-col gap-10">
 				<div className="text-center space-y-3">
 					<span className="text-[11px] font-semibold uppercase tracking-widest text-primary">
 						Try it now
@@ -141,37 +147,46 @@ export function StepDemo({
 					</p>
 				</div>
 
-				<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-					<DemoOption
-						icon={ChartLineIcon}
-						title="Explore with demo data"
-						recommended
-						bullets={[
-							"Pre-loaded with 6 hours of synthetic traces, logs, and errors",
-							"Four demo services with realistic latency and error patterns",
-							"Removable from settings later",
-						]}
-						actionLabel={isSeeding ? "Generating 1,500 spans…" : "Use demo data"}
-						actionIcon={PulseIcon}
-						onAction={handleSeed}
-						disabled={isSeeding}
-						loading={isSeeding}
-						primary
-					/>
-					<DemoOption
-						icon={CodeIcon}
-						title="I'll connect my app"
-						bullets={[
-							"Skip ahead and pick a plan",
-							"We'll show a setup checklist with your ingest key",
-							"Start sending real telemetry whenever you're ready",
-						]}
-						actionLabel="Skip — connect my app"
-						actionIcon={RocketIcon}
-						onAction={handleSkip}
-						disabled={isSeeding}
-					/>
-				</div>
+				<motion.div
+					variants={CARDS_VARIANTS}
+					initial="hidden"
+					animate="show"
+					className="grid grid-cols-1 md:grid-cols-2 gap-4"
+				>
+					<motion.div variants={CARD_ITEM_VARIANTS}>
+						<DemoOption
+							icon={ChartLineIcon}
+							title="Explore with demo data"
+							recommended
+							bullets={[
+								"Pre-loaded with 6 hours of synthetic traces, logs, and errors",
+								"Four demo services with realistic latency and error patterns",
+								"Removable from settings later",
+							]}
+							actionLabel={isSeeding ? "Generating 1,500 spans…" : "Use demo data"}
+							actionIcon={PulseIcon}
+							onAction={handleSeed}
+							disabled={isSeeding}
+							loading={isSeeding}
+							primary
+						/>
+					</motion.div>
+					<motion.div variants={CARD_ITEM_VARIANTS}>
+						<DemoOption
+							icon={CodeIcon}
+							title="I'll connect my app"
+							bullets={[
+								"Skip ahead and pick a plan",
+								"We'll show a setup checklist with your ingest key",
+								"Start sending real telemetry whenever you're ready",
+							]}
+							actionLabel="Skip — connect my app"
+							actionIcon={RocketIcon}
+							onAction={handleSkip}
+							disabled={isSeeding}
+						/>
+					</motion.div>
+				</motion.div>
 
 				{onBack && !isSeeding && (
 					<div className="flex justify-start">
@@ -181,7 +196,7 @@ export function StepDemo({
 						</Button>
 					</div>
 				)}
-			</motion.div>
+			</div>
 		</div>
 	)
 }
@@ -212,27 +227,37 @@ function DemoOption({
 	return (
 		<Card
 			className={cn(
-				"flex flex-col h-full transition-colors relative overflow-hidden",
-				primary ? "border-primary/40 bg-primary/[0.02]" : "",
+				"flex flex-col h-full relative overflow-hidden transition-all duration-200",
+				primary
+					? "border-primary/40 bg-primary/[0.02] shadow-sm shadow-primary/5"
+					: "",
+				!disabled && "hover:-translate-y-0.5",
+				primary && !disabled && "hover:shadow-md hover:shadow-primary/10",
 			)}
 		>
 			{loading && (
-				<div className="absolute inset-x-0 top-0 h-0.5 bg-primary/20 overflow-hidden">
-					<div className="h-full w-full bg-primary animate-pulse" />
-				</div>
+				<motion.div
+					aria-hidden
+					className="pointer-events-none absolute inset-0 rounded-[inherit] ring-2 ring-inset ring-primary/40"
+					animate={{ opacity: [0.35, 0.85, 0.35] }}
+					transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+					style={{ boxShadow: "0 0 0 6px hsl(var(--primary) / 0.06) inset" }}
+				/>
 			)}
 			<CardContent className="flex-1 flex flex-col gap-5 p-6">
 				<div className="flex items-center justify-between">
 					<div
 						className={cn(
 							"flex size-10 items-center justify-center rounded-lg",
-							primary ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+							primary
+								? "bg-gradient-to-br from-primary/15 to-primary/5 ring-1 ring-inset ring-primary/20 text-primary"
+								: "bg-muted text-muted-foreground",
 						)}
 					>
 						<Icon size={18} />
 					</div>
 					{recommended && (
-						<span className="text-[10px] font-semibold uppercase tracking-widest text-primary">
+						<span className="rounded-full bg-primary/15 text-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest">
 							Recommended
 						</span>
 					)}
@@ -243,7 +268,12 @@ function DemoOption({
 				<ul className="space-y-2 flex-1">
 					{bullets.map((b) => (
 						<li key={b} className="flex gap-2 text-sm text-muted-foreground leading-relaxed">
-							<span className="mt-1.5 size-1 rounded-full bg-muted-foreground/60 shrink-0" />
+							<span
+								className={cn(
+									"mt-1.5 size-1 rounded-full shrink-0",
+									primary ? "bg-primary/50" : "bg-muted-foreground/60",
+								)}
+							/>
 							{b}
 						</li>
 					))}

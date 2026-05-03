@@ -1,10 +1,9 @@
 import { useEffect } from "react"
-import { motion } from "motion/react"
 import { useCustomer } from "autumn-js/react"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
 import { PricingCards } from "@/components/settings/pricing-cards"
 import { Button } from "@maple/ui/components/ui/button"
-import { ArrowLeftIcon, PulseIcon } from "@/components/icons"
+import { ArrowLeftIcon } from "@/components/icons"
 
 export function StepPlan({
 	isComplete,
@@ -26,12 +25,7 @@ export function StepPlan({
 
 	return (
 		<div className="flex-1 flex flex-col items-center px-6 py-12 overflow-auto">
-			<motion.div
-				initial={{ opacity: 0, y: 20 }}
-				animate={{ opacity: 1, y: 0 }}
-				transition={{ duration: 0.3 }}
-				className="w-full max-w-5xl"
-			>
+			<div className="w-full max-w-5xl">
 				<div className="text-center mb-10">
 					<span className="text-[11px] font-semibold uppercase tracking-widest text-primary">
 						Pick a plan
@@ -45,13 +39,7 @@ export function StepPlan({
 					</p>
 				</div>
 
-				{isLoading ? (
-					<div className="flex items-center justify-center py-12">
-						<PulseIcon className="animate-spin text-muted-foreground" size={24} />
-					</div>
-				) : (
-					<PricingCards />
-				)}
+				{isLoading ? <PricingSkeleton /> : <PricingCards />}
 
 				{onBack && (
 					<div className="mt-8 flex items-center justify-start">
@@ -61,7 +49,35 @@ export function StepPlan({
 						</Button>
 					</div>
 				)}
-			</motion.div>
+			</div>
+		</div>
+	)
+}
+
+function PricingSkeleton() {
+	return (
+		<div
+			role="status"
+			aria-label="Loading plans"
+			className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-5xl mx-auto"
+		>
+			{[0, 1, 2].map((i) => (
+				<div
+					key={i}
+					className="rounded-xl border bg-card p-6 space-y-4"
+					style={{ animationDelay: `${i * 80}ms` }}
+				>
+					<div className="h-5 w-24 rounded bg-muted/60 animate-pulse" />
+					<div className="h-8 w-32 rounded bg-muted/60 animate-pulse" />
+					<div className="space-y-2 pt-2">
+						<div className="h-3 w-full rounded bg-muted/40 animate-pulse" />
+						<div className="h-3 w-5/6 rounded bg-muted/40 animate-pulse" />
+						<div className="h-3 w-4/6 rounded bg-muted/40 animate-pulse" />
+						<div className="h-3 w-3/6 rounded bg-muted/40 animate-pulse" />
+					</div>
+					<div className="h-10 w-full rounded-lg bg-muted/60 animate-pulse" />
+				</div>
+			))}
 		</div>
 	)
 }

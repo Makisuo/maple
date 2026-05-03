@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useAuth } from "@clerk/clerk-react"
 import { AnimatePresence, motion } from "motion/react"
@@ -19,6 +19,11 @@ import { STEP_IDS, type RoleOption } from "@/atoms/quick-start-atoms"
 export const Route = createFileRoute("/quick-start")({
 	component: QuickStartPage,
 })
+
+export const STEP_MOTION = {
+	duration: 0.28,
+	ease: [0.16, 1, 0.3, 1] as const,
+}
 
 function QuickStartPage() {
 	const { orgId } = useAuth()
@@ -59,15 +64,23 @@ function QuickStartPage() {
 	const currentStepNumber = STEP_IDS.indexOf(activeStep as StepId) + 1
 	const stepLabel = `Step ${currentStepNumber} of ${STEP_IDS.length}`
 
+	const previousStepIndexRef = useRef(currentStepNumber)
+	const direction =
+		currentStepNumber >= previousStepIndexRef.current ? 1 : -1
+
+	useEffect(() => {
+		previousStepIndexRef.current = currentStepNumber
+	}, [currentStepNumber])
+
 	return (
 		<OnboardingLayout
 			currentStep={currentStepNumber}
 			totalSteps={STEP_IDS.length}
 			stepLabel={stepLabel}
 		>
-			<AnimatePresence mode="wait">
+			<AnimatePresence mode="wait" custom={direction} initial={false}>
 				{activeStep === "role" && (
-					<MotionStep key="role">
+					<MotionStep key="role" direction={direction}>
 						<StepQualifyQuestion
 							{...QUALIFY_QUESTIONS.role}
 							value={qualifyAnswers.role}
@@ -80,7 +93,7 @@ function QuickStartPage() {
 				)}
 
 				{activeStep === "demo" && (
-					<MotionStep key="demo">
+					<MotionStep key="demo" direction={direction}>
 						<StepDemo
 							onComplete={() => completeStep("demo")}
 							onRequestDemo={() => setDemoDataRequested(true)}
@@ -91,7 +104,7 @@ function QuickStartPage() {
 				)}
 
 				{activeStep === "plan" && (
-					<MotionStep key="plan">
+					<MotionStep key="plan" direction={direction}>
 						<StepPlan
 							isComplete={isStepComplete("plan")}
 							onComplete={() => completeStep("plan")}
@@ -104,13 +117,20 @@ function QuickStartPage() {
 	)
 }
 
-function MotionStep({ children }: { children: React.ReactNode }) {
+function MotionStep({
+	children,
+	direction,
+}: {
+	children: React.ReactNode
+	direction: number
+}) {
 	return (
 		<motion.div
-			initial={{ opacity: 0, x: 20 }}
+			custom={direction}
+			initial={{ opacity: 0, x: direction * 24 }}
 			animate={{ opacity: 1, x: 0 }}
-			exit={{ opacity: 0, x: -20 }}
-			transition={{ duration: 0.3, ease: "easeInOut" }}
+			exit={{ opacity: 0, x: direction * -24 }}
+			transition={STEP_MOTION}
 			className="flex-1 flex flex-col"
 		>
 			{children}
