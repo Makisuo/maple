@@ -38,6 +38,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 		{ href: l("/features/service-catalog"), label: () => m.nav_service_catalog() },
 		{ href: l("/features/error-tracking"), label: () => m.nav_error_tracking() },
 		{ href: l("/features/ai-mcp-integration"), label: () => m.nav_ai_mcp() },
+		{ href: l("/features/kubernetes-monitoring"), label: () => m.nav_kubernetes() },
 	]
 
 	const useCaseLinks = [

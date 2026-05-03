@@ -1,0 +1,89 @@
+---
+/**
+ * LiveMcpTranscript — AI agent talking to Maple over MCP.
+ * Pre-renders the full transcript SSR (search-engine friendly), then the
+ * client island reveals each segment in sequence: the agent prompt types
+ * character-by-character, tool-calls and results fade in line-by-line.
+ *
+ * Loops every ~28s. Skipped entirely under prefers-reduced-motion (the
+ * SSR'd content is the static fallback).
+ */
+---
+
+<div class="live-frame">
+	<div class="live-frame__head">
+		<span>mcp · agent session</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			LIVE
+		</span>
+	</div>
+	<div class="p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
+		<!-- segment 0: opening agent prompt (typed) -->
+		<div class="mcp-line" data-segment="0">
+			<span class="text-fg-muted">&gt; ask maple</span>
+		</div>
+		<div class="mcp-line text-fg" data-segment="0" data-typed="list services that errored in the last 15m">list services that errored in the last 15m</div>
+
+		<!-- segment 1: first tool call + result -->
+		<div class="mcp-line mt-3" data-segment="1">
+			<span class="text-primary">→ list_services</span>
+			<span class="text-fg-muted">{`{ window: "15m", filter: "errors > 0" }`}</span>
+		</div>
+		<div class="mcp-line mt-1.5" data-segment="1">
+			<span class="text-fg-muted">← 3 services</span>
+		</div>
+		<div class="mcp-line mt-1 text-[11.5px] text-fg-muted" data-segment="1">
+			<div class="grid grid-cols-[10ch_8ch_6ch_8ch_6ch] gap-2 border-t border-border pt-1">
+				<span class="text-fg">payments</span><span>errors</span><span class="text-foreground tabular-nums">142</span><span>p99</span><span class="text-foreground tabular-nums">2.4s</span>
+				<span class="text-fg">recos</span><span>errors</span><span class="text-foreground tabular-nums">38</span><span>p99</span><span class="text-foreground tabular-nums">840ms</span>
+				<span class="text-fg">shipping</span><span>errors</span><span class="text-foreground tabular-nums">6</span><span>p99</span><span class="text-foreground tabular-nums">320ms</span>
+			</div>
+		</div>
+
+		<!-- segment 2: agent narrows -->
+		<div class="mcp-line mt-3 text-fg-muted" data-segment="2">&gt; investigate payments</div>
+
+		<!-- segment 3: find_errors call -->
+		<div class="mcp-line mt-3" data-segment="3">
+			<span class="text-primary">→ find_errors</span>
+			<span class="text-fg-muted">{`{ service: "payments", window: "15m" }`}</span>
+		</div>
+		<div class="mcp-line mt-1.5 text-fg-muted" data-segment="3">← 1 issue</div>
+		<div class="mcp-line mt-1 text-fg" data-segment="3">stripe.charge declined&nbsp;&nbsp;·&nbsp;&nbsp;142 events&nbsp;&nbsp;·&nbsp;&nbsp;98 users</div>
+
+		<!-- segment 4: error_detail call -->
+		<div class="mcp-line mt-3" data-segment="4">
+			<span class="text-primary">→ error_detail</span>
+			<span class="text-fg-muted">{`{ issue_id: "iss_8a91" }`}</span>
+		</div>
+		<div class="mcp-line mt-1.5 text-fg-muted" data-segment="4">← root cause: idempotency key collision</div>
+		<div class="mcp-line mt-1 text-fg-muted" data-segment="4">sample trace: <span class="text-primary">trace_9f3c</span> · order 8421</div>
+
+		<!-- segment 5: propose_fix call -->
+		<div class="mcp-line mt-3" data-segment="5">
+			<span class="text-primary">→ propose_fix</span>
+			<span class="text-fg-muted">{`{ issue: "iss_8a91", fix: "scope idempotency_key by user_id" }`}</span>
+		</div>
+		<div class="mcp-line mt-1.5 text-fg" data-segment="5">← fix attached. opened <span class="text-primary">pr#412</span>.</div>
+
+		<!-- final caret -->
+		<div class="mcp-line mt-3" data-segment="6">
+			<span class="text-fg-muted">&gt;&nbsp;</span><span class="mcp-caret"></span>
+		</div>
+	</div>
+	<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
+		<span>5 tool calls · 4.2s</span>
+		<span>open mcp protocol</span>
+	</div>
+</div>
+
+<script>
+	import { playMcp } from "./live-mcp.client";
+	const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	if (!reduced) {
+		document.querySelectorAll<HTMLElement>("[data-mcp-root]").forEach((el) => {
+			playMcp(el);
+		});
+	}
+</script>

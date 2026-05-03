@@ -15,7 +15,7 @@
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_get_started = () => `Get started free`
+export const cta_get_started = () => `Start free trial`
 
 
 /**
@@ -47,7 +47,7 @@ export const cta_see_full_story = () => `See the full story →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement = () => `Maple is now available — `
+export const nav_announcement = () => `Maple is live · `
 
 
 /**
@@ -55,7 +55,7 @@ export const nav_announcement = () => `Maple is now available — `
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement_link = () => `get started for free`
+export const nav_announcement_link = () => `start your free trial`
 
 
 /**
@@ -111,7 +111,7 @@ export const nav_dashboard = () => `Dashboard`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_get_started = () => `Get started for free`
+export const nav_get_started = () => `Start free trial`
 
 
 /**
@@ -160,6 +160,14 @@ export const nav_error_tracking = () => `Error Tracking`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const nav_ai_mcp = () => `AI & MCP Integration`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_kubernetes = () => `Kubernetes Monitoring`
 
 
 /**
@@ -247,6 +255,30 @@ export const hero_badge = () => `OpenTelemetry native`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const hero_eyebrow = () => `OpenTelemetry native`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_eyebrow_2 = () => `Open source. Self-hostable.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_keep_reading = () => `keep reading ↓`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const hero_title = () => `Open-source observability.`
 
 
@@ -272,6 +304,694 @@ export const hero_title_accent = () => `Native to AI.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_subtitle = () => `Traces, logs, and metrics on OpenTelemetry. Query billions of rows in milliseconds — or let your AI agent do it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_eyebrow = () => `01 · Sovereignty`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_title = () => `Your data, your instrumentation, your bill.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_lede = () => `Maple is the observability backend you'd build if you weren't trying to extract every dollar. OpenTelemetry in. ClickHouse-grade query speed out. The source on GitHub the whole time.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_1_label = () => `Open source`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_1_body = () => `Open-source under FSL-1.1. Read every line. Fork it. Self-host on your own boxes if that's what your security review needs.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_2_label = () => `OpenTelemetry native`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_2_body = () => `OTLP straight in. No proprietary agent. The instrumentation you write today moves to anywhere OTel-compatible tomorrow.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_3_label = () => `Honest pricing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_3_body = () => `Pay for the gigabytes you send. No per-host fees. No per-seat fees. The same numbers your invoice shows.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_link_source = () => `Read the source`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_link_otel = () => `Why OpenTelemetry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_link_pricing = () => `See the calculator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const trace_eyebrow = () => `02 · Trace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const trace_title = () => `Read the trace, not the chart.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const trace_lede = () => `Every request ends up as a span tree with attributes you can actually inspect. Hover any row in this trace to see what was on it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const logs_eyebrow = () => `03 · Logs`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const logs_title = () => `A log feed that doesn't crater your bill at scale.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const logs_lede = () => `Structured logs streamed straight from OTLP. Severity, service, message, duration. Searchable in seconds, retained for the window you actually care about.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const map_eyebrow = () => `04 · Service map`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const map_title = () => `See dependencies move.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const map_lede = () => `Live request flow across your services. Hot services light up. The cascade you'd otherwise reconstruct from a postmortem is right here in the foreground.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_eyebrow = () => `05 · Agents`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_title = () => `Your AI agent reads it too.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_lede = () => `Maple ships with a first-class MCP server. Any compatible agent can list services, search traces, find errors, propose fixes, open PRs. The transcript on the right is real.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_eyebrow = () => `06 · Kubernetes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_title = () => `The pod underneath the slow span.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_lede = () => `Drop a Helm chart on your cluster. Kubelet, host, and kube-state metrics start flowing in. Every span your apps emit arrives carrying pod, node, and namespace, so a slow request lands you on the exact replica that served it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_link_feature = () => `Kubernetes monitoring →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_link_helm = () => `Read the Helm chart`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_namespace = () => `Namespace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_workload = () => `Workload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_kind = () => `Kind`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_ready = () => `Ready`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_cpu = () => `CPU`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_mem = () => `Memory`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_node = () => `Node`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_nodes = () => `Nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_workloads = () => `Workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_cluster_cpu = () => `Cluster CPU`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_cluster_mem = () => `Cluster MEM`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_eyebrow = () => `07 · The bill`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_title = () => `We told you it was honest.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_lede = () => `Side-by-side, line-item. The questions your finance team will ask, answered before they have to ask.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_col_metric = () => `Line item`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_per_host = () => `Per-host fee`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_per_seat = () => `Per-seat fee`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_ingest = () => `Ingest pricing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_retention = () => `Default retention`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_otel = () => `OpenTelemetry support`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_oss = () => `License`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_selfhost = () => `Self-host option`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_row_mcp = () => `MCP / agent surface`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_none = () => `None`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_bundled = () => `Bundled in plan`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_enterprise = () => `Enterprise tier`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_usage = () => `$0.25 / GB ingested`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_native = () => `Native`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_partial = () => `Partial (custom agent)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_yes = () => `Yes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_apache = () => `FSL-1.1`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_proprietary = () => `Proprietary`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_supported = () => `Supported`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_no = () => `No`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_oss_only = () => `OSS components`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_v_first_class = () => `First-class`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_footnote = () => `Competitor numbers are public list prices summarized for comparison. Maple ingest rate is the published flat per-GB. See the calculator for projected monthly cost on your volume.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_link_calculator = () => `Pricing calculator →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_link_vs_dd = () => `Full vs Datadog`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_link_vs_gf = () => `Full vs Grafana Cloud`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_link_vs_nr = () => `Full vs New Relic`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_eyebrow = () => `08 · Start`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_title = () => `Pick your SDK. First trace in five minutes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_lede = () => `Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_endpoint_label = () => `Endpoint`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_key_label = () => `Key`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_key_hint = () => `generated per project in your dashboard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_install_label = () => `Install`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_instrument_label = () => `Instrument`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_copy = () => `Copy`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_copied = () => `Copied`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_footnote = () => `Java, Rust, .NET, Ruby — anything that speaks OTLP works. The custom tab shows the env-var-only setup.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const cta_bookend_title = () => `Run it yourself.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const cta_bookend_lede = () => `14-day trial on Starter, 30 days on Startup. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const cta_bookend_primary = () => `Start free trial`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const cta_bookend_secondary = () => `Read the source`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_manifesto = () => `Made with love for engineers. Priced with respect for your CFO.`
 
 
 /**
@@ -1399,7 +2119,7 @@ export const bottomcta_heading = () => `Ready to observe with clarity?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_subtitle = () => `Start sending traces, logs, and metrics in under five minutes. No credit card required.`
+export const bottomcta_subtitle = () => `Start sending traces, logs, and metrics in under five minutes.`
 
 
 /**
@@ -1512,6 +2232,14 @@ export const footer_error_tracking = () => `Error Tracking`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const footer_ai_mcp = () => `AI & MCP`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_kubernetes = () => `Kubernetes Monitoring`
 
 
 /**
@@ -1695,7 +2423,7 @@ export const pricing_platform_features = () => `Platform features`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_free_forever = () => `Free forever`
+export const pricing_free_forever = () => `Trial included`
 
 
 /**
@@ -1919,7 +2647,7 @@ export const faq_selfhost_q = () => `Can I self-host Maple?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_selfhost_a = () => `Absolutely. Maple is fully open source and can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience.`
+export const faq_selfhost_a = () => `Yes. Maple's source is available under FSL-1.1, and the project can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience.`
 
 
 /**
@@ -1943,7 +2671,7 @@ export const faq_trial_a = () => `Yes, all plans include a free trial so you can
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_home_title = () => `Open Source Observability for Traces, Logs & Metrics — Maple`
+export const page_home_title = () => `Open Source Observability for Traces, Logs & Metrics · Maple`
 
 
 /**
@@ -1967,7 +2695,7 @@ export const page_pricing_title = () => `Simple, Transparent Pricing — Maple`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_pricing_desc = () => `Start free with generous data limits for logs, traces, and metrics. Scale with transparent, usage-based pricing. No per-seat fees, no hidden costs.`
+export const page_pricing_desc = () => `Transparent usage-based pricing for logs, traces, and metrics. No per-seat fees, no hidden costs.`
 
 
 /**
@@ -1991,7 +2719,7 @@ export const page_pricing_heading = () => `Simple, transparent pricing`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_pricing_subtitle = () => `Start free with generous limits. Scale as you grow with usage-based pricing — no per-seat fees, no hidden costs, no vendor lock-in.`
+export const page_pricing_subtitle = () => `Transparent, usage-based pricing — no per-seat fees, no hidden costs, no vendor lock-in. Trials available on every plan.`
 
 
 /**
@@ -2519,6 +3247,526 @@ export const page_dt_filtering_desc = () => `Filter traces by service, duration,
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_title = () => `Kubernetes Monitoring | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_desc = () => `Monitor Kubernetes clusters with OpenTelemetry. A Helm chart collects kubelet, host, and kube-state metrics; spans arrive enriched with pod, node, and namespace.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_label = () => `Kubernetes monitoring`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_heading = () => `Cluster, workload, and span in one view`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_subtitle = () => `Install one Helm chart. Kubelet, host, and kube-state metrics flow in over OTLP. The OpenTelemetry Operator injects pod identity into every span your apps emit, so a slow request lands you on the exact replica that served it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_helm = () => `Helm chart, not a black box`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_helm_desc = () => `maple-k8s-infra is a small Helm chart you can read end-to-end. Kubelet stats per pod, host metrics per node, kube-state metrics across the cluster. OTLP receivers on every node for your apps.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation = () => `Pod and span, joined`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_desc = () => `Spans arrive carrying k8s.pod.name, k8s.node.name, and k8s.namespace.name. Drill from a slow trace straight to the pod and node that ran it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_kube_state = () => `Kube-state metrics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_kube_state_desc = () => `Deployments, StatefulSets, DaemonSets, replica counts, and pod phase, all scraped via the standard kube-state-metrics exporter.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views = () => `Workloads, pods, and nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_desc = () => `Three first-class infrastructure views in the dashboard. Inspect a deployment, a single pod, or a single node, with the same filters you use everywhere else.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_operator = () => `OpenTelemetry Operator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_operator_desc = () => `Pods get OTEL_EXPORTER_OTLP_ENDPOINT and pod/node identity injected at admission. Apps with an OTel SDK linked are instrumented without code changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_multi = () => `Multi-cluster ingest`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_multi_desc = () => `One ingest endpoint per organization. Send from prod, staging, and a developer's kind cluster, and split them with cluster-name resource attributes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_eyebrow = () => `Cluster console`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_title = () => `Workloads, pods, and nodes — one filter sidebar`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_lede = () => `The same view your platform team lives in. Facet down to a deployment in a namespace on a node, or scope to a cluster and watch it live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_breadcrumb = () => `infra › kubernetes › workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_heading = () => `Filters`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_deployment = () => `Deployment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_namespace = () => `Namespace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_cluster = () => `Cluster`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_compute = () => `Compute Type`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_deployment = () => `Deployment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_statefulset = () => `StatefulSet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_daemonset = () => `DaemonSet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_time_last_12h = () => `Last 12 hours`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_reload = () => `Reload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_live = () => `Live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_workloads_h3 = () => `Workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_workloads_subtitle = () => `Aggregated pod metrics by deployment, statefulset, and daemonset.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_eyebrow = () => `Three views`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_title = () => `Pods, nodes, and workloads — first-class`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_lede = () => `Same filters everywhere. Click through from a workload to its pods to the node that runs them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_route = () => `/infra/kubernetes/pods`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_route = () => `/infra/kubernetes/nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_route = () => `/infra/kubernetes/workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_caption = () => `Pods`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_lede = () => `Per-pod CPU and memory — against requests and limits.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_caption = () => `Nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_lede = () => `Kubelet stats per node, with uptime and lifecycle.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_caption = () => `Workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_lede = () => `Aggregated by deployment, statefulset, daemonset.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_eyebrow = () => `Span → pod`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_title = () => `From a slow span to the exact pod`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_lede = () => `The OpenTelemetry Operator stamps every span with k8s.pod.name, k8s.node.name, and k8s.namespace.name at admission. The slow trace already knows where it ran.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_trace_label = () => `Trace: 7af1c204`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_waterfall = () => `Waterfall`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_pod_label = () => `Pod attribution`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_arrow_caption = () => `k8s.pod.name injected at admission`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_pod_status = () => `Active`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_pod = () => `k8s.pod.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_node = () => `k8s.node.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_ns = () => `k8s.namespace.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_eyebrow = () => `One Helm chart`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_title = () => `Drop it on your cluster`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_lede = () => `Read the chart end-to-end. Three commands and the cluster is reporting kubelet, host, and kube-state metrics over OTLP.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_window = () => `helm install maple-k8s-infra`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_1 = () => `Add the chart repo`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_2 = () => `Refresh the index`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_3 = () => `Install on the cluster`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_copy = () => `Copy`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const page_compare_label = () => `Compare`
 
 
@@ -2543,7 +3791,7 @@ export const page_dd_title = () => `Datadog Alternative (Open Source) — Maple 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_desc = () => `Compare Maple and Datadog for observability. Maple offers transparent usage-based pricing, native OpenTelemetry support, and AI-powered diagnostics — fully open source.`
+export const page_dd_desc = () => `Compare Maple and Datadog for observability. Maple offers transparent usage-based pricing, native OpenTelemetry support, and AI-powered diagnostics — open source.`
 
 
 /**
@@ -2623,7 +3871,7 @@ export const page_dd_ai_desc = () => `Diagnose issues faster with AI-powered roo
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_oss = () => `Fully open source`
+export const page_dd_oss = () => `Open source`
 
 
 /**

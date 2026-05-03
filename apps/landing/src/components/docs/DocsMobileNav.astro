@@ -1,5 +1,6 @@
 ---
 import { getCollection } from "astro:content";
+import SdkSelector from "./SdkSelector.astro";
 
 interface Props {
     currentSlug: string;
@@ -9,25 +10,34 @@ const { currentSlug } = Astro.props;
 
 const allDocs = await getCollection("docs", ({ data }) => !data.draft);
 
-const groups = new Map<string, typeof allDocs>();
-for (const doc of allDocs) {
-    const group = doc.data.group;
-    if (!groups.has(group)) groups.set(group, []);
-    groups.get(group)!.push(doc);
-}
-
-for (const [, items] of groups) {
-    items.sort((a, b) => a.data.order - b.data.order);
-}
-
-const groupOrder = ["Getting Started", "Guides", "Concepts"];
-const sortedGroups = [...groups.entries()].sort((a, b) => {
-    const ai = groupOrder.indexOf(a[0]);
-    const bi = groupOrder.indexOf(b[0]);
-    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-});
-
 const currentDoc = allDocs.find((d) => d.id === currentSlug);
+const activeSdk = currentDoc?.data.sdk ?? "effect";
+
+const sdkScopedDocs = allDocs.filter((d) => d.data.sdk === activeSdk);
+const universalDocs = allDocs.filter((d) => !d.data.sdk);
+
+const groupBy = (docs: typeof allDocs) => {
+    const groups = new Map<string, typeof allDocs>();
+    for (const doc of docs) {
+        const group = doc.data.group;
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group)!.push(doc);
+    }
+    for (const [, items] of groups) {
+        items.sort((a, b) => a.data.order - b.data.order);
+    }
+    return groups;
+};
+
+const orderGroups = (groups: Map<string, typeof allDocs>, groupOrder: string[]) =>
+    [...groups.entries()].sort((a, b) => {
+        const ai = groupOrder.indexOf(a[0]);
+        const bi = groupOrder.indexOf(b[0]);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+
+const sdkGroups = orderGroups(groupBy(sdkScopedDocs), ["Effect SDK", "Platforms"]);
+const universalGroups = orderGroups(groupBy(universalDocs), ["Getting Started", "Concepts", "Guides"]);
 ---
 
 <details class="lg:hidden mb-6 border border-border">
@@ -40,10 +50,42 @@ const currentDoc = allDocs.find((d) => d.id === currentSlug);
         </svg>
     </summary>
     <nav class="px-4 pb-4 border-t border-border pt-3" aria-label="Documentation navigation">
-        {sortedGroups.map(([groupName, items]) => (
+        <SdkSelector activeSdk={activeSdk} />
+
+        {sdkGroups.map(([groupName, items]) => (
             <div class="mb-4 last:mb-0">
                 <h3 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-1.5">
                     {groupName}
+                </h3>
+                <ul class="space-y-0.5">
+                    {items.map((doc) => {
+                        const isActive = doc.id === currentSlug;
+                        return (
+                            <li>
+                                <a
+                                    href={`/docs/${doc.id}`}
+                                    class:list={[
+                                        "block py-1 px-2 text-xs transition-colors",
+                                        isActive ? "text-accent" : "text-fg-muted hover:text-fg",
+                                    ]}
+                                >
+                                    {doc.data.title}
+                                </a>
+                            </li>
+                        );
+                    })}
+                </ul>
+            </div>
+        ))}
+
+        {sdkGroups.length > 0 && universalGroups.length > 0 && (
+            <div class="my-4 border-t border-border/60"></div>
+        )}
+
+        {universalGroups.map(([groupName, items]) => (
+            <div class="mb-4 last:mb-0">
+                <h3 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-1.5">
+                    {groupName === "Guides" ? "Other languages" : groupName}
                 </h3>
                 <ul class="space-y-0.5">
                     {items.map((doc) => {

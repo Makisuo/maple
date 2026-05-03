@@ -1,0 +1,114 @@
+---
+/**
+ * BillComparison — spec-sheet-style table.
+ * Dense, numerical, deliberately not pretty. No icons, no checkmarks, no
+ * card grid. The Maple column is amber-tinted to register as the answer.
+ *
+ * Numbers/positions are approximations meant for editorial comparison;
+ * exact pricing is in /pricing and /compare/* pages.
+ */
+import * as m from "../paraglide/messages";
+---
+
+<section class="relative bg-bg-deep">
+	<div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+		<div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-4">{m.bill_eyebrow()}</div>
+		<h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.05] tracking-tight max-w-3xl">
+			{m.bill_title()}
+		</h2>
+		<p class="mt-4 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed">{m.bill_lede()}</p>
+
+		<div class="mt-12 border border-border bg-bg-elevated">
+			<div class="overflow-x-auto">
+				<table class="w-full text-[12.5px] tabular-nums">
+					<thead>
+						<tr class="text-[10px] uppercase tracking-wider text-fg-muted">
+							<th class="text-left font-medium px-4 py-3 border-b border-border">{m.bill_col_metric()}</th>
+							<th class="text-left font-medium px-4 py-3 border-b border-border bg-primary/12 text-primary">Maple</th>
+							<th class="text-left font-medium px-4 py-3 border-b border-border">Datadog</th>
+							<th class="text-left font-medium px-4 py-3 border-b border-border">New Relic</th>
+							<th class="text-left font-medium px-4 py-3 border-b border-border">Grafana Cloud</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_per_host()}</td>
+							<td class="px-4 py-3 border-b border-border bg-primary/8 text-primary font-medium">{m.bill_v_none()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">$15+ / host / mo</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_bundled()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_bundled()}</td>
+						</tr>
+						<tr>
+							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_per_seat()}</td>
+							<td class="px-4 py-3 border-b border-border bg-primary/8 text-primary font-medium">{m.bill_v_none()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_enterprise()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">$99 / full-user / mo</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">$8+ / active-user / mo</td>
+						</tr>
+						<tr>
+							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_ingest()}</td>
+							<td class="px-4 py-3 border-b border-border bg-primary/8 text-primary font-medium">{m.bill_v_usage()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">$1.27 / M events</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">$0.30 / GB</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">$0.50 / M lines</td>
+						</tr>
+						<tr>
+							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_retention()}</td>
+							<td class="px-4 py-3 border-b border-border bg-primary/8 text-primary font-medium">30d default · custom</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">15d default</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">30d default</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">14d default</td>
+						</tr>
+						<tr>
+							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_otel()}</td>
+							<td class="px-4 py-3 border-b border-border bg-primary/8 text-primary font-medium">{m.bill_v_native()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_partial()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_yes()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_yes()}</td>
+						</tr>
+						<tr>
+							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_oss()}</td>
+							<td class="px-4 py-3 border-b border-border bg-primary/8 text-primary font-medium">{m.bill_v_apache()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_proprietary()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_proprietary()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">AGPL components</td>
+						</tr>
+						<tr>
+							<td class="px-4 py-3 border-b border-border text-fg-muted">{m.bill_row_selfhost()}</td>
+							<td class="px-4 py-3 border-b border-border bg-primary/8 text-primary font-medium">{m.bill_v_supported()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_no()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_no()}</td>
+							<td class="px-4 py-3 border-b border-border text-foreground">{m.bill_v_oss_only()}</td>
+						</tr>
+						<tr>
+							<td class="px-4 py-3 text-fg-muted">{m.bill_row_mcp()}</td>
+							<td class="px-4 py-3 bg-primary/8 text-primary font-medium">{m.bill_v_first_class()}</td>
+							<td class="px-4 py-3 text-foreground">{m.bill_v_no()}</td>
+							<td class="px-4 py-3 text-foreground">{m.bill_v_no()}</td>
+							<td class="px-4 py-3 text-foreground">{m.bill_v_no()}</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		</div>
+
+		<p class="mt-4 text-[11px] text-fg-muted/80 max-w-3xl">
+			{m.bill_footnote()}
+		</p>
+
+		<div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+			<a href="/pricing" class="text-primary border-b border-primary/40 hover:border-primary pb-px transition-colors">
+				{m.bill_link_calculator()}
+			</a>
+			<a href="/compare/datadog" class="text-fg-muted hover:text-fg border-b border-border hover:border-foreground pb-px transition-colors">
+				{m.bill_link_vs_dd()}
+			</a>
+			<a href="/compare/grafana" class="text-fg-muted hover:text-fg border-b border-border hover:border-foreground pb-px transition-colors">
+				{m.bill_link_vs_gf()}
+			</a>
+			<a href="/compare/new-relic" class="text-fg-muted hover:text-fg border-b border-border hover:border-foreground pb-px transition-colors">
+				{m.bill_link_vs_nr()}
+			</a>
+		</div>
+	</div>
+</section>

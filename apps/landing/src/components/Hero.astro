@@ -15,30 +15,30 @@ import * as m from "../paraglide/messages";
 
     <div class="relative mx-auto max-w-6xl px-6 pt-24 md:pt-32">
         <!-- Badge -->
-        <div class="mb-6">
-            <span class="inline-flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-fg-muted">
-                <span class="inline-block size-1.5 rounded-full bg-green-400 animate-pulse-dot"></span>
+        <div class="mb-7">
+            <span class="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+                <span class="inline-block size-1.5 rounded-full bg-primary animate-pulse-dot"></span>
                 {m.hero_badge()}
             </span>
         </div>
 
         <!-- Headline -->
-        <h1 class="font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-fg leading-tight max-w-4xl tracking-tight">
+        <h1 class="font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-semibold text-fg leading-[1.02] max-w-4xl tracking-[-0.02em]">
             {m.hero_title()}<br />
             {m.hero_title_sub()} <span class="text-gradient-accent">{m.hero_title_accent()}</span>
         </h1>
 
         <!-- Subtitle -->
-        <p class="mt-5 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed">
+        <p class="mt-6 text-base md:text-lg text-fg-muted max-w-xl leading-relaxed">
             {m.hero_subtitle()}
         </p>
 
         <!-- Dual CTAs -->
-        <div class="mt-8 flex flex-wrap items-center gap-3">
-            <a href="https://app.maple.dev" class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80">
+        <div class="mt-10 flex flex-wrap items-center gap-3">
+            <a href="https://app.maple.dev" class="inline-flex h-11 items-center justify-center bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
                 {m.cta_get_started()}
             </a>
-            <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="inline-flex h-9 items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50">
+            <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="inline-flex h-11 items-center justify-center border border-border bg-transparent px-5 text-sm font-medium text-fg transition-colors hover:bg-bg-elevated">
                 {m.cta_github()}
             </a>
         </div>

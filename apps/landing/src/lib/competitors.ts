@@ -166,7 +166,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			{
 				question: "Can I self-host Maple instead of using the cloud version?",
-				answer: "Yes. Maple is fully open source and can be self-hosted on your own infrastructure. This gives you complete control over your data, compliance with data residency requirements, and eliminates ongoing SaaS costs.",
+				answer: "Yes. Maple's source is available under FSL-1.1 and can be self-hosted on your own infrastructure. This gives you complete control over your data, compliance with data residency requirements, and eliminates ongoing SaaS costs.",
 			},
 			{
 				question: "Does Maple have AI-powered features like Datadog?",
@@ -317,7 +317,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			{
 				question: "Can I still self-host with Maple like I can with Grafana?",
-				answer: "Yes. Like Grafana, Maple is fully open source and can be self-hosted. The difference is you're deploying one system instead of four or five separate components.",
+				answer: "Yes. Maple's source is available under FSL-1.1 and can be self-hosted. The difference is you're deploying one system instead of four or five separate components.",
 			},
 			{
 				question: "What about Grafana's plugin ecosystem?",
@@ -427,7 +427,7 @@ export const competitors: Record<string, Competitor> = {
 			{
 				problem: "Closed-source platform means no visibility into how your data is processed",
 				solution:
-					"Maple is fully open source. Audit the code, understand the data pipeline, and contribute back.",
+					"Maple's source is available under FSL-1.1. Audit the code, understand the data pipeline, and contribute back.",
 			},
 			{
 				problem: "Vendor lock-in through proprietary agents and NRQL query language",
@@ -476,7 +476,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			{
 				question: "Is Maple open source? Can I self-host it?",
-				answer: "Yes to both. Maple is fully open source under a permissive license. You can self-host it on your own infrastructure for complete data sovereignty, or use the hosted cloud version at app.maple.dev.",
+				answer: "Yes to both. Maple's source is available under FSL-1.1. You can self-host it on your own infrastructure for complete data sovereignty, or use the hosted cloud version at app.maple.dev.",
 			},
 			{
 				question: "How does Maple's AI compare to New Relic AI?",

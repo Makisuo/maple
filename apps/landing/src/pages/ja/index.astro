@@ -2,36 +2,92 @@
 import Layout from "../../layouts/Layout.astro";
 import Nav from "../../components/Nav.astro";
 import Hero from "../../components/Hero.astro";
-import TrustBar from "../../components/TrustBar.astro";
-import ProductTabs from "../../components/ProductTabs.astro";
-import FeatureSpotlights from "../../components/FeatureSpotlights.astro";
-import UseCaseShowcase from "../../components/UseCaseShowcase.astro";
-import WhyOpenTelemetry from "../../components/WhyOpenTelemetry.astro";
-import TechnicalDifferentiators from "../../components/TechnicalDifferentiators.astro";
-import AIAgentIntegration from "../../components/AIAgentIntegration.astro";
-import AlertingIntegrations from "../../components/AlertingIntegrations.astro";
-import HowItWorks from "../../components/HowItWorks.astro";
-import BottomCTA from "../../components/BottomCTA.astro";
+import Sovereignty from "../../components/Sovereignty.astro";
+import LiveTrace from "../../components/live/LiveTrace.astro";
+import LiveLogStream from "../../components/live/LiveLogStream.astro";
+import LiveServiceMap from "../../components/live/LiveServiceMap.astro";
+import LiveMcpTranscript from "../../components/live/LiveMcpTranscript.astro";
+import BillComparison from "../../components/BillComparison.astro";
+import Quickstart from "../../components/Quickstart.astro";
 import Footer from "../../components/Footer.astro";
 import SeoHead from "../../components/SeoHead.astro";
+import * as m from "../../paraglide/messages";
 
-const pageTitle = "Open Source Observability for Traces, Logs & Metrics — Maple";
-const pageDescription = "Open-source observability platform built on OpenTelemetry. Collect, visualize, and analyze distributed traces, logs, and metrics from your services with AI-powered diagnostics.";
+const pageTitle = m.page_home_title();
+const pageDescription = m.page_home_desc();
 ---
 
 <Layout title={pageTitle} description={pageDescription}>
     <SeoHead title={pageTitle} description={pageDescription} type="SoftwareApplication" includeOrganization={true} />
+
     <Nav />
     <Hero />
-    <TrustBar />
-    <ProductTabs />
-    <FeatureSpotlights />
-    <UseCaseShowcase />
-    <WhyOpenTelemetry />
-    <TechnicalDifferentiators />
-    <AIAgentIntegration />
-    <AlertingIntegrations />
-    <HowItWorks />
-    <BottomCTA />
+
+    <span id="sovereignty"></span>
+    <Sovereignty />
+
+    <section class="bg-bg">
+        <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+            <div class="grid lg:grid-cols-[minmax(0,360px)_1fr] gap-12 lg:gap-16 items-start">
+                <div class="lg:sticky lg:top-32">
+                    <div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-3">{m.trace_eyebrow()}</div>
+                    <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
+                        {m.trace_title()}
+                    </h2>
+                    <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed max-w-md">{m.trace_lede()}</p>
+                </div>
+                <div>
+                    <LiveTrace />
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="bg-bg-deep">
+        <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+            <LiveLogStream />
+            <div class="mt-12 max-w-2xl">
+                <div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-3">{m.logs_eyebrow()}</div>
+                <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
+                    {m.logs_title()}
+                </h2>
+                <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">{m.logs_lede()}</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="bg-bg">
+        <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+            <div class="grid lg:grid-cols-[1fr_minmax(0,340px)] gap-12 lg:gap-16 items-start">
+                <div>
+                    <LiveServiceMap />
+                </div>
+                <div class="lg:sticky lg:top-32 lg:order-last">
+                    <div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-3">{m.map_eyebrow()}</div>
+                    <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
+                        {m.map_title()}
+                    </h2>
+                    <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed max-w-md">{m.map_lede()}</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="bg-bg-deep">
+        <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+            <div class="max-w-2xl mb-12">
+                <div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-3">{m.mcp_eyebrow()}</div>
+                <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
+                    {m.mcp_title()}
+                </h2>
+                <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">{m.mcp_lede()}</p>
+            </div>
+            <LiveMcpTranscript />
+        </div>
+    </section>
+
+    <BillComparison />
+    <Quickstart />
+
     <Footer />
 </Layout>

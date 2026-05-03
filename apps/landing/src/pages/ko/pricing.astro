@@ -9,7 +9,7 @@ import Footer from "../../components/Footer.astro";
 import SeoHead from "../../components/SeoHead.astro";
 
 const pageTitle = "Simple, Transparent Pricing — Maple";
-const pageDescription = "Start free with generous data limits for logs, traces, and metrics. Scale with transparent, usage-based pricing. No per-seat fees, no hidden costs.";
+const pageDescription = "Transparent usage-based pricing for logs, traces, and metrics. No per-seat fees, no hidden costs.";
 
 const faqItems = [
     {
@@ -18,7 +18,7 @@ const faqItems = [
     },
     {
         question: "What happens if I exceed my plan limits?",
-        answer: "We'll notify you as you approach your limits. On the free plan, ingestion pauses once you hit the cap. On paid plans, additional usage is billed at transparent per-GB rates with no surprises."
+        answer: "We'll notify you as you approach your limits. On the Starter plan, ingestion pauses once you hit the cap. On the Startup plan, additional usage is billed at transparent per-GB rates with no surprises."
     },
     {
         question: "How long is data retained?",
@@ -30,11 +30,11 @@ const faqItems = [
     },
     {
         question: "Can I self-host Maple?",
-        answer: "Absolutely. Maple is fully open source and can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience."
+        answer: "Yes. Maple's source is available under FSL-1.1, and the project can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience."
     },
     {
         question: "Do you offer a free trial for paid plans?",
-        answer: "Yes, paid plans include a 30-day free trial so you can explore all features before committing."
+        answer: "Yes, all plans include a free trial so you can explore all features before committing."
     }
 ];
 ---
@@ -45,7 +45,7 @@ const faqItems = [
     <FeatureHero
         label="Pricing"
         title="Simple, transparent pricing"
-        subtitle="Start free with generous limits. Scale as you grow with usage-based pricing — no per-seat fees, no hidden costs, no vendor lock-in."
+        subtitle="Transparent, usage-based pricing — no per-seat fees, no hidden costs, no vendor lock-in. Trials available on every plan."
     />
     <PricingTable />
     <FAQ items={faqItems} />

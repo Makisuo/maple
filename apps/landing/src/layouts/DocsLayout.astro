@@ -4,6 +4,7 @@ import DocsSidebar from "../components/docs/DocsSidebar.astro";
 import DocsTableOfContents from "../components/docs/DocsTableOfContents.astro";
 import DocsPrevNext from "../components/docs/DocsPrevNext.astro";
 import DocsMobileNav from "../components/docs/DocsMobileNav.astro";
+import AvailableSdks from "../components/docs/AvailableSdks.astro";
 
 interface Props {
     title: string;
@@ -39,15 +40,17 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
         <!-- Docs header -->
         <header class="fixed top-0 left-0 right-0 z-50 h-12 border-b border-border bg-bg/95 backdrop-blur-md">
             <div class="h-full flex items-center justify-between px-5">
-                <div class="flex items-center gap-4">
+                <div class="flex items-center gap-3">
                     <a href="/" class="flex items-center gap-2.5 text-fg-muted hover:text-fg transition-colors">
                         <div class="w-5 h-5 bg-accent flex items-center justify-center">
                             <span class="text-accent-foreground text-[9px] font-bold">M</span>
                         </div>
                         <span class="text-xs font-medium text-fg">Maple</span>
                     </a>
-                    <span class="text-border">/</span>
-                    <a href="/docs" class="text-xs text-fg-muted hover:text-fg transition-colors">
+                    <a
+                        href="/docs"
+                        class="text-[10px] uppercase tracking-wider font-medium px-1.5 py-0.5 border border-border text-fg-muted hover:text-fg hover:border-fg-muted/50 transition-colors"
+                    >
                         Docs
                     </a>
                 </div>
@@ -56,6 +59,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
                         href="https://github.com/Makisuo/maple"
                         target="_blank"
                         rel="noopener noreferrer"
+                        aria-label="GitHub"
                         class="text-fg-muted hover:text-fg transition-colors"
                     >
                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
@@ -90,6 +94,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
             <!-- Table of Contents -->
             <aside class="hidden xl:block w-52 shrink-0 fixed top-12 right-0 bottom-0 overflow-y-auto py-6 px-5 border-l border-border">
                 <DocsTableOfContents headings={headings} />
+                <AvailableSdks />
             </aside>
         </div>
     </body>

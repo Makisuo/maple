@@ -29,11 +29,16 @@
 		"autumn-js": "^1.2.5",
 		"class-variance-authority": "catalog:ui",
 		"clsx": "catalog:ui",
+		"motion": "^12.38.0",
 		"react": "catalog:react",
 		"react-dom": "catalog:react",
 		"recharts": "catalog:ui",
 		"tailwind-merge": "catalog:tailwind",
 		"tailwindcss": "catalog:tailwind",
 		"tw-animate-css": "catalog:tailwind"
+	},
+	"devDependencies": {
+		"@astrojs/check": "^0.9.9",
+		"typescript": "^6.0.3"
 	}
 }

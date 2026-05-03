@@ -1,0 +1,82 @@
+---
+/**
+ * LiveLogStream — auto-scrolling severity-coloured log feed.
+ * Pure CSS animation (log-scroll keyframe). Two copies of the row list
+ * are stacked vertically inside the belt, and the belt translates by
+ * -50% so the loop is seamless. No JS island needed.
+ */
+
+type Level = "info" | "warn" | "error" | "debug";
+
+interface Row {
+	t: string;
+	level: Level;
+	service: string;
+	msg: string;
+	dur?: string;
+}
+
+const rows: Row[] = [
+	{ t: "12:04:18", level: "info",  service: "edge",         msg: "GET /api/orders/8421 200", dur: "412ms" },
+	{ t: "12:04:18", level: "info",  service: "orders-api",   msg: "load_order order_id=8421", dur: "366ms" },
+	{ t: "12:04:18", level: "debug", service: "auth",         msg: "verify_jwt iss=auth.maple.dev", dur: "38ms" },
+	{ t: "12:04:18", level: "info",  service: "postgres",     msg: "SELECT line_items rows=12", dur: "158ms" },
+	{ t: "12:04:18", level: "info",  service: "shipping",     msg: "rate_quote carrier=ups",  dur: "96ms" },
+	{ t: "12:04:18", level: "warn",  service: "fedex-api",    msg: "POST /rates retried (1/3)", dur: "72ms" },
+	{ t: "12:04:18", level: "info",  service: "redis",        msg: "SET order:8421:rate ttl=3600", dur: "14ms" },
+	{ t: "12:04:19", level: "info",  service: "edge",         msg: "GET /api/cart 200", dur: "94ms" },
+	{ t: "12:04:19", level: "info",  service: "cart-svc",     msg: "load_cart user=u_4109", dur: "58ms" },
+	{ t: "12:04:19", level: "debug", service: "feature-flag", msg: "evaluate fast_checkout=false" },
+	{ t: "12:04:19", level: "error", service: "payments",     msg: "stripe.charge declined card=v•••4242", dur: "204ms" },
+	{ t: "12:04:19", level: "warn",  service: "payments",     msg: "fallback to authorize_only flow" },
+	{ t: "12:04:19", level: "info",  service: "kafka",        msg: "produce orders.canceled offset=98041" },
+	{ t: "12:04:20", level: "info",  service: "edge",         msg: "POST /webhooks/stripe 200", dur: "26ms" },
+	{ t: "12:04:20", level: "info",  service: "events",       msg: "dispatch payment.failed → ops" },
+	{ t: "12:04:20", level: "debug", service: "scheduler",    msg: "reschedule retry_at=12:04:25" },
+	{ t: "12:04:20", level: "info",  service: "edge",         msg: "GET /api/inventory 200", dur: "41ms" },
+	{ t: "12:04:20", level: "info",  service: "inventory",    msg: "lookup sku=SKU-9081 region=iad", dur: "23ms" },
+	{ t: "12:04:20", level: "warn",  service: "inventory",    msg: "stock low sku=SKU-9081 qty=3" },
+	{ t: "12:04:21", level: "info",  service: "search",       msg: "query \"red shoes\" hits=412", dur: "82ms" },
+	{ t: "12:04:21", level: "info",  service: "edge",         msg: "GET /api/recos 200", dur: "67ms" },
+	{ t: "12:04:21", level: "debug", service: "recos",        msg: "model=v3.2 cohort=A2" },
+	{ t: "12:04:21", level: "info",  service: "edge",         msg: "POST /api/feedback 201", dur: "18ms" },
+	{ t: "12:04:21", level: "info",  service: "analytics",    msg: "track event=checkout_started" },
+];
+
+const renderRow = (r: Row) => ({
+	t: r.t,
+	level: r.level,
+	service: r.service,
+	msg: r.msg,
+	dur: r.dur ?? "",
+});
+
+const belt = [...rows, ...rows].map(renderRow);
+---
+
+<div class="live-frame">
+	<div class="live-frame__head">
+		<span>logs · stream</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			LIVE
+		</span>
+	</div>
+	<div class="log-stream__viewport">
+		<div class="log-stream__belt">
+			{belt.map((r) => (
+				<div class="log-row" data-level={r.level}>
+					<span class="log-row__t text-fg-muted">{r.t}</span>
+					<span class="log-row__lvl">{r.level.toUpperCase()}</span>
+					<span class="log-row__svc">{r.service}</span>
+					<span class="log-row__msg truncate">{r.msg}</span>
+					<span class="log-row__dur tabular-nums">{r.dur}</span>
+				</div>
+			))}
+		</div>
+	</div>
+	<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
+		<span>14.2k events / minute</span>
+		<span>retention 30d · structured</span>
+	</div>
+</div>

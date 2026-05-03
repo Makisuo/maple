@@ -1,0 +1,103 @@
+---
+/**
+ * LiveWaterfall — hero centerpiece. A real trace waterfall ticking forward.
+ * SSR renders the static end-state for FOUC-free first paint and SEO; the
+ * client island hydrates the animation on idle.
+ *
+ * Service color is computed by hashing the service name into the 16-slot
+ * palette — same approach as packages/ui/src/lib/colors.ts. Same name → same
+ * hue across every component on the page.
+ *
+ * Props let downstream sections (LiveTrace) reuse the visual with a different
+ * density / row count without forking the component.
+ */
+interface SpanRow {
+	service: string;
+	op: string;
+	startMs: number;
+	durationMs: number;
+	depth: number;
+}
+
+interface Props {
+	id?: string;
+	rows?: SpanRow[];
+	totalMs?: number;
+	traceLabel?: string;
+}
+
+const defaultRows: SpanRow[] = [
+	{ service: "edge",          op: "GET /checkout",    startMs:   0, durationMs: 184, depth: 0 },
+	{ service: "checkout-api",  op: "POST /session",    startMs:  18, durationMs: 142, depth: 1 },
+	{ service: "auth-svc",      op: "verify-token",     startMs:  36, durationMs:  46, depth: 2 },
+	{ service: "cart-svc",      op: "load-cart",        startMs:  84, durationMs:  58, depth: 2 },
+	{ service: "pricing",       op: "compute-totals",   startMs: 100, durationMs:  34, depth: 3 },
+	{ service: "postgres",      op: "SELECT items",     startMs: 108, durationMs:  21, depth: 3 },
+	{ service: "redis",         op: "GET cart:u_4109",  startMs: 130, durationMs:   6, depth: 3 },
+];
+
+const {
+	id = "live-waterfall",
+	rows = defaultRows,
+	totalMs = 200,
+	traceLabel = "trace 7c1a · checkout flow",
+} = Astro.props;
+
+const INDENT_PX = 12;
+
+const orderedServices = Array.from(new Set(rows.map((r) => r.service)));
+function serviceColor(name: string): string {
+	const idx = (orderedServices.indexOf(name) % 16) + 1;
+	return `var(--service-${idx})`;
+}
+---
+
+<div class="live-frame" data-live-waterfall data-total={totalMs} id={id}>
+	<div class="live-frame__head">
+		<span>{traceLabel}</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			LIVE
+		</span>
+	</div>
+	<div class="px-1 py-2 relative waterfall-stage" data-waterfall-stage>
+		<span class="trace-cursor" data-trace-cursor aria-hidden="true"></span>
+		{rows.map((r, i) => {
+			const startPct = (r.startMs / totalMs) * 100;
+			const widthPct = (r.durationMs / totalMs) * 100;
+			const colorVar = serviceColor(r.service);
+			return (
+				<div class="waterfall-row" data-row-index={i}>
+					<span class="span-name truncate" style={`padding-left:${r.depth * INDENT_PX + 4}px`}>
+						{Array.from({ length: r.depth }).map((_, d) => (
+							<span class="trace-connector" style={`left:${d * INDENT_PX + 4}px`} aria-hidden="true"></span>
+						))}
+						{r.service}
+					</span>
+					<span class="text-fg-muted truncate">{r.op}</span>
+					<span class="span-bar-track">
+						<span
+							class="span-bar"
+							style={`left:${startPct}%; width:${widthPct}%; --service-color:${colorVar}; --bar-progress:1;`}
+						></span>
+					</span>
+					<span class="span-dur text-fg-muted text-right tabular-nums">{r.durationMs}ms</span>
+				</div>
+			);
+		})}
+	</div>
+	<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
+		<span>{rows.length} spans · {totalMs}ms wall</span>
+		<span>queried 4.2B rows in 142ms</span>
+	</div>
+</div>
+
+<script>
+	import { startWaterfall } from "./live-waterfall.client";
+	const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	if (!reduced) {
+		document.querySelectorAll<HTMLElement>("[data-live-waterfall]").forEach((el) => {
+			startWaterfall(el);
+		});
+	}
+</script>

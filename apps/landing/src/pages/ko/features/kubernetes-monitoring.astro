@@ -1,0 +1,50 @@
+---
+import Layout from "../../../layouts/Layout.astro";
+import Nav from "../../../components/Nav.astro";
+import FeatureHero from "../../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../../components/RelatedFeatures.astro";
+import SeoHead from "../../../components/SeoHead.astro";
+import Breadcrumb from "../../../components/Breadcrumb.astro";
+import BottomCTA from "../../../components/BottomCTA.astro";
+import Footer from "../../../components/Footer.astro";
+import LiveK8sWorkloads from "../../../components/live/LiveK8sWorkloads.astro";
+import * as m from "../../../paraglide/messages";
+
+const pageTitle = m.page_k8s_title();
+const pageDescription = m.page_k8s_desc();
+---
+
+<Layout title={pageTitle} description={pageDescription} ogType="article">
+	<SeoHead title={pageTitle} description={pageDescription} />
+	<Nav />
+	<Breadcrumb items={[{ label: m.breadcrumb_home(), href: "/" }, { label: m.breadcrumb_features(), href: "/#features" }, { label: m.page_k8s_label() }]} />
+	<FeatureHero
+		label={m.page_k8s_label()}
+		title={m.page_k8s_heading()}
+		subtitle={m.page_k8s_subtitle()}
+	/>
+
+	<section class="py-16 md:py-24">
+		<div class="mx-auto max-w-6xl px-6">
+			<LiveK8sWorkloads variant="full" />
+		</div>
+	</section>
+
+	<section class="py-24 md:py-32">
+		<div class="mx-auto max-w-6xl px-6">
+			<FeatureDetailGrid items={[
+				{ title: m.page_k8s_helm(), description: m.page_k8s_helm_desc() },
+				{ title: m.page_k8s_correlation(), description: m.page_k8s_correlation_desc() },
+				{ title: m.page_k8s_kube_state(), description: m.page_k8s_kube_state_desc() },
+				{ title: m.page_k8s_views(), description: m.page_k8s_views_desc() },
+				{ title: m.page_k8s_operator(), description: m.page_k8s_operator_desc() },
+				{ title: m.page_k8s_multi(), description: m.page_k8s_multi_desc() },
+			]} />
+		</div>
+	</section>
+
+	<RelatedFeatures current="kubernetes-monitoring" />
+	<BottomCTA />
+	<Footer />
+</Layout>

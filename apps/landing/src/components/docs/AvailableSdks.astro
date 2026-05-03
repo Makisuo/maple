@@ -1,0 +1,59 @@
+---
+import EffectLogo from "../icons/EffectLogo.astro";
+
+type SdkIcon = "effect" | "letter";
+
+interface Sdk {
+    id: string;
+    name: string;
+    icon: SdkIcon;
+    letter?: string;
+    href?: string;
+    available: boolean;
+}
+
+const sdks: Sdk[] = [
+    { id: "effect", name: "Effect", icon: "effect", href: "/docs/sdks/effect", available: true },
+    { id: "node", name: "Node.js", icon: "letter", letter: "N", available: false },
+    { id: "python", name: "Python", icon: "letter", letter: "Py", available: false },
+];
+---
+
+<div class="mt-10 pt-5 border-t border-border">
+    <h4 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-3">
+        Available in other SDKs
+    </h4>
+    <div class="grid grid-cols-4 gap-1.5">
+        {sdks.map((sdk) => (
+            sdk.available && sdk.href ? (
+                <a
+                    href={sdk.href}
+                    title={sdk.name}
+                    aria-label={sdk.name}
+                    class="aspect-square flex items-center justify-center border border-border bg-bg hover:border-accent/60 hover:bg-accent/5 transition-colors group text-fg group-hover:text-accent"
+                >
+                    {sdk.icon === "effect" ? (
+                        <EffectLogo class="w-3.5 h-3.5 transition-colors group-hover:text-accent" />
+                    ) : (
+                        <span class="text-[10px] font-bold transition-colors group-hover:text-accent">{sdk.letter}</span>
+                    )}
+                </a>
+            ) : (
+                <div
+                    title={`${sdk.name} (coming soon)`}
+                    aria-label={`${sdk.name} (coming soon)`}
+                    class="aspect-square flex items-center justify-center border border-border/60 bg-bg cursor-not-allowed text-fg-muted/50"
+                >
+                    {sdk.icon === "effect" ? (
+                        <EffectLogo class="w-3.5 h-3.5" />
+                    ) : (
+                        <span class="text-[10px] font-bold">{sdk.letter}</span>
+                    )}
+                </div>
+            )
+        ))}
+    </div>
+    <p class="text-[10px] text-fg-muted/70 mt-3 leading-relaxed">
+        More SDKs coming soon. Need a specific platform? <a href="https://github.com/Makisuo/maple/issues" target="_blank" rel="noopener" class="text-fg-muted hover:text-accent underline underline-offset-2 transition-colors">Open an issue</a>.
+    </p>
+</div>
