@@ -8,6 +8,7 @@ import LiveLogStream from "../components/live/LiveLogStream.astro";
 import LiveLogsVolumeChart from "../components/live/LiveLogsVolumeChart.tsx";
 import LiveServiceMap from "../components/live/LiveServiceMap.astro";
 import LiveMcpTranscript from "../components/live/LiveMcpTranscript.astro";
+import Kubernetes from "../components/Kubernetes.astro";
 import BillComparison from "../components/BillComparison.astro";
 import Quickstart from "../components/Quickstart.astro";
 import Footer from "../components/Footer.astro";
@@ -93,6 +94,9 @@ const pageDescription = m.page_home_desc();
             <LiveMcpTranscript />
         </div>
     </section>
+
+    <!-- 06 — Kubernetes. Prose left, workload table right. -->
+    <Kubernetes />
 
     <BillComparison />
     <Quickstart />

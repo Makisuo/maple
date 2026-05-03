@@ -1,0 +1,482 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../components/RelatedFeatures.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import Breadcrumb from "../../components/Breadcrumb.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import Footer from "../../components/Footer.astro";
+import LiveK8sWorkloads from "../../components/live/LiveK8sWorkloads.astro";
+import * as m from "../../paraglide/messages";
+
+const pageTitle = m.page_k8s_title();
+const pageDescription = m.page_k8s_desc();
+
+// Mock data for the "three views" triad — modeled on real app rows captured
+// from /infra/kubernetes/{pods,nodes,workloads}.
+const podRows = [
+	{ pod: "otel-gateway-5988fb47f7-qr2cw", ns: "observability", cpuReq: "147%", cpuLimit: "37%", memReq: "119%", memLimit: "30%", warn: true },
+	{ pod: "prd-artifacts-api-6688755484-ztp7v", ns: "default", cpuReq: "0%", cpuLimit: "52%", memReq: "0%", memLimit: "10%", warn: false },
+	{ pod: "prd-warpstream-5bb84bbbd7-4nmc6", ns: "warpstream", cpuReq: "42%", cpuLimit: "42%", memReq: "35%", memLimit: "35%", warn: false },
+	{ pod: "prd-enrichment-api-7697f64866-ht8qm", ns: "default", cpuReq: "0%", cpuLimit: "34%", memReq: "0%", memLimit: "21%", warn: false },
+];
+
+const nodeRows = [
+	{ name: "i-0ef7f77feb3e0a3eb", cpu: "3.00", seen: "14s ago" },
+	{ name: "i-0293a9e7e2bac82a4", cpu: "2.65", seen: "30s ago" },
+	{ name: "i-0a8c19f2d4e7b15c1", cpu: "1.84", seen: "22s ago" },
+];
+
+const workloadRows = [
+	{ name: "api-gateway", ns: "default", pods: 3, cpu: 47 },
+	{ name: "order-service", ns: "default", pods: 4, cpu: 71 },
+	{ name: "payment-svc", ns: "default", pods: 2, cpu: 86, warn: true },
+	{ name: "inventory-svc", ns: "default", pods: 3, cpu: 34 },
+];
+
+const installSteps = [
+	{ caption: m.page_k8s_install_step_1(), code: "helm repo add maple https://charts.maple.dev" },
+	{ caption: m.page_k8s_install_step_2(), code: "helm repo update" },
+	{ caption: m.page_k8s_install_step_3(), code: "helm install maple-agent maple/collector-agent \\\n  --set maple.ingestUrl=$MAPLE_INGEST_URL \\\n  --set maple.ingestToken=$MAPLE_INGEST_TOKEN" },
+];
+---
+
+<Layout title={pageTitle} description={pageDescription} ogType="article">
+	<SeoHead title={pageTitle} description={pageDescription} />
+	<Nav />
+	<Breadcrumb items={[{ label: m.breadcrumb_home(), href: "/" }, { label: m.breadcrumb_features(), href: "/#features" }, { label: m.page_k8s_label() }]} />
+	<FeatureHero
+		label={m.page_k8s_label()}
+		title={m.page_k8s_heading()}
+		subtitle={m.page_k8s_subtitle()}
+	/>
+
+	<!-- Section 1: Console mock with sidebar + table, staged on hex grid -->
+	<section class="relative overflow-hidden py-16 md:py-24">
+		<div
+			class="absolute inset-0 pointer-events-none"
+			aria-hidden="true"
+			style="
+				background-image:
+					linear-gradient(60deg, oklch(1 0 0 / 4%) 1px, transparent 1px),
+					linear-gradient(-60deg, oklch(1 0 0 / 4%) 1px, transparent 1px),
+					linear-gradient(to right, oklch(1 0 0 / 3%) 1px, transparent 1px);
+				background-size: 56px 56px, 56px 56px, 56px 56px;
+				mask-image: radial-gradient(ellipse 75% 55% at 50% 35%, black, transparent 75%);
+				-webkit-mask-image: radial-gradient(ellipse 75% 55% at 50% 35%, black, transparent 75%);
+			"
+		></div>
+
+		<div class="relative mx-auto max-w-6xl px-6">
+			<div class="mb-10 max-w-2xl">
+				<span class="inline-flex items-center rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+					{m.page_k8s_console_eyebrow()}
+				</span>
+				<h2 class="mt-4 font-display text-2xl md:text-3xl font-semibold leading-tight tracking-tight text-fg">
+					{m.page_k8s_console_title()}
+				</h2>
+				<p class="mt-3 text-sm md:text-base text-fg-muted leading-relaxed">
+					{m.page_k8s_console_lede()}
+				</p>
+			</div>
+
+			<div class="relative">
+				<div
+					class="absolute inset-0 pointer-events-none -z-10"
+					aria-hidden="true"
+					style="box-shadow: 0 0 160px 32px oklch(0.70 0.16 60 / 0.08);"
+				></div>
+				<LiveK8sWorkloads variant="console" />
+			</div>
+		</div>
+	</section>
+
+	<!-- Section 2: Three first-class views — pods / nodes / workloads -->
+	<section class="py-16 md:py-24">
+		<div class="mx-auto max-w-6xl px-6">
+			<div class="mb-10 max-w-2xl">
+				<span class="inline-flex items-center rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+					{m.page_k8s_views_eyebrow()}
+				</span>
+				<h2 class="mt-4 font-display text-2xl md:text-3xl font-semibold leading-tight tracking-tight text-fg">
+					{m.page_k8s_views_title()}
+				</h2>
+				<p class="mt-3 text-sm md:text-base text-fg-muted leading-relaxed">
+					{m.page_k8s_views_lede()}
+				</p>
+			</div>
+
+			<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+				<!-- Pods card -->
+				<div class="bg-bg-elevated border border-border overflow-hidden">
+					<div class="flex items-center justify-between px-4 py-2.5 border-b border-border">
+						<span class="text-[10px] font-mono text-fg-muted">{m.page_k8s_views_pods_route()}</span>
+						<span class="text-[9px] font-mono uppercase tracking-wider text-fg-muted">200 pods</span>
+					</div>
+					<div class="px-4 py-3 border-b border-border">
+						<h3 class="text-sm font-semibold text-fg">{m.page_k8s_views_pods_caption()}</h3>
+						<p class="mt-1 text-[11.5px] text-fg-muted">{m.page_k8s_views_pods_lede()}</p>
+					</div>
+					<table class="k8s-mini-table w-full">
+						<thead>
+							<tr>
+								<th>Pod</th>
+								<th>CPU req</th>
+								<th>CPU lim</th>
+								<th>Mem lim</th>
+							</tr>
+						</thead>
+						<tbody>
+							{podRows.map((p) => (
+								<tr class={p.warn ? "is-warn" : ""}>
+									<td class="cell-name">
+										<span class="cell-name__pod">{p.pod.length > 22 ? p.pod.slice(0, 22) + "…" : p.pod}</span>
+										<span class="cell-name__sub">ns {p.ns}</span>
+									</td>
+									<td class="cell-num">{p.cpuReq}</td>
+									<td class="cell-num">{p.cpuLimit}</td>
+									<td class="cell-num">{p.memLimit}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+
+				<!-- Nodes card -->
+				<div class="bg-bg-elevated border border-border overflow-hidden">
+					<div class="flex items-center justify-between px-4 py-2.5 border-b border-border">
+						<span class="text-[10px] font-mono text-fg-muted">{m.page_k8s_views_nodes_route()}</span>
+						<span class="text-[9px] font-mono uppercase tracking-wider text-fg-muted">3 nodes</span>
+					</div>
+					<div class="px-4 py-3 border-b border-border">
+						<h3 class="text-sm font-semibold text-fg">{m.page_k8s_views_nodes_caption()}</h3>
+						<p class="mt-1 text-[11.5px] text-fg-muted">{m.page_k8s_views_nodes_lede()}</p>
+					</div>
+					<table class="k8s-mini-table w-full">
+						<thead>
+							<tr>
+								<th>Node</th>
+								<th>Status</th>
+								<th>CPU</th>
+								<th>Last seen</th>
+							</tr>
+						</thead>
+						<tbody>
+							{nodeRows.map((n) => (
+								<tr>
+									<td class="cell-name">
+										<span class="cell-name__pod">{n.name}</span>
+									</td>
+									<td><span class="status-dot"></span><span class="status-text">Active</span></td>
+									<td class="cell-num">{n.cpu}</td>
+									<td class="cell-num cell-muted">{n.seen}</td>
+								</tr>
+							))}
+							<tr class="row-empty"><td colspan="4">&nbsp;</td></tr>
+						</tbody>
+					</table>
+				</div>
+
+				<!-- Workloads card -->
+				<div class="bg-bg-elevated border border-border overflow-hidden">
+					<div class="flex items-center justify-between px-4 py-2.5 border-b border-border">
+						<span class="text-[10px] font-mono text-fg-muted">{m.page_k8s_views_workloads_route()}</span>
+						<span class="text-[9px] font-mono uppercase tracking-wider text-fg-muted">21 workloads</span>
+					</div>
+					<div class="px-4 py-3 border-b border-border">
+						<h3 class="text-sm font-semibold text-fg">{m.page_k8s_views_workloads_caption()}</h3>
+						<p class="mt-1 text-[11.5px] text-fg-muted">{m.page_k8s_views_workloads_lede()}</p>
+					</div>
+					<table class="k8s-mini-table w-full">
+						<thead>
+							<tr>
+								<th>Workload</th>
+								<th>Pods</th>
+								<th>Avg CPU</th>
+								<th>NS</th>
+							</tr>
+						</thead>
+						<tbody>
+							{workloadRows.map((w) => (
+								<tr class={w.warn ? "is-warn" : ""}>
+									<td class="cell-name">
+										<span class="cell-name__pod">{w.name}</span>
+									</td>
+									<td class="cell-num">{w.pods}</td>
+									<td class="cell-num">{w.cpu}%</td>
+									<td class="cell-num cell-muted">{w.ns}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- Section 3: Span → Pod correlation diagram -->
+	<section class="py-16 md:py-24">
+		<div class="mx-auto max-w-6xl px-6">
+			<div class="mb-10 max-w-2xl">
+				<span class="inline-flex items-center rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+					{m.page_k8s_correlation_eyebrow()}
+				</span>
+				<h2 class="mt-4 font-display text-2xl md:text-3xl font-semibold leading-tight tracking-tight text-fg">
+					{m.page_k8s_correlation_title()}
+				</h2>
+				<p class="mt-3 text-sm md:text-base text-fg-muted leading-relaxed">
+					{m.page_k8s_correlation_lede()}
+				</p>
+			</div>
+
+			<div class="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] items-stretch gap-4">
+				<!-- Left: trace waterfall -->
+				<div class="bg-bg-elevated border border-border">
+					<div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+						<div class="w-1.5 h-1.5 bg-border"></div>
+						<div class="w-1.5 h-1.5 bg-border"></div>
+						<div class="w-1.5 h-1.5 bg-border"></div>
+						<span class="text-[9px] font-mono text-fg-muted ml-2">{m.page_k8s_correlation_trace_label()}</span>
+						<span class="ml-auto text-[9px] font-mono text-fg-muted">1.18s</span>
+					</div>
+					<div class="p-4 space-y-2">
+						<div class="flex items-center justify-between mb-2">
+							<span class="text-[10px] font-mono text-fg-muted uppercase tracking-wider">{m.page_k8s_correlation_waterfall()}</span>
+						</div>
+						<div class="flex items-center gap-2">
+							<span class="text-[9px] font-mono text-fg-muted w-20 shrink-0 truncate">api-gateway</span>
+							<div class="flex-1 h-5 bg-bg relative">
+								<div class="absolute inset-y-0 left-0 flex items-center px-2" style="width: 100%; background: color-mix(in oklab, var(--service-1) 75%, transparent);">
+									<span class="text-[8px] text-fg font-medium truncate">POST /checkout</span>
+								</div>
+							</div>
+							<span class="text-[9px] font-mono text-fg-muted w-10 text-right shrink-0">1.18s</span>
+						</div>
+						<div class="flex items-center gap-2 pl-5">
+							<span class="text-[9px] font-mono text-fg-muted w-20 shrink-0 truncate">order-service</span>
+							<div class="flex-1 h-5 bg-bg relative">
+								<div class="absolute inset-y-0 flex items-center px-2" style="width: 36%; left: 8%; background: color-mix(in oklab, var(--service-3) 75%, transparent);">
+									<span class="text-[8px] text-fg font-medium truncate">createOrder</span>
+								</div>
+							</div>
+							<span class="text-[9px] font-mono text-fg-muted w-10 text-right shrink-0">425ms</span>
+						</div>
+						<div class="flex items-center gap-2 pl-10">
+							<span class="text-[9px] font-mono text-fg-muted w-20 shrink-0 truncate">payment-svc</span>
+							<div class="flex-1 h-5 bg-bg relative">
+								<div class="absolute inset-y-0 flex items-center px-2 ring-1 ring-[color:var(--severity-warn)]" style="width: 52%; left: 30%; background: color-mix(in oklab, var(--severity-warn) 60%, transparent);">
+									<span class="text-[8px] text-fg font-medium truncate">processPayment</span>
+								</div>
+							</div>
+							<span class="text-[9px] font-mono text-[color:var(--severity-warn)] w-10 text-right shrink-0">612ms</span>
+						</div>
+						<div class="flex items-center gap-2 pl-10">
+							<span class="text-[9px] font-mono text-fg-muted w-20 shrink-0 truncate">inventory-svc</span>
+							<div class="flex-1 h-5 bg-bg relative">
+								<div class="absolute inset-y-0 flex items-center px-2" style="width: 14%; left: 60%; background: color-mix(in oklab, var(--service-5) 75%, transparent);">
+									<span class="text-[8px] text-fg font-medium truncate">reserveItems</span>
+								</div>
+							</div>
+							<span class="text-[9px] font-mono text-fg-muted w-10 text-right shrink-0">98ms</span>
+						</div>
+					</div>
+				</div>
+
+				<!-- Connector arrow -->
+				<div class="hidden lg:flex flex-col items-center justify-center px-2">
+					<svg viewBox="0 0 80 24" width="80" height="24" aria-hidden="true">
+						<defs>
+							<linearGradient id="span-pod-grad" x1="0" y1="0" x2="80" y2="0" gradientUnits="userSpaceOnUse">
+								<stop offset="0%" stop-color="var(--severity-warn)" stop-opacity="0.4"></stop>
+								<stop offset="100%" stop-color="var(--primary)" stop-opacity="0.85"></stop>
+							</linearGradient>
+						</defs>
+						<line x1="0" y1="12" x2="62" y2="12" stroke="url(#span-pod-grad)" stroke-width="1.5" stroke-dasharray="3 3"></line>
+						<polygon points="62,7 74,12 62,17" fill="var(--primary)"></polygon>
+					</svg>
+					<span class="mt-2 max-w-[10rem] text-center text-[9.5px] font-mono uppercase tracking-wider text-fg-muted leading-snug">
+						{m.page_k8s_correlation_arrow_caption()}
+					</span>
+				</div>
+
+				<!-- Right: pod attribution card -->
+				<div class="bg-bg-elevated border border-border">
+					<div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+						<div class="w-1.5 h-1.5 bg-border"></div>
+						<div class="w-1.5 h-1.5 bg-border"></div>
+						<div class="w-1.5 h-1.5 bg-border"></div>
+						<span class="text-[9px] font-mono text-fg-muted ml-2">{m.page_k8s_correlation_pod_label()}</span>
+					</div>
+					<div class="p-4">
+						<div class="flex items-center justify-between mb-3">
+							<span class="text-[10px] font-mono text-fg-muted uppercase tracking-wider">pod</span>
+							<span class="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--primary)]/40 bg-[color:var(--primary)]/10 px-2 py-0.5 text-[9px] font-mono text-[color:var(--primary)]">
+								<span class="w-1 h-1 rounded-full bg-[color:var(--primary)]"></span>
+								{m.page_k8s_correlation_pod_status()}
+							</span>
+						</div>
+						<div class="font-mono text-xs md:text-sm text-fg break-all leading-snug">
+							payment-svc-78f4d6c89b-x7k2p
+						</div>
+						<div class="mt-5 space-y-2.5">
+							<div class="grid grid-cols-[140px_1fr] gap-2 items-baseline border-t border-border/60 pt-2.5">
+								<span class="text-[10px] font-mono text-fg-muted">{m.page_k8s_correlation_attr_pod()}</span>
+								<span class="text-[11px] font-mono text-fg break-all">payment-svc-78f4d6c89b-x7k2p</span>
+							</div>
+							<div class="grid grid-cols-[140px_1fr] gap-2 items-baseline border-t border-border/60 pt-2.5">
+								<span class="text-[10px] font-mono text-fg-muted">{m.page_k8s_correlation_attr_node()}</span>
+								<span class="text-[11px] font-mono text-fg break-all">ip-10-0-1-44.ec2.internal</span>
+							</div>
+							<div class="grid grid-cols-[140px_1fr] gap-2 items-baseline border-t border-border/60 pt-2.5">
+								<span class="text-[10px] font-mono text-fg-muted">{m.page_k8s_correlation_attr_ns()}</span>
+								<span class="text-[11px] font-mono text-fg">default</span>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- Section 4: Helm install terminal -->
+	<section class="py-16 md:py-24">
+		<div class="mx-auto max-w-6xl px-6">
+			<div class="mb-10 max-w-2xl">
+				<span class="inline-flex items-center rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+					{m.page_k8s_install_eyebrow()}
+				</span>
+				<h2 class="mt-4 font-display text-2xl md:text-3xl font-semibold leading-tight tracking-tight text-fg">
+					{m.page_k8s_install_title()}
+				</h2>
+				<p class="mt-3 text-sm md:text-base text-fg-muted leading-relaxed">
+					{m.page_k8s_install_lede()}
+				</p>
+			</div>
+
+			<div class="bg-bg-elevated border border-border max-w-4xl mx-auto">
+				<div class="flex items-center gap-2 px-4 py-3 border-b border-border">
+					<div class="w-2 h-2 bg-border rounded-full"></div>
+					<div class="w-2 h-2 bg-border rounded-full"></div>
+					<div class="w-2 h-2 bg-border rounded-full"></div>
+					<span class="text-[10px] font-mono text-fg-muted ml-2">{m.page_k8s_install_window()}</span>
+				</div>
+				<div class="divide-y divide-border">
+					{installSteps.map((step, i) => (
+						<div class="px-5 py-4">
+							<div class="flex items-center gap-3 mb-2.5">
+								<span class="inline-flex items-center justify-center w-5 h-5 rounded-full border border-border bg-bg text-[10px] font-mono text-fg-muted">
+									{i + 1}
+								</span>
+								<span class="text-[11px] uppercase tracking-wider text-fg-muted font-mono">{step.caption}</span>
+							</div>
+							<div class="bg-bg border border-border rounded-md flex items-start justify-between gap-3 px-3.5 py-2.5">
+								<pre class="font-mono text-[11.5px] md:text-xs text-fg leading-relaxed whitespace-pre overflow-x-auto m-0 flex-1 min-w-0"><code>{step.code}</code></pre>
+								<button type="button" class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded border border-border text-[10px] font-mono text-fg-muted hover:text-fg hover:border-fg-muted transition-colors" aria-label="Copy command">
+									<svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">
+										<rect x="9" y="9" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+										<path d="M5 15V5a1 1 0 0 1 1-1h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+									</svg>
+									{m.page_k8s_install_copy()}
+								</button>
+							</div>
+						</div>
+					))}
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- Detail Grid -->
+	<section class="py-24 md:py-32">
+		<div class="mx-auto max-w-6xl px-6">
+			<FeatureDetailGrid items={[
+				{ title: m.page_k8s_helm(), description: m.page_k8s_helm_desc() },
+				{ title: m.page_k8s_correlation(), description: m.page_k8s_correlation_desc() },
+				{ title: m.page_k8s_kube_state(), description: m.page_k8s_kube_state_desc() },
+				{ title: m.page_k8s_views(), description: m.page_k8s_views_desc() },
+				{ title: m.page_k8s_operator(), description: m.page_k8s_operator_desc() },
+				{ title: m.page_k8s_multi(), description: m.page_k8s_multi_desc() },
+			]} />
+		</div>
+	</section>
+
+	<RelatedFeatures current="kubernetes-monitoring" />
+	<BottomCTA />
+	<Footer />
+</Layout>
+
+<style>
+	.k8s-mini-table {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		border-collapse: collapse;
+	}
+	.k8s-mini-table thead th {
+		text-align: left;
+		font-weight: 500;
+		font-size: 9.5px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+		padding: 8px 12px;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+		background: color-mix(in oklab, var(--bg) 30%, transparent);
+		white-space: nowrap;
+	}
+	.k8s-mini-table tbody tr {
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 40%, transparent);
+		transition: background 200ms cubic-bezier(0.22, 1, 0.36, 1);
+	}
+	.k8s-mini-table tbody tr:last-child { border-bottom: none; }
+	.k8s-mini-table tbody tr:hover {
+		background: color-mix(in oklab, var(--bg) 50%, transparent);
+	}
+	.k8s-mini-table tbody tr.is-warn .cell-name__pod { color: var(--severity-warn); }
+	.k8s-mini-table tbody tr.is-warn .cell-num { color: var(--severity-warn); }
+	.k8s-mini-table tbody tr.row-empty { height: 31px; }
+	.k8s-mini-table tbody tr.row-empty td { border-bottom: none; }
+	.k8s-mini-table td {
+		padding: 8px 12px;
+		vertical-align: middle;
+		white-space: nowrap;
+	}
+	.cell-name {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		min-width: 0;
+	}
+	.cell-name__pod {
+		color: var(--foreground);
+		font-weight: 500;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.cell-name__sub {
+		color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+		font-size: 10px;
+	}
+	.cell-num {
+		font-variant-numeric: tabular-nums;
+		color: color-mix(in oklab, var(--foreground) 88%, transparent);
+		text-align: right;
+	}
+	.cell-muted {
+		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+	}
+	.status-dot {
+		display: inline-block;
+		width: 5px;
+		height: 5px;
+		border-radius: 999px;
+		background: var(--primary);
+		margin-right: 5px;
+		vertical-align: middle;
+	}
+	.status-text {
+		font-size: 10.5px;
+		color: color-mix(in oklab, var(--foreground) 85%, transparent);
+	}
+</style>

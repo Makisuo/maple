@@ -339,7 +339,7 @@
 .waterfall-row .span-name {
 	position: relative;
 	color: var(--foreground);
-	transition: color 160ms cubic-bezier(0.22, 1, 0.36, 1);
+	transition: color 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .waterfall-row .span-name.is-active { color: var(--primary); }
 .waterfall-row .span-name::after {
@@ -353,16 +353,15 @@
 	opacity: 0;
 	transform: scaleX(0);
 	transform-origin: left center;
-	transition: opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
-	            transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+	transition: opacity 160ms cubic-bezier(0.34, 1.56, 0.64, 1),
+	            transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .waterfall-row .span-name.is-active::after {
 	opacity: 1;
 	transform: scaleX(1);
-	transition-duration: 120ms;
 }
 .waterfall-row .span-dur {
-	transition: color 160ms cubic-bezier(0.22, 1, 0.36, 1);
+	transition: color 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .waterfall-row .span-dur.is-active { color: var(--primary); }
 .waterfall-row .span-bar-track {
@@ -379,8 +378,9 @@
 	background: var(--service-color, var(--primary));
 	border-radius: 2px;
 	transform-origin: left center;
-	transform: scaleX(var(--bar-progress, 0));
-	transition: transform 120ms linear;
+	transform: scaleX(0);
+	will-change: transform;
+	transition: box-shadow 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .waterfall-row .span-bar.is-active {
 	box-shadow: 0 0 0 1px var(--primary);
@@ -426,7 +426,9 @@
 	top: 0;
 	bottom: 0;
 	width: 1px;
-	left: var(--cursor-x, 0%);
+	left: 0;
+	transform: translate3d(0, 0, 0);
+	will-change: transform;
 	background: color-mix(in oklab, var(--primary) 60%, transparent);
 	opacity: var(--cursor-opacity, 0);
 	transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1);

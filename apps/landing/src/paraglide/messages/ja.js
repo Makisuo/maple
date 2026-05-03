@@ -167,6 +167,14 @@ export const nav_ai_mcp = () => `AI & MCP統合`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_kubernetes = () => `Kubernetes監視`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const nav_ecommerce = () => `ECサイトのオブザーバビリティ`
 
 
@@ -495,7 +503,135 @@ export const mcp_lede = () => `Maple ships with a first-class MCP server. Any co
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_eyebrow = () => `06 · The bill`
+export const k8s_eyebrow = () => `06 · Kubernetes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_title = () => `The pod underneath the slow span.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_lede = () => `Drop a Helm chart on your cluster. Kubelet, host, and kube-state metrics start flowing in. Every span your apps emit arrives carrying pod, node, and namespace, so a slow request lands you on the exact replica that served it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_link_feature = () => `Kubernetes monitoring →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_link_helm = () => `Read the Helm chart`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_namespace = () => `Namespace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_workload = () => `Workload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_kind = () => `Kind`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_ready = () => `Ready`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_cpu = () => `CPU`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_mem = () => `Memory`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_node = () => `Node`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_nodes = () => `Nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_workloads = () => `Workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_cluster_cpu = () => `Cluster CPU`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_cluster_mem = () => `Cluster MEM`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_eyebrow = () => `07 · The bill`
 
 
 /**
@@ -735,7 +871,7 @@ export const bill_link_vs_nr = () => `Full vs New Relic`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_eyebrow = () => `07 · Start`
+export const start_eyebrow = () => `08 · Start`
 
 
 /**
@@ -743,7 +879,7 @@ export const start_eyebrow = () => `07 · Start`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_title = () => `Three steps to first trace.`
+export const start_title = () => `Pick your SDK. First trace in five minutes.`
 
 
 /**
@@ -751,7 +887,7 @@ export const start_title = () => `Three steps to first trace.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_lede = () => `If you can run a shell, you can have your first trace in Maple in under five minutes.`
+export const start_lede = () => `Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.`
 
 
 /**
@@ -759,7 +895,7 @@ export const start_lede = () => `If you can run a shell, you can have your first
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_step_1_label = () => `Install the collector`
+export const start_endpoint_label = () => `Endpoint`
 
 
 /**
@@ -767,7 +903,7 @@ export const start_step_1_label = () => `Install the collector`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_step_2_label = () => `Point it at Maple`
+export const start_key_label = () => `Key`
 
 
 /**
@@ -775,7 +911,7 @@ export const start_step_2_label = () => `Point it at Maple`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_step_3_label = () => `Restart your service`
+export const start_key_hint = () => `generated per project in your dashboard`
 
 
 /**
@@ -783,7 +919,39 @@ export const start_step_3_label = () => `Restart your service`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_footnote = () => `Need a Python, Java, Go, or Rust example? The docs cover every supported language and most major frameworks.`
+export const start_install_label = () => `Install`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_instrument_label = () => `Instrument`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_copy = () => `Copy`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_copied = () => `Copied`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_footnote = () => `Java, Rust, .NET, Ruby — anything that speaks OTLP works. The custom tab shows the env-var-only setup.`
 
 
 /**
@@ -1867,6 +2035,14 @@ export const footer_ai_mcp = () => `AI & MCP`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const footer_kubernetes = () => `Kubernetes監視`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const footer_compare = () => `比較`
 
 
@@ -2860,6 +3036,526 @@ export const page_dt_filtering = () => `ルートスパンフィルタリング`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const page_dt_filtering_desc = () => `サービス、所要時間、ステータス、HTTPメソッド、カスタム属性でトレースをフィルタリング。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_title = () => `Kubernetes監視 | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_desc = () => `OpenTelemetryでKubernetesクラスターを監視。Helmチャートがkubelet、ホスト、kube-stateメトリクスを収集し、スパンにはpod、node、namespaceが付与されます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_label = () => `Kubernetes監視`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_heading = () => `クラスター、ワークロード、スパンを一画面で`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_subtitle = () => `Helmチャートを1つインストールするだけ。kubelet、ホスト、kube-stateメトリクスがOTLPで流れ込みます。OpenTelemetry Operatorがアプリのスパンにpod情報を注入するため、遅いリクエストから実際に処理したレプリカへ直接到達できます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_helm = () => `ブラックボックスではないHelmチャート`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_helm_desc = () => `maple-k8s-infraは端から端まで読める小さなHelmチャートです。pod単位のkubeletメトリクス、node単位のホストメトリクス、クラスター全体のkube-stateメトリクス、各nodeにOTLPレシーバーを配置。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation = () => `podとスパンの結合`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_desc = () => `スパンにはk8s.pod.name、k8s.node.name、k8s.namespace.nameが付与されます。遅いトレースから、それを実行したpodとnodeへ直接ドリルダウン。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_kube_state = () => `kube-stateメトリクス`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_kube_state_desc = () => `Deployment、StatefulSet、DaemonSet、レプリカ数、podフェーズ。すべて標準のkube-state-metricsエクスポーター経由で収集。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views = () => `Workloads、Pods、Nodesビュー`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_desc = () => `ダッシュボードに3つのファーストクラスインフラビュー。Deployment、単一のpod、単一のnodeを、他の場所と同じフィルタで調査できます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_operator = () => `OpenTelemetry Operator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_operator_desc = () => `Admission時にOTEL_EXPORTER_OTLP_ENDPOINTとpod/node識別情報がpodに注入されます。OTel SDKがリンクされているアプリは、コード変更なしで計装されます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_multi = () => `マルチクラスター取り込み`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_multi_desc = () => `組織ごとに1つの取り込みエンドポイント。本番、ステージング、開発者のkindクラスターから送信し、cluster-nameリソース属性で分割可能。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_eyebrow = () => `クラスターコンソール`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_title = () => `ワークロード、Pod、ノード — 1つのフィルターサイドバー`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_lede = () => `プラットフォームチームが日々使うのと同じビュー。namespace内のdeploymentから特定nodeまで絞り込み、クラスター全体をライブで監視。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_breadcrumb = () => `infra › kubernetes › workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_heading = () => `フィルター`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_deployment = () => `Deployment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_namespace = () => `Namespace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_cluster = () => `Cluster`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_compute = () => `Compute Type`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_deployment = () => `Deployment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_statefulset = () => `StatefulSet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_daemonset = () => `DaemonSet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_time_last_12h = () => `過去12時間`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_reload = () => `再読み込み`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_live = () => `ライブ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_workloads_h3 = () => `ワークロード`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_workloads_subtitle = () => `deployment、statefulset、daemonsetごとに集約されたPodメトリクス。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_eyebrow = () => `3つのビュー`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_title = () => `Pod、ノード、ワークロード — ファーストクラス`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_lede = () => `どこでも同じフィルター。ワークロードからそのPod、そのPodを実行するノードへとクリックスルー。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_route = () => `/infra/kubernetes/pods`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_route = () => `/infra/kubernetes/nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_route = () => `/infra/kubernetes/workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_caption = () => `Pods`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_lede = () => `Podごとのリクエスト・リミット比CPU・メモリ。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_caption = () => `Nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_lede = () => `ノードごとのkubeletスタッツ、稼働時間、ライフサイクル。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_caption = () => `Workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_lede = () => `deployment、statefulset、daemonsetごとに集約。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_eyebrow = () => `Span → Pod`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_title = () => `遅いSpanから正確なPodへ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_lede = () => `OpenTelemetry Operatorがadmission時にすべてのSpanにk8s.pod.name、k8s.node.name、k8s.namespace.nameをスタンプ。遅いトレースは既にどこで実行されたかを知っています。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_trace_label = () => `Trace: 7af1c204`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_waterfall = () => `Waterfall`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_pod_label = () => `Podアトリビューション`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_arrow_caption = () => `admission時にk8s.pod.nameを注入`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_pod_status = () => `Active`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_pod = () => `k8s.pod.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_node = () => `k8s.node.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_ns = () => `k8s.namespace.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_eyebrow = () => `1つのHelmチャート`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_title = () => `クラスターに投入するだけ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_lede = () => `チャートを端から端まで読める。3つのコマンドで、kubelet、ホスト、kube-stateメトリクスがOTLP経由で流れ始めます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_window = () => `helm install maple-k8s-infra`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_1 = () => `チャートリポジトリを追加`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_2 = () => `インデックスを更新`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_3 = () => `クラスターにインストール`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_copy = () => `コピー`
 
 
 /**

@@ -133,6 +133,7 @@
         "autumn-js": "^1.2.5",
         "class-variance-authority": "catalog:ui",
         "clsx": "catalog:ui",
+        "motion": "^12.38.0",
         "react": "catalog:react",
         "react-dom": "catalog:react",
         "recharts": "catalog:ui",

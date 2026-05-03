@@ -167,6 +167,14 @@ export const nav_ai_mcp = () => `AI & MCP Integration`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const nav_kubernetes = () => `Kubernetes Monitoring`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const nav_ecommerce = () => `E-Commerce Observability`
 
 
@@ -495,7 +503,135 @@ export const mcp_lede = () => `Maple ships with a first-class MCP server. Any co
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_eyebrow = () => `06 · The bill`
+export const k8s_eyebrow = () => `06 · Kubernetes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_title = () => `The pod underneath the slow span.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_lede = () => `Drop a Helm chart on your cluster. Kubelet, host, and kube-state metrics start flowing in. Every span your apps emit arrives carrying pod, node, and namespace, so a slow request lands you on the exact replica that served it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_link_feature = () => `Kubernetes monitoring →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_link_helm = () => `Read the Helm chart`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_namespace = () => `Namespace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_workload = () => `Workload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_kind = () => `Kind`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_ready = () => `Ready`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_cpu = () => `CPU`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_mem = () => `Memory`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_col_node = () => `Node`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_nodes = () => `Nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_workloads = () => `Workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_cluster_cpu = () => `Cluster CPU`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const k8s_summary_cluster_mem = () => `Cluster MEM`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const bill_eyebrow = () => `07 · The bill`
 
 
 /**
@@ -735,7 +871,7 @@ export const bill_link_vs_nr = () => `Full vs New Relic`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_eyebrow = () => `07 · Start`
+export const start_eyebrow = () => `08 · Start`
 
 
 /**
@@ -743,7 +879,7 @@ export const start_eyebrow = () => `07 · Start`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_title = () => `Three steps to first trace.`
+export const start_title = () => `Pick your SDK. First trace in five minutes.`
 
 
 /**
@@ -751,7 +887,7 @@ export const start_title = () => `Three steps to first trace.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_lede = () => `If you can run a shell, you can have your first trace in Maple in under five minutes.`
+export const start_lede = () => `Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.`
 
 
 /**
@@ -759,7 +895,7 @@ export const start_lede = () => `If you can run a shell, you can have your first
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_step_1_label = () => `Install the collector`
+export const start_endpoint_label = () => `Endpoint`
 
 
 /**
@@ -767,7 +903,7 @@ export const start_step_1_label = () => `Install the collector`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_step_2_label = () => `Point it at Maple`
+export const start_key_label = () => `Key`
 
 
 /**
@@ -775,7 +911,7 @@ export const start_step_2_label = () => `Point it at Maple`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_step_3_label = () => `Restart your service`
+export const start_key_hint = () => `generated per project in your dashboard`
 
 
 /**
@@ -783,7 +919,39 @@ export const start_step_3_label = () => `Restart your service`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_footnote = () => `Need a Python, Java, Go, or Rust example? The docs cover every supported language and most major frameworks.`
+export const start_install_label = () => `Install`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_instrument_label = () => `Instrument`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_copy = () => `Copy`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_copied = () => `Copied`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const start_footnote = () => `Java, Rust, .NET, Ruby — anything that speaks OTLP works. The custom tab shows the env-var-only setup.`
 
 
 /**
@@ -2071,6 +2239,14 @@ export const footer_ai_mcp = () => `AI & MCP`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const footer_kubernetes = () => `Kubernetes Monitoring`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const footer_compare = () => `Compare`
 
 
@@ -3064,6 +3240,526 @@ export const page_dt_filtering = () => `Root Span Filtering`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const page_dt_filtering_desc = () => `Filter traces by service, duration, status, HTTP method, and custom attributes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_title = () => `Kubernetes Monitoring | Maple`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_desc = () => `Monitor Kubernetes clusters with OpenTelemetry. A Helm chart collects kubelet, host, and kube-state metrics; spans arrive enriched with pod, node, and namespace.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_label = () => `Kubernetes monitoring`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_heading = () => `Cluster, workload, and span in one view`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_subtitle = () => `Install one Helm chart. Kubelet, host, and kube-state metrics flow in over OTLP. The OpenTelemetry Operator injects pod identity into every span your apps emit, so a slow request lands you on the exact replica that served it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_helm = () => `Helm chart, not a black box`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_helm_desc = () => `maple-k8s-infra is a small Helm chart you can read end-to-end. Kubelet stats per pod, host metrics per node, kube-state metrics across the cluster. OTLP receivers on every node for your apps.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation = () => `Pod and span, joined`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_desc = () => `Spans arrive carrying k8s.pod.name, k8s.node.name, and k8s.namespace.name. Drill from a slow trace straight to the pod and node that ran it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_kube_state = () => `Kube-state metrics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_kube_state_desc = () => `Deployments, StatefulSets, DaemonSets, replica counts, and pod phase, all scraped via the standard kube-state-metrics exporter.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views = () => `Workloads, pods, and nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_desc = () => `Three first-class infrastructure views in the dashboard. Inspect a deployment, a single pod, or a single node, with the same filters you use everywhere else.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_operator = () => `OpenTelemetry Operator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_operator_desc = () => `Pods get OTEL_EXPORTER_OTLP_ENDPOINT and pod/node identity injected at admission. Apps with an OTel SDK linked are instrumented without code changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_multi = () => `Multi-cluster ingest`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_multi_desc = () => `One ingest endpoint per organization. Send from prod, staging, and a developer's kind cluster, and split them with cluster-name resource attributes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_eyebrow = () => `Cluster console`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_title = () => `Workloads, pods, and nodes — one filter sidebar`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_console_lede = () => `The same view your platform team lives in. Facet down to a deployment in a namespace on a node, or scope to a cluster and watch it live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_breadcrumb = () => `infra › kubernetes › workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_heading = () => `Filters`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_deployment = () => `Deployment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_namespace = () => `Namespace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_cluster = () => `Cluster`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_filter_compute = () => `Compute Type`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_deployment = () => `Deployment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_statefulset = () => `StatefulSet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_tab_daemonset = () => `DaemonSet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_time_last_12h = () => `Last 12 hours`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_reload = () => `Reload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_live = () => `Live`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_workloads_h3 = () => `Workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_workloads_subtitle = () => `Aggregated pod metrics by deployment, statefulset, and daemonset.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_eyebrow = () => `Three views`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_title = () => `Pods, nodes, and workloads — first-class`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_lede = () => `Same filters everywhere. Click through from a workload to its pods to the node that runs them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_route = () => `/infra/kubernetes/pods`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_route = () => `/infra/kubernetes/nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_route = () => `/infra/kubernetes/workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_caption = () => `Pods`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_pods_lede = () => `Per-pod CPU and memory — against requests and limits.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_caption = () => `Nodes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_nodes_lede = () => `Kubelet stats per node, with uptime and lifecycle.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_caption = () => `Workloads`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_views_workloads_lede = () => `Aggregated by deployment, statefulset, daemonset.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_eyebrow = () => `Span → pod`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_title = () => `From a slow span to the exact pod`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_lede = () => `The OpenTelemetry Operator stamps every span with k8s.pod.name, k8s.node.name, and k8s.namespace.name at admission. The slow trace already knows where it ran.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_trace_label = () => `Trace: 7af1c204`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_waterfall = () => `Waterfall`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_pod_label = () => `Pod attribution`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_arrow_caption = () => `k8s.pod.name injected at admission`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_pod_status = () => `Active`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_pod = () => `k8s.pod.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_node = () => `k8s.node.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_correlation_attr_ns = () => `k8s.namespace.name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_eyebrow = () => `One Helm chart`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_title = () => `Drop it on your cluster`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_lede = () => `Read the chart end-to-end. Three commands and the cluster is reporting kubelet, host, and kube-state metrics over OTLP.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_window = () => `helm install maple-k8s-infra`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_1 = () => `Add the chart repo`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_2 = () => `Refresh the index`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_step_3 = () => `Install on the cluster`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const page_k8s_install_copy = () => `Copy`
 
 
 /**

@@ -1,0 +1,582 @@
+---
+/**
+ * Workload table artifact for the Kubernetes section.
+ * Pure CSS — no client JS. Bars oscillate via desynced animation-delays;
+ * one row carries the rolling state (`is-rolling`) and the warn focal
+ * point. Wrapped in `.live-frame` to match LiveTrace / LiveLogStream.
+ *
+ * Variant:
+ *   "section" — homepage, 7 rows, compact head.
+ *   "full"    — feature page, 8 rows + cluster summary strip on top.
+ *   "console" — feature page, full app-mock with breadcrumb strip,
+ *               time-range controls, filter sidebar, kind tabs.
+ */
+import * as m from "../../paraglide/messages";
+
+interface Props {
+	variant?: "section" | "full" | "console";
+}
+
+const { variant = "section" } = Astro.props;
+const showSummary = variant === "full" || variant === "console";
+const isConsole = variant === "console";
+
+type Kind = "Deployment" | "StatefulSet" | "DaemonSet";
+
+type Row = {
+	namespace: string;
+	workload: string;
+	kind: Kind;
+	ready: string;
+	rolling?: boolean;
+	cpuPct: number;
+	memPct: number;
+	cpuFlux: number; // ± delta the bar oscillates by, in percentage points
+	memFlux: number;
+	node: string;
+	delay: string; // animation-delay so rows desync
+};
+
+const baseRows: Row[] = [
+	{ namespace: "default",       workload: "api-gateway",      kind: "Deployment",  ready: "3/3", cpuPct: 47, memPct: 62, cpuFlux: 4, memFlux: 3, node: "ip-10-0-1-12", delay: "0s" },
+	{ namespace: "default",       workload: "order-service",    kind: "Deployment",  ready: "4/4", cpuPct: 71, memPct: 51, cpuFlux: 5, memFlux: 2, node: "ip-10-0-1-44", delay: "-1.4s" },
+	{ namespace: "default",       workload: "checkout-worker",  kind: "StatefulSet", ready: "2/2", cpuPct: 23, memPct: 38, cpuFlux: 3, memFlux: 2, node: "ip-10-0-2-08", delay: "-2.8s" },
+	{ namespace: "observability", workload: "otel-collector",   kind: "DaemonSet",   ready: "6/6", cpuPct: 39, memPct: 48, cpuFlux: 4, memFlux: 3, node: "per-node",     delay: "-4.2s" },
+	{ namespace: "default",       workload: "payment-svc",      kind: "Deployment",  ready: "2/3", rolling: true, cpuPct: 86, memPct: 67, cpuFlux: 6, memFlux: 3, node: "ip-10-0-1-44", delay: "-0.6s" },
+	{ namespace: "default",       workload: "inventory-svc",    kind: "Deployment",  ready: "3/3", cpuPct: 34, memPct: 49, cpuFlux: 4, memFlux: 2, node: "ip-10-0-2-08", delay: "-3.5s" },
+	{ namespace: "kube-system",   workload: "coredns",          kind: "Deployment",  ready: "2/2", cpuPct: 12, memPct: 21, cpuFlux: 2, memFlux: 1, node: "ip-10-0-1-12", delay: "-2.1s" },
+];
+
+const extraRow: Row = {
+	namespace: "ingress-nginx", workload: "nginx-ingress", kind: "DaemonSet", ready: "3/3", cpuPct: 28, memPct: 33, cpuFlux: 3, memFlux: 2, node: "per-node", delay: "-5.0s",
+};
+
+const rows: Row[] = showSummary ? [...baseRows, extraRow] : baseRows;
+
+const kindColor: Record<Kind, string> = {
+	Deployment:  "var(--service-1)",
+	StatefulSet: "var(--service-3)",
+	DaemonSet:   "var(--service-5)",
+};
+
+const filterGroups = isConsole
+	? [
+		{
+			heading: m.page_k8s_filter_deployment(),
+			items: [
+				{ label: "api-gateway", count: "1" },
+				{ label: "order-service", count: "1" },
+				{ label: "payment-svc", count: "1" },
+				{ label: "inventory-svc", count: "1" },
+				{ label: "checkout-worker", count: "1" },
+			],
+		},
+		{
+			heading: m.page_k8s_filter_namespace(),
+			items: [
+				{ label: "default", count: "5" },
+				{ label: "observability", count: "1" },
+				{ label: "kube-system", count: "1" },
+				{ label: "ingress-nginx", count: "1" },
+			],
+		},
+		{
+			heading: m.page_k8s_filter_cluster(),
+			items: [
+				{ label: "prod-us-east-1", count: "8" },
+				{ label: "prod-eu-west-1", count: "—" },
+				{ label: "stg-us-east-1", count: "—" },
+			],
+		},
+		{
+			heading: m.page_k8s_filter_compute(),
+			items: [
+				{ label: "ec2", count: "6" },
+				{ label: "fargate", count: "2" },
+			],
+		},
+	]
+	: [];
+---
+
+<div class="live-frame">
+	<div class="live-frame__head">
+		<span>cluster: prod-us-east-1</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			LIVE
+		</span>
+	</div>
+
+	{isConsole && (
+		<div class="k8s-toolbar">
+			<span class="k8s-toolbar__crumb">{m.page_k8s_breadcrumb()}</span>
+			<div class="k8s-toolbar__chips">
+				<span class="k8s-chip">
+					<svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
+						<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
+						<path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+					</svg>
+					{m.page_k8s_time_last_12h()}
+				</span>
+				<span class="k8s-chip">
+					<svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
+						<path d="M4 12a8 8 0 1 1 2.34 5.66M4 18v-4h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+					</svg>
+					{m.page_k8s_reload()}
+				</span>
+				<span class="k8s-chip k8s-chip--toggle">
+					<span class="k8s-chip__dot"></span>
+					{m.page_k8s_live()}
+					<span class="k8s-chip__sub">10s</span>
+				</span>
+			</div>
+		</div>
+	)}
+
+	{showSummary && (
+		<div class="k8s-summary">
+			<div class="k8s-summary__cell">
+				<span class="k8s-summary__cap">{m.k8s_summary_nodes()}</span>
+				<span class="k8s-summary__val">12</span>
+			</div>
+			<div class="k8s-summary__cell">
+				<span class="k8s-summary__cap">{m.k8s_summary_workloads()}</span>
+				<span class="k8s-summary__val">{rows.length}</span>
+			</div>
+			<div class="k8s-summary__cell">
+				<span class="k8s-summary__cap">{m.k8s_summary_cluster_cpu()}</span>
+				<span class="k8s-summary__val">42%</span>
+			</div>
+			<div class="k8s-summary__cell">
+				<span class="k8s-summary__cap">{m.k8s_summary_cluster_mem()}</span>
+				<span class="k8s-summary__val">54%</span>
+			</div>
+		</div>
+	)}
+
+	<div class={isConsole ? "k8s-console-body" : ""}>
+		{isConsole && (
+			<aside class="k8s-sidebar">
+				<div class="k8s-sidebar__heading">{m.page_k8s_filter_heading()}</div>
+				{filterGroups.map((group) => (
+					<div class="k8s-sidebar__group">
+						<div class="k8s-sidebar__cap">{group.heading}</div>
+						<ul class="k8s-sidebar__list">
+							{group.items.map((it) => (
+								<li class="k8s-sidebar__item">
+									<span class="k8s-sidebar__check"></span>
+									<span class="k8s-sidebar__label">{it.label}</span>
+									<span class="k8s-sidebar__count">{it.count}</span>
+								</li>
+							))}
+						</ul>
+					</div>
+				))}
+			</aside>
+		)}
+
+		<div class="k8s-console-main">
+			{isConsole && (
+				<div class="k8s-console-header">
+					<h3 class="k8s-console-title">{m.page_k8s_workloads_h3()}</h3>
+					<p class="k8s-console-sub">{m.page_k8s_workloads_subtitle()}</p>
+					<div class="k8s-tabs" role="tablist">
+						<span class="k8s-tab k8s-tab--active" role="tab" aria-selected="true">{m.page_k8s_tab_deployment()}</span>
+						<span class="k8s-tab" role="tab">{m.page_k8s_tab_statefulset()}</span>
+						<span class="k8s-tab" role="tab">{m.page_k8s_tab_daemonset()}</span>
+					</div>
+				</div>
+			)}
+
+			<div class="k8s-table-scroll">
+				<table class="k8s-table">
+			<thead>
+				<tr>
+					<th scope="col">{m.k8s_col_namespace()}</th>
+					<th scope="col">{m.k8s_col_workload()}</th>
+					<th scope="col">{m.k8s_col_kind()}</th>
+					<th scope="col">{m.k8s_col_ready()}</th>
+					<th scope="col">{m.k8s_col_cpu()}</th>
+					<th scope="col">{m.k8s_col_mem()}</th>
+					<th scope="col">{m.k8s_col_node()}</th>
+				</tr>
+			</thead>
+			<tbody>
+				{rows.map((row) => (
+					<tr class:list={["k8s-row", row.rolling && "is-rolling"]}>
+						<td class="k8s-cell-ns">{row.namespace}</td>
+						<td class="k8s-cell-workload">{row.workload}</td>
+						<td class="k8s-cell-kind" style={`--kind-color: ${kindColor[row.kind]};`}>
+							<span class="k8s-kind-dot"></span>
+							{row.kind}
+						</td>
+						<td class="k8s-cell-ready">
+							<span class="k8s-ready-num">{row.ready}</span>
+							{row.rolling && <span class="k8s-rolling-glyph">⟳</span>}
+						</td>
+						<td class="k8s-cell-bar">
+							<div class="k8s-bar" style={`--base: ${row.cpuPct / 100}; --flux: ${row.cpuFlux / 100}; animation-delay: ${row.delay};`}>
+								<div class="k8s-bar__fill"></div>
+							</div>
+							<span class="k8s-bar__pct">{row.cpuPct}%</span>
+						</td>
+						<td class="k8s-cell-bar">
+							<div class="k8s-bar" style={`--base: ${row.memPct / 100}; --flux: ${row.memFlux / 100}; animation-delay: ${row.delay};`}>
+								<div class="k8s-bar__fill"></div>
+							</div>
+							<span class="k8s-bar__pct">{row.memPct}%</span>
+						</td>
+						<td class="k8s-cell-node">{row.node}</td>
+					</tr>
+				))}
+			</tbody>
+		</table>
+			</div>
+		</div>
+	</div>
+</div>
+
+<style>
+	/* Console toolbar (console variant only). */
+	.k8s-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 8px 14px;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+		background: color-mix(in oklab, var(--bg-elevated) 30%, transparent);
+		font-family: var(--font-mono);
+		font-size: 10px;
+	}
+	.k8s-toolbar__crumb {
+		color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+		letter-spacing: 0.04em;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.k8s-toolbar__chips {
+		display: inline-flex;
+		gap: 6px;
+		flex-shrink: 0;
+	}
+	.k8s-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		height: 22px;
+		padding: 0 8px;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		background: color-mix(in oklab, var(--card) 60%, transparent);
+		color: var(--foreground);
+		font-family: var(--font-mono);
+		font-size: 10px;
+		line-height: 1;
+		white-space: nowrap;
+	}
+	.k8s-chip svg {
+		opacity: 0.7;
+	}
+	.k8s-chip--toggle {
+		border-color: color-mix(in oklab, var(--primary) 35%, var(--border));
+		background: color-mix(in oklab, var(--primary) 10%, transparent);
+	}
+	.k8s-chip__dot {
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		border-radius: 999px;
+		background: var(--primary);
+		box-shadow: 0 0 6px color-mix(in oklab, var(--primary) 70%, transparent);
+		animation: k8s-blink 1.2s steps(1) infinite;
+	}
+	.k8s-chip__sub {
+		color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+		margin-left: 2px;
+	}
+
+	/* Console body grid: sidebar + main pane. */
+	.k8s-console-body {
+		display: grid;
+		grid-template-columns: 1fr;
+	}
+	@media (min-width: 768px) {
+		.k8s-console-body {
+			grid-template-columns: 200px 1fr;
+		}
+	}
+
+	.k8s-sidebar {
+		display: none;
+		padding: 14px 14px 18px;
+		border-right: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+		background: color-mix(in oklab, var(--bg-elevated) 25%, transparent);
+		font-family: var(--font-mono);
+	}
+	@media (min-width: 768px) {
+		.k8s-sidebar {
+			display: block;
+		}
+	}
+	.k8s-sidebar__heading {
+		font-size: 9px;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+		padding-bottom: 8px;
+		margin-bottom: 8px;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+	}
+	.k8s-sidebar__group + .k8s-sidebar__group {
+		margin-top: 14px;
+	}
+	.k8s-sidebar__cap {
+		font-size: 10px;
+		font-weight: 500;
+		color: color-mix(in oklab, var(--foreground) 90%, transparent);
+		margin-bottom: 6px;
+	}
+	.k8s-sidebar__list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+	.k8s-sidebar__item {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		font-size: 10.5px;
+		color: color-mix(in oklab, var(--foreground) 78%, transparent);
+		line-height: 1.6;
+		padding: 1px 0;
+	}
+	.k8s-sidebar__check {
+		display: inline-block;
+		width: 9px;
+		height: 9px;
+		border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+		border-radius: 2px;
+		flex-shrink: 0;
+	}
+	.k8s-sidebar__label {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.k8s-sidebar__count {
+		color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+		font-variant-numeric: tabular-nums;
+		font-size: 10px;
+	}
+
+	.k8s-console-main {
+		min-width: 0;
+	}
+	.k8s-console-header {
+		padding: 14px 16px 0;
+	}
+	.k8s-console-title {
+		font-family: var(--font-display, var(--font-mono));
+		font-size: 16px;
+		font-weight: 600;
+		color: var(--foreground);
+		margin: 0;
+		letter-spacing: -0.01em;
+	}
+	.k8s-console-sub {
+		margin: 4px 0 0;
+		font-size: 11.5px;
+		color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+		max-width: 56ch;
+	}
+	.k8s-tabs {
+		margin-top: 12px;
+		display: inline-flex;
+		gap: 2px;
+		padding: 3px;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: color-mix(in oklab, var(--bg-elevated) 35%, transparent);
+	}
+	.k8s-tab {
+		display: inline-flex;
+		align-items: center;
+		height: 22px;
+		padding: 0 10px;
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+		border-radius: 4px;
+		cursor: default;
+	}
+	.k8s-tab--active {
+		background: color-mix(in oklab, var(--card) 90%, transparent);
+		color: var(--foreground);
+		box-shadow: 0 1px 0 color-mix(in oklab, var(--border) 80%, transparent);
+	}
+
+	/* Cluster summary strip (full + console variants). */
+	.k8s-summary {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		border-bottom: 1px solid var(--border);
+	}
+	.k8s-summary__cell {
+		padding: 14px 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		border-right: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+	}
+	.k8s-summary__cell:last-child { border-right: none; }
+	.k8s-summary__cap {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+	}
+	.k8s-summary__val {
+		font-family: var(--font-mono);
+		font-size: 18px;
+		font-weight: 500;
+		color: var(--foreground);
+		letter-spacing: -0.01em;
+	}
+
+	/* Allow horizontal scroll on narrow widths without cropping the namespace column. */
+	.k8s-table-scroll {
+		overflow-x: auto;
+	}
+
+	.k8s-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		line-height: 1.4;
+	}
+
+	.k8s-table thead th {
+		text-align: left;
+		font-weight: 500;
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+		padding: 12px 14px;
+		border-bottom: 1px solid var(--border);
+		background: color-mix(in oklab, var(--bg-elevated) 50%, transparent);
+		white-space: nowrap;
+	}
+
+	.k8s-row {
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+		transition: background 200ms cubic-bezier(0.22, 1, 0.36, 1);
+	}
+	.k8s-row:last-child { border-bottom: none; }
+	.k8s-row:hover {
+		background: color-mix(in oklab, var(--bg-elevated) 50%, transparent);
+	}
+
+	.k8s-row td {
+		padding: 9px 14px;
+		vertical-align: middle;
+		white-space: nowrap;
+	}
+
+	.k8s-cell-ns       { color: color-mix(in oklab, var(--muted-foreground) 90%, transparent); }
+	.k8s-cell-workload { color: var(--foreground); font-weight: 500; }
+	.k8s-cell-kind {
+		color: color-mix(in oklab, var(--foreground) 85%, transparent);
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.k8s-kind-dot {
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		border-radius: 999px;
+		background: var(--kind-color, var(--primary));
+	}
+	.k8s-cell-ready {
+		font-variant-numeric: tabular-nums;
+		color: color-mix(in oklab, var(--foreground) 85%, transparent);
+	}
+	.k8s-rolling-glyph {
+		display: inline-block;
+		margin-left: 6px;
+		color: var(--severity-warn);
+		font-size: 12px;
+		animation: k8s-blink 1.05s steps(1) infinite;
+	}
+	.is-rolling .k8s-ready-num { color: var(--severity-warn); }
+	.k8s-cell-node {
+		color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+		font-size: 11.5px;
+	}
+
+	/* Bar cell layout: bar track + numeric label, both inline. */
+	.k8s-cell-bar {
+		min-width: 160px;
+	}
+	.k8s-bar {
+		display: inline-block;
+		vertical-align: middle;
+		position: relative;
+		width: 88px;
+		height: 6px;
+		background: color-mix(in oklab, var(--bg-elevated) 70%, transparent);
+		border-radius: 2px;
+		overflow: hidden;
+	}
+	.k8s-bar__fill {
+		position: absolute;
+		inset: 0;
+		background: color-mix(in oklab, var(--foreground) 55%, transparent);
+		transform: scaleX(var(--base, 0.5));
+		transform-origin: left center;
+		animation: k8s-bar-flux 7s ease-in-out infinite alternate;
+		will-change: transform;
+	}
+	.is-rolling .k8s-bar__fill {
+		background: var(--severity-warn);
+	}
+	.k8s-bar__pct {
+		display: inline-block;
+		margin-left: 10px;
+		font-variant-numeric: tabular-nums;
+		color: color-mix(in oklab, var(--foreground) 85%, transparent);
+		min-width: 3ch;
+	}
+
+	@keyframes k8s-bar-flux {
+		0%   { transform: scaleX(calc(var(--base) - var(--flux))); }
+		100% { transform: scaleX(calc(var(--base) + var(--flux))); }
+	}
+
+	@keyframes k8s-blink {
+		0%, 49%   { opacity: 1; }
+		50%, 100% { opacity: 0; }
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.k8s-bar__fill {
+			animation: none !important;
+			transform: scaleX(var(--base)) !important;
+		}
+		.k8s-rolling-glyph {
+			animation: none !important;
+			opacity: 0.6 !important;
+		}
+	}
+</style>
