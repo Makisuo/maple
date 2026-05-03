@@ -1,7 +1,7 @@
 ---
 title: "Next.js Instrumentation"
 description: "Instrument a Next.js application with @vercel/otel and send traces, logs, and metrics to Maple."
-group: "Guides"
+group: "Instrumentation"
 order: 4
 sdk: "nextjs"
 ---

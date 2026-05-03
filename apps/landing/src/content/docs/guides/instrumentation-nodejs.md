@@ -1,7 +1,7 @@
 ---
 title: "Node.js Instrumentation"
 description: "Instrument a Node.js application with OpenTelemetry and send traces, logs, and metrics to Maple."
-group: "Guides"
+group: "Instrumentation"
 order: 3
 sdk: "node"
 ---

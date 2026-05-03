@@ -1,7 +1,7 @@
 ---
 title: "Rust Instrumentation"
 description: "Instrument a Rust application with OpenTelemetry and send traces, logs, and metrics to Maple."
-group: "Guides"
+group: "Instrumentation"
 order: 7
 sdk: "rust"
 ---

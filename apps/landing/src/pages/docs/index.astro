@@ -2,6 +2,14 @@
 import { getCollection } from "astro:content";
 import DocsLayout from "../../layouts/DocsLayout.astro";
 import EffectLogo from "../../components/icons/EffectLogo.astro";
+import NodeJsLogo from "../../components/icons/NodeJsLogo.astro";
+import NextjsLogo from "../../components/icons/NextjsLogo.astro";
+import PythonLogo from "../../components/icons/PythonLogo.astro";
+import GoLogo from "../../components/icons/GoLogo.astro";
+import RustLogo from "../../components/icons/RustLogo.astro";
+import OpenJdkLogo from "../../components/icons/OpenJdkLogo.astro";
+import CsharpLogo from "../../components/icons/CsharpLogo.astro";
+import KotlinLogo from "../../components/icons/KotlinLogo.astro";
 
 const allDocs = await getCollection("docs", ({ data }) => !data.draft);
 
@@ -25,37 +33,47 @@ const orderGroups = (groups: Map<string, typeof allDocs>, groupOrder: string[]) 
         return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
     });
 
-const sdkScoped = allDocs.filter((d) => d.data.sdk === "effect");
-const universal = allDocs.filter((d) => !d.data.sdk);
+const effectDocs = allDocs.filter((d) => d.data.sdk === "effect");
+const languageGuides = allDocs
+    .filter((d) => d.data.sdk && d.data.sdk !== "effect")
+    .sort((a, b) => {
+        if (a.data.order !== b.data.order) return a.data.order - b.data.order;
+        return (a.data.sdk ?? "").localeCompare(b.data.sdk ?? "");
+    });
+const conceptual = allDocs.filter((d) => !d.data.sdk);
 
-const sdkGroups = orderGroups(groupBy(sdkScoped), ["Effect SDK", "Platforms"]);
-const universalGroups = orderGroups(groupBy(universal), ["Getting Started", "Concepts", "Guides"]);
+const sdkGroups = orderGroups(groupBy(effectDocs), ["Effect SDK", "Platforms"]);
+const conceptualGroups = orderGroups(groupBy(conceptual), ["Getting Started", "Concepts"]);
 
-// Per-doc runtime/role tag shown right-aligned in the listing.
-// Kept short — the column carries the visual texture, not full sentences.
+// Language registry for Section 02 — icon, display label, runtime hint
+const LANG_META: Record<string, { name: string; Icon: any; meta: string }> = {
+    node:   { name: "node.js",  Icon: NodeJsLogo,  meta: "node 18+" },
+    nextjs: { name: "next.js",  Icon: NextjsLogo,  meta: "app + pages" },
+    python: { name: "python",   Icon: PythonLogo,  meta: "3.9+" },
+    go:     { name: "go",       Icon: GoLogo,      meta: "1.21+" },
+    rust:   { name: "rust",     Icon: RustLogo,    meta: "stable" },
+    java:   { name: "java",     Icon: OpenJdkLogo, meta: "17+" },
+    csharp: { name: "c#",       Icon: CsharpLogo,  meta: ".net 8" },
+    kotlin: { name: "kotlin",   Icon: KotlinLogo,  meta: "jvm" },
+};
+
+// Per-doc runtime/role tag shown right-aligned in the Effect listing.
 const META: Record<string, string> = {
     "sdks/overview": "intro",
     "sdks/effect": "setup",
     "sdks/effect-server": "node · bun · deno",
     "sdks/effect-client": "browser",
     "sdks/effect-cloudflare": "workers",
-    "guides/instrumentation-nodejs": "node",
-    "guides/instrumentation-nextjs": "next.js",
-    "guides/instrumentation-python": "python",
-    "guides/instrumentation-go": "go",
 };
 
 // Stat strip values
 const totalDocs = allDocs.length;
-const totalCollections = sdkGroups.length > 0 ? 2 : 1;
+const totalCollections = 3;
 const updated = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" })
     .format(new Date())
     .toLowerCase();
 
 const renderTree = (i: number, last: number) => (i === last ? "└──" : "├──");
-
-// Renamed group label for the Universal section
-const renamedGroup = (g: string) => (g === "Guides" ? "other languages" : g.toLowerCase());
 ---
 
 <DocsLayout
@@ -143,24 +161,67 @@ const renamedGroup = (g: string) => (g === "Guides" ? "other languages" : g.toLo
             </div>
         </section>
 
-        {/* ── Section 02 · Universal ───────────────────────────── */}
+        {/* ── Section 02 · Other languages ─────────────────────── */}
+        {languageGuides.length > 0 && (
+            <section class="docs-index__section">
+                <div class="docs-index__sec-head docs-index__sec-head--dark">
+                    <span class="docs-index__sec-num">#&nbsp;02</span>
+                    <span class="docs-index__sec-rule" aria-hidden="true"></span>
+                    <h2 class="docs-index__sec-title font-display">Other languages</h2>
+                    <span class="docs-index__pill docs-index__pill--dark">guides</span>
+                </div>
+
+                <p class="docs-index__sec-lede docs-index__sec-lede--dark">
+                    Standard OpenTelemetry setup pointed at Maple's ingest endpoint. One guide per language — pick yours and ship traces, logs, and metrics in minutes.
+                </p>
+
+                <div class="docs-index__lists">
+                    <div class="docs-index__list">
+                        <h3 class="docs-index__list-cap docs-index__list-cap--dark">
+                            <span class="opacity-60"># </span>instrumentation
+                        </h3>
+                        <ul role="list">
+                            {languageGuides.map((doc) => {
+                                const lang = doc.data.sdk ? LANG_META[doc.data.sdk] : undefined;
+                                const Icon = lang?.Icon;
+                                return (
+                                    <li>
+                                        <a href={`/docs/${doc.id}`} class="docs-row docs-row--dark docs-row--lang">
+                                            <span class="docs-row__icon" aria-hidden="true">
+                                                {Icon ? <Icon class="w-3.5 h-3.5" /> : null}
+                                            </span>
+                                            <span class="docs-row__title">{lang?.name ?? doc.data.sdk ?? doc.data.title.toLowerCase()}</span>
+                                            <span class="docs-row__desc">{doc.data.description}</span>
+                                            <span class="docs-row__meta">{lang?.meta ?? ""}</span>
+                                            <span class="docs-row__arrow" aria-hidden="true">→</span>
+                                        </a>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </div>
+                </div>
+            </section>
+        )}
+
+        {/* ── Section 03 · Concepts ────────────────────────────── */}
         <section class="docs-index__section">
             <div class="docs-index__sec-head docs-index__sec-head--dark">
-                <span class="docs-index__sec-num">#&nbsp;02</span>
+                <span class="docs-index__sec-num">#&nbsp;03</span>
                 <span class="docs-index__sec-rule" aria-hidden="true"></span>
-                <h2 class="docs-index__sec-title font-display">Universal</h2>
+                <h2 class="docs-index__sec-title font-display">Concepts</h2>
                 <span class="docs-index__pill docs-index__pill--dark">docs</span>
             </div>
 
             <p class="docs-index__sec-lede docs-index__sec-lede--dark">
-                Concepts and language-specific instrumentation guides. Apply to every Maple deployment, regardless of which SDK you ship.
+                Language-agnostic explanations of how Maple works — OTLP conventions, sampling-aware throughput, and where to start.
             </p>
 
             <div class="docs-index__lists">
-                {universalGroups.map(([groupName, items]) => (
+                {conceptualGroups.map(([groupName, items]) => (
                     <div class="docs-index__list">
                         <h3 class="docs-index__list-cap docs-index__list-cap--dark">
-                            <span class="opacity-60"># </span>{renamedGroup(groupName)}
+                            <span class="opacity-60"># </span>{groupName.toLowerCase()}
                         </h3>
                         <ul role="list">
                             {items.map((doc, i) => (
@@ -437,6 +498,23 @@ const renamedGroup = (g: string) => (g === "Guides" ? "other languages" : g.toLo
         font-size: 13px;
         opacity: 0.55;
         transition: opacity 160ms ease, color 160ms ease;
+    }
+    .docs-row__icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        opacity: 0.85;
+        color: var(--accent);
+        transition: opacity 160ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .docs-row__icon :global(svg) {
+        width: 14px;
+        height: 14px;
+    }
+    .docs-row--lang:hover .docs-row__icon {
+        opacity: 1;
+        transform: scale(1.08);
     }
     .docs-row__title {
         font-family: var(--font-mono);

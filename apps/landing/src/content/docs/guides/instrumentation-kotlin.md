@@ -1,7 +1,7 @@
 ---
 title: "Kotlin Instrumentation"
 description: "Instrument a Kotlin JVM application (Ktor, Spring Boot) with OpenTelemetry and send traces, logs, and metrics to Maple."
-group: "Guides"
+group: "Instrumentation"
 order: 10
 sdk: "kotlin"
 ---

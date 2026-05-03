@@ -34,22 +34,29 @@ interface Props {
     activeSdk?: string;
 }
 
-const { activeSdk = "effect" } = Astro.props;
-const current = sdks.find((s) => s.id === activeSdk) ?? sdks[0];
-const CurrentIcon = current.Icon;
+const { activeSdk } = Astro.props;
+const current = activeSdk ? sdks.find((s) => s.id === activeSdk) : undefined;
+const CurrentIcon = current?.Icon;
+const isEmpty = !current;
 ---
 
 <div class="mb-5">
     <div class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-2 px-2">
         Select your language
     </div>
-    <details class="group relative sdk-selector">
+    <details class="group relative sdk-selector" data-sdk-empty={isEmpty ? "" : null}>
         <summary class="flex items-center justify-between gap-2 px-2.5 py-2 border border-border bg-bg hover:border-fg-muted/50 cursor-pointer transition-colors list-none [&::-webkit-details-marker]:hidden">
             <span class="flex items-center gap-2.5 min-w-0">
-                <span class="w-5 h-5 shrink-0 flex items-center justify-center">
-                    <CurrentIcon class="w-4 h-4" />
+                <span class="w-5 h-5 shrink-0 flex items-center justify-center" data-sdk-current-icon>
+                    {CurrentIcon ? (
+                        <CurrentIcon class="w-4 h-4" />
+                    ) : (
+                        <span class="block w-3 h-3 border border-dashed border-fg-muted/60 rounded-full" aria-hidden="true"></span>
+                    )}
                 </span>
-                <span class="text-xs text-fg font-medium truncate">{current.name}</span>
+                <span class="text-xs font-medium truncate" class:list={[isEmpty ? "text-fg-muted" : "text-fg"]} data-sdk-current-label>
+                    {current?.name ?? "Select language"}
+                </span>
             </span>
             <svg class="w-3 h-3 text-fg-muted transition-transform group-open:rotate-180 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M3 5l3 3 3-3" />
@@ -59,6 +66,7 @@ const CurrentIcon = current.Icon;
             <ul class="py-1">
                 {sdks.map((sdk) => {
                     const Icon = sdk.Icon;
+                    const isCurrent = current?.id === sdk.id;
                     return (
                         <li>
                             {sdk.available ? (
@@ -68,7 +76,7 @@ const CurrentIcon = current.Icon;
                                     data-sdk-id={sdk.id}
                                     class:list={[
                                         "w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left transition-colors",
-                                        sdk.id === current.id
+                                        isCurrent
                                             ? "bg-accent/5 text-accent"
                                             : "text-fg hover:bg-fg/5",
                                     ]}
@@ -79,7 +87,7 @@ const CurrentIcon = current.Icon;
                                         </span>
                                         <span class="text-xs font-medium truncate">{sdk.name}</span>
                                     </span>
-                                    {sdk.id === current.id && (
+                                    {isCurrent && (
                                         <svg class="w-3 h-3 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
                                             <path d="M2.5 6l2.5 2.5 4.5-5" />
                                         </svg>
@@ -107,6 +115,40 @@ const CurrentIcon = current.Icon;
 </div>
 
 <script is:inline>
+    // Progressive enhancement: when the SDK selector renders empty (e.g. on a
+    // concept page where the user hasn't picked a language), restore the
+    // last-used language as a *label only* — does not navigate, so SSR stays
+    // authoritative and there's no hydration mismatch.
+    (() => {
+        const SDK_LABELS = {
+            effect: "Effect",
+            node: "Node.js",
+            nextjs: "Next.js",
+            python: "Python",
+            go: "Go",
+            rust: "Rust",
+            java: "Java",
+            csharp: "C#",
+            kotlin: "Kotlin",
+        };
+        try {
+            document.querySelectorAll("details.sdk-selector[data-sdk-empty]").forEach((details) => {
+                const saved = localStorage.getItem("maple.docs.sdk");
+                if (!saved || !(saved in SDK_LABELS)) return;
+                const label = details.querySelector("[data-sdk-current-label]");
+                if (!label) return;
+                label.textContent = SDK_LABELS[saved];
+                label.classList.remove("text-fg-muted");
+                label.classList.add("text-fg");
+                const option = details.querySelector(`[data-sdk-option][data-sdk-id="${saved}"] svg`);
+                const iconSlot = details.querySelector("[data-sdk-current-icon]");
+                if (option && iconSlot) {
+                    iconSlot.replaceChildren(option.cloneNode(true));
+                }
+            });
+        } catch {}
+    })();
+
     document.addEventListener("click", (event) => {
         const target = event.target;
         if (!(target instanceof Element)) return;

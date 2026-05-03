@@ -11,9 +11,9 @@ const { currentSlug } = Astro.props;
 const allDocs = await getCollection("docs", ({ data }) => !data.draft);
 
 const currentDoc = allDocs.find((d) => d.id === currentSlug);
-const activeSdk = currentDoc?.data.sdk ?? "effect";
+const activeSdk: string | null = currentDoc?.data.sdk ?? null;
 
-const sdkScopedDocs = allDocs.filter((d) => d.data.sdk === activeSdk);
+const sdkScopedDocs = activeSdk ? allDocs.filter((d) => d.data.sdk === activeSdk) : [];
 const universalDocs = allDocs.filter((d) => !d.data.sdk);
 
 const groupBy = (docs: typeof allDocs) => {
@@ -36,8 +36,8 @@ const orderGroups = (groups: Map<string, typeof allDocs>, groupOrder: string[]) 
         return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
     });
 
-const sdkGroups = orderGroups(groupBy(sdkScopedDocs), ["Effect SDK", "Platforms"]);
-const universalGroups = orderGroups(groupBy(universalDocs), ["Getting Started", "Concepts", "Guides"]);
+const sdkGroups = orderGroups(groupBy(sdkScopedDocs), ["Effect SDK", "Platforms", "Instrumentation"]);
+const universalGroups = orderGroups(groupBy(universalDocs), ["Getting Started", "Concepts"]);
 ---
 
 <details class="lg:hidden mb-6 border border-border">
@@ -50,7 +50,7 @@ const universalGroups = orderGroups(groupBy(universalDocs), ["Getting Started", 
         </svg>
     </summary>
     <nav class="px-4 pb-4 border-t border-border pt-3" aria-label="Documentation navigation">
-        <SdkSelector activeSdk={activeSdk} />
+        <SdkSelector activeSdk={activeSdk ?? undefined} />
 
         {sdkGroups.map(([groupName, items]) => (
             <div class="mb-4 last:mb-0">
@@ -85,7 +85,7 @@ const universalGroups = orderGroups(groupBy(universalDocs), ["Getting Started", 
         {universalGroups.map(([groupName, items]) => (
             <div class="mb-4 last:mb-0">
                 <h3 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-1.5">
-                    {groupName === "Guides" ? "Other languages" : groupName}
+                    {groupName}
                 </h3>
                 <ul class="space-y-0.5">
                     {items.map((doc) => {
