@@ -10,30 +10,36 @@ const { currentSlug } = Astro.props;
 const allDocs = await getCollection("docs", ({ data }) => !data.draft);
 
 const currentDoc = allDocs.find((d) => d.id === currentSlug);
-const activeSdk = currentDoc?.data.sdk ?? "effect";
+const activeSdk: string | null = currentDoc?.data.sdk ?? null;
 
 const sdkGroupOrder = ["Effect SDK", "Platforms"];
-const universalGroupOrder = ["Getting Started", "Concepts", "Guides"];
+const universalGroupOrder = ["Getting Started", "Concepts"];
 
-const sdkScoped = allDocs
-    .filter((d) => d.data.sdk === activeSdk)
-    .sort((a, b) => {
-        const ga = sdkGroupOrder.indexOf(a.data.group);
-        const gb = sdkGroupOrder.indexOf(b.data.group);
+const groupSort = (groupOrder: string[]) =>
+    (a: typeof allDocs[number], b: typeof allDocs[number]) => {
+        const ga = groupOrder.indexOf(a.data.group);
+        const gb = groupOrder.indexOf(b.data.group);
         if (ga !== gb) return (ga === -1 ? 999 : ga) - (gb === -1 ? 999 : gb);
         return a.data.order - b.data.order;
-    });
+    };
 
-const universal = allDocs
-    .filter((d) => !d.data.sdk)
-    .sort((a, b) => {
-        const ga = universalGroupOrder.indexOf(a.data.group);
-        const gb = universalGroupOrder.indexOf(b.data.group);
-        if (ga !== gb) return (ga === -1 ? 999 : ga) - (gb === -1 ? 999 : gb);
-        return a.data.order - b.data.order;
-    });
-
-const sorted = [...sdkScoped, ...universal];
+// Walk siblings within the current "section":
+// - Effect doc → Effect SDK chain
+// - Other-language guide → all other-language guides
+// - Conceptual doc (no sdk) → conceptual chain
+let sorted: typeof allDocs;
+if (activeSdk === "effect") {
+    sorted = allDocs.filter((d) => d.data.sdk === "effect").sort(groupSort(sdkGroupOrder));
+} else if (activeSdk) {
+    sorted = allDocs
+        .filter((d) => d.data.sdk && d.data.sdk !== "effect")
+        .sort((a, b) => {
+            if (a.data.order !== b.data.order) return a.data.order - b.data.order;
+            return (a.data.sdk ?? "").localeCompare(b.data.sdk ?? "");
+        });
+} else {
+    sorted = allDocs.filter((d) => !d.data.sdk).sort(groupSort(universalGroupOrder));
+}
 
 const currentIndex = sorted.findIndex((d) => d.id === currentSlug);
 const prev = currentIndex > 0 ? sorted[currentIndex - 1] : null;
