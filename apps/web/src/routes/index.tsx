@@ -18,6 +18,7 @@ import type { ChartLegendMode, ChartTooltipMode } from "@maple/ui/components/cha
 import {
 	getCustomChartTimeSeriesResultAtom,
 	getOverviewTimeSeriesResultAtom,
+	getServiceOverviewResultAtom,
 	getServicesFacetsResultAtom,
 } from "@/lib/services/atoms/tinybird-query-atoms"
 import type { CustomChartTimeSeriesResponse } from "@/api/tinybird/custom-charts"
@@ -84,21 +85,44 @@ const OVERVIEW_CHARTS: OverviewChartConfig[] = [
 
 function DashboardPage() {
 	const search = Route.useSearch()
+	const defaultPreset = useDefaultPreset()
 	return (
-		<PageRefreshProvider timePreset={search.timePreset ?? "24h"}>
-			<DashboardContent />
+		<PageRefreshProvider timePreset={search.timePreset ?? defaultPreset}>
+			<DashboardContent defaultPreset={defaultPreset} />
 		</PageRefreshProvider>
 	)
 }
 
-function DashboardContent() {
+function useDefaultPreset() {
+	const probeRange = useMemo(() => {
+		const end = new Date()
+		const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
+		return { startTime: start.toISOString(), endTime: end.toISOString() }
+	}, [])
+
+	const servicesProbeResult = useRetainedRefreshableResultValue(
+		getServiceOverviewResultAtom({ data: probeRange }),
+	)
+
+	return useMemo(() => {
+		if (!Result.isSuccess(servicesProbeResult)) return "24h"
+		const services = servicesProbeResult.value.data
+		if (services.length === 0) return "24h"
+		const allDemo = services.every(
+			(s) => typeof s.serviceName === "string" && s.serviceName.startsWith("demo-"),
+		)
+		return allDemo ? "6h" : "24h"
+	}, [servicesProbeResult])
+}
+
+function DashboardContent({ defaultPreset }: { defaultPreset: string }) {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
-		search.timePreset ?? "24h",
+		search.timePreset ?? defaultPreset,
 	)
 
 	const handleTimeChange = (
@@ -270,7 +294,7 @@ function DashboardContent() {
 					<TimeRangeHeaderControls
 						startTime={search.startTime ?? effectiveStartTime}
 						endTime={search.endTime ?? effectiveEndTime}
-						presetValue={search.timePreset ?? "24h"}
+						presetValue={search.timePreset ?? defaultPreset}
 						onTimeChange={handleTimeChange}
 					/>
 				</div>
