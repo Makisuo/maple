@@ -6,7 +6,7 @@
  * artifact, and a 3-card feature strip summarizing the K8s offering.
  */
 import { getRelativeLocaleUrl } from "astro:i18n";
-import LiveK8sWorkloads from "./live/LiveK8sWorkloads.astro";
+import LiveK8sHeatmap from "./live/LiveK8sHeatmap.astro";
 import * as m from "../paraglide/messages";
 
 const locale = Astro.currentLocale ?? "en";
@@ -92,7 +92,7 @@ const features = [
 				aria-hidden="true"
 				style="box-shadow: 0 0 160px 32px oklch(0.70 0.16 60 / 0.08);"
 			></div>
-			<LiveK8sWorkloads variant="full" />
+			<LiveK8sHeatmap />
 		</div>
 
 		<!-- Feature strip: three K8s capabilities below the live cluster. -->

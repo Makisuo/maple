@@ -378,7 +378,7 @@
 	background: var(--service-color, var(--primary));
 	border-radius: 2px;
 	transform-origin: left center;
-	transform: scaleX(0);
+	transform: scaleX(var(--bar-progress, 1));
 	will-change: transform;
 	transition: box-shadow 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }

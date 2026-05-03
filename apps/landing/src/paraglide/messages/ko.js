@@ -991,7 +991,7 @@ export const cta_bookend_secondary = () => `Read the source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const footer_manifesto = () => `Built for engineers who actually read their telemetry.`
+export const footer_manifesto = () => `Made with love for engineers. Priced with respect for your CFO.`
 
 
 /**

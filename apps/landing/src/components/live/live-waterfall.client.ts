@@ -30,11 +30,9 @@ type Row = {
 	durationMs: number
 }
 
-const ATTACHED = new WeakSet<HTMLElement>()
-
 export function startWaterfall(root: HTMLElement) {
-	if (ATTACHED.has(root)) return
-	ATTACHED.add(root)
+	if (root.dataset.waterfallAttached === "1") return
+	root.dataset.waterfallAttached = "1"
 
 	const totalMs = Number(root.dataset.total ?? 200)
 	const speedDivisor = Number(root.dataset.speed ?? DEFAULT_SPEED_DIVISOR)
@@ -73,8 +71,8 @@ export function startWaterfall(root: HTMLElement) {
 	const ro = new ResizeObserver(measureTrack)
 	ro.observe(stage)
 
-	// Generation token: each cycle() invocation gets a unique id; stale callbacks
-	// (timers scheduled by an older generation) check against `gen` and bail out.
+	// Generation token: bumping it cancels any in-flight cycle. Stale callbacks
+	// (timers, .finished handlers) gate on `gen === myGen` and bail otherwise.
 	let gen = 0
 	let inflight: AnimationPlaybackControls[] = []
 	let phaseTimers: number[] = []
@@ -107,7 +105,7 @@ export function startWaterfall(root: HTMLElement) {
 		const playSec = (totalMs * speedDivisor) / 1000
 
 		const barAnims: AnimationPlaybackControls[] = []
-		rows.forEach((r, idx) => {
+		rows.forEach((r) => {
 			const startSec = (r.startMs * speedDivisor) / 1000
 			const durSec = Math.max(0.01, (r.durationMs * speedDivisor) / 1000)
 
@@ -115,39 +113,27 @@ export function startWaterfall(root: HTMLElement) {
 				if (gen === myGen) r.row.classList.add("is-active")
 			}, startSec * 1000)
 
-			try {
-				const a = animate(
-					r.bar,
-					{ scaleX: [0, 1] },
-					{ duration: durSec, delay: startSec, ease: "linear" },
-				)
-				console.log("[wf] bar", idx, "animate ok", { durSec, startSec, hasFinished: !!a.finished })
-				a.finished
-					.then(() => {
-						if (gen === myGen) r.row.classList.remove("is-active")
-					})
-					.catch((e) => {
-						console.warn("[wf] bar finished rejected", idx, e)
-					})
-				barAnims.push(a)
-			} catch (e) {
-				console.error("[wf] bar animate threw", idx, e)
-			}
+			const a = animate(
+				r.bar,
+				{ scaleX: [0, 1] },
+				{ duration: durSec, delay: startSec, ease: "linear" },
+			)
+			a.finished
+				.then(() => {
+					if (gen === myGen) r.row.classList.remove("is-active")
+				})
+				.catch(() => {})
+			barAnims.push(a)
 		})
 
 		let cursorAnim: AnimationPlaybackControls | null = null
 		if (cursor) {
 			cursor.style.setProperty("--cursor-opacity", "1")
-			try {
-				cursorAnim = animate(
-					cursor,
-					{ x: [trackOffsetX, trackOffsetX + trackWidth] },
-					{ duration: playSec, ease: "linear" },
-				)
-				console.log("[wf] cursor animate ok", { playSec, from: trackOffsetX, to: trackOffsetX + trackWidth })
-			} catch (e) {
-				console.error("[wf] cursor animate threw", e)
-			}
+			cursorAnim = animate(
+				cursor,
+				{ x: [trackOffsetX, trackOffsetX + trackWidth] },
+				{ duration: playSec, ease: "linear" },
+			)
 		}
 
 		inflight = cursorAnim ? [...barAnims, cursorAnim] : barAnims
@@ -178,7 +164,24 @@ export function startWaterfall(root: HTMLElement) {
 		}
 	}
 
-	cycle()
+	let isVisible = false
+	const io = new IntersectionObserver(
+		([entry]) => {
+			if (entry.isIntersecting) {
+				if (!isVisible) {
+					isVisible = true
+					cycle()
+				}
+			} else if (isVisible) {
+				isVisible = false
+				gen++
+				stopInflight()
+				clearPhaseTimers()
+			}
+		},
+		{ rootMargin: "40px" },
+	)
+	io.observe(root)
 }
 
 function parsePct(value: string): number {

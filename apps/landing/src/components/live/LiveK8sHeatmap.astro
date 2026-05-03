@@ -1,0 +1,338 @@
+---
+/**
+ * Pod density heatmap — alternative artifact for the K8s section.
+ * A 24×8 grid (192 cells) where each cell is a pod, coloured on a CPU-heat
+ * scale (cool gray → primary amber). Cells gently breathe with desynced
+ * opacity oscillation. A handful of cells flag severity-warn / severity-error
+ * (rolling, OOMKilled, CrashLoop) for visual interest. Pure CSS, no JS.
+ */
+
+const COLS = 24;
+const ROWS = 8;
+
+type CellState = "ok" | "warm" | "hot" | "warn" | "err";
+
+interface Cell {
+	col: number;
+	row: number;
+	heat: number; // 0 - 1, drives colour ramp
+	state: CellState;
+	delay: string; // animation delay so cells desync
+}
+
+// Namespace bands (left-to-right blocks of columns). Each band gets its own
+// average heat level so the heatmap reads as "this namespace is busier".
+const bands = [
+	{ name: "default",       cols: 9,  baseHeat: 0.55 },
+	{ name: "observability", cols: 4,  baseHeat: 0.32 },
+	{ name: "kube-system",   cols: 5,  baseHeat: 0.18 },
+	{ name: "ingress-nginx", cols: 3,  baseHeat: 0.42 },
+	{ name: "data",          cols: 3,  baseHeat: 0.68 },
+];
+
+// Pre-marked outliers (col,row) → state. Hand-picked positions so the visual
+// reads as "a few bad pods scattered, not a totally healthy or totally broken cluster".
+const outliers: Record<string, CellState> = {
+	"3,2":   "warn",   // payment-svc rolling
+	"3,3":   "warn",
+	"5,5":   "err",    // OOMKilled
+	"7,1":   "warn",
+	"11,4":  "warn",   // otel pod restarting
+	"19,2":  "err",    // ingress crashloop
+	"21,6":  "warn",
+	"22,1":  "warn",
+};
+
+// Build a deterministic-but-varied heat distribution from the band base heat.
+const cells: Cell[] = [];
+let runningCol = 0;
+for (const band of bands) {
+	for (let bc = 0; bc < band.cols; bc += 1) {
+		const col = runningCol;
+		for (let row = 0; row < ROWS; row += 1) {
+			// Cheap deterministic jitter from col/row.
+			const jitter = ((col * 7 + row * 11) % 13) / 24 - 0.25;
+			const heat = Math.max(0.05, Math.min(0.98, band.baseHeat + jitter));
+			const key = `${col},${row}`;
+			const state: CellState = outliers[key] ?? (heat > 0.78 ? "hot" : heat > 0.55 ? "warm" : "ok");
+			const delay = `-${(((col * 0.31) + (row * 0.47)) % 6).toFixed(2)}s`;
+			cells.push({ col, row, heat, state, delay });
+		}
+		runningCol += 1;
+	}
+}
+
+const totalPods = cells.length;
+const warnCount = cells.filter((c) => c.state === "warn").length;
+const errCount  = cells.filter((c) => c.state === "err").length;
+const hotCount  = cells.filter((c) => c.state === "hot").length;
+const avgHeat   = cells.reduce((s, c) => s + c.heat, 0) / cells.length;
+
+// Pre-render band header positions for the strip above the grid.
+let headerOffset = 0;
+const bandHeaders = bands.map((b) => {
+	const startCol = headerOffset;
+	headerOffset += b.cols;
+	return { ...b, startCol, span: b.cols };
+});
+---
+
+<div class="live-frame">
+	<div class="live-frame__head">
+		<span>pod heatmap · {totalPods} pods · cluster cpu {Math.round(avgHeat * 100)}%</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			LIVE
+		</span>
+	</div>
+
+	<div class="k8s-hm-summary">
+		<div class="k8s-hm-summary__cell">
+			<span class="k8s-hm-summary__cap">PODS</span>
+			<span class="k8s-hm-summary__val">{totalPods}</span>
+		</div>
+		<div class="k8s-hm-summary__cell">
+			<span class="k8s-hm-summary__cap">RUNNING</span>
+			<span class="k8s-hm-summary__val">{totalPods - warnCount - errCount}</span>
+		</div>
+		<div class="k8s-hm-summary__cell">
+			<span class="k8s-hm-summary__cap">DEGRADED</span>
+			<span class="k8s-hm-summary__val k8s-hm-summary__val--warn">{warnCount}</span>
+		</div>
+		<div class="k8s-hm-summary__cell">
+			<span class="k8s-hm-summary__cap">FAILING</span>
+			<span class="k8s-hm-summary__val k8s-hm-summary__val--err">{errCount}</span>
+		</div>
+		<div class="k8s-hm-summary__cell">
+			<span class="k8s-hm-summary__cap">HOT &gt;78%</span>
+			<span class="k8s-hm-summary__val">{hotCount}</span>
+		</div>
+	</div>
+
+	<div class="k8s-hm-canvas">
+		<div
+			class="k8s-hm-bands"
+			style={`grid-template-columns: ${bandHeaders.map((b) => `${b.span}fr`).join(" ")};`}
+		>
+			{bandHeaders.map((b) => (
+				<div class="k8s-hm-band">
+					<span class="k8s-hm-band__name">{b.name}</span>
+					<span class="k8s-hm-band__count">{b.span * ROWS}</span>
+				</div>
+			))}
+		</div>
+
+		<div
+			class="k8s-hm-grid"
+			style={`grid-template-columns: repeat(${COLS}, 1fr);`}
+		>
+			{cells.map((c) => (
+				<div
+					class={`k8s-hm-cell k8s-hm-cell--${c.state}`}
+					style={`--heat: ${c.heat.toFixed(3)}; --d: ${c.delay};`}
+					title={`pod ${c.col + 1}-${c.row + 1} · ${Math.round(c.heat * 100)}% cpu · ${c.state}`}
+				></div>
+			))}
+		</div>
+
+		<div class="k8s-hm-legend">
+			<span class="k8s-hm-legend__cap">CPU</span>
+			<div class="k8s-hm-legend__ramp">
+				<span style="--h: 0.05"></span>
+				<span style="--h: 0.20"></span>
+				<span style="--h: 0.35"></span>
+				<span style="--h: 0.50"></span>
+				<span style="--h: 0.65"></span>
+				<span style="--h: 0.80"></span>
+				<span style="--h: 0.95"></span>
+			</div>
+			<span class="k8s-hm-legend__scale">0%</span>
+			<span class="k8s-hm-legend__scale k8s-hm-legend__scale--right">100%</span>
+			<span class="k8s-hm-legend__sep"></span>
+			<span class="k8s-hm-legend__swatch k8s-hm-legend__swatch--warn"></span>
+			<span class="k8s-hm-legend__cap">degraded</span>
+			<span class="k8s-hm-legend__swatch k8s-hm-legend__swatch--err"></span>
+			<span class="k8s-hm-legend__cap">failing</span>
+		</div>
+	</div>
+</div>
+
+<style>
+	.k8s-hm-summary {
+		display: grid;
+		grid-template-columns: repeat(5, 1fr);
+		border-bottom: 1px solid var(--border);
+	}
+	.k8s-hm-summary__cell {
+		padding: 12px 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		border-right: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+	}
+	.k8s-hm-summary__cell:last-child { border-right: none; }
+	.k8s-hm-summary__cap {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+	}
+	.k8s-hm-summary__val {
+		font-family: var(--font-mono);
+		font-size: 17px;
+		font-weight: 500;
+		color: var(--foreground);
+		letter-spacing: -0.01em;
+		font-variant-numeric: tabular-nums;
+	}
+	.k8s-hm-summary__val--warn { color: var(--severity-warn); }
+	.k8s-hm-summary__val--err  { color: var(--severity-error); }
+
+	.k8s-hm-canvas {
+		padding: 14px 16px 16px;
+	}
+
+	.k8s-hm-bands {
+		display: grid;
+		gap: 4px;
+		margin-bottom: 8px;
+		font-family: var(--font-mono);
+	}
+	.k8s-hm-band {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
+		padding: 0 4px 6px;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+		min-width: 0;
+	}
+	.k8s-hm-band__name {
+		font-size: 10.5px;
+		color: color-mix(in oklab, var(--foreground) 88%, transparent);
+		letter-spacing: 0.02em;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.k8s-hm-band__count {
+		font-size: 9.5px;
+		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.k8s-hm-grid {
+		display: grid;
+		gap: 3px;
+		padding: 4px;
+		background: color-mix(in oklab, var(--bg-elevated) 30%, transparent);
+		border: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+		border-radius: 4px;
+	}
+	.k8s-hm-cell {
+		aspect-ratio: 1 / 1;
+		border-radius: 2px;
+		/* Heat ramp: cool gray for low heat, primary amber for high. */
+		background: color-mix(in oklab,
+			color-mix(in oklab, var(--muted-foreground) 22%, transparent),
+			var(--primary) calc(var(--heat, 0.5) * 100%)
+		);
+		opacity: calc(0.55 + var(--heat, 0.5) * 0.4);
+		animation: k8s-hm-breathe 3.6s ease-in-out infinite alternate;
+		animation-delay: var(--d, 0s);
+		will-change: opacity;
+	}
+	.k8s-hm-cell--hot {
+		box-shadow: 0 0 4px color-mix(in oklab, var(--primary) 55%, transparent);
+	}
+	.k8s-hm-cell--warn {
+		background: var(--severity-warn);
+		opacity: 0.78;
+		box-shadow: 0 0 4px color-mix(in oklab, var(--severity-warn) 60%, transparent);
+		animation: k8s-hm-pulse 1.4s ease-in-out infinite alternate;
+		animation-delay: var(--d, 0s);
+	}
+	.k8s-hm-cell--err {
+		background: var(--severity-error);
+		opacity: 0.92;
+		box-shadow: 0 0 6px color-mix(in oklab, var(--severity-error) 70%, transparent);
+		animation: k8s-hm-pulse 0.9s ease-in-out infinite alternate;
+		animation-delay: var(--d, 0s);
+	}
+
+	.k8s-hm-legend {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 12px;
+		padding-top: 10px;
+		border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+		font-family: var(--font-mono);
+		font-size: 9.5px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+	}
+	.k8s-hm-legend__cap { white-space: nowrap; }
+	.k8s-hm-legend__ramp {
+		display: inline-flex;
+		gap: 2px;
+		padding: 2px;
+		border: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+		border-radius: 3px;
+	}
+	.k8s-hm-legend__ramp span {
+		display: inline-block;
+		width: 14px;
+		height: 8px;
+		border-radius: 1px;
+		background: color-mix(in oklab,
+			color-mix(in oklab, var(--muted-foreground) 22%, transparent),
+			var(--primary) calc(var(--h, 0.5) * 100%)
+		);
+	}
+	.k8s-hm-legend__scale {
+		font-variant-numeric: tabular-nums;
+		text-transform: none;
+		letter-spacing: 0;
+	}
+	.k8s-hm-legend__scale--right { margin-right: 4px; }
+	.k8s-hm-legend__sep {
+		flex: 1 0 8px;
+	}
+	.k8s-hm-legend__swatch {
+		display: inline-block;
+		width: 10px;
+		height: 10px;
+		border-radius: 2px;
+	}
+	.k8s-hm-legend__swatch--warn { background: var(--severity-warn); }
+	.k8s-hm-legend__swatch--err  { background: var(--severity-error); }
+
+	@keyframes k8s-hm-breathe {
+		from { opacity: calc(0.40 + var(--heat, 0.5) * 0.4); }
+		to   { opacity: calc(0.65 + var(--heat, 0.5) * 0.4); }
+	}
+	@keyframes k8s-hm-pulse {
+		from { opacity: 0.55; }
+		to   { opacity: 0.95; }
+	}
+
+	@media (max-width: 720px) {
+		.k8s-hm-summary { grid-template-columns: repeat(3, 1fr); }
+		.k8s-hm-summary__cell:nth-child(4),
+		.k8s-hm-summary__cell:nth-child(5) {
+			display: none;
+		}
+		.k8s-hm-bands .k8s-hm-band__count { display: none; }
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.k8s-hm-cell,
+		.k8s-hm-cell--warn,
+		.k8s-hm-cell--err {
+			animation: none !important;
+		}
+	}
+</style>
