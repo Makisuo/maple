@@ -15,7 +15,7 @@
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_get_started = () => `Get started free`
+export const cta_get_started = () => `Start free trial`
 
 
 /**
@@ -55,7 +55,7 @@ export const nav_announcement = () => `Maple is live · `
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement_link = () => `get started for free`
+export const nav_announcement_link = () => `start your free trial`
 
 
 /**
@@ -111,7 +111,7 @@ export const nav_dashboard = () => `Dashboard`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_get_started = () => `Get started for free`
+export const nav_get_started = () => `Start free trial`
 
 
 /**
@@ -271,7 +271,7 @@ export const hero_keep_reading = () => `keep reading ↓`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_title = () => `Real traces. Real time. Real open source.`
+export const hero_title = () => `Open-source observability.`
 
 
 /**
@@ -295,7 +295,7 @@ export const hero_title_accent = () => `Native to AI.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_subtitle = () => `Traces, logs, metrics on OpenTelemetry. No agents to install, no per-host fees, no vendor lock. Your AI agent reads it too.`
+export const hero_subtitle = () => `Traces, logs, and metrics on OpenTelemetry. Query billions of rows in milliseconds — or let your AI agent do it.`
 
 
 /**
@@ -335,7 +335,7 @@ export const sov_pillar_1_label = () => `Open source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_pillar_1_body = () => `Apache-licensed. Read every line. Fork it. Self-host on your own boxes if that's what your security review needs.`
+export const sov_pillar_1_body = () => `Open-source under FSL-1.1. Read every line. Fork it. Self-host on your own boxes if that's what your security review needs.`
 
 
 /**
@@ -615,7 +615,7 @@ export const bill_v_enterprise = () => `Enterprise tier`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_v_usage = () => `$0.30 / GB ingested`
+export const bill_v_usage = () => `$0.25 / GB ingested`
 
 
 /**
@@ -647,7 +647,7 @@ export const bill_v_yes = () => `Yes`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_v_apache = () => `Apache 2.0`
+export const bill_v_apache = () => `FSL-1.1`
 
 
 /**
@@ -743,7 +743,7 @@ export const start_eyebrow = () => `07 · Start`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_title = () => `Three commands to first trace.`
+export const start_title = () => `Three steps to first trace.`
 
 
 /**
@@ -799,7 +799,7 @@ export const cta_bookend_title = () => `Run it yourself.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_lede = () => `Free tier is generous. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
+export const cta_bookend_lede = () => `14-day trial on Starter, 30 days on Startup. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
 
 
 /**
@@ -807,7 +807,7 @@ export const cta_bookend_lede = () => `Free tier is generous. Self-host is suppo
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_primary = () => `Get started free`
+export const cta_bookend_primary = () => `Start free trial`
 
 
 /**
@@ -1951,7 +1951,7 @@ export const bottomcta_heading = () => `Ready to observe with clarity?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_subtitle = () => `Start sending traces, logs, and metrics in under five minutes. No credit card required.`
+export const bottomcta_subtitle = () => `Start sending traces, logs, and metrics in under five minutes.`
 
 
 /**
@@ -2247,7 +2247,7 @@ export const pricing_platform_features = () => `Platform features`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_free_forever = () => `Free forever`
+export const pricing_free_forever = () => `Trial included`
 
 
 /**
@@ -2471,7 +2471,7 @@ export const faq_selfhost_q = () => `Can I self-host Maple?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_selfhost_a = () => `Absolutely. Maple is fully open source and can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience.`
+export const faq_selfhost_a = () => `Yes. Maple's source is available under FSL-1.1, and the project can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience.`
 
 
 /**
@@ -2519,7 +2519,7 @@ export const page_pricing_title = () => `Simple, Transparent Pricing — Maple`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_pricing_desc = () => `Start free with generous data limits for logs, traces, and metrics. Scale with transparent, usage-based pricing. No per-seat fees, no hidden costs.`
+export const page_pricing_desc = () => `Transparent usage-based pricing for logs, traces, and metrics. No per-seat fees, no hidden costs.`
 
 
 /**
@@ -2543,7 +2543,7 @@ export const page_pricing_heading = () => `Simple, transparent pricing`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_pricing_subtitle = () => `Start free with generous limits. Scale as you grow with usage-based pricing — no per-seat fees, no hidden costs, no vendor lock-in.`
+export const page_pricing_subtitle = () => `Transparent, usage-based pricing — no per-seat fees, no hidden costs, no vendor lock-in. Trials available on every plan.`
 
 
 /**
@@ -3095,7 +3095,7 @@ export const page_dd_title = () => `Datadog Alternative (Open Source) — Maple 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_desc = () => `Compare Maple and Datadog for observability. Maple offers transparent usage-based pricing, native OpenTelemetry support, and AI-powered diagnostics — fully open source.`
+export const page_dd_desc = () => `Compare Maple and Datadog for observability. Maple offers transparent usage-based pricing, native OpenTelemetry support, and AI-powered diagnostics — open source.`
 
 
 /**
@@ -3175,7 +3175,7 @@ export const page_dd_ai_desc = () => `Diagnose issues faster with AI-powered roo
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_oss = () => `Fully open source`
+export const page_dd_oss = () => `Open source`
 
 
 /**

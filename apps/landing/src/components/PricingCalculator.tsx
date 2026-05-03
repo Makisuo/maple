@@ -374,7 +374,7 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 							href="https://app.maple.dev"
 							className="shrink-0 bg-[oklch(0.75_0.12_70)] text-[oklch(0.15_0.02_60)] px-6 py-2.5 text-sm font-medium hover:opacity-90 transition-opacity"
 						>
-							Get started free
+							Start free trial
 						</a>
 					</div>
 				</div>

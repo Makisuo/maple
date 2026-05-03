@@ -183,6 +183,57 @@
 	fill: var(--foreground) !important;
 }
 
+/* App mock interactive sidebar — CSS-only tab switching */
+.mock-radio {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+.app-mock .mock-view {
+	display: none;
+}
+
+.app-mock:has(.mock-radio-map:checked) .mock-view-map,
+.app-mock:has(.mock-radio-overview:checked) .mock-view-overview,
+.app-mock:has(.mock-radio-services:checked) .mock-view-services,
+.app-mock:has(.mock-radio-traces:checked) .mock-view-traces,
+.app-mock:has(.mock-radio-logs:checked) .mock-view-logs,
+.app-mock:has(.mock-radio-metrics:checked) .mock-view-metrics {
+	display: block;
+}
+
+.app-mock:has(.mock-radio-map:checked) nav .mock-nav-map,
+.app-mock:has(.mock-radio-overview:checked) nav .mock-nav-overview,
+.app-mock:has(.mock-radio-services:checked) nav .mock-nav-services,
+.app-mock:has(.mock-radio-traces:checked) nav .mock-nav-traces,
+.app-mock:has(.mock-radio-logs:checked) nav .mock-nav-logs,
+.app-mock:has(.mock-radio-metrics:checked) nav .mock-nav-metrics {
+	background-color: var(--muted);
+	color: var(--foreground);
+}
+
+.app-mock:has(.mock-radio-map:checked) nav .mock-nav-map svg,
+.app-mock:has(.mock-radio-overview:checked) nav .mock-nav-overview svg,
+.app-mock:has(.mock-radio-services:checked) nav .mock-nav-services svg,
+.app-mock:has(.mock-radio-traces:checked) nav .mock-nav-traces svg,
+.app-mock:has(.mock-radio-logs:checked) nav .mock-nav-logs svg,
+.app-mock:has(.mock-radio-metrics:checked) nav .mock-nav-metrics svg {
+	opacity: 1;
+}
+
+/* Gradient text utility — used in the hero accent line. */
+.text-gradient-accent {
+	background: linear-gradient(to right, var(--accent), oklch(0.75 0.15 90));
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	background-clip: text;
+}
+
 /* ──────────────────────────────────────────────────────────────
    Drenched amber identity surface.
    Used twice on the page — sovereignty section, bookend CTA.

@@ -1,7 +1,7 @@
 /**
  * Drives the LiveWaterfall animation. Cycle structure:
  *
- *   PLAY  (totalMs * 6)        — bars grow in sequence at 1/6 wall-speed.
+ *   PLAY  (totalMs * speed)    — bars grow in sequence at 1/speed wall-speed.
  *   PAUSE (1400ms)             — all bars full; slowest-span annotation reveals.
  *   RESET (320ms)              — frame opacity fades to 0.35 (CSS transition);
  *                                progress snaps to 0; opacity returns to 1.
@@ -25,12 +25,14 @@ type RowState = {
 
 const PAUSE_MS = 1400;
 const RESET_MS = 320;
-const SPEED_DIVISOR = 6;
+const DEFAULT_SPEED_DIVISOR = 10;
 
 export function startWaterfall(root: HTMLElement) {
 	const totalMs = Number(root.dataset.total ?? 200);
+	const speedDivisor = Number(root.dataset.speed ?? DEFAULT_SPEED_DIVISOR);
 	const stage = root.querySelector<HTMLElement>("[data-waterfall-stage]") ?? root;
 	const cursor = root.querySelector<HTMLElement>("[data-trace-cursor]");
+	const firstTrack = root.querySelector<HTMLElement>(".span-bar-track");
 
 	const rows: RowState[] = Array.from(
 		root.querySelectorAll<HTMLElement>(".waterfall-row"),
@@ -57,9 +59,22 @@ export function startWaterfall(root: HTMLElement) {
 		0,
 	);
 
-	const playEndMs = totalMs * SPEED_DIVISOR;
+	const playEndMs = totalMs * speedDivisor;
 	const pauseEndMs = playEndMs + PAUSE_MS;
 	const cycleEndMs = pauseEndMs + RESET_MS;
+
+	let trackOffsetX = 0;
+	let trackWidth = 0;
+	const measureTrack = () => {
+		if (!firstTrack) return;
+		const sR = stage.getBoundingClientRect();
+		const tR = firstTrack.getBoundingClientRect();
+		trackOffsetX = tR.left - sR.left;
+		trackWidth = tR.width;
+	};
+	measureTrack();
+	const ro = new ResizeObserver(measureTrack);
+	ro.observe(stage);
 
 	let raf = 0;
 	let cycleStart = performance.now();
@@ -81,7 +96,8 @@ export function startWaterfall(root: HTMLElement) {
 
 	const setCursor = (xPct: number, opacity: number) => {
 		if (!cursor) return;
-		cursor.style.setProperty("--cursor-x", `${xPct}%`);
+		const px = trackOffsetX + (xPct / 100) * trackWidth;
+		cursor.style.setProperty("--cursor-x", `${px}px`);
 		cursor.style.setProperty("--cursor-opacity", String(opacity));
 	};
 
@@ -133,7 +149,7 @@ export function startWaterfall(root: HTMLElement) {
 		}
 
 		// PLAY window.
-		const playMs = elapsed / SPEED_DIVISOR;
+		const playMs = elapsed / speedDivisor;
 		let activeIdx = -1;
 		rows.forEach((r, i) => {
 			const localElapsed = playMs - r.startMs;

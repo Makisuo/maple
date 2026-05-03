@@ -1,0 +1,842 @@
+---
+const uid = Math.random().toString(36).slice(2, 8);
+
+// ─── Service map geometry (mock-view-map) ──────────────────────────────
+// Pixel-faithful copy of apps/web/src/components/service-map/ServiceMapNode.tsx.
+// Same 220×62 card, same Tailwind classes, same brand-icon SVGs, same
+// severity colors. Edges keep the dashboard's smoothstep + flowing-dash
+// vocabulary. Rendered as static HTML inside SVG <foreignObject> so the
+// whole canvas scales with the mock window via the SVG viewBox.
+type Platform = "kubernetes" | "cloudflare" | "lambda" | undefined;
+type DbSystem = "postgres" | "redis" | "clickhouse" | "mysql" | "mongodb" | undefined;
+
+interface MapNode {
+    id: string;
+    label: string;
+    col: number;
+    row: number;
+    hot?: boolean;
+    db?: boolean;
+    dbSystem?: DbSystem;
+    platform?: Platform;
+    rps: string;
+    rpsPrefix?: string;
+    err?: string;
+    avg: string;
+    pods?: number;
+}
+interface MapEdge { from: string; to: string; rps?: number; calls: string; hot?: boolean }
+
+const MAP_NODE_W = 220;
+const MAP_NODE_H = 62;
+const MAP_COL_X = [10, 270, 530, 790];
+const MAP_ROWS_PER_COL: number[][] = [
+    [180],
+    [180],
+    [80, 180, 280],
+    [110, 250],
+];
+
+const mapNodes: MapNode[] = [
+    { id: "edge",     label: "edge",         col: 0, row: 0, platform: "cloudflare", rps: "12.4k", err: "0.1", avg: "8ms",   pods: 6  },
+    { id: "checkout", label: "checkout-api", col: 1, row: 0, platform: "kubernetes", rps: "4.2k",  err: "0.3", avg: "24ms",  pods: 12 },
+    { id: "auth",     label: "auth-svc",     col: 2, row: 0, platform: "kubernetes", rps: "4.2k",  err: "0.0", avg: "6ms",   pods: 8  },
+    { id: "pricing",  label: "pricing",      col: 2, row: 1, platform: "kubernetes", hot: true, rps: "2.8k", err: "2.4", avg: "142ms", pods: 4 },
+    { id: "payments", label: "payments",     col: 2, row: 2, platform: "lambda",     rps: "1.1k",  err: "0.5", avg: "38ms" },
+    { id: "redis",    label: "redis",        col: 3, row: 0, db: true, dbSystem: "redis",    rps: "18.2k", avg: "2ms"  },
+    { id: "postgres", label: "postgres",     col: 3, row: 1, db: true, dbSystem: "postgres", rps: "6.4k",  avg: "14ms" },
+];
+
+const mapEdges: MapEdge[] = [
+    { from: "edge",     to: "checkout", rps: 4200,  calls: "4.2k"  },
+    { from: "checkout", to: "auth",     rps: 4200,  calls: "4.2k"  },
+    { from: "checkout", to: "pricing",  rps: 2800,  calls: "2.8k", hot: true },
+    { from: "checkout", to: "payments", rps: 1100,  calls: "1.1k" },
+    { from: "pricing",  to: "redis",    rps: 12400, calls: "12.4k" },
+    { from: "pricing",  to: "postgres", rps: 6400,  calls: "6.4k"  },
+];
+
+// Service-color slot (matches packages/ui/src/lib/colors.ts: hash idx → --service-N)
+const mapOrderedServices = Array.from(new Set(mapNodes.filter((n) => !n.db).map((n) => n.label)));
+function mapServiceColor(label: string): string {
+    const idx = (mapOrderedServices.indexOf(label) % 16) + 1;
+    return `var(--service-${idx})`;
+}
+
+interface Pt { x: number; y: number }
+const mapNodeRight = (n: MapNode): Pt => ({ x: MAP_COL_X[n.col] + MAP_NODE_W, y: MAP_ROWS_PER_COL[n.col][n.row] });
+const mapNodeLeft  = (n: MapNode): Pt => ({ x: MAP_COL_X[n.col],              y: MAP_ROWS_PER_COL[n.col][n.row] });
+
+function smoothStepPath(a: Pt, b: Pt, r = 12): string {
+    if (Math.abs(a.y - b.y) < 0.5) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+    const midX = (a.x + b.x) / 2;
+    const dy = Math.sign(b.y - a.y);
+    return [
+        `M ${a.x} ${a.y}`,
+        `L ${midX - r} ${a.y}`,
+        `Q ${midX} ${a.y} ${midX} ${a.y + dy * r}`,
+        `L ${midX} ${b.y - dy * r}`,
+        `Q ${midX} ${b.y} ${midX + r} ${b.y}`,
+        `L ${b.x} ${b.y}`,
+    ].join(" ");
+}
+
+// Match the dashboard formula: clamp(2, 8, 2 + log10(callCount) * 2)
+function strokeWidthFor(callCount: number | undefined): number {
+    if (!callCount || callCount <= 0) return 2;
+    return Math.min(8, Math.max(2, 2 + Math.log10(callCount) * 2));
+}
+
+const mapNodeById = Object.fromEntries(mapNodes.map((n) => [n.id, n]));
+const mapEdgeRender = mapEdges.map((e, i) => {
+    const fromNode = mapNodeById[e.from];
+    const toNode = mapNodeById[e.to];
+    const a = mapNodeRight(fromNode);
+    const b = mapNodeLeft(toNode);
+    const midX = (a.x + b.x) / 2;
+    const labelY = a.y + (b.y - a.y) / 2;
+    return {
+        ...e,
+        gradId: `mockmap-${uid}-${i}`,
+        path: smoothStepPath(a, b),
+        sw: strokeWidthFor(e.rps),
+        sourceColor: mapServiceColor(fromNode.label),
+        targetColor: toNode.db ? "var(--severity-info)" : mapServiceColor(toNode.label),
+        sourcePt: a,
+        targetPt: b,
+        labelX: midX,
+        labelY,
+    };
+});
+
+const MAP_VIEW_W = 1020;
+const MAP_VIEW_H = 360;
+---
+
+<div class="app-mock border border-border bg-bg-elevated overflow-hidden">
+    <!-- Window chrome -->
+    <div class="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg">
+        <div class="w-2.5 h-2.5 bg-border"></div>
+        <div class="w-2.5 h-2.5 bg-border"></div>
+        <div class="w-2.5 h-2.5 bg-border"></div>
+        <span class="ml-3 text-fg-muted text-[10px]">maple.dev</span>
+    </div>
+
+    <!-- Hidden radio inputs for tab switching -->
+    <input type="radio" name={`mock-nav-${uid}`} id={`mock-map-${uid}`} class="mock-radio mock-radio-map" checked />
+    <input type="radio" name={`mock-nav-${uid}`} id={`mock-overview-${uid}`} class="mock-radio mock-radio-overview" />
+    <input type="radio" name={`mock-nav-${uid}`} id={`mock-services-${uid}`} class="mock-radio mock-radio-services" />
+    <input type="radio" name={`mock-nav-${uid}`} id={`mock-traces-${uid}`} class="mock-radio mock-radio-traces" />
+    <input type="radio" name={`mock-nav-${uid}`} id={`mock-logs-${uid}`} class="mock-radio mock-radio-logs" />
+    <input type="radio" name={`mock-nav-${uid}`} id={`mock-metrics-${uid}`} class="mock-radio mock-radio-metrics" />
+
+    <div class="flex min-h-[340px] md:min-h-[400px]">
+        <!-- Sidebar -->
+        <div class="w-40 border-r border-border shrink-0 hidden md:flex flex-col bg-bg">
+            <div class="flex items-center gap-2 px-3 py-3 border-b border-border">
+                <div class="w-5 h-5 bg-accent flex items-center justify-center">
+                    <span class="text-accent-foreground text-[9px] font-bold">M</span>
+                </div>
+                <span class="text-fg text-[11px] font-medium">Maple</span>
+            </div>
+            <div class="p-2 text-[9px] text-fg-muted uppercase tracking-wider px-3 pt-3">Navigation</div>
+            <nav class="px-1.5 space-y-0.5 flex-1">
+                <label for={`mock-map-${uid}`} class="mock-nav-map mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="12" cy="12" r="2"/><line x1="7" y1="6" x2="10" y2="11"/><line x1="17" y1="6" x2="14" y2="11"/><line x1="7" y1="18" x2="10" y2="13"/><line x1="17" y1="18" x2="14" y2="13"/></svg>
+                    Service Map
+                </label>
+                <label for={`mock-overview-${uid}`} class="mock-nav-overview mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                    Overview
+                </label>
+                <label for={`mock-services-${uid}`} class="mock-nav-services mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="0"/><rect x="2" y="14" width="20" height="8" rx="0"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
+                    Services
+                </label>
+                <label for={`mock-traces-${uid}`} class="mock-nav-traces mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+                    Traces
+                </label>
+                <label for={`mock-logs-${uid}`} class="mock-nav-logs mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    Logs
+                </label>
+                <label for={`mock-metrics-${uid}`} class="mock-nav-metrics mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    Metrics
+                </label>
+            </nav>
+        </div>
+
+        <!-- ===== SERVICE MAP VIEW ===== -->
+        <div class="mock-view mock-view-map flex-1 p-3 md:p-4 space-y-3 overflow-hidden">
+            <!-- Header -->
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-[9px] text-fg-muted">Service Map</div>
+                    <div class="text-xs text-fg font-medium">Live dependencies</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">production</span>
+                    <span class="inline-flex items-center gap-1.5 text-[9px] text-primary border border-border px-2 py-0.5">
+                        <span class="size-1 rounded-full bg-primary animate-pulse-dot"></span>
+                        live · 60s
+                    </span>
+                </div>
+            </div>
+
+            <!-- Map canvas. SVG handles scaling via viewBox; nodes ride along
+                 inside <foreignObject> so they use the dashboard's exact Tailwind
+                 markup (matches apps/web/src/components/service-map/ServiceMapNode.tsx). -->
+            <div class="relative border border-border bg-card overflow-hidden">
+                <svg
+                    viewBox={`0 0 ${MAP_VIEW_W} ${MAP_VIEW_H}`}
+                    class="block w-full h-auto"
+                    role="img"
+                    aria-label="Live service dependency graph"
+                >
+                    <defs>
+                        <!-- React Flow's BackgroundVariant.Dots: gap 16, size 1 -->
+                        <pattern id={`mockmap-dots-${uid}`} x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
+                            <circle cx="0.5" cy="0.5" r="0.5" fill="color-mix(in oklab, var(--muted-foreground) 30%, transparent)" />
+                        </pattern>
+                        <!-- userSpaceOnUse so the filter region doesn't collapse on horizontal
+                             (zero-bbox-height) paths — keeps every edge visually consistent. -->
+                        <filter id={`mockmap-ambient-${uid}`} filterUnits="userSpaceOnUse" x="0" y="0" width={MAP_VIEW_W} height={MAP_VIEW_H}>
+                            <feGaussianBlur in="SourceGraphic" stdDeviation="8" />
+                        </filter>
+                        <filter id={`mockmap-glass-${uid}`} filterUnits="userSpaceOnUse" x="0" y="0" width={MAP_VIEW_W} height={MAP_VIEW_H}>
+                            <feGaussianBlur in="SourceGraphic" stdDeviation="0.5" result="glass-blur" />
+                            <feMerge>
+                                <feMergeNode in="glass-blur" />
+                                <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                        </filter>
+                        {mapEdgeRender.map((e) => (
+                            <linearGradient id={e.gradId} gradientUnits="userSpaceOnUse"
+                                x1={e.sourcePt.x} y1={e.sourcePt.y}
+                                x2={e.targetPt.x} y2={e.targetPt.y}>
+                                <stop offset="0%" stop-color={e.sourceColor} />
+                                <stop offset="100%" stop-color={e.targetColor} />
+                            </linearGradient>
+                        ))}
+                    </defs>
+
+                    <!-- Dot grid background -->
+                    <rect x="0" y="0" width={MAP_VIEW_W} height={MAP_VIEW_H} fill={`url(#mockmap-dots-${uid})`} />
+
+                    <!-- Edges: 5 layers (ambient, tube wall, dark core, glass, flowing dashes) — matches ServiceMapEdge.tsx -->
+                    {mapEdgeRender.map((e) => {
+                        const intensity = e.rps && e.rps > 0 ? Math.min(1, 0.3 + 0.7 * (Math.log10(1 + e.rps) / Math.log10(100))) : 0.15;
+                        return (
+                            <g>
+                                <path d={e.path} fill="none" stroke={`url(#${e.gradId})`} stroke-width={e.sw * 3 + 12} stroke-opacity={0.04 + intensity * 0.08} filter={`url(#mockmap-ambient-${uid})`} />
+                                <path d={e.path} fill="none" stroke={`url(#${e.gradId})`} stroke-width={e.sw + 4} stroke-opacity={0.12 + intensity * 0.15} />
+                                <path d={e.path} fill="none" stroke="oklch(0.141 0.005 285.823)" stroke-width={e.sw} stroke-opacity={0.5 + intensity * 0.2} />
+                                <path d={e.path} fill="none" stroke={`url(#${e.gradId})`} stroke-width={e.sw * 0.4} stroke-opacity={0.15 + intensity * 0.25} filter={`url(#mockmap-glass-${uid})`} />
+                                <path d={e.path} fill="none" stroke={`url(#${e.gradId})`} stroke-width={e.sw * 0.25} stroke-opacity={0.2 + intensity * 0.4} stroke-dasharray="4 20" class="svc-map-flow" />
+                            </g>
+                        );
+                    })}
+
+                    <!-- Nodes — exact ServiceMapNode.tsx markup inside foreignObject -->
+                    {mapNodes.map((n) => {
+                        const x = MAP_COL_X[n.col];
+                        const y = MAP_ROWS_PER_COL[n.col][n.row] - MAP_NODE_H / 2;
+                        const errNum = n.err ? parseFloat(n.err) : 0;
+                        const healthDotCls = errNum > 5 ? "bg-severity-error" : errNum > 1 ? "bg-severity-warn" : "bg-severity-info";
+                        const errCls = errNum > 5 ? "text-severity-error" : errNum > 1 ? "text-severity-warn" : "text-fg";
+                        const cardBorderCls = n.hot ? "border-severity-warn" : "border-border";
+                        const cardBgCls = n.db ? "bg-muted/40" : "bg-card";
+                        const accent = n.db ? "var(--severity-info)" : mapServiceColor(n.label);
+                        return (
+                            <foreignObject x={x} y={y} width={MAP_NODE_W} height={MAP_NODE_H} class="overflow-visible">
+                                <div xmlns="http://www.w3.org/1999/xhtml" class={`w-[220px] rounded-lg border overflow-hidden flex ${cardBgCls} ${cardBorderCls}`} style={n.hot ? "box-shadow: 0 0 0 3px color-mix(in oklab, var(--severity-warn) 15%, transparent);" : undefined}>
+                                    {/* Left accent stripe */}
+                                    <div class="w-[3px] shrink-0" style={`background-color: ${accent}`}></div>
+
+                                    <div class="flex flex-col gap-2 px-3 py-2.5 flex-1 min-w-0">
+                                        {/* Header: health dot · platform/db icon · service name · DB badge */}
+                                        <div class="flex items-center gap-1.5">
+                                            <div class={`h-1.5 w-1.5 rounded-full shrink-0 ${healthDotCls}`}></div>
+                                            {/* Platform / DB icon — inline SVG, brand colors */}
+                                            {n.platform === "kubernetes" && (
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="#326CE5" class="shrink-0" aria-hidden="true">
+                                                    <path d="M10.204 14.35l.007.01-.999 2.413a5.171 5.171 0 0 1-2.075-2.597l2.578-.437.004.005a.44.44 0 0 1 .484.606zm-.833-2.129a.44.44 0 0 0 .173-.756l.002-.011L7.585 9.7a5.143 5.143 0 0 0-.73 3.255l2.514-.725.002-.009zm1.145-1.98a.44.44 0 0 0 .699-.337l.01-.005.15-2.62a5.144 5.144 0 0 0-3.01 1.442l2.147 1.523.004-.002zm.76 2.75l.723.349.722-.347.18-.78-.5-.623h-.804l-.5.623.179.779zm1.5-3.095a.44.44 0 0 0 .7.336l.008.003 2.134-1.513a5.188 5.188 0 0 0-2.992-1.442l.148 2.615.002.001zm10.876 5.97l-5.773 7.181a1.6 1.6 0 0 1-1.248.594l-9.261.003a1.6 1.6 0 0 1-1.247-.596l-5.776-7.18a1.583 1.583 0 0 1-.307-1.34L2.1 5.573c.108-.47.425-.864.863-1.073L11.305.513a1.606 1.606 0 0 1 1.385 0l8.345 3.985c.438.209.755.604.863 1.073l2.062 8.955c.108.47-.005.963-.308 1.34zm-3.289-2.057c-.042-.01-.103-.026-.145-.034-.174-.033-.315-.025-.479-.038-.35-.037-.638-.067-.895-.148-.105-.04-.18-.165-.216-.216l-.201-.059a6.45 6.45 0 0 0-.105-2.332 6.465 6.465 0 0 0-.936-2.163c.052-.047.15-.133.177-.159.008-.09.001-.183.094-.282.197-.185.444-.338.743-.522.142-.084.273-.137.415-.242.032-.024.076-.062.11-.089.24-.191.295-.52.123-.736-.172-.216-.506-.236-.745-.045-.034.027-.08.062-.111.088-.134.116-.217.23-.33.35-.246.25-.45.458-.673.609-.097.056-.239.037-.303.033l-.19.135a6.545 6.545 0 0 0-4.146-2.003l-.012-.223c-.065-.062-.143-.115-.163-.25-.022-.268.015-.557.057-.905.023-.163.061-.298.068-.475.001-.04-.001-.099-.001-.142 0-.306-.224-.555-.5-.555-.275 0-.499.249-.499.555l.001.014c0 .041-.002.092 0 .128.006.177.044.312.067.475.042.348.078.637.056.906a.545.545 0 0 1-.162.258l-.012.211a6.424 6.424 0 0 0-4.166 2.003 8.373 8.373 0 0 1-.18-.128c-.09.012-.18.04-.297-.029-.223-.15-.427-.358-.673-.608-.113-.12-.195-.234-.329-.349-.03-.026-.077-.062-.111-.088a.594.594 0 0 0-.348-.132.481.481 0 0 0-.398.176c-.172.216-.117.546.123.737l.007.005.104.083c.142.105.272.159.414.242.299.185.546.338.743.522.076.082.09.226.1.288l.16.143a6.462 6.462 0 0 0-1.02 4.506l-.208.06c-.055.072-.133.184-.215.217-.257.081-.546.11-.895.147-.164.014-.305.006-.48.039-.037.007-.09.02-.133.03l-.004.002-.007.002c-.295.071-.484.342-.423.608.061.267.349.429.645.365l.007-.001.01-.003.129-.029c.17-.046.294-.113.448-.172.33-.118.604-.217.87-.256.112-.009.23.069.288.101l.217-.037a6.5 6.5 0 0 0 2.88 3.596l-.09.218c.033.084.069.199.044.282-.097.252-.263.517-.452.813-.091.136-.185.242-.268.399-.02.037-.045.095-.064.134-.128.275-.034.591.213.71.248.12.556-.007.69-.282v-.002c.02-.039.046-.09.062-.127.07-.162.094-.301.144-.458.132-.332.205-.68.387-.897.05-.06.13-.082.215-.105l.113-.205a6.453 6.453 0 0 0 4.609.012l.106.192c.086.028.18.042.256.155.136.232.229.507.342.84.05.156.074.295.145.457.016.037.043.09.062.129.133.276.442.402.69.282.247-.118.341-.435.213-.71-.02-.039-.045-.096-.065-.134-.083-.156-.177-.261-.268-.398-.19-.296-.346-.541-.443-.793-.04-.13.007-.21.038-.294-.018-.022-.059-.144-.083-.202a6.499 6.499 0 0 0 2.88-3.622c.064.01.176.03.213.038.075-.05.144-.114.28-.104.266.039.54.138.87.256.154.06.277.128.448.173.036.01.088.019.13.028l.009.003.007.001c.297.064.584-.098.645-.365.06-.266-.128-.537-.423-.608zM16.4 9.701l-1.95 1.746v.005a.44.44 0 0 0 .173.757l.003.01 2.526.728a5.199 5.199 0 0 0-.108-1.674A5.208 5.208 0 0 0 16.4 9.7zm-4.013 5.325a.437.437 0 0 0-.404-.232.44.44 0 0 0-.372.233h-.002l-1.268 2.292a5.164 5.164 0 0 0 3.326.003l-1.27-2.296h-.01zm1.888-1.293a.44.44 0 0 0-.27.036.44.44 0 0 0-.214.572l-.003.004 1.01 2.438a5.15 5.15 0 0 0 2.081-2.615l-2.6-.44-.004.005z" />
+                                                </svg>
+                                            )}
+                                            {n.platform === "cloudflare" && (
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="#F38020" class="shrink-0" aria-hidden="true">
+                                                    <path d="M16.5088 16.8447c.1475-.5068.0908-.9707-.1553-1.3154-.2246-.3164-.6045-.499-1.0615-.5205l-8.6592-.1123a.1559.1559 0 0 1-.1333-.0713c-.0283-.042-.0351-.0986-.021-.1553.0278-.084.1123-.1484.2036-.1562l8.7359-.1123c1.0351-.0489 2.1601-.8868 2.5537-1.9136l.499-1.3013c.0215-.0561.0293-.1128.0147-.168-.5625-2.5463-2.835-4.4453-5.5499-4.4453-2.5039 0-4.6284 1.6177-5.3876 3.8614-.4927-.3658-1.1187-.5625-1.794-.499-1.2026.119-2.1665 1.083-2.2861 2.2856-.0283.31-.0069.6128.0635.894C1.5683 13.171 0 14.7754 0 16.752c0 .1748.0142.3515.0352.5273.0141.083.0844.1475.1689.1475h15.9814c.0909 0 .1758-.0645.2032-.1553l.12-.4268zm2.7568-5.5634c-.0771 0-.1611 0-.2383.0112-.0566 0-.1054.0415-.127.0976l-.3378 1.1744c-.1475.5068-.0918.9707.1543 1.3164.2256.3164.6055.498 1.0625.5195l1.8437.1133c.0557 0 .1055.0263.1329.0703.0283.043.0351.1074.0214.1562-.0283.084-.1132.1485-.204.1553l-1.921.1123c-1.041.0488-2.1582.8867-2.5527 1.914l-.1406.3585c-.0283.0713.0215.1416.0986.1416h6.5977c.0771 0 .1474-.0489.169-.126.1122-.4082.1757-.837.1757-1.2803 0-2.6025-2.125-4.727-4.7344-4.727" />
+                                                </svg>
+                                            )}
+                                            {n.platform === "lambda" && (
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="#FF9900" class="shrink-0" aria-hidden="true">
+                                                    <path d="M3.6722 3v17.997h4.5066l1.6512-3.4192H6.563V6.4192h2.4119L7.4036 3zm10.5418 0L9.749 12.0146l4.4642 8.9854H21l-4.4856-9.0145L20.917 3z" />
+                                                </svg>
+                                            )}
+                                            {n.dbSystem === "postgres" && (
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="#4169E1" class="shrink-0" aria-hidden="true">
+                                                    <path d="M23.5594 14.7228a.5269.5269 0 0 0-.0563-.1191c-.139-.2632-.4768-.3418-1.0074-.2321-1.6533.3411-2.2935.1312-2.5256-.0191 1.342-2.0482 2.445-4.522 3.0411-6.8297.2714-1.0507.7982-3.5237.1222-4.7316a1.5641 1.5641 0 0 0-.1509-.235C21.6931.9086 19.8007.0248 17.5099.0005c-1.4947-.0158-2.7705.3461-3.1161.4794a9.449 9.449 0 0 0-.5159-.0816 8.044 8.044 0 0 0-1.3114-.1278c-1.1822-.0184-2.2038.2642-3.0498.8406-.8573-.3211-4.7888-1.645-7.2219.0788C.9359 2.1526.3086 3.8733.4302 6.3043c.0409.818.5069 3.334 1.2423 5.7436.4598 1.5065.9387 2.7019 1.4334 3.582.553.9942 1.1259 1.5933 1.7143 1.7895.4474.1491 1.1327.1441 1.8581-.7279.8012-.9635 1.5903-1.8258 1.9446-2.2069.4351.2355.9064.3625 1.39.3772a.0569.0569 0 0 0 .0004.0041c-.084.0993-.1664.2007-.2472.3054-.3389.4302-.4094.5197-1.5002.7443-.3102.064-1.1344.2339-1.1464.8115-.0025.1224.0329.2309.0919.3268.2269.4231.9216.6097 1.015.6331 1.3345.3335 2.5044.092 3.3714-.6787-.017 2.231.0775 4.4174.3454 5.0874.2212.5529.7618 1.9045 2.4692 1.9043.2505 0 .5263-.0291.8296-.0941 1.7819-.3821 2.5557-1.1696 2.855-2.9059.1503-.8707.4016-2.8753.5388-4.1012.0169-.0703.0357-.1207.057-.1362.0007-.0005.0697-.0471.4272.0307a.3673.3673 0 0 0 .0443.0068l.2539.0223.0149.001c.8468.0384 1.9114-.1426 2.5312-.4308.6438-.2988 1.8057-1.0323 1.5951-1.6698z" />
+                                                </svg>
+                                            )}
+                                            {n.dbSystem === "redis" && (
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="#FF4438" class="shrink-0" aria-hidden="true">
+                                                    <path d="M22.71 13.145c-1.66 2.092-3.452 4.483-7.038 4.483-3.203 0-4.397-2.825-4.48-5.12.701 1.484 2.073 2.685 4.214 2.63 4.117-.133 6.94-3.852 6.94-7.239 0-4.05-3.022-6.972-8.268-6.972-3.752 0-8.4 1.428-11.455 3.685C2.59 6.937 3.885 9.958 4.35 9.626c2.648-1.904 4.748-3.13 6.784-3.744C8.12 9.244.886 17.05 0 18.425c.1 1.261 1.66 4.648 2.424 4.648.232 0 .431-.133.664-.365a100.49 100.49 0 0 0 5.54-6.765c.222 3.104 1.748 6.898 6.014 6.898 3.819 0 7.604-2.756 9.33-8.965.2-.764-.73-1.361-1.261-.73zm-4.349-5.013c0 1.959-1.926 2.922-3.685 2.922-.941 0-1.664-.247-2.235-.568 1.051-1.592 2.092-3.225 3.21-4.973 1.972.334 2.71 1.43 2.71 2.619z" />
+                                                </svg>
+                                            )}
+                                            <span class="text-xs font-medium text-fg truncate">{n.label}</span>
+                                            {n.db && (
+                                                <span class="ml-auto shrink-0 text-[9px] font-medium tracking-wide text-fg-muted/60 uppercase">db</span>
+                                            )}
+                                        </div>
+
+                                        {/* Metrics row */}
+                                        <div class="flex gap-4">
+                                            <div class="flex flex-col gap-px">
+                                                <span class="text-[9px] font-medium tracking-wide text-fg-muted/60 uppercase">{n.db ? "calls/s" : "req/s"}</span>
+                                                <span class="text-[11px] font-medium text-fg font-mono tabular-nums">{n.rps}</span>
+                                            </div>
+                                            {n.err !== undefined && (
+                                                <div class="flex flex-col gap-px">
+                                                    <span class="text-[9px] font-medium tracking-wide text-fg-muted/60 uppercase">err%</span>
+                                                    <span class={`text-[11px] font-medium font-mono tabular-nums ${errCls}`}>{n.err}%</span>
+                                                </div>
+                                            )}
+                                            <div class="flex flex-col gap-px">
+                                                <span class="text-[9px] font-medium tracking-wide text-fg-muted/60 uppercase">avg</span>
+                                                <span class={`text-[11px] font-medium font-mono tabular-nums ${parseFloat(n.avg) > 100 ? "text-severity-warn" : "text-fg"}`}>{n.avg}</span>
+                                            </div>
+                                            {!n.db && (
+                                                <div class="flex flex-col gap-px ml-auto items-end">
+                                                    <span class="text-[9px] font-medium tracking-wide text-fg-muted/60 uppercase">pods</span>
+                                                    {n.pods !== undefined ? (
+                                                        <span class="flex items-center gap-1 text-[11px] font-medium text-fg font-mono tabular-nums">
+                                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-fg-muted/70 shrink-0" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                                                            {n.pods}
+                                                        </span>
+                                                    ) : (
+                                                        <span class="text-[11px] font-mono tabular-nums text-fg-muted/30">—</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </foreignObject>
+                        );
+                    })}
+                </svg>
+            </div>
+
+            <!-- Legend / status row — same vocabulary as the dashboard footer -->
+            <div class="flex items-center justify-between text-[9px] text-fg-muted">
+                <div class="flex items-center gap-3">
+                    <span class="font-medium">Drag to arrange · scroll to zoom</span>
+                    <span class="opacity-30">|</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="size-1.5 rounded-full bg-severity-info"></span>Healthy</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="size-1.5 rounded-full bg-severity-warn"></span>Degraded</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="size-1.5 rounded-full bg-severity-error"></span>Error</span>
+                </div>
+                <span class="text-severity-warn">pricing · p99 +18% vs 1h ago</span>
+            </div>
+        </div>
+
+        <!-- ===== OVERVIEW VIEW ===== -->
+        <div class="mock-view mock-view-overview flex-1 p-3 md:p-4 space-y-3 overflow-hidden">
+            <!-- Header -->
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-[9px] text-fg-muted">Overview</div>
+                    <div class="text-xs text-fg font-medium">Dashboard</div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">production</span>
+                    <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
+                </div>
+            </div>
+            <!-- Metric cards (matches real dashboard: Total Logs, Total Traces, Total Metrics, Data Size) -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
+                <div class="bg-bg-elevated p-2.5">
+                    <div class="text-[9px] text-fg-muted mb-0.5">Total Traces</div>
+                    <div class="text-base md:text-lg text-fg font-bold">24.3K</div>
+                </div>
+                <div class="bg-bg-elevated p-2.5">
+                    <div class="text-[9px] text-fg-muted mb-0.5">Total Logs</div>
+                    <div class="text-base md:text-lg text-fg font-bold">1.2M</div>
+                </div>
+                <div class="bg-bg-elevated p-2.5">
+                    <div class="text-[9px] text-fg-muted mb-0.5">Total Metrics</div>
+                    <div class="text-base md:text-lg text-fg font-bold">847K</div>
+                </div>
+                <div class="bg-bg-elevated p-2.5">
+                    <div class="text-[9px] text-fg-muted mb-0.5">Data Size</div>
+                    <div class="text-base md:text-lg text-fg font-bold">2.4GB</div>
+                </div>
+            </div>
+            <!-- 2x2 chart grid (matches real: Request Volume, Error Rate, Latency, Log Volume) -->
+            <div class="grid grid-cols-2 gap-3">
+                <!-- Request Volume -->
+                <div class="border border-border bg-bg p-3">
+                    <div class="text-[9px] text-fg-muted mb-2">Request Volume</div>
+                    <div class="flex items-end gap-[3px] h-14">
+                        <div class="flex-1 bg-chart-throughput/70 h-[45%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[52%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[68%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[60%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[82%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[75%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[90%]"></div>
+                        <div class="flex-1 bg-chart-throughput/70 h-[85%]"></div>
+                        <div class="flex-1 bg-chart-throughput h-[100%]"></div>
+                        <div class="flex-1 bg-chart-throughput h-[78%]"></div>
+                        <div class="flex-1 bg-chart-throughput h-[65%]"></div>
+                        <div class="flex-1 bg-chart-throughput h-[70%]"></div>
+                    </div>
+                </div>
+                <!-- Error Rate -->
+                <div class="border border-border bg-bg p-3">
+                    <div class="text-[9px] text-fg-muted mb-2">Error Rate</div>
+                    <div class="flex items-end gap-[3px] h-14">
+                        <div class="flex-1 bg-chart-error/50 h-[12%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[8%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[15%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[10%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[22%]"></div>
+                        <div class="flex-1 bg-chart-error/70 h-[45%]"></div>
+                        <div class="flex-1 bg-chart-error/70 h-[38%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[18%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[12%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[8%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[14%]"></div>
+                        <div class="flex-1 bg-chart-error/50 h-[10%]"></div>
+                    </div>
+                </div>
+                <!-- Latency (p50/p95/p99) -->
+                <div class="border border-border bg-bg p-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-[9px] text-fg-muted">Latency</div>
+                        <div class="flex items-center gap-2">
+                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p50 inline-block"></span>p50</span>
+                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p95 inline-block"></span>p95</span>
+                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p99 inline-block"></span>p99</span>
+                        </div>
+                    </div>
+                    <div class="relative h-14">
+                        <!-- p99 (tallest) -->
+                        <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
+                            <div class="flex-1 bg-chart-p99/30 h-[80%]"></div><div class="flex-1 bg-chart-p99/30 h-[75%]"></div><div class="flex-1 bg-chart-p99/30 h-[90%]"></div><div class="flex-1 bg-chart-p99/30 h-[85%]"></div><div class="flex-1 bg-chart-p99/30 h-[70%]"></div><div class="flex-1 bg-chart-p99/30 h-[95%]"></div><div class="flex-1 bg-chart-p99/30 h-[88%]"></div><div class="flex-1 bg-chart-p99/30 h-[78%]"></div><div class="flex-1 bg-chart-p99/30 h-[82%]"></div><div class="flex-1 bg-chart-p99/30 h-[75%]"></div><div class="flex-1 bg-chart-p99/30 h-[80%]"></div><div class="flex-1 bg-chart-p99/30 h-[72%]"></div>
+                        </div>
+                        <!-- p95 -->
+                        <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
+                            <div class="flex-1 bg-chart-p95/40 h-[50%]"></div><div class="flex-1 bg-chart-p95/40 h-[45%]"></div><div class="flex-1 bg-chart-p95/40 h-[58%]"></div><div class="flex-1 bg-chart-p95/40 h-[52%]"></div><div class="flex-1 bg-chart-p95/40 h-[42%]"></div><div class="flex-1 bg-chart-p95/40 h-[65%]"></div><div class="flex-1 bg-chart-p95/40 h-[55%]"></div><div class="flex-1 bg-chart-p95/40 h-[48%]"></div><div class="flex-1 bg-chart-p95/40 h-[50%]"></div><div class="flex-1 bg-chart-p95/40 h-[44%]"></div><div class="flex-1 bg-chart-p95/40 h-[52%]"></div><div class="flex-1 bg-chart-p95/40 h-[40%]"></div>
+                        </div>
+                        <!-- p50 (shortest) -->
+                        <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
+                            <div class="flex-1 bg-chart-p50/60 h-[22%]"></div><div class="flex-1 bg-chart-p50/60 h-[20%]"></div><div class="flex-1 bg-chart-p50/60 h-[25%]"></div><div class="flex-1 bg-chart-p50/60 h-[23%]"></div><div class="flex-1 bg-chart-p50/60 h-[18%]"></div><div class="flex-1 bg-chart-p50/60 h-[28%]"></div><div class="flex-1 bg-chart-p50/60 h-[24%]"></div><div class="flex-1 bg-chart-p50/60 h-[21%]"></div><div class="flex-1 bg-chart-p50/60 h-[22%]"></div><div class="flex-1 bg-chart-p50/60 h-[19%]"></div><div class="flex-1 bg-chart-p50/60 h-[24%]"></div><div class="flex-1 bg-chart-p50/60 h-[18%]"></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Log Volume -->
+                <div class="border border-border bg-bg p-3">
+                    <div class="text-[9px] text-fg-muted mb-2">Log Volume</div>
+                    <div class="flex items-end gap-[3px] h-14">
+                        <div class="flex-1 bg-chart-2/70 h-[70%]"></div>
+                        <div class="flex-1 bg-chart-2/70 h-[65%]"></div>
+                        <div class="flex-1 bg-chart-2/70 h-[78%]"></div>
+                        <div class="flex-1 bg-chart-2/70 h-[82%]"></div>
+                        <div class="flex-1 bg-chart-2/70 h-[60%]"></div>
+                        <div class="flex-1 bg-chart-2/70 h-[55%]"></div>
+                        <div class="flex-1 bg-chart-2 h-[90%]"></div>
+                        <div class="flex-1 bg-chart-2 h-[95%]"></div>
+                        <div class="flex-1 bg-chart-2 h-[88%]"></div>
+                        <div class="flex-1 bg-chart-2 h-[75%]"></div>
+                        <div class="flex-1 bg-chart-2/70 h-[68%]"></div>
+                        <div class="flex-1 bg-chart-2/70 h-[72%]"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== SERVICES VIEW ===== -->
+        <div class="mock-view mock-view-services flex-1 p-3 md:p-4 space-y-3 overflow-hidden">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-[9px] text-fg-muted">Services</div>
+                    <div class="text-xs text-fg font-medium">Services</div>
+                </div>
+                <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
+            </div>
+            <!-- Services table -->
+            <div class="border border-border bg-bg overflow-hidden">
+                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
+                    <span>Service</span><span>Env</span><span>P50</span><span>P95</span><span>P99</span><span class="text-right">Throughput</span>
+                </div>
+                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
+                    <span class="text-accent font-medium">api-gateway</span>
+                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
+                    <span class="text-fg-muted font-mono">12ms</span>
+                    <span class="text-fg-muted font-mono">45ms</span>
+                    <span class="text-fg-muted font-mono">120ms</span>
+                    <span class="text-fg-muted font-mono text-right">1.2K/s</span>
+                </div>
+                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
+                    <span class="text-accent font-medium">auth-service</span>
+                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
+                    <span class="text-fg-muted font-mono">8ms</span>
+                    <span class="text-fg-muted font-mono">22ms</span>
+                    <span class="text-fg-muted font-mono">67ms</span>
+                    <span class="text-fg-muted font-mono text-right">890/s</span>
+                </div>
+                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
+                    <span class="text-accent font-medium">order-service</span>
+                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
+                    <span class="text-fg-muted font-mono">34ms</span>
+                    <span class="text-fg-muted font-mono">89ms</span>
+                    <span class="text-fg-muted font-mono">234ms</span>
+                    <span class="text-fg-muted font-mono text-right">456/s</span>
+                </div>
+                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
+                    <span class="text-accent font-medium">payment-svc</span>
+                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
+                    <span class="text-fg-muted font-mono">56ms</span>
+                    <span class="text-fg-muted font-mono">145ms</span>
+                    <span class="text-fg-muted font-mono">380ms</span>
+                    <span class="text-fg-muted font-mono text-right">234/s</span>
+                </div>
+                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
+                    <span class="text-accent font-medium">notification-svc</span>
+                    <span><span class="text-[8px] px-1.5 py-0.5 bg-yellow-500/10 text-yellow-400">staging</span></span>
+                    <span class="text-fg-muted font-mono">5ms</span>
+                    <span class="text-fg-muted font-mono">15ms</span>
+                    <span class="text-fg-muted font-mono">42ms</span>
+                    <span class="text-fg-muted font-mono text-right">120/s</span>
+                </div>
+                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 hover:bg-muted/20 items-center">
+                    <span class="text-accent font-medium">inventory-svc</span>
+                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
+                    <span class="text-fg-muted font-mono">18ms</span>
+                    <span class="text-fg-muted font-mono">52ms</span>
+                    <span class="text-fg-muted font-mono">156ms</span>
+                    <span class="text-fg-muted font-mono text-right">678/s</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TRACES VIEW ===== -->
+        <div class="mock-view mock-view-traces flex-1 overflow-hidden">
+            <div class="flex h-full">
+                <!-- Traces Filter Sidebar -->
+                <aside class="w-[130px] shrink-0 border-r border-border bg-bg hidden md:flex flex-col p-2.5 space-y-2.5 overflow-y-auto">
+                    <!-- Status -->
+                    <div>
+                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Status</div>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                Ok
+                                <span class="text-[8px] text-fg-muted/60 ml-auto">5</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                Error
+                                <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="border-t border-border"></div>
+                    <!-- Service -->
+                    <div>
+                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Service</div>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                api-gateway
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                auth-service
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                order-service
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-border shrink-0"></span>
+                                payment-svc
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                inventory-svc
+                            </label>
+                        </div>
+                    </div>
+                    <div class="border-t border-border"></div>
+                    <!-- Duration -->
+                    <div>
+                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Duration</div>
+                        <div class="flex items-center gap-1">
+                            <span class="flex-1 border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">0ms</span>
+                            <span class="text-[8px] text-fg-muted">–</span>
+                            <span class="flex-1 border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">5s</span>
+                        </div>
+                        <div class="mt-1.5 h-1 bg-bg-elevated border border-border relative">
+                            <div class="absolute inset-y-0 left-[5%] right-[15%] bg-accent/30"></div>
+                        </div>
+                    </div>
+                    <div class="border-t border-border"></div>
+                    <!-- Method -->
+                    <div>
+                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Method</div>
+                        <div class="flex flex-wrap gap-1">
+                            <span class="text-[8px] px-1.5 py-0.5 border border-accent/30 bg-accent/10 text-accent">GET</span>
+                            <span class="text-[8px] px-1.5 py-0.5 border border-accent/30 bg-accent/10 text-accent">POST</span>
+                            <span class="text-[8px] px-1.5 py-0.5 border border-border text-fg-muted">PUT</span>
+                            <span class="text-[8px] px-1.5 py-0.5 border border-border text-fg-muted">DELETE</span>
+                        </div>
+                    </div>
+                </aside>
+                <!-- Traces Content -->
+                <div class="flex-1 p-3 md:p-4 space-y-3 min-w-0">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-[9px] text-fg-muted">Traces</div>
+                            <div class="text-xs text-fg font-medium">Traces</div>
+                        </div>
+                        <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
+                    </div>
+                    <!-- Traces table -->
+                    <div class="border border-border bg-bg overflow-hidden">
+                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
+                            <span>Trace ID</span><span>Root Span</span><span>Services</span><span>Duration</span><span>Spans</span><span>Status</span>
+                        </div>
+                        <!-- Row 1 -->
+                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-accent font-mono text-[9px]">a3f8c1d2</span>
+                            <span class="text-fg truncate">POST /api/checkout</span>
+                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">order</span><span class="text-[8px] text-fg-muted">+2</span></span>
+                            <span class="text-fg-muted font-mono">203ms</span>
+                            <span class="text-fg-muted font-mono">8</span>
+                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
+                        </div>
+                        <!-- Row 2 (error) -->
+                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border bg-destructive/5 hover:bg-destructive/10 items-center">
+                            <span class="text-accent font-mono text-[9px]">b7e2f9a1</span>
+                            <span class="text-fg truncate">POST /api/payment</span>
+                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">payment</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
+                            <span class="text-fg-muted font-mono">1.2s</span>
+                            <span class="text-fg-muted font-mono">5</span>
+                            <span><span class="text-[8px] px-1.5 py-0.5 bg-red-500/10 text-red-400">Error</span></span>
+                        </div>
+                        <!-- Row 3 -->
+                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-accent font-mono text-[9px]">c4d1e8b3</span>
+                            <span class="text-fg truncate">GET /api/products</span>
+                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">inventory</span></span>
+                            <span class="text-fg-muted font-mono">45ms</span>
+                            <span class="text-fg-muted font-mono">3</span>
+                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
+                        </div>
+                        <!-- Row 4 -->
+                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-accent font-mono text-[9px]">d9a3b5c7</span>
+                            <span class="text-fg truncate">POST /api/auth/login</span>
+                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
+                            <span class="text-fg-muted font-mono">89ms</span>
+                            <span class="text-fg-muted font-mono">4</span>
+                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
+                        </div>
+                        <!-- Row 5 -->
+                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-accent font-mono text-[9px]">e2f6a8d4</span>
+                            <span class="text-fg truncate">GET /api/users/me</span>
+                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
+                            <span class="text-fg-muted font-mono">23ms</span>
+                            <span class="text-fg-muted font-mono">2</span>
+                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
+                        </div>
+                        <!-- Row 6 -->
+                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 hover:bg-muted/20 items-center">
+                            <span class="text-accent font-mono text-[9px]">f1c5d7e9</span>
+                            <span class="text-fg truncate">PUT /api/orders/confirm</span>
+                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">order</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">notify</span></span>
+                            <span class="text-fg-muted font-mono">156ms</span>
+                            <span class="text-fg-muted font-mono">6</span>
+                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== LOGS VIEW ===== -->
+        <div class="mock-view mock-view-logs flex-1 overflow-hidden">
+            <div class="flex h-full">
+                <!-- Logs Filter Sidebar -->
+                <aside class="w-[130px] shrink-0 border-r border-border bg-bg hidden md:flex flex-col p-2.5 space-y-2.5 overflow-y-auto">
+                    <!-- Level -->
+                    <div>
+                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Level</div>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-1.5 text-[10px] text-blue-400 cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                INFO
+                                <span class="text-[8px] text-fg-muted/60 ml-auto">4</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-yellow-400 cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                WARN
+                                <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-red-400 cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                ERROR
+                                <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-gray-400 cursor-default">
+                                <span class="w-2.5 h-2.5 border border-border shrink-0"></span>
+                                DEBUG
+                                <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="border-t border-border"></div>
+                    <!-- Service -->
+                    <div>
+                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Service</div>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                api-gateway
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                order-service
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                payment-svc
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                auth-service
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 border border-border shrink-0"></span>
+                                inventory-svc
+                            </label>
+                        </div>
+                    </div>
+                    <div class="border-t border-border"></div>
+                    <!-- Query -->
+                    <div>
+                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Query</div>
+                        <div class="border border-border bg-bg-elevated px-1.5 py-1 text-[9px] text-fg-muted font-mono">service:payment*</div>
+                        <div class="text-[8px] text-fg-muted/50 mt-1">Supports regex</div>
+                    </div>
+                </aside>
+                <!-- Logs Content -->
+                <div class="flex-1 p-3 md:p-4 space-y-3 min-w-0">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-[9px] text-fg-muted">Logs</div>
+                            <div class="text-xs text-fg font-medium">Logs</div>
+                        </div>
+                        <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 1h</span>
+                    </div>
+                    <div class="border border-border bg-bg overflow-hidden">
+                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
+                            <span>Timestamp</span><span>Service</span><span>Level</span><span>Message</span>
+                        </div>
+                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-fg-muted font-mono text-[9px]">14:23:01.342</span>
+                            <span class="text-fg-muted font-mono text-[9px]">api-gateway</span>
+                            <span><span class="text-[8px] px-1 py-0.5 bg-blue-500/10 text-blue-400">INFO</span></span>
+                            <span class="text-fg-muted truncate">POST /api/checkout 200 203ms</span>
+                        </div>
+                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-fg-muted font-mono text-[9px]">14:23:01.298</span>
+                            <span class="text-fg-muted font-mono text-[9px]">order-service</span>
+                            <span><span class="text-[8px] px-1 py-0.5 bg-blue-500/10 text-blue-400">INFO</span></span>
+                            <span class="text-fg-muted truncate">Order created order_id=ord_8f3a2c</span>
+                        </div>
+                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-fg-muted font-mono text-[9px]">14:23:01.245</span>
+                            <span class="text-fg-muted font-mono text-[9px]">payment-svc</span>
+                            <span><span class="text-[8px] px-1 py-0.5 bg-yellow-500/10 text-yellow-400">WARN</span></span>
+                            <span class="text-fg-muted truncate">Retry attempt 2/3 for charge txn_9d1e</span>
+                        </div>
+                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border bg-destructive/5 hover:bg-destructive/10 items-center">
+                            <span class="text-fg-muted font-mono text-[9px]">14:22:58.891</span>
+                            <span class="text-fg-muted font-mono text-[9px]">payment-svc</span>
+                            <span><span class="text-[8px] px-1 py-0.5 bg-red-500/10 text-red-400">ERROR</span></span>
+                            <span class="text-fg-muted truncate">Connection timeout to stripe after 5000ms</span>
+                        </div>
+                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-fg-muted font-mono text-[9px]">14:22:57.123</span>
+                            <span class="text-fg-muted font-mono text-[9px]">auth-service</span>
+                            <span><span class="text-[8px] px-1 py-0.5 bg-blue-500/10 text-blue-400">INFO</span></span>
+                            <span class="text-fg-muted truncate">Token validated user_id=usr_2f8a</span>
+                        </div>
+                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
+                            <span class="text-fg-muted font-mono text-[9px]">14:22:56.445</span>
+                            <span class="text-fg-muted font-mono text-[9px]">api-gateway</span>
+                            <span><span class="text-[8px] px-1 py-0.5 bg-gray-500/10 text-gray-400">DEBUG</span></span>
+                            <span class="text-fg-muted truncate">Rate limit check passed ip=192.168.1.42</span>
+                        </div>
+                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 hover:bg-muted/20 items-center">
+                            <span class="text-fg-muted font-mono text-[9px]">14:22:55.201</span>
+                            <span class="text-fg-muted font-mono text-[9px]">inventory-svc</span>
+                            <span><span class="text-[8px] px-1 py-0.5 bg-blue-500/10 text-blue-400">INFO</span></span>
+                            <span class="text-fg-muted truncate">Stock reserved sku=SKU-1234 qty=2</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== METRICS VIEW ===== -->
+        <div class="mock-view mock-view-metrics flex-1 p-3 md:p-4 space-y-3 overflow-hidden">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-[9px] text-fg-muted">Metrics</div>
+                    <div class="text-xs text-fg font-medium">Metrics</div>
+                </div>
+                <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 6h</span>
+            </div>
+            <!-- Service detail style: 2x2 chart grid -->
+            <div class="grid grid-cols-2 gap-3">
+                <div class="border border-border bg-bg p-3">
+                    <div class="text-[9px] text-fg-muted mb-2">http.server.duration (p95)</div>
+                    <!-- Area chart style with gradient effect -->
+                    <div class="flex items-end gap-[2px] h-16">
+                        <div class="flex-1 bg-chart-p95/50 h-[40%]"></div><div class="flex-1 bg-chart-p95/50 h-[42%]"></div><div class="flex-1 bg-chart-p95/55 h-[48%]"></div><div class="flex-1 bg-chart-p95/55 h-[45%]"></div><div class="flex-1 bg-chart-p95/60 h-[55%]"></div><div class="flex-1 bg-chart-p95/60 h-[52%]"></div><div class="flex-1 bg-chart-p95/65 h-[62%]"></div><div class="flex-1 bg-chart-p95/65 h-[58%]"></div><div class="flex-1 bg-chart-p95/70 h-[70%]"></div><div class="flex-1 bg-chart-p95/70 h-[65%]"></div><div class="flex-1 bg-chart-p95/75 h-[72%]"></div><div class="flex-1 bg-chart-p95/75 h-[68%]"></div><div class="flex-1 bg-chart-p95/80 h-[78%]"></div><div class="flex-1 bg-chart-p95 h-[75%]"></div><div class="flex-1 bg-chart-p95 h-[72%]"></div><div class="flex-1 bg-chart-p95 h-[68%]"></div>
+                    </div>
+                    <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
+                </div>
+                <div class="border border-border bg-bg p-3">
+                    <div class="text-[9px] text-fg-muted mb-2">http.server.request.count</div>
+                    <div class="flex items-end gap-[2px] h-16">
+                        <div class="flex-1 bg-chart-throughput/50 h-[60%]"></div><div class="flex-1 bg-chart-throughput/50 h-[65%]"></div><div class="flex-1 bg-chart-throughput/55 h-[70%]"></div><div class="flex-1 bg-chart-throughput/55 h-[62%]"></div><div class="flex-1 bg-chart-throughput/60 h-[58%]"></div><div class="flex-1 bg-chart-throughput/60 h-[72%]"></div><div class="flex-1 bg-chart-throughput/65 h-[80%]"></div><div class="flex-1 bg-chart-throughput/65 h-[75%]"></div><div class="flex-1 bg-chart-throughput/70 h-[85%]"></div><div class="flex-1 bg-chart-throughput/70 h-[90%]"></div><div class="flex-1 bg-chart-throughput/75 h-[82%]"></div><div class="flex-1 bg-chart-throughput/75 h-[78%]"></div><div class="flex-1 bg-chart-throughput/80 h-[88%]"></div><div class="flex-1 bg-chart-throughput h-[92%]"></div><div class="flex-1 bg-chart-throughput h-[85%]"></div><div class="flex-1 bg-chart-throughput h-[80%]"></div>
+                    </div>
+                    <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
+                </div>
+                <div class="border border-border bg-bg p-3">
+                    <div class="text-[9px] text-fg-muted mb-2">process.runtime.memory</div>
+                    <div class="flex items-end gap-[2px] h-16">
+                        <div class="flex-1 bg-chart-4/50 h-[50%]"></div><div class="flex-1 bg-chart-4/50 h-[52%]"></div><div class="flex-1 bg-chart-4/55 h-[54%]"></div><div class="flex-1 bg-chart-4/55 h-[56%]"></div><div class="flex-1 bg-chart-4/60 h-[55%]"></div><div class="flex-1 bg-chart-4/60 h-[58%]"></div><div class="flex-1 bg-chart-4/65 h-[60%]"></div><div class="flex-1 bg-chart-4/65 h-[62%]"></div><div class="flex-1 bg-chart-4/70 h-[61%]"></div><div class="flex-1 bg-chart-4/70 h-[64%]"></div><div class="flex-1 bg-chart-4/75 h-[66%]"></div><div class="flex-1 bg-chart-4/75 h-[65%]"></div><div class="flex-1 bg-chart-4/80 h-[68%]"></div><div class="flex-1 bg-chart-4 h-[70%]"></div><div class="flex-1 bg-chart-4 h-[72%]"></div><div class="flex-1 bg-chart-4 h-[71%]"></div>
+                    </div>
+                    <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
+                </div>
+                <div class="border border-border bg-bg p-3">
+                    <div class="text-[9px] text-fg-muted mb-2">db.client.connections.active</div>
+                    <div class="flex items-end gap-[2px] h-16">
+                        <div class="flex-1 bg-chart-2/50 h-[30%]"></div><div class="flex-1 bg-chart-2/50 h-[35%]"></div><div class="flex-1 bg-chart-2/55 h-[32%]"></div><div class="flex-1 bg-chart-2/55 h-[38%]"></div><div class="flex-1 bg-chart-2/60 h-[42%]"></div><div class="flex-1 bg-chart-2/60 h-[40%]"></div><div class="flex-1 bg-chart-2/65 h-[45%]"></div><div class="flex-1 bg-chart-2/65 h-[50%]"></div><div class="flex-1 bg-chart-2/70 h-[48%]"></div><div class="flex-1 bg-chart-2/70 h-[52%]"></div><div class="flex-1 bg-chart-2/75 h-[55%]"></div><div class="flex-1 bg-chart-2/75 h-[50%]"></div><div class="flex-1 bg-chart-2/80 h-[48%]"></div><div class="flex-1 bg-chart-2 h-[45%]"></div><div class="flex-1 bg-chart-2 h-[42%]"></div><div class="flex-1 bg-chart-2 h-[40%]"></div>
+                    </div>
+                    <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
