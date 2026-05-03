@@ -75,6 +75,7 @@ export function LatencyLineChart({
 					tickLine={false}
 					axisLine={false}
 					tickMargin={8}
+					width={70}
 					tickFormatter={(v) => formatLatency(v)}
 				/>
 				{tooltip !== "hidden" && (

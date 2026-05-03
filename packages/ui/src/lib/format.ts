@@ -2,9 +2,11 @@ import { Match, pipe } from "effect"
 
 /**
  * Format a duration in milliseconds to a human-readable string.
- * - < 1ms: displays in microseconds (μs)
- * - 1ms - 1000ms: displays in milliseconds (ms)
- * - >= 1000ms: displays in seconds (s)
+ * - < 1ms: microseconds (μs)
+ * - < 1s: milliseconds (ms)
+ * - < 60s: seconds (s)
+ * - < 1h: minutes (min)
+ * - >= 1h: hours (h)
  */
 export function formatDuration(ms: number): string {
 	if (ms < 1) {
@@ -13,7 +15,13 @@ export function formatDuration(ms: number): string {
 	if (ms < 1000) {
 		return `${ms.toFixed(1)}ms`
 	}
-	return `${(ms / 1000).toFixed(2)}s`
+	if (ms < 60_000) {
+		return `${(ms / 1000).toFixed(2)}s`
+	}
+	if (ms < 3_600_000) {
+		return `${(ms / 60_000).toFixed(1)}min`
+	}
+	return `${(ms / 3_600_000).toFixed(1)}h`
 }
 
 /**
@@ -45,7 +53,13 @@ export function formatLatency(ms: number): string {
 	if (ms < 1000) {
 		return `${ms.toFixed(1)}ms`
 	}
-	return `${(ms / 1000).toFixed(2)}s`
+	if (ms < 60_000) {
+		return `${(ms / 1000).toFixed(2)}s`
+	}
+	if (ms < 3_600_000) {
+		return `${(ms / 60_000).toFixed(1)}min`
+	}
+	return `${(ms / 3_600_000).toFixed(1)}h`
 }
 
 /**

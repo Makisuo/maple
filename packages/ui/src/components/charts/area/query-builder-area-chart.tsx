@@ -187,6 +187,7 @@ export function QueryBuilderAreaChart({
 					tickLine={false}
 					axisLine={false}
 					tickMargin={8}
+					width={80}
 					scale={logScale ? "log" : "auto"}
 					domain={[softMin ?? (logScale ? 1 : "auto"), softMax ?? "auto"]}
 					allowDataOverflow={logScale || softMin != null || softMax != null}

@@ -84,7 +84,7 @@ export function ApdexAreaChart({
 					tickMargin={8}
 					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
 				/>
-				<YAxis domain={[0, 1]} tickLine={false} axisLine={false} tickMargin={8} />
+				<YAxis domain={[0, 1]} tickLine={false} axisLine={false} tickMargin={8} width={50} />
 				{tooltip !== "hidden" && (
 					<ChartTooltip
 						content={

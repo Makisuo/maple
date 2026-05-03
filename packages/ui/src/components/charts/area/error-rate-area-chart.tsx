@@ -88,6 +88,7 @@ export function ErrorRateAreaChart({
 					tickLine={false}
 					axisLine={false}
 					tickMargin={8}
+					width={60}
 					tickFormatter={(v) => formatErrorRate(v)}
 				/>
 				{tooltip !== "hidden" && (
