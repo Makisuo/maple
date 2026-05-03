@@ -30,6 +30,31 @@ const universal = allDocs.filter((d) => !d.data.sdk);
 
 const sdkGroups = orderGroups(groupBy(sdkScoped), ["Effect SDK", "Platforms"]);
 const universalGroups = orderGroups(groupBy(universal), ["Getting Started", "Concepts", "Guides"]);
+
+// Per-doc runtime/role tag shown right-aligned in the listing.
+// Kept short — the column carries the visual texture, not full sentences.
+const META: Record<string, string> = {
+    "sdks/overview": "intro",
+    "sdks/effect": "setup",
+    "sdks/effect-server": "node · bun · deno",
+    "sdks/effect-client": "browser",
+    "sdks/effect-cloudflare": "workers",
+    "guides/instrumentation-nodejs": "node",
+    "guides/instrumentation-python": "python",
+    "guides/instrumentation-go": "go",
+};
+
+// Stat strip values
+const totalDocs = allDocs.length;
+const totalCollections = sdkGroups.length > 0 ? 2 : 1;
+const updated = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" })
+    .format(new Date())
+    .toLowerCase();
+
+const renderTree = (i: number, last: number) => (i === last ? "└──" : "├──");
+
+// Renamed group label for the Universal section
+const renamedGroup = (g: string) => (g === "Guides" ? "other languages" : g.toLowerCase());
 ---
 
 <DocsLayout
@@ -38,68 +63,512 @@ const universalGroups = orderGroups(groupBy(universal), ["Getting Started", "Con
     headings={[]}
     currentSlug=""
 >
-    <h1 class="text-xl font-bold text-fg mb-1.5">Documentation</h1>
-    <p class="text-xs text-fg-muted mb-8 leading-relaxed">Technical documentation for the Maple observability platform.</p>
-
-    <section class="mb-10">
-        <div class="flex items-center gap-3 mb-4">
-            <div class="w-6 h-6 bg-accent flex items-center justify-center text-accent-foreground">
-                <EffectLogo class="w-3.5 h-3.5" />
+    <div class="docs-index">
+        {/* ── Header ────────────────────────────────────────────── */}
+        <header class="docs-index__head">
+            <div class="docs-index__prompt">
+                <span class="text-fg-muted">~/maple/docs</span>
+                <span class="text-accent">$</span>
+                <span class="text-fg-muted">ls -la</span>
+                <span class="docs-index__caret" aria-hidden="true"></span>
             </div>
-            <h2 class="text-sm font-medium text-fg">Effect SDK</h2>
-            <span class="text-[10px] uppercase tracking-wider text-fg-muted px-1.5 py-0.5 border border-border">Stable</span>
-        </div>
-        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {sdkGroups.map(([groupName, items]) => (
-                <div>
-                    <h3 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-3">
-                        {groupName}
-                    </h3>
-                    <div class="space-y-2">
-                        {items.map((doc) => (
-                            <a
-                                href={`/docs/${doc.id}`}
-                                class="block border border-border p-3 hover:border-accent/50 transition-colors group"
-                            >
-                                <span class="text-sm text-fg group-hover:text-accent transition-colors font-medium block">
-                                    {doc.data.title}
-                                </span>
-                                <span class="text-xs text-fg-muted mt-1 leading-relaxed block">
-                                    {doc.data.description}
-                                </span>
-                            </a>
-                        ))}
-                    </div>
-                </div>
-            ))}
-        </div>
-    </section>
 
-    <section>
-        <h2 class="text-sm font-medium text-fg mb-4">Universal</h2>
-        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {universalGroups.map(([groupName, items]) => (
-                <div>
-                    <h3 class="text-[10px] text-fg-muted uppercase tracking-wider font-medium mb-3">
-                        {groupName === "Guides" ? "Other languages" : groupName}
-                    </h3>
-                    <div class="space-y-2">
-                        {items.map((doc) => (
-                            <a
-                                href={`/docs/${doc.id}`}
-                                class="block border border-border p-3 hover:border-accent/50 transition-colors group"
-                            >
-                                <span class="text-sm text-fg group-hover:text-accent transition-colors font-medium block">
-                                    {doc.data.title}
-                                </span>
-                                <span class="text-xs text-fg-muted mt-1 leading-relaxed block">
-                                    {doc.data.description}
-                                </span>
-                            </a>
-                        ))}
+            <div class="flex items-end justify-between gap-6 flex-wrap">
+                <h1 class="docs-index__title font-display">Documentation</h1>
+
+                <ul class="docs-index__stats" aria-label="Docs index stats">
+                    <li>
+                        <span class="docs-index__stat-cap">docs</span>
+                        <span class="docs-index__stat-val">{String(totalDocs).padStart(2, "0")}</span>
+                    </li>
+                    <li>
+                        <span class="docs-index__stat-cap">collections</span>
+                        <span class="docs-index__stat-val">0{totalCollections}</span>
+                    </li>
+                    <li>
+                        <span class="docs-index__stat-cap">updated</span>
+                        <span class="docs-index__stat-val">{updated}</span>
+                    </li>
+                </ul>
+            </div>
+
+            <p class="docs-index__lede">
+                Technical documentation for the Maple observability platform — SDKs, OpenTelemetry guides, and the concepts that power the product.
+            </p>
+        </header>
+
+        {/* ── Section 01 · Effect SDK (drenched amber) ─────────── */}
+        <section class="docs-index__band drenched-amber">
+            <div class="docs-index__band-inner">
+                <div class="docs-index__sec-head">
+                    <span class="docs-index__sec-num">#&nbsp;01</span>
+                    <span class="docs-index__sec-rule" aria-hidden="true"></span>
+                    <div class="docs-index__sec-tile" aria-hidden="true">
+                        <EffectLogo class="w-3.5 h-3.5" />
                     </div>
+                    <h2 class="docs-index__sec-title font-display">Effect SDK</h2>
+                    <span class="docs-index__pill">stable</span>
+                    <code class="docs-index__pkg" aria-label="Install command">
+                        <span class="opacity-60 mr-1">$</span>npm i @maple-dev/effect-sdk
+                    </code>
                 </div>
-            ))}
-        </div>
-    </section>
+
+                <p class="docs-index__sec-lede">
+                    Official, opinionated wrappers around OpenTelemetry that auto-detect platform conventions. One <code>layer()</code> call ships traces, logs, and metrics from Node, Bun, Deno, the browser, or a Worker.
+                </p>
+
+                <div class="docs-index__lists">
+                    {sdkGroups.map(([groupName, items]) => (
+                        <div class="docs-index__list">
+                            <h3 class="docs-index__list-cap">
+                                <span class="opacity-60"># </span>{groupName.toLowerCase()}
+                            </h3>
+                            <ul role="list">
+                                {items.map((doc, i) => (
+                                    <li>
+                                        <a href={`/docs/${doc.id}`} class="docs-row">
+                                            <span class="docs-row__tree" aria-hidden="true">{renderTree(i, items.length - 1)}</span>
+                                            <span class="docs-row__title">{doc.data.title.toLowerCase()}</span>
+                                            <span class="docs-row__desc">{doc.data.description}</span>
+                                            <span class="docs-row__meta">{META[doc.id] ?? ""}</span>
+                                            <span class="docs-row__arrow" aria-hidden="true">→</span>
+                                        </a>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </section>
+
+        {/* ── Section 02 · Universal ───────────────────────────── */}
+        <section class="docs-index__section">
+            <div class="docs-index__sec-head docs-index__sec-head--dark">
+                <span class="docs-index__sec-num">#&nbsp;02</span>
+                <span class="docs-index__sec-rule" aria-hidden="true"></span>
+                <h2 class="docs-index__sec-title font-display">Universal</h2>
+                <span class="docs-index__pill docs-index__pill--dark">docs</span>
+            </div>
+
+            <p class="docs-index__sec-lede docs-index__sec-lede--dark">
+                Concepts and language-specific instrumentation guides. Apply to every Maple deployment, regardless of which SDK you ship.
+            </p>
+
+            <div class="docs-index__lists">
+                {universalGroups.map(([groupName, items]) => (
+                    <div class="docs-index__list">
+                        <h3 class="docs-index__list-cap docs-index__list-cap--dark">
+                            <span class="opacity-60"># </span>{renamedGroup(groupName)}
+                        </h3>
+                        <ul role="list">
+                            {items.map((doc, i) => (
+                                <li>
+                                    <a href={`/docs/${doc.id}`} class="docs-row docs-row--dark">
+                                        <span class="docs-row__tree" aria-hidden="true">{renderTree(i, items.length - 1)}</span>
+                                        <span class="docs-row__title">{doc.data.title.toLowerCase()}</span>
+                                        <span class="docs-row__desc">{doc.data.description}</span>
+                                        <span class="docs-row__meta">{META[doc.id] ?? ""}</span>
+                                        <span class="docs-row__arrow" aria-hidden="true">→</span>
+                                    </a>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ))}
+            </div>
+        </section>
+
+        {/* ── Footer rail ──────────────────────────────────────── */}
+        <footer class="docs-index__rail">
+            <span class="text-fg-muted/70" aria-hidden="true">───</span>
+            <span class="text-fg-muted">looking for something specific?</span>
+            <a href="https://github.com/Makisuo/maple" class="docs-index__rail-link">github</a>
+            <span class="text-fg-muted/40" aria-hidden="true">·</span>
+            <a href="https://app.maple.dev" class="docs-index__rail-link">open the app <span aria-hidden="true">→</span></a>
+        </footer>
+    </div>
 </DocsLayout>
+
+<style>
+    /* ──────────────────────────────────────────────────────────
+       Docs index page — typographic directory listing.
+       Reuses tokens from global.css; no new colors / fonts.
+       ────────────────────────────────────────────────────────── */
+    .docs-index {
+        position: relative;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Subtle dot-grid behind the page (matches service-map motif). */
+    .docs-index::before {
+        content: "";
+        position: absolute;
+        inset: -32px -64px;
+        z-index: -1;
+        pointer-events: none;
+        background-image: radial-gradient(
+            color-mix(in oklab, var(--border) 90%, transparent) 1px,
+            transparent 1px
+        );
+        background-size: 22px 22px;
+        background-position: 0 0;
+        mask-image: linear-gradient(to bottom, black 0%, black 60%, transparent 100%);
+        opacity: 0.55;
+    }
+
+    /* ── Header ────────────────────────────────────────────── */
+    .docs-index__head {
+        position: relative;
+        padding-bottom: 28px;
+        margin-bottom: 36px;
+        border-bottom: 1px solid var(--border);
+    }
+    .docs-index__prompt {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        display: inline-flex;
+        gap: 8px;
+        margin-bottom: 18px;
+        align-items: center;
+    }
+    .docs-index__caret {
+        display: inline-block;
+        width: 7px;
+        height: 11px;
+        background: var(--accent);
+        animation: caret-blink 1.05s steps(1) infinite;
+    }
+    .docs-index__title {
+        font-family: var(--font-display);
+        font-size: clamp(40px, 7vw, 64px);
+        line-height: 0.95;
+        letter-spacing: -0.035em;
+        font-weight: 600;
+        color: var(--foreground);
+        margin: 0;
+    }
+    .docs-index__stats {
+        display: flex;
+        gap: 0;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border: 1px solid var(--border);
+        background: color-mix(in oklab, var(--bg-elevated) 60%, transparent);
+    }
+    .docs-index__stats li {
+        display: flex;
+        flex-direction: column;
+        padding: 7px 12px;
+        min-width: 78px;
+        border-right: 1px solid var(--border);
+    }
+    .docs-index__stats li:last-child {
+        border-right: 0;
+    }
+    .docs-index__stat-cap {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+    }
+    .docs-index__stat-val {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        color: var(--foreground);
+        margin-top: 2px;
+    }
+    .docs-index__lede {
+        margin-top: 22px;
+        font-size: 13px;
+        line-height: 1.65;
+        color: var(--muted-foreground);
+        max-width: 56ch;
+    }
+
+    /* ── Section heads (shared) ───────────────────────────── */
+    .docs-index__sec-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    .docs-index__sec-num {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
+    }
+    .docs-index__sec-rule {
+        flex: 0 0 36px;
+        height: 1px;
+        background: currentColor;
+        opacity: 0.4;
+    }
+    .docs-index__sec-tile {
+        width: 22px;
+        height: 22px;
+        background: var(--accent-foreground);
+        color: var(--accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .docs-index__band .docs-index__sec-tile :global(svg) {
+        color: var(--accent);
+    }
+    .docs-index__sec-title {
+        font-family: var(--font-display);
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        margin: 0;
+    }
+    .docs-index__pill {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        padding: 3px 7px;
+        border: 1px solid currentColor;
+        opacity: 0.85;
+    }
+    .docs-index__pill--dark {
+        color: var(--muted-foreground);
+        border-color: var(--border);
+    }
+    .docs-index__pkg {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        margin-left: auto;
+        padding: 5px 10px;
+        background: color-mix(in oklab, var(--accent-foreground) 14%, transparent);
+        border: 1px solid color-mix(in oklab, var(--accent-foreground) 25%, transparent);
+        white-space: nowrap;
+    }
+
+    /* ── Drenched amber band ──────────────────────────────── */
+    .docs-index__band {
+        position: relative;
+        margin-bottom: 56px;
+        overflow: hidden;
+    }
+    .docs-index__band-inner {
+        position: relative;
+        z-index: 1;
+        padding: 28px 28px 32px;
+    }
+    .docs-index__sec-lede {
+        margin-top: 18px;
+        margin-bottom: 26px;
+        font-size: 13px;
+        line-height: 1.65;
+        max-width: 64ch;
+        opacity: 0.85;
+    }
+    .docs-index__sec-lede :global(code) {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        padding: 1px 5px;
+        background: color-mix(in oklab, var(--accent-foreground) 14%, transparent);
+        border: 1px solid color-mix(in oklab, var(--accent-foreground) 22%, transparent);
+    }
+    .docs-index__sec-lede--dark :global(code) {
+        background: var(--bg-elevated);
+        border-color: var(--border);
+        color: var(--accent);
+    }
+
+    /* ── Section 02 dark head spacing ─────────────────────── */
+    .docs-index__section {
+        margin-bottom: 48px;
+        padding-top: 4px;
+    }
+    .docs-index__sec-head--dark {
+        color: var(--foreground);
+    }
+
+    /* ── Group lists (the typographic listings) ───────────── */
+    .docs-index__lists {
+        display: flex;
+        flex-direction: column;
+        gap: 26px;
+    }
+    .docs-index__list ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        border-top: 1px solid currentColor;
+        border-color: color-mix(in oklab, currentColor 30%, transparent);
+    }
+    .docs-index__list-cap {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin: 0 0 8px;
+        opacity: 0.65;
+    }
+    .docs-index__list-cap--dark {
+        color: var(--muted-foreground);
+        opacity: 1;
+    }
+
+    /* ── Row ──────────────────────────────────────────────── */
+    .docs-row {
+        display: grid;
+        grid-template-columns: 3.5ch minmax(11ch, 18ch) 1fr auto auto;
+        gap: 14px;
+        align-items: baseline;
+        padding: 9px 4px;
+        border-bottom: 1px solid color-mix(in oklab, currentColor 18%, transparent);
+        text-decoration: none;
+        color: inherit;
+        position: relative;
+        transition: padding-left 160ms cubic-bezier(0.22, 1, 0.36, 1),
+                    background-color 160ms ease;
+    }
+    .docs-row__tree {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        opacity: 0.55;
+        transition: opacity 160ms ease, color 160ms ease;
+    }
+    .docs-row__title {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        color: currentColor;
+    }
+    .docs-row__desc {
+        font-family: var(--font-sans);
+        font-size: 12px;
+        line-height: 1.5;
+        opacity: 0.72;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .docs-row__meta {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: lowercase;
+        opacity: 0.55;
+        white-space: nowrap;
+    }
+    .docs-row__arrow {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        opacity: 0.4;
+        transform: translateX(0);
+        transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+                    opacity 160ms ease;
+    }
+
+    /* Amber-band hover: cream brightens */
+    .docs-index__band .docs-row:hover {
+        padding-left: 12px;
+        background: color-mix(in oklab, var(--accent-foreground) 8%, transparent);
+    }
+    .docs-index__band .docs-row:hover .docs-row__tree,
+    .docs-index__band .docs-row:hover .docs-row__arrow {
+        opacity: 1;
+    }
+    .docs-index__band .docs-row:hover .docs-row__arrow {
+        transform: translateX(4px);
+    }
+
+    /* Dark hover: amber accent */
+    .docs-row--dark:hover {
+        padding-left: 12px;
+        background: color-mix(in oklab, var(--accent) 6%, transparent);
+    }
+    .docs-row--dark:hover .docs-row__tree,
+    .docs-row--dark:hover .docs-row__arrow,
+    .docs-row--dark:hover .docs-row__title {
+        color: var(--accent);
+    }
+    .docs-row--dark:hover .docs-row__tree,
+    .docs-row--dark:hover .docs-row__arrow {
+        opacity: 1;
+    }
+    .docs-row--dark:hover .docs-row__arrow {
+        transform: translateX(4px);
+    }
+    .docs-row--dark:hover .docs-row__desc {
+        opacity: 0.95;
+    }
+
+    /* ── Footer rail ──────────────────────────────────────── */
+    .docs-index__rail {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding-top: 18px;
+        border-top: 1px solid var(--border);
+    }
+    .docs-index__rail-link {
+        color: var(--muted-foreground);
+        transition: color 160ms ease;
+        text-decoration: none;
+    }
+    .docs-index__rail-link:hover {
+        color: var(--accent);
+    }
+
+    /* ── Responsive: collapse desc + meta on small ────────── */
+    @media (max-width: 640px) {
+        .docs-row {
+            grid-template-columns: 3.5ch 1fr auto;
+            row-gap: 4px;
+            column-gap: 10px;
+        }
+        .docs-row__desc {
+            grid-column: 2 / 3;
+            white-space: normal;
+            font-size: 11.5px;
+            opacity: 0.65;
+        }
+        .docs-row__meta {
+            display: none;
+        }
+        .docs-row__arrow {
+            grid-row: 1;
+            grid-column: 3;
+            align-self: center;
+        }
+        .docs-index__pkg {
+            margin-left: 0;
+            font-size: 10px;
+        }
+        .docs-index__band-inner {
+            padding: 22px 18px 26px;
+        }
+        .docs-index__title {
+            font-size: clamp(34px, 9vw, 48px);
+        }
+        .docs-index__stats {
+            order: 2;
+        }
+    }
+
+    @keyframes caret-blink {
+        0%, 49% { opacity: 1; }
+        50%, 100% { opacity: 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .docs-index__caret { animation: none; opacity: 0.6; }
+        .docs-row,
+        .docs-row__arrow,
+        .docs-row__tree { transition: none; }
+    }
+</style>
