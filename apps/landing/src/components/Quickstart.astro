@@ -1,60 +1,488 @@
 ---
 /**
- * Quickstart + bookend CTA.
- * Three real shell commands stacked vertically (numbered, no card grid),
- * then a drenched-amber bookend with the primary CTA.
+ * Tabbed SDK snippet showcase + bookend CTA.
+ * Snippets mirror apps/web/src/components/quick-start/sdk-snippets.ts so the
+ * landing page shows the same code the dashboard generates after sign-up.
+ * Placeholder values: INGEST_URL = https://ingest.maple.dev, API_KEY = maple_pk_••••••••.
  */
 import * as m from "../paraglide/messages";
+import { Code } from "astro:components";
 
-const steps = [
-	{ n: "01", label: m.start_step_1_label(), code: `curl -sSL https://maple.dev/install.sh | sh` },
-	{ n: "02", label: m.start_step_2_label(), code: `export OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.maple.dev\nexport OTEL_EXPORTER_OTLP_HEADERS=\"authorization=Bearer $MAPLE_TOKEN\"` },
-	{ n: "03", label: m.start_step_3_label(), code: `node -r @opentelemetry/auto-instrumentations-node/register server.js` },
+const INGEST_URL = "https://ingest.maple.dev";
+const API_KEY = "maple_pk_••••••••";
+
+type SnippetLang = "ts" | "python" | "go" | "bash";
+
+type Snippet = {
+	id: string;
+	label: string;
+	filename: string;
+	descriptor: string;
+	lang: SnippetLang;
+	installLang: SnippetLang;
+	install: string;
+	instrument: string;
+};
+
+const fill = (s: string) => s.replaceAll("{{INGEST_URL}}", INGEST_URL).replaceAll("{{API_KEY}}", API_KEY);
+
+// SDK brand logo SVG paths (from simpleicons.org, MIT licensed, monochrome)
+const SDK_LOGOS: Record<string, { path: string; color: string }> = {
+	nodejs: {
+		color: "#5FA04E",
+		path: `M11.998 24c-.32 0-.641-.084-.922-.247l-2.936-1.737c-.438-.245-.224-.332-.08-.382.585-.203.703-.25 1.328-.604.065-.037.151-.023.218.017l2.256 1.339c.082.045.197.045.272 0l8.795-5.076c.082-.047.134-.141.134-.238V6.921c0-.099-.052-.192-.137-.242l-8.79-5.072c-.081-.047-.189-.047-.271 0L2.075 6.679c-.084.05-.137.144-.137.243v10.151c0 .097.053.19.137.235l2.41 1.392c1.308.654 2.108-.116 2.108-.89V7.787c0-.142.114-.253.256-.253h1.117c.139 0 .256.111.256.253v10.021c0 1.748-.95 2.75-2.605 2.75-.508 0-.91 0-2.027-.551L1.234 18.665c-.566-.327-.916-.939-.916-1.594V6.921c0-.655.35-1.267.916-1.594L10.029.245c.552-.31 1.279-.31 1.831 0l8.795 5.082c.566.327.92.939.92 1.594v10.151c0 .655-.354 1.264-.92 1.594l-8.795 5.082c-.281.16-.6.247-.928.247zm2.715-6.99c-3.85 0-4.656-1.768-4.656-3.252 0-.142.114-.255.256-.255h1.139c.127 0 .234.092.254.217.172 1.16.685 1.745 3.007 1.745 1.849 0 2.636-.418 2.636-1.398 0-.564-.224-.983-3.097-1.265-2.404-.238-3.891-.769-3.891-2.691 0-1.772 1.495-2.829 4-2.829 2.811 0 4.205.976 4.382 3.07a.26.26 0 0 1-.067.196.26.26 0 0 1-.187.082h-1.143a.252.252 0 0 1-.247-.198c-.273-1.219-.939-1.609-2.738-1.609-2.011 0-2.245.7-2.245 1.225 0 .636.276.821 2.999 1.181 2.696.357 3.985.86 3.985 2.759 0 1.913-1.595 3.012-4.378 3.012z`,
+	},
+	nextjs: {
+		color: "#FFFFFF",
+		path: `M11.5725 0c-.1763 0-.3098.0013-.3584.0067-.0516.0053-.2159.021-.3636.0328-3.4088.3073-6.6017 2.1463-8.624 4.9728C1.1004 6.584.3802 8.3666.1082 10.255c-.0962.659-.108.8537-.108 1.7474s.012 1.0884.108 1.7476c.652 4.506 3.8591 8.2919 8.2087 9.6945.7789.2511 1.6.4223 2.5337.5255.3636.04 1.9354.04 2.299 0 1.6117-.1783 2.9772-.577 4.3237-1.2643.2065-.1056.2464-.1337.2183-.1573-.0188-.0139-.8987-1.1938-1.9543-2.62l-1.919-2.592-2.4047-3.5583c-1.3231-1.9564-2.4117-3.556-2.4211-3.556-.0094-.0026-.0187 1.5787-.0235 3.509-.0067 3.3802-.0093 3.5162-.0516 3.596-.061.115-.108.1618-.2064.2134-.075.0374-.1408.0445-.495.0445h-.406l-.1078-.068a.4383.4383 0 01-.1572-.1712l-.0493-.1056.0053-4.703.0067-4.7054.0726-.0915c.0376-.0493.1174-.1125.1736-.143.0962-.047.1338-.0517.5396-.0517.4787 0 .5584.0187.6827.1547.0353.0377 1.3373 1.9987 2.895 4.3608a10760.433 10760.433 0 004.7344 7.1706l1.9002 2.8782.096-.0633c.8518-.5536 1.7525-1.3418 2.4657-2.1627 1.5179-1.7429 2.4963-3.868 2.8247-6.134.0961-.6591.1078-.854.1078-1.7475 0-.8937-.012-1.0884-.108-1.7476-.6522-4.506-3.8592-8.2919-8.2087-9.6945-.7672-.2487-1.5836-.42-2.4985-.5232-.169-.0176-1.0835-.0366-1.6123-.037zm4.0685 7.217c.3473 0 .4082.0053.4857.047.1127.0562.204.1642.237.2767.0186.061.0234 1.3653.0186 4.3044l-.0067 4.2175-.7436-1.14-.7461-1.14v-3.066c0-1.982.0093-3.0963.0234-3.1502.0375-.1313.1196-.2346.2323-.2955.0961-.0494.1313-.054.4997-.054z`,
+	},
+	python: {
+		color: "#3776AB",
+		path: `M14.25.18l.9.2.73.26.59.3.45.32.34.34.25.34.16.33.1.3.04.26.02.2-.01.13V8.5l-.05.63-.13.55-.21.46-.26.38-.3.31-.33.25-.35.19-.35.14-.33.1-.3.07-.26.04-.21.02H8.77l-.69.05-.59.14-.5.22-.41.27-.33.32-.27.35-.2.36-.15.37-.1.35-.07.32-.04.27-.02.21v3.06H3.17l-.21-.03-.28-.07-.32-.12-.35-.18-.36-.26-.36-.36-.35-.46-.32-.59-.28-.73-.21-.88-.14-1.05-.05-1.23.06-1.22.16-1.04.24-.87.32-.71.36-.57.4-.44.42-.33.42-.24.4-.16.36-.1.32-.05.24-.01h.16l.06.01h8.16v-.83H6.18l-.01-2.75-.02-.37.05-.34.11-.31.17-.28.25-.26.31-.23.38-.2.44-.18.51-.15.58-.12.64-.1.71-.06.77-.04.84-.02 1.27.05zm-6.3 1.98l-.23.33-.08.41.08.41.23.34.33.22.41.09.41-.09.33-.22.23-.34.08-.41-.08-.41-.23-.33-.33-.22-.41-.09-.41.09zm13.09 3.95l.28.06.32.12.35.18.36.27.36.35.35.47.32.59.28.73.21.88.14 1.04.05 1.23-.06 1.23-.16 1.04-.24.86-.32.71-.36.57-.4.45-.42.33-.42.24-.4.16-.36.09-.32.05-.24.02-.16-.01h-8.22v.82h5.84l.01 2.76.02.36-.05.34-.11.31-.17.29-.25.25-.31.24-.38.2-.44.17-.51.15-.58.13-.64.09-.71.07-.77.04-.84.01-1.27-.04-1.07-.14-.9-.2-.73-.25-.59-.3-.45-.33-.34-.34-.25-.34-.16-.33-.1-.3-.04-.25-.02-.2.01-.13v-5.34l.05-.64.13-.54.21-.46.26-.38.3-.32.33-.24.35-.2.35-.14.33-.1.3-.06.26-.04.21-.02.13-.01h5.84l.69-.05.59-.14.5-.21.41-.28.33-.32.27-.35.2-.36.15-.36.1-.35.07-.32.04-.28.02-.21V6.07h2.09l.14.01zm-6.47 14.25l-.23.33-.08.41.08.41.23.33.33.23.41.08.41-.08.33-.23.23-.33.08-.41-.08-.41-.23-.33-.33-.23-.41-.08-.41.08z`,
+	},
+	go: {
+		color: "#00ADD8",
+		path: `M1.811 10.231c-.047 0-.058-.023-.035-.059l.246-.315c.023-.035.081-.058.128-.058h4.172c.046 0 .058.035.035.07l-.199.303c-.023.036-.082.07-.117.07zM.047 11.306c-.047 0-.059-.023-.035-.058l.245-.316c.023-.035.082-.058.129-.058h5.328c.047 0 .07.035.058.07l-.093.28c-.012.047-.058.07-.105.07zm2.828 1.075c-.047 0-.058-.035-.035-.07l.163-.292c.023-.035.07-.07.117-.07h2.337c.047 0 .07.035.07.082l-.023.28c0 .047-.047.082-.082.082zm12.129-2.36c-.736.187-1.239.327-1.963.514-.176.046-.187.058-.34-.117-.174-.199-.303-.327-.548-.444-.737-.362-1.45-.257-2.115.175-.795.514-1.204 1.274-1.192 2.22.011.935.654 1.706 1.577 1.835.795.105 1.46-.175 1.987-.77.105-.13.198-.27.315-.434H10.47c-.245 0-.304-.152-.222-.35.152-.362.432-.97.596-1.274a.315.315 0 01.292-.187h4.253c-.023.316-.023.631-.07.947a4.983 4.983 0 01-.958 2.29c-.841 1.11-1.94 1.8-3.33 1.986-1.145.152-2.209-.07-3.143-.77-.865-.655-1.356-1.52-1.484-2.595-.152-1.274.222-2.419.993-3.424.83-1.086 1.928-1.776 3.272-2.02 1.098-.2 2.15-.07 3.096.571.62.41 1.063.97 1.356 1.648.07.105.023.164-.117.2m3.868 6.461c-1.064-.024-2.034-.328-2.852-1.029a3.665 3.665 0 01-1.262-2.255c-.21-1.32.152-2.489.947-3.529.853-1.122 1.881-1.706 3.272-1.95 1.192-.21 2.314-.095 3.33.595.923.63 1.496 1.484 1.648 2.605.198 1.578-.257 2.863-1.344 3.962-.771.783-1.718 1.273-2.805 1.495-.315.06-.63.07-.934.106zm2.78-4.72c-.011-.153-.011-.27-.034-.387-.21-1.157-1.274-1.81-2.384-1.554-1.087.245-1.788.935-2.045 2.033-.21.912.234 1.835 1.075 2.21.643.28 1.285.245 1.905-.07.923-.48 1.425-1.228 1.484-2.233z`,
+	},
+	effect: {
+		color: "#F2A81D",
+		path: `M11.846.007a.8.8 0 0 0-.312.103L.454 6.346a.8.8 0 0 0-.397.855.8.8 0 0 0 .408.78L3.99 9.976 1.033 11.64a.76.76 0 0 0-.374.838c-.033.265.07.541.378.715l10.546 5.967a.8.8 0 0 0 .61.073.8.8 0 0 0 .27-.094l10.548-5.968c.31-.175.412-.454.376-.72a.76.76 0 0 0-.383-.79l-3.01-1.693 3.554-2.012a.8.8 0 0 0 .399-.836.8.8 0 0 0-.412-.753L12.455.13a.8.8 0 0 0-.28-.097.8.8 0 0 0-.227-.033m6.482 10.853 2.78 1.566-9.205 5.21-9.21-5.213 2.76-1.554 5.99 3.387a.83.83 0 0 0 .638.076.8.8 0 0 0 .285-.098zm3.572 6.03a.75.75 0 0 0-.35.098l-9.67 5.47-9.635-5.45a.75.75 0 0 0-1.01.267.717.717 0 0 0 .27.99l9.976 5.644a.75.75 0 0 0 .372.098c.079 0 .294-.026.46-.117l9.978-5.645a.716.716 0 0 0 .27-.99.75.75 0 0 0-.661-.364`,
+	},
+	otel: {
+		color: "#F5A800",
+		path: `M16.708 6.764a3.453 3.453 0 0 1-3.453-3.452A3.453 3.453 0 0 1 16.708 0 3.453 3.453 0 0 1 20.16 3.312a3.453 3.453 0 0 1-3.452 3.452zm0-5.207a1.755 1.755 0 0 0-1.755 1.755 1.755 1.755 0 0 0 1.755 1.755 1.755 1.755 0 0 0 1.755-1.755 1.755 1.755 0 0 0-1.755-1.755zM6.118 24a4.118 4.118 0 0 1-4.118-4.118 4.118 4.118 0 0 1 4.118-4.118 4.118 4.118 0 0 1 4.118 4.118A4.118 4.118 0 0 1 6.118 24zm0-6.539a2.421 2.421 0 0 0-2.421 2.421 2.421 2.421 0 0 0 2.421 2.421 2.421 2.421 0 0 0 2.421-2.421 2.421 2.421 0 0 0-2.421-2.421zM13.255 12.764L11.236 10.745 7.745 14.236a4.118 4.118 0 0 0-1.627 0L8.764 11.59a4.118 4.118 0 0 1 5.825 0l4.49 4.49a4.118 4.118 0 0 1 0 5.825 4.118 4.118 0 0 1-5.824 0L8.764 17.412l1.198-1.198 4.493 4.494a2.421 2.421 0 0 0 3.428-3.42z`,
+	},
+};
+
+const stepIcons = {
+	pick: `<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>`,
+	install: `<path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>`,
+	instrument: `<path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>`,
+};
+
+const snippets: Snippet[] = [
+	{
+		id: "nodejs",
+		label: "Node.js",
+		filename: "tracing.ts",
+		descriptor: "Express, Fastify, Hono",
+		lang: "ts",
+		installLang: "bash",
+		install: `npm install @opentelemetry/sdk-node \\
+  @opentelemetry/auto-instrumentations-node \\
+  @opentelemetry/exporter-trace-otlp-http \\
+  @opentelemetry/exporter-logs-otlp-http`,
+		instrument: fill(`// tracing.ts — run with: node --import ./tracing.ts app.ts
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
+
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({
+    url: "{{INGEST_URL}}/v1/traces",
+    headers: { Authorization: "Bearer {{API_KEY}}" },
+  }),
+  logRecordProcessors: [
+    new SimpleLogRecordProcessor(
+      new OTLPLogExporter({
+        url: "{{INGEST_URL}}/v1/logs",
+        headers: { Authorization: "Bearer {{API_KEY}}" },
+      })
+    ),
+  ],
+  instrumentations: [getNodeAutoInstrumentations()],
+});
+
+sdk.start();`),
+	},
+	{
+		id: "nextjs",
+		label: "Next.js",
+		filename: "instrumentation.ts",
+		descriptor: "App Router, Pages Router",
+		lang: "ts",
+		installLang: "bash",
+		install: `npm install @vercel/otel @opentelemetry/sdk-logs @opentelemetry/exporter-logs-otlp-http`,
+		instrument: fill(`// instrumentation.ts (project root)
+import { registerOTel } from "@vercel/otel";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs";
+
+export function register() {
+  registerOTel({
+    serviceName: "my-next-app",
+    attributes: { environment: "production" },
+    traceExporter: { url: "{{INGEST_URL}}/v1/traces" },
+    logRecordProcessor: new SimpleLogRecordProcessor(
+      new OTLPLogExporter({
+        url: "{{INGEST_URL}}/v1/logs",
+        headers: { Authorization: "Bearer {{API_KEY}}" },
+      })
+    ),
+  });
+}`),
+	},
+	{
+		id: "python",
+		label: "Python",
+		filename: "tracing.py",
+		descriptor: "FastAPI, Django, Flask",
+		lang: "python",
+		installLang: "bash",
+		install: `pip install opentelemetry-sdk \\
+  opentelemetry-exporter-otlp-proto-http \\
+  opentelemetry-instrumentation`,
+		instrument: fill(`# tracing.py
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+provider = TracerProvider()
+exporter = OTLPSpanExporter(
+    endpoint="{{INGEST_URL}}/v1/traces",
+    headers={"Authorization": "Bearer {{API_KEY}}"},
+)
+provider.add_span_processor(BatchSpanProcessor(exporter))
+trace.set_tracer_provider(provider)
+
+tracer = trace.get_tracer("quickstart")
+with tracer.start_as_current_span("hello-maple"):
+    print("Trace sent!")`),
+	},
+	{
+		id: "go",
+		label: "Go",
+		filename: "main.go",
+		descriptor: "net/http, Echo, Gin",
+		lang: "go",
+		installLang: "bash",
+		install: `go get go.opentelemetry.io/otel \\
+  go.opentelemetry.io/otel/sdk \\
+  go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`,
+		instrument: fill(`package main
+
+import (
+	"context"
+	"log"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/trace"
+)
+
+func main() {
+	ctx := context.Background()
+
+	exporter, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithEndpointURL("{{INGEST_URL}}/v1/traces"),
+		otlptracehttp.WithHeaders(map[string]string{
+			"Authorization": "Bearer {{API_KEY}}",
+		}),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tp := trace.NewTracerProvider(trace.WithBatcher(exporter))
+	defer tp.Shutdown(ctx)
+	otel.SetTracerProvider(tp)
+
+	tracer := otel.Tracer("quickstart")
+	_, span := tracer.Start(ctx, "hello-maple")
+	span.End()
+	tp.ForceFlush(ctx)
+
+	log.Println("Trace sent!")
+}`),
+	},
+	{
+		id: "effect",
+		label: "Effect",
+		filename: "telemetry.ts",
+		descriptor: "Effect-TS apps",
+		lang: "ts",
+		installLang: "bash",
+		install: `npm install @maple-dev/effect-sdk effect`,
+		instrument: fill(`// telemetry.ts
+import { Maple } from "@maple-dev/effect-sdk"
+import { Effect } from "effect"
+
+// Auto-detects MAPLE_ENDPOINT, MAPLE_INGEST_KEY,
+// commit SHA, and deployment environment from env vars
+const TracerLive = Maple.layer({
+  serviceName: "my-effect-app",
+})
+
+const program = Effect.gen(function* () {
+  yield* Effect.log("Hello from Effect!")
+}).pipe(Effect.withSpan("hello-maple"))
+
+Effect.runPromise(
+  program.pipe(Effect.provide(TracerLive))
+)`),
+	},
+	{
+		id: "otel",
+		label: "Custom",
+		filename: ".env",
+		descriptor: "Any OTel-compliant SDK",
+		lang: "bash",
+		installLang: "bash",
+		install: `# Use your language's OpenTelemetry SDK
+# https://opentelemetry.io/docs/languages/`,
+		instrument: fill(`# Configure via environment variables — works with any OTel SDK
+export OTEL_EXPORTER_OTLP_ENDPOINT="{{INGEST_URL}}"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer {{API_KEY}}"
+export OTEL_SERVICE_NAME="my-service"
+
+# Then run your application with your language's OTel SDK enabled`),
+	},
 ];
+
+const defaultId = snippets[0].id;
 ---
 
 <section class="relative bg-bg">
 	<div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
-		<div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted mb-4">{m.start_eyebrow()}</div>
-		<h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.05] tracking-tight max-w-3xl">
+		<div class="flex flex-wrap items-baseline justify-between gap-4 mb-4">
+			<div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted">{m.start_eyebrow()}</div>
+			<div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] font-mono">
+				<span class="text-fg-muted uppercase tracking-wider text-[10px] font-sans">{m.start_endpoint_label()}</span>
+				<span class="inline-flex items-center gap-1.5 text-fg">
+					<span class="relative inline-flex size-1.5" aria-hidden="true">
+						<span class="absolute inset-0 rounded-full bg-primary animate-ping opacity-75"></span>
+						<span class="relative inline-flex size-1.5 rounded-full bg-primary"></span>
+					</span>
+					{INGEST_URL}
+				</span>
+				<span class="text-fg-muted uppercase tracking-wider text-[10px] font-sans">{m.start_key_label()}</span>
+				<span class="text-fg">{API_KEY}</span>
+			</div>
+		</div>
+		<h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.05] tracking-tight max-w-[24ch] text-balance">
 			{m.start_title()}
 		</h2>
-		<p class="mt-4 text-sm md:text-base text-fg-muted max-w-xl leading-relaxed">{m.start_lede()}</p>
+		<p class="mt-4 text-sm md:text-base text-fg-muted max-w-[48ch] leading-relaxed">{m.start_lede()}</p>
 
-		<ol class="mt-12 space-y-6">
-			{steps.map((s) => (
-				<li class="grid grid-cols-[auto_1fr] gap-x-6 md:gap-x-10">
-					<div class="text-[11px] tabular-nums text-primary tracking-wider pt-3">{s.n}</div>
-					<div>
-						<div class="text-[11px] uppercase tracking-wider text-fg-muted mb-2">{s.label}</div>
-						<pre class="bg-bg-deep border border-border px-4 py-3 text-[12.5px] text-fg overflow-x-auto"><code>{s.code}</code></pre>
+		<div class="mt-12 border border-border bg-bg-elevated/30 relative" data-quickstart-tabs role="tablist">
+			{/* connector spine — vertical line through the rail badges (desktop only) */}
+			<div class="hidden md:block absolute left-[calc(2.75rem+0.5px)] top-12 bottom-12 w-px bg-linear-to-b from-primary/60 via-primary/30 to-primary/10" aria-hidden="true"></div>
+
+			{/* Step 01 — pick */}
+			<div class="flex flex-col md:flex-row md:items-stretch border-b border-border">
+				<div class="flex md:flex-col md:w-52 md:shrink-0 md:border-r border-b md:border-b-0 border-border md:p-5 px-5 py-3 gap-3 md:gap-3 items-baseline md:items-start bg-bg-elevated relative">
+					<div class="flex items-center gap-2.5">
+						<span class="relative z-10 inline-flex size-7 items-center justify-center bg-bg border border-primary text-primary font-mono text-[11px] tabular-nums shadow-[0_0_0_3px_var(--bg-elevated)]">01</span>
+						<svg class="size-3.5 text-primary/70 hidden md:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={stepIcons.pick} />
 					</div>
-				</li>
-			))}
-		</ol>
+					<div class="flex flex-col gap-1">
+						<div class="text-[11px] uppercase tracking-wider text-fg">Pick</div>
+						<div class="hidden md:block text-[11.5px] text-fg-muted leading-relaxed">Choose the SDK that matches your runtime.</div>
+					</div>
+				</div>
+				<div class="flex-1 p-5">
+					<div class="flex flex-wrap gap-2">
+						{snippets.map((s) => (
+							<button
+								type="button"
+								role="tab"
+								data-tab-trigger={s.id}
+								data-filename={s.filename}
+								aria-selected={s.id === defaultId ? "true" : "false"}
+								class="group inline-flex items-center gap-2 font-mono text-[12px] pl-2 pr-3 py-1.5 border transition-all aria-[selected=true]:border-primary aria-[selected=true]:text-fg aria-[selected=true]:bg-primary/10 aria-[selected=true]:shadow-[inset_0_0_0_1px_var(--primary)] aria-[selected=false]:border-border aria-[selected=false]:text-fg-muted hover:text-fg hover:border-fg-muted"
+							>
+								<svg
+									class="size-4 transition-opacity group-aria-[selected=false]:opacity-60"
+									viewBox="0 0 24 24"
+									fill={SDK_LOGOS[s.id]?.color ?? "currentColor"}
+									aria-hidden="true"
+									set:html={`<path d="${SDK_LOGOS[s.id]?.path ?? ""}"/>`}
+								/>
+								{s.label}
+							</button>
+						))}
+					</div>
+				</div>
+			</div>
 
-		<p class="mt-10 text-[12px] text-fg-muted max-w-xl leading-relaxed">
-			{m.start_footnote()}
-		</p>
+			{/* Step 02 — install */}
+			<div class="flex flex-col md:flex-row md:items-stretch border-b border-border">
+				<div class="flex md:flex-col md:w-52 md:shrink-0 md:border-r border-b md:border-b-0 border-border md:p-5 px-5 py-3 gap-3 md:gap-3 items-baseline md:items-start bg-bg-elevated relative">
+					<div class="flex items-center gap-2.5">
+						<span class="relative z-10 inline-flex size-7 items-center justify-center bg-bg border border-primary text-primary font-mono text-[11px] tabular-nums shadow-[0_0_0_3px_var(--bg-elevated)]">02</span>
+						<svg class="size-3.5 text-primary/70 hidden md:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={stepIcons.install} />
+					</div>
+					<div class="flex flex-col gap-1">
+						<div class="text-[11px] uppercase tracking-wider text-fg">Install</div>
+						<div class="hidden md:block text-[11.5px] text-fg-muted leading-relaxed">Add the OpenTelemetry packages to your project.</div>
+					</div>
+				</div>
+				<div class="flex-1 min-w-0">
+					<div class="flex items-center gap-2 border-b border-border px-5 h-9 bg-bg-deep/50">
+						<span class="font-mono text-fg-muted text-[12px]">$</span>
+						<span class="text-[10px] uppercase tracking-wider text-fg-muted font-sans">{m.start_install_label()}</span>
+					</div>
+					{snippets.map((s) => (
+						<div data-tab-panel={`install-${s.id}`} hidden={s.id !== defaultId} class="quickstart-code">
+							<Code code={s.install} lang={s.installLang} theme="vitesse-dark" />
+						</div>
+					))}
+				</div>
+			</div>
+
+			{/* Step 03 — instrument */}
+			<div class="flex flex-col md:flex-row md:items-stretch">
+				<div class="flex md:flex-col md:w-52 md:shrink-0 md:border-r border-b md:border-b-0 border-border md:p-5 px-5 py-3 gap-3 md:gap-3 items-baseline md:items-start bg-bg-elevated relative">
+					<div class="flex items-center gap-2.5">
+						<span class="relative z-10 inline-flex size-7 items-center justify-center bg-bg border border-primary text-primary font-mono text-[11px] tabular-nums shadow-[0_0_0_3px_var(--bg-elevated)]">03</span>
+						<svg class="size-3.5 text-primary/70 hidden md:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={stepIcons.instrument} />
+					</div>
+					<div class="flex flex-col gap-1">
+						<div class="text-[11px] uppercase tracking-wider text-fg">Instrument</div>
+						<div class="hidden md:block text-[11.5px] text-fg-muted leading-relaxed">Drop this snippet in. First trace lands in seconds.</div>
+					</div>
+				</div>
+				<div class="flex-1 min-w-0">
+					<div class="flex items-center justify-between border-b border-border px-5 h-9 bg-bg-deep/50">
+						<div class="flex items-center gap-2 min-w-0">
+							<svg class="size-3.5 text-fg-muted shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-quickstart-active-logo>
+								<path d={SDK_LOGOS[defaultId]?.path ?? ""} />
+							</svg>
+							<div class="text-[12px] text-fg-muted font-mono truncate" data-quickstart-active-filename>{snippets.find(s => s.id === defaultId)?.filename}</div>
+						</div>
+						<button
+							type="button"
+							data-quickstart-copy
+							data-copy-default={m.start_copy()}
+							data-copy-active={m.start_copied()}
+							class="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-fg-muted hover:text-fg transition-colors shrink-0"
+						>
+							<svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<rect x="9" y="9" width="13" height="13" rx="2" />
+								<path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+							</svg>
+							<span data-quickstart-copy-label>{m.start_copy()}</span>
+						</button>
+					</div>
+					{snippets.map((s) => (
+						<div data-tab-panel={s.id} hidden={s.id !== defaultId} class="quickstart-code">
+							<Code code={s.instrument} lang={s.lang} theme="vitesse-dark" />
+							<span hidden data-copy-source={s.id}>{s.instrument}</span>
+						</div>
+					))}
+				</div>
+			</div>
+		</div>
+
+		<p class="mt-10 text-[12px] text-fg-muted max-w-[48ch] leading-relaxed">{m.start_footnote()}</p>
 	</div>
 
-	<!-- bookend -->
+	{/* ──────────────────────────────────────────────────────── */}
+	{/* Bookend                                                 */}
+	{/* ──────────────────────────────────────────────────────── */}
 	<div class="relative overflow-hidden drenched-amber">
 		<div class="relative mx-auto max-w-6xl px-6 py-24 md:py-32">
-			<h2 class="font-display text-4xl sm:text-5xl md:text-6xl font-semibold leading-[1.04] tracking-tight max-w-3xl">
+			<h2 class="font-display text-4xl sm:text-5xl md:text-6xl font-semibold leading-[1.04] tracking-tight max-w-[24ch]">
 				{m.cta_bookend_title()}
 			</h2>
-			<p class="mt-5 text-base md:text-lg max-w-xl opacity-85 leading-relaxed">{m.cta_bookend_lede()}</p>
+			<p class="mt-5 text-base md:text-lg max-w-[48ch] opacity-85 leading-relaxed">{m.cta_bookend_lede()}</p>
 			<div class="mt-10 flex flex-wrap items-center gap-3">
-				<a href="https://app.maple.dev"
-				   class="inline-flex items-center justify-center h-11 px-5 bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors">
+				<a
+					href="https://app.maple.dev"
+					class="inline-flex items-center justify-center h-11 px-5 bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
+				>
 					{m.cta_bookend_primary()}
 				</a>
-				<a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer"
-				   class="inline-flex items-center justify-center h-11 px-5 border border-current/40 text-sm font-medium hover:bg-current/10 transition-colors">
+				<a
+					href="https://github.com/Makisuo/maple"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="inline-flex items-center justify-center h-11 px-5 border border-current/40 text-sm font-medium hover:bg-current/10 transition-colors"
+				>
 					{m.cta_bookend_secondary()}
 				</a>
 			</div>
 		</div>
 	</div>
 </section>
+
+<script>
+	const tabRow = document.querySelector<HTMLElement>("[data-quickstart-tabs]");
+
+	if (tabRow) {
+		const root = tabRow;
+
+		function setActive(id: string) {
+			root.querySelectorAll<HTMLElement>("[data-tab-trigger]").forEach((btn) => {
+				btn.setAttribute("aria-selected", btn.dataset.tabTrigger === id ? "true" : "false");
+			});
+			root.querySelectorAll<HTMLElement>("[data-tab-panel]").forEach((panel) => {
+				const target = panel.dataset.tabPanel ?? "";
+				// Install panels are tagged "install-<id>"; instrument panels use the bare id.
+				panel.hidden = target !== id && target !== `install-${id}`;
+			});
+			const trigger = root.querySelector<HTMLElement>(`[data-tab-trigger="${id}"]`);
+			root.querySelectorAll<HTMLElement>("[data-quickstart-active-filename]").forEach((el) => {
+				el.textContent = trigger?.dataset.filename ?? trigger?.textContent ?? "";
+			});
+			const sourceLogo = trigger?.querySelector("svg");
+			if (sourceLogo) {
+				root.querySelectorAll<SVGElement>("[data-quickstart-active-logo]").forEach((el) => {
+					el.innerHTML = sourceLogo.innerHTML;
+				});
+			}
+		}
+
+		root.addEventListener("click", (event) => {
+			const target = event.target as HTMLElement | null;
+			const trigger = target?.closest<HTMLElement>("[data-tab-trigger]");
+			if (!trigger) return;
+			const id = trigger.dataset.tabTrigger;
+			if (id) setActive(id);
+		});
+
+		const copyButton = root.querySelector<HTMLButtonElement>("[data-quickstart-copy]");
+		const copyLabel = copyButton?.querySelector<HTMLElement>("[data-quickstart-copy-label]");
+		copyButton?.addEventListener("click", () => {
+			// Copy the source whose tab-panel is currently visible.
+			const source = Array.from(root.querySelectorAll<HTMLElement>("[data-copy-source]")).find((el) => {
+				const panel = el.closest<HTMLElement>("[data-tab-panel]");
+				return panel ? !panel.hidden : true;
+			});
+			if (!source || !copyLabel) return;
+
+			const text = source.textContent ?? "";
+			const done = () => {
+				const active = copyButton.dataset.copyActive ?? "Copied";
+				const original = copyButton.dataset.copyDefault ?? "Copy";
+				copyLabel.textContent = active;
+				window.setTimeout(() => {
+					copyLabel.textContent = original;
+				}, 1500);
+			};
+
+			if (navigator.clipboard?.writeText) {
+				navigator.clipboard.writeText(text).then(done).catch(() => done());
+			} else {
+				done();
+			}
+		});
+	}
+</script>
+
+<style is:global>
+	.quickstart-code .astro-code {
+		background-color: var(--bg-deep) !important;
+		font-size: 12.5px;
+		line-height: 1.55;
+		padding: 1rem 1.25rem;
+		overflow-x: auto;
+		font-family: inherit;
+	}
+	.quickstart-code .astro-code code {
+		font-family: inherit;
+	}
+</style>
