@@ -11,8 +11,11 @@
  * lifecycle (timer at start, .finished at end) so multi-active is automatic
  * and there's no per-frame index race.
  *
- * The cursor is one Motion `animate()` driving `transform: translate3d(...)`,
- * so it rides the compositor — no layout work per frame.
+ * The cursor is one Motion `animate()` driving the `x` transform component, so
+ * it rides the compositor — no layout work per frame.
+ *
+ * Uses Motion's individual transform properties (scaleX, x), not the `transform`
+ * shorthand string keyframes — Motion can't interpolate opaque transform strings.
  */
 import { animate, type AnimationPlaybackControls } from "motion"
 
@@ -27,7 +30,12 @@ type Row = {
 	durationMs: number
 }
 
+const ATTACHED = new WeakSet<HTMLElement>()
+
 export function startWaterfall(root: HTMLElement) {
+	if (ATTACHED.has(root)) return
+	ATTACHED.add(root)
+
 	const totalMs = Number(root.dataset.total ?? 200)
 	const speedDivisor = Number(root.dataset.speed ?? DEFAULT_SPEED_DIVISOR)
 	const stage = root.querySelector<HTMLElement>("[data-waterfall-stage]") ?? root
@@ -65,15 +73,22 @@ export function startWaterfall(root: HTMLElement) {
 	const ro = new ResizeObserver(measureTrack)
 	ro.observe(stage)
 
+	// Generation token: each cycle() invocation gets a unique id; stale callbacks
+	// (timers scheduled by an older generation) check against `gen` and bail out.
+	let gen = 0
 	let inflight: AnimationPlaybackControls[] = []
-	let timers: number[] = []
-	let cancelled = false
+	let phaseTimers: number[] = []
 
-	const stopAll = () => {
-		inflight.forEach((a) => a.stop())
+	const stopInflight = () => {
+		inflight.forEach((a) => {
+			try { a.stop() } catch {}
+		})
 		inflight = []
-		timers.forEach((t) => window.clearTimeout(t))
-		timers = []
+	}
+
+	const clearPhaseTimers = () => {
+		phaseTimers.forEach((t) => window.clearTimeout(t))
+		phaseTimers = []
 	}
 
 	const armRows = () => {
@@ -88,88 +103,82 @@ export function startWaterfall(root: HTMLElement) {
 		stage.style.setProperty("--frame-opacity", "1")
 	}
 
-	const playOnce = () => {
+	const playOnce = (myGen: number) => {
 		const playSec = (totalMs * speedDivisor) / 1000
 
-		const barAnims = rows.map((r) => {
+		const barAnims: AnimationPlaybackControls[] = []
+		rows.forEach((r, idx) => {
 			const startSec = (r.startMs * speedDivisor) / 1000
-			const durSec = (r.durationMs * speedDivisor) / 1000
+			const durSec = Math.max(0.01, (r.durationMs * speedDivisor) / 1000)
 
-			const startTimer = window.setTimeout(() => {
-				if (!cancelled) r.row.classList.add("is-active")
+			window.setTimeout(() => {
+				if (gen === myGen) r.row.classList.add("is-active")
 			}, startSec * 1000)
-			timers.push(startTimer)
 
-			const a = animate(
-				r.bar,
-				{ transform: ["scaleX(0)", "scaleX(1)"] },
-				{ duration: durSec, delay: startSec, ease: "linear" },
-			)
-			a.finished
-				.then(() => {
-					if (!cancelled) r.row.classList.remove("is-active")
-				})
-				.catch(() => {})
-			return a
+			try {
+				const a = animate(
+					r.bar,
+					{ scaleX: [0, 1] },
+					{ duration: durSec, delay: startSec, ease: "linear" },
+				)
+				console.log("[wf] bar", idx, "animate ok", { durSec, startSec, hasFinished: !!a.finished })
+				a.finished
+					.then(() => {
+						if (gen === myGen) r.row.classList.remove("is-active")
+					})
+					.catch((e) => {
+						console.warn("[wf] bar finished rejected", idx, e)
+					})
+				barAnims.push(a)
+			} catch (e) {
+				console.error("[wf] bar animate threw", idx, e)
+			}
 		})
 
 		let cursorAnim: AnimationPlaybackControls | null = null
 		if (cursor) {
 			cursor.style.setProperty("--cursor-opacity", "1")
-			cursorAnim = animate(
-				cursor,
-				{
-					transform: [
-						`translate3d(${trackOffsetX}px, 0, 0)`,
-						`translate3d(${trackOffsetX + trackWidth}px, 0, 0)`,
-					],
-				},
-				{ duration: playSec, ease: "linear" },
-			)
+			try {
+				cursorAnim = animate(
+					cursor,
+					{ x: [trackOffsetX, trackOffsetX + trackWidth] },
+					{ duration: playSec, ease: "linear" },
+				)
+				console.log("[wf] cursor animate ok", { playSec, from: trackOffsetX, to: trackOffsetX + trackWidth })
+			} catch (e) {
+				console.error("[wf] cursor animate threw", e)
+			}
 		}
 
 		inflight = cursorAnim ? [...barAnims, cursorAnim] : barAnims
 		return Promise.all(inflight.map((a) => a.finished)).catch(() => {})
 	}
 
-	const delay = (ms: number) =>
+	const phaseDelay = (ms: number) =>
 		new Promise<void>((resolve) => {
 			const t = window.setTimeout(() => resolve(), ms)
-			timers.push(t)
+			phaseTimers.push(t)
 		})
 
 	const cycle = async () => {
-		while (!cancelled) {
+		const myGen = ++gen
+		while (gen === myGen) {
 			armRows()
-			await playOnce()
-			if (cancelled) return
+			await playOnce(myGen)
+			if (gen !== myGen) return
 
 			rows[slowestIdx].row.classList.add("is-slowest")
-			await delay(PAUSE_MS)
-			if (cancelled) return
+			await phaseDelay(PAUSE_MS)
+			if (gen !== myGen) return
 			rows[slowestIdx].row.classList.remove("is-slowest")
 
 			stage.style.setProperty("--frame-opacity", "0.35")
 			if (cursor) cursor.style.setProperty("--cursor-opacity", "0")
-			await delay(RESET_MS)
+			await phaseDelay(RESET_MS)
 		}
 	}
 
 	cycle()
-
-	const io = new IntersectionObserver(
-		([entry]) => {
-			if (!entry.isIntersecting) {
-				cancelled = true
-				stopAll()
-			} else if (cancelled) {
-				cancelled = false
-				cycle()
-			}
-		},
-		{ rootMargin: "40px" },
-	)
-	io.observe(root)
 }
 
 function parsePct(value: string): number {
