@@ -418,16 +418,22 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							const cloudPlatform = String(row.cloudPlatform ?? "")
 							const cloudProvider = String(row.cloudProvider ?? "")
 							const faasName = String(row.faasName ?? "")
+							const mapleSdkType = String(row.mapleSdkType ?? "")
 							// Require pod/deployment, not just cluster.name — see SQL comment.
 							const isKubernetes = k8sPodName !== "" || k8sDeploymentName !== ""
-							const platform: "kubernetes" | "cloudflare" | "lambda" | "unknown" =
+							// Infrastructure signals win over SDK self-report so a server SDK on
+							// cloudflare/lambda still classifies by host. Pure browser apps never
+							// set k8s/cloud/faas, so they fall through to web.
+							const platform: "kubernetes" | "cloudflare" | "lambda" | "web" | "unknown" =
 								cloudPlatform === "cloudflare.workers" || cloudProvider === "cloudflare"
 									? "cloudflare"
 									: faasName !== "" || cloudPlatform === "aws_lambda"
 										? "lambda"
 										: isKubernetes
 											? "kubernetes"
-											: "unknown"
+											: mapleSdkType === "client"
+												? "web"
+												: "unknown"
 							return {
 								serviceName: String(row.serviceName ?? ""),
 								platform,
@@ -435,6 +441,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								cloudPlatform,
 								cloudProvider,
 								faasName,
+								mapleSdkType,
 							}
 						}),
 					})

@@ -8,6 +8,7 @@ import {
 	CloudflareIcon,
 	CubeIcon,
 	DatabaseIcon,
+	GlobeIcon,
 	KubernetesIcon,
 	MongodbIcon,
 	MysqlIcon,
@@ -31,6 +32,8 @@ function getPlatformIcon(platform: ServicePlatform | undefined): {
 			return { Icon: CloudflareIcon, label: "Cloudflare Workers", branded: true }
 		case "lambda":
 			return { Icon: AwsLambdaIcon, label: "AWS Lambda", branded: true }
+		case "web":
+			return { Icon: GlobeIcon, label: "Web (browser)", branded: false }
 		default:
 			return { Icon: ServerIcon, label: "Unknown runtime", branded: false }
 	}

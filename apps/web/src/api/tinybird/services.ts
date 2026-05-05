@@ -3,7 +3,7 @@ import { QueryEngineExecuteRequest } from "@maple/query-engine"
 import { ServiceOverviewRequest, ServiceApdexRequest, ServiceReleasesRequest } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { buildBucketTimeline, computeBucketSeconds, toIsoBucket } from "@/api/tinybird/timeseries-utils"
-import { estimateThroughput } from "@/lib/sampling"
+import { summarizeSampling } from "@/lib/sampling"
 import {
 	TinybirdDateTimeString,
 	decodeInput,
@@ -59,9 +59,7 @@ interface CoercedRow {
 	p50LatencyMs: number
 	p95LatencyMs: number
 	p99LatencyMs: number
-	sampledSpanCount: number
-	unsampledSpanCount: number
-	dominantThreshold: string
+	estimatedSpanCount: number
 }
 
 function coerceRow(raw: Record<string, unknown>): CoercedRow {
@@ -75,9 +73,7 @@ function coerceRow(raw: Record<string, unknown>): CoercedRow {
 		p50LatencyMs: Number(raw.p50LatencyMs ?? 0),
 		p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
 		p99LatencyMs: Number(raw.p99LatencyMs ?? 0),
-		sampledSpanCount: Number(raw.sampledSpanCount ?? 0),
-		unsampledSpanCount: Number(raw.unsampledSpanCount ?? 0),
-		dominantThreshold: String(raw.dominantThreshold ?? ""),
+		estimatedSpanCount: Number(raw.estimatedSpanCount ?? 0),
 	}
 }
 
@@ -99,19 +95,9 @@ function aggregateByServiceEnvironment(rows: CoercedRow[], durationSeconds: numb
 	for (const group of groups.values()) {
 		const totalSpans = group.reduce((sum, r) => sum + r.spanCount, 0)
 		const totalErrors = group.reduce((sum, r) => sum + r.errorCount, 0)
-		const totalSampled = group.reduce((sum, r) => sum + r.sampledSpanCount, 0)
-		const totalUnsampled = group.reduce((sum, r) => sum + r.unsampledSpanCount, 0)
+		const totalEstimated = group.reduce((sum, r) => sum + r.estimatedSpanCount, 0)
 
-		// Use the first non-empty threshold found across commit groups
-		let threshold = ""
-		for (const r of group) {
-			if (r.dominantThreshold) {
-				threshold = r.dominantThreshold
-				break
-			}
-		}
-
-		const sampling = estimateThroughput(totalSampled, totalUnsampled, threshold, durationSeconds)
+		const sampling = summarizeSampling(totalEstimated, totalSpans, durationSeconds)
 
 		// Weighted average of latencies by span count
 		let p50 = 0

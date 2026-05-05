@@ -997,7 +997,7 @@ function ServiceMapCanvas({
 							{colorMode === "platform" && (
 								<>
 									<span className="text-foreground/30">|</span>
-									{(["kubernetes", "cloudflare", "lambda", "unknown"] as const).map((p) => (
+									{(["kubernetes", "cloudflare", "lambda", "web", "unknown"] as const).map((p) => (
 										<div key={p} className="flex items-center gap-1.5">
 											<div
 												className="h-2.5 w-2.5 rounded-sm shrink-0"

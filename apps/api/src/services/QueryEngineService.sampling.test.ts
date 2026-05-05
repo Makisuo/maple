@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { parseSamplingWeight } from "./QueryEngineService"
 
 /**
  * TS mirror of the ClickHouse `SampleRate` MATERIALIZED expression on the
- * `traces` datasource. If the SQL math diverges from this function (or from
- * `parseSamplingWeight`), the materialized column will return values that
- * disagree with the runtime sampling-weight logic — this test catches that.
+ * `traces` datasource. The query engine no longer parses thresholds in JS —
+ * instead it sums the per-row `SampleRate` column directly. This test pins
+ * down the SQL math so changes to `SAMPLE_RATE_EXPR` in
+ * packages/domain/src/tinybird/datasources.ts don't silently change values.
  *
  * The CH expression resolves SampleRate in three branches:
  *   1. SpanAttributes['SampleRate'] (explicit, set by collector)
@@ -29,24 +29,20 @@ function sampleRateFromTraceState(traceState: string): number {
 	return 1.0 / Math.max(1.0 - rejection, 0.0001)
 }
 
-describe("SampleRate materialization parity", () => {
-	it("th:8 → weight 2.0 (matches parseSamplingWeight)", () => {
-		expect(sampleRateFromTraceState("th:8")).toBeCloseTo(parseSamplingWeight("8"))
+describe("SampleRate materialization", () => {
+	it("th:8 → weight 2.0 (50% rejection)", () => {
 		expect(sampleRateFromTraceState("th:8")).toBeCloseTo(2.0)
 	})
 
-	it("th:c → weight 4.0", () => {
-		expect(sampleRateFromTraceState("th:c")).toBeCloseTo(parseSamplingWeight("c"))
+	it("th:c → weight 4.0 (75% rejection)", () => {
 		expect(sampleRateFromTraceState("th:c")).toBeCloseTo(4.0)
 	})
 
 	it("th:80 (multi-char hex) → weight 2.0", () => {
-		expect(sampleRateFromTraceState("th:80")).toBeCloseTo(parseSamplingWeight("80"))
 		expect(sampleRateFromTraceState("th:80")).toBeCloseTo(2.0)
 	})
 
 	it("th:f (15/16 reject) → weight 16.0", () => {
-		expect(sampleRateFromTraceState("th:f")).toBeCloseTo(parseSamplingWeight("f"))
 		expect(sampleRateFromTraceState("th:f")).toBeCloseTo(16.0)
 	})
 
@@ -60,19 +56,32 @@ describe("SampleRate materialization parity", () => {
 		expect(sampleRateFromTraceState("vendor=x,th:8,other=y")).toBeCloseTo(2.0)
 	})
 
-	it("matches parseSamplingWeight for known thresholds across the range", () => {
-		const cases = ["1", "4", "8", "c", "f", "80", "c0", "f0"]
-		for (const hex of cases) {
-			const fromMaterializedSql = sampleRateFromTraceState(`th:${hex}`)
-			const fromRuntime = parseSamplingWeight(hex)
-			expect(fromMaterializedSql).toBeCloseTo(fromRuntime)
-		}
-	})
-
 	it("clamps near-100% rejection to 1/0.0001 = 10000", () => {
 		// hex 'fffffffffffffffe' is essentially full rejection; SQL clamps via greatest(..., 0.0001)
 		const result = sampleRateFromTraceState("th:fffffffffffffffe")
 		expect(result).toBeLessThanOrEqual(10000)
 		expect(result).toBeGreaterThan(1)
+	})
+})
+
+describe("Mixed-threshold buckets — the bug this replaces", () => {
+	// Regression test: the old approach picked one threshold per bucket via
+	// `anyIf` and applied it to every sampled span, which inflated estimates by
+	// orders of magnitude under mixed sampling rates. Sum-of-SampleRate scales
+	// each row by its own threshold, so a 99/1 mix of th:8 / th:fff8 yields
+	// ~99 * 2 + 1 * 8192 ≈ 8390, NOT 100 * 8192 = 819200.
+	it("99 spans at th:8 + 1 span at th:fff8 → ~8390 not ~820000", () => {
+		const lightWeight = sampleRateFromTraceState("th:8") // ~2
+		const heavyWeight = sampleRateFromTraceState("th:fff8") // ~8192
+		const correctEstimate = 99 * lightWeight + 1 * heavyWeight
+		expect(correctEstimate).toBeGreaterThan(8000)
+		expect(correctEstimate).toBeLessThan(8400)
+
+		// What the old `anyIf(threshold)` approach would have produced if it
+		// happened to pick the heavy threshold:
+		const oldBuggyEstimate = 100 * heavyWeight
+		expect(oldBuggyEstimate).toBeGreaterThan(800000)
+		// The fix changes the answer by ~100x for this mix.
+		expect(oldBuggyEstimate / correctEstimate).toBeGreaterThan(90)
 	})
 })

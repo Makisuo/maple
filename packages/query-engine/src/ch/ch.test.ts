@@ -229,20 +229,19 @@ describe("tracesTimeseriesQuery", () => {
 		expect(sql).toContain("countIf(StatusCode = 'Error') / count(), 0) AS errorRate")
 	})
 
-	it("includes sampling columns when needsSampling is true", () => {
+	it("emits sum(SampleRate) when needsSampling is true", () => {
 		const q = tracesTimeseriesQuery({ metric: "count", needsSampling: true })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("sampledSpanCount")
-		expect(sql).toContain("unsampledSpanCount")
-		expect(sql).toContain("dominantThreshold")
-		expect(sql).toContain("TraceState LIKE '%th:%'")
+		expect(sql).toContain("sum(SampleRate) AS estimatedSpanCount")
+		// The old non-deterministic `anyIf(threshold)` is gone — it was the bug.
+		expect(sql).not.toContain("dominantThreshold")
+		expect(sql).not.toContain("anyIf")
 	})
 
-	it("excludes sampling columns when needsSampling is false", () => {
+	it("emits a constant 0 estimatedSpanCount when needsSampling is false", () => {
 		const q = tracesTimeseriesQuery({ metric: "count", needsSampling: false })
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("0 AS sampledSpanCount")
-		expect(sql).toContain("0 AS unsampledSpanCount")
+		expect(sql).toContain("0 AS estimatedSpanCount")
 	})
 
 	it("groups by service", () => {

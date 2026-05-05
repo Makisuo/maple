@@ -19,45 +19,44 @@ OpenTelemetry propagates a `TraceState` header on every span. When probability-b
 tracestate: ot=th:e668
 ```
 
-Maple's Tinybird queries read this value directly from the `TraceState` column:
+At ingest time, Maple computes a per-row `SampleRate` weight on the `traces` datasource. The expression resolves three sources in priority order:
 
-```sql
-countIf(TraceState LIKE '%th:%')                            AS sampledSpanCount,
-countIf(TraceState = '' OR TraceState NOT LIKE '%th:%')     AS unsampledSpanCount,
-anyIf(extract(TraceState, 'th:([0-9a-f]+)'), TraceState LIKE '%th:%') AS dominantThreshold
-```
+1. `SpanAttributes['SampleRate']` -- explicit collector-set value, takes precedence.
+2. `TraceState th:<hex>` -- W3C threshold sampling, parsed inline.
+3. Default `1.0` -- unsampled.
+
+Because the weight is materialized per row, downstream queries don't need to know anything about TraceState parsing -- they just sum `SampleRate`.
 
 No manual configuration is needed -- if your OTel SDK or Collector sets the `th` value, Maple picks it up automatically.
 
 ## How throughput is calculated
 
-The threshold hex value encodes the rejection probability. Maple converts it to an acceptance probability and a corresponding weight:
+The threshold hex value encodes the rejection probability. The per-row `SampleRate` is the inverse of the acceptance probability:
 
 ```typescript
-// threshold "e668" -> ~90% rejection -> ~10% acceptance -> weight ~10
+// threshold "e668" -> ~90% rejection -> ~10% acceptance -> SampleRate ~10
 const thresholdInt = parseInt(thresholdHex, 16)
 const maxInt = Math.pow(16, thresholdHex.length)
 const rejectionRate = thresholdInt / maxInt
 const acceptanceProbability = 1 - rejectionRate
-const weight = 1 / acceptanceProbability
+const sampleRate = 1 / acceptanceProbability
 ```
 
-Then:
-
-- **No sampling detected** (no `th` in `TraceState`): spans are counted as-is.
-- **Sampling detected**: sampled span count is multiplied by the weight, then added to unsampled spans.
+Then the query engine simply sums the column:
 
 ```
-estimatedTotal = (sampledSpanCount * weight) + unsampledSpanCount
+estimatedTotal = sum(SampleRate)        -- per-row weighted sum
 throughput     = estimatedTotal / durationSeconds
 ```
 
-For example, with 10% sampling (`weight = 10`) and 500 sampled service entry point spans over 60 seconds:
+For example, with 10% sampling (`SampleRate = 10`) and 500 sampled service entry point spans over 60 seconds:
 
 ```
 estimatedTotal = 500 * 10 = 5000
 throughput     = 5000 / 60 = ~83 req/s
 ```
+
+Critically, this also handles **mixed sampling rates** correctly. If 99 of those 500 spans were sampled at 50% (weight 2) and 1 was sampled at 99.99% rejection (weight 8192), the per-row sum yields `99 * 2 + 1 * 8192 ≈ 8390` -- not `500 * 8192` like a single-weight-per-bucket approximation would.
 
 ## UI indicators
 
@@ -69,10 +68,8 @@ When sampling is detected for a service:
 
 ## Limitations
 
-- **Dominant threshold** -- Maple uses `any()` (an arbitrary pick) to select the threshold value per service per time window. If the sampling rate changes mid-window, the value used may not perfectly represent all spans in that window.
-- **Edge throughput** -- service-to-service call counts on the service map are also extrapolated from sampled traces using the same method. The edge label shows `~` when sampling is active.
+- **Edge throughput** -- service-to-service call counts on the service map use the same per-row `SampleRate` weighting. The edge label shows `~` when sampling is active.
 - **Error rate is not extrapolated** -- error rate is computed as `errorCount / spanCount` from the spans Maple actually receives. This ratio is generally representative, but could skew if sampling is correlated with error status.
-- **Mixed sampling rates** -- if different services use different sampling rates, each service's throughput is extrapolated independently using its own threshold. Cross-service edges use the threshold from the edge's span data.
 
 ## For best results
 

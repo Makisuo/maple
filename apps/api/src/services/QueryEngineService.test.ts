@@ -28,9 +28,7 @@ const makeTraceTimeseriesRow = (
 		satisfiedCount: number
 		toleratingCount: number
 		apdexScore: number
-		sampledSpanCount: number
-		unsampledSpanCount: number
-		dominantThreshold: string
+		estimatedSpanCount: number
 	}> = {},
 ) => ({
 	bucket: "2026-01-01 00:00:00",
@@ -44,9 +42,7 @@ const makeTraceTimeseriesRow = (
 	satisfiedCount: 0,
 	toleratingCount: 0,
 	apdexScore: 0,
-	sampledSpanCount: 0,
-	unsampledSpanCount: 0,
-	dominantThreshold: "",
+	estimatedSpanCount: 0,
 	...overrides,
 })
 
@@ -540,9 +536,7 @@ describe("makeQueryEngineEvaluate", () => {
 							satisfiedCount: 180,
 							toleratingCount: 10,
 							apdexScore: 0.925,
-							sampledSpanCount: 200,
-							unsampledSpanCount: 0,
-							dominantThreshold: "0",
+							estimatedSpanCount: 200,
 						},
 					]),
 			}),
@@ -589,9 +583,7 @@ describe("makeQueryEngineEvaluate", () => {
 							satisfiedCount: 30,
 							toleratingCount: 6,
 							apdexScore: 0.825,
-							sampledSpanCount: 40,
-							unsampledSpanCount: 0,
-							dominantThreshold: "0",
+							estimatedSpanCount: 40,
 						},
 					]),
 			}),

@@ -61,9 +61,11 @@ export type LogsRow = InferRow<typeof logs>
  * Both must produce identical values per row, so the expression is hoisted
  * here. If you change one, change the other.
  *
- * The W3C `th:` parsing math mirrors `parseSamplingWeight()` in
- * apps/api/src/services/QueryEngineService.ts — see
- * QueryEngineService.sampling.test.ts for parity tests.
+ * The query engine sums this column directly (`sum(SampleRate)`) to compute
+ * sampling-aware throughput, so the SQL math here is load-bearing for the
+ * dashboard's "Estimated" series. See
+ * apps/api/src/services/QueryEngineService.sampling.test.ts for the parity
+ * tests that pin down expected weights.
  */
 const SAMPLE_RATE_EXPR =
 	"multiIf(" +
@@ -337,6 +339,7 @@ export const serviceMapEdgesHourly = defineDatasource("service_map_edges_hourly"
 		MaxDurationMs: t.simpleAggregateFunction("max", t.float64()),
 		SampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 		UnsampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		SampleRateSum: t.simpleAggregateFunction("sum", t.float64()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
@@ -371,6 +374,7 @@ export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_ho
 		MaxDurationMs: t.simpleAggregateFunction("max", t.float64()),
 		SampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 		UnsampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		SampleRateSum: t.simpleAggregateFunction("sum", t.float64()),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
@@ -406,6 +410,7 @@ export const servicePlatformsHourly = defineDatasource("service_platforms_hourly
 		CloudPlatform: t.simpleAggregateFunction("max", t.string()),
 		CloudProvider: t.simpleAggregateFunction("max", t.string()),
 		FaasName: t.simpleAggregateFunction("max", t.string()),
+		MapleSdkType: t.simpleAggregateFunction("max", t.string()),
 		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
 	engine: engine.aggregatingMergeTree({
@@ -436,6 +441,7 @@ export const serviceOverviewSpans = defineDatasource("service_overview_spans", {
 		TraceState: t.string(),
 		DeploymentEnv: t.string().lowCardinality(),
 		CommitSha: t.string().lowCardinality(),
+		SampleRate: t.float64().default(1.0),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",

@@ -26,12 +26,13 @@ import {
 
 /**
  * Minimal column shape the metric SELECT exprs need — satisfied by both
- * `Traces` and `ServiceOverviewSpans` (the MV pre-projects these three).
+ * `Traces` and `ServiceOverviewSpans` (the MV pre-projects these).
  */
 interface MetricCols {
 	Duration: CH.Expr<number>
 	StatusCode: CH.Expr<string>
 	TraceState: CH.Expr<string>
+	SampleRate: CH.Expr<number>
 }
 
 function metricSelectExprs(
@@ -60,13 +61,11 @@ function metricSelectExprs(
 			? CH.if_(CH.count().gt(0), CH.countIf($.StatusCode.eq("Error")).div(CH.count()), CH.lit(0))
 			: CH.lit(0),
 		...apdex,
-		sampledSpanCount: needsSampling ? CH.countIf($.TraceState.like("%th:%")) : CH.lit(0),
-		unsampledSpanCount: needsSampling
-			? CH.countIf($.TraceState.eq("").or($.TraceState.notLike("%th:%")))
-			: CH.lit(0),
-		dominantThreshold: needsSampling
-			? CH.anyIf(CH.extract_($.TraceState, "th:([0-9a-f]+)"), $.TraceState.like("%th:%"))
-			: CH.lit(""),
+		// Per-span weighted sum: each row contributes `SampleRate` (>= 1.0).
+		// Replaces the old `sampledSpanCount * dominantWeight + unsampledSpanCount`
+		// approximation, which mis-estimated buckets with mixed sampling rates
+		// because `anyIf` picked one arbitrary threshold and applied it to all.
+		estimatedSpanCount: needsSampling ? CH.sum($.SampleRate) : CH.lit(0),
 	}
 }
 
@@ -225,9 +224,7 @@ export interface TracesTimeseriesOutput {
 	readonly satisfiedCount: number
 	readonly toleratingCount: number
 	readonly apdexScore: number
-	readonly sampledSpanCount: number
-	readonly unsampledSpanCount: number
-	readonly dominantThreshold: string
+	readonly estimatedSpanCount: number
 }
 
 export function tracesTimeseriesQuery(
@@ -313,7 +310,7 @@ export function tracesBreakdownQuery(opts: TracesBreakdownOpts) {
 
 	return from(Traces)
 		.select(($) => {
-			const { sampledSpanCount, unsampledSpanCount, dominantThreshold, ...metrics } = metricSelectExprs(
+			const { estimatedSpanCount: _estimatedSpanCount, ...metrics } = metricSelectExprs(
 				$,
 				opts.metric,
 				apdexThresholdMs,

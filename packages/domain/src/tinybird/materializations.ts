@@ -275,7 +275,8 @@ export const serviceOverviewSpansMv = defineMaterializedView("service_overview_s
           StatusCode,
           TraceState,
           ResourceAttributes['deployment.environment'] AS DeploymentEnv,
-          ResourceAttributes['deployment.commit_sha'] AS CommitSha
+          ResourceAttributes['deployment.commit_sha'] AS CommitSha,
+          SampleRate
         FROM traces
         WHERE SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''
       `,
@@ -344,7 +345,8 @@ export const serviceMapEdgesHourlyMv = defineMaterializedView("service_map_edges
           sum(Duration / 1000000) AS DurationSumMs,
           max(Duration / 1000000) AS MaxDurationMs,
           countIf(TraceState LIKE '%th:%') AS SampledSpanCount,
-          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount
+          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount,
+          sum(SampleRate) AS SampleRateSum
         FROM traces
         WHERE SpanKind = 'Client'
           AND SpanAttributes['peer.service'] != ''
@@ -379,7 +381,8 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
           sum(Duration / 1000000) AS DurationSumMs,
           max(Duration / 1000000) AS MaxDurationMs,
           countIf(TraceState LIKE '%th:%') AS SampledSpanCount,
-          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount
+          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount,
+          sum(SampleRate) AS SampleRateSum
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer')
           AND SpanAttributes['db.system'] != ''
@@ -415,6 +418,7 @@ export const servicePlatformsHourlyMv = defineMaterializedView("service_platform
           max(ResourceAttributes['cloud.platform']) AS CloudPlatform,
           max(ResourceAttributes['cloud.provider']) AS CloudProvider,
           max(ResourceAttributes['faas.name']) AS FaasName,
+          max(ResourceAttributes['maple.sdk.type']) AS MapleSdkType,
           count() AS SpanCount
         FROM traces
         WHERE ServiceName != ''

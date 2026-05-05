@@ -38,13 +38,14 @@ describe("serviceOverviewQuery", () => {
 		expect(sql).toContain("FORMAT JSON")
 	})
 
-	it("includes sampling columns", () => {
+	it("emits per-row weighted estimated span count via sum(SampleRate)", () => {
 		const q = serviceOverviewQuery({})
 		const { sql } = compileCH(q, baseParams)
-		expect(sql).toContain("sampledSpanCount")
-		expect(sql).toContain("unsampledSpanCount")
-		expect(sql).toContain("dominantThreshold")
-		expect(sql).toContain("TraceState LIKE '%th:%'")
+		expect(sql).toContain("estimatedSpanCount")
+		expect(sql).toContain("sum(SampleRate)")
+		// The old `anyIf(threshold)` approach must be gone — it was the bug.
+		expect(sql).not.toContain("dominantThreshold")
+		expect(sql).not.toContain("anyIf")
 	})
 
 	it("applies environment filter", () => {

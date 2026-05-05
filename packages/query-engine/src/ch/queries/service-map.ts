@@ -22,9 +22,7 @@ export interface ServiceDependenciesOutput {
 	readonly errorCount: number
 	readonly avgDurationMs: number
 	readonly p95DurationMs: number
-	readonly sampledSpanCount: number
-	readonly unsampledSpanCount: number
-	readonly dominantThreshold: string
+	readonly estimatedSpanCount: number
 }
 
 export function serviceDependenciesSQL(
@@ -34,7 +32,16 @@ export function serviceDependenciesSQL(
 	const esc = escapeClickHouseString
 	const envFilter = opts.deploymentEnv ? `AND DeploymentEnv = '${esc(opts.deploymentEnv)}'` : ""
 
-	// Node 1: Pre-aggregated hourly edges (peer.service path)
+	// Node 1: Pre-aggregated hourly edges (peer.service path).
+	// `SampleRateSum` is a per-row weighted sum maintained by the MV — replaces
+	// the `sampledSpanCount * dominantWeight` approximation, which inflated
+	// estimates by orders of magnitude when sampling rates varied within a bucket.
+	//
+	// Per-row fallback `if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))`:
+	// the SampleRateSum column was added after this MV existed, so historical
+	// hourly buckets have SampleRateSum=0. For those buckets we fall back to
+	// CallCount (treats them as unsampled) — accurate for new buckets, degraded
+	// but non-zero for old ones. Safe across mixed time ranges.
 	const peerServiceEdges = `SELECT
       SourceService AS sourceService,
       TargetService AS targetService,
@@ -42,9 +49,7 @@ export function serviceDependenciesSQL(
       sum(ErrorCount) AS errorCount,
       sum(DurationSumMs) / sum(CallCount) AS avgDurationMs,
       max(MaxDurationMs) AS p95DurationMs,
-      sum(SampledSpanCount) AS sampledSpanCount,
-      sum(UnsampledSpanCount) AS unsampledSpanCount,
-      '' AS dominantThreshold
+      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS estimatedSpanCount
     FROM service_map_edges_hourly
     WHERE OrgId = '${esc(params.orgId)}'
       AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
@@ -52,7 +57,9 @@ export function serviceDependenciesSQL(
       ${envFilter}
     GROUP BY sourceService, targetService`
 
-	// Node 2: Join-based edges (Client/Producer spans without peer.service)
+	// Node 2: Join-based edges (Client/Producer spans without peer.service).
+	// `service_map_children` doesn't carry SampleRate yet (it's a TraceState-only
+	// projection) so we compute the per-row weight inline from `c.TraceState`.
 	const joinEdges = `SELECT
       p.ServiceName AS sourceService,
       c.ServiceName AS targetService,
@@ -60,9 +67,11 @@ export function serviceDependenciesSQL(
       countIf(c.StatusCode = 'Error') AS errorCount,
       avg(c.Duration / 1000000) AS avgDurationMs,
       quantile(0.95)(c.Duration / 1000000) AS p95DurationMs,
-      countIf(c.TraceState LIKE '%th:%') AS sampledSpanCount,
-      countIf(c.TraceState = '' OR c.TraceState NOT LIKE '%th:%') AS unsampledSpanCount,
-      anyIf(extract(c.TraceState, 'th:([0-9a-f]+)'), c.TraceState LIKE '%th:%') AS dominantThreshold
+      sum(multiIf(
+        match(c.TraceState, 'th:[0-9a-f]+'),
+        1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001),
+        1.0
+      )) AS estimatedSpanCount
     FROM (
       SELECT TraceId, SpanId, ServiceName
       FROM service_map_spans
@@ -85,7 +94,6 @@ export function serviceDependenciesSQL(
     WHERE p.ServiceName != c.ServiceName
     GROUP BY sourceService, targetService`
 
-	// Node 3: Merge both edge sources
 	const sql = `SELECT
   sourceService,
   targetService,
@@ -93,9 +101,7 @@ export function serviceDependenciesSQL(
   sum(errorCount) AS errorCount,
   avg(avgDurationMs) AS avgDurationMs,
   max(p95DurationMs) AS p95DurationMs,
-  sum(sampledSpanCount) AS sampledSpanCount,
-  sum(unsampledSpanCount) AS unsampledSpanCount,
-  any(dominantThreshold) AS dominantThreshold
+  sum(estimatedSpanCount) AS estimatedSpanCount
 FROM (
   ${peerServiceEdges}
   UNION ALL
@@ -137,9 +143,7 @@ export interface ServiceDbEdgesOutput {
 	readonly errorCount: number
 	readonly avgDurationMs: number
 	readonly p95DurationMs: number
-	readonly sampledSpanCount: number
-	readonly unsampledSpanCount: number
-	readonly dominantThreshold: string
+	readonly estimatedSpanCount: number
 }
 
 export function serviceDbEdgesSQL(
@@ -155,6 +159,9 @@ export function serviceDbEdgesSQL(
 		: ""
 
 	// Hourly pre-aggregated buckets — covers everything except the in-flight hour.
+	// `SampleRateSum` is the per-row weighted sum maintained by the MV. Historical
+	// buckets that pre-date the column have SampleRateSum=0, so fall back to
+	// CallCount per-row (treats those buckets as unsampled — degraded but safe).
 	const hourlyEdges = `SELECT
       ServiceName AS sourceService,
       DbSystem AS dbSystem,
@@ -162,9 +169,7 @@ export function serviceDbEdgesSQL(
       sum(ErrorCount) AS errorCount,
       sum(DurationSumMs) / sum(CallCount) AS avgDurationMs,
       max(MaxDurationMs) AS p95DurationMs,
-      sum(SampledSpanCount) AS sampledSpanCount,
-      sum(UnsampledSpanCount) AS unsampledSpanCount,
-      '' AS dominantThreshold
+      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS estimatedSpanCount
     FROM service_map_db_edges_hourly
     WHERE OrgId = '${esc(params.orgId)}'
       AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
@@ -174,6 +179,7 @@ export function serviceDbEdgesSQL(
     GROUP BY sourceService, dbSystem`
 
 	// Trailing-hour raw fallback so the current incomplete bucket is included.
+	// Reads the per-row `SampleRate` column directly; no inline weight math needed.
 	const recentEdges = `SELECT
       ServiceName AS sourceService,
       SpanAttributes['db.system'] AS dbSystem,
@@ -181,9 +187,7 @@ export function serviceDbEdgesSQL(
       countIf(StatusCode = 'Error') AS errorCount,
       avg(Duration / 1000000) AS avgDurationMs,
       quantile(0.95)(Duration / 1000000) AS p95DurationMs,
-      countIf(TraceState LIKE '%th:%') AS sampledSpanCount,
-      countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS unsampledSpanCount,
-      anyIf(extract(TraceState, 'th:([0-9a-f]+)'), TraceState LIKE '%th:%') AS dominantThreshold
+      sum(SampleRate) AS estimatedSpanCount
     FROM traces
     WHERE OrgId = '${esc(params.orgId)}'
       AND Timestamp >= addHours(toDateTime('${esc(params.endTime)}'), -1)
@@ -201,9 +205,7 @@ export function serviceDbEdgesSQL(
   sum(errorCount) AS errorCount,
   avg(avgDurationMs) AS avgDurationMs,
   max(p95DurationMs) AS p95DurationMs,
-  sum(sampledSpanCount) AS sampledSpanCount,
-  sum(unsampledSpanCount) AS unsampledSpanCount,
-  any(dominantThreshold) AS dominantThreshold
+  sum(estimatedSpanCount) AS estimatedSpanCount
 FROM (
   ${hourlyEdges}
   UNION ALL
@@ -248,6 +250,7 @@ export interface ServicePlatformsOutput {
 	readonly cloudPlatform: string
 	readonly cloudProvider: string
 	readonly faasName: string
+	readonly mapleSdkType: string
 }
 
 export function servicePlatformsSQL(
@@ -266,7 +269,8 @@ export function servicePlatformsSQL(
   max(K8sDeploymentName) AS k8sDeploymentName,
   max(CloudPlatform) AS cloudPlatform,
   max(CloudProvider) AS cloudProvider,
-  max(FaasName) AS faasName
+  max(FaasName) AS faasName,
+  max(MapleSdkType) AS mapleSdkType
 FROM service_platforms_hourly
 WHERE OrgId = '${esc(params.orgId)}'
   AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))

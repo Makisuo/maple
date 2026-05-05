@@ -332,9 +332,7 @@ export interface ServiceOverviewOutput {
 	readonly p50LatencyMs: number
 	readonly p95LatencyMs: number
 	readonly p99LatencyMs: number
-	readonly sampledSpanCount: number
-	readonly unsampledSpanCount: number
-	readonly dominantThreshold: string
+	readonly estimatedSpanCount: number
 }
 
 export interface ServiceOverviewParams {
@@ -646,9 +644,7 @@ export interface CustomTracesTimeseriesOutput {
 	readonly satisfiedCount: number
 	readonly toleratingCount: number
 	readonly apdexScore: number
-	readonly sampledSpanCount: number
-	readonly unsampledSpanCount: number
-	readonly dominantThreshold: string
+	readonly estimatedSpanCount: number
 }
 
 export interface CustomTracesTimeseriesParams {
@@ -748,9 +744,7 @@ export interface ServiceDependenciesOutput {
 	readonly errorCount: number
 	readonly avgDurationMs: number
 	readonly p95DurationMs: number
-	readonly sampledSpanCount: number
-	readonly unsampledSpanCount: number
-	readonly dominantThreshold: string
+	readonly estimatedSpanCount: number
 }
 
 export interface ServiceDependenciesParams {

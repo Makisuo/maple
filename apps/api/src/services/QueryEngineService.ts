@@ -444,14 +444,6 @@ function groupTimeSeriesRows<T extends { bucket: string | Date; groupName: strin
 	}))
 }
 
-export function parseSamplingWeight(hex: string): number {
-	if (!hex || hex === "0") return 1
-	const thresholdInt = parseInt(hex, 16)
-	const maxInt = Math.pow(16, hex.length)
-	const rejectionRate = thresholdInt / maxInt
-	return 1 / Math.max(1 - rejectionRate, 0.0001)
-}
-
 function groupAllMetricsTimeSeriesRows<
 	T extends {
 		bucket: string | Date
@@ -463,9 +455,7 @@ function groupAllMetricsTimeSeriesRows<
 		p99Duration: number
 		errorRate: number
 		apdexScore: number
-		sampledSpanCount: number
-		unsampledSpanCount: number
-		dominantThreshold: string
+		estimatedSpanCount: number
 	},
 >(rows: ReadonlyArray<T>, fillOptions?: BucketFillOptions): Array<TimeseriesPoint> {
 	const emptyMetrics: Record<string, number> = {
@@ -476,9 +466,7 @@ function groupAllMetricsTimeSeriesRows<
 		p99_duration: 0,
 		error_rate: 0,
 		apdex: 0,
-		sampled_span_count: 0,
-		unsampled_span_count: 0,
-		sampling_weight: 1,
+		estimated_span_count: 0,
 	}
 	const bucketMap = new Map<string, Record<string, number>>()
 	const bucketOrder: string[] = fillOptions
@@ -495,9 +483,7 @@ function groupAllMetricsTimeSeriesRows<
 			p99_duration: Number(row.p99Duration),
 			error_rate: Number(row.errorRate),
 			apdex: Number(row.apdexScore),
-			sampled_span_count: Number(row.sampledSpanCount),
-			unsampled_span_count: Number(row.unsampledSpanCount),
-			sampling_weight: parseSamplingWeight(String(row.dominantThreshold ?? "")),
+			estimated_span_count: Number(row.estimatedSpanCount),
 		})
 		if (!fillOptions) {
 			bucketOrder.push(bucket)

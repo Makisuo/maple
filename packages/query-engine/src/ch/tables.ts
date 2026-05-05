@@ -104,6 +104,7 @@ export const ServiceOverviewSpans = table("service_overview_spans", {
 	TraceState: T.string,
 	DeploymentEnv: T.string,
 	CommitSha: T.string,
+	SampleRate: T.float64,
 })
 
 export const ErrorSpans = table("error_spans", {
@@ -289,6 +290,7 @@ export const ServiceMapEdgesHourly = table("service_map_edges_hourly", {
 	MaxDurationMs: T.float64,
 	SampledSpanCount: T.uint64,
 	UnsampledSpanCount: T.uint64,
+	SampleRateSum: T.float64,
 })
 
 export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
@@ -303,6 +305,7 @@ export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	MaxDurationMs: T.float64,
 	SampledSpanCount: T.uint64,
 	UnsampledSpanCount: T.uint64,
+	SampleRateSum: T.float64,
 })
 
 export const ServicePlatformsHourly = table("service_platforms_hourly", {

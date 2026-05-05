@@ -1303,9 +1303,7 @@ describe("AlertsService", () => {
 			satisfiedCount: 180,
 			toleratingCount: 10,
 			apdexScore: 0.925,
-			sampledSpanCount: 200,
-			unsampledSpanCount: 0,
-			dominantThreshold: "0",
+			estimatedSpanCount: 200,
 		}
 		const healthyRow = {
 			bucket: "2026-01-01 00:00:00",
@@ -1319,9 +1317,7 @@ describe("AlertsService", () => {
 			satisfiedCount: 195,
 			toleratingCount: 3,
 			apdexScore: 0.9825,
-			sampledSpanCount: 200,
-			unsampledSpanCount: 0,
-			dominantThreshold: "0",
+			estimatedSpanCount: 200,
 		}
 
 		const stub: WarehouseQueryServiceShape = {

@@ -224,7 +224,7 @@ export class ServiceDbEdgesResponse extends Schema.Class<ServiceDbEdgesResponse>
 	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
-const ServicePlatformLiteral = Schema.Literals(["kubernetes", "cloudflare", "lambda", "unknown"])
+const ServicePlatformLiteral = Schema.Literals(["kubernetes", "cloudflare", "lambda", "web", "unknown"])
 
 export class ServicePlatformsRequest extends Schema.Class<ServicePlatformsRequest>("ServicePlatformsRequest")({
 	startTime: TinybirdDateTime,
@@ -243,6 +243,7 @@ export class ServicePlatformsResponse extends Schema.Class<ServicePlatformsRespo
 			cloudPlatform: Schema.String,
 			cloudProvider: Schema.String,
 			faasName: Schema.String,
+			mapleSdkType: Schema.String,
 		}),
 	),
 }) {}

@@ -162,37 +162,22 @@ export interface ServiceOverview {
 }
 
 /**
- * Parse the OTel probability sampling threshold (hex) into a weight.
- * Mirrors apps/web/src/lib/sampling.ts:parseSamplingThreshold.
- *
- * Example: `"e668"` → ~90% rejection → ~10% acceptance → weight ~10.
+ * Summarize sampling-aware throughput for a single row.
+ * Mirrors apps/web/src/lib/sampling.ts:summarizeSampling — including the
+ * estimatedSpanCount=0 fallback for historical buckets that pre-date the
+ * SampleRateSum column.
  */
-function parseSamplingThreshold(thresholdHex: string): { weight: number } {
-	if (!thresholdHex || thresholdHex === "0") return { weight: 1 }
-	const thresholdInt = parseInt(thresholdHex, 16)
-	const maxInt = Math.pow(16, thresholdHex.length)
-	const rejectionRate = thresholdInt / maxInt
-	const acceptanceProbability = Math.max(1 - rejectionRate, 0.0001)
-	return { weight: 1 / acceptanceProbability }
-}
-
-/**
- * Estimate actual (extrapolated) throughput from sampled + unsampled span counts.
- * Mirrors apps/web/src/lib/sampling.ts:estimateThroughput.
- */
-function estimateThroughput(
-	sampledCount: number,
-	unsampledCount: number,
-	thresholdHex: string,
+function summarizeSampling(
+	estimatedSpanCount: number,
+	tracedSpanCount: number,
 	durationSeconds: number,
 ): { traced: number; estimated: number; hasSampling: boolean; weight: number } {
-	const { weight } = parseSamplingThreshold(thresholdHex)
-	const hasSampling = sampledCount > 0 && weight > 1.01
-	const estimatedTotal = sampledCount * weight + unsampledCount
-	const tracedTotal = sampledCount + unsampledCount
+	const effectiveEstimated = estimatedSpanCount > 0 ? estimatedSpanCount : tracedSpanCount
+	const weight = tracedSpanCount > 0 ? effectiveEstimated / tracedSpanCount : 1
+	const hasSampling = weight > 1.01
 	return {
-		traced: durationSeconds > 0 ? tracedTotal / durationSeconds : 0,
-		estimated: durationSeconds > 0 ? estimatedTotal / durationSeconds : 0,
+		traced: durationSeconds > 0 ? tracedSpanCount / durationSeconds : 0,
+		estimated: durationSeconds > 0 ? effectiveEstimated / durationSeconds : 0,
 		hasSampling,
 		weight,
 	}
@@ -219,9 +204,7 @@ export async function fetchServiceOverview(startTime: string, endTime: string): 
 		p50LatencyMs: number
 		p95LatencyMs: number
 		p99LatencyMs: number
-		sampledSpanCount: number
-		unsampledSpanCount: number
-		dominantThreshold: string
+		estimatedSpanCount: number
 	}
 
 	const groups = new Map<string, RawRow[]>()
@@ -239,9 +222,7 @@ export async function fetchServiceOverview(startTime: string, endTime: string): 
 			p50LatencyMs: Number(raw.p50LatencyMs ?? 0),
 			p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
 			p99LatencyMs: Number(raw.p99LatencyMs ?? 0),
-			sampledSpanCount: Number(raw.sampledSpanCount ?? 0),
-			unsampledSpanCount: Number(raw.unsampledSpanCount ?? 0),
-			dominantThreshold: String(raw.dominantThreshold ?? ""),
+			estimatedSpanCount: Number(raw.estimatedSpanCount ?? 0),
 		}
 
 		const group = groups.get(key)
@@ -257,19 +238,9 @@ export async function fetchServiceOverview(startTime: string, endTime: string): 
 	for (const group of groups.values()) {
 		const totalSpans = group.reduce((sum, r) => sum + r.spanCount, 0)
 		const totalErrors = group.reduce((sum, r) => sum + r.errorCount, 0)
-		const totalSampled = group.reduce((sum, r) => sum + r.sampledSpanCount, 0)
-		const totalUnsampled = group.reduce((sum, r) => sum + r.unsampledSpanCount, 0)
+		const totalEstimated = group.reduce((sum, r) => sum + r.estimatedSpanCount, 0)
 
-		// Use the first non-empty threshold across the commit groups (matches web).
-		let threshold = ""
-		for (const r of group) {
-			if (r.dominantThreshold) {
-				threshold = r.dominantThreshold
-				break
-			}
-		}
-
-		const sampling = estimateThroughput(totalSampled, totalUnsampled, threshold, durationSeconds)
+		const sampling = summarizeSampling(totalEstimated, totalSpans, durationSeconds)
 
 		let p50 = 0
 		let p95 = 0
@@ -430,26 +401,6 @@ async function fetchSpanMetricsCalls(
 	return new Map()
 }
 
-/**
- * Fetch the dominant sampling threshold for a service via the service-overview
- * endpoint. Returns the parsed weight (1 if no sampling). Used as a fallback for
- * the detail-page throughput chart when the SpanMetrics Connector is not deployed.
- */
-async function fetchServiceSamplingWeight(
-	serviceName: string,
-	startTime: string,
-	endTime: string,
-): Promise<{ weight: number; hasSampling: boolean }> {
-	try {
-		const overview = await fetchServiceOverview(startTime, endTime)
-		const match = overview.find((s) => s.serviceName === serviceName)
-		if (!match) return { weight: 1, hasSampling: false }
-		return { weight: match.samplingWeight, hasSampling: match.hasSampling }
-	} catch {
-		return { weight: 1, hasSampling: false }
-	}
-}
-
 export async function fetchServiceDetailTimeSeries(
 	serviceName: string,
 	startTime: string,
@@ -471,23 +422,21 @@ export async function fetchServiceDetailTimeSeries(
 		},
 	})
 
-	// Three parallel requests:
-	//  1. The trace-count timeseries (always required for the chart shape).
+	// Two parallel requests:
+	//  1. The trace timeseries (count + per-bucket `estimated_span_count` —
+	//     the per-row weighted sum from the query engine).
 	//  2. The SpanMetrics-based throughput (preferred — works when the OTel
 	//     Collector SpanMetrics Connector is deployed).
-	//  3. The service overview, used to derive the dominant TraceState `th:`
-	//     threshold as a fallback when SpanMetrics returns nothing. This matches
-	//     what the web services list does for sampling-aware throughput.
-	const [tracesRes, metricsByBucket, samplingFallback] = await Promise.all([
+	const [tracesRes, metricsByBucket] = await Promise.all([
 		tracesPromise,
 		fetchSpanMetricsCalls(serviceName, startTime, endTime, bucketSeconds),
-		fetchServiceSamplingWeight(serviceName, startTime, endTime),
 	])
 
 	const divisor = bucketSeconds > 0 ? bucketSeconds : 1
 
 	interface TracesEntry {
 		count: number
+		estimatedSpanCount: number
 		errorRate: number
 		p50: number
 		p95: number
@@ -499,6 +448,7 @@ export async function fetchServiceDetailTimeSeries(
 		for (const p of tracesRes.result.data) {
 			tracesByBucket.set(normalizeBucket(p.bucket), {
 				count: p.series.count ?? 0,
+				estimatedSpanCount: p.series.estimated_span_count ?? 0,
 				errorRate: p.series.error_rate ?? 0,
 				p50: p.series.p50_duration ?? 0,
 				p95: p.series.p95_duration ?? 0,
@@ -518,48 +468,25 @@ export async function fetchServiceDetailTimeSeries(
 		const rawCount = t?.count ?? 0
 		const metricsCount = metricsByBucket.get(bucket) ?? 0
 		const rawPerSec = rawCount / divisor
-		const metricsPerSec = metricsCount / divisor
 
-		// Preferred: SpanMetrics-based throughput (most accurate when present).
-		if (metricsCount > 0) {
-			return {
-				bucket,
-				throughput: metricsPerSec,
-				tracedThroughput: rawPerSec,
-				hasSampling: true,
-				samplingWeight: rawCount > 0 ? metricsCount / rawCount : 1,
-				errorRate: t?.errorRate ?? 0,
-				p50LatencyMs: t?.p50 ?? 0,
-				p95LatencyMs: t?.p95 ?? 0,
-				p99LatencyMs: t?.p99 ?? 0,
-			}
-		}
-
-		// Fallback: TraceState `th:` threshold extrapolation. Uses the global weight
-		// from the service overview to scale every bucket uniformly. Approximate
-		// (assumes the sampling rate is stable across the time range), but matches
-		// how the services list page reports throughput when only trace sampling is
-		// configured.
-		if (samplingFallback.hasSampling && samplingFallback.weight > 1.01 && rawCount > 0) {
-			return {
-				bucket,
-				throughput: rawPerSec * samplingFallback.weight,
-				tracedThroughput: rawPerSec,
-				hasSampling: true,
-				samplingWeight: samplingFallback.weight,
-				errorRate: t?.errorRate ?? 0,
-				p50LatencyMs: t?.p50 ?? 0,
-				p95LatencyMs: t?.p95 ?? 0,
-				p99LatencyMs: t?.p99 ?? 0,
-			}
-		}
+		// Prefer SpanMetrics Connector when present (exact pre-sampling counts).
+		// Otherwise use the per-row weighted sum from the query engine, which is
+		// correct under mixed sampling rates. Fall back to rawCount when neither
+		// is available (e.g. no sampling configured) — `?? rawCount` is wrong
+		// here because estimatedSpanCount is coerced to 0 when missing.
+		const estimatedFromQuery = t?.estimatedSpanCount ?? 0
+		const estimatedCount =
+			metricsCount > 0 ? metricsCount : estimatedFromQuery > 0 ? estimatedFromQuery : rawCount
+		const throughput = estimatedCount / divisor
+		const samplingWeight = rawCount > 0 ? estimatedCount / rawCount : 1
+		const hasSampling = samplingWeight > 1.01
 
 		return {
 			bucket,
-			throughput: rawPerSec,
+			throughput,
 			tracedThroughput: rawPerSec,
-			hasSampling: false,
-			samplingWeight: 1,
+			hasSampling,
+			samplingWeight,
 			errorRate: t?.errorRate ?? 0,
 			p50LatencyMs: t?.p50 ?? 0,
 			p95LatencyMs: t?.p95 ?? 0,

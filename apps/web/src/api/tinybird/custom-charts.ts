@@ -540,9 +540,26 @@ interface AllMetricsPoint {
 	p50: number
 	p95: number
 	p99: number
-	sampledSpanCount: number
-	unsampledSpanCount: number
-	samplingWeight: number
+	estimatedSpanCount: number
+}
+
+/**
+ * Resolve the throughput value for a bucket, in priority order:
+ *   1. SpanMetrics Connector (exact pre-sampling counts) — when deployed.
+ *   2. `sum(SampleRate)` from the query engine (per-row weighted sum).
+ *   3. Raw traced count — when neither is available (no sampling configured).
+ *
+ * `?? rawCount` won't work as the fallback because `estimatedSpanCount` is
+ * coerced to 0 when the column is missing; treat 0 as "no value" explicitly.
+ */
+function resolveThroughput(
+	rawCount: number,
+	estimatedSpanCount: number,
+	metricsThroughput: number | undefined,
+): number {
+	if (metricsThroughput != null && metricsThroughput > 0) return metricsThroughput
+	if (estimatedSpanCount > 0) return estimatedSpanCount
+	return rawCount
 }
 
 function extractAllMetricsSeries(response: {
@@ -557,9 +574,7 @@ function extractAllMetricsSeries(response: {
 			p50: point.series.p50_duration ?? 0,
 			p95: point.series.p95_duration ?? 0,
 			p99: point.series.p99_duration ?? 0,
-			sampledSpanCount: point.series.sampled_span_count ?? 0,
-			unsampledSpanCount: point.series.unsampled_span_count ?? 0,
-			samplingWeight: point.series.sampling_weight ?? 1,
+			estimatedSpanCount: point.series.estimated_span_count ?? 0,
 		})
 	}
 	return map
@@ -614,34 +629,16 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
 	const points = [...allBuckets].sort().map((bucket): ServiceDetailTimeSeriesPoint => {
 		const m = allMetrics.get(bucket)
 		const rawCount = m?.count ?? 0
-		const metricsThroughput = metricsMap.get(bucket)
-
-		if (metricsThroughput != null && metricsThroughput > 0) {
-			return {
-				bucket,
-				throughput: metricsThroughput,
-				tracedThroughput: rawCount,
-				hasSampling: true,
-				samplingWeight: rawCount > 0 ? metricsThroughput / rawCount : 1,
-				errorRate: m?.errorRate ?? 0,
-				p50LatencyMs: m?.p50 ?? 0,
-				p95LatencyMs: m?.p95 ?? 0,
-				p99LatencyMs: m?.p99 ?? 0,
-			}
-		}
-
-		const sampledCount = m?.sampledSpanCount ?? 0
-		const weight = m?.samplingWeight ?? 1
-		const unsampledCount = m?.unsampledSpanCount ?? 0
-		const hasSampling = sampledCount > 0 && weight > 1.01
-		const estimatedCount = hasSampling ? sampledCount * weight + unsampledCount : rawCount
+		const throughput = resolveThroughput(rawCount, m?.estimatedSpanCount ?? 0, metricsMap.get(bucket))
+		const samplingWeight = rawCount > 0 ? throughput / rawCount : 1
+		const hasSampling = samplingWeight > 1.01
 
 		return {
 			bucket,
-			throughput: estimatedCount,
+			throughput,
 			tracedThroughput: rawCount,
 			hasSampling,
-			samplingWeight: hasSampling ? weight : 1,
+			samplingWeight,
 			errorRate: m?.errorRate ?? 0,
 			p50LatencyMs: m?.p50 ?? 0,
 			p95LatencyMs: m?.p95 ?? 0,
@@ -710,34 +707,16 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
 	const points = [...allBuckets].sort().map((bucket): ServiceDetailTimeSeriesPoint => {
 		const m = allMetrics.get(bucket)
 		const rawCount = m?.count ?? 0
-		const metricsThroughput = metricsMap.get(bucket)
-
-		if (metricsThroughput != null && metricsThroughput > 0) {
-			return {
-				bucket,
-				throughput: metricsThroughput,
-				tracedThroughput: rawCount,
-				hasSampling: true,
-				samplingWeight: rawCount > 0 ? metricsThroughput / rawCount : 1,
-				errorRate: m?.errorRate ?? 0,
-				p50LatencyMs: m?.p50 ?? 0,
-				p95LatencyMs: m?.p95 ?? 0,
-				p99LatencyMs: m?.p99 ?? 0,
-			}
-		}
-
-		const sampledCount = m?.sampledSpanCount ?? 0
-		const weight = m?.samplingWeight ?? 1
-		const unsampledCount = m?.unsampledSpanCount ?? 0
-		const hasSampling = sampledCount > 0 && weight > 1.01
-		const estimatedCount = hasSampling ? sampledCount * weight + unsampledCount : rawCount
+		const throughput = resolveThroughput(rawCount, m?.estimatedSpanCount ?? 0, metricsMap.get(bucket))
+		const samplingWeight = rawCount > 0 ? throughput / rawCount : 1
+		const hasSampling = samplingWeight > 1.01
 
 		return {
 			bucket,
-			throughput: estimatedCount,
+			throughput,
 			tracedThroughput: rawCount,
 			hasSampling,
-			samplingWeight: hasSampling ? weight : 1,
+			samplingWeight,
 			errorRate: m?.errorRate ?? 0,
 			p50LatencyMs: m?.p50 ?? 0,
 			p95LatencyMs: m?.p95 ?? 0,

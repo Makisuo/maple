@@ -5,7 +5,7 @@ import {
 	ServicePlatformsRequest,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { estimateThroughput } from "@/lib/sampling"
+import { summarizeSampling } from "@/lib/sampling"
 import { TinybirdDateTimeString, decodeInput, runTinybirdQuery } from "@/api/tinybird/effect-utils"
 
 export interface ServiceEdge {
@@ -42,7 +42,7 @@ export interface ServiceDbEdgesResponse {
 	edges: ServiceDbEdge[]
 }
 
-export type ServicePlatform = "kubernetes" | "cloudflare" | "lambda" | "unknown"
+export type ServicePlatform = "kubernetes" | "cloudflare" | "lambda" | "web" | "unknown"
 
 export interface ServicePlatformInfo {
 	serviceName: string
@@ -51,6 +51,7 @@ export interface ServicePlatformInfo {
 	cloudPlatform: string
 	cloudProvider: string
 	faasName: string
+	mapleSdkType: string
 }
 
 export interface ServicePlatformsResponse {
@@ -68,13 +69,9 @@ export type GetServiceMapInput = Schema.Schema.Type<typeof GetServiceMapInputSch
 function transformEdge(row: Record<string, unknown>, durationSeconds: number): ServiceEdge {
 	const callCount = Number(row.callCount ?? 0)
 	const errorCount = Number(row.errorCount ?? 0)
-	const sampledSpanCount = Number(row.sampledSpanCount ?? 0)
-	const unsampledSpanCount = Number(row.unsampledSpanCount ?? 0)
-	const threshold = String(row.dominantThreshold ?? "")
-	const sampling = estimateThroughput(sampledSpanCount, unsampledSpanCount, threshold, durationSeconds)
-	const estimatedCallCount = sampling.hasSampling
-		? Math.round(sampling.estimated * durationSeconds)
-		: callCount
+	const estimatedSpanCount = Number(row.estimatedSpanCount ?? 0)
+	const sampling = summarizeSampling(estimatedSpanCount, callCount, durationSeconds)
+	const estimatedCallCount = sampling.hasSampling ? Math.round(estimatedSpanCount) : callCount
 	return {
 		sourceService: String(row.sourceService ?? ""),
 		targetService: String(row.targetService ?? ""),
@@ -129,13 +126,9 @@ export const getServiceMap = Effect.fn("QueryEngine.getServiceMap")(function* ({
 function transformDbEdge(row: Record<string, unknown>, durationSeconds: number): ServiceDbEdge {
 	const callCount = Number(row.callCount ?? 0)
 	const errorCount = Number(row.errorCount ?? 0)
-	const sampledSpanCount = Number(row.sampledSpanCount ?? 0)
-	const unsampledSpanCount = Number(row.unsampledSpanCount ?? 0)
-	const threshold = String(row.dominantThreshold ?? "")
-	const sampling = estimateThroughput(sampledSpanCount, unsampledSpanCount, threshold, durationSeconds)
-	const estimatedCallCount = sampling.hasSampling
-		? Math.round(sampling.estimated * durationSeconds)
-		: callCount
+	const estimatedSpanCount = Number(row.estimatedSpanCount ?? 0)
+	const sampling = summarizeSampling(estimatedSpanCount, callCount, durationSeconds)
+	const estimatedCallCount = sampling.hasSampling ? Math.round(estimatedSpanCount) : callCount
 	return {
 		sourceService: String(row.sourceService ?? ""),
 		dbSystem: String(row.dbSystem ?? ""),
@@ -209,6 +202,7 @@ export const getServicePlatforms = Effect.fn("QueryEngine.getServicePlatforms")(
 			cloudPlatform: row.cloudPlatform,
 			cloudProvider: row.cloudProvider,
 			faasName: row.faasName,
+			mapleSdkType: row.mapleSdkType,
 		})),
 	}
 })

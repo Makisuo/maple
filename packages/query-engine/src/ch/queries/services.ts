@@ -30,9 +30,7 @@ export interface ServiceOverviewOutput {
 	readonly p50LatencyMs: number
 	readonly p95LatencyMs: number
 	readonly p99LatencyMs: number
-	readonly sampledSpanCount: number
-	readonly unsampledSpanCount: number
-	readonly dominantThreshold: string
+	readonly estimatedSpanCount: number
 }
 
 export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
@@ -47,12 +45,10 @@ export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
 			p50LatencyMs: CH.quantile(0.5)($.Duration).div(1000000),
 			p95LatencyMs: CH.quantile(0.95)($.Duration).div(1000000),
 			p99LatencyMs: CH.quantile(0.99)($.Duration).div(1000000),
-			sampledSpanCount: CH.countIf($.TraceState.like("%th:%")),
-			unsampledSpanCount: CH.countIf($.TraceState.eq("").or($.TraceState.notLike("%th:%"))),
-			dominantThreshold: CH.anyIf(
-				CH.extract_($.TraceState, "th:([0-9a-f]+)"),
-				$.TraceState.like("%th:%"),
-			),
+			// Per-span weighted sum: each row's `SampleRate` is 1.0 for unsampled
+			// rows or `1 / acceptanceProbability` for spans carrying a `th:` value.
+			// Replaces the broken `sampledSpanCount * dominantWeight` approximation.
+			estimatedSpanCount: CH.sum($.SampleRate),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
