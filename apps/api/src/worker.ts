@@ -1,7 +1,7 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { WorkerConfigProviderLive, WorkerEnvironmentLive } from "@maple/effect-cloudflare"
 import { Context, FileSystem, Layer, Path } from "effect"
-import { HttpRouter } from "effect/unstable/http"
+import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
@@ -45,12 +45,18 @@ const telemetry = MapleCloudflareSDK.make({
 	dropSpanNames: ["McpServer/Notifications."],
 })
 
-// `disableLogger: true` skips Effect's default `HttpMiddleware.logger`. When it
-// wraps the MCP route the RpcServer's response queue never closes, so the
-// Promise from `toWebHandler` never resolves (Cloudflare 1101 in prod,
-// miniflare "worker hung" locally). The upstream Effect McpServer test uses
-// the same flag. Application logs still flow through the OTLP logger installed
-// by `telemetry.layer`.
+// POST /mcp hangs indefinitely on Cloudflare Workers when `toWebHandler` is
+// called with no middleware (1101 in prod, miniflare "worker hung" locally).
+// Suspected Effect RpcServer / HttpRouter scope-propagation bug. Providing
+// ANY middleware — even a pass-through — unsticks it. We pair the passthrough
+// with `disableLogger: true` so Effect's default `HttpMiddleware.logger` does
+// not double-log; application logs flow through the OTLP logger installed by
+// `telemetry.layer`. Earlier attempt (commit 769032b0) dropped the passthrough
+// and relied on `disableLogger: true` alone — that brings back the original
+// hang in prod because Effect treats `disableLogger:true` + no middleware as
+// "no middleware at all", which is the failing condition.
+const passthroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
+
 const buildHandler = () =>
 	HttpRouter.toWebHandler(
 		AllRoutes.pipe(
@@ -63,14 +69,22 @@ const buildHandler = () =>
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLive),
 		),
-		{ disableLogger: true },
+		{ middleware: passthroughMiddleware, disableLogger: true },
 	)
 
 // Single isolate-wide handler — `toWebHandler` builds its own ManagedRuntime
-// once and keeps it for the lifetime of the isolate. Building it per-request
-// would defeat the runtime's isolate-level reuse.
-let cachedHandler: ReturnType<typeof buildHandler> | undefined
-const getHandler = () => (cachedHandler ??= buildHandler())
+// once and keeps it for the lifetime of the isolate. Built eagerly at module
+// load so a layer construction failure surfaces as a startup error in
+// `wrangler tail` instead of silently hanging the first request and bricking
+// the isolate (Cloudflare 1101).
+const cachedHandler = buildHandler()
+const getHandler = () => cachedHandler
+
+// Time-box every handler call so a single hung request returns a useful 504
+// instead of waiting for the Cloudflare runtime to kill it as 1101 with no
+// stack. CF's hard limit is ~30s; we cut at 25s to leave headroom for the
+// timeout response itself.
+const HANDLER_TIMEOUT_MS = 25_000
 
 const isMcpPost = (request: Request): boolean => {
 	if (request.method !== "POST") return false
@@ -94,6 +108,16 @@ const readMcpSessionsBinding = (env: Record<string, unknown>): McpSessionsBindin
 	return undefined
 }
 
+const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+	})
+	return Promise.race([promise, timeout]).finally(() => {
+		if (timer) clearTimeout(timer)
+	}) as Promise<T>
+}
+
 const handle = async (
 	request: Request,
 	env: Record<string, unknown>,
@@ -104,9 +128,20 @@ const handle = async (
 		if (sid) await sessionStore.preload(sid)
 	}
 	const { handler } = getHandler()
-	const response = await handler(request, Context.empty() as never)
-	ctx.waitUntil(telemetry.flush(env))
-	return response
+	try {
+		const response = await withTimeout(
+			handler(request, Context.empty() as never),
+			HANDLER_TIMEOUT_MS,
+			"worker handler",
+		)
+		ctx.waitUntil(telemetry.flush(env))
+		return response
+	} catch (err) {
+		console.error("[worker] handler failed:", err)
+		ctx.waitUntil(telemetry.flush(env))
+		const message = err instanceof Error ? err.message : String(err)
+		return new Response(`worker handler error: ${message}`, { status: 504 })
+	}
 }
 
 export default {
