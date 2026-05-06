@@ -251,6 +251,7 @@ export interface ServicePlatformsOutput {
 	readonly cloudProvider: string
 	readonly faasName: string
 	readonly mapleSdkType: string
+	readonly processRuntimeName: string
 }
 
 export function servicePlatformsSQL(
@@ -270,7 +271,8 @@ export function servicePlatformsSQL(
   max(CloudPlatform) AS cloudPlatform,
   max(CloudProvider) AS cloudProvider,
   max(FaasName) AS faasName,
-  max(MapleSdkType) AS mapleSdkType
+  max(MapleSdkType) AS mapleSdkType,
+  max(ProcessRuntimeName) AS processRuntimeName
 FROM service_platforms_hourly
 WHERE OrgId = '${esc(params.orgId)}'
   AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))

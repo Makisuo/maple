@@ -52,6 +52,7 @@ export interface ServicePlatformInfo {
 	cloudProvider: string
 	faasName: string
 	mapleSdkType: string
+	runtime: string
 }
 
 export interface ServicePlatformsResponse {
@@ -203,6 +204,7 @@ export const getServicePlatforms = Effect.fn("QueryEngine.getServicePlatforms")(
 			cloudProvider: row.cloudProvider,
 			faasName: row.faasName,
 			mapleSdkType: row.mapleSdkType,
+			runtime: row.processRuntimeName,
 		})),
 	}
 })

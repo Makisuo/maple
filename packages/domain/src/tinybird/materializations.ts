@@ -419,6 +419,7 @@ export const servicePlatformsHourlyMv = defineMaterializedView("service_platform
           max(ResourceAttributes['cloud.provider']) AS CloudProvider,
           max(ResourceAttributes['faas.name']) AS FaasName,
           max(ResourceAttributes['maple.sdk.type']) AS MapleSdkType,
+          max(ResourceAttributes['process.runtime.name']) AS ProcessRuntimeName,
           count() AS SpanCount
         FROM traces
         WHERE ServiceName != ''

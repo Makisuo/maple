@@ -319,6 +319,8 @@ export const ServicePlatformsHourly = table("service_platforms_hourly", {
 	CloudPlatform: T.string,
 	CloudProvider: T.string,
 	FaasName: T.string,
+	MapleSdkType: T.string,
+	ProcessRuntimeName: T.string,
 	SpanCount: T.uint64,
 })
 

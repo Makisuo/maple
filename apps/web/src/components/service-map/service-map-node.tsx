@@ -39,6 +39,26 @@ function getPlatformIcon(platform: ServicePlatform | undefined): {
 	}
 }
 
+function formatRuntimeLabel(rt: string | undefined): { short: string; full: string } | null {
+	if (!rt) return null
+	switch (rt) {
+		case "nodejs":
+			return { short: "node", full: "Node.js" }
+		case "edge-light":
+			return { short: "edge", full: "Edge runtime" }
+		case "bun":
+			return { short: "bun", full: "Bun" }
+		case "deno":
+			return { short: "deno", full: "Deno" }
+		case "workerd":
+			return { short: "workerd", full: "Cloudflare workerd" }
+		case "fastly":
+			return { short: "fastly", full: "Fastly Compute" }
+		default:
+			return { short: rt, full: rt }
+	}
+}
+
 function getDbIcon(system: string | undefined): {
 	Icon: IconComponent
 	label: string
@@ -95,10 +115,12 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 		selected,
 		infra,
 		platform,
+		runtime,
 		dbSystem,
 		colorMode,
 	} = data
 	const isDatabase = kind === "database"
+	const runtimeInfo = !isDatabase ? formatRuntimeLabel(runtime) : null
 	const accentColor = getServiceMapNodeColor(
 		{ label, kind, errorRate, platform },
 		services,
@@ -148,10 +170,18 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 								/>
 							</TooltipTrigger>
 							<TooltipContent side="bottom">
-								<p>{iconLabel}</p>
+								<p>
+									{iconLabel}
+									{runtimeInfo ? ` · ${runtimeInfo.full}` : ""}
+								</p>
 							</TooltipContent>
 						</Tooltip>
 						<span className="text-xs font-medium text-foreground truncate">{label}</span>
+						{runtimeInfo && (
+							<span className="shrink-0 text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">
+								{runtimeInfo.short}
+							</span>
+						)}
 						{isDatabase && (
 							<span className="ml-auto shrink-0 text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase">
 								db

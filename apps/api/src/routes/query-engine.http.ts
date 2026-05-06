@@ -419,6 +419,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							const cloudProvider = String(row.cloudProvider ?? "")
 							const faasName = String(row.faasName ?? "")
 							const mapleSdkType = String(row.mapleSdkType ?? "")
+							const processRuntimeName = String(row.processRuntimeName ?? "")
 							// Require pod/deployment, not just cluster.name — see SQL comment.
 							const isKubernetes = k8sPodName !== "" || k8sDeploymentName !== ""
 							// Infrastructure signals win over SDK self-report so a server SDK on
@@ -442,6 +443,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								cloudProvider,
 								faasName,
 								mapleSdkType,
+								processRuntimeName,
 							}
 						}),
 					})

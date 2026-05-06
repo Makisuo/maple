@@ -411,6 +411,7 @@ export const servicePlatformsHourly = defineDatasource("service_platforms_hourly
 		CloudProvider: t.simpleAggregateFunction("max", t.string()),
 		FaasName: t.simpleAggregateFunction("max", t.string()),
 		MapleSdkType: t.simpleAggregateFunction("max", t.string()),
+		ProcessRuntimeName: t.simpleAggregateFunction("max", t.string()),
 		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
 	engine: engine.aggregatingMergeTree({

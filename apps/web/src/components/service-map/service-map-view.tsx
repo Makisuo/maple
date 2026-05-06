@@ -759,6 +759,7 @@ function ServiceMapCanvas({
 	edges: serviceEdges,
 	dbEdges,
 	platforms,
+	runtimes,
 	overviews,
 	workloads,
 	showInfraTab,
@@ -767,6 +768,7 @@ function ServiceMapCanvas({
 	edges: ServiceEdge[]
 	dbEdges: ServiceDbEdge[]
 	platforms: Map<string, ServicePlatform>
+	runtimes: Map<string, string>
 	overviews: ServiceOverview[]
 	workloads: ServiceWorkload[]
 	showInfraTab: boolean
@@ -784,6 +786,7 @@ function ServiceMapCanvas({
 			durationSeconds,
 			serviceWorkloads: workloads,
 			platforms,
+			runtimes,
 		})
 		const positioned = layoutNodes(rawNodes, rawEdges, layoutConfig)
 		// Service legend should only include real services, not synthetic db: nodes
@@ -791,7 +794,7 @@ function ServiceMapCanvas({
 			...new Set(positioned.filter((n) => !n.id.startsWith(DB_NODE_PREFIX)).map((n) => n.id)),
 		].sort()
 		return { layoutedNodes: positioned, flowEdges: rawEdges, services: allServices }
-	}, [serviceEdges, dbEdges, platforms, overviews, workloads, durationSeconds, layoutConfig])
+	}, [serviceEdges, dbEdges, platforms, runtimes, overviews, workloads, durationSeconds, layoutConfig])
 
 	// Merge layout positions with selection + color-mode state
 	const nodesWithSelection = useMemo(() => {
@@ -1103,6 +1106,15 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 		}
 		return map
 	}, [platformsResult])
+	const runtimes = useMemo(() => {
+		const map = new Map<string, string>()
+		if (Result.isSuccess(platformsResult)) {
+			for (const p of platformsResult.value.platforms) {
+				if (p.runtime) map.set(p.serviceName, p.runtime)
+			}
+		}
+		return map
+	}, [platformsResult])
 
 	// Bulk fetch workloads keyed off the same set of services that appear in edges.
 	// Gated on infraEnabled so we don't issue this query on plans without the
@@ -1148,6 +1160,7 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 				edges={mapResponse.edges}
 				dbEdges={dbEdges}
 				platforms={platforms}
+				runtimes={runtimes}
 				overviews={overviews}
 				workloads={workloads}
 				showInfraTab={infraEnabled}

@@ -244,6 +244,7 @@ export class ServicePlatformsResponse extends Schema.Class<ServicePlatformsRespo
 			cloudProvider: Schema.String,
 			faasName: Schema.String,
 			mapleSdkType: Schema.String,
+			processRuntimeName: Schema.String,
 		}),
 	),
 }) {}

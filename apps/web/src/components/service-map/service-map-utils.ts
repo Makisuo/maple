@@ -26,6 +26,7 @@ export interface ServiceNodeData {
 	selected: boolean
 	infra?: ServiceNodeInfra
 	platform?: ServicePlatform
+	runtime?: string
 	dbSystem?: string
 	colorMode?: ServiceMapColorMode
 	[key: string]: unknown
@@ -127,6 +128,7 @@ export interface BuildFlowElementsInput {
 	durationSeconds: number
 	serviceWorkloads?: ServiceWorkload[]
 	platforms?: Map<string, ServicePlatform>
+	runtimes?: Map<string, string>
 }
 
 /**
@@ -143,6 +145,7 @@ export function buildFlowElements({
 	durationSeconds,
 	serviceWorkloads = [],
 	platforms,
+	runtimes,
 }: BuildFlowElementsInput): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
 	const services = deriveServiceList(edges, serviceOverviews)
 
@@ -211,6 +214,7 @@ export function buildFlowElements({
 				selected: false,
 				infra,
 				platform: platforms?.get(service),
+				runtime: runtimes?.get(service),
 			},
 		}
 	})
