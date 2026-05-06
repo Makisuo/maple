@@ -221,7 +221,7 @@ export class WarehouseQueryService extends Context.Service<
 				const details = getClickHouseErrorDetails(error)
 				const rawMessage = details.message
 				const message = cleanErrorMessage(rawMessage)
-				const setting = detectQuotaSetting(rawMessage)
+				const setting = detectQuotaSetting(rawMessage, details.code, details.type)
 				const clickhouseFields = {
 					clickhouseCode: details.code,
 					clickhouseType: details.type,

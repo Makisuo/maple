@@ -88,4 +88,40 @@ describe("detectQuotaSetting", () => {
 		expect(detectQuotaSetting("Resource 'foo' not found")).toBeUndefined()
 		expect(detectQuotaSetting(undefined)).toBeUndefined()
 	})
+
+	// Regression: production saw an UNKNOWN_IDENTIFIER (code 47) error tagged
+	// as TinybirdQuotaExceededError because the old regex matched the bare
+	// substring `max_execution_time` inside the SETTINGS clause that ClickHouse
+	// echoes back in every error message.
+	const PROD_UNKNOWN_IDENTIFIER_MESSAGE =
+		"Unknown expression or function identifier 'SampleRate' in scope SELECT toStartOfInterval(Timestamp, toIntervalSecond(3600)) AS bucket FROM service_overview_spans WHERE OrgId = 'org_1' SETTINGS max_execution_time = 30, max_memory_usage = 4000000000."
+
+	it("does not mis-classify UNKNOWN_IDENTIFIER as a quota error (with structured fields)", () => {
+		expect(
+			detectQuotaSetting(PROD_UNKNOWN_IDENTIFIER_MESSAGE, "47", "UNKNOWN_IDENTIFIER"),
+		).toBeUndefined()
+	})
+
+	it("does not mis-classify UNKNOWN_IDENTIFIER as a quota error (message only)", () => {
+		// Even without structured code/type, the tightened patterns must
+		// ignore the echoed `SETTINGS max_execution_time = ...` clause.
+		expect(detectQuotaSetting(PROD_UNKNOWN_IDENTIFIER_MESSAGE)).toBeUndefined()
+	})
+
+	it("classifies by ClickHouse code first", () => {
+		expect(detectQuotaSetting("anything", "159")).toBe("max_execution_time")
+		expect(detectQuotaSetting("anything", "241")).toBe("max_memory_usage")
+		// Non-quota codes return undefined even when the message looks ambiguous
+		expect(detectQuotaSetting("Memory limit (for query) exceeded", "47")).toBeUndefined()
+	})
+
+	it("classifies by ClickHouse type when code is missing", () => {
+		expect(detectQuotaSetting("anything", undefined, "TIMEOUT_EXCEEDED")).toBe(
+			"max_execution_time",
+		)
+		expect(detectQuotaSetting("anything", undefined, "MEMORY_LIMIT_EXCEEDED")).toBe(
+			"max_memory_usage",
+		)
+		expect(detectQuotaSetting("anything", undefined, "UNKNOWN_IDENTIFIER")).toBeUndefined()
+	})
 })

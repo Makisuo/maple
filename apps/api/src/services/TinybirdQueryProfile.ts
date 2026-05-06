@@ -72,23 +72,58 @@ export const resolveSettings = (options?: {
 	return { ...base, ...options.settings }
 }
 
-const QUOTA_ERROR_PATTERNS: ReadonlyArray<{
-	pattern: RegExp
-	setting: "max_execution_time" | "max_memory_usage" | "max_threads"
-}> = [
+type QuotaSetting = "max_execution_time" | "max_memory_usage" | "max_threads"
+
+/**
+ * ClickHouse error codes for the quota-class errors we care about.
+ * Source: ClickHouse `src/Common/ErrorCodes.cpp`.
+ */
+const CODE_TO_SETTING: Record<string, QuotaSetting> = {
+	"159": "max_execution_time", // TIMEOUT_EXCEEDED
+	"241": "max_memory_usage", // MEMORY_LIMIT_EXCEEDED
+}
+
+const TYPE_TO_SETTING: Record<string, QuotaSetting> = {
+	TIMEOUT_EXCEEDED: "max_execution_time",
+	MEMORY_LIMIT_EXCEEDED: "max_memory_usage",
+}
+
+/**
+ * Message-only fallback patterns. Deliberately tight: bare substrings like
+ * `max_execution_time` or `max_memory_usage` would match the trailing
+ * `SETTINGS max_execution_time = 30, max_memory_usage = ...` clause that
+ * ClickHouse echoes inside *every* error message, falsely tagging
+ * UNKNOWN_IDENTIFIER and similar errors as quota errors.
+ *
+ * Use these only when neither structured `code` nor `type` is available.
+ */
+const QUOTA_ERROR_PATTERNS: ReadonlyArray<{ pattern: RegExp; setting: QuotaSetting }> = [
 	{
-		pattern: /TIMEOUT[_ ]EXCEEDED|Timeout exceeded|max_execution_time|estimated query execution time/i,
+		pattern: /Code:\s*159\b|TIMEOUT_EXCEEDED|estimated query execution time exceeded|Timeout exceeded:/i,
 		setting: "max_execution_time",
 	},
 	{
-		pattern: /MEMORY[_ ]LIMIT[_ ]EXCEEDED|Memory limit \(for query\) exceeded/i,
+		pattern: /Code:\s*241\b|MEMORY_LIMIT_EXCEEDED|Memory limit \(for query\) exceeded/i,
 		setting: "max_memory_usage",
 	},
 ]
 
+/**
+ * Classify whether a ClickHouse error is a quota/limit breach (and which one).
+ *
+ * Prefers the structured `code` / `type` fields surfaced by the ClickHouse
+ * client — they're unambiguous. Only falls back to message regex when both
+ * are absent (e.g. errors that come back as a raw string), and even then
+ * the patterns avoid the SQL-echo trap.
+ */
 export const detectQuotaSetting = (
 	message: string | undefined,
-): "max_execution_time" | "max_memory_usage" | "max_threads" | undefined => {
+	code?: string,
+	type?: string,
+): QuotaSetting | undefined => {
+	if (code && CODE_TO_SETTING[code]) return CODE_TO_SETTING[code]
+	if (type && TYPE_TO_SETTING[type]) return TYPE_TO_SETTING[type]
+	if (code || type) return undefined
 	if (!message) return undefined
 	for (const { pattern, setting } of QUOTA_ERROR_PATTERNS) {
 		if (pattern.test(message)) return setting
