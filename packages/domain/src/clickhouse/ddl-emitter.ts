@@ -534,6 +534,66 @@ export const parseEmittedStatement = (sql: string): EmittedStatement | null => {
 }
 
 /**
+ * Extract a single column's *original* definition line — including any
+ * `DEFAULT` / `MATERIALIZED` / `CODEC` / `COMMENT` / `TTL` clauses — from a
+ * CREATE TABLE statement.
+ *
+ * Used by `OrgClickHouseSettingsService.applySchema` to emit
+ * `ALTER TABLE ... ADD COLUMN IF NOT EXISTS <line>` against drifted tables
+ * without losing column defaults. (`parseEmittedStatement` strips the clauses
+ * because string-equality on the bare type is what drift detection wants;
+ * here we need the opposite.)
+ *
+ * Returns `null` if `sql` is not a CREATE TABLE, the column doesn't appear in
+ * the column list, or the matched line is an `INDEX` clause.
+ */
+export const extractColumnDefinition = (sql: string, columnName: string): string | null => {
+	const tableMatch = CREATE_TABLE_HEADER.exec(sql)
+	if (!tableMatch) return null
+
+	const openIndex = sql.indexOf("(")
+	let depth = 0
+	let closeIndex = -1
+	for (let i = openIndex; i < sql.length; i++) {
+		const ch = sql[i]
+		if (ch === "(") depth++
+		else if (ch === ")") {
+			depth--
+			if (depth === 0) {
+				closeIndex = i
+				break
+			}
+		}
+	}
+	if (closeIndex < 0) return null
+
+	const body = sql.slice(openIndex + 1, closeIndex)
+	let lineDepth = 0
+	let lineStart = 0
+	const segments: string[] = []
+	for (let i = 0; i < body.length; i++) {
+		const ch = body[i]
+		if (ch === "(") lineDepth++
+		else if (ch === ")") lineDepth--
+		else if (ch === "," && lineDepth === 0) {
+			segments.push(body.slice(lineStart, i))
+			lineStart = i + 1
+		}
+	}
+	segments.push(body.slice(lineStart))
+
+	for (const segment of segments) {
+		const trimmed = segment.trim().replace(/,$/, "").trim()
+		if (trimmed.length === 0) continue
+		if (/^INDEX\s/i.test(trimmed)) continue
+		const nameMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s+/.exec(trimmed)
+		if (!nameMatch) continue
+		if (nameMatch[1] === columnName) return trimmed
+	}
+	return null
+}
+
+/**
  * Build the full ordered list of DDL statements for a Tinybird project
  * manifest. Order is:
  *

@@ -340,8 +340,8 @@ export function OrgClickHouseSettingsSection({
 									<CardTitle>Schema</CardTitle>
 									<CardDescription>
 										Compare your cluster against Maple&apos;s bundled schema snapshot. Apply
-										creates missing tables and views; drifted ones are skipped — resolve
-										those manually before applying.
+										creates missing tables and views, and adds missing columns to existing
+										tables. Type mismatches are skipped — resolve those manually.
 									</CardDescription>
 								</div>
 							</div>

@@ -20,6 +20,7 @@ import {
 	CLICKHOUSE_MV_SOURCE_TABLES,
 	clickHouseProjectRevision,
 	computeSchemaDiff,
+	extractColumnDefinition,
 	migrations as clickHouseMigrations,
 	parseEmittedStatement,
 	qualifyStatementForDatabase,
@@ -712,6 +713,10 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			const applied: string[] = []
 			const skipped: Array<{ name: string; reason: string }> = []
 
+			// Track tables whose drift was *fully* resolved by additive ALTERs, so
+			// the schemaVersion bump below stays accurate.
+			const fullyResolvedDrift = new Set<string>()
+
 			for (const entry of entries) {
 				if (entry.status === "missing") {
 					const table = desiredByName.get(entry.name)
@@ -720,17 +725,77 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					yield* execClickHouse(config, stmt)
 					applied.push(entry.name)
 				} else if (entry.status === "drifted") {
-					skipped.push({
-						name: entry.name,
-						reason: `${entry.columnDrifts.length} column drift${entry.columnDrifts.length === 1 ? "" : "s"} — resolve manually`,
-					})
+					// MV bodies aren't fully diffed (presence-only), so a "drifted" entry
+					// always implies kind === "table" today. Defensive guard anyway —
+					// dropping/recreating MVs is destructive and out of scope here.
+					if (entry.kind !== "table") {
+						skipped.push({
+							name: entry.name,
+							reason: `materialized view drift — resolve manually`,
+						})
+						continue
+					}
+					const table = desiredByName.get(entry.name)
+					if (!table) {
+						skipped.push({ name: entry.name, reason: `desired definition missing` })
+						continue
+					}
+
+					const missingDrifts = entry.columnDrifts.filter((d) => d.kind === "missing")
+					const typeMismatches = entry.columnDrifts.filter((d) => d.kind === "type_mismatch")
+					// `extra` drifts (columns the customer has that Maple doesn't expect)
+					// don't block — Maple only reads the columns it owns. Surfaced for
+					// visibility in the diff response, but ignored here.
+
+					const addedColumns: string[] = []
+					const unresolvableAdds: string[] = []
+					for (const drift of missingDrifts) {
+						const colDef = extractColumnDefinition(table.createStatement, drift.column)
+						if (!colDef) {
+							// Shouldn't happen — `missing` drift means the column is in the
+							// desired schema by definition — but guard against parser drift.
+							unresolvableAdds.push(drift.column)
+							continue
+						}
+						const alter = `ALTER TABLE \`${config.database}\`.\`${entry.name}\` ADD COLUMN IF NOT EXISTS ${colDef}`
+						yield* execClickHouse(config, alter)
+						addedColumns.push(drift.column)
+					}
+
+					const remainingIssues =
+						typeMismatches.length + unresolvableAdds.length
+					if (remainingIssues === 0) {
+						applied.push(entry.name)
+						fullyResolvedDrift.add(entry.name)
+					} else {
+						const parts: string[] = []
+						if (addedColumns.length > 0) {
+							parts.push(
+								`${addedColumns.length} column${addedColumns.length === 1 ? "" : "s"} added`,
+							)
+						}
+						if (typeMismatches.length > 0) {
+							parts.push(
+								`${typeMismatches.length} type mismatch${typeMismatches.length === 1 ? "" : "es"} — resolve manually`,
+							)
+						}
+						if (unresolvableAdds.length > 0) {
+							parts.push(
+								`${unresolvableAdds.length} column${unresolvableAdds.length === 1 ? "" : "s"} unparseable`,
+							)
+						}
+						skipped.push({ name: entry.name, reason: parts.join("; ") })
+					}
 				}
 				// `up_to_date` entries are silently passed over.
 			}
 
 			const now = Date.now()
 			const allSatisfied = entries.every(
-				(e) => e.status === "up_to_date" || (e.status === "missing" && applied.includes(e.name)),
+				(e) =>
+					e.status === "up_to_date" ||
+					(e.status === "missing" && applied.includes(e.name)) ||
+					(e.status === "drifted" && fullyResolvedDrift.has(e.name)),
 			)
 			yield* database
 				.execute((db) =>

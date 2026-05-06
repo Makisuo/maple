@@ -3,6 +3,7 @@ export {
 	emitCreateTable,
 	emitJsonPathSpec,
 	emitProjectDdl,
+	extractColumnDefinition,
 	parseEmittedStatement,
 	type EmittedMaterializedView,
 	type EmittedStatement,
