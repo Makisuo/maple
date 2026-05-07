@@ -33,19 +33,30 @@ interface StreamController {
 	completion: Promise<void>
 }
 
-export function streamChat(
-	threadId: string,
-	body: ChatStreamBody,
-	callbacks: ChatStreamCallbacks,
-): StreamController {
+export interface StreamChatOptions {
+	threadId: string
+	body: ChatStreamBody
+	getToken: () => Promise<string | null>
+	callbacks: ChatStreamCallbacks
+}
+
+export function streamChat({
+	threadId,
+	body,
+	getToken,
+	callbacks,
+}: StreamChatOptions): StreamController {
 	const controller = new AbortController()
 
 	const completion = (async () => {
 		let response: Response
 		try {
-			response = (await expoFetch(mobileChatUrl(threadId), {
+			const token = await getToken()
+			const headers: Record<string, string> = { "content-type": "application/json" }
+			if (token) headers.authorization = `Bearer ${token}`
+			response = (await expoFetch(mobileChatUrl(body.orgId, threadId), {
 				method: "POST",
-				headers: { "content-type": "application/json" },
+				headers,
 				body: JSON.stringify(body),
 				signal: controller.signal,
 			})) as unknown as Response

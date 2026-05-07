@@ -8,6 +8,7 @@
 	},
 	"dependencies": {
 		"@ai-sdk/openai-compatible": "^2.0.30",
+		"@clerk/backend": "^2.30.1",
 		"@cloudflare/ai-chat": "^0.3.2",
 		"@maple/agent-harness": "workspace:*",
 		"@maple/api": "workspace:*",

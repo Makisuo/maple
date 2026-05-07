@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useAgent } from "agents/react"
 import { useAgentChat } from "@cloudflare/ai-chat/react"
 import { useAuth } from "@clerk/clerk-react"
@@ -61,13 +61,31 @@ interface DashboardAiConversationProps {
 
 export function DashboardAiConversation({ dashboardName, widgets }: DashboardAiConversationProps) {
 	const { dashboardId, addWidget, removeWidget } = useDashboardActions()
-	const { orgId } = useAuth()
+	const { orgId, getToken } = useAuth()
 
+	const agentName = orgId ? `${orgId}:dashboard-${dashboardId}` : `dashboard-${dashboardId}`
 	const agent = useAgent({
 		agent: "ChatAgent",
-		name: `dashboard-${dashboardId}`,
+		name: agentName,
 		host: chatAgentUrl,
+		query: async () => ({ token: (await getToken()) ?? null }),
+		queryDeps: [orgId],
+		cacheTtl: 30_000,
 	})
+
+	const prepareSendMessagesRequest = useMemo(
+		() => async (opts: { headers?: HeadersInit }) => {
+			const token = await getToken()
+			const headers = new Headers(opts.headers ?? {})
+			if (token) headers.set("Authorization", `Bearer ${token}`)
+			const out: Record<string, string> = {}
+			headers.forEach((value, key) => {
+				out[key] = value
+			})
+			return { headers: out }
+		},
+		[getToken],
+	)
 
 	const { messages, sendMessage, status, error } = useAgentChat({
 		agent,
@@ -82,6 +100,8 @@ export function DashboardAiConversation({ dashboardName, widgets }: DashboardAiC
 				})),
 			},
 		},
+		getInitialMessages: null,
+		prepareSendMessagesRequest,
 	})
 
 	const isLoading = status === "streaming" || status === "submitted"

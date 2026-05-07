@@ -3,6 +3,11 @@ export const chatAgentUrl =
 
 export const CHAT_AGENT_CLASS = "chat-agent"
 
-export function mobileChatUrl(threadId: string): string {
-	return `${chatAgentUrl}/agents/${CHAT_AGENT_CLASS}/${encodeURIComponent(threadId)}/mobile-chat`
+export function scopedAgentName(orgId: string, threadId: string): string {
+	return `${orgId}:${threadId}`
+}
+
+export function mobileChatUrl(orgId: string, threadId: string): string {
+	const name = encodeURIComponent(scopedAgentName(orgId, threadId))
+	return `${chatAgentUrl}/agents/${CHAT_AGENT_CLASS}/${name}/mobile-chat`
 }

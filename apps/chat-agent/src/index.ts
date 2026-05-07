@@ -18,6 +18,7 @@ import { createMapleAiTools } from "./lib/direct-tools"
 import { createModelGateway } from "./lib/model-gateway"
 import { createDurableObjectSessionStore, type DurableSqlClient } from "./lib/session-store"
 import { SYSTEM_PROMPT, DASHBOARD_BUILDER_SYSTEM_PROMPT } from "./lib/system-prompt"
+import { orgIdFromDoName, parseDoNameFromUrl, verifyRequest } from "./lib/auth"
 
 interface DashboardContext {
 	dashboardName: string
@@ -640,6 +641,10 @@ class ChatAgent extends AIChatAgent<Env> {
 		return new Response("Not Found", { status: 404 })
 	}
 
+	private resolveOrgId(): string | undefined {
+		return orgIdFromDoName(this.name)
+	}
+
 	private async runChatTurn(input: {
 		body: Record<string, unknown> | undefined
 		userText: string
@@ -649,9 +654,13 @@ class ChatAgent extends AIChatAgent<Env> {
 	}): Promise<Response> {
 		const { body, userText, abortSignal, onFinish } = input
 
-		const orgId = body?.orgId as string | undefined
+		const orgId = this.resolveOrgId()
 		if (!orgId) {
-			return createErrorResponse("orgId is required in the request body")
+			return createErrorResponse("Agent instance is not bound to an organization")
+		}
+		const bodyOrgId = body?.orgId
+		if (typeof bodyOrgId === "string" && bodyOrgId !== orgId) {
+			return createErrorResponse("orgId mismatch between agent instance and request body")
 		}
 
 		const envRecord = this.env as unknown as Record<string, unknown>
@@ -749,20 +758,46 @@ const corsHeaders = {
 	"Access-Control-Allow-Headers": "Content-Type, Authorization",
 }
 
+const withCors = (response: Response): Response => {
+	const next = new Response(response.body, response)
+	for (const [key, value] of Object.entries(corsHeaders)) {
+		next.headers.set(key, value)
+	}
+	return next
+}
+
+const denied = (status: number, message: string): Response =>
+	withCors(
+		new Response(JSON.stringify({ error: message }), {
+			status,
+			headers: { "Content-Type": "application/json" },
+		}),
+	)
+
 export default {
 	async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
 		if (request.method === "OPTIONS") {
 			return new Response(null, { headers: corsHeaders })
 		}
 
-		const response = await routeAgentRequest(request, env)
-		if (response) {
-			const newResponse = new Response(response.body, response)
-			for (const [key, value] of Object.entries(corsHeaders)) {
-				newResponse.headers.set(key, value)
-			}
-			return newResponse
+		const url = new URL(request.url)
+		if (!url.pathname.startsWith("/agents/")) {
+			return new Response("Not Found", { status: 404 })
 		}
+
+		const doName = parseDoNameFromUrl(url)
+		if (!doName) return denied(404, "Unknown agent route")
+
+		const verified = await verifyRequest(request, env)
+		if (!verified) return denied(401, "Authentication required")
+
+		const namedOrgId = orgIdFromDoName(doName)
+		if (!namedOrgId || namedOrgId !== verified.orgId) {
+			return denied(403, "Agent name does not match authenticated organization")
+		}
+
+		const response = await routeAgentRequest(request, env)
+		if (response) return withCors(response)
 
 		return new Response("Not Found", { status: 404 })
 	},

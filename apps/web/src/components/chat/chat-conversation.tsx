@@ -61,7 +61,7 @@ export function ChatConversation({
 	mode,
 	alertContext,
 }: ChatConversationProps) {
-	const { orgId } = useAuth()
+	const { orgId, getToken } = useAuth()
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive)
 
@@ -70,7 +70,24 @@ export function ChatConversation({
 		agent: "ChatAgent",
 		name: agentName,
 		host: chatAgentUrl,
+		query: async () => ({ token: (await getToken()) ?? null }),
+		queryDeps: [orgId],
+		cacheTtl: 30_000,
 	})
+
+	const prepareSendMessagesRequest = useMemo(
+		() => async (opts: { headers?: HeadersInit }) => {
+			const token = await getToken()
+			const headers = new Headers(opts.headers ?? {})
+			if (token) headers.set("Authorization", `Bearer ${token}`)
+			const out: Record<string, string> = {}
+			headers.forEach((value, key) => {
+				out[key] = value
+			})
+			return { headers: out }
+		},
+		[getToken],
+	)
 
 	const body = useMemo<Record<string, unknown>>(() => {
 		const base: Record<string, unknown> = { orgId }
@@ -81,7 +98,12 @@ export function ChatConversation({
 		return base
 	}, [orgId, mode, alertContext])
 
-	const { messages, sendMessage, status } = useAgentChat({ agent, body })
+	const { messages, sendMessage, status } = useAgentChat({
+		agent,
+		body,
+		getInitialMessages: null,
+		prepareSendMessagesRequest,
+	})
 
 	const [hasSettled, setHasSettled] = useState(false)
 	useEffect(() => {

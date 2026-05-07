@@ -33,7 +33,7 @@ function makeId(prefix: string): string {
 }
 
 export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) {
-	const { orgId } = useAuth()
+	const { orgId, getToken } = useAuth()
 	const [messages, setMessages] = useState<UIMessage[]>([])
 	const [status, setStatus] = useState<Status>("idle")
 	const [error, setError] = useState<string | null>(null)
@@ -107,15 +107,16 @@ export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) 
 
 			assistantIdRef.current = null
 
-			const stream = streamChat(
+			const stream = streamChat({
 				threadId,
-				{
+				body: {
 					orgId,
 					userText,
 					mode: alertContext ? "alert" : undefined,
 					alertContext,
 				},
-				{
+				getToken,
+				callbacks: {
 					onAssistantStart: (id) => {
 						const assistantId = id || makeId("asst")
 						assistantIdRef.current = assistantId
@@ -194,10 +195,10 @@ export function useMobileChat({ threadId, alertContext }: UseMobileChatOptions) 
 						})
 					},
 				},
-			)
+			})
 			activeStream.current = stream
 		},
-		[orgId, status, threadId, alertContext, persist, updateSummary],
+		[orgId, status, threadId, alertContext, getToken, persist, updateSummary],
 	)
 
 	const stop = useCallback(() => {
