@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { useAuth } from "@clerk/clerk-react"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@maple/ui/components/ui/sidebar"
 import { useChatTabs } from "@/hooks/use-chat-tabs"
@@ -13,8 +14,25 @@ interface ChatPageProps {
 }
 
 export function ChatPage({ initialTabId, mode, alertContext }: ChatPageProps) {
+	const { orgId } = useAuth()
+	if (!orgId) return null
+	return (
+		<ChatPageInner
+			orgId={orgId}
+			initialTabId={initialTabId}
+			mode={mode}
+			alertContext={alertContext}
+		/>
+	)
+}
+
+interface ChatPageInnerProps extends ChatPageProps {
+	orgId: string
+}
+
+function ChatPageInner({ orgId, initialTabId, mode, alertContext }: ChatPageInnerProps) {
 	const { tabs, activeTabId, createTab, closeTab, setActiveTab, renameTab, ensureTab } =
-		useChatTabs(initialTabId)
+		useChatTabs(orgId, initialTabId)
 
 	useEffect(() => {
 		if (mode !== "alert" || !alertContext) return

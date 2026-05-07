@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react"
 import { useAgent } from "agents/react"
 import { useAgentChat } from "@cloudflare/ai-chat/react"
 import { useAuth } from "@clerk/clerk-react"
 import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
+import { ConversationLoadingSkeleton } from "@/components/chat/chat-conversation"
 import {
 	Conversation,
 	ConversationContent,
@@ -84,6 +86,19 @@ export function DashboardAiConversation({ dashboardName, widgets }: DashboardAiC
 
 	const isLoading = status === "streaming" || status === "submitted"
 
+	const [hasSettled, setHasSettled] = useState(false)
+	useEffect(() => {
+		if (messages.length > 0) {
+			setHasSettled(true)
+			return
+		}
+		const t = setTimeout(() => setHasSettled(true), 600)
+		return () => clearTimeout(t)
+	}, [messages.length, dashboardId])
+	useEffect(() => {
+		setHasSettled(false)
+	}, [dashboardId])
+
 	const handleSend = (text: string) => {
 		if (!text.trim() || isLoading) return
 		sendMessage({ text: text.trim() })
@@ -102,7 +117,9 @@ export function DashboardAiConversation({ dashboardName, widgets }: DashboardAiC
 			)}
 			<Conversation className="flex-1 min-h-0">
 				<ConversationContent className="mx-auto w-full gap-4 px-4 py-4">
-					{messages.length === 0 ? (
+					{!hasSettled && messages.length === 0 ? (
+						<ConversationLoadingSkeleton />
+					) : messages.length === 0 ? (
 						<ConversationEmptyState
 							title="Dashboard AI"
 							description="Tell me what you want to visualize and I'll add widgets to your dashboard."

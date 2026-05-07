@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useAgent } from "agents/react"
 import { useAgentChat } from "@cloudflare/ai-chat/react"
 import { useAuth } from "@clerk/clerk-react"
@@ -65,9 +65,10 @@ export function ChatConversation({
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive)
 
+	const agentName = orgId ? `${orgId}:${tabId}` : tabId
 	const agent = useAgent({
 		agent: "ChatAgent",
-		name: tabId,
+		name: agentName,
 		host: chatAgentUrl,
 	})
 
@@ -81,6 +82,19 @@ export function ChatConversation({
 	}, [orgId, mode, alertContext])
 
 	const { messages, sendMessage, status } = useAgentChat({ agent, body })
+
+	const [hasSettled, setHasSettled] = useState(false)
+	useEffect(() => {
+		setHasSettled(false)
+	}, [agentName])
+	useEffect(() => {
+		if (messages.length > 0) {
+			setHasSettled(true)
+			return
+		}
+		const t = setTimeout(() => setHasSettled(true), 600)
+		return () => clearTimeout(t)
+	}, [messages.length, agentName])
 
 	const isLoading = status === "streaming" || status === "submitted"
 	const isAlertMode = mode === "alert" && !!alertContext
@@ -102,7 +116,9 @@ export function ChatConversation({
 			{isAlertMode && <AlertAttachmentCard alert={alertContext!} />}
 			<Conversation className="flex-1 min-h-0">
 				<ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
-					{messages.length === 0 ? (
+					{!hasSettled && messages.length === 0 ? (
+						<ConversationLoadingSkeleton />
+					) : messages.length === 0 ? (
 						isAlertMode ? (
 							<div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
 								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
@@ -222,6 +238,16 @@ export function ChatConversation({
 					</PromptInputFooter>
 				</PromptInput>
 			</div>
+		</div>
+	)
+}
+
+export function ConversationLoadingSkeleton() {
+	return (
+		<div className="flex flex-col gap-3 py-6" aria-hidden>
+			<div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+			<div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+			<div className="h-3 w-1/3 animate-pulse rounded bg-muted" />
 		</div>
 	)
 }
