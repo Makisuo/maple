@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect"
+import { Duration, Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { make } from "./index.js"
 
@@ -109,6 +109,51 @@ describe("MapleCloudflareSDK.make", () => {
 		expect(records[0].severityText).toBe("Info")
 		expect(records[0].body.stringValue).toBe("hello world")
 		expect(records[1].severityText).toBe("Error")
+	})
+
+	// Regression: in-flight spans were dropped when the worker's outer
+	// `Promise.race` timeout fired, because finalizers never ran. The fix
+	// pushes the timeout inside the Effect runtime via middleware, which
+	// interrupts the inner fiber and triggers `withSpan` finalizers. This
+	// test pins down the underlying property: when an outer Effect.timeout
+	// interrupts a slow inner span, the span MUST end up in the export
+	// buffer with status `Ok` and `status.interrupted = true`.
+	it("ends in-flight spans when an outer Effect.timeoutOrElse interrupts the work", async () => {
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		const telemetry = make({ serviceName: "unit-test" })
+
+		const slowWork = Effect.sleep(Duration.seconds(10)).pipe(Effect.withSpan("slow-op"))
+		const wrapped = Effect.timeoutOrElse(slowWork, {
+			duration: Duration.millis(20),
+			orElse: () => Effect.void,
+		})
+
+		await Effect.runPromise(Effect.provide(wrapped, telemetry.layer))
+		await telemetry.flush(env)
+
+		const traceCall = calls.find((c) => c.url.endsWith("/v1/traces"))
+		expect(traceCall, "expected traces to be POSTed even though the inner span was interrupted")
+			.toBeDefined()
+		const body = traceCall!.body as {
+			resourceSpans: Array<{
+				scopeSpans: Array<{
+					spans: Array<{
+						name: string
+						status: { code: number; message?: string }
+						attributes: Array<{ key: string; value: { boolValue?: boolean } }>
+					}>
+				}>
+			}>
+		}
+		const span = body.resourceSpans[0].scopeSpans[0].spans.find((s) => s.name === "slow-op")
+		expect(span, "slow-op span should be present in the export").toBeDefined()
+		// Tracer maps interrupt-only causes to Status.Ok (code = 1) with an
+		// `Interrupted` message and a `status.interrupted = true` attribute.
+		expect(span!.status.code).toBe(1)
+		expect(span!.status.message).toBe("Interrupted")
+		const interrupted = span!.attributes.find((a) => a.key === "status.interrupted")
+		expect(interrupted?.value.boolValue).toBe(true)
 	})
 
 	it("second flush is a no-op when buffer is empty", async () => {

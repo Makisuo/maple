@@ -1,6 +1,6 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { WorkerConfigProviderLive, WorkerEnvironmentLive } from "@maple/effect-cloudflare"
-import { Context, FileSystem, Layer, Path } from "effect"
+import { Context, Duration, Effect, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
@@ -48,14 +48,34 @@ const telemetry = MapleCloudflareSDK.make({
 // POST /mcp hangs indefinitely on Cloudflare Workers when `toWebHandler` is
 // called with no middleware (1101 in prod, miniflare "worker hung" locally).
 // Suspected Effect RpcServer / HttpRouter scope-propagation bug. Providing
-// ANY middleware — even a pass-through — unsticks it. We pair the passthrough
-// with `disableLogger: true` so Effect's default `HttpMiddleware.logger` does
+// ANY middleware — even a pass-through — unsticks it. We pair this with
+// `disableLogger: true` so Effect's default `HttpMiddleware.logger` does
 // not double-log; application logs flow through the OTLP logger installed by
-// `telemetry.layer`. Earlier attempt (commit 769032b0) dropped the passthrough
-// and relied on `disableLogger: true` alone — that brings back the original
-// hang in prod because Effect treats `disableLogger:true` + no middleware as
-// "no middleware at all", which is the failing condition.
-const passthroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
+// `telemetry.layer`.
+//
+// The middleware also enforces a per-request timeout. This MUST live inside
+// the Effect runtime (not as an outer `Promise.race`) because that's the only
+// way the timeout interrupts the inner fiber. Interruption runs `withSpan`
+// finalizers in reverse, which calls `end()` on every open span and pushes
+// it into the export buffer. An outer `Promise.race` rejects without
+// interrupting — finalizers never run, spans never end, and the failed
+// request becomes invisible in traces.
+//
+// 22s leaves margin under CF's 30s wall-clock cap for the post-response
+// `telemetry.flush(env)` to drain the buffer to OTLP.
+const REQUEST_TIMEOUT = Duration.seconds(22)
+
+const requestTimeoutMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) =>
+	Effect.timeoutOrElse(httpApp, {
+		duration: REQUEST_TIMEOUT,
+		orElse: () =>
+			Effect.succeed(
+				HttpServerResponse.text(
+					`request timed out after ${Duration.toMillis(REQUEST_TIMEOUT)}ms`,
+					{ status: 504 },
+				),
+			),
+	})
 
 const buildHandler = () =>
 	HttpRouter.toWebHandler(
@@ -69,7 +89,7 @@ const buildHandler = () =>
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLive),
 		),
-		{ middleware: passthroughMiddleware, disableLogger: true },
+		{ middleware: requestTimeoutMiddleware, disableLogger: true },
 	)
 
 // Single isolate-wide handler — `toWebHandler` builds its own ManagedRuntime
@@ -79,12 +99,6 @@ const buildHandler = () =>
 // the isolate (Cloudflare 1101).
 const cachedHandler = buildHandler()
 const getHandler = () => cachedHandler
-
-// Time-box every handler call so a single hung request returns a useful 504
-// instead of waiting for the Cloudflare runtime to kill it as 1101 with no
-// stack. CF's hard limit is ~30s; we cut at 25s to leave headroom for the
-// timeout response itself.
-const HANDLER_TIMEOUT_MS = 25_000
 
 const isMcpPost = (request: Request): boolean => {
 	if (request.method !== "POST") return false
@@ -108,16 +122,10 @@ const readMcpSessionsBinding = (env: Record<string, unknown>): McpSessionsBindin
 	return undefined
 }
 
-const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
-	let timer: ReturnType<typeof setTimeout> | undefined
-	const timeout = new Promise<never>((_, reject) => {
-		timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-	})
-	return Promise.race([promise, timeout]).finally(() => {
-		if (timer) clearTimeout(timer)
-	}) as Promise<T>
-}
-
+// Per-request timeout lives in `requestTimeoutMiddleware` above so that
+// finalizers run on interrupt and traces export. If the handler still throws
+// (layer construction failure, fatal runtime error), we surface it as a 504
+// outside Effect — these are rare and not the trace-export hot path.
 const handle = async (
 	request: Request,
 	env: Record<string, unknown>,
@@ -129,11 +137,7 @@ const handle = async (
 	}
 	const { handler } = getHandler()
 	try {
-		const response = await withTimeout(
-			handler(request, Context.empty() as never),
-			HANDLER_TIMEOUT_MS,
-			"worker handler",
-		)
+		const response = await handler(request, Context.empty() as never)
 		ctx.waitUntil(telemetry.flush(env))
 		return response
 	} catch (err) {
