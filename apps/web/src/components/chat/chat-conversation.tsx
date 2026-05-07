@@ -7,6 +7,14 @@ import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import { alertPromptSuggestions, type AlertContext } from "./alert-context"
 import { AlertAttachmentCard } from "./alert-attachment-card"
 import {
+	deriveAutoContexts,
+	readChatReferrer,
+	suggestionsForContexts,
+	type AutoContext,
+	type PageContextPayload,
+} from "./auto-contexts"
+import { PageContextChips } from "./page-context-chips"
+import {
 	Conversation,
 	ConversationContent,
 	ConversationEmptyState,
@@ -65,6 +73,26 @@ export function ChatConversation({
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive)
 
+	const referrerPath = useMemo(() => readChatReferrer(), [tabId])
+	const derivedContexts = useMemo<AutoContext[]>(
+		() => (referrerPath ? deriveAutoContexts(referrerPath) : []),
+		[referrerPath],
+	)
+	const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
+	useEffect(() => {
+		setDismissed(new Set())
+	}, [referrerPath])
+	const activeContexts = useMemo(
+		() => derivedContexts.filter((c) => !dismissed.has(c.id)),
+		[derivedContexts, dismissed],
+	)
+	const dismissContext = (id: string) =>
+		setDismissed((prev) => {
+			const next = new Set(prev)
+			next.add(id)
+			return next
+		})
+
 	const agentName = orgId ? `${orgId}:${tabId}` : tabId
 	const agent = useAgent({
 		agent: "ChatAgent",
@@ -95,8 +123,15 @@ export function ChatConversation({
 			base.mode = "alert"
 			base.alertContext = alertContext
 		}
+		if (activeContexts.length > 0 && referrerPath) {
+			const payload: PageContextPayload = {
+				pathname: referrerPath,
+				contexts: activeContexts,
+			}
+			base.pageContext = payload
+		}
 		return base
-	}, [orgId, mode, alertContext])
+	}, [orgId, mode, alertContext, activeContexts, referrerPath])
 
 	const { messages, sendMessage, status } = useAgentChat({
 		agent,
@@ -120,10 +155,11 @@ export function ChatConversation({
 
 	const isLoading = status === "streaming" || status === "submitted"
 	const isAlertMode = mode === "alert" && !!alertContext
-	const suggestions = useMemo(
-		() => (isAlertMode ? alertPromptSuggestions(alertContext!) : DEFAULT_SUGGESTIONS),
-		[isAlertMode, alertContext],
-	)
+	const suggestions = useMemo(() => {
+		if (isAlertMode) return alertPromptSuggestions(alertContext!)
+		const routeAware = suggestionsForContexts(activeContexts)
+		return routeAware ?? DEFAULT_SUGGESTIONS
+	}, [isAlertMode, alertContext, activeContexts])
 
 	const handleSend = (text: string) => {
 		if (!text.trim() || isLoading) return
@@ -246,6 +282,7 @@ export function ChatConversation({
 						))}
 					</Suggestions>
 				)}
+				<PageContextChips contexts={activeContexts} onDismiss={dismissContext} />
 				<PromptInput
 					onSubmit={({ text }) => handleSend(text)}
 					className="rounded-lg border shadow-sm"

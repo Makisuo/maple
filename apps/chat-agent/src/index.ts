@@ -25,6 +25,66 @@ interface DashboardContext {
 	existingWidgets: Array<{ title: string; visualization: string }>
 }
 
+type AutoContext =
+	| { kind: "service"; id: string; serviceName: string }
+	| { kind: "trace"; id: string; traceId: string }
+	| { kind: "dashboard"; id: string; dashboardId: string; widgetId?: string }
+	| { kind: "error_type"; id: string; errorType: string }
+	| { kind: "error_issue"; id: string; issueId: string }
+	| { kind: "alert_rule"; id: string; ruleId: string }
+	| { kind: "host"; id: string; hostName: string }
+	| { kind: "logs_explorer"; id: string }
+	| { kind: "metrics_explorer"; id: string }
+	| { kind: "traces_explorer"; id: string }
+	| { kind: "service_map"; id: string }
+
+interface PageContextPayload {
+	pathname: string
+	contexts: AutoContext[]
+}
+
+const formatAutoContextLine = (ctx: AutoContext): string => {
+	switch (ctx.kind) {
+		case "service":
+			return `- service: ${ctx.serviceName}`
+		case "trace":
+			return `- trace: ${ctx.traceId}`
+		case "dashboard":
+			return ctx.widgetId
+				? `- dashboard: ${ctx.dashboardId} (widget: ${ctx.widgetId})`
+				: `- dashboard: ${ctx.dashboardId}`
+		case "error_type":
+			return `- error_type: ${ctx.errorType}`
+		case "error_issue":
+			return `- error_issue: ${ctx.issueId}`
+		case "alert_rule":
+			return `- alert_rule: ${ctx.ruleId}`
+		case "host":
+			return `- host: ${ctx.hostName}`
+		case "logs_explorer":
+			return "- view: logs explorer"
+		case "metrics_explorer":
+			return "- view: metrics explorer"
+		case "traces_explorer":
+			return "- view: traces explorer"
+		case "service_map":
+			return "- view: service map"
+	}
+}
+
+const formatPageContextBlock = (payload: PageContextPayload): string => {
+	if (payload.contexts.length === 0) return ""
+	const lines = [
+		"",
+		"## Current Page Context",
+		"The user is viewing the following Maple page. Treat these entities as the implicit subject when the user says \"this\", \"here\", or asks open-ended questions without naming a target. The user can dismiss any of these chips, so respect what's listed below.",
+		"",
+		`page: ${payload.pathname}`,
+		...payload.contexts.map(formatAutoContextLine),
+	]
+	return lines.join("\n")
+}
+
 interface AlertContext {
 	ruleId: string
 	ruleName: string
@@ -694,6 +754,7 @@ class ChatAgent extends AIChatAgent<Env> {
 		const mode = (body?.mode as string) ?? "default"
 		const dashboardContext = body?.dashboardContext as DashboardContext | undefined
 		const alertContext = body?.alertContext as AlertContext | undefined
+		const pageContext = body?.pageContext as PageContextPayload | undefined
 
 		try {
 			const directTools = await createMapleAiTools(envRecord, orgId)
@@ -712,6 +773,9 @@ class ChatAgent extends AIChatAgent<Env> {
 			}
 			if (isAlertMode && alertContext) {
 				systemPrompt += `\n${formatAlertContextBlock(alertContext)}`
+			}
+			if (pageContext && pageContext.contexts.length > 0) {
+				systemPrompt += `\n${formatPageContextBlock(pageContext)}`
 			}
 
 			const allTools = isDashboardMode
