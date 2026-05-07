@@ -215,6 +215,23 @@ const isTaggedBackendError = (error: unknown): boolean =>
 	typeof (error as { _tag: unknown })._tag === "string" &&
 	(error as { _tag: string })._tag.startsWith("@maple/http/errors/")
 
+// Errors that mean "the query ran fine, the time range just had no rows."
+// These should surface immediately as the "No data" UI in WidgetFrame —
+// retrying does not help and creates a runaway request loop.
+const EXPECTED_EMPTY_MESSAGES = new Set([
+	"No query data found in selected time range",
+	"No breakdown data found in selected time range",
+	"No list data found in selected time range",
+	"No successful query results",
+	"No enabled queries to run",
+])
+
+const isExpectedEmptyDataError = (error: unknown): boolean => {
+	if (typeof error !== "object" || error === null) return false
+	const message = (error as { message?: unknown }).message
+	return typeof message === "string" && EXPECTED_EMPTY_MESSAGES.has(message)
+}
+
 const toWidgetDataAtomError = (error: unknown): unknown => {
 	if (error instanceof WidgetDataAtomError) return error
 	if (isTaggedBackendError(error)) return error
@@ -258,7 +275,11 @@ const widgetFetchFamily = Atom.family((key: string) =>
 				)
 			}),
 			Effect.mapError(toWidgetDataAtomError),
-			Effect.retry(Schedule.exponential("500 millis").pipe(Schedule.andThen(Schedule.recurs(2)))),
+			Effect.retry({
+				times: 2,
+				schedule: Schedule.exponential("500 millis"),
+				while: (error) => !isExpectedEmptyDataError(error),
+			}),
 		),
 	).pipe(Atom.setIdleTTL(120_000)),
 )
@@ -328,6 +349,12 @@ export function useWidgetData(widget: DashboardWidget) {
 		return Result.builder(result)
 			.onInitial(() => ({ status: "loading" }) as const)
 			.onError((error) => {
+				if (isExpectedEmptyDataError(error)) {
+					return {
+						status: "error",
+						message: "No query data found in selected time range",
+					} as const
+				}
 				const { title, description } = formatBackendError(error)
 				return { status: "error", title, message: description } as const
 			})
