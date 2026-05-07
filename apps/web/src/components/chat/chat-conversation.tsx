@@ -32,6 +32,7 @@ import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator"
 import { Tool } from "@/components/ai-elements/tool"
+import { ApprovalCard } from "./approval-card"
 import type { UIMessage } from "ai"
 
 function shouldShowThinkingIndicator(
@@ -133,7 +134,7 @@ export function ChatConversation({
 		return base
 	}, [orgId, mode, alertContext, activeContexts, referrerPath])
 
-	const { messages, sendMessage, status } = useAgentChat({
+	const { messages, sendMessage, status, addToolApprovalResponse } = useAgentChat({
 		agent,
 		body,
 		getInitialMessages: null,
@@ -234,10 +235,36 @@ export function ChatConversation({
 														input?: unknown
 														output?: unknown
 														errorText?: string
+														approval?: { id: string }
 													}
 													const toolName = part.type.startsWith("tool-")
 														? part.type.replace(/^tool-/, "")
 														: (toolPart.toolName ?? "unknown")
+													if (
+														toolPart.state === "approval-requested" &&
+														toolPart.approval?.id
+													) {
+														return (
+															<ApprovalCard
+																key={toolPart.toolCallId ?? i}
+																toolName={toolName}
+																input={toolPart.input}
+																approvalId={toolPart.approval.id}
+																onApprove={(id) =>
+																	addToolApprovalResponse({
+																		id,
+																		approved: true,
+																	})
+																}
+																onDeny={(id) =>
+																	addToolApprovalResponse({
+																		id,
+																		approved: false,
+																	})
+																}
+															/>
+														)
+													}
 													return (
 														<Tool
 															key={toolPart.toolCallId ?? i}

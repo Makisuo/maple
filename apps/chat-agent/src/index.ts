@@ -15,6 +15,7 @@ import type { Env } from "./lib/types"
 import { resolveOrgOpenrouterKey } from "@maple/api/agent"
 import { trackTokenUsage } from "./lib/autumn-tracker"
 import { createMapleAiTools } from "./lib/direct-tools"
+import { applyApprovalGates } from "./lib/gated-tools"
 import { createModelGateway } from "./lib/model-gateway"
 import { createDurableObjectSessionStore, type DurableSqlClient } from "./lib/session-store"
 import { SYSTEM_PROMPT, DASHBOARD_BUILDER_SYSTEM_PROMPT } from "./lib/system-prompt"
@@ -757,7 +758,7 @@ class ChatAgent extends AIChatAgent<Env> {
 		const pageContext = body?.pageContext as PageContextPayload | undefined
 
 		try {
-			const directTools = await createMapleAiTools(envRecord, orgId)
+			const directTools = applyApprovalGates(await createMapleAiTools(envRecord, orgId))
 			const isDashboardMode = mode === "dashboard_builder"
 			const isAlertMode = mode === "alert"
 
