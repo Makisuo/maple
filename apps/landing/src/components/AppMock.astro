@@ -113,7 +113,7 @@ const MAP_VIEW_W = 1020;
 const MAP_VIEW_H = 360;
 ---
 
-<div class="app-mock border border-border bg-bg-elevated overflow-hidden">
+<div class="app-mock rounded-xl border border-border bg-bg-elevated overflow-hidden">
     <!-- Window chrome -->
     <div class="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg">
         <div class="w-2.5 h-2.5 bg-border"></div>
@@ -188,7 +188,7 @@ const MAP_VIEW_H = 360;
             <!-- Map canvas. SVG handles scaling via viewBox; nodes ride along
                  inside <foreignObject> so they use the dashboard's exact Tailwind
                  markup (matches apps/web/src/components/service-map/ServiceMapNode.tsx). -->
-            <div class="relative border border-border bg-card overflow-hidden">
+            <div class="relative rounded-lg border border-border bg-card overflow-hidden">
                 <svg
                     viewBox={`0 0 ${MAP_VIEW_W} ${MAP_VIEW_H}`}
                     class="block w-full h-auto"
@@ -356,7 +356,7 @@ const MAP_VIEW_H = 360;
                 </div>
             </div>
             <!-- Metric cards (matches real dashboard: Total Logs, Total Traces, Total Metrics, Data Size) -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border rounded-lg overflow-hidden">
                 <div class="bg-bg-elevated p-2.5">
                     <div class="text-[9px] text-fg-muted mb-0.5">Total Traces</div>
                     <div class="text-base md:text-lg text-fg font-bold">24.3K</div>
@@ -377,7 +377,7 @@ const MAP_VIEW_H = 360;
             <!-- 2x2 chart grid (matches real: Request Volume, Error Rate, Latency, Log Volume) -->
             <div class="grid grid-cols-2 gap-3">
                 <!-- Request Volume -->
-                <div class="border border-border bg-bg p-3">
+                <div class="rounded-lg border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">Request Volume</div>
                     <div class="flex items-end gap-[3px] h-14">
                         <div class="flex-1 bg-chart-throughput/70 h-[45%]"></div>
@@ -395,7 +395,7 @@ const MAP_VIEW_H = 360;
                     </div>
                 </div>
                 <!-- Error Rate -->
-                <div class="border border-border bg-bg p-3">
+                <div class="rounded-lg border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">Error Rate</div>
                     <div class="flex items-end gap-[3px] h-14">
                         <div class="flex-1 bg-chart-error/50 h-[12%]"></div>
@@ -413,7 +413,7 @@ const MAP_VIEW_H = 360;
                     </div>
                 </div>
                 <!-- Latency (p50/p95/p99) -->
-                <div class="border border-border bg-bg p-3">
+                <div class="rounded-lg border border-border bg-bg p-3">
                     <div class="flex items-center justify-between mb-2">
                         <div class="text-[9px] text-fg-muted">Latency</div>
                         <div class="flex items-center gap-2">
@@ -438,7 +438,7 @@ const MAP_VIEW_H = 360;
                     </div>
                 </div>
                 <!-- Log Volume -->
-                <div class="border border-border bg-bg p-3">
+                <div class="rounded-lg border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">Log Volume</div>
                     <div class="flex items-end gap-[3px] h-14">
                         <div class="flex-1 bg-chart-2/70 h-[70%]"></div>
@@ -468,7 +468,7 @@ const MAP_VIEW_H = 360;
                 <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
             </div>
             <!-- Services table -->
-            <div class="border border-border bg-bg overflow-hidden">
+            <div class="rounded-lg border border-border bg-bg overflow-hidden">
                 <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
                     <span>Service</span><span>Env</span><span>P50</span><span>P95</span><span>P99</span><span class="text-right">Throughput</span>
                 </div>
@@ -576,9 +576,9 @@ const MAP_VIEW_H = 360;
                     <div>
                         <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Duration</div>
                         <div class="flex items-center gap-1">
-                            <span class="flex-1 border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">0ms</span>
+                            <span class="flex-1 rounded-md border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">0ms</span>
                             <span class="text-[8px] text-fg-muted">–</span>
-                            <span class="flex-1 border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">5s</span>
+                            <span class="flex-1 rounded-md border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">5s</span>
                         </div>
                         <div class="mt-1.5 h-1 bg-bg-elevated border border-border relative">
                             <div class="absolute inset-y-0 left-[5%] right-[15%] bg-accent/30"></div>
@@ -606,7 +606,7 @@ const MAP_VIEW_H = 360;
                         <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
                     </div>
                     <!-- Traces table -->
-                    <div class="border border-border bg-bg overflow-hidden">
+                    <div class="rounded-lg border border-border bg-bg overflow-hidden">
                         <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
                             <span>Trace ID</span><span>Root Span</span><span>Services</span><span>Duration</span><span>Spans</span><span>Status</span>
                         </div>
@@ -744,7 +744,7 @@ const MAP_VIEW_H = 360;
                         </div>
                         <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 1h</span>
                     </div>
-                    <div class="border border-border bg-bg overflow-hidden">
+                    <div class="rounded-lg border border-border bg-bg overflow-hidden">
                         <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
                             <span>Timestamp</span><span>Service</span><span>Level</span><span>Message</span>
                         </div>
@@ -806,7 +806,7 @@ const MAP_VIEW_H = 360;
             </div>
             <!-- Service detail style: 2x2 chart grid -->
             <div class="grid grid-cols-2 gap-3">
-                <div class="border border-border bg-bg p-3">
+                <div class="rounded-lg border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">http.server.duration (p95)</div>
                     <!-- Area chart style with gradient effect -->
                     <div class="flex items-end gap-[2px] h-16">
@@ -814,21 +814,21 @@ const MAP_VIEW_H = 360;
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
-                <div class="border border-border bg-bg p-3">
+                <div class="rounded-lg border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">http.server.request.count</div>
                     <div class="flex items-end gap-[2px] h-16">
                         <div class="flex-1 bg-chart-throughput/50 h-[60%]"></div><div class="flex-1 bg-chart-throughput/50 h-[65%]"></div><div class="flex-1 bg-chart-throughput/55 h-[70%]"></div><div class="flex-1 bg-chart-throughput/55 h-[62%]"></div><div class="flex-1 bg-chart-throughput/60 h-[58%]"></div><div class="flex-1 bg-chart-throughput/60 h-[72%]"></div><div class="flex-1 bg-chart-throughput/65 h-[80%]"></div><div class="flex-1 bg-chart-throughput/65 h-[75%]"></div><div class="flex-1 bg-chart-throughput/70 h-[85%]"></div><div class="flex-1 bg-chart-throughput/70 h-[90%]"></div><div class="flex-1 bg-chart-throughput/75 h-[82%]"></div><div class="flex-1 bg-chart-throughput/75 h-[78%]"></div><div class="flex-1 bg-chart-throughput/80 h-[88%]"></div><div class="flex-1 bg-chart-throughput h-[92%]"></div><div class="flex-1 bg-chart-throughput h-[85%]"></div><div class="flex-1 bg-chart-throughput h-[80%]"></div>
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
-                <div class="border border-border bg-bg p-3">
+                <div class="rounded-lg border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">process.runtime.memory</div>
                     <div class="flex items-end gap-[2px] h-16">
                         <div class="flex-1 bg-chart-4/50 h-[50%]"></div><div class="flex-1 bg-chart-4/50 h-[52%]"></div><div class="flex-1 bg-chart-4/55 h-[54%]"></div><div class="flex-1 bg-chart-4/55 h-[56%]"></div><div class="flex-1 bg-chart-4/60 h-[55%]"></div><div class="flex-1 bg-chart-4/60 h-[58%]"></div><div class="flex-1 bg-chart-4/65 h-[60%]"></div><div class="flex-1 bg-chart-4/65 h-[62%]"></div><div class="flex-1 bg-chart-4/70 h-[61%]"></div><div class="flex-1 bg-chart-4/70 h-[64%]"></div><div class="flex-1 bg-chart-4/75 h-[66%]"></div><div class="flex-1 bg-chart-4/75 h-[65%]"></div><div class="flex-1 bg-chart-4/80 h-[68%]"></div><div class="flex-1 bg-chart-4 h-[70%]"></div><div class="flex-1 bg-chart-4 h-[72%]"></div><div class="flex-1 bg-chart-4 h-[71%]"></div>
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
-                <div class="border border-border bg-bg p-3">
+                <div class="rounded-lg border border-border bg-bg p-3">
                     <div class="text-[9px] text-fg-muted mb-2">db.client.connections.active</div>
                     <div class="flex items-end gap-[2px] h-16">
                         <div class="flex-1 bg-chart-2/50 h-[30%]"></div><div class="flex-1 bg-chart-2/50 h-[35%]"></div><div class="flex-1 bg-chart-2/55 h-[32%]"></div><div class="flex-1 bg-chart-2/55 h-[38%]"></div><div class="flex-1 bg-chart-2/60 h-[42%]"></div><div class="flex-1 bg-chart-2/60 h-[40%]"></div><div class="flex-1 bg-chart-2/65 h-[45%]"></div><div class="flex-1 bg-chart-2/65 h-[50%]"></div><div class="flex-1 bg-chart-2/70 h-[48%]"></div><div class="flex-1 bg-chart-2/70 h-[52%]"></div><div class="flex-1 bg-chart-2/75 h-[55%]"></div><div class="flex-1 bg-chart-2/75 h-[50%]"></div><div class="flex-1 bg-chart-2/80 h-[48%]"></div><div class="flex-1 bg-chart-2 h-[45%]"></div><div class="flex-1 bg-chart-2 h-[42%]"></div><div class="flex-1 bg-chart-2 h-[40%]"></div>

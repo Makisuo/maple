@@ -267,7 +267,7 @@ const defaultId = snippets[0].id;
 		</h2>
 		<p class="mt-4 text-sm md:text-base text-fg-muted max-w-[48ch] leading-relaxed">{m.start_lede()}</p>
 
-		<div class="mt-12 border border-border bg-bg-elevated/30 relative" data-quickstart-tabs role="tablist">
+		<div class="mt-12 overflow-hidden rounded-xl border border-border bg-bg-elevated/30 relative" data-quickstart-tabs role="tablist">
 			{/* connector spine — vertical line through the rail badges (desktop only) */}
 			<div class="hidden md:block absolute left-[calc(2.75rem+0.5px)] top-12 bottom-12 w-px bg-linear-to-b from-primary/60 via-primary/30 to-primary/10" aria-hidden="true"></div>
 
@@ -292,7 +292,7 @@ const defaultId = snippets[0].id;
 								data-tab-trigger={s.id}
 								data-filename={s.filename}
 								aria-selected={s.id === defaultId ? "true" : "false"}
-								class="group inline-flex items-center gap-2 font-mono text-[12px] pl-2 pr-3 py-1.5 border transition-all aria-[selected=true]:border-primary aria-[selected=true]:text-fg aria-[selected=true]:bg-primary/10 aria-[selected=true]:shadow-[inset_0_0_0_1px_var(--primary)] aria-[selected=false]:border-border aria-[selected=false]:text-fg-muted hover:text-fg hover:border-fg-muted"
+								class="group inline-flex items-center gap-2 font-mono text-[12px] pl-2 pr-3 py-1.5 rounded-md border transition-all aria-[selected=true]:border-primary aria-[selected=true]:text-fg aria-[selected=true]:bg-primary/10 aria-[selected=true]:shadow-[inset_0_0_0_1px_var(--primary)] aria-[selected=false]:border-border aria-[selected=false]:text-fg-muted hover:text-fg hover:border-fg-muted"
 							>
 								<svg
 									class="size-4 transition-opacity group-aria-[selected=false]:opacity-60"
@@ -392,7 +392,7 @@ const defaultId = snippets[0].id;
 			<div class="mt-10 flex flex-wrap items-center gap-3">
 				<a
 					href="https://app.maple.dev"
-					class="inline-flex items-center justify-center h-11 px-5 bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
+					class="inline-flex items-center justify-center h-11 px-5 rounded-lg bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
 				>
 					{m.cta_bookend_primary()}
 				</a>
@@ -400,7 +400,7 @@ const defaultId = snippets[0].id;
 					href="https://github.com/Makisuo/maple"
 					target="_blank"
 					rel="noopener noreferrer"
-					class="inline-flex items-center justify-center h-11 px-5 border border-current/40 text-sm font-medium hover:bg-current/10 transition-colors"
+					class="inline-flex items-center justify-center h-11 px-5 rounded-lg border border-current/40 text-sm font-medium hover:bg-current/10 transition-colors"
 				>
 					{m.cta_bookend_secondary()}
 				</a>

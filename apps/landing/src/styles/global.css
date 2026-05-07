@@ -156,7 +156,7 @@
 .react-flow__controls {
 	box-shadow: none !important;
 	border: 1px solid var(--border) !important;
-	border-radius: 0 !important;
+	border-radius: var(--radius) !important;
 	overflow: hidden;
 }
 
@@ -276,13 +276,14 @@
 
 /* ──────────────────────────────────────────────────────────────
    Live artifact frame.
-   Container around every live demo. Sharp 1px border, no glass,
+   Container around every live demo. Soft 1px border, no glass,
    no blur, deep-ink background, generous padding, monospace inset.
+   Radius matches the rest of the design system's top-level frames.
    ────────────────────────────────────────────────────────────── */
 .live-frame {
 	background: var(--bg-deep);
 	border: 1px solid var(--border);
-	border-radius: var(--radius);
+	border-radius: var(--radius-xl);
 	overflow: hidden;
 	font-family: var(--font-mono);
 }

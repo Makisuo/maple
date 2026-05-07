@@ -254,7 +254,7 @@ export function TraceVisualization() {
 	}
 
 	return (
-		<div className="border border-border bg-[var(--bg-elevated)] overflow-hidden">
+		<div className="rounded-xl border border-border bg-[var(--bg-elevated)] overflow-hidden">
 			{/* Trace detail header */}
 			<div className="px-4 py-3 border-b border-border bg-background">
 				<div className="flex items-center justify-between mb-2">
