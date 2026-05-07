@@ -1,5 +1,9 @@
 import { motion } from "motion/react"
 import { cn } from "@maple/ui/utils"
+import {
+	OnboardingOrgSwitcher,
+	OnboardingUserMenu,
+} from "./onboarding-header-actions"
 
 const PIP_TRANSITION = { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const }
 
@@ -61,9 +65,13 @@ export function OnboardingLayout({
 					})}
 				</div>
 
-				<span className="text-sm text-muted-foreground tabular-nums">
-					{stepLabel ?? `Step ${currentStep} of ${totalSteps}`}
-				</span>
+				<div className="flex items-center gap-3">
+					<OnboardingOrgSwitcher />
+					<span className="hidden text-sm text-muted-foreground tabular-nums sm:inline">
+						{stepLabel ?? `Step ${currentStep} of ${totalSteps}`}
+					</span>
+					<OnboardingUserMenu />
+				</div>
 			</header>
 
 			<main className="relative z-10 flex-1 flex flex-col">{children}</main>
