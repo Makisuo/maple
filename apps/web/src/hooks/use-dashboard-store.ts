@@ -113,6 +113,29 @@ function parseDashboards(raw: readonly unknown[]): Dashboard[] {
 	return raw.map((d) => ensureDashboard(d)).filter((d): d is Dashboard => d !== null)
 }
 
+// Returns the previous array unchanged if every dashboard's id+updatedAt
+// matches a previous entry. Preserving identity here breaks the cascade
+// where every list-query refetch invalidates every memoised widget render.
+function reconcileDashboards(previous: readonly Dashboard[], next: Dashboard[]): Dashboard[] {
+	if (previous.length !== next.length) return next
+
+	const previousById = new Map(previous.map((d) => [d.id, d]))
+	const reconciled: Dashboard[] = []
+	let allMatched = true
+
+	for (const candidate of next) {
+		const prior = previousById.get(candidate.id)
+		if (prior && prior.updatedAt === candidate.updatedAt) {
+			reconciled.push(prior)
+		} else {
+			reconciled.push(candidate)
+			allMatched = false
+		}
+	}
+
+	return allMatched ? (previous as Dashboard[]) : reconciled
+}
+
 export function useDashboardStore() {
 	const [dashboards, setDashboards] = useAtom(dashboardsAtom)
 	const [persistenceError, setPersistenceError] = useAtom(persistenceErrorAtom)
@@ -140,7 +163,8 @@ export function useDashboardStore() {
 		if (listResult === lastSyncedListResult.current) return
 		lastSyncedListResult.current = listResult
 		if (Result.isSuccess(listResult)) {
-			setDashboards(parseDashboards(listResult.value.dashboards))
+			const parsed = parseDashboards(listResult.value.dashboards)
+			setDashboards((previous) => reconcileDashboards(previous, parsed))
 			setPersistenceError(null)
 		} else if (Result.isFailure(listResult)) {
 			setPersistenceError(getErrorMessage(listResult))

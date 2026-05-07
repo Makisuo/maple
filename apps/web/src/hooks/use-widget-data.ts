@@ -284,26 +284,37 @@ export function useWidgetData(widget: DashboardWidget) {
 				? `Unknown data source endpoint: ${widget.dataSource.endpoint}`
 				: null
 
-	const resolvedParams = resolvedTimeRange
-		? interpolateParams(
-				{
-					...widget.dataSource.params,
-					strategy: { enableEmptyRangeFallback: false },
-					startTime: resolvedTimeRange.startTime,
-					endTime: resolvedTimeRange.endTime,
-				},
-				resolvedTimeRange,
-			)
-		: {}
-
-	const result = useRefreshableAtomValue(
-		disableReason === null && !isStatic
-			? widgetFetchAtom({
-					endpoint: widget.dataSource.endpoint,
-					params: resolvedParams,
-				})
-			: disabledResultAtom<unknown, WidgetDataAtomError>(),
+	const resolvedParams = useMemo(
+		() =>
+			resolvedTimeRange
+				? interpolateParams(
+						{
+							...widget.dataSource.params,
+							strategy: { enableEmptyRangeFallback: false },
+							startTime: resolvedTimeRange.startTime,
+							endTime: resolvedTimeRange.endTime,
+						},
+						resolvedTimeRange,
+					)
+				: {},
+		[resolvedTimeRange, widget.dataSource.params],
 	)
+
+	// Stabilise the atom reference across renders. Atom.family already dedupes
+	// by encoded key, but giving React the same Atom instance avoids any path
+	// where useAtomValue / useAtomRefresh re-subscribe and drop an in-flight
+	// fetch (the user-visible symptom: widgets stuck on the loading skeleton).
+	const fetchAtom = useMemo(() => {
+		if (disableReason !== null || isStatic) {
+			return disabledResultAtom<unknown, WidgetDataAtomError>()
+		}
+		return widgetFetchAtom({
+			endpoint: widget.dataSource.endpoint,
+			params: resolvedParams,
+		})
+	}, [disableReason, isStatic, widget.dataSource.endpoint, resolvedParams])
+
+	const result = useRefreshableAtomValue(fetchAtom)
 
 	const transform = widget.dataSource.transform
 

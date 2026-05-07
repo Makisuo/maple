@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from "react"
+import { memo, useCallback, useMemo, useRef } from "react"
 import { GridLayout, useContainerWidth, verticalCompactor } from "react-grid-layout"
 import type { Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
@@ -85,17 +85,47 @@ export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasPr
 	const { width, containerRef, mounted } = useContainerWidth()
 	const editable = mode === "edit" && !readOnly
 
-	const layouts: Layout = widgets.map((w) => ({
-		i: w.id,
-		x: w.layout.x,
-		y: w.layout.y,
-		w: w.layout.w,
-		h: w.layout.h,
-		minW: w.layout.minW ?? 2,
-		minH: w.layout.minH ?? 2,
-		...(w.layout.maxW != null ? { maxW: w.layout.maxW } : {}),
-		...(w.layout.maxH != null ? { maxH: w.layout.maxH } : {}),
-	}))
+	const layouts: Layout = useMemo(
+		() =>
+			widgets.map((w) => ({
+				i: w.id,
+				x: w.layout.x,
+				y: w.layout.y,
+				w: w.layout.w,
+				h: w.layout.h,
+				minW: w.layout.minW ?? 2,
+				minH: w.layout.minH ?? 2,
+				...(w.layout.maxW != null ? { maxW: w.layout.maxW } : {}),
+				...(w.layout.maxH != null ? { maxH: w.layout.maxH } : {}),
+			})),
+		[widgets],
+	)
+
+	// react-grid-layout fires onLayoutChange once on mount with the
+	// post-compaction layout. That first call is not a real user edit, so
+	// we drop it to avoid a spurious upsert that invalidates the dashboards
+	// list and cascades a re-render of every widget.
+	const initialLayoutSeenRef = useRef(false)
+
+	const handleLayoutChange = useCallback(
+		(layout: Layout) => {
+			if (readOnly) return
+			if (!initialLayoutSeenRef.current) {
+				initialLayoutSeenRef.current = true
+				return
+			}
+			updateWidgetLayouts(
+				layout.map((l) => ({
+					i: l.i,
+					x: l.x,
+					y: l.y,
+					w: l.w,
+					h: l.h,
+				})),
+			)
+		},
+		[readOnly, updateWidgetLayouts],
+	)
 
 	return (
 		<div ref={containerRef}>
@@ -119,18 +149,7 @@ export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasPr
 						handles: ["se"],
 					}}
 					compactor={verticalCompactor}
-					onLayoutChange={(layout) => {
-						if (readOnly) return
-						updateWidgetLayouts(
-							layout.map((l) => ({
-								i: l.i,
-								x: l.x,
-								y: l.y,
-								w: l.w,
-								h: l.h,
-							})),
-						)
-					}}
+					onLayoutChange={handleLayoutChange}
 				>
 					{widgets.map((widget) => (
 						<div key={widget.id}>
