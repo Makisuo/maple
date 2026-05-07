@@ -2,7 +2,8 @@ import { HttpServerRequest } from "effect/unstable/http"
 import type { TinybirdPipe } from "@maple/domain"
 import { Effect } from "effect"
 import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
-import { McpAuthMissingError, McpQueryError } from "@/mcp/tools/types"
+import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
+import { McpAuthMissingError } from "@/mcp/tools/types"
 import { WarehouseQueryService } from "@/services/WarehouseQueryService"
 import { TinybirdExecutor } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
@@ -27,15 +28,9 @@ export const queryTinybird = <T = any>(pipe: TinybirdPipe, params?: Record<strin
 	Effect.gen(function* () {
 		const tenant = yield* resolveTenant
 		const service = yield* WarehouseQueryService
-		const response = yield* service.query(tenant, { pipe, params }).pipe(
-			Effect.mapError(
-				(error) =>
-					new McpQueryError({
-						message: error.message,
-						pipe,
-					}),
-			),
-		)
+		const response = yield* service
+			.query(tenant, { pipe, params })
+			.pipe(Effect.mapError(toMcpQueryError(pipe)))
 
 		return { data: response.data as T[] }
 	})

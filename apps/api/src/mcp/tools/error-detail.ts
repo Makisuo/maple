@@ -3,13 +3,13 @@ import {
 	optionalNumberParam,
 	optionalStringParam,
 	requiredStringParam,
-	McpQueryError,
 	type McpToolRegistrar,
 } from "./types"
 import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationFromMs, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
+import { toMcpQueryError } from "../lib/map-warehouse-error"
 import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { errorDetail } from "@maple/query-engine/observability"
@@ -48,9 +48,7 @@ export function registerErrorDetailTool(server: McpToolRegistrar) {
 				limit: limit ?? 5,
 			}).pipe(
 				Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
-				Effect.mapError(
-					(e) => new McpQueryError({ message: e.message, pipe: "error_detail_traces" }),
-				),
+				Effect.mapError(toMcpQueryError("error_detail_traces")),
 			)
 
 			if (result.traces.length === 0) {

@@ -1,8 +1,9 @@
-import { optionalStringParam, requiredStringParam, McpQueryError, type McpToolRegistrar } from "./types"
+import { optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
 import { resolveTenant } from "../lib/query-tinybird"
 import { resolveTimeRange } from "../lib/time"
 import { formatDurationFromMs, formatPercent, formatNumber, truncate } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
+import { toMcpQueryError } from "../lib/map-warehouse-error"
 import { Array as Arr, Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { diagnoseService } from "@maple/query-engine/observability"
@@ -28,7 +29,7 @@ export function registerDiagnoseServiceTool(server: McpToolRegistrar) {
 				environment: environment ?? undefined,
 			}).pipe(
 				Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
-				Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "service_overview" })),
+				Effect.mapError(toMcpQueryError("service_overview")),
 			)
 
 			const h = result.health

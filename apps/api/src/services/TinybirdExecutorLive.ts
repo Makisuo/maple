@@ -26,7 +26,16 @@ export const makeTinybirdExecutorFromTenant = (tenant: TenantContext) =>
 				query: <T>(pipe: string, params: Record<string, unknown>, options?: ExecutorQueryOptions) =>
 					warehouse.query(tenant, { pipe: pipe as any, params }, options).pipe(
 						Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
-						Effect.mapError((error) => new ObservabilityError({ message: error.message, pipe })),
+						Effect.mapError(
+							(error) =>
+								new ObservabilityError({
+									message: error.message,
+									pipe,
+									...("category" in error && error.category !== undefined
+										? { category: error.category }
+										: {}),
+								}),
+						),
 						Effect.withSpan("TinybirdExecutor.query", {
 							attributes: { pipe, orgId: tenant.orgId, "query.profile": options?.profile },
 						}),
@@ -36,7 +45,15 @@ export const makeTinybirdExecutorFromTenant = (tenant: TenantContext) =>
 						.sqlQuery(tenant, sql, { ...options, context: "tinybirdExecutor.sqlQuery" })
 						.pipe(
 							Effect.map((rows) => rows as unknown as ReadonlyArray<T>),
-							Effect.mapError((error) => new ObservabilityError({ message: error.message })),
+							Effect.mapError(
+								(error) =>
+									new ObservabilityError({
+										message: error.message,
+										...("category" in error && error.category !== undefined
+											? { category: error.category }
+											: {}),
+									}),
+							),
 						),
 			})
 		}),

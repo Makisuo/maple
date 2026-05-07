@@ -60,7 +60,13 @@ export type WarehouseSqlError = TinybirdQueryError | TinybirdQuotaExceededError
  * during the rename. Prefer `WarehouseSqlError` in new code.
  */
 export type TinybirdSqlError = WarehouseSqlError
-type TinybirdQueryErrorCategory = "query" | "upstream" | "auth" | "config" | "client"
+type TinybirdQueryErrorCategory =
+	| "query"
+	| "upstream"
+	| "auth"
+	| "config"
+	| "client"
+	| "schema_drift"
 
 export interface WarehouseQueryServiceShape {
 	readonly query: (
@@ -183,6 +189,18 @@ const transientClickHouseTypes = new Set([
 	"ALL_CONNECTION_TRIES_FAILED",
 ])
 
+// CH error types raised when a column or function reference doesn't exist in
+// the cluster's schema. For BYO-ClickHouse customers this is almost always
+// schema drift between Maple's expected schema and what the cluster has —
+// resolved by running schema apply, not by retrying. Surfacing it as a
+// distinct category lets the MCP layer return an actionable message.
+const schemaDriftClickHouseTypes = new Set([
+	"UNKNOWN_IDENTIFIER",
+	"NO_SUCH_COLUMN_IN_TABLE",
+	"THERE_IS_NO_COLUMN",
+	"NOT_FOUND_COLUMN_IN_BLOCK",
+])
+
 export class WarehouseQueryService extends Context.Service<
 	WarehouseQueryService,
 	WarehouseQueryServiceShape
@@ -291,6 +309,20 @@ export class WarehouseQueryService extends Context.Service<
 						pipe,
 						message,
 						category: "client",
+						upstreamStatus,
+						...clickhouseFields,
+					})
+				}
+				const isSchemaDrift =
+					(type !== undefined && schemaDriftClickHouseTypes.has(type)) ||
+					/Unknown (?:expression or function )?identifier|Missing columns|There is no column|No such column/i.test(
+						rawMessage,
+					)
+				if (isSchemaDrift) {
+					return new TinybirdQueryError({
+						pipe,
+						message,
+						category: "schema_drift",
 						upstreamStatus,
 						...clickhouseFields,
 					})

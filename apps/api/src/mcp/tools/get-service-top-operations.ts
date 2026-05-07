@@ -2,7 +2,6 @@ import {
 	optionalNumberParam,
 	optionalStringParam,
 	requiredStringParam,
-	McpQueryError,
 	type McpToolRegistrar,
 } from "./types"
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
@@ -12,6 +11,7 @@ import { formatTable } from "../lib/format"
 import { formatMetricValue } from "../lib/format-query-result"
 import { formatNextSteps } from "../lib/next-steps"
 import { createDualContent } from "../lib/structured-output"
+import { toMcpQueryError } from "../lib/map-warehouse-error"
 import { Effect, Schema } from "effect"
 import { topOperations } from "@maple/query-engine/observability"
 import type { TracesMetric } from "@maple/query-engine"
@@ -50,7 +50,7 @@ export function registerGetServiceTopOperationsTool(server: McpToolRegistrar) {
 				limit: resolvedLimit,
 			}).pipe(
 				Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
-				Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "top_operations" })),
+				Effect.mapError(toMcpQueryError("top_operations")),
 			)
 
 			const lines: string[] = [

@@ -7,6 +7,12 @@ export class ObservabilityError extends Schema.TaggedErrorClass<ObservabilityErr
 		message: Schema.String,
 		pipe: Schema.optionalKey(Schema.String),
 		cause: Schema.optionalKey(Schema.Defect),
+		// Mirrors `TinybirdQueryError.category` from @maple/domain — kept loose
+		// here (Schema.String) so this package doesn't take a dependency on the
+		// HTTP-domain error union. Today: "query" | "upstream" | "auth" |
+		// "config" | "client" | "schema_drift". MCP and HTTP layers branch on
+		// "schema_drift" to surface a remediation hint.
+		category: Schema.optionalKey(Schema.String),
 	},
 ) {}
 

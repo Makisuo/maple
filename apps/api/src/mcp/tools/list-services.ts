@@ -4,10 +4,10 @@ import { resolveTimeRange } from "../lib/time"
 import { formatPercent, formatDurationFromMs, formatNumber, formatTable } from "../lib/format"
 import { formatNextSteps } from "../lib/next-steps"
 import { createDualContent } from "../lib/structured-output"
+import { toMcpQueryError } from "../lib/map-warehouse-error"
 import { Array as Arr, Effect, Layer, Schema } from "effect"
 import { listServices } from "@maple/query-engine/observability"
 import { makeTinybirdExecutorFromTenant } from "@/services/TinybirdExecutorLive"
-import { McpQueryError } from "./types"
 
 export function registerListServicesTool(server: McpToolRegistrar) {
 	server.tool(
@@ -27,7 +27,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
 				environment: environment ?? undefined,
 			}).pipe(
 				Effect.provide(makeTinybirdExecutorFromTenant(tenant)),
-				Effect.mapError((e) => new McpQueryError({ message: e.message, pipe: "service_overview" })),
+				Effect.mapError(toMcpQueryError("service_overview")),
 			)
 
 			const lines: string[] = [
