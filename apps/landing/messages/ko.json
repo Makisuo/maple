@@ -524,7 +524,7 @@
 	"start_footnote": "Java, Rust, .NET, Ruby \u2014 anything that speaks OTLP works. The custom tab shows the env-var-only setup.",
 
 	"cta_bookend_title": "Run it yourself.",
-	"cta_bookend_lede": "14-day trial on Starter, 30 days on Startup. Self-host is supported. The dashboard ships with the same live waterfall you just watched.",
+	"cta_bookend_lede": "14-day trial on Starter. Self-host is supported. The dashboard ships with the same live waterfall you just watched.",
 	"cta_bookend_primary": "Start free trial",
 	"cta_bookend_secondary": "Read the source",
 

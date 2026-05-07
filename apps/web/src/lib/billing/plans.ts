@@ -1,3 +1,5 @@
+export const TRIAL_DURATION_DAYS = 14
+
 export interface PlanLimits {
 	logsGB: number
 	tracesGB: number

@@ -121,8 +121,7 @@ if (plans.length === 0) {
             price: 39,
             interval: "/month",
             isFree: false,
-            hasTrial: true,
-            trialDuration: 30,
+            hasTrial: false,
             subtitle: m.pricing_for_growing(),
             dataFeatures: [
                 { label: m.pricing_logs(), value: "100 GB", detail: "then $0.25/GB" },
@@ -130,7 +129,7 @@ if (plans.length === 0) {
                 { label: m.pricing_metrics(), value: "100 GB", detail: "then $0.25/GB" },
             ],
             platformFeatures: PLAN_FEATURES["startup"]!.map((f) => ({ label: f.label })),
-            ctaLabel: m.pricing_start_trial({ duration: "30" }),
+            ctaLabel: m.pricing_subscribe(),
             ctaStyle: "accent",
         },
     ]
@@ -141,7 +140,7 @@ if (plans.length === 0) {
     <div class="mx-auto max-w-6xl px-6">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {plans.map((plan) => (
-                <div class="border border-border bg-bg-elevated flex flex-col">
+                <div class="rounded-xl border border-border bg-bg-elevated flex flex-col">
                     <div class="p-6 md:p-8 flex flex-col flex-1">
                         <div class="flex items-center gap-2">
                             <span class="text-[11px] uppercase tracking-widest text-fg-muted">{plan.name}</span>
@@ -221,7 +220,7 @@ if (plans.length === 0) {
         </div>
 
         <!-- Enterprise -->
-        <div class="mt-4 border border-border bg-accent/[0.02]">
+        <div class="mt-4 overflow-hidden rounded-xl border border-border bg-accent/[0.02]">
             <div class="p-6 md:p-8">
                 <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr] gap-8">
                     <div>

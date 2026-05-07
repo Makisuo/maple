@@ -6,7 +6,7 @@ type Plan = NonNullable<ReturnType<typeof useListPlans>["data"]>[number]
 type PlanItem = Plan["items"][number]
 
 import { cn } from "@maple/ui/utils"
-import { getPlanFeatures, getPlanDescription } from "@/lib/billing/plans"
+import { TRIAL_DURATION_DAYS, getPlanFeatures, getPlanDescription } from "@/lib/billing/plans"
 import { useTrialStatus } from "@/hooks/use-trial-status"
 import {
 	Card,
@@ -320,7 +320,8 @@ export function PricingCards() {
 							)}
 							{trialAvailable && !isActive && (
 								<div className="mx-6 mt-6 -mb-2 rounded-md bg-primary/10 px-3 py-1.5 text-center text-xs font-medium text-primary">
-									30-day free trial included
+									{plan.freeTrial?.durationLength ?? TRIAL_DURATION_DAYS}-day free trial
+									included
 								</div>
 							)}
 							<CardHeader className="pt-6">

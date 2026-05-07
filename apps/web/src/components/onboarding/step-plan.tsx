@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { useCustomer } from "autumn-js/react"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { TRIAL_DURATION_DAYS } from "@/lib/billing/plans"
 import { PricingCards } from "@/components/settings/pricing-cards"
 import { Button } from "@maple/ui/components/ui/button"
 import { ArrowLeftIcon } from "@/components/icons"
@@ -34,8 +35,8 @@ export function StepPlan({
 						Pick a plan to keep going
 					</h2>
 					<p className="text-muted-foreground text-[15px] mt-3 max-w-lg mx-auto">
-						Start a 30-day free trial — we'll save your card now and won't charge until day 30.
-						Cancel anytime from settings.
+						Start a {TRIAL_DURATION_DAYS}-day free trial — we'll save your card now and won't
+						charge until day {TRIAL_DURATION_DAYS}. Cancel anytime from settings.
 					</p>
 				</div>
 

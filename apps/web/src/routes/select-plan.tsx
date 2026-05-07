@@ -6,6 +6,7 @@ import { Schema } from "effect"
 import { RocketIcon } from "@/components/icons"
 import { PricingCards } from "@/components/settings/pricing-cards"
 import { hasSelectedPlan } from "@/lib/billing/plan-gating"
+import { TRIAL_DURATION_DAYS } from "@/lib/billing/plans"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
@@ -66,14 +67,14 @@ function SelectPlanPage() {
 				<div className="text-center flex flex-col items-center">
 					<div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-medium tracking-wider text-primary uppercase mb-6">
 						<RocketIcon size={14} />
-						30-day free trial
+						{TRIAL_DURATION_DAYS}-day free trial
 					</div>
 					<h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground [text-wrap:balance]">
 						Start your free trial
 					</h1>
 					<p className="text-muted-foreground mt-4 text-sm md:text-base leading-relaxed max-w-lg mx-auto [text-wrap:balance]">
-						Try any paid plan free for 30 days. You won't be charged until the trial ends. Cancel
-						anytime.
+						Try any paid plan free for {TRIAL_DURATION_DAYS} days. You won't be charged until the
+						trial ends. Cancel anytime.
 					</p>
 				</div>
 

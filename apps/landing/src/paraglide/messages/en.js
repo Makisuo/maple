@@ -967,7 +967,7 @@ export const cta_bookend_title = () => `Run it yourself.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_lede = () => `14-day trial on Starter, 30 days on Startup. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
+export const cta_bookend_lede = () => `14-day trial on Starter. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
 
 
 /**
