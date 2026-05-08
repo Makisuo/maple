@@ -1,7 +1,8 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { CurrentTenant, MapleApi } from "@maple/domain/http"
+import { CurrentTenant, ErrorForbiddenError, MapleApi } from "@maple/domain/http"
 import { Effect } from "effect"
 import { ErrorsService } from "../services/ErrorsService"
+import { requireAdmin } from "../lib/auth"
 
 export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers) =>
 	Effect.gen(function* () {
@@ -200,6 +201,13 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+					yield* requireAdmin(
+						tenant.roles,
+						() =>
+							new ErrorForbiddenError({
+								message: "Only org admins can manage error notification policy",
+							}),
+					)
 					return yield* errors.upsertNotificationPolicy(tenant.orgId, tenant.userId, payload)
 				}).pipe(Effect.withSpan("HttpErrors.upsertNotificationPolicy")),
 			)

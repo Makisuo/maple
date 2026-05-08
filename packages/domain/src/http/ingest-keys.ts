@@ -26,23 +26,31 @@ export class IngestKeyEncryptionError extends Schema.TaggedErrorClass<IngestKeyE
 	{ httpApiStatus: 500 },
 ) {}
 
+export class IngestKeyForbiddenError extends Schema.TaggedErrorClass<IngestKeyForbiddenError>()(
+	"@maple/http/errors/IngestKeyForbiddenError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 403 },
+) {}
+
 export class IngestKeysApiGroup extends HttpApiGroup.make("ingestKeys")
 	.add(
 		HttpApiEndpoint.get("get", "/", {
 			success: IngestKeysResponse,
-			error: [IngestKeyPersistenceError, IngestKeyEncryptionError],
+			error: [IngestKeyForbiddenError, IngestKeyPersistenceError, IngestKeyEncryptionError],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("rerollPublic", "/public/reroll", {
 			success: IngestKeysResponse,
-			error: [IngestKeyPersistenceError, IngestKeyEncryptionError],
+			error: [IngestKeyForbiddenError, IngestKeyPersistenceError, IngestKeyEncryptionError],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("rerollPrivate", "/private/reroll", {
 			success: IngestKeysResponse,
-			error: [IngestKeyPersistenceError, IngestKeyEncryptionError],
+			error: [IngestKeyForbiddenError, IngestKeyPersistenceError, IngestKeyEncryptionError],
 		}),
 	)
 	.prefix("/api/ingest-keys")

@@ -328,6 +328,14 @@ export class ErrorValidationError extends Schema.TaggedErrorClass<ErrorValidatio
 	{ httpApiStatus: 400 },
 ) {}
 
+export class ErrorForbiddenError extends Schema.TaggedErrorClass<ErrorForbiddenError>()(
+	"@maple/http/errors/ErrorForbiddenError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 403 },
+) {}
+
 export class ErrorIssueNotFoundError extends Schema.TaggedErrorClass<ErrorIssueNotFoundError>()(
 	"@maple/http/errors/ErrorIssueNotFoundError",
 	{
@@ -511,7 +519,7 @@ export class ErrorsApiGroup extends HttpApiGroup.make("errors")
 		HttpApiEndpoint.put("upsertNotificationPolicy", "/policy", {
 			payload: ErrorNotificationPolicyUpsertRequest,
 			success: ErrorNotificationPolicyDocument,
-			error: [ErrorPersistenceError, ErrorValidationError],
+			error: [ErrorForbiddenError, ErrorPersistenceError, ErrorValidationError],
 		}),
 	)
 	.prefix("/api/errors")
