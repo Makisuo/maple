@@ -105,6 +105,17 @@ export const ClickHouseTableDiffEntry = Schema.Union([
 		kind: ClickHouseTableKind,
 		columnDrifts: Schema.Array(ClickHouseColumnDrift),
 	}),
+	// Reported when an object with the same name exists on the cluster but as
+	// the wrong kind (e.g. a regular table named `errors_by_service_60s_mv`
+	// shadowing the materialized view we expect). Apply will skip these
+	// rather than auto-remediating, since dropping a customer's existing
+	// object is destructive.
+	Schema.Struct({
+		status: Schema.Literal("wrong_kind"),
+		name: Schema.String,
+		kind: ClickHouseTableKind,
+		actualKind: ClickHouseTableKind,
+	}),
 ])
 export type ClickHouseTableDiffEntry = Schema.Schema.Type<typeof ClickHouseTableDiffEntry>
 

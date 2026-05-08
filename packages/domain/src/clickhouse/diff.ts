@@ -62,6 +62,12 @@ export type TableDiffEntry =
 			readonly kind: ClickHouseTableKind
 			readonly columnDrifts: ReadonlyArray<ColumnDrift>
 	  }
+	| {
+			readonly status: "wrong_kind"
+			readonly name: string
+			readonly kind: ClickHouseTableKind
+			readonly actualKind: ClickHouseTableKind
+	  }
 
 const normalizeType = (type: string): string =>
 	// Collapse whitespace; CH's system.columns sometimes returns the type with
@@ -118,7 +124,21 @@ export const computeSchemaDiff = (
 		if (!actualTable) {
 			return { status: "missing", name: table.name, kind: table.kind }
 		}
-		// Materialized views: presence-only check in v1.
+		// If the customer has an object of the same name but a different kind
+		// (e.g. a regular table where we expect a materialized view), the
+		// previous behavior was to fall through to the MV presence check and
+		// return `up_to_date`, leaving the MV uncreated and downstream
+		// aggregates unpopulated. Surface a `wrong_kind` drift instead so
+		// apply can skip with a clear error.
+		if (actualTable.kind !== table.kind) {
+			return {
+				status: "wrong_kind",
+				name: table.name,
+				kind: table.kind,
+				actualKind: actualTable.kind,
+			}
+		}
+		// Materialized views: presence-only check in v1 (kind already matched above).
 		if (table.kind === "materialized_view") {
 			return { status: "up_to_date", name: table.name, kind: table.kind }
 		}
