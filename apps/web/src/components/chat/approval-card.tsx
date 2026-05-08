@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
-import { CircleWarningIcon } from "@/components/icons"
+import { ChevronDownIcon, ChevronRightIcon, CircleWarningIcon } from "@/components/icons"
+import { ApprovalSummary, safeStringify } from "./approval-renderers"
 
 const TOOL_LABELS: Record<string, string> = {
 	create_dashboard: "Create dashboard",
@@ -28,6 +29,7 @@ interface ApprovalCardProps {
 
 export function ApprovalCard({ toolName, input, approvalId, onApprove, onDeny }: ApprovalCardProps) {
 	const [busy, setBusy] = useState<"approve" | "deny" | null>(null)
+	const [showRaw, setShowRaw] = useState(false)
 	const label = TOOL_LABELS[toolName] ?? toolName.replace(/_/g, " ")
 
 	const handle = (action: "approve" | "deny") => async () => {
@@ -40,14 +42,6 @@ export function ApprovalCard({ toolName, input, approvalId, onApprove, onDeny }:
 		}
 	}
 
-	const inputJson = (() => {
-		try {
-			return JSON.stringify(input, null, 2)
-		} catch {
-			return String(input)
-		}
-	})()
-
 	return (
 		<div className="my-2 overflow-hidden rounded-lg border border-amber-500/40 bg-amber-500/5 text-xs">
 			<div className="flex items-center gap-2 px-3 py-2">
@@ -55,10 +49,26 @@ export function ApprovalCard({ toolName, input, approvalId, onApprove, onDeny }:
 				<span className="font-medium">Approval required: {label}</span>
 			</div>
 			<div className="border-t border-amber-500/20 bg-background/50 p-3">
-				<div className="mb-2 text-[11px] uppercase tracking-wide text-muted-foreground">Input</div>
-				<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 font-mono text-[11px] leading-snug">
-					{inputJson}
-				</pre>
+				<ApprovalSummary toolName={toolName} input={input} />
+
+				<button
+					type="button"
+					onClick={() => setShowRaw((v) => !v)}
+					className="mt-3 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+				>
+					{showRaw ? (
+						<ChevronDownIcon className="size-3" />
+					) : (
+						<ChevronRightIcon className="size-3" />
+					)}
+					{showRaw ? "Hide raw input" : "Show raw input"}
+				</button>
+				{showRaw ? (
+					<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 font-mono text-[11px] leading-snug">
+						{safeStringify(input)}
+					</pre>
+				) : null}
+
 				<div className="mt-3 flex gap-2">
 					<Button
 						type="button"
