@@ -718,6 +718,16 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			const fullyResolvedDrift = new Set<string>()
 
 			for (const entry of entries) {
+				if (entry.status === "wrong_kind") {
+					// An object with the same name exists but as a different kind
+					// (table vs materialized view). Auto-remediating would mean
+					// dropping the customer's existing object — out of scope.
+					skipped.push({
+						name: entry.name,
+						reason: `expected ${entry.kind}, found ${entry.actualKind} — resolve manually`,
+					})
+					continue
+				}
 				if (entry.status === "missing") {
 					const table = desiredByName.get(entry.name)
 					if (!table) continue

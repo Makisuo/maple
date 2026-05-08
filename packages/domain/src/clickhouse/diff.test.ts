@@ -223,4 +223,51 @@ describe("computeSchemaDiff", () => {
 			{ status: "missing", name: "logs_hourly", kind: "materialized_view" },
 		])
 	})
+
+	it("flags wrong_kind when an actual object exists but is the wrong kind", () => {
+		// Customer has a regular table named the same as our desired MV — the
+		// previous behavior was to silently report up_to_date, leaving the MV
+		// uncreated and aggregates unpopulated.
+		const desired: DesiredSchema = {
+			tables: [desiredMv("errors_by_service_60s_mv")],
+		}
+		const result = computeSchemaDiff(
+			desired,
+			actualMap({
+				name: "errors_by_service_60s_mv",
+				kind: "table",
+				columns: [{ name: "OrgId", type: "String" }],
+			}),
+		)
+		expect(result).toEqual([
+			{
+				status: "wrong_kind",
+				name: "errors_by_service_60s_mv",
+				kind: "materialized_view",
+				actualKind: "table",
+			},
+		])
+	})
+
+	it("flags wrong_kind in the inverse direction (MV where a table is expected)", () => {
+		const desired: DesiredSchema = {
+			tables: [desiredTable("logs", [["OrgId", "String"]])],
+		}
+		const result = computeSchemaDiff(
+			desired,
+			actualMap({
+				name: "logs",
+				kind: "materialized_view",
+				columns: [],
+			}),
+		)
+		expect(result).toEqual([
+			{
+				status: "wrong_kind",
+				name: "logs",
+				kind: "table",
+				actualKind: "materialized_view",
+			},
+		])
+	})
 })
