@@ -31,7 +31,7 @@
 	"dependencies": {},
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260414.1",
-		"@effect/vitest": "4.0.0-beta.57",
+		"@effect/vitest": "4.0.0-beta.64",
 		"@maple/db": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
@@ -43,9 +43,6 @@
 		"turbo": "^2.9.3",
 		"typescript": "catalog:tooling"
 	},
-	"overrides": {
-		"effect": "https://github.com/Makisuo/effect-smol/releases/download/mcp-clientsessions-pre/effect-4.0.0-beta.57.tgz"
-	},
 	"packageManager": "bun@1.3.11",
 	"catalog": {
 		"vite": "^8.0.3",
@@ -56,11 +53,11 @@
 			"@clickhouse/client-web": "^1.18.3"
 		},
 		"effect": {
-			"@effect/atom-react": "4.0.0-beta.57",
+			"@effect/atom-react": "4.0.0-beta.64",
 			"@effect/language-service": "^0.85.1",
-			"@effect/opentelemetry": "4.0.0-beta.57",
-			"@effect/platform-bun": "4.0.0-beta.57",
-			"effect": "4.0.0-beta.57"
+			"@effect/opentelemetry": "4.0.0-beta.64",
+			"@effect/platform-bun": "4.0.0-beta.64",
+			"effect": "4.0.0-beta.64"
 		},
 		"react": {
 			"@types/react": "^19.2.14",
@@ -88,5 +85,8 @@
 			"clsx": "^2.1.1",
 			"recharts": "2.15.4"
 		}
+	},
+	"patchedDependencies": {
+		"effect@4.0.0-beta.64": "patches/effect@4.0.0-beta.64.patch"
 	}
 }

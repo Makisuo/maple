@@ -4,6 +4,7 @@ import { Context, Duration, Effect, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
 import { runWithSessionBindings, sessionStore } from "./mcp/lib/session-store"
@@ -69,12 +70,25 @@ const requestTimeoutMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) =>
 	Effect.timeoutOrElse(httpApp, {
 		duration: REQUEST_TIMEOUT,
 		orElse: () =>
-			Effect.succeed(
-				HttpServerResponse.text(
+			Effect.gen(function* () {
+				const req = yield* HttpServerRequest.HttpServerRequest
+				const url = (() => {
+					try {
+						return new URL(req.url).pathname
+					} catch {
+						return req.url
+					}
+				})()
+				console.warn(
+					`[timeout] ${req.method} ${url} hit ${Duration.toMillis(REQUEST_TIMEOUT)}ms cap` +
+						` auth=${req.headers.authorization ? "yes" : "no"}` +
+						` mcp-session=${req.headers["mcp-session-id"] ?? "-"}`,
+				)
+				return HttpServerResponse.text(
 					`request timed out after ${Duration.toMillis(REQUEST_TIMEOUT)}ms`,
 					{ status: 504 },
-				),
-			),
+				)
+			}),
 	})
 
 const buildHandler = () =>

@@ -1,0 +1,58 @@
+diff --git a/dist/unstable/ai/McpServer.d.ts b/dist/unstable/ai/McpServer.d.ts
+index 52bba6ee3cae21f09e774fc5ef27c0ee4f169686..111e92a4eb74ae1906b28038d18cc20f1ed9433a 100644
+--- a/dist/unstable/ai/McpServer.d.ts
++++ b/dist/unstable/ai/McpServer.d.ts
+@@ -10,7 +10,7 @@ import type * as RpcGroup from "../rpc/RpcGroup.ts";
+ import * as RpcMessage from "../rpc/RpcMessage.ts";
+ import * as RpcServer from "../rpc/RpcServer.ts";
+ import { CallToolResult, CompleteResult, ElicitationDeclined, GetPromptResult, InternalError, InvalidParams, McpServerClient, Prompt, Resource, ResourceTemplate, ServerNotificationRpcs, Tool as McpTool } from "./McpSchema.ts";
+-import type { CallTool, ClientCapabilities, Complete, GetPrompt, Param, PromptMessage, ReadResourceResult } from "./McpSchema.ts";
++import type { CallTool, ClientCapabilities, Complete, GetPrompt, Initialize, Param, PromptMessage, ReadResourceResult } from "./McpSchema.ts";
+ import * as Tool from "./Tool.ts";
+ import type * as Toolkit from "./Toolkit.ts";
+ declare const McpServer_base: Context.ServiceClass<McpServer, "effect/ai/McpServer", {
+@@ -130,6 +130,7 @@ export declare const run: (options: {
+     readonly name: string;
+     readonly version: string;
+     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
++    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+ }) => Effect.Effect<never, never, McpServer | RpcServer.Protocol>;
+ /**
+  * @since 4.0.0
+@@ -139,6 +140,7 @@ export declare const layer: (options: {
+     readonly name: string;
+     readonly version: string;
+     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
++    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+ }) => Layer.Layer<McpServer | McpServerClient, never, RpcServer.Protocol>;
+ /**
+  * Run the McpServer, using stdio for input and output.
+@@ -201,6 +203,7 @@ export declare const layerStdio: (options: {
+     readonly name: string;
+     readonly version: string;
+     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
++    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+ }) => Layer.Layer<McpServer | McpServerClient, never, Stdio>;
+ /**
+  * Run the `McpServer`, registering a router with a `HttpRouter`
+@@ -213,6 +216,7 @@ export declare const layerHttp: (options: {
+     readonly version: string;
+     readonly path: HttpRouter.PathInput;
+     readonly extensions?: Record<`${string}/${string}`, unknown> | undefined;
++    readonly clientSessions?: Map<string, typeof Initialize.payloadSchema.Type> | undefined;
+ }) => Layer.Layer<McpServer | McpServerClient, never, HttpRouter.HttpRouter>;
+ /**
+  * Register a `Toolkit` with the `McpServer`.
+diff --git a/dist/unstable/ai/McpServer.js b/dist/unstable/ai/McpServer.js
+index 4b6de094df40ca585ebb848c3a02a24c11c76800..0f9a6d2b8f6b8bd573a441b249f12cc18b0c0317 100644
+--- a/dist/unstable/ai/McpServer.js
++++ b/dist/unstable/ai/McpServer.js
+@@ -191,7 +191,7 @@ export const run = /*#__PURE__*/Effect.fnUntraced(function* (options) {
+   const protocol = yield* RpcServer.Protocol;
+   const server = yield* McpServer;
+   const isHttp = Option.isSome(yield* Effect.serviceOption(HttpRouter.HttpRouter));
+-  const clientSessions = new Map();
++  const clientSessions = options.clientSessions ?? new Map();
+   const handlers = yield* Layer.build(layerHandlers(options, {
+     clientSessions
+   }));
