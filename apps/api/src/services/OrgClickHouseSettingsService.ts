@@ -38,6 +38,7 @@ import {
 } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
+import { validateExternalUrl } from "../lib/url-validator"
 
 /**
  * Resolved per-org backend config, returned to the runtime SQL layer.
@@ -294,23 +295,15 @@ const renderCollectorYaml = (input: {
 const quoteYaml = (value: string): string => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
 
 const normalizeHttpUrl = (raw: string): Effect.Effect<string, OrgClickHouseSettingsValidationError> =>
-	Effect.try({
-		try: () => {
-			const trimmed = raw.trim()
-			if (trimmed.length === 0) {
-				throw new Error("ClickHouse URL is required")
-			}
-			const url = new URL(trimmed)
-			if (url.protocol !== "http:" && url.protocol !== "https:") {
-				throw new Error("ClickHouse URL must use http or https")
-			}
-			return trimmed.replace(/\/+$/, "")
-		},
-		catch: (error) =>
-			new OrgClickHouseSettingsValidationError({
-				message: error instanceof Error ? error.message : "Invalid ClickHouse URL",
-			}),
-	})
+	validateExternalUrl(raw).pipe(
+		Effect.map(() => raw.trim().replace(/\/+$/, "")),
+		Effect.mapError(
+			(error) =>
+				new OrgClickHouseSettingsValidationError({
+					message: error.message,
+				}),
+		),
+	)
 
 const isOrgAdmin = (roles: ReadonlyArray<RoleName>) =>
 	roles.includes(ROOT_ROLE) || roles.includes(ORG_ADMIN_ROLE)
@@ -587,12 +580,26 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			}
 
 			// If the user left the password blank on a re-save, reuse the existing
-			// stored password (decrypted from the previous row) so the validation
-			// step can authenticate.
+			// stored password (decrypted from the previous row) ONLY when the URL,
+			// user, and database are unchanged. Otherwise we'd be silently sending
+			// the stored credential to a different host — an SSRF / credential
+			// disclosure path. Force the user to re-enter the password when any
+			// connection identifier changes.
 			const existingRow = yield* selectActiveRow(orgId)
 			let plainPassword = (payload.password ?? "").trim()
 			if (plainPassword.length === 0 && Option.isSome(existingRow)) {
-				plainPassword = yield* decryptStoredPassword(existingRow.value)
+				const existing = existingRow.value
+				const sameEndpoint =
+					existing.chUrl === url &&
+					existing.chUser === user &&
+					existing.chDatabase === dbName
+				if (!sameEndpoint) {
+					return yield* new OrgClickHouseSettingsValidationError({
+						message:
+							"Password is required when changing the ClickHouse URL, user, or database",
+					})
+				}
+				plainPassword = yield* decryptStoredPassword(existing)
 			}
 
 			// Connect-and-validate: hit the cluster with `SELECT 1` so a typo'd

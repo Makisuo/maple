@@ -57,16 +57,15 @@ export const HttpServiceDiscoveryLive = HttpApiBuilder.group(MapleApi, "serviceD
 							return Option.none<PrometheusSDTarget>()
 						}
 
-						const labels: Record<string, string> = {
-							__scheme__: url.value.protocol.replace(":", ""),
-							__metrics_path__: url.value.pathname,
-							__scrape_interval__: `${row.scrapeIntervalSeconds}s`,
-							job: row.serviceName ?? row.name,
-							maple_org_id: row.orgId,
-							maple_scrape_target_id: row.id,
-							maple_scrape_target_name: row.name,
-						}
+						const labels: Record<string, string> = {}
 
+						// Apply user-supplied labels first so they cannot override the
+						// canonical system labels written below. Reserved keys
+						// (`maple_*`, `__*`, `job`, `instance`) are also rejected at
+						// write time in ScrapeTargetsService.validateLabelsJson, but
+						// applying system labels last is the authoritative defense
+						// against tenant-controlled `maple_org_id` poisoning the
+						// collector's tenant attribution.
 						if (row.labelsJson) {
 							const extra = yield* Schema.decodeUnknownEffect(
 								Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
@@ -76,6 +75,14 @@ export const HttpServiceDiscoveryLive = HttpApiBuilder.group(MapleApi, "serviceD
 								Object.assign(labels, extra.value)
 							}
 						}
+
+						labels.__scheme__ = url.value.protocol.replace(":", "")
+						labels.__metrics_path__ = url.value.pathname
+						labels.__scrape_interval__ = `${row.scrapeIntervalSeconds}s`
+						labels.job = row.serviceName ?? row.name
+						labels.maple_org_id = row.orgId
+						labels.maple_scrape_target_id = row.id
+						labels.maple_scrape_target_name = row.name
 
 						return Option.some(new PrometheusSDTarget({ targets: [url.value.host], labels }))
 					}),
