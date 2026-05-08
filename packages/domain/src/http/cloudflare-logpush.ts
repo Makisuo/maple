@@ -102,6 +102,14 @@ export class CloudflareLogpushEncryptionError extends Schema.TaggedErrorClass<Cl
 	{ httpApiStatus: 500 },
 ) {}
 
+export class CloudflareLogpushForbiddenError extends Schema.TaggedErrorClass<CloudflareLogpushForbiddenError>()(
+	"@maple/http/errors/CloudflareLogpushForbiddenError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 403 },
+) {}
+
 export class CloudflareLogpushApiGroup extends HttpApiGroup.make("cloudflareLogpush")
 	.add(
 		HttpApiEndpoint.get("list", "/connectors", {
@@ -114,6 +122,7 @@ export class CloudflareLogpushApiGroup extends HttpApiGroup.make("cloudflareLogp
 			payload: CreateCloudflareLogpushConnectorRequest,
 			success: CloudflareLogpushCreateResponse,
 			error: [
+				CloudflareLogpushForbiddenError,
 				CloudflareLogpushValidationError,
 				CloudflareLogpushPersistenceError,
 				CloudflareLogpushEncryptionError,
@@ -128,6 +137,7 @@ export class CloudflareLogpushApiGroup extends HttpApiGroup.make("cloudflareLogp
 			payload: UpdateCloudflareLogpushConnectorRequest,
 			success: CloudflareLogpushConnectorResponse,
 			error: [
+				CloudflareLogpushForbiddenError,
 				CloudflareLogpushNotFoundError,
 				CloudflareLogpushValidationError,
 				CloudflareLogpushPersistenceError,
@@ -140,7 +150,7 @@ export class CloudflareLogpushApiGroup extends HttpApiGroup.make("cloudflareLogp
 				connectorId: CloudflareLogpushConnectorId,
 			},
 			success: CloudflareLogpushDeleteResponse,
-			error: [CloudflareLogpushNotFoundError, CloudflareLogpushPersistenceError],
+			error: [CloudflareLogpushForbiddenError, CloudflareLogpushNotFoundError, CloudflareLogpushPersistenceError],
 		}),
 	)
 	.add(
@@ -150,6 +160,7 @@ export class CloudflareLogpushApiGroup extends HttpApiGroup.make("cloudflareLogp
 			},
 			success: CloudflareLogpushSetupResponse,
 			error: [
+				CloudflareLogpushForbiddenError,
 				CloudflareLogpushNotFoundError,
 				CloudflareLogpushPersistenceError,
 				CloudflareLogpushEncryptionError,
@@ -163,6 +174,7 @@ export class CloudflareLogpushApiGroup extends HttpApiGroup.make("cloudflareLogp
 			},
 			success: CloudflareLogpushSetupResponse,
 			error: [
+				CloudflareLogpushForbiddenError,
 				CloudflareLogpushNotFoundError,
 				CloudflareLogpushPersistenceError,
 				CloudflareLogpushEncryptionError,
