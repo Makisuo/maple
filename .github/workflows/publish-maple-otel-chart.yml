@@ -13,10 +13,11 @@ permissions:
 jobs:
     publish:
         runs-on: ubuntu-latest
+        environment: publish-charts
         steps:
-            - uses: actions/checkout@v5
+            - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-            - uses: azure/setup-helm@v4
+            - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
 
             - name: Publish chart to GHCR
               env:

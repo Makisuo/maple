@@ -16,18 +16,19 @@ permissions:
 jobs:
     deploy-prd:
         runs-on: ubuntu-latest
+        environment: production
         env:
             DOPPLER_PROJECT: maple
             DOPPLER_CONFIG: prd
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
             - name: Setup Bun
-              uses: oven-sh/setup-bun@v2
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
             - name: Load deployment secrets from Doppler
-              uses: dopplerhq/secrets-fetch-action@v1.3.0
+              uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
               with:
                   doppler-token: ${{ secrets.DOPPLER_TOKEN }}
                   doppler-project: ${{ env.DOPPLER_PROJECT }}

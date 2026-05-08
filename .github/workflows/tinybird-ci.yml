@@ -5,9 +5,8 @@ on:
 
 concurrency: ${{ github.workflow }}-${{ github.event.pull_request.number }}
 
-env:
-    TINYBIRD_HOST: ${{ secrets.TINYBIRD_HOST }}
-    TINYBIRD_TOKEN: ${{ secrets.TINYBIRD_TOKEN }}
+permissions:
+    contents: read
 
 jobs:
     ci:
@@ -21,7 +20,7 @@ jobs:
                 ports:
                     - 7181:7181
         steps:
-            - uses: actions/checkout@v3
+            - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
             - name: Install Tinybird CLI
               run: curl https://tinybird.co | sh
             - name: Build project
@@ -29,4 +28,7 @@ jobs:
             - name: Test project
               run: tb test run
             - name: Deployment check
-              run: tb --cloud --host ${{ env.TINYBIRD_HOST }} --token ${{ env.TINYBIRD_TOKEN }} deploy --check
+              env:
+                  TINYBIRD_HOST: ${{ secrets.TINYBIRD_HOST }}
+                  TINYBIRD_TOKEN: ${{ secrets.TINYBIRD_TOKEN }}
+              run: tb --cloud --host "$TINYBIRD_HOST" --token "$TINYBIRD_TOKEN" deploy --check

@@ -22,13 +22,18 @@ permissions:
 jobs:
     pullfrog:
         runs-on: ubuntu-latest
+        # `pullfrog-agent` environment must require manual approval in repo
+        # settings. The agent action receives a prompt that influences code
+        # execution with repo write + many provider API keys, so dispatch
+        # should be gated behind reviewer approval.
+        environment: pullfrog-agent
         steps:
             - name: Checkout code
-              uses: actions/checkout@v6
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
                   fetch-depth: 1
             - name: Run agent
-              uses: pullfrog/pullfrog@v0
+              uses: pullfrog/pullfrog@e4e93ea6d3c787a7bc6cc285d168deb0eab7ac83 # v0
               with:
                   prompt: ${{ inputs.prompt }}
               env:

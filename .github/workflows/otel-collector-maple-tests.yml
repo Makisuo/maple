@@ -22,9 +22,9 @@ jobs:
             run:
                 working-directory: packages/otel-collector-maple-exporter
         steps:
-            - uses: actions/checkout@v5
+            - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-            - uses: actions/setup-go@v5
+            - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
               with:
                   # Match `go 1.25.0` in packages/otel-collector-maple-exporter/go.mod.
                   go-version-file: packages/otel-collector-maple-exporter/go.mod
