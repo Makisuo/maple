@@ -7,7 +7,7 @@ import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
-import { runWithSessionBindings, sessionStore } from "./mcp/lib/session-store"
+import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
 import { DatabaseD1Live } from "./services/DatabaseD1Live"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
@@ -123,15 +123,10 @@ const isMcpPost = (request: Request): boolean => {
 	}
 }
 
-interface McpSessionsBinding {
-	readonly get: (key: string, type: "json") => Promise<unknown>
-	readonly put: (key: string, value: string, options?: { readonly expirationTtl?: number }) => Promise<void>
-}
-
-const readMcpSessionsBinding = (env: Record<string, unknown>): McpSessionsBinding | undefined => {
+const readMcpSessionsBinding = (env: Record<string, unknown>): SessionsBinding | undefined => {
 	const candidate = env.MCP_SESSIONS
 	if (candidate && typeof candidate === "object" && "get" in candidate && "put" in candidate) {
-		return candidate as McpSessionsBinding
+		return candidate as SessionsBinding
 	}
 	return undefined
 }
@@ -140,18 +135,39 @@ const readMcpSessionsBinding = (env: Record<string, unknown>): McpSessionsBindin
 // finalizers run on interrupt and traces export. If the handler still throws
 // (layer construction failure, fatal runtime error), we surface it as a 504
 // outside Effect — these are rare and not the trace-export hot path.
+//
+// MCP session persistence runs OUTSIDE the Effect runtime on purpose. Effect's
+// fiber scheduler doesn't reliably propagate AsyncLocalStorage through every
+// generator resumption / scope finalizer / forked fiber, so reading a binding
+// via ALS from inside an `override set()` on the clientSessions Map silently
+// no-ops in some paths — sessions stay in-memory only and the next isolate 404s.
+// Driving the KV preload+put from this outer async context means the bindings
+// come from `env` directly — no AsyncLocalStorage required.
 const handle = async (
 	request: Request,
 	env: Record<string, unknown>,
 	ctx: ExecutionContext,
 ): Promise<Response> => {
-	if (isMcpPost(request)) {
-		const sid = request.headers.get("mcp-session-id")
-		if (sid) await sessionStore.preload(sid)
-	}
+	const kv = readMcpSessionsBinding(env)
+	const isMcp = isMcpPost(request)
+	const reqSid = isMcp ? request.headers.get("mcp-session-id") : null
+
+	if (kv && reqSid) await preloadSession(kv, reqSid)
+
 	const { handler } = getHandler()
 	try {
 		const response = await handler(request, Context.empty() as never)
+		if (kv && isMcp) {
+			const resSid = response.headers.get("mcp-session-id")
+			// Only persist when the server issued a new session — i.e. on
+			// `initialize`, where the response sid differs from the request sid
+			// (or the request had none). Subsequent requests echo the same sid;
+			// re-putting on every call would burn KV write quota for no reason.
+			if (resSid && resSid !== reqSid) {
+				const put = persistSession(kv, resSid)
+				if (put) ctx.waitUntil(put)
+			}
+		}
 		ctx.waitUntil(telemetry.flush(env))
 		return response
 	} catch (err) {
@@ -164,5 +180,5 @@ const handle = async (
 
 export default {
 	fetch: (request: Request, env: Record<string, unknown>, ctx: ExecutionContext) =>
-		runWithSessionBindings({ ctx, kv: readMcpSessionsBinding(env) }, () => handle(request, env, ctx)),
+		handle(request, env, ctx),
 }
