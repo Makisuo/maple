@@ -43,6 +43,13 @@ describe("validateExternalUrlSync", () => {
 		"http://[fe80::1]/",
 		"http://[fc00::1]/",
 		"http://[fd12:3456:789a::1]/",
+		// IPv4-mapped IPv6: most URL parsers canonicalise these to the hex
+		// form (e.g. `[::ffff:7f00:1]` for 127.0.0.1), so match both forms.
+		"http://[::ffff:127.0.0.1]/",
+		"http://[::ffff:169.254.169.254]/",
+		"http://[::ffff:10.0.0.1]/",
+		"http://[::ffff:192.168.1.1]/",
+		"http://[::ffff:172.20.0.1]/",
 	])("rejects private/loopback host: %s", (raw) => {
 		expect(() => validateExternalUrlSync(raw)).toThrow(UrlValidationError)
 	})
