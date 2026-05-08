@@ -412,7 +412,20 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
 						),
 					)
 
-					const stale = body.deployments.filter((d) => !d.live && d.status !== "live")
+					// Only delete deployments in known terminal-failed states. The
+					// previous filter (`!d.live && d.status !== "live"`) also matched
+					// in-flight states like `deploying`, `data_ready`, and any
+					// unrecognised status string from a future Tinybird release —
+					// deleting an active deployment that's still being promoted
+					// disrupts schema rollout. Restrict to `failed` / `error` and
+					// require `live === false` (or unset) as defense in depth.
+					const TERMINAL_FAILED_STATUSES = new Set(["failed", "error"])
+					const stale = body.deployments.filter(
+						(d) =>
+							d.live !== true &&
+							typeof d.status === "string" &&
+							TERMINAL_FAILED_STATUSES.has(d.status),
+					)
 					if (stale.length === 0) return
 
 					yield* Effect.forEach(
@@ -421,8 +434,20 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
 							Effect.tryPromise({
 								try: () =>
 									api.request(`/v1/deployments/${deployment.id}`, { method: "DELETE" }),
-								catch: () => null,
-							}).pipe(Effect.ignore),
+								catch: (error) =>
+									error instanceof Error ? error : new Error(String(error)),
+							}).pipe(
+								Effect.tapError((error) =>
+									Effect.logWarning("Tinybird stale-deployment cleanup failed").pipe(
+										Effect.annotateLogs({
+											deploymentId: deployment.id,
+											deploymentStatus: deployment.status ?? "unknown",
+											error: error.message,
+										}),
+									),
+								),
+								Effect.ignore,
+							),
 						{ concurrency: "unbounded", discard: true },
 					)
 				},

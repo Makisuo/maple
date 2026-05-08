@@ -136,6 +136,23 @@ const escapeHtml = (value: string) =>
 		.replace(/"/g, "&quot;")
 		.replace(/'/g, "&#39;")
 
+// JSON.stringify does not escape `<` or `>`, so a payload value of
+// `</script><script>alert(1)</script>` would terminate the inline script
+// block. Escape these characters and the U+2028 / U+2029 line separators
+// (which are valid line terminators in JS but not in JSON) before
+// interpolating into a `<script>` body.
+const LINE_SEPARATOR = String.fromCharCode(0x2028)
+const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029)
+const escapeJsonInHtml = (json: string) =>
+	json
+		.replace(/</g, "\\u003c")
+		.replace(/>/g, "\\u003e")
+		.replace(/&/g, "\\u0026")
+		.split(LINE_SEPARATOR)
+		.join("\\u2028")
+		.split(PARAGRAPH_SEPARATOR)
+		.join("\\u2029")
+
 const renderCallbackPage = (params: {
 	status: "success" | "error"
 	message: string
@@ -143,11 +160,13 @@ const renderCallbackPage = (params: {
 }) => {
 	const safeMessage = escapeHtml(params.message)
 	const safeReturn = params.returnTo ? escapeHtml(params.returnTo) : null
-	const payload = JSON.stringify({
-		type: "maple:integration:hazel",
-		status: params.status,
-		message: params.message,
-	})
+	const payload = escapeJsonInHtml(
+		JSON.stringify({
+			type: "maple:integration:hazel",
+			status: params.status,
+			message: params.message,
+		}),
+	)
 	return `<!doctype html>
 <html lang="en">
   <head>

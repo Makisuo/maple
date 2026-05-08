@@ -22,6 +22,7 @@ import { Cause, Effect, Exit, Layer, Option, Redacted, Schema, Context } from "e
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
+import { safeFetch, validateExternalUrl } from "../lib/url-validator"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -177,23 +178,23 @@ const rowToResponse = (row: ScrapeTargetRow): ScrapeTargetResponse =>
 const MIN_SCRAPE_INTERVAL = 5
 const MAX_SCRAPE_INTERVAL = 300
 
-const validateUrl = (url: string) => {
-	return Effect.sync(() => url.trim()).pipe(
-		Effect.flatMap((trimmed) =>
-			Effect.try({
-				try: () => {
-					if (trimmed.length === 0) {
-						throw new Error("URL is required")
-					}
+const RESERVED_LABEL_KEYS = new Set(["job", "instance"])
+const RESERVED_LABEL_PREFIXES = ["maple_", "__"]
 
-					new URL(trimmed)
-					return trimmed
-				},
-				catch: (error) =>
-					new ScrapeTargetValidationError({
-						message: error instanceof Error ? error.message : `Invalid URL: ${trimmed}`,
-					}),
-			}),
+const isReservedLabelKey = (key: string): boolean => {
+	if (RESERVED_LABEL_KEYS.has(key)) return true
+	return RESERVED_LABEL_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
+const validateUrl = (url: string) => {
+	const trimmed = url.trim()
+	return validateExternalUrl(trimmed).pipe(
+		Effect.as(trimmed),
+		Effect.mapError(
+			(error) =>
+				new ScrapeTargetValidationError({
+					message: error.message,
+				}),
 		),
 	)
 }
@@ -219,7 +220,17 @@ const validateLabelsJson = (labelsJson: string | null | undefined) => {
 					message: "labelsJson must be a JSON object with string values",
 				}),
 		),
-		Effect.as(labelsJson),
+		Effect.flatMap((decoded) => {
+			const reserved = Object.keys(decoded).filter(isReservedLabelKey)
+			if (reserved.length > 0) {
+				return Effect.fail(
+					new ScrapeTargetValidationError({
+						message: `Reserved label keys are not allowed: ${reserved.join(", ")}`,
+					}),
+				)
+			}
+			return Effect.succeed(labelsJson)
+		}),
 	)
 }
 
@@ -508,11 +519,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 						const controller = new AbortController()
 						const timeout = setTimeout(() => controller.abort(), 10_000)
 						try {
-							const response = await fetch(row.url, {
+							const response = await safeFetch(row.url, {
 								method: "GET",
 								headers,
 								signal: controller.signal,
-								redirect: "follow",
 							})
 							if (!response.ok) {
 								throw new Error(`HTTP ${response.status} ${response.statusText}`)

@@ -111,6 +111,7 @@ import { Env } from "./Env"
 import { HazelOAuthService } from "./HazelOAuthService"
 import { QueryEngineService, type GroupedAlertObservation } from "./QueryEngineService"
 import { WarehouseQueryService } from "./WarehouseQueryService"
+import { validateExternalUrl } from "../lib/url-validator"
 import type { AlertChecksRow } from "@maple/domain/tinybird"
 import {
 	PublicConfigFromJson,
@@ -371,6 +372,15 @@ const makeDeliveryError = (message: string, destinationType?: AlertDestinationTy
 	})
 
 const isAdmin = (roles: ReadonlyArray<RoleName>) => roles.some((role) => adminRoles.includes(role))
+
+const validateDestinationUrl = (
+	rawUrl: string,
+	field: string,
+): Effect.Effect<string, AlertValidationError> =>
+	validateExternalUrl(rawUrl).pipe(
+		Effect.as(rawUrl.trim()),
+		Effect.mapError((error) => makeValidationError(`${field}: ${error.message}`)),
+	)
 
 const parseEncryptionKey = (raw: string): Effect.Effect<Buffer, AlertValidationError> =>
 	parseBase64Aes256GcmKey(raw, (message) =>
@@ -1604,6 +1614,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			request: AlertDestinationCreateRequest,
 		) {
 			yield* requireAdmin(roles)
+			// Reject URLs pointing at internal/loopback/metadata networks before we
+			// persist them. The dispatcher will later POST to whatever we store.
+			if (request.type === "slack") {
+				yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
+			} else if (request.type === "webhook") {
+				yield* validateDestinationUrl(request.url, "url")
+			} else if (request.type === "hazel") {
+				yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
+			}
 			const destinationId = makeUuid()
 			const publicConfig = buildPublicConfig(request)
 			const secretConfig: DestinationSecretConfig =
@@ -1673,6 +1692,17 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const hydrated = yield* hydrateDestination(existing)
 			let nextPublicConfig = hydrated.publicConfig
 			let nextSecretConfig = hydrated.secretConfig
+
+			// Validate any URL the request supplies before we persist it. Each
+			// branch only validates when the field is non-empty so the existing
+			// (already-validated) stored URL can stay unchanged on partial updates.
+			if (request.type === "slack" && request.webhookUrl != null && request.webhookUrl.trim().length > 0) {
+				yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
+			} else if (request.type === "webhook" && request.url != null && request.url.trim().length > 0) {
+				yield* validateDestinationUrl(request.url, "url")
+			} else if (request.type === "hazel" && request.webhookUrl != null && request.webhookUrl.trim().length > 0) {
+				yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
+			}
 
 			switch (request.type) {
 				case "slack":

@@ -6,6 +6,7 @@ import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
+import { validateInternalRedirect } from "@maple/ui/lib/sanitizers"
 import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { setSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
@@ -23,7 +24,10 @@ export const Route = effectRoute(createFileRoute("/sign-in"))({
 
 export const redirectToDashboard = () => {
 	const params = new URLSearchParams(window.location.search)
-	const redirectUrl = params.get("redirect_url") || "/"
+	// Only same-origin relative paths are allowed. An absolute URL or
+	// protocol-relative `//attacker/` would let an attacker exfiltrate the
+	// just-stored session token by phishing through a sign-in link.
+	const redirectUrl = validateInternalRedirect(params.get("redirect_url")) ?? "/"
 	window.location.assign(redirectUrl)
 }
 

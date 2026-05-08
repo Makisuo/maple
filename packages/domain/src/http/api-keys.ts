@@ -48,6 +48,14 @@ export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersis
 	{ httpApiStatus: 503 },
 ) {}
 
+export class ApiKeyForbiddenError extends Schema.TaggedErrorClass<ApiKeyForbiddenError>()(
+	"@maple/http/errors/ApiKeyForbiddenError",
+	{
+		message: Schema.String,
+	},
+	{ httpApiStatus: 403 },
+) {}
+
 export class ApiKeyNotFoundError extends Schema.TaggedErrorClass<ApiKeyNotFoundError>()(
 	"@maple/http/errors/ApiKeyNotFoundError",
 	{
@@ -68,7 +76,7 @@ export class ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 		HttpApiEndpoint.post("create", "/", {
 			payload: CreateApiKeyRequest,
 			success: ApiKeyCreatedResponse,
-			error: ApiKeyPersistenceError,
+			error: [ApiKeyForbiddenError, ApiKeyPersistenceError],
 		}),
 	)
 	.add(
@@ -77,7 +85,7 @@ export class ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 				keyId: ApiKeyId,
 			},
 			success: ApiKeyResponse,
-			error: [ApiKeyNotFoundError, ApiKeyPersistenceError],
+			error: [ApiKeyForbiddenError, ApiKeyNotFoundError, ApiKeyPersistenceError],
 		}),
 	)
 	.prefix("/api/api-keys")

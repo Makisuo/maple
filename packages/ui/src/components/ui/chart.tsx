@@ -5,6 +5,7 @@ import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 import * as RechartsPrimitive from "recharts"
 
 import { cn } from "../../lib/utils"
+import { sanitizeCssIdentifier, validateCssColor } from "../../lib/sanitizers"
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const
@@ -74,18 +75,27 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
 		return null
 	}
 
+	// Escape the chart id and each config key so a telemetry label like
+	// `</style><script>` cannot terminate the <style> block. Validate the
+	// color via a strict allowlist; entries with a non-recognised color value
+	// are dropped rather than emitted as raw CSS.
+	const safeId = sanitizeCssIdentifier(id)
+
 	return (
 		<style
 			dangerouslySetInnerHTML={{
 				__html: Object.entries(THEMES)
 					.map(
 						([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
+${prefix} [data-chart="${safeId}"] {
 ${colorConfig
 	.map(([key, itemConfig]) => {
 		const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color
-		return color ? `  --color-${key}: ${color};` : null
+		const safeColor = validateCssColor(color)
+		if (!safeColor) return null
+		return `  --color-${sanitizeCssIdentifier(key)}: ${safeColor};`
 	})
+	.filter((line): line is string => line !== null)
 	.join("\n")}
 }
 `,

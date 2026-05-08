@@ -10,6 +10,7 @@ import {
 import type { AlertDestinationRow } from "@maple/db"
 import { Duration, Effect, Match, Option } from "effect"
 import type { EnrichedDestinationSecretConfig } from "./AlertDestinationHydration"
+import { safeFetch } from "../lib/url-validator"
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                     */
@@ -283,7 +284,7 @@ export const dispatchDelivery = (
 				slack: (config) =>
 					Effect.gen(function* () {
 						const response = yield* runTimedFetch("slack", "Slack", fetchFn, timeoutMs, () =>
-							fetchFn(config.webhookUrl, {
+							safeFetch(config.webhookUrl, {
 								method: "POST",
 								headers: { "content-type": "application/json" },
 								body: JSON.stringify({
@@ -295,6 +296,7 @@ export const dispatchDelivery = (
 										},
 									],
 								}),
+								fetchFn,
 							}),
 						)
 						if (!response.ok) {
@@ -374,7 +376,7 @@ export const dispatchDelivery = (
 								.digest("hex")
 						}
 						const response = yield* runTimedFetch("webhook", "Webhook", fetchFn, timeoutMs, () =>
-							fetchFn(config.url, { method: "POST", headers, body: payloadJson }),
+							safeFetch(config.url, { method: "POST", headers, body: payloadJson, fetchFn }),
 						)
 						if (!response.ok) {
 							return yield* Effect.fail(
@@ -403,7 +405,7 @@ export const dispatchDelivery = (
 								.digest("hex")
 						}
 						const response = yield* runTimedFetch("hazel", "Hazel", fetchFn, timeoutMs, () =>
-							fetchFn(config.webhookUrl, { method: "POST", headers, body: payloadJson }),
+							safeFetch(config.webhookUrl, { method: "POST", headers, body: payloadJson, fetchFn }),
 						)
 						if (!response.ok) {
 							return yield* Effect.fail(
@@ -455,7 +457,7 @@ export const dispatchDelivery = (
 							fetchFn,
 							timeoutMs,
 							() =>
-								fetchFn(hazelUrl, {
+								safeFetch(hazelUrl, {
 									method: "POST",
 									headers: {
 										"content-type": "application/json",
@@ -463,6 +465,7 @@ export const dispatchDelivery = (
 										"x-maple-delivery-key": context.deliveryKey,
 									},
 									body,
+									fetchFn,
 								}),
 						)
 						if (response.status === 401 || response.status === 403) {
