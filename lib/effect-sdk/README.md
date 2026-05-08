@@ -35,6 +35,47 @@ Commit SHA is auto-detected from `COMMIT_SHA`, `RAILWAY_GIT_COMMIT_SHA`, `VERCEL
 
 Environment is auto-detected from `MAPLE_ENVIRONMENT`, `RAILWAY_ENVIRONMENT`, `VERCEL_ENV`, or `NODE_ENV`.
 
+## Cloudflare Workers
+
+The Workers preset uses a custom flushable tracer + Effect logger — Workers don't run Node-style background tasks, so spans and logs are buffered in-isolate and drained inside `ctx.waitUntil()` after each request. Construct once at module scope; `flush(env)` resolves env lazily on the first call.
+
+```typescript
+import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
+import { Layer } from "effect"
+import { HttpRouter } from "effect/unstable/http"
+
+const telemetry = MapleCloudflareSDK.make({
+	serviceName: "my-worker",
+	// Optional: drop noisy spans before they hit OTLP (prefix match).
+	// dropSpanNames: ["McpServer/Notifications."],
+})
+
+const handler = HttpRouter.toWebHandler(Routes.pipe(Layer.provideMerge(telemetry.layer)))
+
+export default {
+	async fetch(req: Request, env: Env, ctx: ExecutionContext) {
+		const res = await handler(req)
+		ctx.waitUntil(telemetry.flush(env))
+		return res
+	},
+}
+```
+
+`telemetry.layer` MUST live in the same runtime as your routes — provide it to the layer composition you hand to `HttpRouter.toWebHandler`, not a separate per-request runtime, or your spans won't pick up the Tracer reference.
+
+When `MAPLE_INGEST_KEY` is unset, the SDK runs in no-op mode: buffers are drained so they don't grow across the isolate's lifetime, but no requests are made. After a flush failure, each signal sleeps 60s before retrying so a broken collector doesn't get hammered.
+
+### Cloudflare-specific options
+
+| Option            | Description                                                                                              |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| `dropSpanNames`   | Span names whose prefix matches an entry are dropped before OTLP export (e.g. `"McpServer/Notifications."`) |
+| `excludeLogSpans` | Skip Effect log spans in OTLP log attributes. Default `false`                                             |
+| `tracesPath`      | OTLP traces path appended to `endpoint`. Default `/v1/traces`                                            |
+| `logsPath`        | OTLP logs path appended to `endpoint`. Default `/v1/logs`                                                |
+
+The same `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` env vars apply, read from the Workers `env` binding.
+
 ## Client (Browser)
 
 All configuration must be provided programmatically since browsers don't have access to environment variables.
