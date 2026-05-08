@@ -12,6 +12,7 @@ interface HistogramWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 }
 
 export const HistogramWidget = memo(function HistogramWidget({
@@ -21,6 +22,7 @@ export const HistogramWidget = memo(function HistogramWidget({
 	onRemove,
 	onClone,
 	onConfigure,
+	onFix,
 }: HistogramWidgetProps) {
 	const entry = getChartById(display.chartId ?? "query-builder-histogram")
 	if (!entry) return null
@@ -38,6 +40,7 @@ export const HistogramWidget = memo(function HistogramWidget({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onFix={onFix}
 			loadingSkeleton={<Skeleton className="h-full w-full" />}
 		>
 			<Suspense fallback={<Skeleton className="h-full w-full" />}>

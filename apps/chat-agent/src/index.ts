@@ -129,6 +129,45 @@ const SIGNAL_TOOL_HINTS: Record<string, string> = {
 	metric: "- Use `query_data` or `inspect_chart_data` to pull the raw metric values across the window.",
 }
 
+interface WidgetFixContext {
+	dashboardId: string
+	widgetId: string
+	widgetTitle: string
+	widgetJson: string
+	errorTitle: string | null
+	errorMessage: string | null
+}
+
+const formatWidgetFixContextBlock = (ctx: WidgetFixContext): string => {
+	const lines = [
+		"",
+		"## Broken Widget — Propose a Fix",
+		"The user is on a dashboard with a widget that is failing schema validation. The full widget JSON and the validation error are attached. Diagnose what is wrong with the widget config, then call `update_dashboard_widget` with a corrected `widget_json`.",
+		"",
+		`dashboard_id: ${ctx.dashboardId}`,
+		`widget_id: ${ctx.widgetId}`,
+		`widget_title: ${JSON.stringify(ctx.widgetTitle)}`,
+		"",
+		"### Validation error",
+		ctx.errorTitle ? `- ${ctx.errorTitle}` : "- (no title)",
+		ctx.errorMessage ? `- ${ctx.errorMessage}` : "- (no message)",
+		"",
+		"### Current widget config",
+		"```json",
+		ctx.widgetJson,
+		"```",
+		"",
+		"### Fix-mode rules",
+		"- Treat the widget JSON as the single source of truth. Modify only what the validation error requires.",
+		"- Do NOT change `id`, `layout`, or `visualization` unless the schema error explicitly requires it.",
+		"- Preserve `display.title` and other display config that is not implicated by the error.",
+		"- Call `update_dashboard_widget` with `dashboard_id`, `widget_id`, and a complete corrected `widget_json` (full widget object as a JSON string).",
+		"- The user must approve the change. Do not attempt to bypass the approval gate.",
+		"- After the user approves, briefly confirm what changed and why.",
+	]
+	return lines.join("\n")
+}
+
 const formatAlertContextBlock = (alert: AlertContext): string => {
 	const observedRaw = alert.value === null ? "n/a" : String(alert.value)
 	const thresholdExpr = `${formatAlertComparator(alert.comparator)} ${alert.threshold}`
@@ -755,12 +794,14 @@ class ChatAgent extends AIChatAgent<Env> {
 		const mode = (body?.mode as string) ?? "default"
 		const dashboardContext = body?.dashboardContext as DashboardContext | undefined
 		const alertContext = body?.alertContext as AlertContext | undefined
+		const widgetFixContext = body?.widgetFixContext as WidgetFixContext | undefined
 		const pageContext = body?.pageContext as PageContextPayload | undefined
 
 		try {
 			const directTools = applyApprovalGates(await createMapleAiTools(envRecord, orgId))
 			const isDashboardMode = mode === "dashboard_builder"
 			const isAlertMode = mode === "alert"
+			const isWidgetFixMode = mode === "widget-fix"
 
 			let systemPrompt = isDashboardMode ? DASHBOARD_BUILDER_SYSTEM_PROMPT : SYSTEM_PROMPT
 			if (isDashboardMode && dashboardContext) {
@@ -774,6 +815,9 @@ class ChatAgent extends AIChatAgent<Env> {
 			}
 			if (isAlertMode && alertContext) {
 				systemPrompt += `\n${formatAlertContextBlock(alertContext)}`
+			}
+			if (isWidgetFixMode && widgetFixContext) {
+				systemPrompt += `\n${formatWidgetFixContextBlock(widgetFixContext)}`
 			}
 			if (pageContext && pageContext.contexts.length > 0) {
 				systemPrompt += `\n${formatPageContextBlock(pageContext)}`

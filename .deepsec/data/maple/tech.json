@@ -1,0 +1,13 @@
+{
+  "tags": [
+    "bun",
+    "github-actions",
+    "node"
+  ],
+  "sentinels": [
+    "bun.lock",
+    "package.json"
+  ],
+  "detectedAt": "2026-05-08T18:16:48.886Z",
+  "rootPath": "/Users/makisuo/Documents/GitHub/maple"
+}

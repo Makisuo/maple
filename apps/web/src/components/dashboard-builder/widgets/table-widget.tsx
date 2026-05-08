@@ -12,6 +12,7 @@ interface TableWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 }
 
 export function formatCellValue(value: unknown, unit?: string): string {
@@ -61,6 +62,7 @@ export const TableWidget = memo(function TableWidget({
 	onRemove,
 	onClone,
 	onConfigure,
+	onFix,
 }: TableWidgetProps) {
 	const displayName = display.title || "Untitled"
 	const rows =
@@ -99,6 +101,7 @@ export const TableWidget = memo(function TableWidget({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onFix={onFix}
 			contentClassName="flex-1 min-h-0 overflow-auto p-0"
 			loadingSkeleton={
 				<div className="p-3 flex flex-col gap-2">

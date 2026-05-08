@@ -14,6 +14,7 @@ interface ListWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 }
 
 type ColumnDef = {
@@ -32,6 +33,7 @@ export const ListWidget = memo(function ListWidget({
 	onRemove,
 	onClone,
 	onConfigure,
+	onFix,
 }: ListWidgetProps) {
 	const title = display.title || "Untitled"
 	const rows =
@@ -61,6 +63,7 @@ export const ListWidget = memo(function ListWidget({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onFix={onFix}
 			contentClassName="flex-1 min-h-0 overflow-auto p-0"
 			loadingSkeleton={
 				<div className="p-3 flex flex-col gap-2">

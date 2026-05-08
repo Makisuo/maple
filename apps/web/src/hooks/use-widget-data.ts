@@ -9,6 +9,39 @@ import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { encodeKey } from "@/lib/cache-key"
 import { formatBackendError } from "@/lib/error-messages"
+import { Cause, Exit } from "effect"
+
+const unwrapEffectCause = (error: unknown): unknown => {
+	if (Cause.isCause(error)) return Cause.squash(error)
+	if (Exit.isExit(error)) {
+		const found = Exit.isFailure(error) ? Cause.squash(error.cause) : undefined
+		if (found !== undefined) return found
+	}
+	return error
+}
+
+const errorTag = (error: unknown): string | undefined => {
+	if (typeof error !== "object" || error === null) return undefined
+	const tag = (error as { _tag?: unknown })._tag
+	return typeof tag === "string" ? tag : undefined
+}
+
+const DECODE_ERROR_TAGS = new Set([
+	"TinybirdDecodeError",
+	"@maple/http/errors/QueryEngineValidationError",
+])
+
+const classifyWidgetErrorKind = (input: unknown): "decode" | "runtime" => {
+	const error = unwrapEffectCause(input)
+	const directTag = errorTag(error)
+	if (directTag && DECODE_ERROR_TAGS.has(directTag)) return "decode"
+	if (typeof error === "object" && error !== null && "cause" in error) {
+		const cause = (error as { cause?: unknown }).cause
+		const causeTag = errorTag(cause)
+		if (causeTag && DECODE_ERROR_TAGS.has(causeTag)) return "decode"
+	}
+	return "runtime"
+}
 
 function isSeriesNameHidden(seriesName: string, hiddenBaseNames: Set<string>): boolean {
 	for (const base of hiddenBaseNames) {
@@ -356,7 +389,8 @@ export function useWidgetData(widget: DashboardWidget) {
 					} as const
 				}
 				const { title, description } = formatBackendError(error)
-				return { status: "error", title, message: description } as const
+				const kind = classifyWidgetErrorKind(error)
+				return { status: "error", title, message: description, kind } as const
 			})
 			.onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) }) as const)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)

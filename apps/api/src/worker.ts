@@ -82,7 +82,9 @@ const requestTimeoutMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) =>
 				console.warn(
 					`[timeout] ${req.method} ${url} hit ${Duration.toMillis(REQUEST_TIMEOUT)}ms cap` +
 						` auth=${req.headers.authorization ? "yes" : "no"}` +
-						` mcp-session=${req.headers["mcp-session-id"] ?? "-"}`,
+						` mcp-session=${req.headers["mcp-session-id"] ?? "-"}` +
+						` method=${req.headers["x-mcp-debug-method"] ?? "-"}` +
+						` id=${req.headers["x-mcp-debug-id"] ?? "-"}`,
 				)
 				return HttpServerResponse.text(
 					`request timed out after ${Duration.toMillis(REQUEST_TIMEOUT)}ms`,
@@ -131,6 +133,24 @@ const readMcpSessionsBinding = (env: Record<string, unknown>): SessionsBinding |
 	return undefined
 }
 
+type McpFrame = { method: string; id: string }
+
+// Peek the JSON-RPC body without consuming the request stream. Returns the
+// first frame's method and id (string-coerced; "-" if absent). Tolerates batch
+// payloads and malformed JSON — diagnostics only, never throws.
+const peekMcpFrame = (body: string): McpFrame => {
+	try {
+		const parsed = JSON.parse(body)
+		const first = Array.isArray(parsed) ? parsed[0] : parsed
+		const method = typeof first?.method === "string" ? first.method : "-"
+		const id =
+			first?.id === undefined || first?.id === null ? "-" : String(first.id)
+		return { method, id }
+	} catch {
+		return { method: "-", id: "-" }
+	}
+}
+
 // Per-request timeout lives in `requestTimeoutMiddleware` above so that
 // finalizers run on interrupt and traces export. If the handler still throws
 // (layer construction failure, fatal runtime error), we surface it as a 504
@@ -152,11 +172,35 @@ const handle = async (
 	const isMcp = isMcpPost(request)
 	const reqSid = isMcp ? request.headers.get("mcp-session-id") : null
 
+	// MCP diagnostics: buffer the body so we can peek the JSON-RPC method/id
+	// before handing it off to Effect. We re-emit the request with the buffered
+	// body and stash the parsed frame in custom headers so the inner timeout
+	// middleware can include them in `[timeout]` warnings.
+	let forwardRequest = request
+	let mcpFrame: McpFrame | null = null
+	const startedAt = Date.now()
+	if (isMcp) {
+		const bodyText = await request.text()
+		mcpFrame = peekMcpFrame(bodyText)
+		const headers = new Headers(request.headers)
+		headers.set("x-mcp-debug-method", mcpFrame.method)
+		headers.set("x-mcp-debug-id", mcpFrame.id)
+		forwardRequest = new Request(request.url, {
+			method: request.method,
+			headers,
+			body: bodyText,
+		})
+		console.log(
+			`[mcp-in] method=${mcpFrame.method} id=${mcpFrame.id}` +
+				` sid=${reqSid ?? "-"} body_len=${bodyText.length}`,
+		)
+	}
+
 	if (kv && reqSid) await preloadSession(kv, reqSid)
 
 	const { handler } = getHandler()
 	try {
-		const response = await handler(request, Context.empty() as never)
+		const response = await handler(forwardRequest, Context.empty() as never)
 		if (kv && isMcp) {
 			const resSid = response.headers.get("mcp-session-id")
 			// Only persist when the server issued a new session — i.e. on
@@ -168,10 +212,24 @@ const handle = async (
 				if (put) ctx.waitUntil(put)
 			}
 		}
+		if (isMcp && mcpFrame) {
+			console.log(
+				`[mcp-out] method=${mcpFrame.method} id=${mcpFrame.id}` +
+					` status=${response.status} dur=${Date.now() - startedAt}ms` +
+					` body_len=${response.headers.get("content-length") ?? "-"}` +
+					` resp_sid=${response.headers.get("mcp-session-id") ?? "-"}`,
+			)
+		}
 		ctx.waitUntil(telemetry.flush(env))
 		return response
 	} catch (err) {
 		console.error("[worker] handler failed:", err)
+		if (isMcp && mcpFrame) {
+			console.error(
+				`[mcp-err] method=${mcpFrame.method} id=${mcpFrame.id}` +
+					` dur=${Date.now() - startedAt}ms`,
+			)
+		}
 		ctx.waitUntil(telemetry.flush(env))
 		const message = err instanceof Error ? err.message : String(err)
 		return new Response(`worker handler error: ${message}`, { status: 504 })

@@ -12,6 +12,7 @@ interface ChartWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 }
 
 export const ChartWidget = memo(function ChartWidget({
@@ -21,6 +22,7 @@ export const ChartWidget = memo(function ChartWidget({
 	onRemove,
 	onClone,
 	onConfigure,
+	onFix,
 }: ChartWidgetProps) {
 	const chartId = display.chartId ?? "gradient-area"
 	const entry = getChartById(chartId)
@@ -40,6 +42,7 @@ export const ChartWidget = memo(function ChartWidget({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onFix={onFix}
 			loadingSkeleton={<Skeleton className="h-full w-full" />}
 		>
 			<Suspense fallback={<Skeleton className="h-full w-full" />}>

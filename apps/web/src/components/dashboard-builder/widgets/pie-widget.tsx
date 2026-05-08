@@ -12,6 +12,7 @@ interface PieWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 }
 
 export const PieWidget = memo(function PieWidget({
@@ -21,6 +22,7 @@ export const PieWidget = memo(function PieWidget({
 	onRemove,
 	onClone,
 	onConfigure,
+	onFix,
 }: PieWidgetProps) {
 	const entry = getChartById(display.chartId ?? "query-builder-pie")
 	if (!entry) return null
@@ -39,6 +41,7 @@ export const PieWidget = memo(function PieWidget({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onFix={onFix}
 			loadingSkeleton={<Skeleton className="h-full w-full" />}
 		>
 			<Suspense fallback={<Skeleton className="h-full w-full" />}>

@@ -10,6 +10,7 @@ interface MarkdownWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/

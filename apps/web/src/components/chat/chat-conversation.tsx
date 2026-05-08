@@ -7,6 +7,12 @@ import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import { alertPromptSuggestions, type AlertContext } from "./alert-context"
 import { AlertAttachmentCard } from "./alert-attachment-card"
 import {
+	widgetFixAutoPrompt,
+	widgetFixSuggestions,
+	type WidgetFixContext,
+} from "./widget-fix-context"
+import { WidgetFixAttachmentCard } from "./widget-fix-attachment-card"
+import {
 	deriveAutoContexts,
 	readChatReferrer,
 	suggestionsForContexts,
@@ -59,8 +65,9 @@ interface ChatConversationProps {
 	tabId: string
 	isActive: boolean
 	onFirstMessage?: (tabId: string, text: string) => void
-	mode?: "alert"
+	mode?: "alert" | "widget-fix"
 	alertContext?: AlertContext
+	widgetFixContext?: WidgetFixContext
 }
 
 export function ChatConversation({
@@ -69,6 +76,7 @@ export function ChatConversation({
 	onFirstMessage,
 	mode,
 	alertContext,
+	widgetFixContext,
 }: ChatConversationProps) {
 	const { orgId, getToken } = useAuth()
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -124,7 +132,11 @@ export function ChatConversation({
 			base.mode = "alert"
 			base.alertContext = alertContext
 		}
-		if (activeContexts.length > 0 && referrerPath) {
+		if (mode === "widget-fix" && widgetFixContext) {
+			base.mode = "widget-fix"
+			base.widgetFixContext = widgetFixContext
+		}
+		if (mode !== "widget-fix" && activeContexts.length > 0 && referrerPath) {
 			const payload: PageContextPayload = {
 				pathname: referrerPath,
 				contexts: activeContexts,
@@ -132,7 +144,7 @@ export function ChatConversation({
 			base.pageContext = payload
 		}
 		return base
-	}, [orgId, mode, alertContext, activeContexts, referrerPath])
+	}, [orgId, mode, alertContext, widgetFixContext, activeContexts, referrerPath])
 
 	const { messages, sendMessage, status, addToolApprovalResponse } = useAgentChat({
 		agent,
@@ -156,11 +168,13 @@ export function ChatConversation({
 
 	const isLoading = status === "streaming" || status === "submitted"
 	const isAlertMode = mode === "alert" && !!alertContext
+	const isWidgetFixMode = mode === "widget-fix" && !!widgetFixContext
 	const suggestions = useMemo(() => {
 		if (isAlertMode) return alertPromptSuggestions(alertContext!)
+		if (isWidgetFixMode) return widgetFixSuggestions(widgetFixContext!)
 		const routeAware = suggestionsForContexts(activeContexts)
 		return routeAware ?? DEFAULT_SUGGESTIONS
-	}, [isAlertMode, alertContext, activeContexts])
+	}, [isAlertMode, alertContext, isWidgetFixMode, widgetFixContext, activeContexts])
 
 	const handleSend = (text: string) => {
 		if (!text.trim() || isLoading) return
@@ -170,9 +184,21 @@ export function ChatConversation({
 		sendMessage({ text: text.trim() })
 	}
 
+	const widgetFixAutoSentRef = useRef<string | null>(null)
+	useEffect(() => {
+		if (!isWidgetFixMode || !isActive) return
+		if (!hasSettled || isLoading) return
+		if (messages.length > 0) return
+		if (widgetFixAutoSentRef.current === tabId) return
+		widgetFixAutoSentRef.current = tabId
+		handleSend(widgetFixAutoPrompt)
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isWidgetFixMode, isActive, hasSettled, isLoading, messages.length, tabId])
+
 	return (
 		<div className="flex h-full flex-col">
 			{isAlertMode && <AlertAttachmentCard alert={alertContext!} />}
+			{isWidgetFixMode && <WidgetFixAttachmentCard ctx={widgetFixContext!} />}
 			<Conversation className="flex-1 min-h-0">
 				<ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
 					{!hasSettled && messages.length === 0 ? (
@@ -186,6 +212,16 @@ export function ChatConversation({
 								<p className="max-w-sm text-sm text-muted-foreground">
 									The alert above is attached to every message in this thread. Start with a
 									suggestion or ask your own question.
+								</p>
+							</div>
+						) : isWidgetFixMode ? (
+							<div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
+								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
+									Diagnosing widget…
+								</p>
+								<p className="max-w-sm text-sm text-muted-foreground">
+									Maple AI is reading the broken widget config and the validation error.
+									It will propose a corrected widget JSON for you to approve.
 								</p>
 							</div>
 						) : (
@@ -302,21 +338,29 @@ export function ChatConversation({
 			</Conversation>
 
 			<div className="mx-auto w-full max-w-3xl px-4 pb-4">
-				{(messages.length > 0 || isAlertMode) && (
+				{(messages.length > 0 || isAlertMode || isWidgetFixMode) && (
 					<Suggestions className="mb-3">
 						{suggestions.map((s) => (
 							<Suggestion key={s} suggestion={s} onClick={() => handleSend(s)} />
 						))}
 					</Suggestions>
 				)}
-				<PageContextChips contexts={activeContexts} onDismiss={dismissContext} />
+				{!isWidgetFixMode && (
+					<PageContextChips contexts={activeContexts} onDismiss={dismissContext} />
+				)}
 				<PromptInput
 					onSubmit={({ text }) => handleSend(text)}
 					className="rounded-lg border shadow-sm"
 				>
 					<PromptInputTextarea
 						ref={textareaRef}
-						placeholder={isAlertMode ? "Ask about this alert..." : "Ask about your system..."}
+						placeholder={
+							isAlertMode
+								? "Ask about this alert..."
+								: isWidgetFixMode
+									? "Ask about this widget..."
+									: "Ask about your system..."
+						}
 						disabled={isLoading}
 					/>
 					<PromptInputFooter>

@@ -11,6 +11,7 @@ interface StatWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 }
 
 export function formatValue(value: unknown, unit?: string, prefix?: string, suffix?: string): string {
@@ -47,6 +48,7 @@ export const StatWidget = memo(function StatWidget({
 	onRemove,
 	onClone,
 	onConfigure,
+	onFix,
 }: StatWidgetProps) {
 	const displayName = display.title || "Untitled"
 	const value = dataState.status === "ready" ? dataState.data : undefined
@@ -61,6 +63,7 @@ export const StatWidget = memo(function StatWidget({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onFix={onFix}
 			contentClassName="flex-1 min-h-0 flex items-center justify-center p-4"
 			loadingSkeleton={<Skeleton className="h-8 w-24" />}
 		>

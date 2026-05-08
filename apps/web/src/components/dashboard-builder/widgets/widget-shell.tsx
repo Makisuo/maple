@@ -1,5 +1,12 @@
 import type { ReactNode } from "react"
-import { GripDotsIcon, TrashIcon, PencilIcon, CopyIcon, DotsVerticalIcon } from "@/components/icons"
+import {
+	GripDotsIcon,
+	TrashIcon,
+	PencilIcon,
+	CopyIcon,
+	DotsVerticalIcon,
+	ChatBubbleSparkleIcon,
+} from "@/components/icons"
 
 import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@maple/ui/components/ui/card"
 import { Button } from "@maple/ui/components/ui/button"
@@ -97,6 +104,7 @@ interface WidgetFrameProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 	contentClassName?: string
 	loadingSkeleton: ReactNode
 	children: ReactNode
@@ -109,6 +117,7 @@ export function WidgetFrame({
 	onRemove,
 	onClone,
 	onConfigure,
+	onFix,
 	contentClassName,
 	loadingSkeleton,
 	children,
@@ -130,7 +139,7 @@ export function WidgetFrame({
 						<span className="text-xs text-muted-foreground">No data in selected time range</span>
 					</div>
 				) : (
-					<div className="flex items-center justify-center h-full flex-col gap-1 px-3">
+					<div className="flex items-center justify-center h-full flex-col gap-1.5 px-3">
 						<span className="text-xs font-medium text-destructive">
 							{dataState.title ?? "Unable to load"}
 						</span>
@@ -138,6 +147,17 @@ export function WidgetFrame({
 							<span className="text-[10px] text-destructive/70 max-w-full text-center line-clamp-2">
 								{dataState.message}
 							</span>
+						)}
+						{onFix && dataState.kind === "decode" && (
+							<Button
+								variant="outline"
+								size="xs"
+								onClick={onFix}
+								className="mt-1 h-6 gap-1 text-[10px]"
+							>
+								<ChatBubbleSparkleIcon size={12} />
+								Fix with AI
+							</Button>
 						)}
 					</div>
 				)

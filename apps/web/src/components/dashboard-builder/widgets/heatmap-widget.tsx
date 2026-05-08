@@ -12,6 +12,7 @@ interface HeatmapWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onFix?: () => void
 }
 
 export const HeatmapWidget = memo(function HeatmapWidget({
@@ -21,6 +22,7 @@ export const HeatmapWidget = memo(function HeatmapWidget({
 	onRemove,
 	onClone,
 	onConfigure,
+	onFix,
 }: HeatmapWidgetProps) {
 	const entry = getChartById(display.chartId ?? "query-builder-heatmap")
 	if (!entry) return null
@@ -38,6 +40,7 @@ export const HeatmapWidget = memo(function HeatmapWidget({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onFix={onFix}
 			loadingSkeleton={<Skeleton className="h-full w-full" />}
 		>
 			<Suspense fallback={<Skeleton className="h-full w-full" />}>
