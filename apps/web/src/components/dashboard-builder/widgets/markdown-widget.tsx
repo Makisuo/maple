@@ -2,6 +2,7 @@ import { memo } from "react"
 
 import { WidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
+import { validateUrlScheme } from "@maple/ui/lib/sanitizers"
 
 interface MarkdownWidgetProps {
 	dataState?: WidgetDataState
@@ -30,17 +31,33 @@ function renderInline(text: string): React.ReactNode[] {
 		if (segment.startsWith("[")) {
 			const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(segment)
 			if (linkMatch) {
-				tokens.push(
-					<a
-						key={`l-${key++}`}
-						href={linkMatch[2]}
-						target="_blank"
-						rel="noreferrer"
-						className="text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
-					>
-						{linkMatch[1]}
-					</a>,
-				)
+				const safeHref = validateUrlScheme(linkMatch[2])
+				if (safeHref) {
+					tokens.push(
+						<a
+							key={`l-${key++}`}
+							href={safeHref}
+							target="_blank"
+							rel="noreferrer"
+							className="text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary"
+						>
+							{linkMatch[1]}
+						</a>,
+					)
+				} else {
+					// Reject `javascript:` / `data:` / protocol-relative — render as
+					// plain text so an attacker can't smuggle a clickable XSS link
+					// through a stored markdown widget.
+					tokens.push(
+						<span
+							key={`l-${key++}`}
+							title={`Blocked unsupported link scheme: ${linkMatch[2]}`}
+							className="text-muted-foreground"
+						>
+							{linkMatch[1]}
+						</span>,
+					)
+				}
 			}
 		} else if (segment.startsWith("**")) {
 			tokens.push(<strong key={`b-${key++}`}>{segment.slice(2, -2)}</strong>)
