@@ -19,6 +19,7 @@ import { IntegrationsSection } from "@/components/settings/integrations-section"
 import { NotificationsSection } from "@/components/settings/notifications-section"
 import { OrgOpenRouterSettingsSection } from "@/components/settings/org-openrouter-settings-section"
 import { OrgClickHouseSettingsSection } from "@/components/settings/org-clickhouse-settings-section"
+import { OrganizationSection } from "@/components/settings/organization-section"
 import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
@@ -30,12 +31,14 @@ import {
 	DatabaseIcon,
 	CodeIcon,
 	ChatBubbleSparkleIcon,
+	GearIcon,
 	GridIcon,
 	type IconComponent,
 } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 
 const tabValues = [
+	"organization",
 	"members",
 	"ingestion",
 	"api-keys",
@@ -75,6 +78,7 @@ const navSections: NavSection[] = [
 		id: "workspace",
 		title: "Workspace",
 		items: [
+			{ id: "organization", label: "Organization", icon: GearIcon },
 			{ id: "members", label: "Members", icon: UserIcon },
 			{ id: "billing", label: "Billing", icon: CreditCardIcon },
 		],
@@ -154,6 +158,7 @@ function SettingsNav({
 }
 
 const tabLabels: Record<SettingsTab, string> = {
+	organization: "Organization",
 	members: "Members",
 	ingestion: "Ingestion",
 	"api-keys": "API Keys",
@@ -185,7 +190,12 @@ export function SettingsPage() {
 		.map((section) => ({
 			...section,
 			items: section.items.filter((item) => {
-				if (item.id === "members" || item.id === "billing" || item.id === "notifications")
+				if (
+					item.id === "organization" ||
+					item.id === "members" ||
+					item.id === "billing" ||
+					item.id === "notifications"
+				)
 					return isClerkAuthEnabled
 				if (item.id === "data-platform") return canAccessDataPlatform
 				if (item.id === "ai") return canAccessAi
@@ -241,6 +251,7 @@ export function SettingsPage() {
 				<SettingsNav sections={visibleSections} activeTab={activeTab} onSelect={handleTabSelect} />
 			}
 		>
+			{activeTab === "organization" && <OrganizationSection />}
 			{activeTab === "members" && <MembersSection />}
 			{activeTab === "ingestion" && <IngestionSection />}
 			{activeTab === "api-keys" && <ApiKeysSection />}

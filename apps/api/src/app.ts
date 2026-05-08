@@ -18,6 +18,7 @@ import { HttpObservabilityLive } from "./routes/observability.http"
 import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgOpenRouterSettingsLive } from "./routes/org-openrouter-settings.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
+import { HttpOrganizationsLive } from "./routes/organizations.http"
 import { HttpQueryEngineLive } from "./routes/query-engine.http"
 import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http"
 import { HttpServiceDiscoveryLive } from "./routes/sd.http"
@@ -39,6 +40,7 @@ import { Env } from "./services/Env"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
 import { OrgOpenRouterSettingsService } from "./services/OrgOpenRouterSettingsService"
 import { OrgClickHouseSettingsService } from "./services/OrgClickHouseSettingsService"
+import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { WarehouseQueryService } from "./services/WarehouseQueryService"
@@ -66,6 +68,7 @@ export const CoreServicesLive = Layer.mergeAll(
 	OrgIngestKeysService.layer,
 	OrgOpenRouterSettingsService.layer,
 	OrgClickHouseSettingsService.layer,
+	OrganizationService.layer,
 	ScrapeTargetsService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
@@ -126,6 +129,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpObservabilityLive),
 	Layer.provide(HttpOrgOpenRouterSettingsLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
+	Layer.provide(HttpOrganizationsLive),
 	Layer.provide(HttpScrapeTargetsLive),
 	Layer.provide(HttpServiceDiscoveryLive),
 	Layer.provide(HttpQueryEngineLive),

@@ -12,6 +12,7 @@ import { IntegrationsApiGroup } from "./integrations"
 import { ObservabilityApiGroup } from "./observability"
 import { OrgOpenrouterSettingsApiGroup } from "./org-openrouter-settings"
 import { OrgClickHouseSettingsApiGroup } from "./org-clickhouse-settings"
+import { OrganizationsApiGroup } from "./organizations"
 import { QueryEngineApiGroup } from "./query-engine"
 import { ScrapeTargetsApiGroup } from "./scrape-targets"
 import { ServiceDiscoveryApiGroup } from "./service-discovery"
@@ -30,6 +31,7 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(ObservabilityApiGroup)
 	.add(OrgOpenrouterSettingsApiGroup)
 	.add(OrgClickHouseSettingsApiGroup)
+	.add(OrganizationsApiGroup)
 	.add(QueryEngineApiGroup)
 	.add(ScrapeTargetsApiGroup)
 	.add(ServiceDiscoveryApiGroup)
