@@ -9,11 +9,11 @@ import { inspectTrace, type SpanNode } from "@maple/query-engine/observability"
 export function registerInspectTraceTool(server: McpToolRegistrar) {
 	server.tool(
 		"inspect_trace",
-		"Get the full span tree and logs for a single trace. Use this to understand request flow, find bottlenecks, and see error context. Pass `timestamp` (any timestamp from the trace) so the query can prune ClickHouse partitions to a ±1h window — without it the query scans the full retention window.",
+		"Get the full span tree and logs for a single trace. Use this to understand request flow, find bottlenecks, and see error context. Pass `timestamp` (any timestamp from the trace) so the query can prune ClickHouse partitions to a ±1h window. Without `timestamp` only the last 24h is scanned — pass `timestamp` for older traces.",
 		Schema.Struct({
 			trace_id: requiredStringParam("The trace ID to inspect"),
 			timestamp: optionalStringParam(
-				"ISO-8601 timestamp of any span in the trace (e.g. from `search_traces` results). Used to narrow the ClickHouse scan to a ±1h window — strongly recommended.",
+				"ISO-8601 timestamp of any span in the trace (e.g. from `search_traces` results). Used to narrow the ClickHouse scan to a ±1h window — required for traces older than 24h, strongly recommended otherwise.",
 			),
 		}),
 		Effect.fn("McpTool.inspectTrace")(function* ({ trace_id, timestamp }) {
@@ -40,7 +40,12 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
 			)
 
 			if (result.spanCount === 0) {
-				return { content: [{ type: "text" as const, text: `No spans found for trace ${trace_id}` }] }
+				const hint = timestampHint
+					? ""
+					: ` (scanned last 24h). If this trace is older, pass timestamp=<ISO-8601> from \`search_traces\` results.`
+				return {
+					content: [{ type: "text" as const, text: `No spans found for trace ${trace_id}${hint}` }],
+				}
 			}
 
 			const lines: string[] = [

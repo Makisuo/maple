@@ -15,6 +15,7 @@ import { HttpDigestLive } from "./routes/digest.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "./routes/integrations.http"
 import { HttpIngestKeysLive } from "./routes/ingest-keys.http"
 import { HttpObservabilityLive } from "./routes/observability.http"
+import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgOpenRouterSettingsLive } from "./routes/org-openrouter-settings.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpQueryEngineLive } from "./routes/query-engine.http"
@@ -134,6 +135,7 @@ export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
 	AutumnRouter,
 	IntegrationsCallbackRouter,
+	OAuthDiscoveryRouter,
 	McpLive,
 	HealthRouter,
 	McpGetFallback,

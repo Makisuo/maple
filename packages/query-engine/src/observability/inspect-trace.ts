@@ -57,14 +57,22 @@ export interface InspectTraceOptions {
 	 * Approximate timestamp for the trace. When provided, the underlying
 	 * `span_hierarchy` and `list_logs` queries are bounded to a window around
 	 * it so ClickHouse can prune partitions instead of scanning the full
-	 * retention window. Strongly recommended.
+	 * retention window. Strongly recommended for traces older than the
+	 * default fallback window.
 	 */
 	readonly timestampHint?: Date
-	/** Half-width of the time window in hours. Defaults to 1. */
+	/** Half-width of the time window when `timestampHint` is set. Defaults to 1h. */
 	readonly rangeHours?: number
+	/**
+	 * Lookback window when `timestampHint` is not provided. Defaults to 24h ending
+	 * at `now`. Without a bound, queries scan full retention and time out on
+	 * busy clusters.
+	 */
+	readonly defaultLookbackHours?: number
 }
 
 const DEFAULT_RANGE_HOURS = 1
+const DEFAULT_LOOKBACK_HOURS = 24
 
 const tinybirdDateTime = (d: Date): string => d.toISOString().replace("T", " ").slice(0, 19)
 
@@ -83,9 +91,17 @@ export const inspectTrace = Effect.fn("Observability.inspectTrace")(function* (
 					end_time: tinybirdDateTime(new Date(options.timestampHint.getTime() + halfWidthMs)),
 				}
 			})()
-		: undefined
+		: (() => {
+				const lookbackMs = (options?.defaultLookbackHours ?? DEFAULT_LOOKBACK_HOURS) * 60 * 60 * 1000
+				const end = new Date()
+				return {
+					start_time: tinybirdDateTime(new Date(end.getTime() - lookbackMs)),
+					end_time: tinybirdDateTime(end),
+				}
+			})()
 
-	yield* Effect.annotateCurrentSpan("narrowByTime", range != null)
+	yield* Effect.annotateCurrentSpan("narrowByTime", options?.timestampHint != null)
+	yield* Effect.annotateCurrentSpan("usingDefaultLookback", options?.timestampHint == null)
 
 	const [spansResult, logsResult] = yield* Effect.all(
 		[
