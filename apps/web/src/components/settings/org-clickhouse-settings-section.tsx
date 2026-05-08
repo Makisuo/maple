@@ -135,7 +135,7 @@ export function OrgClickHouseSettingsSection({
 
 	const diffSummary = useMemo(() => {
 		if (!diff) return null
-		const counts = { up_to_date: 0, missing: 0, drifted: 0 }
+		const counts = { up_to_date: 0, missing: 0, drifted: 0, wrong_kind: 0 }
 		for (const entry of diff.entries) counts[entry.status]++
 		return counts
 	}, [diff])
@@ -428,7 +428,9 @@ export function OrgClickHouseSettingsSection({
 															? "Up to date"
 															: entry.status === "missing"
 																? "Missing — will be created"
-																: `Drift: ${entry.columnDrifts.length} mismatch${entry.columnDrifts.length === 1 ? "" : "es"}`}
+																: entry.status === "wrong_kind"
+																	? `Wrong kind: expected ${entry.kind === "materialized_view" ? "MV" : "table"}, found ${entry.actualKind === "materialized_view" ? "MV" : "table"} — resolve manually`
+																	: `Drift: ${entry.columnDrifts.length} mismatch${entry.columnDrifts.length === 1 ? "" : "es"}`}
 													</span>
 													{isDrifted ? (
 														isExpanded ? (
