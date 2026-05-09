@@ -452,6 +452,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("serviceWorkloads", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					if (payload.services.length === 0) {
+						return new ServiceWorkloadsResponse({ data: [] })
+					}
 					const compiled = CH.serviceWorkloadsSQL(
 						{ services: payload.services },
 						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },

@@ -21,11 +21,13 @@ export interface QueryRunResult {
 }
 
 type FormulaOperator = "+" | "-" | "*" | "/"
+type FormulaUnaryOperator = "u-"
 
 type FormulaToken =
 	| { type: "number"; value: number }
 	| { type: "identifier"; value: string }
 	| { type: "operator"; value: FormulaOperator }
+	| { type: "unary"; value: FormulaUnaryOperator }
 	| { type: "leftParen" }
 	| { type: "rightParen" }
 
@@ -146,6 +148,11 @@ function compileFormula(expression: string): {
 				}
 				output.push(top)
 			}
+			// After the operand inside the parens has been emitted, any unary
+			// operator that was waiting on it should be applied next.
+			while (operatorStack.length > 0 && operatorStack[operatorStack.length - 1].type === "unary") {
+				output.push(operatorStack.pop()!)
+			}
 
 			if (!foundLeftParen) {
 				return {
@@ -160,16 +167,25 @@ function compileFormula(expression: string): {
 		}
 
 		if (token.type === "operator") {
-			if (
+			const isUnaryContext =
 				token.value === "-" &&
 				(!previousToken || previousToken.type === "operator" || previousToken.type === "leftParen")
-			) {
-				// Unary minus: rewrite "-x" as "0 - x"
-				output.push({ type: "number", value: 0 })
+
+			if (isUnaryContext) {
+				// Unary minus: high-precedence single-operand operator. Push it
+				// directly onto the operator stack without popping any pending
+				// binary operator — its operand hasn't been read yet.
+				operatorStack.push({ type: "unary", value: "u-" })
+				previousToken = token
+				continue
 			}
 
 			while (operatorStack.length > 0) {
 				const top = operatorStack[operatorStack.length - 1]
+				if (top.type === "unary") {
+					output.push(operatorStack.pop()!)
+					continue
+				}
 				if (top.type !== "operator") {
 					break
 				}
@@ -233,6 +249,18 @@ function evaluateCompiledFormula(
 
 			stack.push(value)
 			continue
+		}
+
+		if (token.type === "unary") {
+			if (stack.length < 1) {
+				return { value: null, error: "Invalid formula expression", reason: "other" }
+			}
+			const operand = stack.pop()!
+			if (token.value === "u-") {
+				stack.push(-operand)
+				continue
+			}
+			return { value: null, error: "Invalid formula token", reason: "other" }
 		}
 
 		if (token.type !== "operator") {

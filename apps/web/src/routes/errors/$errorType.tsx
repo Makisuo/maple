@@ -66,7 +66,10 @@ function truncateErrorType(errorType: string, maxLength = 50): string {
 
 function ErrorDetailContent() {
 	const { errorType: rawErrorType } = Route.useParams()
-	const errorType = decodeURIComponent(rawErrorType)
+	// TanStack Router already decodes route params. A second decodeURIComponent
+	// throws URIError on literal `%` and silently transforms encoded
+	// substrings like `%2F` into `/`, querying the wrong error type.
+	const errorType = rawErrorType
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(

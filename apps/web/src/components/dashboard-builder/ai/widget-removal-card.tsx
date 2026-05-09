@@ -12,6 +12,7 @@ interface WidgetRemovalCardProps {
 
 function findWidgetByTitle(widgets: DashboardWidget[], title: string): DashboardWidget | null {
 	const normalized = title.toLowerCase().trim()
+	if (normalized.length === 0) return null
 	return (
 		widgets.find((w) => w.display.title?.toLowerCase().trim() === normalized) ??
 		widgets.find((w) => w.display.title?.toLowerCase().includes(normalized)) ??

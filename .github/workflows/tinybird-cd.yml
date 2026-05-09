@@ -35,8 +35,12 @@ jobs:
                   ALLOW_DESTRUCTIVE: ${{ github.event.inputs.allow_destructive }}
               run: |
                   set -euo pipefail
+                  HOST_FLAG=()
+                  if [ -n "${TINYBIRD_HOST:-}" ]; then
+                    HOST_FLAG=(--host "$TINYBIRD_HOST")
+                  fi
                   if [ "$ALLOW_DESTRUCTIVE" = "true" ]; then
-                    bun scripts/tinybird-deploy-destructive.ts
+                    bunx tinybird deploy "${HOST_FLAG[@]}" --allow-destructive-operations
                   else
-                    bunx tinybird deploy
+                    bunx tinybird deploy "${HOST_FLAG[@]}"
                   fi

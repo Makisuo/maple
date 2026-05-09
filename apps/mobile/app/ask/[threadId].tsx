@@ -10,7 +10,9 @@ export default function ChatThread() {
 	const router = useRouter()
 	const insets = useSafeAreaInsets()
 	const params = useLocalSearchParams<{ threadId: string; alert?: string }>()
-	const threadId = typeof params.threadId === "string" ? decodeURIComponent(params.threadId) : ""
+	// Expo Router already decodes route params; a second decodeURIComponent
+	// throws URIError for any literal "%" in the already-decoded value.
+	const threadId = typeof params.threadId === "string" ? params.threadId : ""
 
 	const alertContext = useMemo(() => {
 		if (typeof params.alert !== "string" || !params.alert) return undefined

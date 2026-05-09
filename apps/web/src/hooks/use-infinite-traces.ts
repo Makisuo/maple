@@ -66,6 +66,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 
 	const [additionalPages, setAdditionalPages] = React.useState<TracesResponse[]>([])
 	const [isFetchingNextPage, setIsFetchingNextPage] = React.useState(false)
+	const [paginationStopped, setPaginationStopped] = React.useState(false)
 	const filterKeyRef = React.useRef(filterKey)
 	const isFetchingRef = React.useRef(false)
 
@@ -73,6 +74,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 		filterKeyRef.current = filterKey
 		setAdditionalPages([])
 		setIsFetchingNextPage(false)
+		setPaginationStopped(false)
 		isFetchingRef.current = false
 	}, [filterKey])
 
@@ -83,13 +85,14 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 	}, [firstPageResult, additionalPages])
 
 	const hasNextPage = React.useMemo(() => {
+		if (paginationStopped) return false
 		if (!Result.isSuccess(firstPageResult)) return false
 		if (additionalPages.length === 0) {
 			return firstPageResult.value.data.length === PAGE_SIZE
 		}
 		const lastPage = additionalPages[additionalPages.length - 1]
 		return lastPage.data.length === PAGE_SIZE
-	}, [firstPageResult, additionalPages])
+	}, [firstPageResult, additionalPages, paginationStopped])
 
 	const fetchNextPage = React.useCallback(() => {
 		if (isFetchingRef.current || !hasNextPage) return
@@ -104,8 +107,13 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 				if (filterKeyRef.current !== currentKey) return
 				setAdditionalPages((prev) => [...prev, result])
 			})
-			.catch(() => {
-				// Silently handle errors for subsequent pages
+			.catch((error) => {
+				if (filterKeyRef.current !== currentKey) return
+				// Surface the failure by terminating pagination so the caller stops
+				// asking for more pages. Without this, hasNextPage stays true and the
+				// UI loops on a backend offset cap.
+				setPaginationStopped(true)
+				console.error("Trace pagination failed", error)
 			})
 			.finally(() => {
 				if (filterKeyRef.current === currentKey) {

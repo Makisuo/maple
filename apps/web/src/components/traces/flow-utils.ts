@@ -89,13 +89,21 @@ function createCombinedNode(spans: SpanNode[]): CombinedNode {
  * Calculate aggregated duration statistics for a group of spans
  */
 function calculateAggregatedDuration(spans: SpanNode[]): AggregatedDuration {
-	const durations = spans.map((s) => s.durationMs)
-	const total = durations.reduce((sum, d) => sum + d, 0)
+	let total = 0
+	let min = Infinity
+	let max = -Infinity
+	for (const s of spans) {
+		total += s.durationMs
+		if (s.durationMs < min) min = s.durationMs
+		if (s.durationMs > max) max = s.durationMs
+	}
+	if (!Number.isFinite(min)) min = 0
+	if (!Number.isFinite(max)) max = 0
 	return {
 		total,
-		min: Math.min(...durations),
-		max: Math.max(...durations),
-		avg: total / spans.length,
+		min,
+		max,
+		avg: spans.length > 0 ? total / spans.length : 0,
 	}
 }
 
@@ -212,6 +220,8 @@ interface LayoutNode {
 	children: LayoutNode[]
 }
 
+const MAX_LAYOUT_DEPTH = 200
+
 function buildLayoutTree(nodes: FlowNode[], edges: FlowEdge[]): LayoutNode[] {
 	// Build adjacency map from edges
 	const childrenMap = new Map<string, string[]>()
@@ -227,16 +237,22 @@ function buildLayoutTree(nodes: FlowNode[], edges: FlowEdge[]): LayoutNode[] {
 	// Find root nodes (nodes without parents)
 	const rootIds = nodes.filter((n) => !hasParent.has(n.id)).map((n) => n.id)
 
-	// Build tree recursively
-	function buildNode(id: string): LayoutNode {
+	// Build tree recursively. Guard against cycles and depth blowups; both can
+	// happen when telemetry contains malformed parent_span_id chains.
+	const visited = new Set<string>()
+	function buildNode(id: string, depth: number): LayoutNode {
+		if (depth > MAX_LAYOUT_DEPTH || visited.has(id)) {
+			return { id, children: [] }
+		}
+		visited.add(id)
 		const childIds = childrenMap.get(id) || []
 		return {
 			id,
-			children: childIds.map((childId) => buildNode(childId)),
+			children: childIds.map((childId) => buildNode(childId, depth + 1)),
 		}
 	}
 
-	return rootIds.map((id) => buildNode(id))
+	return rootIds.map((id) => buildNode(id, 0))
 }
 
 /**
@@ -254,16 +270,25 @@ export function getLayoutedElements(
 	// Build layout tree from edges
 	const layoutRoots = buildLayoutTree(nodes, edges)
 
-	// Calculate subtree widths for centering parent nodes
+	// Memoize subtree widths so deep/wide trees don't re-walk subtrees once
+	// per ancestor — getSubtreeWidth is called both for centering and for
+	// child placement, which previously made the layout O(n²) per level.
+	const subtreeWidthCache = new Map<string, number>()
 	function getSubtreeWidth(node: LayoutNode): number {
+		const cached = subtreeWidthCache.get(node.id)
+		if (cached !== undefined) return cached
+		let value: number
 		if (node.children.length === 0) {
-			return NODE_WIDTH
+			value = NODE_WIDTH
+		} else {
+			const childrenWidth = node.children.reduce(
+				(sum, child) => sum + getSubtreeWidth(child) + HORIZONTAL_SPACING,
+				-HORIZONTAL_SPACING,
+			)
+			value = Math.max(NODE_WIDTH, childrenWidth)
 		}
-		const childrenWidth = node.children.reduce(
-			(sum, child) => sum + getSubtreeWidth(child) + HORIZONTAL_SPACING,
-			-HORIZONTAL_SPACING,
-		)
-		return Math.max(NODE_WIDTH, childrenWidth)
+		subtreeWidthCache.set(node.id, value)
+		return value
 	}
 
 	// Position nodes recursively

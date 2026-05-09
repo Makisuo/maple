@@ -62,7 +62,7 @@ export const createChatAgentWorker = async ({
 				process.env.MAPLE_INGEST_PUBLIC_URL?.trim() || "https://ingest.maple.dev",
 			MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
 			INTERNAL_SERVICE_TOKEN: alchemy.secret(process.env.INTERNAL_SERVICE_TOKEN),
-			OPENROUTER_API_KEY: alchemy.secret(process.env.OPENROUTER_API_KEY),
+			...optionalSecret("OPENROUTER_API_KEY"),
 			...optionalPlain("MAPLE_ENDPOINT"),
 			...optionalPlain("MAPLE_ENVIRONMENT", formatMapleStage(stage)),
 			...optionalPlain("COMMIT_SHA"),

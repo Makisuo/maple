@@ -27,7 +27,10 @@ export function register() {
   registerOTel({
     serviceName: "my-next-app",
     attributes: { environment: "production" },
-    traceExporter: { url: "{{INGEST_URL}}/v1/traces" },
+    traceExporter: {
+      url: "{{INGEST_URL}}/v1/traces",
+      headers: { Authorization: "Bearer {{API_KEY}}" },
+    },
     logRecordProcessor: new SimpleLogRecordProcessor(
       new OTLPLogExporter({
         url: "{{INGEST_URL}}/v1/logs",

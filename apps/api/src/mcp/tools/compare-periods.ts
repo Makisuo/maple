@@ -1,4 +1,4 @@
-import { optionalStringParam, type McpToolRegistrar } from "./types"
+import { McpQueryError, optionalStringParam, type McpToolRegistrar } from "./types"
 import { queryTinybird } from "../lib/query-tinybird"
 import { getSpamPatternsParam } from "@/lib/spam-patterns"
 import { resolveTimeRange } from "../lib/time"
@@ -40,6 +40,12 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 			if (around_time) {
 				// Auto-generate 30min before/after comparison
 				const center = new Date(around_time.replace(" ", "T") + "Z")
+				if (!Number.isFinite(center.getTime())) {
+					return yield* new McpQueryError({
+						message: `Invalid around_time: ${around_time}`,
+						pipe: "compare_periods",
+					})
+				}
 				const halfWindow = 30 * 60 * 1000 // 30 minutes
 				prevSt = new Date(center.getTime() - halfWindow).toISOString().replace("T", " ").slice(0, 19)
 				prevEt = around_time
@@ -54,6 +60,12 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 				// Resolve previous period: default to same duration before current
 				const currentStartDate = new Date(current.st.replace(" ", "T") + "Z")
 				const currentEndDate = new Date(current.et.replace(" ", "T") + "Z")
+				if (!Number.isFinite(currentStartDate.getTime()) || !Number.isFinite(currentEndDate.getTime())) {
+					return yield* new McpQueryError({
+						message: `Invalid current period: ${current_start ?? "(default)"} to ${current_end ?? "(default)"}`,
+						pipe: "compare_periods",
+					})
+				}
 				const durationMs = currentEndDate.getTime() - currentStartDate.getTime()
 
 				prevEt = previous_end ?? current.st
@@ -72,11 +84,15 @@ export function registerComparePeriodsTool(server: McpToolRegistrar) {
 						start_time: curSt,
 						end_time: curEt,
 						exclude_spam_patterns: getSpamPatternsParam(),
+						...(service_name && { services: service_name }),
+						...(environment && { deployment_envs: environment }),
 					}),
 					queryTinybird("errors_summary", {
 						start_time: prevSt,
 						end_time: prevEt,
 						exclude_spam_patterns: getSpamPatternsParam(),
+						...(service_name && { services: service_name }),
+						...(environment && { deployment_envs: environment }),
 					}),
 					queryTinybird("service_overview", {
 						start_time: curSt,

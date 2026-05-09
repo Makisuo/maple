@@ -154,7 +154,22 @@ export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServic
 			const hash = yield* Effect.promise(() => sha256Hex(options.key))
 			const composite = `${options.bucket}:${hash}`
 
-			const cached = yield* Effect.promise(() => backend.get(options.bucket, hash))
+			const cached = yield* Effect.tryPromise({
+				try: () => backend.get(options.bucket, hash),
+				catch: (error) => error,
+			}).pipe(
+				Effect.tapError((error) =>
+					Effect.logWarning("Edge cache get failed; treating as miss").pipe(
+						Effect.annotateLogs({
+							bucket: options.bucket,
+							key: options.key,
+							hash,
+							error: String(error),
+						}),
+					),
+				),
+				Effect.orElseSucceed(() => undefined),
+			)
 			if (cached !== undefined) {
 				if (options.schema) {
 					const decoded = yield* Schema.decodeUnknownEffect(options.schema)(cached).pipe(
@@ -195,7 +210,22 @@ export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServic
 					const stored: unknown = options.schema
 						? yield* Schema.encodeUnknownEffect(options.schema)(value).pipe(Effect.orDie)
 						: value
-					yield* Effect.promise(() => backend.put(options.bucket, hash, stored, options.ttlSeconds))
+					yield* Effect.tryPromise({
+						try: () => backend.put(options.bucket, hash, stored, options.ttlSeconds),
+						catch: (error) => error,
+					}).pipe(
+						Effect.tapError((error) =>
+							Effect.logWarning("Edge cache put failed; continuing without cache").pipe(
+								Effect.annotateLogs({
+									bucket: options.bucket,
+									key: options.key,
+									hash,
+									error: String(error),
+								}),
+							),
+						),
+						Effect.ignore,
+					)
 					yield* Deferred.succeed(deferred, value)
 				})
 

@@ -29,6 +29,17 @@ export const searchTraces = Effect.fn("Observability.searchTraces")(function* (i
 	if (input.service) yield* Effect.annotateCurrentSpan("service", input.service)
 	if (input.spanName) yield* Effect.annotateCurrentSpan("spanName", input.spanName)
 
+	// Root-level search is backed by the `list_traces` pipe, which only takes a
+	// single attribute filter. Reject N>1 filters so callers know to switch to
+	// span-level mode rather than silently drop everything past the first one.
+	const rootMode = !(input.spanName && !input.rootOnly)
+	if (rootMode && (input.attributeFilters?.length ?? 0) > 1) {
+		return yield* new ObservabilityError({
+			message:
+				"Root-level trace search supports at most one attribute filter. Provide spanName for span-level search to use multiple filters.",
+		})
+	}
+
 	const spans =
 		input.spanName && !input.rootOnly
 			? yield* spanLevelSearch(executor, input, limit, offset)

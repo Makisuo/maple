@@ -62,7 +62,9 @@ function normalizeWidget(raw: unknown): NormalizedWidget | undefined {
 }
 
 function WidgetRow({ widget }: { widget: NormalizedWidget }) {
-	const Icon = VIZ_ICONS[widget.visualization] ?? ChartLineIcon
+	const Icon = Object.hasOwn(VIZ_ICONS, widget.visualization)
+		? VIZ_ICONS[widget.visualization]
+		: ChartLineIcon
 	return (
 		<div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5">
 			<Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -252,8 +254,12 @@ export function AddDashboardWidgetSummary({ input }: ApprovalRendererProps) {
 	const obj = asRecord(input) ?? {}
 	const dashboardId = asString(obj.dashboard_id) ?? "—"
 	const visualization = asString(obj.visualization) ?? "chart"
-	const Icon = VIZ_ICONS[visualization] ?? ChartLineIcon
-	const vizLabel = VIZ_LABELS[visualization] ?? visualization
+	const Icon = Object.hasOwn(VIZ_ICONS, visualization)
+		? VIZ_ICONS[visualization]
+		: ChartLineIcon
+	const vizLabel = Object.hasOwn(VIZ_LABELS, visualization)
+		? VIZ_LABELS[visualization]
+		: visualization
 
 	const display = safeParseJson<Record<string, unknown>>(obj.display_json)
 	const dataSource = safeParseJson<Record<string, unknown>>(obj.data_source_json)

@@ -38,12 +38,23 @@ const toBase64Url = (input: string): string => {
 export const encodeWidgetFixContextToSearchParam = (ctx: WidgetFixContext): string =>
 	toBase64Url(JSON.stringify(ctx))
 
+const isWidgetFixContext = (value: unknown): value is WidgetFixContext => {
+	if (!value || typeof value !== "object") return false
+	const v = value as Record<string, unknown>
+	if (typeof v.dashboardId !== "string") return false
+	if (typeof v.widgetId !== "string") return false
+	if (typeof v.widgetTitle !== "string") return false
+	if (typeof v.widgetJson !== "string") return false
+	if (v.errorTitle !== null && typeof v.errorTitle !== "string") return false
+	if (v.errorMessage !== null && typeof v.errorMessage !== "string") return false
+	return true
+}
+
 export const decodeWidgetFixContextFromSearchParam = (raw: string): WidgetFixContext | undefined => {
 	try {
 		const json = fromBase64Url(raw)
-		const parsed = JSON.parse(json) as WidgetFixContext
-		if (!parsed || typeof parsed !== "object") return undefined
-		if (typeof parsed.dashboardId !== "string" || typeof parsed.widgetId !== "string") return undefined
+		const parsed = JSON.parse(json) as unknown
+		if (!isWidgetFixContext(parsed)) return undefined
 		return parsed
 	} catch {
 		return undefined

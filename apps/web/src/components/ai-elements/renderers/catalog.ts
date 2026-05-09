@@ -151,8 +151,8 @@ export const catalog = defineCatalog(schema, {
 				cards: z.array(
 					z.object({
 						label: z.string(),
-						value: z.number(),
-						format: z.enum(["number", "percent", "duration", "decimal"]),
+						value: z.union([z.string(), z.number()]),
+						format: z.enum(["number", "percent", "duration", "decimal", "text"]),
 					}),
 				),
 			}),

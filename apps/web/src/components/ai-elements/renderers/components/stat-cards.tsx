@@ -4,12 +4,15 @@ import { formatDuration, formatErrorRate, formatNumber } from "@/lib/format"
 interface StatCardsProps {
 	cards: Array<{
 		label: string
-		value: number
-		format: "number" | "percent" | "duration" | "decimal"
+		value: number | string
+		format: "number" | "percent" | "duration" | "decimal" | "text"
 	}>
 }
 
-function formatValue(value: number, format: string): string {
+function formatValue(value: number | string, format: string): string {
+	if (format === "text" || typeof value === "string") {
+		return String(value)
+	}
 	switch (format) {
 		case "number":
 			return formatNumber(value)

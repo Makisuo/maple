@@ -27,11 +27,17 @@ export function transformSpan(raw: SpanHierarchyRow): Span {
 	}
 }
 
+const MAX_SPAN_DEPTH = 200
+
 export function buildSpanTree(spans: Span[]): SpanNode[] {
 	const spanMap = new Map<string, SpanNode>()
 	const rootSpans: SpanNode[] = []
 
+	// Deduplicate spanIds — telemetry can occasionally emit duplicates which
+	// would otherwise cause the parent-child wiring below to attach the same
+	// node twice.
 	for (const span of spans) {
+		if (spanMap.has(span.spanId)) continue
 		spanMap.set(span.spanId, { ...span, children: [], depth: 0 })
 	}
 
@@ -40,6 +46,13 @@ export function buildSpanTree(spans: Span[]): SpanNode[] {
 	for (const span of spans) {
 		const node = spanMap.get(span.spanId)
 		if (!node) continue
+
+		// Reject self-parent links — they would form a cycle in the tree and
+		// crash the recursive traversals below.
+		if (span.parentSpanId === span.spanId) {
+			rootSpans.push(node)
+			continue
+		}
 
 		if (span.parentSpanId && spanMap.has(span.parentSpanId)) {
 			const parent = spanMap.get(span.parentSpanId)
@@ -74,7 +87,14 @@ export function buildSpanTree(spans: Span[]): SpanNode[] {
 		rootSpans.push(placeholder)
 	}
 
+	const visited = new Set<string>()
 	function setDepth(node: SpanNode, depth: number) {
+		if (visited.has(node.spanId) || depth > MAX_SPAN_DEPTH) {
+			node.depth = depth
+			node.children = []
+			return
+		}
+		visited.add(node.spanId)
 		node.depth = depth
 		for (const child of node.children) {
 			setDepth(child, depth + 1)

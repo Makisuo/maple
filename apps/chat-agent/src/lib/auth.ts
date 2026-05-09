@@ -26,11 +26,15 @@ const extractBearerToken = (request: Request): string | undefined => {
 	return undefined
 }
 
-const decodeBase64Url = (input: string): string => {
+const decodeBase64Url = (input: string): string | undefined => {
 	const normalized = input.replace(/-/g, "+").replace(/_/g, "/")
 	const padding = normalized.length % 4
 	const padded = padding === 0 ? normalized : normalized + "=".repeat(4 - padding)
-	return atob(padded)
+	try {
+		return atob(padded)
+	} catch {
+		return undefined
+	}
 }
 
 const constantTimeEqual = (a: Uint8Array, b: Uint8Array): boolean => {
@@ -46,9 +50,11 @@ const verifyHs256 = async (token: string, secret: string): Promise<{ sub: string
 	const parts = token.split(".")
 	if (parts.length !== 3) return undefined
 	const [encodedHeader, encodedPayload, encodedSignature] = parts as [string, string, string]
+	const decodedHeader = decodeBase64Url(encodedHeader)
+	if (decodedHeader === undefined) return undefined
 	let header: { alg?: string }
 	try {
-		header = JSON.parse(decodeBase64Url(encodedHeader)) as { alg?: string }
+		header = JSON.parse(decodedHeader) as { alg?: string }
 	} catch {
 		return undefined
 	}
@@ -64,11 +70,15 @@ const verifyHs256 = async (token: string, secret: string): Promise<{ sub: string
 	const expected = new Uint8Array(
 		await crypto.subtle.sign("HMAC", key, enc.encode(`${encodedHeader}.${encodedPayload}`)),
 	)
-	const provided = Uint8Array.from(decodeBase64Url(encodedSignature), (c) => c.charCodeAt(0))
+	const decodedSignature = decodeBase64Url(encodedSignature)
+	if (decodedSignature === undefined) return undefined
+	const provided = Uint8Array.from(decodedSignature, (c) => c.charCodeAt(0))
 	if (!constantTimeEqual(expected, provided)) return undefined
+	const decodedPayload = decodeBase64Url(encodedPayload)
+	if (decodedPayload === undefined) return undefined
 	let payload: { sub?: unknown; org_id?: unknown; exp?: unknown; nbf?: unknown }
 	try {
-		payload = JSON.parse(decodeBase64Url(encodedPayload)) as typeof payload
+		payload = JSON.parse(decodedPayload) as typeof payload
 	} catch {
 		return undefined
 	}

@@ -10,10 +10,10 @@ import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "../lib/query-tinybird"
 import { ErrorsService } from "@/services/ErrorsService"
-import type {
-	AlertDestinationId,
-	AlertSeverity,
+import {
 	ErrorNotificationPolicyUpsertRequest,
+	type AlertDestinationId,
+	type AlertSeverity,
 } from "@maple/domain/http"
 
 const validSeverities: ReadonlyArray<AlertSeverity> = ["warning", "critical"]
@@ -79,12 +79,18 @@ export function registerUpdateErrorNotificationPolicyTool(server: McpToolRegistr
 			if (min_occurrence_count !== undefined) patch.minOccurrenceCount = min_occurrence_count
 			if (severity !== undefined) patch.severity = severity as AlertSeverity
 
+			const decodedPatch = yield* Schema.decodeUnknownEffect(ErrorNotificationPolicyUpsertRequest)(patch).pipe(
+				Effect.mapError(
+					(error) =>
+						new McpQueryError({
+							message: `Invalid notification policy payload: ${String(error)}`,
+							pipe: "update_error_notification_policy",
+						}),
+				),
+			)
+
 			const policy = yield* errors
-				.upsertNotificationPolicy(
-					tenant.orgId,
-					tenant.userId,
-					patch as ErrorNotificationPolicyUpsertRequest,
-				)
+				.upsertNotificationPolicy(tenant.orgId, tenant.userId, decodedPatch)
 				.pipe(
 					Effect.mapError(
 						(error) =>

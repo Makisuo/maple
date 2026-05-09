@@ -76,6 +76,7 @@ export const findSlowTraces = Effect.fn("Observability.findSlowTraces")(function
 					start_time: input.timeRange.startTime,
 					end_time: input.timeRange.endTime,
 					...(input.service && { service: input.service }),
+					...(input.environment && { deployment_env: input.environment }),
 				},
 				{ profile: "aggregation" },
 			),

@@ -89,7 +89,17 @@ export interface ServiceEdgeData {
 }
 
 export const DB_NODE_PREFIX = "db:"
-export const dbNodeId = (system: string) => `${DB_NODE_PREFIX}${system}`
+export const SERVICE_NODE_PREFIX = "svc:"
+export const EDGE_ID_PREFIX = "edge:"
+
+const encodeIdComponent = (raw: string): string => encodeURIComponent(raw)
+
+export const dbNodeId = (system: string) => `${DB_NODE_PREFIX}${encodeIdComponent(system)}`
+export const svcNodeId = (service: string) => `${SERVICE_NODE_PREFIX}${encodeIdComponent(service)}`
+export const edgeIdFor = (source: string, target: string) =>
+	`${EDGE_ID_PREFIX}${encodeIdComponent(source)}:${encodeIdComponent(target)}`
+
+export const isDbNodeId = (id: string) => id.startsWith(DB_NODE_PREFIX)
 
 // Layout constants (defaults)
 export const DEFAULT_LAYOUT_CONFIG = {
@@ -241,7 +251,7 @@ export function buildFlowElements({
 	}
 
 	const flowEdges: Edge<ServiceEdgeData>[] = edges.map((edge) => ({
-		id: `${edge.sourceService}->${edge.targetService}`,
+		id: edgeIdFor(edge.sourceService, edge.targetService),
 		source: edge.sourceService,
 		target: edge.targetService,
 		type: "serviceEdge",
@@ -261,7 +271,7 @@ export function buildFlowElements({
 	for (const e of dbEdges) {
 		if (!e.dbSystem || !e.sourceService) continue
 		flowEdges.push({
-			id: `${e.sourceService}->${dbNodeId(e.dbSystem)}`,
+			id: edgeIdFor(e.sourceService, dbNodeId(e.dbSystem)),
 			source: e.sourceService,
 			target: dbNodeId(e.dbSystem),
 			type: "serviceEdge",

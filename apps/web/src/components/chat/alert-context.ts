@@ -27,11 +27,29 @@ const fromBase64Url = (input: string): string => {
 	return Buffer.from(full, "base64").toString("utf8")
 }
 
+const isAlertContext = (value: unknown): value is AlertContext => {
+	if (!value || typeof value !== "object") return false
+	const v = value as Record<string, unknown>
+	if (typeof v.ruleId !== "string") return false
+	if (typeof v.ruleName !== "string") return false
+	if (v.incidentId !== null && typeof v.incidentId !== "string") return false
+	if (typeof v.eventType !== "string") return false
+	if (typeof v.signalType !== "string") return false
+	if (typeof v.severity !== "string") return false
+	if (typeof v.comparator !== "string") return false
+	if (typeof v.threshold !== "number") return false
+	if (v.value !== null && typeof v.value !== "number") return false
+	if (typeof v.windowMinutes !== "number") return false
+	if (v.groupKey !== null && typeof v.groupKey !== "string") return false
+	if (v.sampleCount !== null && typeof v.sampleCount !== "number") return false
+	return true
+}
+
 export const decodeAlertContextFromSearchParam = (raw: string): AlertContext | undefined => {
 	try {
 		const json = fromBase64Url(raw)
-		const parsed = JSON.parse(json) as AlertContext
-		if (!parsed || typeof parsed !== "object") return undefined
+		const parsed = JSON.parse(json) as unknown
+		if (!isAlertContext(parsed)) return undefined
 		return parsed
 	} catch {
 		return undefined

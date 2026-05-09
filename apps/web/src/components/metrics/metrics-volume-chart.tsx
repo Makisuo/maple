@@ -28,13 +28,14 @@ const chartConfig = {
 interface MetricsVolumeChartProps {
 	metricName: string | null
 	metricType: GetMetricTimeSeriesInput["metricType"] | null
+	serviceName?: string | null
 }
 
 function formatTinybirdDateTime(date: Date): string {
 	return date.toISOString().slice(0, 19).replace("T", " ")
 }
 
-export function MetricsVolumeChart({ metricName, metricType }: MetricsVolumeChartProps) {
+export function MetricsVolumeChart({ metricName, metricType, serviceName }: MetricsVolumeChartProps) {
 	const endTime = formatTinybirdDateTime(new Date())
 	const startTime = formatTinybirdDateTime(new Date(Date.now() - 60 * 60 * 1000))
 
@@ -47,6 +48,7 @@ export function MetricsVolumeChart({ metricName, metricType }: MetricsVolumeChar
 						bucketSeconds: 60,
 						startTime,
 						endTime,
+						...(serviceName ? { service: serviceName } : {}),
 					},
 				})
 			: disabledResultAtom<MetricTimeSeriesResponse>(),

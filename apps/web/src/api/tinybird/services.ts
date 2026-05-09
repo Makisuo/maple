@@ -284,6 +284,7 @@ const getServicesFacetsEffect = Effect.fn("QueryEngine.getServicesFacets")(funct
 				environments.push(item)
 				break
 			case "commitSha":
+			case "commit_sha":
 				commitShas.push(item)
 				break
 		}

@@ -42,6 +42,7 @@ export function MetricsOverview() {
 			<MetricsVolumeChart
 				metricName={selectedMetric?.metricName ?? null}
 				metricType={(selectedMetric?.metricType as GetMetricTimeSeriesInput["metricType"]) ?? null}
+				serviceName={selectedMetric?.serviceName ?? null}
 			/>
 
 			<div>

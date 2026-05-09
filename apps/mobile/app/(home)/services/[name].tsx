@@ -34,7 +34,9 @@ function formatPercent(rate: number): string {
 export default function ServiceDetailScreen() {
 	const { name } = useLocalSearchParams<{ name: string }>()
 	const router = useRouter()
-	const serviceName = decodeURIComponent(name ?? "")
+	// Expo Router already decodes `name` for us; a second decodeURIComponent
+	// would crash on `%` characters inside the decoded value.
+	const serviceName = typeof name === "string" ? name : ""
 
 	const [selectedIndex, setSelectedIndex] = useState(1)
 	const timeKey = TIME_OPTIONS[selectedIndex]

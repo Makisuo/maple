@@ -7,8 +7,8 @@ import { printJson } from "../../services/Formatter"
 import { resolveTimeRange } from "../../lib/time"
 
 export const breakdown = Command.make("breakdown", {
-	source: Flag.choice("source", ["traces", "logs", "metrics"]).pipe(
-		Flag.withDescription("Data source"),
+	source: Flag.choice("source", ["traces"]).pipe(
+		Flag.withDescription("Data source (logs/metrics breakdown not yet wired through this command)"),
 		Flag.withDefault("traces"),
 	),
 	metric: Flag.string("metric").pipe(

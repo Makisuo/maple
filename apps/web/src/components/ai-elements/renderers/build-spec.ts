@@ -52,7 +52,12 @@ export function buildSpec(output: StructuredToolOutput): Spec {
 		case "find_errors": {
 			const d = output.data
 			const root = addElement(elements, "ErrorList", {
-				errors: d.errors,
+				errors: d.errors.map((e) => ({
+					errorType: e.errorType,
+					count: e.count,
+					affectedServices: [],
+					lastSeen: e.lastSeen,
+				})),
 			})
 			return { root, elements }
 		}

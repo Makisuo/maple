@@ -277,11 +277,15 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 												</TableCell>
 											</TableRow>
 											{envServices.map((service: ServiceOverview) => {
-												const serviceSeries = timeSeriesMap[service.serviceName]
-												const throughputData =
-													serviceSeries?.map((p) => ({ value: p.throughput })) ?? []
-												const errorRateData =
-													serviceSeries?.map((p) => ({ value: p.errorRate })) ?? []
+												const serviceSeries = Object.hasOwn(timeSeriesMap, service.serviceName)
+													? timeSeriesMap[service.serviceName]
+													: undefined
+												const throughputData = Array.isArray(serviceSeries)
+													? serviceSeries.map((p) => ({ value: p.throughput }))
+													: []
+												const errorRateData = Array.isArray(serviceSeries)
+													? serviceSeries.map((p) => ({ value: p.errorRate }))
+													: []
 
 												return (
 													<TableRow

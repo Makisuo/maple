@@ -735,9 +735,15 @@ export interface ErrorDetailTracesOutput {
 export function errorDetailTracesQuery(opts: ErrorDetailTracesOpts) {
 	const limit = opts.limit ?? 10
 
-	// Subquery: find distinct matching error TraceIds
+	// Subquery: find distinct matching error TraceIds. Order by the most
+	// recent Timestamp per trace so the LIMIT selects the N most recently
+	// errored traces — ordering by TraceId would return arbitrary ID-sorted
+	// rows that omit the most recent matches when the result is truncated.
 	const errorSub = from(ErrorSpans)
-		.select(($) => ({ TraceId: $.TraceId }))
+		.select(($) => ({
+			TraceId: $.TraceId,
+			lastErrorSeen: CH.max_($.Timestamp),
+		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			errorFingerprint($.StatusMessage).eq(opts.errorType),
@@ -747,7 +753,7 @@ export function errorDetailTracesQuery(opts: ErrorDetailTracesOpts) {
 			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
 		])
 		.groupBy("TraceId")
-		.orderBy(["TraceId", "desc"])
+		.orderBy(["lastErrorSeen", "desc"])
 		.limit(limit)
 
 	// Outer query: join traces with error subquery

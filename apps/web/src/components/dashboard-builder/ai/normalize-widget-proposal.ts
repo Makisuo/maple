@@ -3,6 +3,7 @@ import type {
 	WidgetDataSource,
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
+import { serverFunctionMap } from "@/components/dashboard-builder/data-source-registry"
 import {
 	QUERY_BUILDER_METRIC_TYPES,
 	createQueryDraft,
@@ -571,6 +572,14 @@ function inferMetricDisplayUnit(
 }
 
 export function normalizeAiWidgetProposal(input: AiWidgetProposal): NormalizeAiWidgetProposalResult {
+	if (!Object.hasOwn(serverFunctionMap, input.dataSource.endpoint)) {
+		return {
+			kind: "blocked",
+			reason: `Unknown data source endpoint: ${input.dataSource.endpoint}`,
+			proposal: input,
+		}
+	}
+
 	if (
 		input.visualization === "list" &&
 		(input.dataSource.endpoint === "list_traces" || input.dataSource.endpoint === "list_logs")

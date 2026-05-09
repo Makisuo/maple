@@ -26,7 +26,7 @@ export interface PlanFeature {
 
 export const PLAN_FEATURES: Record<string, PlanFeature[]> = {
 	starter: [
-		{ icon: "clock", label: "Data retention", value: "14 days" },
+		{ icon: "clock", label: "Data retention", value: "7 days" },
 		{ icon: "grid", label: "Dashboards", value: "Unlimited" },
 		{ icon: "bell", label: "Alerting", value: "Advanced" },
 		{ icon: "code", label: "API access", value: "Full" },

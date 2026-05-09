@@ -22,5 +22,5 @@ export interface Env {
 	SD_INTERNAL_TOKEN?: string
 	RESEND_API_KEY?: string
 	RESEND_FROM_EMAIL?: string
-	OPENROUTER_API_KEY: string
+	OPENROUTER_API_KEY?: string
 }

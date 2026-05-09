@@ -143,7 +143,7 @@ export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasPr
 
 	const handleLayoutChange = useCallback(
 		(layout: Layout) => {
-			if (readOnly) return
+			if (!editable) return
 			if (!initialLayoutSeenRef.current) {
 				initialLayoutSeenRef.current = true
 				return
@@ -158,7 +158,7 @@ export function DashboardCanvas({ widgets, readOnly = false }: DashboardCanvasPr
 				})),
 			)
 		},
-		[readOnly, updateWidgetLayouts],
+		[editable, updateWidgetLayouts],
 	)
 
 	return (

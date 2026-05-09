@@ -2700,13 +2700,20 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							})
 
 							if (failure.retryable && row.attemptNumber < MAX_DELIVERY_ATTEMPTS) {
+								// Carry the original delivery payload through the retry. Empty
+								// payloads here would force the next attempt to fall back on
+								// rule-row defaults, losing observed value, sample count,
+								// dedupe context, and links.
+								const retryPayload = (yield* parseDeliveryPayload(row.payloadJson).pipe(
+									Effect.orElseSucceed(() => ({})),
+								)) as Record<string, unknown>
 								yield* insertDeliveryEvent(
 									row.orgId as OrgId,
 									row.incidentId ? decodeAlertIncidentIdSync(row.incidentId) : null,
 									decodeAlertRuleIdSync(row.ruleId),
 									decodeAlertDestinationIdSync(row.destinationId),
 									decodeAlertEventTypeSync(row.eventType),
-									{} as Record<string, unknown>,
+									retryPayload,
 									currentTime + computeRetryDelayMs(row.attemptNumber),
 									row.deliveryKey,
 									row.attemptNumber + 1,

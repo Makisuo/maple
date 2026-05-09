@@ -7,8 +7,10 @@ import { printJson } from "../../services/Formatter"
 import { resolveTimeRange } from "../../lib/time"
 
 export const timeseries = Command.make("timeseries", {
-	source: Flag.choice("source", ["traces", "logs", "metrics"]).pipe(
-		Flag.withDescription("Data source"),
+	source: Flag.choice("source", ["traces", "logs"]).pipe(
+		Flag.withDescription(
+			"Data source (metrics timeseries needs metric_name/metric_type and is not exposed here)",
+		),
 		Flag.withDefault("traces"),
 	),
 	metric: Flag.string("metric").pipe(
