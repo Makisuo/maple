@@ -32,53 +32,70 @@ export function serviceDependenciesSQL(
 	const esc = escapeClickHouseString
 	const envFilter = opts.deploymentEnv ? `AND DeploymentEnv = '${esc(opts.deploymentEnv)}'` : ""
 
-	// Node 1: Pre-aggregated hourly edges (peer.service path).
-	// `SampleRateSum` is a per-row weighted sum maintained by the MV — replaces
-	// the `sampledSpanCount * dominantWeight` approximation, which inflated
-	// estimates by orders of magnitude when sampling rates varied within a bucket.
+	// Inner branches expose distinct alias names (`bucket*`) so the outer
+	// SELECT's `sum(...) AS callCount` doesn't collide with an inner
+	// `sum(CallCount) AS callCount`. ClickHouse's UNION-ALL+GROUP-BY
+	// optimizer otherwise rewrites the outer as `sum(sum(CallCount))` and
+	// rejects the query with "found inside another aggregate function".
 	//
-	// Per-row fallback `if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))`:
-	// the SampleRateSum column was added after this MV existed, so historical
-	// hourly buckets have SampleRateSum=0. For those buckets we fall back to
-	// CallCount (treats them as unsampled) — accurate for new buckets, degraded
-	// but non-zero for old ones. Safe across mixed time ranges.
+	// We also carry `bucketDurationSumMs` separately from `bucketCallCount`
+	// so the outer can compute a properly-weighted average:
+	//   sum(bucketDurationSumMs) / sum(bucketCallCount)
+	// instead of `avg(avgDurationMs)` (averaging averages, which ignores
+	// the relative call counts of each branch).
+	//
+	// Time ranges are split so the two branches don't double-count the
+	// in-progress hour: the MV covers complete hourly buckets strictly
+	// before `toStartOfHour(endTime)`, the raw join scans only from there
+	// to `endTime`. (Previously the MV included the in-progress hour AND
+	// the raw join read the trailing hour, so spans inside the current
+	// hour got counted twice.)
+	//
+	// `bucketEstimatedSpanCount` per-row fallback
+	// `if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))`: the
+	// SampleRateSum column was added after this MV existed, so historical
+	// buckets have SampleRateSum=0. For those buckets we treat them as
+	// unsampled — accurate for new buckets, degraded but non-zero for old
+	// ones. Safe across mixed time ranges.
 	const peerServiceEdges = `SELECT
       SourceService AS sourceService,
       TargetService AS targetService,
-      sum(CallCount) AS callCount,
-      sum(ErrorCount) AS errorCount,
-      sum(DurationSumMs) / sum(CallCount) AS avgDurationMs,
-      max(MaxDurationMs) AS p95DurationMs,
-      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS estimatedSpanCount
+      sum(CallCount) AS bucketCallCount,
+      sum(ErrorCount) AS bucketErrorCount,
+      sum(DurationSumMs) AS bucketDurationSumMs,
+      max(MaxDurationMs) AS bucketMaxDurationMs,
+      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
     FROM service_map_edges_hourly
     WHERE OrgId = '${esc(params.orgId)}'
       AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
-      AND Hour <= '${esc(params.endTime)}'
+      AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
       ${envFilter}
     GROUP BY sourceService, targetService`
 
-	// Node 2: Join-based edges (Client/Producer spans without peer.service).
-	// `service_map_children` doesn't carry SampleRate yet (it's a TraceState-only
-	// projection) so we compute the per-row weight inline from `c.TraceState`.
+	// Join-based edges for the in-progress hour only (Client/Producer spans
+	// without peer.service). `service_map_children` doesn't carry SampleRate
+	// yet — it's a TraceState-only projection — so we compute the per-row
+	// weight inline from `c.TraceState`. Duration math stays consistent with
+	// the MV branch by exposing sum/max separately.
 	const joinEdges = `SELECT
       p.ServiceName AS sourceService,
       c.ServiceName AS targetService,
-      count() AS callCount,
-      countIf(c.StatusCode = 'Error') AS errorCount,
-      avg(c.Duration / 1000000) AS avgDurationMs,
-      quantile(0.95)(c.Duration / 1000000) AS p95DurationMs,
+      count() AS bucketCallCount,
+      countIf(c.StatusCode = 'Error') AS bucketErrorCount,
+      sum(c.Duration / 1000000) AS bucketDurationSumMs,
+      max(c.Duration / 1000000) AS bucketMaxDurationMs,
       sum(multiIf(
         match(c.TraceState, 'th:[0-9a-f]+'),
         1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001),
         1.0
-      )) AS estimatedSpanCount
+      )) AS bucketEstimatedSpanCount
     FROM (
       SELECT TraceId, SpanId, ServiceName
       FROM service_map_spans
       WHERE OrgId = '${esc(params.orgId)}'
         AND SpanKind IN ('Client', 'Producer')
         AND PeerService = ''
-        AND Timestamp >= addHours(toDateTime('${esc(params.endTime)}'), -1)
+        AND Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))
         AND Timestamp <= '${esc(params.endTime)}'
         ${envFilter}
     ) AS p
@@ -86,7 +103,7 @@ export function serviceDependenciesSQL(
       SELECT TraceId, ParentSpanId, ServiceName, Duration, StatusCode, TraceState
       FROM service_map_children
       WHERE OrgId = '${esc(params.orgId)}'
-        AND Timestamp >= addHours(toDateTime('${esc(params.endTime)}'), -1)
+        AND Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))
         AND Timestamp <= '${esc(params.endTime)}'
         ${envFilter}
     ) AS c
@@ -97,11 +114,11 @@ export function serviceDependenciesSQL(
 	const sql = `SELECT
   sourceService,
   targetService,
-  sum(callCount) AS callCount,
-  sum(errorCount) AS errorCount,
-  avg(avgDurationMs) AS avgDurationMs,
-  max(p95DurationMs) AS p95DurationMs,
-  sum(estimatedSpanCount) AS estimatedSpanCount
+  sum(bucketCallCount) AS callCount,
+  sum(bucketErrorCount) AS errorCount,
+  sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+  max(bucketMaxDurationMs) AS p95DurationMs,
+  sum(bucketEstimatedSpanCount) AS estimatedSpanCount
 FROM (
   ${peerServiceEdges}
   UNION ALL
@@ -158,39 +175,43 @@ export function serviceDbEdgesSQL(
 		? `AND ResourceAttributes['deployment.environment'] = '${esc(opts.deploymentEnv)}'`
 		: ""
 
-	// Hourly pre-aggregated buckets — covers everything except the in-flight hour.
-	// `SampleRateSum` is the per-row weighted sum maintained by the MV. Historical
-	// buckets that pre-date the column have SampleRateSum=0, so fall back to
-	// CallCount per-row (treats those buckets as unsampled — degraded but safe).
+	// Inner branches expose `bucket*` aliases so the outer `sum(...) AS callCount`
+	// can't collide with an inner `sum(CallCount) AS callCount` — same fix as
+	// `serviceDependenciesSQL` for the same nested-aggregate optimizer error.
+	// Historical buckets that pre-date the SampleRateSum column have it set to
+	// 0, so we fall back to CallCount per-row (treats those buckets as
+	// unsampled — degraded but safe).
 	const hourlyEdges = `SELECT
       ServiceName AS sourceService,
       DbSystem AS dbSystem,
-      sum(CallCount) AS callCount,
-      sum(ErrorCount) AS errorCount,
-      sum(DurationSumMs) / sum(CallCount) AS avgDurationMs,
-      max(MaxDurationMs) AS p95DurationMs,
-      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS estimatedSpanCount
+      sum(CallCount) AS bucketCallCount,
+      sum(ErrorCount) AS bucketErrorCount,
+      sum(DurationSumMs) AS bucketDurationSumMs,
+      max(MaxDurationMs) AS bucketMaxDurationMs,
+      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
     FROM service_map_db_edges_hourly
     WHERE OrgId = '${esc(params.orgId)}'
       AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
-      AND Hour <= '${esc(params.endTime)}'
+      AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
       AND DbSystem != ''
       ${envFilterMv}
     GROUP BY sourceService, dbSystem`
 
-	// Trailing-hour raw fallback so the current incomplete bucket is included.
-	// Reads the per-row `SampleRate` column directly; no inline weight math needed.
+	// Raw fallback for the in-progress hour only (the MV branch stops at
+	// `toStartOfHour(endTime)`). Reads per-row `SampleRate` directly so no
+	// inline weight math is needed. Carries `bucketDurationSumMs` separately
+	// so the outer can do a properly-weighted average.
 	const recentEdges = `SELECT
       ServiceName AS sourceService,
       SpanAttributes['db.system'] AS dbSystem,
-      count() AS callCount,
-      countIf(StatusCode = 'Error') AS errorCount,
-      avg(Duration / 1000000) AS avgDurationMs,
-      quantile(0.95)(Duration / 1000000) AS p95DurationMs,
-      sum(SampleRate) AS estimatedSpanCount
+      count() AS bucketCallCount,
+      countIf(StatusCode = 'Error') AS bucketErrorCount,
+      sum(Duration / 1000000) AS bucketDurationSumMs,
+      max(Duration / 1000000) AS bucketMaxDurationMs,
+      sum(SampleRate) AS bucketEstimatedSpanCount
     FROM traces
     WHERE OrgId = '${esc(params.orgId)}'
-      AND Timestamp >= addHours(toDateTime('${esc(params.endTime)}'), -1)
+      AND Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))
       AND Timestamp <= '${esc(params.endTime)}'
       AND SpanKind IN ('Client', 'Producer')
       AND SpanAttributes['db.system'] != ''
@@ -201,11 +222,11 @@ export function serviceDbEdgesSQL(
 	const sql = `SELECT
   sourceService,
   dbSystem,
-  sum(callCount) AS callCount,
-  sum(errorCount) AS errorCount,
-  avg(avgDurationMs) AS avgDurationMs,
-  max(p95DurationMs) AS p95DurationMs,
-  sum(estimatedSpanCount) AS estimatedSpanCount
+  sum(bucketCallCount) AS callCount,
+  sum(bucketErrorCount) AS errorCount,
+  sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
+  max(bucketMaxDurationMs) AS p95DurationMs,
+  sum(bucketEstimatedSpanCount) AS estimatedSpanCount
 FROM (
   ${hourlyEdges}
   UNION ALL

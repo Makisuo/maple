@@ -5,6 +5,12 @@ import { withDashboardMutation } from "../lib/dashboard-mutations"
 
 const TOOL = "reorder_dashboard_widgets"
 
+// Web canvas grid is 12 columns wide. Heights are unbounded vertically but
+// must be at least 1 row. Anything outside these bounds will render off the
+// grid or with negative dimensions, so reject it server-side rather than
+// letting a malformed layout corrupt the dashboard.
+const GRID_COLS = 12
+
 const LayoutEntrySchema = Schema.Struct({
 	widget_id: Schema.String,
 	x: Schema.Number,
@@ -18,6 +24,40 @@ const LayoutEntrySchema = Schema.Struct({
 })
 
 const LayoutsFromJson = Schema.fromJsonString(Schema.Array(LayoutEntrySchema))
+
+type LayoutEntry = typeof LayoutEntrySchema.Type
+
+const validateLayoutGeometry = (entries: ReadonlyArray<LayoutEntry>): string[] => {
+	const errors: string[] = []
+	for (const entry of entries) {
+		if (!Number.isInteger(entry.x) || entry.x < 0) {
+			errors.push(`${entry.widget_id}: x must be an integer >= 0 (got ${entry.x})`)
+		}
+		if (!Number.isInteger(entry.y) || entry.y < 0) {
+			errors.push(`${entry.widget_id}: y must be an integer >= 0 (got ${entry.y})`)
+		}
+		if (!Number.isInteger(entry.w) || entry.w < 1 || entry.w > GRID_COLS) {
+			errors.push(
+				`${entry.widget_id}: w must be an integer between 1 and ${GRID_COLS} (got ${entry.w})`,
+			)
+		}
+		if (!Number.isInteger(entry.h) || entry.h < 1) {
+			errors.push(`${entry.widget_id}: h must be an integer >= 1 (got ${entry.h})`)
+		}
+		if (
+			Number.isInteger(entry.x) &&
+			Number.isInteger(entry.w) &&
+			entry.x >= 0 &&
+			entry.w >= 1 &&
+			entry.x + entry.w > GRID_COLS
+		) {
+			errors.push(
+				`${entry.widget_id}: x+w must not exceed ${GRID_COLS} (got x=${entry.x} w=${entry.w})`,
+			)
+		}
+	}
+	return errors
+}
 
 export function registerReorderDashboardWidgetsTool(server: McpToolRegistrar) {
 	server.tool(
@@ -49,6 +89,19 @@ export function registerReorderDashboardWidgetsTool(server: McpToolRegistrar) {
 						{
 							type: "text" as const,
 							text: "layouts_json must contain at least one layout entry.",
+						},
+					],
+				}
+			}
+
+			const geometryErrors = validateLayoutGeometry(layouts)
+			if (geometryErrors.length > 0) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text" as const,
+							text: `Invalid layout geometry:\n- ${geometryErrors.join("\n- ")}`,
 						},
 					],
 				}
