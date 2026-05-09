@@ -16,7 +16,6 @@
 	],
 	"scripts": {
 		"start": "bun src/cli.ts",
-		"test": "bun test",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
