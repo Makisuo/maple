@@ -1,6 +1,6 @@
-import { Result, useAtom, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { useCallback, useEffect, useRef } from "react"
-import { Exit, Schema } from "effect"
+import { Result, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { useCallback, useEffect, useMemo, useRef } from "react"
+import { Cause, Exit, Schema } from "effect"
 import {
 	DashboardCreateRequest,
 	DashboardDocument,
@@ -52,6 +52,29 @@ function getErrorMessage(error: unknown): string {
 	}
 
 	return "Dashboard persistence is temporarily unavailable"
+}
+
+// Walk a Cause/Exit failure chain to detect a server-side concurrency
+// rejection. The persistence layer surfaces these as a tagged error with the
+// `@maple/http/errors/DashboardConcurrencyError` identifier; this matches both
+// Effect-tagged class instances and the JSON shape the HTTP boundary decodes
+// into on the client side.
+function isConcurrencyConflict(failure: unknown): boolean {
+	const visit = (value: unknown): boolean => {
+		if (value === null || typeof value !== "object") return false
+		const tag = (value as { _tag?: unknown })._tag
+		if (typeof tag === "string" && tag.includes("DashboardConcurrencyError")) return true
+		if (Cause.isCause(value)) {
+			return visit(Cause.squash(value))
+		}
+		return false
+	}
+
+	if (Exit.isExit(failure)) {
+		if (!Exit.isFailure(failure)) return false
+		return visit(Cause.squash(failure.cause))
+	}
+	return visit(failure)
 }
 
 function ensureDashboard(value: unknown): Dashboard | null {
@@ -140,9 +163,16 @@ export function useDashboardStore() {
 	const [dashboards, setDashboards] = useAtom(dashboardsAtom)
 	const [persistenceError, setPersistenceError] = useAtom(persistenceErrorAtom)
 
-	const listResult = useAtomValue(
-		MapleApiAtomClient.query("dashboards", "list", { reactivityKeys: ["dashboards"] }),
+	// Hoist the list query atom so `useAtomRefresh` and `useAtomValue` operate
+	// on the same instance — without the memo, each render builds a fresh atom
+	// and the refresh handle ends up pointing at a stale, garbage-collected
+	// query.
+	const listQueryAtom = useMemo(
+		() => MapleApiAtomClient.query("dashboards", "list", { reactivityKeys: ["dashboards"] }),
+		[],
 	)
+	const listResult = useAtomValue(listQueryAtom)
+	const refetchDashboards = useAtomRefresh(listQueryAtom)
 	const createMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "create"), {
 		mode: "promiseExit",
 	})
@@ -183,37 +213,79 @@ export function useDashboardStore() {
 	setDashboardsRef.current = setDashboards
 	const setPersistenceErrorRef = useRef(setPersistenceError)
 	setPersistenceErrorRef.current = setPersistenceError
+	const refetchDashboardsRef = useRef(refetchDashboards)
+	refetchDashboardsRef.current = refetchDashboards
+
+	// Per-dashboard FIFO queue. Each mutation chains off the tail so two quick
+	// `mutateDashboard` calls against the same id can't race each other —
+	// otherwise both would capture the same `dashboardsRef.current` snapshot
+	// before the first re-render lands and the second would clobber the first.
+	const mutationQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
 
 	const mutateDashboard = useCallback(
 		async (dashboardId: string, updater: (dashboard: Dashboard) => Dashboard): Promise<void> => {
-			// Capture snapshot at call time via ref — safe under concurrent mutations
-			const snapshot = [...dashboardsRef.current]
-			const index = snapshot.findIndex((d) => d.id === dashboardId)
-			if (index < 0) return
+			const previousTail = mutationQueuesRef.current.get(dashboardId) ?? Promise.resolve()
 
-			const updated = updater(snapshot[index])
+			const next = previousTail
+				.catch(() => undefined)
+				.then(async () => {
+					// Capture snapshot AFTER any previous tail's optimistic state
+					// has been written back to `dashboardsRef.current` — this is
+					// what makes the queue safe for back-to-back edits.
+					const snapshot = [...dashboardsRef.current]
+					const index = snapshot.findIndex((d) => d.id === dashboardId)
+					if (index < 0) return
 
-			// Skip no-op mutations (e.g. layout change on mount with same values)
-			if (updated === snapshot[index]) return
+					const updated = updater(snapshot[index])
 
-			const next = [...snapshot]
-			next[index] = updated
+					// Skip no-op mutations (e.g. layout change on mount with same values)
+					if (updated === snapshot[index]) return
 
-			// Optimistic update
-			setDashboardsRef.current(next)
+					const nextDashboards = [...snapshot]
+					nextDashboards[index] = updated
 
-			const result = await upsertRef.current({
-				params: { dashboardId: asDashboardId(updated.id) },
-				payload: new DashboardUpsertRequest({
-					dashboard: toDashboardDocument(updated),
-				}),
-				reactivityKeys: ["dashboards", `dashboard:${updated.id}:versions`],
+					// Optimistic update
+					setDashboardsRef.current(nextDashboards)
+
+					const result = await upsertRef.current({
+						params: { dashboardId: asDashboardId(updated.id) },
+						payload: new DashboardUpsertRequest({
+							dashboard: toDashboardDocument(updated),
+						}),
+						reactivityKeys: ["dashboards", `dashboard:${updated.id}:versions`],
+					})
+
+					if (Exit.isFailure(result)) {
+						// Always roll back the optimistic update before deciding
+						// what to do about the error.
+						setDashboardsRef.current(snapshot)
+
+						if (isConcurrencyConflict(result)) {
+							// Someone else wrote the same dashboard between our
+							// read and our write. Refetch so the user picks up
+							// the latest server state and can re-apply their
+							// edit on top of it. Surface a transient banner so
+							// the user knows their last save did not land.
+							setPersistenceErrorRef.current(
+								"Another editor saved changes to this dashboard. Refetching the latest version — re-apply your edit if needed.",
+							)
+							refetchDashboardsRef.current()
+						} else {
+							setPersistenceErrorRef.current(getErrorMessage(result))
+						}
+					}
+				})
+
+			mutationQueuesRef.current.set(dashboardId, next)
+
+			// Drop the entry once it settles so the map doesn't grow unbounded.
+			next.finally(() => {
+				if (mutationQueuesRef.current.get(dashboardId) === next) {
+					mutationQueuesRef.current.delete(dashboardId)
+				}
 			})
 
-			if (Exit.isFailure(result)) {
-				setDashboardsRef.current(snapshot)
-				setPersistenceErrorRef.current(getErrorMessage(result))
-			}
+			await next
 		},
 		[],
 	)

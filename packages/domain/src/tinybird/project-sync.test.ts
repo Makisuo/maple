@@ -291,7 +291,7 @@ describe("Tinybird project sync", () => {
 	})
 
 	describe("cleanupStaleTinybirdDeployments", () => {
-		it("deletes non-live deployments returned by the list endpoint", async () => {
+		it("deletes only deployments in terminal failed states", async () => {
 			const calls: Array<{ method: string; url: string }> = []
 
 			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -304,8 +304,13 @@ describe("Tinybird project sync", () => {
 					return jsonResponse({
 						deployments: [
 							{ id: "live-1", status: "live", live: true },
-							{ id: "stale-1", status: "deploying", live: false },
-							{ id: "stale-2", status: "data_ready", live: false },
+							// In-flight states must not be deleted — these are active
+							// deployments about to be promoted.
+							{ id: "in-flight-1", status: "deploying", live: false },
+							{ id: "in-flight-2", status: "data_ready", live: false },
+							// Terminal failed states are safe to clean up.
+							{ id: "failed-1", status: "failed", live: false },
+							{ id: "failed-2", status: "error", live: false },
 						],
 					})
 				}
@@ -320,7 +325,7 @@ describe("Tinybird project sync", () => {
 
 			const deletes = calls.filter((c) => c.method === "DELETE")
 			const deleteIds = deletes.map((c) => c.url.match(/\/v1\/deployments\/([^?]+)/)?.[1]).sort()
-			expect(deleteIds).toEqual(["stale-1", "stale-2"])
+			expect(deleteIds).toEqual(["failed-1", "failed-2"])
 		})
 
 		it("is a no-op when there are no stale deployments", async () => {

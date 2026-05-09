@@ -3,11 +3,12 @@ import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
-import { DashboardDocument, PortableDashboardDocument } from "@maple/domain/http"
+import { DashboardDocument, DashboardId, PortableDashboardDocument } from "@maple/domain/http"
 import { IsoDateTimeString } from "@maple/domain"
 
 const PortableDashboardFromJson = Schema.fromJsonString(PortableDashboardDocument)
 const decodeIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)
+const decodeDashboardId = Schema.decodeUnknownSync(DashboardId)
 
 const TIME_RANGE_MAP: Record<string, string> = {
 	"1h": "1h",
@@ -41,19 +42,78 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 			const tenant = yield* resolveTenant
 			const persistence = yield* DashboardPersistenceService
 
-			const result = yield* persistence.list(tenant.orgId).pipe(
-				Effect.mapError(
-					(error) =>
-						new McpQueryError({
-							message: error.message,
-							pipe: "update_dashboard",
-						}),
-				),
-			)
+			const portable = dashboard_json
+				? yield* Schema.decodeUnknownEffect(PortableDashboardFromJson)(dashboard_json).pipe(
+						Effect.mapError(
+							() =>
+								new McpQueryError({
+									message: "Invalid dashboard JSON",
+									pipe: "update_dashboard",
+								}),
+						),
+					)
+				: null
 
-			const existing = result.dashboards.find((d) => d.id === dashboard_id)
+			const dashboardIdBranded = decodeDashboardId(dashboard_id)
 
-			if (!existing) {
+			const result = yield* persistence
+				.mutate(tenant.orgId, tenant.userId, dashboardIdBranded, (existing) =>
+					Effect.sync(() => {
+						const now = decodeIsoDateTimeString(new Date().toISOString())
+
+						if (portable) {
+							// Full-replacement path. Variables aren't part of the
+							// portable export schema, so preserve whatever the
+							// stored dashboard already had — otherwise a "rename"
+							// via this branch would silently wipe variables.
+							return new DashboardDocument({
+								id: existing.id,
+								name: portable.name,
+								description: portable.description,
+								tags: portable.tags,
+								timeRange: portable.timeRange,
+								variables: existing.variables,
+								widgets: portable.widgets,
+								createdAt: existing.createdAt,
+								updatedAt: now,
+							})
+						}
+
+						const timeRange = time_range
+							? {
+									type: "relative" as const,
+									value: TIME_RANGE_MAP[time_range] ?? time_range,
+								}
+							: existing.timeRange
+
+						return new DashboardDocument({
+							id: existing.id,
+							name: name ?? existing.name,
+							description: description ?? existing.description,
+							tags: existing.tags,
+							timeRange,
+							variables: existing.variables,
+							widgets: existing.widgets,
+							createdAt: existing.createdAt,
+							updatedAt: now,
+						})
+					}),
+				)
+				.pipe(
+					Effect.map((dashboard) => ({ ok: true as const, dashboard })),
+					Effect.catchTag("@maple/http/errors/DashboardNotFoundError", () =>
+						Effect.succeed({ ok: false as const }),
+					),
+					Effect.mapError(
+						(error) =>
+							new McpQueryError({
+								message: error.message,
+								pipe: "update_dashboard",
+							}),
+					),
+				)
+
+			if (!result.ok) {
 				return {
 					isError: true,
 					content: [
@@ -65,62 +125,7 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 				}
 			}
 
-			const now = decodeIsoDateTimeString(new Date().toISOString())
-
-			let updated: DashboardDocument
-
-			if (dashboard_json) {
-				const portable = yield* Schema.decodeUnknownEffect(PortableDashboardFromJson)(
-					dashboard_json,
-				).pipe(
-					Effect.mapError(
-						() =>
-							new McpQueryError({
-								message: "Invalid dashboard JSON",
-								pipe: "update_dashboard",
-							}),
-					),
-				)
-
-				updated = new DashboardDocument({
-					id: existing.id,
-					name: portable.name,
-					description: portable.description,
-					tags: portable.tags,
-					timeRange: portable.timeRange,
-					widgets: portable.widgets,
-					createdAt: existing.createdAt,
-					updatedAt: now,
-				})
-			} else {
-				const timeRange = time_range
-					? {
-							type: "relative" as const,
-							value: TIME_RANGE_MAP[time_range] ?? time_range,
-						}
-					: existing.timeRange
-
-				updated = new DashboardDocument({
-					id: existing.id,
-					name: name ?? existing.name,
-					description: description ?? existing.description,
-					tags: existing.tags,
-					timeRange,
-					widgets: existing.widgets,
-					createdAt: existing.createdAt,
-					updatedAt: now,
-				})
-			}
-
-			const dashboard = yield* persistence.upsert(tenant.orgId, tenant.userId, updated).pipe(
-				Effect.mapError(
-					(error) =>
-						new McpQueryError({
-							message: error.message,
-							pipe: "update_dashboard",
-						}),
-				),
-			)
+			const { dashboard } = result
 
 			const lines: string[] = [
 				`## Dashboard Updated`,

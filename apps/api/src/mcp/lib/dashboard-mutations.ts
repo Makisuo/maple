@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import {
 	DashboardDocument,
+	DashboardId,
 	DashboardWidgetSchema,
 	IsoDateTimeString,
 	WidgetDataSourceSchema,
@@ -11,6 +12,8 @@ import {
 import { resolveTenant } from "@/mcp/lib/query-tinybird"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
 import { McpQueryError } from "@/mcp/tools/types"
+
+const decodeDashboardId = Schema.decodeUnknownSync(DashboardId)
 
 export type DashboardWidget = typeof DashboardWidgetSchema.Type
 export type WidgetLayout = typeof WidgetLayoutSchema.Type
@@ -104,6 +107,13 @@ export class DashboardMutationNotFound {
  * existing widgets and should return the new widget array; any other change
  * (rename, description, etc.) should stay on the dedicated `update_dashboard`
  * tool.
+ *
+ * Concurrency: delegates to `persistence.mutate`, which uses a compare-and-swap
+ * on `dashboards.version`. If a concurrent writer (another MCP call or web
+ * edit) lands between our read and write the transform is re-applied on top
+ * of the new state and retried. After exhausting the retry budget the caller
+ * receives a `DashboardConcurrencyError` (mapped here to `McpQueryError`),
+ * which is preferable to a silent lost update.
  */
 export const withDashboardMutation = <E, R>(
 	dashboardId: string,
@@ -116,49 +126,49 @@ export const withDashboardMutation = <E, R>(
 		const tenant = yield* resolveTenant
 		const persistence = yield* DashboardPersistenceService
 
-		const result = yield* persistence.list(tenant.orgId).pipe(
-			Effect.mapError(
-				(error) =>
-					new McpQueryError({
-						message: error.message,
-						pipe: tool,
+		// `mutate` reports "not found" via a typed `DashboardNotFoundError` and
+		// concurrency exhaustion via `DashboardConcurrencyError`. We collapse
+		// the not-found case into the structured `notFound` return shape that
+		// callers already render to the user, and map every other persistence
+		// error onto `McpQueryError`.
+		const dashboardIdBranded = decodeDashboardId(dashboardId)
+
+		return yield* persistence
+			.mutate(tenant.orgId, tenant.userId, dashboardIdBranded, (existing) =>
+				Effect.gen(function* () {
+					const nextWidgets = yield* transform(existing.widgets)
+					const now = decodeIsoDateTimeString(new Date().toISOString())
+
+					return new DashboardDocument({
+						id: existing.id,
+						name: existing.name,
+						description: existing.description,
+						tags: existing.tags,
+						timeRange: existing.timeRange,
+						variables: existing.variables,
+						widgets: nextWidgets,
+						createdAt: existing.createdAt,
+						updatedAt: now,
+					})
+				}),
+			)
+			.pipe(
+				Effect.map((dashboard) => ({ ok: true as const, dashboard })),
+				Effect.catchTag("@maple/http/errors/DashboardNotFoundError", () =>
+					Effect.succeed({
+						ok: false as const,
+						notFound: `Dashboard not found: ${dashboardId}. Use list_dashboards to find available dashboard IDs.`,
 					}),
-			),
-		)
-
-		const existing = result.dashboards.find((d) => d.id === dashboardId)
-
-		if (!existing) {
-			return {
-				ok: false as const,
-				notFound: `Dashboard not found: ${dashboardId}. Use list_dashboards to find available dashboard IDs.`,
-			}
-		}
-
-		const nextWidgets = yield* transform(existing.widgets)
-		const now = decodeIsoDateTimeString(new Date().toISOString())
-
-		const updated = new DashboardDocument({
-			id: existing.id,
-			name: existing.name,
-			description: existing.description,
-			tags: existing.tags,
-			timeRange: existing.timeRange,
-			variables: existing.variables,
-			widgets: nextWidgets,
-			createdAt: existing.createdAt,
-			updatedAt: now,
-		})
-
-		const dashboard = yield* persistence.upsert(tenant.orgId, tenant.userId, updated).pipe(
-			Effect.mapError(
-				(error) =>
-					new McpQueryError({
-						message: error.message,
-						pipe: tool,
-					}),
-			),
-		)
-
-		return { ok: true as const, dashboard }
+				),
+				Effect.mapError((error) => {
+					const message =
+						error !== null &&
+						typeof error === "object" &&
+						"message" in error &&
+						typeof (error as { message: unknown }).message === "string"
+							? (error as { message: string }).message
+							: String(error)
+					return new McpQueryError({ message, pipe: tool })
+				}),
+			)
 	})

@@ -1,4 +1,5 @@
 import {
+	DashboardConcurrencyError,
 	DashboardDeleteResponse,
 	DashboardId,
 	DashboardNotFoundError,
@@ -29,6 +30,13 @@ const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 
 const COALESCE_WINDOW_MS = 5_000
+
+// Optimistic-locking retry budget for `mutate`. Each attempt re-reads the
+// current dashboard, re-applies the caller's transform on top of it, and
+// attempts a compare-and-swap on (id, version). Five attempts is enough for
+// genuine contention; if we still can't win the CAS we surface the conflict
+// to the caller so they can refetch and retry at their own pace.
+const MUTATE_MAX_ATTEMPTS = 5
 
 const toPersistenceError = (error: unknown) =>
 	new DashboardPersistenceError({
@@ -97,6 +105,12 @@ const versionRowToSummary = (row: DashboardVersionRow): DashboardVersionSummary 
 		createdBy: decodeUserIdSync(row.createdBy),
 	})
 
+type VersionOptions = {
+	readonly forceKind?: DashboardVersionSummary["changeKind"]
+	readonly forceSummary?: string
+	readonly sourceVersionId?: DashboardVersionId | null
+}
+
 export class DashboardPersistenceService extends Context.Service<DashboardPersistenceService>()(
 	"DashboardPersistenceService",
 	{
@@ -105,10 +119,16 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 
 			const loadCurrent = (orgId: OrgId, dashboardId: DashboardId) =>
 				Effect.gen(function* () {
-					const rows: ReadonlyArray<{ readonly payloadJson: string }> = yield* database
+					const rows: ReadonlyArray<{
+						readonly payloadJson: string
+						readonly version: number
+					}> = yield* database
 						.execute((db) =>
 							db
-								.select({ payloadJson: dashboards.payloadJson })
+								.select({
+									payloadJson: dashboards.payloadJson,
+									version: dashboards.version,
+								})
 								.from(dashboards)
 								.where(and(eq(dashboards.orgId, orgId), eq(dashboards.id, dashboardId))),
 						)
@@ -116,7 +136,8 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 
 					const row = rows[0]
 					if (!row) return null
-					return yield* parsePayload(row.payloadJson)
+					const document = yield* parsePayload(row.payloadJson)
+					return { document, version: row.version }
 				})
 
 			const recordVersion = (
@@ -124,11 +145,7 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 				userId: UserId,
 				dashboard: DashboardDocument,
 				previous: DashboardDocument | null,
-				options: {
-					readonly forceKind?: DashboardVersionSummary["changeKind"]
-					readonly forceSummary?: string
-					readonly sourceVersionId?: DashboardVersionId | null
-				} = {},
+				options: VersionOptions = {},
 			) =>
 				Effect.gen(function* () {
 					const summary = summarizeDashboardChange(previous, dashboard)
@@ -221,52 +238,115 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 				return new DashboardsListResponse({ dashboards: dashboardDocuments })
 			})
 
+			// Compare-and-swap update against `dashboards.version`. Returns
+			// `true` when the row was updated (we won the CAS), `false` when
+			// the expected version no longer matches (a concurrent writer beat
+			// us). The history snapshot insert is best-effort and runs only
+			// after the CAS update succeeds, so a stale conflicting attempt
+			// never produces a phantom audit row.
+			const tryCasUpdate = (
+				orgId: OrgId,
+				userId: UserId,
+				dashboard: DashboardDocument,
+				expectedVersion: number,
+				updatedAt: number,
+				payloadJson: string,
+			) =>
+				Effect.gen(function* () {
+					const updated: ReadonlyArray<{ readonly id: string }> = yield* database
+						.execute((db) =>
+							db
+								.update(dashboards)
+								.set({
+									name: dashboard.name,
+									payloadJson,
+									updatedAt,
+									updatedBy: userId,
+									version: expectedVersion + 1,
+								})
+								.where(
+									and(
+										eq(dashboards.orgId, orgId),
+										eq(dashboards.id, dashboard.id),
+										eq(dashboards.version, expectedVersion),
+									),
+								)
+								.returning({ id: dashboards.id }),
+						)
+						.pipe(Effect.mapError(toPersistenceError))
+
+					return updated.length > 0
+				})
+
+			const insertNew = (
+				orgId: OrgId,
+				userId: UserId,
+				dashboard: DashboardDocument,
+				createdAt: number,
+				updatedAt: number,
+				payloadJson: string,
+			) =>
+				database
+					.execute((db) =>
+						db.insert(dashboards).values({
+							orgId,
+							id: dashboard.id,
+							name: dashboard.name,
+							payloadJson,
+							createdAt,
+							updatedAt,
+							createdBy: userId,
+							updatedBy: userId,
+							version: 1,
+						}),
+					)
+					.pipe(Effect.mapError(toPersistenceError))
+
 			const upsertInternal = (
 				orgId: OrgId,
 				userId: UserId,
 				dashboard: DashboardDocument,
-				versionOptions: {
-					readonly forceKind?: DashboardVersionSummary["changeKind"]
-					readonly forceSummary?: string
-					readonly sourceVersionId?: DashboardVersionId | null
-				} = {},
+				versionOptions: VersionOptions = {},
 			) =>
 				Effect.gen(function* () {
-					const previous = yield* loadCurrent(orgId, dashboard.id)
 					const payloadJson = yield* stringifyPayload(dashboard)
 					const createdAt = yield* parseTimestamp("createdAt", dashboard.createdAt)
 					const updatedAt = yield* parseTimestamp("updatedAt", dashboard.updatedAt)
 
-					yield* database
-						.execute((db) =>
-							db
-								.insert(dashboards)
-								.values({
-									orgId,
-									id: dashboard.id,
-									name: dashboard.name,
-									payloadJson,
-									createdAt,
-									updatedAt,
-									createdBy: userId,
-									updatedBy: userId,
-								})
-								.onConflictDoUpdate({
-									target: [dashboards.orgId, dashboards.id],
-									set: {
-										name: dashboard.name,
-										payloadJson,
-										updatedAt,
-										updatedBy: userId,
-									},
-								}),
+					const current = yield* loadCurrent(orgId, dashboard.id)
+
+					if (current === null) {
+						yield* insertNew(orgId, userId, dashboard, createdAt, updatedAt, payloadJson)
+					} else {
+						const won = yield* tryCasUpdate(
+							orgId,
+							userId,
+							dashboard,
+							current.version,
+							updatedAt,
+							payloadJson,
 						)
-						.pipe(Effect.mapError(toPersistenceError))
+						if (!won) {
+							return yield* Effect.fail(
+								new DashboardConcurrencyError({
+									dashboardId: dashboard.id,
+									message:
+										"Dashboard was modified by another writer. Refetch and try again.",
+								}),
+							)
+						}
+					}
 
 					// History recording is best-effort: a failure here must not roll
 					// back the dashboard write. The dashboard table is the source of
 					// truth; versions are an append-only audit trail.
-					yield* recordVersion(orgId, userId, dashboard, previous, versionOptions).pipe(
+					yield* recordVersion(
+						orgId,
+						userId,
+						dashboard,
+						current?.document ?? null,
+						versionOptions,
+					).pipe(
 						Effect.tapError((error) =>
 							Effect.logWarning(
 								"[DashboardPersistenceService] Failed to record dashboard version",
@@ -293,6 +373,67 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 			) {
 				const createdDashboard = createDashboardDocument(dashboard)
 				return yield* upsertInternal(orgId, userId, createdDashboard)
+			})
+
+			// Read-modify-write helper used by the MCP dashboard tools. Loads
+			// the current dashboard, runs the caller's transform on top of it,
+			// and attempts a compare-and-swap update. On CAS conflict (a
+			// concurrent writer slipped in between read and write) we re-read
+			// and re-apply the transform up to MUTATE_MAX_ATTEMPTS times before
+			// giving up with a typed `DashboardConcurrencyError`. This is the
+			// pattern that prevents lost updates between concurrent MCP tool
+			// calls and HTTP edits.
+			const mutate = Effect.fn("DashboardPersistenceService.mutate")(function* <E, R>(
+				orgId: OrgId,
+				userId: UserId,
+				dashboardId: DashboardId,
+				transform: (dashboard: DashboardDocument) => Effect.Effect<DashboardDocument, E, R>,
+				versionOptions: VersionOptions = {},
+			) {
+				for (let attempt = 0; attempt < MUTATE_MAX_ATTEMPTS; attempt++) {
+					const current = yield* loadCurrent(orgId, dashboardId)
+					if (current === null) {
+						return yield* Effect.fail(
+							new DashboardNotFoundError({
+								dashboardId,
+								message: "Dashboard not found",
+							}),
+						)
+					}
+
+					const next = yield* transform(current.document)
+					const payloadJson = yield* stringifyPayload(next)
+					const updatedAt = yield* parseTimestamp("updatedAt", next.updatedAt)
+
+					const won = yield* tryCasUpdate(
+						orgId,
+						userId,
+						next,
+						current.version,
+						updatedAt,
+						payloadJson,
+					)
+					if (!won) continue
+
+					yield* recordVersion(orgId, userId, next, current.document, versionOptions).pipe(
+						Effect.tapError((error) =>
+							Effect.logWarning(
+								"[DashboardPersistenceService] Failed to record dashboard version",
+							).pipe(Effect.annotateLogs({ error: String(error) })),
+						),
+						Effect.ignore,
+					)
+
+					return next
+				}
+
+				return yield* Effect.fail(
+					new DashboardConcurrencyError({
+						dashboardId,
+						message:
+							"Dashboard mutation failed after repeated concurrency conflicts. Refetch and try again.",
+					}),
+				)
 			})
 
 			const remove = Effect.fn("DashboardPersistenceService.delete")(function* (
@@ -350,7 +491,7 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 							}),
 						)
 					}
-					return current
+					return current.document
 				})
 
 			const listVersions = Effect.fn("DashboardPersistenceService.listVersions")(function* (
@@ -463,6 +604,7 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 				create,
 				list,
 				upsert,
+				mutate,
 				delete: remove,
 				listVersions,
 				getVersion,
@@ -482,6 +624,13 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 
 	static readonly upsert = (orgId: OrgId, userId: UserId, dashboard: DashboardDocument) =>
 		this.use((service) => service.upsert(orgId, userId, dashboard))
+
+	static readonly mutate = <E, R>(
+		orgId: OrgId,
+		userId: UserId,
+		dashboardId: DashboardId,
+		transform: (dashboard: DashboardDocument) => Effect.Effect<DashboardDocument, E, R>,
+	) => this.use((service) => service.mutate(orgId, userId, dashboardId, transform))
 
 	static readonly delete = (orgId: OrgId, dashboardId: DashboardId) =>
 		this.use((service) => service.delete(orgId, dashboardId))

@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 export const dashboards = sqliteTable(
 	"dashboards",
@@ -11,6 +11,10 @@ export const dashboards = sqliteTable(
 		updatedAt: integer("updated_at", { mode: "number" }).notNull(),
 		createdBy: text("created_by").notNull(),
 		updatedBy: text("updated_by").notNull(),
+		// Optimistic-concurrency token. Bumped on every upsert; mutations use a
+		// compare-and-swap on (id, version) and retry on conflict so concurrent
+		// writers can no longer silently clobber each other.
+		version: integer("version", { mode: "number" }).notNull().default(0),
 	},
 	(table) => [
 		primaryKey({ columns: [table.orgId, table.id] }),
@@ -44,6 +48,14 @@ export const dashboardVersions = sqliteTable(
 	(table) => [
 		primaryKey({ columns: [table.orgId, table.id] }),
 		index("dashboard_versions_org_dashboard_idx").on(table.orgId, table.dashboardId, table.versionNumber),
+		// Prevents two concurrent saves from stamping the same version_number for
+		// the same dashboard. Insert collisions surface as a unique-constraint
+		// error which the persistence layer maps to a concurrency conflict.
+		uniqueIndex("dashboard_versions_org_dashboard_version_unq").on(
+			table.orgId,
+			table.dashboardId,
+			table.versionNumber,
+		),
 	],
 )
 

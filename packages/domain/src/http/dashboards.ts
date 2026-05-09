@@ -285,6 +285,15 @@ export class DashboardValidationError extends Schema.TaggedErrorClass<DashboardV
 	{ httpApiStatus: 400 },
 ) {}
 
+export class DashboardConcurrencyError extends Schema.TaggedErrorClass<DashboardConcurrencyError>()(
+	"@maple/http/errors/DashboardConcurrencyError",
+	{
+		dashboardId: DashboardId,
+		message: Schema.String,
+	},
+	{ httpApiStatus: 409 },
+) {}
+
 // ---------------------------------------------------------------------------
 // Templates
 // ---------------------------------------------------------------------------
@@ -344,7 +353,7 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		HttpApiEndpoint.post("create", "/", {
 			payload: DashboardCreateRequest,
 			success: DashboardDocument,
-			error: [DashboardValidationError, DashboardPersistenceError],
+			error: [DashboardValidationError, DashboardPersistenceError, DashboardConcurrencyError],
 		}),
 	)
 	.add(
@@ -354,7 +363,12 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			},
 			payload: DashboardUpsertRequest,
 			success: DashboardDocument,
-			error: [DashboardValidationError, DashboardPersistenceError],
+			error: [
+				DashboardValidationError,
+				DashboardPersistenceError,
+				DashboardConcurrencyError,
+				DashboardNotFoundError,
+			],
 		}),
 	)
 	.add(
@@ -390,6 +404,7 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				DashboardVersionNotFoundError,
 				DashboardValidationError,
 				DashboardPersistenceError,
+				DashboardConcurrencyError,
 			],
 		}),
 	)
@@ -403,7 +418,12 @@ export class DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 			params: { templateId: DashboardTemplateId },
 			payload: DashboardTemplateInstantiateRequest,
 			success: DashboardDocument,
-			error: [DashboardTemplateNotFoundError, DashboardValidationError, DashboardPersistenceError],
+			error: [
+				DashboardTemplateNotFoundError,
+				DashboardValidationError,
+				DashboardPersistenceError,
+				DashboardConcurrencyError,
+			],
 		}),
 	)
 	.prefix("/api/dashboards")
