@@ -20,7 +20,7 @@ export function ErrorList({ props }: BaseComponentProps<ErrorListProps>) {
 				return (
 					<div
 						key={`${err.errorType}-${i}`}
-						className="flex items-start gap-2 rounded px-1 py-1 text-[11px] hover:bg-muted/50"
+						className="flex items-start gap-2 rounded p-1 text-[11px] hover:bg-muted/50"
 					>
 						<span className="min-w-0 flex-1 truncate text-severity-error" title={err.errorType}>
 							{err.errorType.length > 60 ? `${err.errorType.slice(0, 60)}...` : err.errorType}

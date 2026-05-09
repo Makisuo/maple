@@ -13,7 +13,7 @@ function PaperPlaneIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<polyline
-				points="21.5 2.5 7 12.875 7 21 12 16.625"
+				points="21.5 2.5 7 12.87 7 21 12 16.62"
 				stroke="currentColor"
 				strokeMiterlimit="10"
 				strokeWidth="2"

@@ -102,7 +102,7 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 					<DialogTitle>Install the infrastructure agent</DialogTitle>
 					<DialogDescription>
 						Maple ships host, container, and Kubernetes metrics through the OpenTelemetry
-						collector. Pick a platform and run the command below on your target host — the new
+						collector. Pick a platform and run the command below on your target host. The new
 						host will appear here within about a minute.
 					</DialogDescription>
 				</DialogHeader>

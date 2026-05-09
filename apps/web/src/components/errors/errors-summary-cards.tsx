@@ -40,9 +40,9 @@ export function ErrorsSummaryCards({ filters }: ErrorsSummaryCardsProps) {
 			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 				{Array.from({ length: 4 }).map((_, index) => (
 					<Card key={index}>
-						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+						<CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
 							<Skeleton className="h-4 w-24" />
-							<Skeleton className="h-4 w-4" />
+							<Skeleton className="size-4" />
 						</CardHeader>
 						<CardContent>
 							<Skeleton className="h-8 w-20" />
@@ -61,7 +61,7 @@ export function ErrorsSummaryCards({ filters }: ErrorsSummaryCardsProps) {
 					{ title: "Affected Traces", icon: PulseIcon },
 				].map((card) => (
 					<Card key={card.title}>
-						<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+						<CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
 							<CardTitle className="text-sm font-medium">{card.title}</CardTitle>
 							<card.icon size={16} className="text-muted-foreground" />
 						</CardHeader>
@@ -111,7 +111,7 @@ export function ErrorsSummaryCards({ filters }: ErrorsSummaryCardsProps) {
 				>
 					{cardConfig.map((card) => (
 						<Card key={card.title}>
-							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+							<CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
 								<CardTitle className="text-sm font-medium">{card.title}</CardTitle>
 								<card.icon size={16} className="text-muted-foreground" />
 							</CardHeader>

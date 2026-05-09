@@ -4,7 +4,7 @@ import { cn } from "@maple/ui/lib/utils"
 
 export function ActorChip({ actor }: { actor: ActorDocument | null }) {
 	if (!actor) {
-		return <span className="text-xs text-muted-foreground">—</span>
+		return <span className="text-xs text-muted-foreground">–</span>
 	}
 	if (actor.type === "agent") {
 		const label = actor.agentName ?? actor.id.slice(0, 8)

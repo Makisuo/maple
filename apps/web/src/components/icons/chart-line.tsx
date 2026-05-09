@@ -13,7 +13,7 @@ function ChartLineIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="M2.5 15.7102L9.06666 9.14357L14.9333 14.8579L21.5 8.29119"
+				d="M2.5 15.71L9.06 9.14L14.93 14.85L21.5 8.29"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

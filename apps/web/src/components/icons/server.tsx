@@ -14,7 +14,7 @@ function ServerIcon({ size = 24, className, ...props }: IconProps) {
 		>
 			<path d="M12 3V21" stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
 			<path
-				d="M19 3H5C3.89543 3 3 3.89543 3 5V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V5C21 3.89543 20.1046 3 19 3Z"
+				d="M19 3H5C3.89 3 3 3.89 3 5V19C3 20.10 3.89 21 5 21H19C20.10 21 21 20.10 21 19V5C21 3.89 20.10 3 19 3Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

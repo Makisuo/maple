@@ -21,7 +21,7 @@ function HistoryIcon({ size = 24, className, ...props }: IconProps) {
 			/>
 			<path d="M3.5 3.5V7.5H7.5" stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
 			<path
-				d="M2.5 12C2.5 17.2467 6.75329 21.5 12 21.5C17.2467 21.5 21.5 17.2467 21.5 12C21.5 6.75329 17.2467 2.5 12 2.5C8.38142 2.5 5.23538 4.52314 3.63131 7.5L3.73595 7.311"
+				d="M2.5 12C2.5 17.24 6.75 21.5 12 21.5C17.24 21.5 21.5 17.24 21.5 12C21.5 6.75 17.24 2.5 12 2.5C8.38 2.5 5.23 4.52 3.63 7.5L3.73 7.31"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

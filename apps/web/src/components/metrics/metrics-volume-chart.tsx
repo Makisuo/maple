@@ -75,7 +75,7 @@ export function MetricsVolumeChart({ metricName, metricType, serviceName }: Metr
 			<Card>
 				<CardHeader>
 					<CardTitle>{metricName}</CardTitle>
-					<CardDescription>Loading trend data...</CardDescription>
+					<CardDescription>Loading trend data…</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<Skeleton className="h-[200px] w-full" />

@@ -29,7 +29,7 @@ export function CheckHistorySparkline({
 	className,
 }: CheckHistorySparklineProps) {
 	const { data, seriesKeys, statusLookup, isMultiSeries } = React.useMemo(() => {
-		const sorted = [...checks].sort(
+		const sorted = checks.toSorted(
 			(a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
 		)
 

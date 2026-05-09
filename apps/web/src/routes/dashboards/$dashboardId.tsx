@@ -99,7 +99,7 @@ function DashboardViewPage() {
 	if (!activeDashboard) {
 		return (
 			<DashboardLayout breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}>
-				<div className="py-12 text-sm text-muted-foreground">Loading dashboard...</div>
+				<div className="py-12 text-sm text-muted-foreground">Loading dashboard…</div>
 			</DashboardLayout>
 		)
 	}
@@ -179,9 +179,9 @@ function DashboardViewPage() {
 						) : activeDashboard.widgets.length === 0 && mode === "view" ? (
 							<div className="flex flex-col items-center justify-center py-24 gap-4">
 								<div className="flex gap-2">
-									<div className="w-8 h-8 rounded bg-primary/15" />
-									<div className="w-8 h-8 rounded bg-primary/10" />
-									<div className="w-8 h-8 rounded bg-primary/15" />
+									<div className="size-8 rounded bg-primary/15" />
+									<div className="size-8 rounded bg-primary/10" />
+									<div className="size-8 rounded bg-primary/15" />
 								</div>
 								<div className="flex flex-col items-center gap-1">
 									<p className="text-sm font-medium text-foreground">No widgets yet</p>

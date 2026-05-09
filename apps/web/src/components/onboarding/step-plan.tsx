@@ -35,7 +35,7 @@ export function StepPlan({
 						Pick a plan to keep going
 					</h2>
 					<p className="text-muted-foreground text-[15px] mt-3 max-w-lg mx-auto">
-						Start a {TRIAL_DURATION_DAYS}-day free trial — we'll save your card now and won't
+						Start a {TRIAL_DURATION_DAYS}-day free trial: we'll save your card now and won't
 						charge until day {TRIAL_DURATION_DAYS}. Cancel anytime from settings.
 					</p>
 				</div>

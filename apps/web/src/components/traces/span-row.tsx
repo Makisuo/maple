@@ -63,7 +63,7 @@ export function SpanRow({
 						<Button
 							variant="ghost"
 							size="icon-sm"
-							className="h-6 w-6 shrink-0"
+							className="size-6 shrink-0"
 							aria-label={expanded ? "Collapse span" : "Expand span"}
 							onClick={(e) => {
 								e.stopPropagation()
@@ -153,7 +153,7 @@ export function SpanRow({
 					<Button
 						variant="ghost"
 						size="icon-sm"
-						className="h-6 w-6 shrink-0"
+						className="size-6 shrink-0"
 						aria-label={expanded ? "Collapse span" : "Expand span"}
 						onClick={(e) => {
 							e.stopPropagation()

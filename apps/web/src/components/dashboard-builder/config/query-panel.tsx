@@ -173,7 +173,7 @@ export function QueryPanel({
 
 			{/* Body */}
 			{!collapsed && (
-				<div className="px-3 py-3 space-y-3">
+				<div className="p-3 space-y-3">
 					{isMetrics ? (
 						<MetricsBody
 							query={query}

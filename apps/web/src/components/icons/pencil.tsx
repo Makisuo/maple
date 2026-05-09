@@ -22,7 +22,7 @@ function PencilIcon({ size = 24, className, ...props }: IconProps) {
 				strokeWidth="2"
 			/>
 			<path
-				d="m9,20l-6,1,1-6L15.464,3.536c1.381-1.381,3.619-1.381,5,0h0c1.381,1.381,1.381,3.619,0,5l-11.464,11.464Z"
+				d="m9,20l-6,1,1-6L15.46,3.53c1.38-1.38,3.61-1.38,5,0h0c1.38,1.38,1.38,3.61,0,5l-11.46,11.46Z"
 				stroke="currentColor"
 				strokeLinecap="square"
 				strokeMiterlimit="10"

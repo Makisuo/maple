@@ -87,6 +87,8 @@ const ADD_ONS: Array<{ key: AddOnKey; label: string }> = [
 	{ key: "legend", label: "Legend" },
 ]
 
+const METRIC_TYPE_SET = new Set<string>(QUERY_BUILDER_METRIC_TYPES)
+
 function createQuery(index: number): QueryDraft {
 	return createQueryDraft(index)
 }
@@ -105,7 +107,7 @@ function parseMetricSelection(raw: string): { metricName: string; metricType: Me
 		return null
 	}
 
-	if (!QUERY_BUILDER_METRIC_TYPES.includes(metricType as MetricType)) {
+	if (!METRIC_TYPE_SET.has(metricType)) {
 		return null
 	}
 
@@ -235,7 +237,7 @@ function QueryBuilderAtomResults({ input }: { input: QueryBuilderTimeseriesInput
 	return (
 		<>
 			{Result.builder(result)
-				.onInitial(() => <p className="text-xs text-muted-foreground">Running query...</p>)
+				.onInitial(() => <p className="text-xs text-muted-foreground">Running query…</p>)
 				.onError((error) => (
 					<div className="space-y-2 border p-2">
 						<div className="flex flex-wrap items-center gap-2">
@@ -356,7 +358,7 @@ function QueryBuilderLabInner({ startTime, endTime }: QueryBuilderLabProps) {
 		const map = new Map<string, MetricOption>()
 
 		for (const row of metricRows) {
-			if (!QUERY_BUILDER_METRIC_TYPES.includes(row.metricType as MetricType)) {
+			if (!METRIC_TYPE_SET.has(row.metricType)) {
 				continue
 			}
 

@@ -539,7 +539,7 @@ export function useDashboardStore() {
 				// Sort by (y, x) so the array order matches visual order. The grid
 				// compactor uses array order as a tiebreaker when items share a row,
 				// so a stale order causes drag-to-swap to snap back.
-				const sorted = [...widgets].sort((a, b) => {
+				const sorted = widgets.toSorted((a, b) => {
 					if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
 					return a.layout.x - b.layout.x
 				})
@@ -572,7 +572,7 @@ export function useDashboardStore() {
 			mutateDashboard(dashboardId, (dashboard) => {
 				if (dashboard.widgets.length === 0) return dashboard
 
-				const sorted = [...dashboard.widgets].sort((a, b) => {
+				const sorted = dashboard.widgets.toSorted((a, b) => {
 					if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
 					return a.layout.x - b.layout.x
 				})

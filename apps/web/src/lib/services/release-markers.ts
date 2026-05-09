@@ -9,7 +9,7 @@ export function detectReleaseMarkers(
 ): ReleaseMarker[] {
 	if (timeline.length === 0) return []
 
-	const sorted = [...timeline].sort((a, b) => a.bucket.localeCompare(b.bucket))
+	const sorted = timeline.toSorted((a, b) => a.bucket.localeCompare(b.bucket))
 
 	// Find the dominant SHA (highest total count) — this is the "established" release
 	const countBySha = new Map<string, number>()

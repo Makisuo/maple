@@ -258,10 +258,10 @@ export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
 										</TableCell>
 									</TableRow>
 								) : (
-									errors.map((errorRow: ErrorByType, index: number) => {
+									errors.map((errorRow: ErrorByType) => {
 										const isExpanded = expandedError === errorRow.errorType
 										return (
-											<Fragment key={`${errorRow.errorType}-${index}`}>
+											<Fragment key={errorRow.errorType}>
 												<TableRow
 													className="cursor-pointer hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
 													tabIndex={0}

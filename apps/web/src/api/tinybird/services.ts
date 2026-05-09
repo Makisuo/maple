@@ -190,7 +190,7 @@ export interface ServiceOverviewTimeSeriesResponse {
 }
 
 function sortByBucket<T extends { bucket: string }>(rows: T[]): T[] {
-	return [...rows].sort((left, right) => left.bucket.localeCompare(right.bucket))
+	return rows.toSorted((left, right) => left.bucket.localeCompare(right.bucket))
 }
 
 function fillServiceApdexPoints(

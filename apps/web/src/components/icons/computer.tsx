@@ -13,14 +13,14 @@ function ComputerIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="M16 2L8.00001 2C6.89544 2 6.00001 2.89543 6.00001 4L6.00001 20C6.00001 21.1046 6.89544 22 8.00001 22L16 22C17.1046 22 18 21.1046 18 20L18 4C18 2.89543 17.1046 2 16 2Z"
+				d="M16 2L8.00 2C6.89 2 6.00 2.89 6.00 4L6.00 20C6.00 21.10 6.89 22 8.00 22L16 22C17.10 22 18 21.10 18 20L18 4C18 2.89 17.10 2 16 2Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"
 				strokeLinecap="square"
 			/>
 			<path
-				d="M12 18C13.1046 18 14 17.1046 14 16C14 14.8954 13.1046 14 12 14C10.8954 14 10 14.8954 10 16C10 17.1046 10.8954 18 12 18Z"
+				d="M12 18C13.10 18 14 17.10 14 16C14 14.89 13.10 14 12 14C10.89 14 10 14.89 10 16C10 17.10 10.89 18 12 18Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

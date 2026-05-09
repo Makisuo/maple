@@ -18,19 +18,19 @@ function GlobeIcon({ size = 24, className, ...props }: IconProps) {
 				strokeWidth="2"
 			/>
 			<path
-				d="M12 22C17.7143 16.5578 17.7143 7.44218 12 2"
+				d="M12 22C17.71 16.55 17.71 7.44 12 2"
 				stroke="currentColor"
 				strokeWidth="2"
 				fill="none"
 			/>
 			<path
-				d="M12 22C6.28571 16.5578 6.28571 7.44218 12 2"
+				d="M12 22C6.28 16.55 6.28 7.44 12 2"
 				stroke="currentColor"
 				strokeWidth="2"
 				fill="none"
 			/>
 			<path
-				d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z"
+				d="M12 22C17.52 22 22 17.52 22 12C22 6.47 17.52 2 12 2C6.47 2 2 6.47 2 12C2 17.52 6.47 22 12 22Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

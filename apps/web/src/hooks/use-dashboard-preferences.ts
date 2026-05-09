@@ -40,7 +40,7 @@ export function useDashboardPreferences() {
 				filtered = dashboards.filter((d) => d.tags?.includes(tagFilter))
 			}
 
-			const sorted = [...filtered].sort((a, b) => {
+			const sorted = filtered.toSorted((a, b) => {
 				const aFav = favoritesSet.has(a.id) ? 0 : 1
 				const bFav = favoritesSet.has(b.id) ? 0 : 1
 				if (aFav !== bFav) return aFav - bFav

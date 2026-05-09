@@ -38,7 +38,7 @@ export function FirstActionHint() {
 									<code className="text-xs bg-muted px-1 py-0.5 rounded">demo-api</code>.
 								</p>
 								<p className="text-xs text-muted-foreground mt-0.5">
-									We seeded a deliberate latency spike — find it in the traces view.
+									We seeded a deliberate latency spike. Find it in the traces view.
 								</p>
 							</div>
 							<Button size="sm" onClick={handleShowMe} className="gap-2 shrink-0">

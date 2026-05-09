@@ -14,13 +14,13 @@ function CubeIcon({ size = 24, className, ...props }: IconProps) {
 		>
 			<path d="M12 22.5V11" stroke="currentColor" strokeWidth="2" />
 			<path
-				d="M21.5 6.25001L22 6L12 11L2 6.00001L2.5 6.25001"
+				d="M21.5 6.25L22 6L12 11L2 6.00L2.5 6.25"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"
 			/>
 			<path
-				d="M22 18.0789V5.92105L12 1.5L2 5.92105V18.0789L12 22.5L22 18.0789Z"
+				d="M22 18.07V5.92L12 1.5L2 5.92V18.07L12 22.5L22 18.07Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

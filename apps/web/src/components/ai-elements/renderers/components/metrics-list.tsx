@@ -48,9 +48,9 @@ export function MetricsList({ props }: BaseComponentProps<MetricsListProps>) {
 						</tr>
 					</thead>
 					<tbody>
-						{metrics.map((m, i) => (
+						{metrics.map((m) => (
 							<tr
-								key={`${m.metricName}-${i}`}
+								key={`${m.metricName}-${m.metricType}`}
 								className="border-b border-border/20 last:border-0"
 							>
 								<td className="max-w-[180px] truncate py-1 pr-2 font-mono">{m.metricName}</td>

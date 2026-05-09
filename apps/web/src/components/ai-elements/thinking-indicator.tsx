@@ -10,7 +10,7 @@ export function ThinkingIndicator({ className }: ThinkingIndicatorProps) {
 		<div className={cn("flex items-center gap-1 py-1", className)}>
 			{[0, 1, 2].map((i) => (
 				<motion.span
-					key={i}
+					key={`dot-${i}`}
 					className="size-1.5 rounded-full bg-muted-foreground"
 					animate={{ opacity: [0.3, 1, 0.3] }}
 					transition={{

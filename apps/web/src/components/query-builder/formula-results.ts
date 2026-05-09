@@ -339,7 +339,7 @@ function listUnionBuckets(bucketMaps: Map<string, number>[]): string[] {
 		}
 	}
 
-	return [...bucketSet].sort()
+	return Array.from(bucketSet).toSorted()
 }
 
 function listIntersectedBuckets(bucketMaps: Map<string, number>[]): string[] {
@@ -437,10 +437,11 @@ export function buildFormulaResults(
 		const eligibleBuckets =
 			referencedBucketMaps.length === 0 ? allBuckets : listIntersectedBuckets(referencedBucketMaps)
 
+		const eligibleBucketSet = new Set(eligibleBuckets)
 		const missingOperandBuckets =
 			referencedBucketMaps.length === 0
 				? []
-				: listUnionBuckets(referencedBucketMaps).filter((bucket) => !eligibleBuckets.includes(bucket))
+				: listUnionBuckets(referencedBucketMaps).filter((bucket) => !eligibleBucketSet.has(bucket))
 
 		const warnings: string[] = []
 		if (missingOperandBuckets.length > 0) {

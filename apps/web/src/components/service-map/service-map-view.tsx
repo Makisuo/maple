@@ -790,9 +790,9 @@ function ServiceMapCanvas({
 		})
 		const positioned = layoutNodes(rawNodes, rawEdges, layoutConfig)
 		// Service legend should only include real services, not synthetic db: nodes
-		const allServices = [
-			...new Set(positioned.filter((n) => !n.id.startsWith(DB_NODE_PREFIX)).map((n) => n.id)),
-		].sort()
+		const allServices = Array.from(
+			new Set(positioned.filter((n) => !n.id.startsWith(DB_NODE_PREFIX)).map((n) => n.id)),
+		).toSorted()
 		return { layoutedNodes: positioned, flowEdges: rawEdges, services: allServices }
 	}, [serviceEdges, dbEdges, platforms, runtimes, overviews, workloads, durationSeconds, layoutConfig])
 
@@ -948,7 +948,7 @@ function ServiceMapCanvas({
 									{services.slice(0, 3).map((service) => (
 										<div key={service} className="flex items-center gap-1.5">
 											<div
-												className="h-2.5 w-2.5 rounded-sm shrink-0"
+												className="size-2.5 rounded-sm shrink-0"
 												style={{
 													backgroundColor: getServiceMapNodeColor(
 														{ label: service, kind: "service", errorRate: 0 },
@@ -973,7 +973,7 @@ function ServiceMapCanvas({
 															className="flex items-center gap-1.5 min-w-0"
 														>
 															<div
-																className="h-2.5 w-2.5 rounded-sm shrink-0"
+																className="size-2.5 rounded-sm shrink-0"
 																style={{
 																	backgroundColor: getServiceMapNodeColor(
 																		{
@@ -1003,7 +1003,7 @@ function ServiceMapCanvas({
 									{(["kubernetes", "cloudflare", "lambda", "web", "unknown"] as const).map((p) => (
 										<div key={p} className="flex items-center gap-1.5">
 											<div
-												className="h-2.5 w-2.5 rounded-sm shrink-0"
+												className="size-2.5 rounded-sm shrink-0"
 												style={{
 													backgroundColor: getPlatformColor(
 														p === "unknown" ? undefined : p,
@@ -1018,15 +1018,15 @@ function ServiceMapCanvas({
 							<span className="flex-1" />
 							<div className="flex items-center gap-3">
 								<div className="flex items-center gap-1.5">
-									<div className="h-2 w-2 rounded-full bg-severity-info" />
+									<div className="size-2 rounded-full bg-severity-info" />
 									<span>Healthy</span>
 								</div>
 								<div className="flex items-center gap-1.5">
-									<div className="h-2 w-2 rounded-full bg-severity-warn" />
+									<div className="size-2 rounded-full bg-severity-warn" />
 									<span>Degraded</span>
 								</div>
 								<div className="flex items-center gap-1.5">
-									<div className="h-2 w-2 rounded-full bg-severity-error" />
+									<div className="size-2 rounded-full bg-severity-error" />
 									<span>Error</span>
 								</div>
 							</div>
@@ -1141,7 +1141,7 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 	return Result.builder(mapResult)
 		.onInitial(() => (
 			<div className="flex items-center justify-center h-full">
-				<div className="text-sm text-muted-foreground animate-pulse">Loading service map...</div>
+				<div className="text-sm text-muted-foreground animate-pulse">Loading service map…</div>
 			</div>
 		))
 		.onError((error) => {

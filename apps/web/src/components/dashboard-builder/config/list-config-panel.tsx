@@ -191,7 +191,7 @@ function DraggableColumnRow({
 			<Button
 				variant="ghost"
 				size="sm"
-				className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+				className="size-8 p-0 text-muted-foreground hover:text-destructive"
 				onClick={() => removeColumn(index)}
 			>
 				&times;

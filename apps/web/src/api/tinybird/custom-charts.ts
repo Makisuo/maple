@@ -70,7 +70,7 @@ function querySpanMetricsCalls(params: {
 }
 
 function sortByBucket<T extends { bucket: string }>(rows: T[]): T[] {
-	return [...rows].sort((left, right) => left.bucket.localeCompare(right.bucket))
+	return rows.toSorted((left, right) => left.bucket.localeCompare(right.bucket))
 }
 
 function fillServiceDetailPoints(
@@ -626,7 +626,7 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
 	for (const k of allMetrics.keys()) allBuckets.add(k)
 	for (const k of metricsMap.keys()) allBuckets.add(k)
 
-	const points = [...allBuckets].sort().map((bucket): ServiceDetailTimeSeriesPoint => {
+	const points = Array.from(allBuckets).toSorted().map((bucket): ServiceDetailTimeSeriesPoint => {
 		const m = allMetrics.get(bucket)
 		const rawCount = m?.count ?? 0
 		const throughput = resolveThroughput(rawCount, m?.estimatedSpanCount ?? 0, metricsMap.get(bucket))
@@ -704,7 +704,7 @@ const getOverviewTimeSeriesEffect = Effect.fn("QueryEngine.getOverviewTimeSeries
 	for (const k of allMetrics.keys()) allBuckets.add(k)
 	for (const k of metricsMap.keys()) allBuckets.add(k)
 
-	const points = [...allBuckets].sort().map((bucket): ServiceDetailTimeSeriesPoint => {
+	const points = Array.from(allBuckets).toSorted().map((bucket): ServiceDetailTimeSeriesPoint => {
 		const m = allMetrics.get(bucket)
 		const rawCount = m?.count ?? 0
 		const throughput = resolveThroughput(rawCount, m?.estimatedSpanCount ?? 0, metricsMap.get(bucket))

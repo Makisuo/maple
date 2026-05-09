@@ -107,7 +107,7 @@ export function AttributesTable({ attributes, title, searchQuery, groupByNamespa
 							key={group.namespace}
 							defaultOpen={group.entries.length <= 8 || !!searchQuery}
 						>
-							<CollapsibleTrigger className="flex items-center gap-1 w-full text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors group px-1 py-1 rounded hover:bg-muted/40">
+							<CollapsibleTrigger className="flex items-center gap-1 w-full text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors group p-1 rounded hover:bg-muted/40">
 								<ChevronRightIcon
 									size={10}
 									className="transition-transform group-data-[panel-open]:rotate-90"

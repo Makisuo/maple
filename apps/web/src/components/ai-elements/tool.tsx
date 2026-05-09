@@ -187,7 +187,7 @@ export function Tool(props: ToolProps) {
 				<span className="ml-auto flex items-center gap-1.5">
 					{status === "running" && (
 						<>
-							<span className="text-muted-foreground">Running...</span>
+							<span className="text-muted-foreground">Running…</span>
 							<LoaderIcon className="size-3 animate-spin text-muted-foreground" />
 						</>
 					)}
@@ -238,7 +238,7 @@ export function Tool(props: ToolProps) {
 					{(structuredData || outputText != null) && (
 						<div className="px-3 py-2">
 							{structuredData ? (
-								<Suspense fallback={<div className="text-muted-foreground">Loading...</div>}>
+								<Suspense fallback={<div className="text-muted-foreground">Loading…</div>}>
 									<LazyToolRenderer data={structuredData} />
 								</Suspense>
 							) : outputText != null ? (

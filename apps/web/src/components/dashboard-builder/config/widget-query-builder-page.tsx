@@ -201,7 +201,7 @@ export function WidgetQueryBuilderPage({
 			{/* Main content (scrollable) */}
 			<div className="flex-1 min-w-0 overflow-y-auto">
 				{/* Preview hero section */}
-				<div className="border-b bg-muted/30 px-6 py-6">
+				<div className="border-b bg-muted/30 p-6">
 					<div className="flex justify-end mb-3">
 						<TimeRangePicker
 							startTime={resolvedTime?.startTime}
@@ -228,7 +228,7 @@ export function WidgetQueryBuilderPage({
 				</div>
 
 				{/* Query configuration */}
-				<div className="px-6 py-6 space-y-6" onFocusCapture={activateAutocomplete}>
+				<div className="p-6 space-y-6" onFocusCapture={activateAutocomplete}>
 					{validationError && (
 						<p className="text-xs text-destructive font-medium">{validationError}</p>
 					)}

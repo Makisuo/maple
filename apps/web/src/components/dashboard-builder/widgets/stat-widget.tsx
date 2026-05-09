@@ -34,7 +34,7 @@ function getThresholdColor(
 	const num = typeof value === "number" ? value : Number(value)
 	if (Number.isNaN(num)) return undefined
 
-	const sorted = [...thresholds].sort((a, b) => b.value - a.value)
+	const sorted = thresholds.toSorted((a, b) => b.value - a.value)
 	for (const t of sorted) {
 		if (num >= t.value) return t.color
 	}

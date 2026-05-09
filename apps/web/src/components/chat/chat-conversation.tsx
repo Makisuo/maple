@@ -327,7 +327,7 @@ export function ChatConversation({
 							{isLoading && messages[messages.length - 1]?.role === "user" && (
 								<Message from="assistant">
 									<MessageContent>
-										<Shimmer>Thinking...</Shimmer>
+										<Shimmer>Thinking…</Shimmer>
 									</MessageContent>
 								</Message>
 							)}

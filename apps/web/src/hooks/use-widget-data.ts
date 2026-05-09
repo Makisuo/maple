@@ -134,7 +134,7 @@ function applyTransform(
 	// sortBy
 	if (transform.sortBy) {
 		const { field, direction } = transform.sortBy
-		rows = [...rows].sort((a, b) => {
+		rows = rows.toSorted((a: Record<string, unknown>, b: Record<string, unknown>) => {
 			const aVal = a[field] ?? 0
 			const bVal = b[field] ?? 0
 			const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0

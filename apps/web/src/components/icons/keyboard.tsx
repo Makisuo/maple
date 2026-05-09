@@ -13,7 +13,7 @@ function KeyboardIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="M4 18L20 18C21.1046 18 22 17.1046 22 16L22 8.00001C22 6.89544 21.1046 6.00001 20 6.00001L4 6.00001C2.89543 6.00001 2 6.89544 2 8.00001L2 16C2 17.1046 2.89543 18 4 18Z"
+				d="M4 18L20 18C21.10 18 22 17.10 22 16L22 8.00C22 6.89 21.10 6.00 20 6.00L4 6.00C2.89 6.00 2 6.89 2 8.00L2 16C2 17.10 2.89 18 4 18Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

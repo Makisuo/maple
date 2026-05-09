@@ -372,10 +372,10 @@ export const PromptInput = ({
 				return true
 			}
 
-			const patterns = accept
-				.split(",")
-				.map((s) => s.trim())
-				.filter(Boolean)
+			const patterns = accept.split(",").flatMap((s) => {
+				const trimmed = s.trim()
+				return trimmed ? [trimmed] : []
+			})
 
 			return patterns.some((pattern) => {
 				if (pattern.endsWith("/*")) {

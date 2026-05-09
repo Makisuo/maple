@@ -136,7 +136,7 @@ export function DashboardAiConversation({ dashboardName, widgets }: DashboardAiC
 				</div>
 			)}
 			<Conversation className="flex-1 min-h-0">
-				<ConversationContent className="mx-auto w-full gap-4 px-4 py-4">
+				<ConversationContent className="mx-auto w-full gap-4 p-4">
 					{!hasSettled && messages.length === 0 ? (
 						<ConversationLoadingSkeleton />
 					) : messages.length === 0 ? (
@@ -291,7 +291,7 @@ export function DashboardAiConversation({ dashboardName, widgets }: DashboardAiC
 							{isLoading && messages[messages.length - 1]?.role === "user" && (
 								<Message from="assistant">
 									<MessageContent>
-										<Shimmer>Thinking...</Shimmer>
+										<Shimmer>Thinking…</Shimmer>
 									</MessageContent>
 								</Message>
 							)}

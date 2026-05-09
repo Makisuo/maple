@@ -152,7 +152,7 @@ export function TraceFlowView() {
 					{services.map((service) => (
 						<div key={service} className="flex items-center gap-1.5">
 							<div
-								className="h-3 w-3 rounded-sm shadow-sm"
+								className="size-3 rounded-sm shadow-sm"
 								style={{ backgroundColor: getServiceLegendColor(service, services) }}
 							/>
 							<span className="font-medium">{service}</span>
@@ -162,7 +162,7 @@ export function TraceFlowView() {
 				<span className="flex-1" />
 				<div className="flex items-center gap-1.5">
 					<div
-						className="h-3 w-3 rounded-sm shadow-sm"
+						className="size-3 rounded-sm shadow-sm"
 						style={{ backgroundColor: "oklch(0.62 0.20 25)" }}
 					/>
 					<span className="font-medium">Error</span>

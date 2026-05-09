@@ -68,7 +68,7 @@ function LogEntry({ log, timeZone, onClick }: { log: Log; timeZone: string; onCl
 
 	return (
 		<div
-			className="border-b py-2 px-2 last:border-b-0 hover:bg-muted/30 cursor-pointer"
+			className="border-b p-2 last:border-b-0 hover:bg-muted/30 cursor-pointer"
 			onClick={() => onClick?.(log)}
 		>
 			<div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-1">

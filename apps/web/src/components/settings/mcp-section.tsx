@@ -101,7 +101,7 @@ export function McpSection() {
 						<p className="text-muted-foreground text-xs">Authenticate with an API key.</p>
 						{createdSecret ? (
 							<p className="text-severity-info text-xs font-medium">
-								Key created — config below is ready to copy.
+								Key created. Config below is ready to copy.
 							</p>
 						) : (
 							<Button variant="outline" size="xs" onClick={() => setCreateDialogOpen(true)}>

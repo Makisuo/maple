@@ -253,7 +253,7 @@ export function ApiKeysSection() {
 							</div>
 							<DialogFooter>
 								<Button variant="outline" onClick={() => handleCreateDialogClose(false)}>
-									Done
+									Close
 								</Button>
 							</DialogFooter>
 						</>

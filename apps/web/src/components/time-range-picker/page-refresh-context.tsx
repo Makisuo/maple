@@ -87,7 +87,7 @@ export function PageRefreshProvider({
 
 		document.addEventListener("visibilitychange", handleVisibilityChange)
 		return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
-	}, [liveEnabled, triggerReload])
+	}, [liveEnabled])
 
 	React.useEffect(() => {
 		if (!liveEnabled || !isVisible) return
@@ -97,7 +97,7 @@ export function PageRefreshProvider({
 		}, LIVE_REFRESH_INTERVAL_MS)
 
 		return () => window.clearInterval(intervalId)
-	}, [isVisible, liveEnabled, triggerReload])
+	}, [isVisible, liveEnabled])
 
 	const value = React.useMemo<PageRefreshContextValue>(
 		() => ({
@@ -107,7 +107,7 @@ export function PageRefreshProvider({
 			setLiveEnabled,
 			reload: () => triggerReload(),
 		}),
-		[liveEnabled, isReloading, refreshVersion, triggerReload],
+		[liveEnabled, isReloading, refreshVersion],
 	)
 
 	return <PageRefreshContext value={value}>{children}</PageRefreshContext>

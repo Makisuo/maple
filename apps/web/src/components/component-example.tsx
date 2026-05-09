@@ -232,7 +232,7 @@ function FormExample() {
 												<DropdownMenuGroup>
 													<DropdownMenuItem>
 														<MagnifierIcon strokeWidth={2} />
-														Browse...
+														Browse…
 													</DropdownMenuItem>
 												</DropdownMenuGroup>
 											</DropdownMenuSubContent>
@@ -465,7 +465,7 @@ function FormExample() {
 								/>
 							</Field>
 							<Field orientation="horizontal">
-								<Button type="submit">Submit</Button>
+								<Button type="submit">Save changes</Button>
 								<Button variant="outline" type="button">
 									Cancel
 								</Button>

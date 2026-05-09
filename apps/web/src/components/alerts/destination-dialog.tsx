@@ -330,7 +330,7 @@ function HazelOAuthFields({
 				</Select>
 				{organizations.length === 0 ? (
 					<p className="text-[11px] text-muted-foreground">
-						No organizations returned — make sure your Hazel account is a member of at least one
+						No organizations returned. Make sure your Hazel account is a member of at least one
 						organization.
 					</p>
 				) : null}
@@ -377,7 +377,7 @@ function HazelOAuthFields({
 				</Select>
 				{orgIdForChannels.length > 0 && !channelsLoading && channels.length === 0 ? (
 					<p className="text-[11px] text-muted-foreground">
-						No channels — make sure your account is in at least one channel of this organization.
+						No channels. Make sure your account is in at least one channel of this organization.
 					</p>
 				) : null}
 			</div>

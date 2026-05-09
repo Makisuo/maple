@@ -189,7 +189,7 @@ function AlertCreatePage() {
 			]}
 			titleContent={
 				<div className="flex items-center gap-2">
-					<h1 className="text-2xl font-bold tracking-tight truncate">{pageTitle}</h1>
+					<h1 className="text-2xl font-semibold tracking-tight truncate">{pageTitle}</h1>
 					<Badge variant="secondary" className="text-xs font-medium">
 						Beta
 					</Badge>
@@ -572,7 +572,7 @@ function AlertCreatePage() {
 							{/* Chart */}
 							<div className="space-y-2">
 								<span className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-									{signalLabels[ruleForm.signalType]} — Last 24h
+									{signalLabels[ruleForm.signalType]}: Last 24h
 								</span>
 								<AlertPreviewChart
 									data={chartData}

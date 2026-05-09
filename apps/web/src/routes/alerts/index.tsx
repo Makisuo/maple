@@ -325,7 +325,7 @@ function MonitorTab({
 													{rule.name}
 												</Link>
 											) : (
-												<span className="text-muted-foreground">—</span>
+												<span className="text-muted-foreground">–</span>
 											)}
 										</TableCell>
 										<TableCell className="text-muted-foreground">
@@ -553,7 +553,7 @@ function AlertsPage() {
 				titleContent={
 					<div>
 						<div className="flex items-center gap-2">
-							<h1 className="text-2xl font-bold tracking-tight truncate">Alerts</h1>
+							<h1 className="text-2xl font-semibold tracking-tight truncate">Alerts</h1>
 							<Badge variant="secondary" className="text-xs font-medium">
 								Beta
 							</Badge>

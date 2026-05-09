@@ -52,7 +52,7 @@ export function DestinationCard({
 		>
 			<span
 				aria-hidden
-				className="pointer-events-none absolute -left-12 -top-12 h-32 w-32 rounded-full opacity-0 blur-3xl transition-opacity duration-500 group-hover:opacity-60"
+				className="pointer-events-none absolute -left-12 -top-12 size-32 rounded-full opacity-0 blur-3xl transition-opacity duration-500 group-hover:opacity-60"
 				style={{ background: provider.accentBg }}
 			/>
 
@@ -81,8 +81,8 @@ export function DestinationCard({
 							/>
 							{isHealthy && destination.lastTestedAt && (
 								<span className="relative inline-flex items-center" aria-hidden>
-									<span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-emerald-400 opacity-75" />
-									<span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+									<span className="absolute inline-flex size-1.5 animate-ping rounded-full bg-emerald-400 opacity-75" />
+									<span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
 								</span>
 							)}
 						</div>

@@ -141,12 +141,20 @@ function getButtonConfig(plan: Plan) {
 	}
 }
 
+const currencyFormatters = new Map<string, Intl.NumberFormat>()
+
 function formatCurrency(amount: number, currency: string): string {
-	return new Intl.NumberFormat("en-US", {
-		style: "currency",
-		currency: currency.toUpperCase(),
-		minimumFractionDigits: 2,
-	}).format(amount)
+	const key = currency.toUpperCase()
+	let formatter = currencyFormatters.get(key)
+	if (!formatter) {
+		formatter = new Intl.NumberFormat("en-US", {
+			style: "currency",
+			currency: key,
+			minimumFractionDigits: 2,
+		})
+		currencyFormatters.set(key, formatter)
+	}
+	return formatter.format(amount)
 }
 
 interface CheckoutPreview {
@@ -367,7 +375,7 @@ export function PricingCards() {
 								</CardDescription>
 								{getPlanSlug(plan) === "starter" && (
 									<div className="mt-3 rounded-md bg-primary/10 px-3 py-1.5 text-center text-xs font-medium text-primary">
-										Predictable pricing — no usage-based charges
+										Predictable pricing: no usage-based charges
 									</div>
 								)}
 							</CardHeader>

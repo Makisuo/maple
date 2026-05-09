@@ -40,16 +40,18 @@ function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string
 	return formatted.description || formatted.title || fallback
 }
 
+const syncDateFormatter = new Intl.DateTimeFormat("en-US", {
+	month: "short",
+	day: "numeric",
+	year: "numeric",
+	hour: "numeric",
+	minute: "2-digit",
+})
+
 function formatSyncDate(value: string | null): string {
 	if (!value) return "Never"
 	try {
-		return new Intl.DateTimeFormat("en-US", {
-			month: "short",
-			day: "numeric",
-			year: "numeric",
-			hour: "numeric",
-			minute: "2-digit",
-		}).format(new Date(value))
+		return syncDateFormatter.format(new Date(value))
 	} catch {
 		return value
 	}
@@ -341,7 +343,7 @@ export function OrgClickHouseSettingsSection({
 									<CardDescription>
 										Compare your cluster against Maple&apos;s bundled schema snapshot. Apply
 										creates missing tables and views, and adds missing columns to existing
-										tables. Type mismatches are skipped — resolve those manually.
+										tables. Type mismatches are skipped: resolve those manually.
 									</CardDescription>
 								</div>
 							</div>
@@ -382,7 +384,7 @@ export function OrgClickHouseSettingsSection({
 								</div>
 							) : !Result.isSuccess(diffResult) ? (
 								<div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-									Failed to introspect ClickHouse —{" "}
+									Failed to introspect ClickHouse:{" "}
 									{getExitErrorMessage(
 										diffResult as unknown as Exit.Exit<unknown, unknown>,
 										"check that credentials are valid",
@@ -470,7 +472,7 @@ export function OrgClickHouseSettingsSection({
 									{isRefreshingDiff ? (
 										<>
 											<LoaderIcon size={12} className="mr-1 animate-spin" />
-											Refreshing...
+											Refreshing…
 										</>
 									) : (
 										"Refresh diff"
@@ -487,7 +489,7 @@ export function OrgClickHouseSettingsSection({
 									{isApplying ? (
 										<>
 											<LoaderIcon size={12} className="mr-1 animate-spin" />
-											Applying...
+											Applying…
 										</>
 									) : diffSummary && diffSummary.missing > 0 ? (
 										`Apply schema (${diffSummary.missing} missing${diffSummary.drifted > 0 ? `, ${diffSummary.drifted} skipped` : ""})`
@@ -510,7 +512,7 @@ export function OrgClickHouseSettingsSection({
 						<AlertDialogTitle>Disable BYO ClickHouse?</AlertDialogTitle>
 						<AlertDialogDescription>
 							This org will fall back to the default Maple-managed Tinybird Cloud. Tables in
-							your ClickHouse cluster are NOT touched — disable just removes Maple&apos;s
+							your ClickHouse cluster are NOT touched: disable just removes Maple&apos;s
 							pointer to it.
 						</AlertDialogDescription>
 					</AlertDialogHeader>

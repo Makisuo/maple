@@ -42,7 +42,7 @@ export function TraceTimelineTooltipContent({
 			{/* Header */}
 			<div className="flex items-center gap-2">
 				{serviceColor && (
-					<div className="h-2.5 w-2.5 shrink-0" style={{ backgroundColor: serviceColor }} />
+					<div className="size-2.5 shrink-0" style={{ backgroundColor: serviceColor }} />
 				)}
 				<span className="font-medium truncate">{span.spanName}</span>
 			</div>

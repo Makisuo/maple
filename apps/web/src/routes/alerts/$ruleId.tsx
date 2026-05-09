@@ -120,7 +120,7 @@ function RuleDetailPage() {
 	// Timeline bar segments for sticky header
 	const timelineSegments = useMemo(() => {
 		if (ruleIncidents.length === 0) return []
-		const sorted = [...ruleIncidents].sort((a, b) => {
+		const sorted = ruleIncidents.toSorted((a, b) => {
 			const ta = a.firstTriggeredAt ? new Date(a.firstTriggeredAt).getTime() : 0
 			const tb = b.firstTriggeredAt ? new Date(b.firstTriggeredAt).getTime() : 0
 			return ta - tb
@@ -251,7 +251,7 @@ function RuleDetailPage() {
 			titleContent={
 				<div>
 					<div className="flex items-center gap-2 flex-wrap">
-						<h1 className="text-2xl font-bold tracking-tight truncate">{rule.name}</h1>
+						<h1 className="text-2xl font-semibold tracking-tight truncate">{rule.name}</h1>
 						<Badge variant="secondary" className="text-xs font-medium">
 							Beta
 						</Badge>
@@ -284,7 +284,7 @@ function RuleDetailPage() {
 				<div className="space-y-6">
 					<div className="space-y-2">
 						<h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
-							{signalLabels[rule.signalType]} — Last 24h
+							{signalLabels[rule.signalType]}: Last 24h
 						</h2>
 						<AlertPreviewChart
 							data={chartData}
@@ -434,7 +434,7 @@ function RuleDetailPage() {
 								</span>
 								<div className="mt-3 space-y-2">
 									{stats.topContributors.length === 0 ? (
-										<span className="text-3xl font-bold">—</span>
+										<span className="text-3xl font-bold">–</span>
 									) : (
 										stats.topContributors.map(([groupKey, count]) => (
 											<div key={groupKey} className="flex items-center gap-2">
@@ -757,7 +757,7 @@ function ChecksPanel({
 									</TableCell>
 									<TableCell>
 										{check.incidentTransition === "none" ? (
-											<span className="text-muted-foreground">—</span>
+											<span className="text-muted-foreground">–</span>
 										) : (
 											<Badge
 												variant="outline"

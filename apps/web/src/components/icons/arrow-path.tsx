@@ -13,7 +13,7 @@ function ArrowPathIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="M3 12a9 9 0 0 1 15.364-6.364L21 8"
+				d="M3 12a9 9 0 0 1 15.36-6.36L21 8"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeLinecap="square"
@@ -26,7 +26,7 @@ function ArrowPathIcon({ size = 24, className, ...props }: IconProps) {
 				strokeLinejoin="miter"
 			/>
 			<path
-				d="M21 12a9 9 0 0 1-15.364 6.364L3 16"
+				d="M21 12a9 9 0 0 1-15.36 6.36L3 16"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeLinecap="square"

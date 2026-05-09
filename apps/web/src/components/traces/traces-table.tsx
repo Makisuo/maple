@@ -354,7 +354,7 @@ export function TracesTableView({
 						{isFetchingNextPage && (
 							<tr className="border-b transition-colors">
 								<td colSpan={5} className="p-2 text-center text-sm text-muted-foreground">
-									Loading more traces...
+									Loading more traces…
 								</td>
 							</tr>
 						)}

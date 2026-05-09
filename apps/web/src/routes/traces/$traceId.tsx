@@ -76,7 +76,7 @@ function TraceDetailPage() {
 					<div className="rounded-md border">
 						{Array.from({ length: 5 }).map((_, i) => (
 							<div key={i} className="flex items-center gap-2 border-b p-3">
-								<Skeleton className="h-4 w-4" />
+								<Skeleton className="size-4" />
 								<Skeleton className="h-4 w-20" />
 								<Skeleton className="h-4 w-16" />
 								<Skeleton className="h-4 flex-1" />
@@ -270,7 +270,7 @@ function TraceDetailPage() {
 						</Badge>
 					}
 				>
-					<div className="flex flex-1 flex-col space-y-3 min-h-0">
+					<div className="flex flex-1 flex-col gap-y-3 min-h-0">
 						<div className="flex flex-wrap items-center gap-2 shrink-0">
 							<span className="text-xs text-muted-foreground">Services:</span>
 							{services.map((service: string) => (

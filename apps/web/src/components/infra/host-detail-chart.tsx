@@ -53,7 +53,7 @@ function transformRows(rows: ReadonlyArray<{ bucket: string; attributeValue: str
 		existing[series] = row.value
 		byBucket.set(row.bucket, existing)
 	}
-	const data = [...byBucket.values()].sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)))
+	const data = Array.from(byBucket.values()).toSorted((a, b) => String(a.bucket).localeCompare(String(b.bucket)))
 	return { data, series: [...seriesSet] }
 }
 

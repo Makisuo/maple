@@ -67,7 +67,7 @@ function groupByEnvironment(services: ServiceOverview[]): [string, ServiceOvervi
 		if (!groups.has(env)) groups.set(env, [])
 		groups.get(env)!.push(service)
 	}
-	return [...groups.entries()].sort(([a], [b]) => {
+	return Array.from(groups.entries()).toSorted(([a], [b]) => {
 		const pa = ENVIRONMENT_PRIORITY[a.toLowerCase()] ?? (a === "unknown" ? 999 : 3)
 		const pb = ENVIRONMENT_PRIORITY[b.toLowerCase()] ?? (b === "unknown" ? 999 : 3)
 		if (pa !== pb) return pa - pb

@@ -20,7 +20,7 @@ function FloppyDiskIcon({ size = 24, className, ...props }: IconProps) {
 				strokeWidth="2"
 			/>
 			<path
-				d="m19,21H5c-1.105,0-2-.895-2-2V5c0-1.105.895-2,2-2h11l5,5v11c0,1.105-.895,2-2,2Z"
+				d="m19,21H5c-1.10,0-2-.895-2-2V5c0-1.10.895-2,2-2h11l5,5v11c0,1.10-.895,2-2,2Z"
 				stroke="currentColor"
 				strokeLinecap="square"
 				strokeMiterlimit="10"

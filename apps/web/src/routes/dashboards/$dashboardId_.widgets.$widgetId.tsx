@@ -69,7 +69,7 @@ function WidgetConfigurePage() {
 	if (!activeDashboard || !configureWidget) {
 		return (
 			<DashboardLayout breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}>
-				<div className="py-12 text-sm text-muted-foreground">Loading widget...</div>
+				<div className="py-12 text-sm text-muted-foreground">Loading widget…</div>
 			</DashboardLayout>
 		)
 	}

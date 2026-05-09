@@ -385,14 +385,14 @@ export function TraceTimeline() {
 					{services.map((service) => (
 						<div key={service} className="flex items-center gap-1">
 							<div
-								className="h-2 w-2 shrink-0"
+								className="size-2 shrink-0"
 								style={{ backgroundColor: getServiceLegendColor(service, services) }}
 							/>
 							<span className="font-medium">{service}</span>
 						</div>
 					))}
 					<div className="flex items-center gap-1">
-						<div className="h-2 w-2 bg-destructive shrink-0" />
+						<div className="size-2 bg-destructive shrink-0" />
 						<span className="font-medium">Error</span>
 					</div>
 				</div>

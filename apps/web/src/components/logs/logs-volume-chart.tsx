@@ -159,8 +159,12 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 			}
 
 			const seriesKeys = SEVERITY_ORDER.filter((s) => seriesKeysSet.has(s))
+			const seriesKeysAdded = new Set(seriesKeys)
 			for (const key of seriesKeysSet) {
-				if (!seriesKeys.includes(key)) seriesKeys.push(key)
+				if (!seriesKeysAdded.has(key)) {
+					seriesKeys.push(key)
+					seriesKeysAdded.add(key)
+				}
 			}
 
 			const chartData = points.map((point) => ({

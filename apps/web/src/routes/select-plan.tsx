@@ -60,7 +60,7 @@ function SelectPlanPage() {
 			</div>
 
 			<div className="pointer-events-none absolute inset-0">
-				<div className="absolute top-[20%] left-[50%] -translate-x-1/2 -translate-y-1/2 h-[40rem] w-[40rem] rounded-full bg-primary/5 blur-[100px]" />
+				<div className="absolute top-[20%] left-[50%] -translate-x-1/2 -translate-y-1/2 size-[40rem] rounded-full bg-primary/5 blur-[100px]" />
 			</div>
 
 			<section className="relative mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 md:px-8 z-10">

@@ -77,7 +77,7 @@ function TemplatesPage() {
 				</div>
 			)}
 			{!Result.isSuccess(listResult) && !failed ? (
-				<div className="py-12 text-sm text-muted-foreground">Loading templates...</div>
+				<div className="py-12 text-sm text-muted-foreground">Loading templates…</div>
 			) : (
 				<TemplatePicker templates={templates} submitting={submitting} onUse={handleUse} />
 			)}

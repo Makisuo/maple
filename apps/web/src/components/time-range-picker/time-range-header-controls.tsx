@@ -37,7 +37,7 @@ export function TimeRangeHeaderControls({
 						type="button"
 						variant="outline"
 						size="sm"
-						className="-ml-px h-7 w-7 p-0"
+						className="-ml-px size-7 p-0"
 						onClick={() => onTimeChange({ presetValue: defaultPreset })}
 						aria-label="Reset to default time range"
 					>

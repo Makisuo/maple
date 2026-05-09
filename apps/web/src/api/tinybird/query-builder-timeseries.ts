@@ -222,7 +222,7 @@ function resolveStrategy(input: QueryBuilderTimeseriesInput): {
 	return {
 		enableEmptyRangeFallback:
 			input.strategy?.enableEmptyRangeFallback ?? DEFAULT_STRATEGY.enableEmptyRangeFallback,
-		fallbackWindowSeconds: [...uniqueWindows].sort((left, right) => left - right),
+		fallbackWindowSeconds: Array.from(uniqueWindows).toSorted((left, right) => left - right),
 		maxFallbackRangeSeconds:
 			input.strategy?.maxFallbackRangeSeconds ?? DEFAULT_STRATEGY.maxFallbackRangeSeconds,
 	}
@@ -552,7 +552,7 @@ function combineRows(
 		}
 	}
 
-	return [...rowsByBucket.values()].sort((left, right) =>
+	return Array.from(rowsByBucket.values()).toSorted((left, right) =>
 		String(left.bucket).localeCompare(String(right.bucket)),
 	)
 }

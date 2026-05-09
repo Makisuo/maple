@@ -98,7 +98,7 @@ function HazelIntegrationCard() {
 			style={{ ["--tile-accent" as string]: "#F46F0F" }}
 		>
 			<span
-				className="relative inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-card"
+				className="relative inline-flex size-12 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-card"
 				aria-hidden
 			>
 				<span

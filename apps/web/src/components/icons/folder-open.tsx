@@ -20,7 +20,7 @@ function FolderOpenIcon({ size = 24, className, ...props }: IconProps) {
 				strokeLinecap="square"
 			/>
 			<path
-				d="M21 7V7C21 5.89543 20.1046 5 19 5H13.5L10.5 2H5C3.89543 2 3 2.89543 3 4V7"
+				d="M21 7V7C21 5.89 20.10 5 19 5H13.5L10.5 2H5C3.89 2 3 2.89 3 4V7"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

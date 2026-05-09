@@ -266,7 +266,7 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 									</Tooltip>
 								) : (
 									<span className="text-[11px] font-mono tabular-nums text-muted-foreground/30">
-										—
+										–
 									</span>
 								)}
 							</div>

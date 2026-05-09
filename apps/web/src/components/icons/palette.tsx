@@ -13,14 +13,14 @@ function PaletteIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="M1 10.7315C1 6.95059 2.8317 3.61452 5.68915 1.61287C6.7149 0.871522 8.3268 0.723252 9.05948 1.61287C10.012 2.87317 8.3268 4.65241 9.05948 5.6903C11.0377 8.13675 15.214 3.31798 20.1229 5.6903C23.6398 7.46954 23.1269 12.14 22.6873 13.8451C21.3685 18.5157 17.119 22 12.0635 22C5.98222 21.9259 1 16.9588 1 10.7315Z"
+				d="M1 10.73C1 6.95 2.83 3.61 5.68 1.61C6.71 0.87 8.32 0.72 9.05 1.61C10.01 2.87 8.32 4.65 9.05 5.69C11.03 8.13 15.21 3.31 20.12 5.69C23.63 7.46 23.12 12.14 22.68 13.84C21.36 18.51 17.11 22 12.06 22C5.98 21.92 1 16.95 1 10.73Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"
 				strokeLinecap="square"
 			/>
 			<path
-				d="M6.5 15C6.77614 15 7 14.7761 7 14.5C7 14.2239 6.77614 14 6.5 14C6.22386 14 6 14.2239 6 14.5C6 14.7761 6.22386 15 6.5 15Z"
+				d="M6.5 15C6.77 15 7 14.77 7 14.5C7 14.22 6.77 14 6.5 14C6.22 14 6 14.22 6 14.5C6 14.77 6.22 15 6.5 15Z"
 				fill="currentColor"
 				stroke="currentColor"
 				strokeWidth="2"
@@ -28,7 +28,7 @@ function PaletteIcon({ size = 24, className, ...props }: IconProps) {
 				strokeLinecap="square"
 			/>
 			<path
-				d="M5.5 10C5.77614 10 6 9.77614 6 9.5C6 9.22386 5.77614 9 5.5 9C5.22386 9 5 9.22386 5 9.5C5 9.77614 5.22386 10 5.5 10Z"
+				d="M5.5 10C5.77 10 6 9.77 6 9.5C6 9.22 5.77 9 5.5 9C5.22 9 5 9.22 5 9.5C5 9.77 5.22 10 5.5 10Z"
 				fill="currentColor"
 				stroke="currentColor"
 				strokeWidth="2"
@@ -36,7 +36,7 @@ function PaletteIcon({ size = 24, className, ...props }: IconProps) {
 				strokeLinecap="square"
 			/>
 			<path
-				d="M10.5 18C10.7761 18 11 17.7761 11 17.5C11 17.2239 10.7761 17 10.5 17C10.2239 17 10 17.2239 10 17.5C10 17.7761 10.2239 18 10.5 18Z"
+				d="M10.5 18C10.77 18 11 17.77 11 17.5C11 17.22 10.77 17 10.5 17C10.22 17 10 17.22 10 17.5C10 17.77 10.22 18 10.5 18Z"
 				fill="currentColor"
 				stroke="currentColor"
 				strokeWidth="2"
@@ -44,7 +44,7 @@ function PaletteIcon({ size = 24, className, ...props }: IconProps) {
 				strokeLinecap="square"
 			/>
 			<path
-				d="M17 14C18.1046 14 19 12.8807 19 11.5C19 10.1193 18.1046 9 17 9C15.8954 9 15 10.1193 15 11.5C15 12.8807 15.8954 14 17 14Z"
+				d="M17 14C18.10 14 19 12.88 19 11.5C19 10.11 18.10 9 17 9C15.89 9 15 10.11 15 11.5C15 12.88 15.89 14 17 14Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

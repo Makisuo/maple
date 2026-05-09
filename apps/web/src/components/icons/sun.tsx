@@ -13,7 +13,7 @@ function SunIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="M12 18C15.3137 18 18 15.3137 18 12C18 8.68629 15.3137 6 12 6C8.68629 6 6 8.68629 6 12C6 15.3137 8.68629 18 12 18Z"
+				d="M12 18C15.31 18 18 15.31 18 12C18 8.68 15.31 6 12 6C8.68 6 6 8.68 6 12C6 15.31 8.68 18 12 18Z"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"
@@ -24,25 +24,25 @@ function SunIcon({ size = 24, className, ...props }: IconProps) {
 			<path d="M23 12L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
 			<path d="M2 12L1 12" stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
 			<path
-				d="M19.7782 4.2218L19.0711 4.92891"
+				d="M19.77 4.22L19.07 4.92"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeLinecap="square"
 			/>
 			<path
-				d="M4.92893 19.071L4.22183 19.7782"
+				d="M4.92 19.07L4.22 19.77"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeLinecap="square"
 			/>
 			<path
-				d="M19.7782 19.7782L19.0711 19.0711"
+				d="M19.77 19.77L19.07 19.07"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeLinecap="square"
 			/>
 			<path
-				d="M4.92893 4.92896L4.22183 4.22185"
+				d="M4.92 4.92L4.22 4.22"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeLinecap="square"

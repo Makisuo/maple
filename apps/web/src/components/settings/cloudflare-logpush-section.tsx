@@ -532,7 +532,7 @@ export function CloudflareLogpushSection() {
 					{!setup && Result.isInitial(setupResult) ? (
 						<div className="text-muted-foreground flex items-center justify-center gap-2 py-10 text-sm">
 							<LoaderIcon size={14} className="animate-spin" />
-							Loading setup details...
+							Loading setup details…
 						</div>
 					) : !setup ? (
 						<div className="text-muted-foreground py-6 text-sm">

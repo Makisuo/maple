@@ -49,17 +49,19 @@ function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string
 	return fallback
 }
 
+const dateFormatter = new Intl.DateTimeFormat("en-US", {
+	month: "short",
+	day: "numeric",
+	year: "numeric",
+	hour: "numeric",
+	minute: "2-digit",
+})
+
 function formatDate(value: string | null): string {
 	if (!value) return "Never"
 
 	try {
-		return new Intl.DateTimeFormat("en-US", {
-			month: "short",
-			day: "numeric",
-			year: "numeric",
-			hour: "numeric",
-			minute: "2-digit",
-		}).format(new Date(value))
+		return dateFormatter.format(new Date(value))
 	} catch {
 		return value
 	}

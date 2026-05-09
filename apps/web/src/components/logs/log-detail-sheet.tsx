@@ -95,7 +95,7 @@ function TraceTimeline({ currentLog, onLogSelect }: { currentLog: Log; onLogSele
 					</>
 				))
 				.onSuccess((data) => {
-					const logs = [...data.data].sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+					const logs = data.data.toSorted((a, b) => a.timestamp.localeCompare(b.timestamp))
 
 					if (logs.length <= 1) {
 						return (
@@ -131,7 +131,7 @@ function TraceTimeline({ currentLog, onLogSelect }: { currentLog: Log; onLogSele
 									const spanChanged = prevLog && prevLog.spanId !== log.spanId && log.spanId
 
 									return (
-										<div key={`${log.timestamp}-${log.spanId}-${i}`}>
+										<div key={`${log.timestamp}-${log.spanId}-${log.body.slice(0, 20)}`}>
 											{spanChanged && (
 												<div className="flex items-center gap-2 px-2 py-0.5 bg-muted/30">
 													<div className="h-px flex-1 bg-border" />

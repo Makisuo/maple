@@ -13,21 +13,21 @@ function LogoutIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="M16 4V4C16 2.89543 15.1046 2 14 2L6 2C4.89543 2 4 2.89543 4 4L4 20C4 21.1046 4.89543 22 6 22L14 22C15.1046 22 16 21.1046 16 20V20"
+				d="M16 4V4C16 2.89 15.10 2 14 2L6 2C4.89 2 4 2.89 4 4L4 20C4 21.10 4.89 22 6 22L14 22C15.10 22 16 21.10 16 20V20"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"
 				strokeLinecap="square"
 			/>
 			<path
-				d="M9.99999 12L21.5 12L21 12"
+				d="M9.99 12L21.5 12L21 12"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"
 				strokeLinecap="square"
 			/>
 			<path
-				d="M17.2574 16.2427L21.5 12L17.2574 7.75739"
+				d="M17.25 16.24L21.5 12L17.25 7.75"
 				stroke="currentColor"
 				strokeWidth="2"
 				strokeMiterlimit="10"

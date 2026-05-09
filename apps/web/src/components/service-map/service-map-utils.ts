@@ -363,7 +363,7 @@ function computeLayers(
 
 	// If no roots (pure cycle), pick the node with lowest in-degree
 	if (roots.length === 0) {
-		const sorted = [...nodes].sort((a, b) => {
+		const sorted = nodes.toSorted((a, b) => {
 			const da = inDegree.get(a.id) ?? 0
 			const db = inDegree.get(b.id) ?? 0
 			return da !== db ? da - db : a.id.localeCompare(b.id)
@@ -413,7 +413,7 @@ function computeLayers(
 
 	// Barycenter ordering: sort nodes within each layer by the median position
 	// of their neighbors in adjacent layers to minimize edge crossings
-	const layerIndices = [...layerGroups.keys()].sort((a, b) => a - b)
+	const layerIndices = Array.from(layerGroups.keys()).toSorted((a, b) => a - b)
 	const positionOf = new Map<string, number>()
 
 	function updatePositions() {
@@ -521,8 +521,12 @@ export function layoutNodes(
 	const nodeById = new Map(nodes.map((n) => [n.id, n]))
 
 	for (const component of connectedComponents) {
-		const compNodes = component.map((id) => nodeById.get(id)!).filter(Boolean)
-		const compEdges = edges.filter((e) => component.includes(e.source) && component.includes(e.target))
+		const compNodes = component.flatMap((id) => {
+			const node = nodeById.get(id)
+			return node ? [node] : []
+		})
+		const componentSet = new Set(component)
+		const compEdges = edges.filter((e) => componentSet.has(e.source) && componentSet.has(e.target))
 
 		const layers = computeLayers(compNodes, compEdges)
 

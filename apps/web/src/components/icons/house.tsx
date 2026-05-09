@@ -13,7 +13,7 @@ function HouseIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="M9 21V16C9 14.3431 10.3431 13 12 13C13.6569 13 15 14.3431 15 16V21"
+				d="M9 21V16C9 14.34 10.34 13 12 13C13.65 13 15 14.34 15 16V21"
 				stroke="currentColor"
 				strokeWidth="2"
 			/>

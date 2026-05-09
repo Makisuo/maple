@@ -96,7 +96,7 @@ function TraceTimelineBarInner({
 			{bar.span.children.length > 0 && (
 				<button
 					data-collapse-toggle={bar.span.spanId}
-					className="flex items-center justify-center w-4 h-4 shrink-0 ml-1 text-muted-foreground hover:text-foreground"
+					className="flex items-center justify-center size-4 shrink-0 ml-1 text-muted-foreground hover:text-foreground"
 					tabIndex={-1}
 				>
 					{bar.isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}

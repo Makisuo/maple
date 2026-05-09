@@ -400,7 +400,7 @@ export function buildWidgetDataSource(
 			whereClause: effectiveWhereClause,
 			aggregation: "count", // required by the spec builder but unused for list
 		}
-		const columnFields = state.listColumns.map((c) => c.field).filter(Boolean)
+		const columnFields = state.listColumns.flatMap((c) => (c.field ? [c.field] : []))
 		return {
 			endpoint: "custom_query_builder_list" as const,
 			params: {

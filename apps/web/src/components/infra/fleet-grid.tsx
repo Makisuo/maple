@@ -127,7 +127,7 @@ export function FleetGrid({ hosts }: FleetGridProps) {
 				</div>
 			</div>
 
-			<div className="px-4 py-4">
+			<div className="p-4">
 				<div
 					className="grid gap-[3px]"
 					style={{ gridTemplateColumns: "repeat(auto-fill, minmax(28px, 1fr))" }}

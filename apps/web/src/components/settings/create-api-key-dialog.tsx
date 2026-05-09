@@ -124,7 +124,7 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated }: CreateApiK
 						</div>
 						<DialogFooter>
 							<Button variant="outline" onClick={() => handleClose(false)}>
-								Done
+								Close
 							</Button>
 						</DialogFooter>
 					</>

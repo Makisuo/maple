@@ -53,12 +53,14 @@ function getInitials(firstName?: string | null, lastName?: string | null) {
 	return (first + last).toUpperCase() || "?"
 }
 
+const dateFormatter = new Intl.DateTimeFormat("en-US", {
+	month: "short",
+	day: "numeric",
+	year: "numeric",
+})
+
 function formatDate(date: Date) {
-	return new Intl.DateTimeFormat("en-US", {
-		month: "short",
-		day: "numeric",
-		year: "numeric",
-	}).format(date)
+	return dateFormatter.format(date)
 }
 
 function roleBadge(role: string) {

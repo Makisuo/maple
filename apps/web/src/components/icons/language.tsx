@@ -40,9 +40,9 @@ function LanguageIcon({ size = 24, className, ...props }: IconProps) {
 				strokeWidth="2"
 			/>
 			<line
-				x1="13.091"
+				x1="13.09"
 				y1="18"
-				x2="19.909"
+				x2="19.90"
 				y2="18"
 				stroke="currentColor"
 				strokeMiterlimit="10"
@@ -56,7 +56,7 @@ function LanguageIcon({ size = 24, className, ...props }: IconProps) {
 				strokeWidth="2"
 			/>
 			<path
-				d="m10.504,13.408c-2.223-.829-5.176-2.793-5.504-7.408h1"
+				d="m10.50,13.40c-2.22-.829-5.17-2.79-5.50-7.40h1"
 				stroke="currentColor"
 				strokeLinecap="square"
 				strokeMiterlimit="10"

@@ -22,7 +22,7 @@ function EyeIcon({ size = 24, className, ...props }: IconProps) {
 				strokeWidth="2"
 			/>
 			<path
-				d="m1.141,12s3.859-7,10.859-7,10.859,7,10.859,7c0,0-3.859,7-10.859,7S1.141,12,1.141,12Z"
+				d="m1.14,12s3.85-7,10.85-7,10.85,7,10.85,7c0,0-3.85,7-10.85,7S1.14,12,1.14,12Z"
 				stroke="currentColor"
 				strokeLinecap="square"
 				strokeMiterlimit="10"

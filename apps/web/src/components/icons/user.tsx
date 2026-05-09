@@ -22,7 +22,7 @@ function UserIcon({ size = 24, className, ...props }: IconProps) {
 				strokeWidth="2"
 			/>
 			<path
-				d="m12,13c-4.418,0-8,3.582-8,8,5.333,1.333,10.667,1.333,16,0,0-4.418-3.582-8-8-8Z"
+				d="m12,13c-4.41,0-8,3.58-8,8,5.33,1.33,10.66,1.33,16,0,0-4.41-3.58-8-8-8Z"
 				stroke="currentColor"
 				strokeLinecap="square"
 				strokeMiterlimit="10"

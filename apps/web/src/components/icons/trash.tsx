@@ -13,13 +13,13 @@ function TrashIcon({ size = 24, className, ...props }: IconProps) {
 			{...props}
 		>
 			<path
-				d="m18.833,8l-.503,12.083c-.045,1.071-.926,1.917-1.998,1.917H7.668c-1.072,0-1.954-.845-1.998-1.917l-.503-12.083"
+				d="m18.83,8l-.503,12.08c-.045,1.07-.926,1.91-1.99,1.91H7.66c-1.07,0-1.95-.845-1.99-1.91l-.503-12.08"
 				stroke="currentColor"
 				strokeMiterlimit="10"
 				strokeWidth="2"
 			/>
 			<path
-				d="m10,4v-1c0-.552.448-1,1-1h2c.552,0,1,.448,1,1v1"
+				d="m10,4v-1c0-.552.44-1,1-1h2c.552,0,1,.448,1,1v1"
 				stroke="currentColor"
 				strokeMiterlimit="10"
 				strokeWidth="2"
@@ -45,7 +45,7 @@ function TrashIcon({ size = 24, className, ...props }: IconProps) {
 				strokeWidth="2"
 			/>
 			<path
-				d="m5,4h14c1.104,0,2,.896,2,2v2H3v-2c0-1.104.896-2,2-2Z"
+				d="m5,4h14c1.10,0,2,.896,2,2v2H3v-2c0-1.10.896-2,2-2Z"
 				stroke="currentColor"
 				strokeLinecap="square"
 				strokeMiterlimit="10"

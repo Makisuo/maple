@@ -129,7 +129,7 @@ function DashboardListPage() {
 				</div>
 			)}
 			{isLoading && dashboards.length === 0 ? (
-				<div className="py-12 text-sm text-muted-foreground">Loading dashboards...</div>
+				<div className="py-12 text-sm text-muted-foreground">Loading dashboards…</div>
 			) : null}
 			<DashboardList
 				dashboards={sortedDashboards}

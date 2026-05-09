@@ -169,9 +169,10 @@ function mergeBreakdownResults(
 	// Multiple queries: merge by name, one column per query
 	const rowsByName = new Map<string, Record<string, string | number>>()
 	const columnNames: string[] = []
+	const queriesById = new Map(enabledQueries.map((q) => [q.id, q]))
 
 	for (const result of successful) {
-		const query = enabledQueries.find((q) => q.id === result.queryId)
+		const query = queriesById.get(result.queryId)
 		const displayName = query ? toDisplayName(query) : result.queryName
 		columnNames.push(displayName)
 
@@ -193,7 +194,7 @@ function mergeBreakdownResults(
 
 	// Sort by the first column's value descending
 	const firstCol = columnNames[0]
-	return [...rowsByName.values()].sort((a, b) => {
+	return Array.from(rowsByName.values()).toSorted((a, b) => {
 		const aVal = typeof a[firstCol] === "number" ? a[firstCol] : 0
 		const bVal = typeof b[firstCol] === "number" ? b[firstCol] : 0
 		return bVal - aVal

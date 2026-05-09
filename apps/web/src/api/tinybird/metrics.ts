@@ -223,7 +223,7 @@ const getMetricTimeSeriesEffect = Effect.fn("Tinybird.getMetricTimeSeries")(func
 	processResult(maxRes, "maxValue")
 	processResult(countRes, "dataPointCount")
 
-	const rows = [...valueMap.values()].sort((a, b) => a.bucket.localeCompare(b.bucket))
+	const rows = Array.from(valueMap.values()).toSorted((a, b) => a.bucket.localeCompare(b.bucket))
 
 	return { data: rows }
 })
