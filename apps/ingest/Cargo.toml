@@ -46,3 +46,12 @@ uuid = { version = "1", features = ["v4"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 moka = { version = "0.12", features = ["future"] }
+
+# Pipeline (in-process collector replacement). Token-bucket rate limiting per
+# (org, signal) for the Sampler stage.
+governor = "0.10"
+# PII redaction patterns in the Transformer stage.
+regex = "1"
+
+[dev-dependencies]
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time"] }

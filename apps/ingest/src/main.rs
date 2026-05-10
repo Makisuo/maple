@@ -2,6 +2,7 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod autumn;
+mod pipeline;
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -222,6 +223,7 @@ struct AppState {
     cloudflare_resolver: CloudflareConnectorResolver,
     metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
     autumn_tracker: Option<AutumnTracker>,
+    pipeline: Arc<pipeline::Pipeline>,
 }
 
 #[derive(Clone)]
@@ -517,6 +519,27 @@ async fn main() {
 
     let shared_db = Arc::new(database);
 
+    let pipeline_config = match pipeline::PipelineConfig::from_env() {
+        Ok(cfg) => cfg,
+        Err(error) => {
+            eprintln!("Pipeline configuration error: {error}");
+            std::process::exit(1);
+        }
+    };
+    let pipeline_mode_label = match pipeline_config.mode {
+        pipeline::PipelineMode::Disabled => "disabled",
+        pipeline::PipelineMode::Shadow => "shadow",
+        pipeline::PipelineMode::Primary => "primary",
+    };
+    info!(mode = pipeline_mode_label, "Pipeline mode resolved");
+    let pipeline_handle = match pipeline::Pipeline::new(pipeline_config) {
+        Ok(p) => p,
+        Err(error) => {
+            eprintln!("Pipeline init error: {error}");
+            std::process::exit(1);
+        }
+    };
+
     let state = Arc::new(AppState {
         resolver: IngestKeyResolver {
             db: Arc::clone(&shared_db),
@@ -532,6 +555,7 @@ async fn main() {
         config: config.clone(),
         metrics_handle: prometheus_handle,
         autumn_tracker,
+        pipeline: pipeline_handle,
     });
 
     let cors = CorsLayer::new()
@@ -976,6 +1000,53 @@ async fn handle_signal_inner(
     .increment(enrich_result.item_count as u64);
 
     let decoded_bytes = decoded_payload.len();
+
+    // --- Pipeline (in-process collector) ---
+    // When INGEST_PIPELINE_MODE is shadow/primary, decode the enriched payload
+    // and feed it through the in-process pipeline. Errors here are
+    // intentionally NOT surfaced — in shadow mode the upstream forward is the
+    // production path and a shadow failure must not turn into a 5xx for the
+    // SDK. Phase 1 only handles traces; logs/metrics land in phase 2.
+    if state.pipeline.mode().is_enabled() && matches!(signal, Signal::Traces) {
+        match payload_format {
+            PayloadFormat::Protobuf => {
+                match ExportTraceServiceRequest::decode(enrich_result.payload.as_slice()) {
+                    Ok(request) => {
+                        state
+                            .pipeline
+                            .ingest_traces(&resolved_key.org_id, &request)
+                            .await;
+                    }
+                    Err(error) => {
+                        warn!(
+                            error = %error,
+                            org_id = resolved_key.org_id.as_str(),
+                            "pipeline traces: failed to re-decode enriched protobuf payload"
+                        );
+                    }
+                }
+            }
+            PayloadFormat::Json => {
+                match serde_json::from_slice::<ExportTraceServiceRequest>(
+                    enrich_result.payload.as_slice(),
+                ) {
+                    Ok(request) => {
+                        state
+                            .pipeline
+                            .ingest_traces(&resolved_key.org_id, &request)
+                            .await;
+                    }
+                    Err(error) => {
+                        warn!(
+                            error = %error,
+                            org_id = resolved_key.org_id.as_str(),
+                            "pipeline traces: failed to re-decode enriched JSON payload"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     // --- Encode & Forward ---
     let outbound_body = encode_payload(&enrich_result.payload, content_encoding.as_deref())
