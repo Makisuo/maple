@@ -26,6 +26,7 @@ export interface AuthServiceShape {
 	readonly loginSelfHosted: (
 		password: string,
 	) => Effect.Effect<SelfHostedLoginResponse, SelfHostedAuthDisabledError | SelfHostedInvalidPasswordError>
+	readonly getUserEmail: (userId: string) => Effect.Effect<string | null>
 }
 
 type HeaderRecord = Record<string, string | undefined>
@@ -421,17 +422,51 @@ export const makeResolveMcpTenant = (
 	authenticateClerkRequest = makeClerkAuthenticateRequest(env),
 ) => makeResolveTenant(env, authenticateClerkRequest, "api_key")
 
+export const makeGetUserEmail = (
+	env: Pick<AuthEnv, "MAPLE_AUTH_MODE" | "CLERK_SECRET_KEY" | "CLERK_PUBLISHABLE_KEY" | "CLERK_JWT_KEY">,
+) => {
+	if (getAuthMode(env.MAPLE_AUTH_MODE) !== "clerk" || Option.isNone(env.CLERK_SECRET_KEY)) {
+		return Effect.fn("AuthService.getUserEmail")(function* (_userId: string) {
+			return null as string | null
+		})
+	}
+
+	const clerkClient = createClerkClient({
+		secretKey: Redacted.value(env.CLERK_SECRET_KEY.value),
+		publishableKey: getOptionalString(env.CLERK_PUBLISHABLE_KEY),
+		jwtKey: getOptionalSecret(env.CLERK_JWT_KEY),
+	})
+
+	return Effect.fn("AuthService.getUserEmail")(function* (userId: string) {
+		const user = yield* Effect.tryPromise({
+			try: () => clerkClient.users.getUser(userId),
+			catch: (error) => error,
+		}).pipe(Effect.option)
+
+		return Option.match(user, {
+			onNone: () => null as string | null,
+			onSome: (u) => {
+				const primaryId = u.primaryEmailAddressId
+				const primary = u.emailAddresses?.find((e) => e.id === primaryId)
+				return primary?.emailAddress ?? u.emailAddresses?.[0]?.emailAddress ?? null
+			},
+		})
+	})
+}
+
 export class AuthService extends Context.Service<AuthService, AuthServiceShape>()("AuthService", {
 	make: Effect.gen(function* () {
 		const env = yield* Env
 		const resolveTenant = makeResolveTenant(env)
 		const resolveMcpTenant = makeResolveMcpTenant(env)
 		const loginSelfHosted = makeLoginSelfHosted(env)
+		const getUserEmail = makeGetUserEmail(env)
 
 		return {
 			resolveTenant,
 			resolveMcpTenant,
 			loginSelfHosted,
+			getUserEmail,
 		}
 	}),
 }) {

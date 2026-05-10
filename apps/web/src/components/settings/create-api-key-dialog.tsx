@@ -1,7 +1,7 @@
 import { useAtomRefresh, useAtomSet } from "@/lib/effect-atom"
 import { useState } from "react"
 import { Exit } from "effect"
-import { CreateApiKeyRequest } from "@maple/domain/http"
+import { CreateApiKeyRequest, type ApiKeyKind } from "@maple/domain/http"
 import { toast } from "sonner"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -28,9 +28,10 @@ interface CreateApiKeyDialogProps {
 	open: boolean
 	onOpenChange: (open: boolean) => void
 	onCreated?: (secret: string) => void
+	kind?: ApiKeyKind
 }
 
-export function CreateApiKeyDialog({ open, onOpenChange, onCreated }: CreateApiKeyDialogProps) {
+export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: CreateApiKeyDialogProps) {
 	const [newName, setNewName] = useState("")
 	const [newDescription, setNewDescription] = useState("")
 	const [isCreating, setIsCreating] = useState(false)
@@ -50,6 +51,7 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated }: CreateApiK
 			payload: new CreateApiKeyRequest({
 				name: newName.trim(),
 				description: newDescription.trim() || undefined,
+				kind,
 			}),
 		})
 		if (Exit.isSuccess(result)) {

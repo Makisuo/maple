@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import {
 	ApiKeyId,
+	type ApiKeyKind,
 	ApiKeyCreatedResponse,
 	ApiKeyNotFoundError,
 	ApiKeyPersistenceError,
@@ -37,12 +38,14 @@ const rowToResponse = (row: typeof apiKeys.$inferSelect): ApiKeyResponse =>
 		name: row.name,
 		description: row.description ?? null,
 		keyPrefix: row.keyPrefix,
+		kind: row.kind,
 		revoked: row.revoked,
 		revokedAt: row.revokedAt ?? null,
 		lastUsedAt: row.lastUsedAt ?? null,
 		expiresAt: row.expiresAt ?? null,
 		createdAt: row.createdAt,
 		createdBy: decodeUserIdSync(row.createdBy),
+		createdByEmail: row.createdByEmail ?? null,
 	})
 
 export class ApiKeysService extends Context.Service<ApiKeysService>()("ApiKeysService", {
@@ -94,7 +97,13 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("ApiKeysSe
 		const create = Effect.fn("ApiKeysService.create")(function* (
 			orgId: OrgId,
 			userId: UserId,
-			params: { name: string; description?: string; expiresInSeconds?: number },
+			params: {
+				name: string
+				description?: string
+				expiresInSeconds?: number
+				kind?: ApiKeyKind
+				createdByEmail?: string | null
+			},
 		) {
 			const id = decodeApiKeyIdSync(randomUUID())
 			const rawKey = generateApiKey()
@@ -102,6 +111,8 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("ApiKeysSe
 			const keyPrefix = rawKey.slice(0, 12) + "..."
 			const now = Date.now()
 			const expiresAt = params.expiresInSeconds ? now + params.expiresInSeconds * 1000 : undefined
+			const kind: ApiKeyKind = params.kind ?? "standard"
+			const createdByEmail = params.createdByEmail ?? null
 
 			yield* database
 				.execute((db) =>
@@ -112,9 +123,11 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("ApiKeysSe
 						description: params.description ?? null,
 						keyHash,
 						keyPrefix,
+						kind,
 						expiresAt: expiresAt ?? null,
 						createdAt: now,
 						createdBy: userId,
+						createdByEmail,
 					}),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
@@ -124,12 +137,14 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("ApiKeysSe
 				name: params.name,
 				description: params.description ?? null,
 				keyPrefix,
+				kind,
 				revoked: false,
 				revokedAt: null,
 				lastUsedAt: null,
 				expiresAt: expiresAt ?? null,
 				createdAt: now,
 				createdBy: userId,
+				createdByEmail,
 				secret: rawKey,
 			})
 		})

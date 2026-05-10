@@ -211,6 +211,7 @@ function McpPage() {
 					open={createDialogOpen}
 					onOpenChange={setCreateDialogOpen}
 					onCreated={(secret) => setCreatedSecret(secret)}
+					kind="mcp"
 				/>
 			</div>
 		</DashboardLayout>

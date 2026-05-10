@@ -14,8 +14,10 @@ export const apiKeys = sqliteTable(
 		lastUsedAt: integer("last_used_at", { mode: "number" }),
 		expiresAt: integer("expires_at", { mode: "number" }),
 		metadataJson: text("metadata_json"),
+		kind: text("kind", { enum: ["standard", "mcp"] }).notNull().default("standard"),
 		createdAt: integer("created_at", { mode: "number" }).notNull(),
 		createdBy: text("created_by").notNull(),
+		createdByEmail: text("created_by_email"),
 	},
 	(table) => [
 		uniqueIndex("api_keys_key_hash_unique").on(table.keyHash),

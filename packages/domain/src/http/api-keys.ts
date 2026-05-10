@@ -3,17 +3,22 @@ import { Schema } from "effect"
 import { ApiKeyId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 
+export const ApiKeyKind = Schema.Literals(["standard", "mcp"])
+export type ApiKeyKind = Schema.Schema.Type<typeof ApiKeyKind>
+
 export class ApiKeyResponse extends Schema.Class<ApiKeyResponse>("ApiKeyResponse")({
 	id: ApiKeyId,
 	name: Schema.String,
 	description: Schema.NullOr(Schema.String),
 	keyPrefix: Schema.String,
+	kind: ApiKeyKind,
 	revoked: Schema.Boolean,
 	revokedAt: Schema.NullOr(Schema.Number),
 	lastUsedAt: Schema.NullOr(Schema.Number),
 	expiresAt: Schema.NullOr(Schema.Number),
 	createdAt: Schema.Number,
 	createdBy: UserId,
+	createdByEmail: Schema.NullOr(Schema.String),
 }) {}
 
 export class ApiKeyCreatedResponse extends Schema.Class<ApiKeyCreatedResponse>("ApiKeyCreatedResponse")({
@@ -21,12 +26,14 @@ export class ApiKeyCreatedResponse extends Schema.Class<ApiKeyCreatedResponse>("
 	name: Schema.String,
 	description: Schema.NullOr(Schema.String),
 	keyPrefix: Schema.String,
+	kind: ApiKeyKind,
 	revoked: Schema.Boolean,
 	revokedAt: Schema.NullOr(Schema.Number),
 	lastUsedAt: Schema.NullOr(Schema.Number),
 	expiresAt: Schema.NullOr(Schema.Number),
 	createdAt: Schema.Number,
 	createdBy: UserId,
+	createdByEmail: Schema.NullOr(Schema.String),
 	secret: Schema.String,
 }) {}
 
@@ -38,6 +45,7 @@ export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("Crea
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
 	expiresInSeconds: Schema.optional(Schema.Number),
+	kind: Schema.optional(ApiKeyKind),
 }) {}
 
 export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersistenceError>()(
