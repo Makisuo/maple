@@ -357,8 +357,14 @@ fn init_tracing(forward_endpoint: &str, bind_port: u16) -> Option<SdkTracerProvi
         .with_target(false)
         .compact();
 
-    let deployment_env =
-        std::env::var("DEPLOYMENT_ENV").unwrap_or_else(|_| "development".to_string());
+    // Resolve the deployment environment in maple's canonical priority order.
+    // MAPLE_ENVIRONMENT is what apps/api/alchemy.run.ts and friends set via
+    // resolveDeploymentEnvironment(stage); RAILWAY_ENVIRONMENT_NAME is Railway's
+    // free runtime label; DEPLOYMENT_ENV is a manual override of last resort.
+    let deployment_env = std::env::var("MAPLE_ENVIRONMENT")
+        .or_else(|_| std::env::var("RAILWAY_ENVIRONMENT_NAME"))
+        .or_else(|_| std::env::var("DEPLOYMENT_ENV"))
+        .unwrap_or_else(|_| "development".to_string());
     let internal_org_id =
         std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_string());
 
