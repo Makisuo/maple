@@ -41,6 +41,7 @@ import {
 	sendMapleChatMessage,
 	type EntityStreamDB,
 	type EntityTimelineSection,
+	type MapleChatSession,
 } from "@/lib/services/ai/electric-chat"
 
 type PromptStatus = "submitted" | "streaming" | "ready" | "error"
@@ -132,9 +133,10 @@ export function ChatConversation({
 			return next
 		})
 
-	const [session, setSession] = useState<{ id: string; entityUrl: string } | null>(null)
+	const [session, setSession] = useState<MapleChatSession | null>(null)
 	const [db, setDb] = useState<EntityStreamDB | null>(null)
 	const [sessionError, setSessionError] = useState<string | null>(null)
+	const [sendError, setSendError] = useState<string | null>(null)
 	const [pendingSend, setPendingSend] = useState(false)
 	const [answeredApprovals, setAnsweredApprovals] = useState<Set<string>>(() => new Set())
 
@@ -160,17 +162,23 @@ export function ChatConversation({
 
 	useEffect(() => {
 		let cancelled = false
+		let close: (() => void) | null = null
 		setSession(null)
 		setDb(null)
 		setSessionError(null)
+		setSendError(null)
 		setAnsweredApprovals(new Set())
 
 		ensureMapleChatSession({ tabId })
 			.then(async (nextSession) => {
-				const nextDb = await observeMapleChatSession(nextSession.entityUrl)
-				if (cancelled) return
+				const observation = await observeMapleChatSession(nextSession)
+				if (cancelled) {
+					observation.close()
+					return
+				}
+				close = observation.close
 				setSession(nextSession)
-				setDb(nextDb)
+				setDb(observation.db)
 			})
 			.catch((error) => {
 				if (cancelled) return
@@ -179,6 +187,7 @@ export function ChatConversation({
 
 		return () => {
 			cancelled = true
+			close?.()
 		}
 	}, [tabId, orgId])
 
@@ -240,8 +249,11 @@ export function ChatConversation({
 			onFirstMessage(tabId, trimmed.slice(0, 40))
 		}
 		setPendingSend(true)
+		setSendError(null)
 		try {
 			await sendMapleChatMessage(session.id, { ...body, text: trimmed })
+		} catch (error) {
+			setSendError(error instanceof Error ? error.message : String(error))
 		} finally {
 			setPendingSend(false)
 		}
@@ -249,24 +261,31 @@ export function ChatConversation({
 
 	const handleApprovalResponse = async (approvalId: string, approved: boolean) => {
 		if (!session) return
-		await sendMapleApprovalResponse(session.id, approvalId, approved)
-		setAnsweredApprovals((prev) => {
-			const next = new Set(prev)
-			next.add(approvalId)
-			return next
-		})
+		try {
+			await sendMapleApprovalResponse(session.id, approvalId, approved)
+			setAnsweredApprovals((prev) => {
+				const next = new Set(prev)
+				next.add(approvalId)
+				return next
+			})
+		} catch (error) {
+			setSendError(error instanceof Error ? error.message : String(error))
+		}
 	}
 
+	// handleSend is a fresh closure each render; we intentionally pin the
+	// auto-send to (tabId, mode-readiness) via a ref so we never replay it.
+	const handleSendRef = useRef(handleSend)
+	handleSendRef.current = handleSend
 	const widgetFixAutoSentRef = useRef<string | null>(null)
 	useEffect(() => {
 		if (!isWidgetFixMode || !isActive) return
-		if (!hasSettled || isLoading) return
+		if (!session || !hasSettled || isLoading) return
 		if (visibleUserMessageCount > 0) return
 		if (widgetFixAutoSentRef.current === tabId) return
 		widgetFixAutoSentRef.current = tabId
-		handleSend(widgetFixAutoPrompt)
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isWidgetFixMode, isActive, hasSettled, isLoading, visibleUserMessageCount, tabId])
+		void handleSendRef.current(widgetFixAutoPrompt)
+	}, [isWidgetFixMode, isActive, hasSettled, isLoading, visibleUserMessageCount, tabId, session])
 
 	return (
 		<div className="flex h-full flex-col">
@@ -355,6 +374,14 @@ export function ChatConversation({
 			</Conversation>
 
 			<div className="mx-auto w-full max-w-3xl px-4 pb-4">
+				{sendError && (
+					<div
+						role="alert"
+						className="mb-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+					>
+						{sendError}
+					</div>
+				)}
 				{(hasVisibleMessages || isAlertMode || isWidgetFixMode) && (
 					<Suggestions className="mb-3">
 						{suggestions.map((s) => (

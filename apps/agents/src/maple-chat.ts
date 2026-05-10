@@ -1,12 +1,14 @@
-import {
-	type EntityRegistry,
-	type HandlerContext,
-	type TimelineItem,
-	type LLMMessage,
+import type {
+	EntityRegistry,
+	HandlerContext,
+	LLMMessage,
+	StateCollectionProxy,
+	TimelineItem,
 } from "@electric-ax/agents-runtime"
 import { getModel, type Model } from "@mariozechner/pi-ai"
 import { z } from "zod"
 import {
+	DASHBOARD_BUILDER_SYSTEM_PROMPT,
 	ELECTRIC_OPENROUTER_MODEL_ID,
 	MAPLE_CHAT_ENTITY_TYPE,
 	SYSTEM_PROMPT,
@@ -39,7 +41,7 @@ const ApprovalResponseSchema = z.object({
 	approved: z.boolean(),
 })
 
-const ApprovalRequestRowSchema = z.object({
+export const ApprovalRequestRowSchema = z.object({
 	id: z.string(),
 	toolCallId: z.string(),
 	toolName: z.string(),
@@ -54,16 +56,37 @@ const ApprovalRequestRowSchema = z.object({
 type ChatCreation = z.infer<typeof ChatCreationSchema>
 type ChatMessage = z.infer<typeof ChatMessageSchema>
 type ApprovalResponse = z.infer<typeof ApprovalResponseSchema>
+type ApprovalRow = z.infer<typeof ApprovalRequestRowSchema>
+
+const ChatState = {
+	approvalRequests: {
+		schema: ApprovalRequestRowSchema,
+		type: "approval_request",
+		primaryKey: "id" as const,
+	},
+} as const
+
+// Custom ctx alias — the SDK's StateProxy constraint requires
+// StateCollectionProxy<Record<string, unknown>>, but our typed Zod schema
+// would narrow the row covariantly, which conflicts with the proxy's
+// invariant `update(_, draft => ...)` signature. We widen the row type to
+// match the constraint and downcast inside helpers.
+type AnyStateProxy = Record<string, StateCollectionProxy>
+type ChatCtx = HandlerContext<AnyStateProxy, ChatCreation>
+type ApprovalCollection = StateCollectionProxy<ApprovalRow, ApprovalRow, string>
 
 const asRecord = (value: unknown): Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: {}
 
-const latestInboxPayload = (ctx: any): unknown => {
+const latestInboxPayload = (ctx: ChatCtx): unknown => {
 	const inbox = ctx.db.collections.inbox.toArray
-	return inbox[inbox.length - 1]?.payload
+	return inbox.at(-1)?.payload
 }
+
+const approvalCollection = (ctx: ChatCtx): ApprovalCollection =>
+	ctx.state.approvalRequests as unknown as ApprovalCollection
 
 const parseChatContext = (payload: ChatMessage): MapleChatContextInput => ({
 	mode: payload.mode,
@@ -82,7 +105,10 @@ const projectMapleTimeline = (item: TimelineItem): LLMMessage[] | null => {
 	return null
 }
 
-const resolveApiKey = async (env: AgentsEnv, orgId: string): Promise<{ apiKey: string; isByok: boolean }> => {
+const resolveApiKey = async (
+	env: AgentsEnv,
+	orgId: string,
+): Promise<{ apiKey: string; isByok: boolean }> => {
 	const orgKey = await resolveOrgOpenrouterKey(env as Record<string, unknown>, orgId, {
 		database: "libsql",
 	})
@@ -96,21 +122,26 @@ const resolveApiKey = async (env: AgentsEnv, orgId: string): Promise<{ apiKey: s
 const openRouterModel = () =>
 	getModel("openrouter", ELECTRIC_OPENROUTER_MODEL_ID as never) as Model<"openai-completions">
 
+const selectSystemPrompt = (mode: string | undefined): string =>
+	mode === "dashboard_builder" ? DASHBOARD_BUILDER_SYSTEM_PROMPT : SYSTEM_PROMPT
+
 const runApprovalResponse = async (
-	ctx: any,
+	ctx: ChatCtx,
 	env: AgentsEnv,
 	args: ChatCreation,
 	response: ApprovalResponse,
 ) => {
-	const row = ctx.state.approvalRequests?.get(response.approvalId)
+	const approvalRequests = approvalCollection(ctx)
+	const row = approvalRequests.get(response.approvalId)
 	const run = ctx.recordRun()
 	if (!row) {
 		run.attachResponse("Approval request was not found or has expired.")
 		run.end({ status: "failed", finishReason: "approval_missing" })
 		return
 	}
+
 	if (!response.approved) {
-		ctx.state.approvalRequests?.update(response.approvalId, (draft: any) => {
+		approvalRequests.update(response.approvalId, (draft) => {
 			draft.status = "denied"
 			draft.resolvedAt = Date.now()
 		})
@@ -119,7 +150,7 @@ const runApprovalResponse = async (
 		return
 	}
 
-	ctx.state.approvalRequests?.update(response.approvalId, (draft: any) => {
+	approvalRequests.update(response.approvalId, (draft) => {
 		draft.status = "approved"
 		draft.resolvedAt = Date.now()
 	})
@@ -131,17 +162,19 @@ const runApprovalResponse = async (
 			row.toolName,
 			row.args,
 		)
-		ctx.state.approvalRequests?.update(response.approvalId, (draft: any) => {
+		approvalRequests.update(response.approvalId, (draft) => {
 			draft.status = "executed"
 			draft.result = result
+			draft.resolvedAt = Date.now()
 		})
 		run.attachResponse(result)
 		run.end({ status: "completed", finishReason: "approval_executed" })
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error)
-		ctx.state.approvalRequests?.update(response.approvalId, (draft: any) => {
+		approvalRequests.update(response.approvalId, (draft) => {
 			draft.status = "failed"
 			draft.error = message
+			draft.resolvedAt = Date.now()
 		})
 		run.attachResponse(`Failed to run approved action: ${message}`)
 		run.end({ status: "failed", finishReason: "approval_failed" })
@@ -156,37 +189,45 @@ export const registerMapleChatEntity = (registry: EntityRegistry, env: AgentsEnv
 			user_message: ChatMessageSchema.toJSONSchema(),
 			approval_response: ApprovalResponseSchema.toJSONSchema(),
 		},
-		state: {
-			approvalRequests: {
-				schema: ApprovalRequestRowSchema,
-				type: "approval_request",
-				primaryKey: "id",
-			},
-		},
+		state: ChatState,
 		async handler(ctx) {
 			const args = ChatCreationSchema.parse(ctx.args)
-			const payload = latestInboxPayload(ctx)
+			const payload = latestInboxPayload(ctx as unknown as ChatCtx)
 
 			if (ctx.events.some((event) => event.type === "message_received")) {
 				const approval = ApprovalResponseSchema.safeParse(payload)
 				if (approval.success) {
-					await runApprovalResponse(ctx, env, args, approval.data)
+					await runApprovalResponse(ctx as unknown as ChatCtx, env, args, approval.data)
 					return
 				}
 			}
 
 			const message = ChatMessageSchema.safeParse(payload)
 			if (!message.success) {
+				if (payload !== undefined) {
+					console.warn(
+						`[maple-chat] Ignoring unrecognized payload on ${ctx.entityUrl}: ${message.error.issues
+							.map((i) => `${i.path.join(".")}: ${i.message}`)
+							.join(", ")}`,
+					)
+				}
 				ctx.sleep()
 				return
 			}
 
 			const { apiKey, isByok } = await resolveApiKey(env, args.orgId)
-			const systemPrompt = withMapleContext(SYSTEM_PROMPT, parseChatContext(message.data))
-			const mapleTools = await createMapleElectricTools(ctx, {
-				env: env as Record<string, unknown>,
-				orgId: args.orgId,
-			})
+			const chatContext = parseChatContext(message.data)
+			const systemPrompt = withMapleContext(selectSystemPrompt(chatContext.mode), chatContext)
+			const mapleTools = await createMapleElectricTools(
+				{
+					entityUrl: ctx.entityUrl,
+					approvalRequests: approvalCollection(ctx as unknown as ChatCtx),
+				},
+				{
+					env: env as Record<string, unknown>,
+					orgId: args.orgId,
+				},
+			)
 
 			ctx.useContext({
 				sourceBudget: 100_000,
@@ -210,11 +251,13 @@ export const registerMapleChatEntity = (registry: EntityRegistry, env: AgentsEnv
 			const result = await ctx.agent.run()
 
 			if (!isByok && result.usage.tokens > 0) {
+				// The SDK exposes aggregate token usage only — no input/output split.
+				// We attribute everything to ai_output_tokens because output dominates
+				// LLM pricing in practice and avoids systematically under-billing.
 				await trackTokenUsage(env, {
 					orgId: args.orgId,
-					// Electric currently exposes aggregate runtime token usage here.
-					inputTokens: result.usage.tokens,
-					outputTokens: 0,
+					inputTokens: 0,
+					outputTokens: result.usage.tokens,
 					idempotencyKey: turnId,
 					source: "chat",
 				})
