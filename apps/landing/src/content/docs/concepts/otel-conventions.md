@@ -52,16 +52,19 @@ API keys are available in your Maple project settings.
 
 ### Recommended
 
-| Attribute                | Description                                                                                         |
-| ------------------------ | --------------------------------------------------------------------------------------------------- |
-| `deployment.environment` | Environment name (`production`, `staging`, `development`). Used for filtering and release tracking. |
-| `deployment.commit_sha`  | Git commit SHA. Enables release markers on charts and deployment tracking.                          |
-| `service.version`        | Service version string.                                                                             |
+| Attribute                     | Description                                                                                         |
+| ----------------------------- | --------------------------------------------------------------------------------------------------- |
+| `deployment.environment.name` | Environment name (`production`, `staging`, `development`). Used for filtering and release tracking. |
+| `vcs.repository.url.full`     | Canonical https URL of the repo (e.g. `https://github.com/acme/api`). Links telemetry to source.    |
+| `vcs.ref.head.revision`       | Git commit SHA. Enables release markers on charts and deployment tracking.                          |
+| `service.version`             | Service version string.                                                                             |
+
+`vcs.repository.url.full` and `vcs.ref.head.revision` are the OpenTelemetry semantic-convention keys -- prefer them over legacy names like `deployment.commit_sha`, `git.repo`, or `app.repo_url`.
 
 Set resource attributes via environment variable:
 
 ```bash
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production,deployment.commit_sha=abc123"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment.name=production,vcs.repository.url.full=https://github.com/acme/api,vcs.ref.head.revision=abc123"
 ```
 
 ## Span Status Codes
@@ -162,7 +165,9 @@ This derives 100%-accurate metrics from every span before sampling reduces the t
 
 ## Environment Variable Reference
 
-Configure any OTel SDK using standard environment variables instead of (or in addition to) programmatic setup:
+The recommended setup is to **inline the endpoint and ingest key directly in your bootstrap source** -- the ingest key is project-scoped and write-only (Sentry-DSN-shaped), so source-level configuration removes a class of "OTel didn't start because env vars weren't set" deploy failures. The per-language guides show this shape.
+
+If your existing setup uses the standard OpenTelemetry environment variables, those are also supported:
 
 ```bash
 # Required
@@ -171,7 +176,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_API_KEY"
 export OTEL_SERVICE_NAME="my-service"
 
 # Recommended
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production,deployment.commit_sha=abc123"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment.name=production,vcs.repository.url.full=https://github.com/acme/api,vcs.ref.head.revision=abc123"
 ```
 
 These variables are supported by all official OpenTelemetry SDKs.

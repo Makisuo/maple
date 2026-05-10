@@ -8,10 +8,12 @@ sdk: "kotlin"
 
 This guide covers instrumenting a Kotlin JVM application (Ktor, Spring Boot, generic JVM) to send traces and logs to Maple. For Android, see the [opentelemetry-android](https://github.com/open-telemetry/opentelemetry-android) project.
 
+> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/Makisuo/maple/tree/main/skills/maple-onboard).
+
 ## Prerequisites
 
 - Kotlin 1.9+ on JDK 11+
-- A Maple project with an API key
+- A Maple project with an API key (or use the `MAPLE_TEST` placeholder while pairing -- it's accepted by the ingest gateway and discarded, so the bootstrap can run before you've created your first key)
 
 ## Option 1: Java Agent (Recommended)
 
@@ -44,7 +46,7 @@ export OTEL_SERVICE_NAME="my-kotlin-app"
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.maple.dev"
 export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_API_KEY"
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment.name=production,vcs.repository.url.full=https://github.com/acme/my-kotlin-app"
 ```
 
 ## Option 2: Manual SDK Setup

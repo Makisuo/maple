@@ -8,10 +8,12 @@ sdk: "csharp"
 
 This guide covers instrumenting a .NET (C#) application to send traces and logs to Maple using the OpenTelemetry SDK.
 
+> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/Makisuo/maple/tree/main/skills/maple-onboard).
+
 ## Prerequisites
 
 - .NET 6+ (works on .NET Framework 4.6.2+ via OpenTelemetry's net462 target)
-- A Maple project with an API key
+- A Maple project with an API key (or use the `MAPLE_TEST` placeholder while pairing -- it's accepted by the ingest gateway and discarded, so the bootstrap can run before you've created your first key)
 
 ## Install Dependencies
 
@@ -43,7 +45,9 @@ builder.Services.AddOpenTelemetry()
         .AddService(serviceName: "my-dotnet-app", serviceVersion: "1.0.0")
         .AddAttributes(new Dictionary<string, object>
         {
-            ["deployment.environment"] = builder.Environment.EnvironmentName,
+            ["deployment.environment.name"] = builder.Environment.EnvironmentName,
+            ["vcs.repository.url.full"] = "https://github.com/acme/my-dotnet-app",
+            ["vcs.ref.head.revision"] = Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "",
         }))
     .WithTracing(tracing => tracing
         .AddAspNetCoreInstrumentation()
@@ -170,7 +174,7 @@ export OTEL_SERVICE_NAME="my-dotnet-app"
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.maple.dev"
 export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_API_KEY"
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment.name=production,vcs.repository.url.full=https://github.com/acme/my-dotnet-app"
 ```
 
 ## Verify

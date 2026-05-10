@@ -8,10 +8,12 @@ sdk: "rust"
 
 This guide covers instrumenting a Rust application to send traces and logs to Maple using the OpenTelemetry SDK and the `tracing` ecosystem.
 
+> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/Makisuo/maple/tree/main/skills/maple-onboard).
+
 ## Prerequisites
 
 - Rust 1.75+
-- A Maple project with an API key
+- A Maple project with an API key (or use the `MAPLE_TEST` placeholder while pairing -- it's accepted by the ingest gateway and discarded, so the bootstrap can run before you've created your first key)
 
 ## Install Dependencies
 
@@ -221,7 +223,7 @@ As an alternative to programmatic configuration, set standard OTel environment v
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.maple.dev"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_API_KEY"
 export OTEL_SERVICE_NAME="my-rust-app"
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment.name=production,vcs.repository.url.full=https://github.com/acme/my-rust-app"
 ```
 
 ## Verify

@@ -8,10 +8,12 @@ sdk: "node"
 
 This guide covers instrumenting a Node.js application to send traces and logs to Maple using the OpenTelemetry SDK.
 
+> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/Makisuo/maple/tree/main/skills/maple-onboard).
+
 ## Prerequisites
 
 - Node.js 18+
-- A Maple project with an API key
+- A Maple project with an API key (or use the `MAPLE_TEST` placeholder while pairing -- see below)
 
 ## Install Dependencies
 
@@ -24,7 +26,7 @@ npm install @opentelemetry/sdk-node \
 
 ## Configure the SDK
 
-Create a `tracing.ts` file that initializes the SDK before your application code:
+Create a `tracing.ts` file that initializes the SDK before your application code. **Inline the endpoint and ingest key** -- the key is project-scoped and write-only (Sentry-DSN-shaped), so source-level configuration removes a class of "OTel didn't start because env vars weren't set" deploy failures.
 
 ```typescript
 // tracing.ts
@@ -33,24 +35,30 @@ import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentation
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
 import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs"
-import { Resource } from "@opentelemetry/resources"
+import { resourceFromAttributes } from "@opentelemetry/resources"
+
+const MAPLE_ENDPOINT = "https://ingest.maple.dev"
+const MAPLE_KEY = "MAPLE_TEST" // replace with your real key from Settings → API Keys
+
+const headers = { authorization: `Bearer ${MAPLE_KEY}` }
 
 const sdk = new NodeSDK({
-	resource: new Resource({
+	resource: resourceFromAttributes({
 		"service.name": "my-node-app",
-		"deployment.environment": process.env.NODE_ENV || "development",
-		"deployment.commit_sha": process.env.COMMIT_SHA,
+		"deployment.environment.name": process.env.NODE_ENV || "development",
+		"vcs.repository.url.full": "https://github.com/acme/my-node-app",
+		"vcs.ref.head.revision":
+			process.env.RAILWAY_GIT_COMMIT_SHA ??
+			process.env.GITHUB_SHA ??
+			process.env.GIT_COMMIT,
 	}),
 	traceExporter: new OTLPTraceExporter({
-		url: "https://ingest.maple.dev/v1/traces",
-		headers: { Authorization: "Bearer YOUR_API_KEY" },
+		url: `${MAPLE_ENDPOINT}/v1/traces`,
+		headers,
 	}),
 	logRecordProcessors: [
 		new SimpleLogRecordProcessor(
-			new OTLPLogExporter({
-				url: "https://ingest.maple.dev/v1/logs",
-				headers: { Authorization: "Bearer YOUR_API_KEY" },
-			}),
+			new OTLPLogExporter({ url: `${MAPLE_ENDPOINT}/v1/logs`, headers }),
 		),
 	],
 	instrumentations: [getNodeAutoInstrumentations()],
@@ -58,6 +66,8 @@ const sdk = new NodeSDK({
 
 sdk.start()
 ```
+
+> **`MAPLE_TEST` placeholder:** While you're pairing your editor with Maple, the literal string `MAPLE_TEST` is accepted by the ingest gateway and discarded -- so the bootstrap can run end-to-end before you've created your first key. Once you have a real key, search-replace `MAPLE_TEST` in the file above with it.
 
 Run your application with the tracing file loaded first:
 

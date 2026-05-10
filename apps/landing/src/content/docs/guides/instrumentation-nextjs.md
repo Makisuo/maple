@@ -8,11 +8,13 @@ sdk: "nextjs"
 
 This guide covers instrumenting a Next.js application -- App Router, Pages Router, route handlers, and middleware -- using `@vercel/otel` and shipping traces and logs to Maple.
 
+> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/Makisuo/maple/tree/main/skills/maple-onboard).
+
 ## Prerequisites
 
 - Next.js 13.4+ (the instrumentation hook landed in `experimental.instrumentationHook`; it is enabled by default in 15.x)
 - Node.js 18+
-- A Maple project with an API key
+- A Maple project with an API key (or use the `MAPLE_TEST` placeholder while pairing -- see below)
 
 ## Install Dependencies
 
@@ -27,7 +29,7 @@ npm install @vercel/otel \
 
 ## Configure the SDK
 
-Create an `instrumentation.ts` file at the **project root** (not inside `app/` or `src/`). Next.js calls `register()` exactly once on cold start of every runtime.
+Create an `instrumentation.ts` file at the **project root** (not inside `app/` or `src/`). Next.js calls `register()` exactly once on cold start of every runtime. **Inline the endpoint and ingest key** -- the key is project-scoped and write-only (Sentry-DSN-shaped), so source-level configuration sidesteps Vercel's env-propagation quirks during preview builds.
 
 ```typescript
 // instrumentation.ts
@@ -35,26 +37,31 @@ import { registerOTel } from "@vercel/otel"
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http"
 import { SimpleLogRecordProcessor } from "@opentelemetry/sdk-logs"
 
+const MAPLE_ENDPOINT = "https://ingest.maple.dev"
+const MAPLE_KEY = "MAPLE_TEST" // replace with your real key from Settings → API Keys
+
+const headers = { authorization: `Bearer ${MAPLE_KEY}` }
+
 export function register() {
 	registerOTel({
 		serviceName: "my-next-app",
 		attributes: {
-			"deployment.environment": process.env.NODE_ENV ?? "development",
-			"deployment.commit_sha": process.env.VERCEL_GIT_COMMIT_SHA,
+			"deployment.environment.name": process.env.VERCEL_ENV ?? "development",
+			"vcs.repository.url.full": "https://github.com/acme/my-next-app",
+			"vcs.ref.head.revision": process.env.VERCEL_GIT_COMMIT_SHA,
 		},
 		traceExporter: {
-			url: "https://ingest.maple.dev/v1/traces",
-			headers: { Authorization: "Bearer YOUR_API_KEY" },
+			url: `${MAPLE_ENDPOINT}/v1/traces`,
+			headers,
 		},
 		logRecordProcessor: new SimpleLogRecordProcessor(
-			new OTLPLogExporter({
-				url: "https://ingest.maple.dev/v1/logs",
-				headers: { Authorization: "Bearer YOUR_API_KEY" },
-			}),
+			new OTLPLogExporter({ url: `${MAPLE_ENDPOINT}/v1/logs`, headers }),
 		),
 	})
 }
 ```
+
+> **`MAPLE_TEST` placeholder:** While you're pairing your editor with Maple, the literal string `MAPLE_TEST` is accepted by the ingest gateway and discarded -- so the bootstrap can run end-to-end before you've created your first key. Once you have a real key, search-replace `MAPLE_TEST` in the file above with it.
 
 ## Enable the Instrumentation Hook
 

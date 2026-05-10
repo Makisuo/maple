@@ -238,6 +238,7 @@ function ConnectInstructions({ framework }: { framework: FrameworkId }) {
 						<TabsList variant="line" className="h-9">
 							<TabsTrigger value="install">Install</TabsTrigger>
 							<TabsTrigger value="instrument">Instrument</TabsTrigger>
+							<TabsTrigger value="claude-code">Claude Code</TabsTrigger>
 						</TabsList>
 					</div>
 
@@ -253,6 +254,19 @@ function ConnectInstructions({ framework }: { framework: FrameworkId }) {
 						<CodeBlock
 							code={interpolate(snippet.instrument)}
 							language={snippet.label.toLowerCase()}
+						/>
+					</TabsContent>
+
+					<TabsContent value="claude-code" className="overflow-auto p-3 mt-0 space-y-2">
+						<p className="text-xs text-muted-foreground">
+							Run this prompt in Claude Code (or Codex / Cursor with the skill
+							installed). The <code className="rounded bg-muted px-1">maple-onboard</code>{" "}
+							skill walks every service in the repo, installs OpenTelemetry, wires
+							traces / logs / metrics, and verifies the bootstrap end-to-end.
+						</p>
+						<CodeBlock
+							code={`Install Maple in this repo using the maple-onboard skill.\nMy ingest key is ${apiKey || "<your-api-key>"}.`}
+							language="shell"
 						/>
 					</TabsContent>
 				</Tabs>

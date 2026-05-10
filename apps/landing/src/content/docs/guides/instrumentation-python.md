@@ -8,10 +8,12 @@ sdk: "python"
 
 This guide covers instrumenting a Python application to send traces and logs to Maple using the OpenTelemetry SDK.
 
+> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/Makisuo/maple/tree/main/skills/maple-onboard).
+
 ## Prerequisites
 
 - Python 3.8+
-- A Maple project with an API key
+- A Maple project with an API key (or use the `MAPLE_TEST` placeholder while pairing -- see below)
 
 ## Install Dependencies
 
@@ -23,7 +25,7 @@ pip install opentelemetry-sdk \
 
 ## Configure the SDK
 
-Create a `tracing.py` module to initialize the SDK:
+Create a `tracing.py` module to initialize the SDK. **Inline the endpoint and ingest key** -- the key is project-scoped and write-only (Sentry-DSN-shaped), so source-level configuration removes a class of "OTel didn't start because env vars weren't set" deploy failures.
 
 ```python
 # tracing.py
@@ -34,20 +36,28 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 
+MAPLE_ENDPOINT = "https://ingest.maple.dev"
+MAPLE_KEY = "MAPLE_TEST"  # replace with your real key from Settings → API Keys
+
 resource = Resource.create({
     "service.name": "my-python-app",
-    "deployment.environment": os.getenv("DEPLOYMENT_ENV", "development"),
-    "deployment.commit_sha": os.getenv("COMMIT_SHA", ""),
+    "deployment.environment.name": os.getenv("DEPLOYMENT_ENV", "development"),
+    "vcs.repository.url.full": "https://github.com/acme/my-python-app",
+    "vcs.ref.head.revision": os.getenv("RAILWAY_GIT_COMMIT_SHA")
+        or os.getenv("GITHUB_SHA")
+        or os.getenv("GIT_COMMIT", ""),
 })
 
 provider = TracerProvider(resource=resource)
 exporter = OTLPSpanExporter(
-    endpoint="https://ingest.maple.dev/v1/traces",
-    headers={"Authorization": "Bearer YOUR_API_KEY"},
+    endpoint=f"{MAPLE_ENDPOINT}/v1/traces",
+    headers={"authorization": f"Bearer {MAPLE_KEY}"},
 )
 provider.add_span_processor(BatchSpanProcessor(exporter))
 trace.set_tracer_provider(provider)
 ```
+
+> **`MAPLE_TEST` placeholder:** While you're pairing your editor with Maple, the literal string `MAPLE_TEST` is accepted by the ingest gateway and discarded -- so the bootstrap can run end-to-end before you've created your first key. Once you have a real key, search-replace `MAPLE_TEST` in the file above with it.
 
 Import this module early in your application startup, before other modules that need tracing:
 
@@ -201,7 +211,7 @@ As an alternative to programmatic configuration, set standard OTel environment v
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.maple.dev"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_API_KEY"
 export OTEL_SERVICE_NAME="my-python-app"
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment.name=production,vcs.repository.url.full=https://github.com/acme/my-python-app"
 ```
 
 Then use `opentelemetry-instrument` to run your app with auto-instrumentation and these settings applied automatically.

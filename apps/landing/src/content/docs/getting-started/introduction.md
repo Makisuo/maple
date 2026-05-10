@@ -33,6 +33,16 @@ Ask questions about your system in natural language using Maple's MCP integratio
 2. Point your OpenTelemetry SDK at Maple's ingest endpoint
 3. Start exploring in the dashboard
 
+The fastest path: run **`maple-onboard`** in Claude Code (or Codex / Cursor with the skill installed) and it'll walk every service in the repo, install OpenTelemetry, wire traces / logs / metrics, and verify the bootstrap end-to-end.
+
+```
+maple-onboard
+```
+
+Or set up by hand. The recommended shape is to **inline the endpoint and ingest key in your bootstrap source** -- the ingest key is project-scoped and write-only (Sentry-DSN-shaped), so source-level configuration removes a class of "OTel didn't start because env vars weren't set" deploy failures. See the per-language guides for exact code.
+
+If you'd rather use the standard OpenTelemetry environment variables, those work too:
+
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.maple.dev"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_API_KEY"

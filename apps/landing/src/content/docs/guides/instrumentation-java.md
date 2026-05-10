@@ -8,10 +8,12 @@ sdk: "java"
 
 This guide covers instrumenting a Java application to send traces and logs to Maple. The fastest path on the JVM is the OpenTelemetry Java agent, which auto-instruments most popular libraries with zero code changes.
 
+> **Run this with Claude Code:** `maple-onboard` walks every service in the repo, installs OpenTelemetry, and verifies the bootstrap end-to-end. See the [maple-onboard skill](https://github.com/Makisuo/maple/tree/main/skills/maple-onboard).
+
 ## Prerequisites
 
 - Java 8+
-- A Maple project with an API key
+- A Maple project with an API key (or use the `MAPLE_TEST` placeholder while pairing -- it's accepted by the ingest gateway and discarded, so the bootstrap can run before you've created your first key)
 
 ## Option 1: Java Agent (Recommended)
 
@@ -31,7 +33,7 @@ java \
   -Dotel.exporter.otlp.endpoint=https://ingest.maple.dev \
   -Dotel.exporter.otlp.protocol=http/protobuf \
   -Dotel.exporter.otlp.headers="Authorization=Bearer YOUR_API_KEY" \
-  -Dotel.resource.attributes="deployment.environment=production" \
+  -Dotel.resource.attributes="deployment.environment.name=production,vcs.repository.url.full=https://github.com/acme/my-java-app" \
   -jar app.jar
 ```
 
@@ -43,7 +45,7 @@ export OTEL_SERVICE_NAME="my-java-app"
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://ingest.maple.dev"
 export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer YOUR_API_KEY"
-export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=production"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment.name=production,vcs.repository.url.full=https://github.com/acme/my-java-app"
 ```
 
 The agent automatically instruments Spring (MVC, Boot, WebFlux), JDBC, gRPC, Kafka, JMS, AWS SDK, and 100+ other libraries. See the full list in the [agent documentation](https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/docs/supported-libraries.md).
