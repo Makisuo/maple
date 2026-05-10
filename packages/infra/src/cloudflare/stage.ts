@@ -72,6 +72,19 @@ export function formatMapleStage(stage: MapleStage): string {
 	}
 }
 
+export function resolveDeploymentEnvironment(stage: MapleStage): string {
+	switch (stage.kind) {
+		case "prd":
+			return "production"
+		case "stg":
+			return "staging"
+		case "pr":
+			return `pr-${stage.prNumber}`
+		case "dev":
+			return "development"
+	}
+}
+
 export function resolveMapleDomains(stage: MapleStage): MapleDomains {
 	switch (stage.kind) {
 		case "prd":

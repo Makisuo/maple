@@ -2,7 +2,7 @@ import path from "node:path"
 import alchemy from "alchemy"
 import { D1Database, KVNamespace, Worker } from "alchemy/cloudflare"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
-import { formatMapleStage, resolveD1Name, resolveWorkerName } from "@maple/infra/cloudflare"
+import { resolveD1Name, resolveDeploymentEnvironment, resolveWorkerName } from "@maple/infra/cloudflare"
 
 const requireEnv = (key: string): string => {
 	const value = process.env[key]?.trim()
@@ -72,7 +72,7 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			QE_BUCKET_CACHE_TTL_SECONDS: process.env.QE_BUCKET_CACHE_TTL_SECONDS?.trim() || "86400",
 			QE_BUCKET_CACHE_FLUX_SECONDS: process.env.QE_BUCKET_CACHE_FLUX_SECONDS?.trim() || "60",
 			...optionalPlain("MAPLE_ENDPOINT"),
-			...optionalPlain("MAPLE_ENVIRONMENT", formatMapleStage(stage)),
+			...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
 			...optionalPlain("COMMIT_SHA"),
 			MAPLE_INGEST_KEY: alchemy.secret(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 			...optionalSecret("MAPLE_ROOT_PASSWORD"),

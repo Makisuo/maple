@@ -2,7 +2,7 @@ import path from "node:path"
 import alchemy from "alchemy"
 import { DurableObjectNamespace, Worker, type D1Database } from "alchemy/cloudflare"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
-import { formatMapleStage, resolveWorkerName } from "@maple/infra/cloudflare"
+import { resolveDeploymentEnvironment, resolveWorkerName } from "@maple/infra/cloudflare"
 
 const requireEnv = (key: string): string => {
 	const value = process.env[key]?.trim()
@@ -64,7 +64,7 @@ export const createChatAgentWorker = async ({
 			INTERNAL_SERVICE_TOKEN: alchemy.secret(process.env.INTERNAL_SERVICE_TOKEN),
 			...optionalSecret("OPENROUTER_API_KEY"),
 			...optionalPlain("MAPLE_ENDPOINT"),
-			...optionalPlain("MAPLE_ENVIRONMENT", formatMapleStage(stage)),
+			...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
 			...optionalPlain("COMMIT_SHA"),
 			MAPLE_INGEST_KEY: alchemy.secret(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 			...optionalSecret("MAPLE_ROOT_PASSWORD"),

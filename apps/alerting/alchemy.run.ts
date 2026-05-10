@@ -2,7 +2,7 @@ import path from "node:path"
 import alchemy from "alchemy"
 import { Worker, type D1Database } from "alchemy/cloudflare"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
-import { formatMapleStage, resolveWorkerName } from "@maple/infra/cloudflare"
+import { resolveDeploymentEnvironment, resolveWorkerName } from "@maple/infra/cloudflare"
 
 const requireEnv = (key: string): string => {
 	const value = process.env[key]?.trim()
@@ -50,7 +50,7 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 			MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
 			RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL?.trim() || "Maple <notifications@maple.dev>",
 			...optionalPlain("MAPLE_ENDPOINT"),
-			...optionalPlain("MAPLE_ENVIRONMENT", formatMapleStage(stage)),
+			...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
 			...optionalPlain("COMMIT_SHA"),
 			MAPLE_INGEST_KEY: alchemy.secret(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 			...optionalSecret("MAPLE_ROOT_PASSWORD"),
