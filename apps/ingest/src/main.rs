@@ -4,7 +4,6 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 mod autumn;
 
 use std::io::{Read, Write};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -26,7 +25,6 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
-use libsql::{params, Builder, Database};
 use metrics::{counter, gauge, histogram};
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
@@ -86,8 +84,9 @@ struct AppConfig {
     forward_timeout: Duration,
     max_request_body_bytes: usize,
     require_tls: bool,
-    db_url: Option<String>,
-    db_auth_token: Option<String>,
+    cf_account_id: String,
+    d1_database_id: String,
+    d1_api_token: String,
     lookup_hmac_key: String,
     autumn_secret_key: Option<String>,
     autumn_api_url: String,
@@ -158,15 +157,29 @@ impl AppConfig {
             }
         }
 
-        let db_url = std::env::var("MAPLE_DB_URL")
-            .ok()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
+        let cf_account_id = std::env::var("CLOUDFLARE_ACCOUNT_ID")
+            .map_err(|_| "CLOUDFLARE_ACCOUNT_ID is required".to_string())?
+            .trim()
+            .to_string();
+        if cf_account_id.is_empty() {
+            return Err("CLOUDFLARE_ACCOUNT_ID is required".to_string());
+        }
 
-        let db_auth_token = std::env::var("MAPLE_DB_AUTH_TOKEN")
-            .ok()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
+        let d1_database_id = std::env::var("MAPLE_DB_ID")
+            .map_err(|_| "MAPLE_DB_ID is required".to_string())?
+            .trim()
+            .to_string();
+        if d1_database_id.is_empty() {
+            return Err("MAPLE_DB_ID is required".to_string());
+        }
+
+        let d1_api_token = std::env::var("CLOUDFLARE_API_TOKEN")
+            .map_err(|_| "CLOUDFLARE_API_TOKEN is required".to_string())?
+            .trim()
+            .to_string();
+        if d1_api_token.is_empty() {
+            return Err("CLOUDFLARE_API_TOKEN is required".to_string());
+        }
 
         let lookup_hmac_key = std::env::var("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY")
             .map_err(|_| "MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY is required".to_string())?
@@ -201,8 +214,9 @@ impl AppConfig {
             forward_timeout: Duration::from_millis(forward_timeout_ms),
             max_request_body_bytes,
             require_tls,
-            db_url,
-            db_auth_token,
+            cf_account_id,
+            d1_database_id,
+            d1_api_token,
             lookup_hmac_key,
             autumn_secret_key,
             autumn_api_url,
@@ -212,15 +226,62 @@ impl AppConfig {
 }
 
 struct IngestKeyResolver {
-    db: Arc<Database>,
+    store: Arc<dyn KeyStore>,
     lookup_hmac_key: String,
     cache: Cache<String, ResolvedIngestKey>,
 }
 
 struct CloudflareConnectorResolver {
-    db: Arc<Database>,
+    store: Arc<dyn KeyStore>,
     lookup_hmac_key: String,
     cache: Cache<String, ResolvedCloudflareConnector>,
+}
+
+/// Database-agnostic surface used by the two resolvers. Implementations:
+/// `LibsqlKeyStore` (local dev / legacy) and `D1KeyStore` (Cloudflare D1 REST
+/// in production, where the API service writes ingest-key rows). Both back
+/// the same four operations.
+#[async_trait::async_trait]
+trait KeyStore: Send + Sync {
+    async fn fetch_ingest_key(
+        &self,
+        key_hash: &str,
+        hash_column: &'static str,
+    ) -> Result<Option<KeyRow>, String>;
+
+    async fn fetch_connector(
+        &self,
+        connector_id: &str,
+        secret_hash: &str,
+    ) -> Result<Option<ConnectorRow>, String>;
+
+    async fn record_connector_success(
+        &self,
+        connector_id: &str,
+        now_ms: i64,
+    ) -> Result<(), String>;
+
+    async fn record_connector_failure(
+        &self,
+        connector_id: &str,
+        error: &str,
+        now_ms: i64,
+    ) -> Result<(), String>;
+}
+
+#[derive(Clone, Debug)]
+struct KeyRow {
+    org_id: String,
+    self_managed: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ConnectorRow {
+    org_id: String,
+    service_name: String,
+    zone_name: String,
+    dataset: String,
+    self_managed: bool,
 }
 
 struct AppState {
@@ -484,14 +545,6 @@ async fn main() {
 
     let tracer_provider = init_tracing(&config.forward_endpoint, config.port);
 
-    let database = match open_database(&config).await {
-        Ok(database) => database,
-        Err(error) => {
-            eprintln!("Database init error: {error}");
-            std::process::exit(1);
-        }
-    };
-
     let http_client = match Client::builder()
         .timeout(config.forward_timeout)
         .pool_max_idle_per_host(5)
@@ -504,6 +557,11 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // Cloudflare D1 REST backend — the API writes ingest-key rows to D1, so
+    // ingest reads them from the same place. CF env vars were validated when
+    // AppConfig loaded, so this is infallible.
+    let store: Arc<dyn KeyStore> = build_key_store(&config, http_client.clone());
 
     let autumn_tracker = config.autumn_secret_key.as_ref().map(|key| {
         AutumnTracker::spawn(
@@ -523,16 +581,14 @@ async fn main() {
         .max_capacity(1_000)
         .build();
 
-    let shared_db = Arc::new(database);
-
     let state = Arc::new(AppState {
         resolver: IngestKeyResolver {
-            db: Arc::clone(&shared_db),
+            store: Arc::clone(&store),
             lookup_hmac_key: config.lookup_hmac_key.clone(),
             cache: ingest_key_cache,
         },
         cloudflare_resolver: CloudflareConnectorResolver {
-            db: Arc::clone(&shared_db),
+            store: Arc::clone(&store),
             lookup_hmac_key: config.lookup_hmac_key.clone(),
             cache: cloudflare_connector_cache,
         },
@@ -1932,32 +1988,15 @@ impl IngestKeyResolver {
         // LEFT JOIN against org_tinybird_settings so the "self-managed?" flag is
         // resolved in the same roundtrip as org_id. This hits the DB only on cache
         // miss; warm cache hits (>99% of traffic) skip this entirely.
-        let query = format!(
-            "SELECT k.org_id, \
-                    CASE WHEN s.sync_status = 'active' THEN 1 ELSE 0 END AS self_managed \
-             FROM org_ingest_keys k \
-             LEFT JOIN org_tinybird_settings s ON s.org_id = k.org_id \
-             WHERE k.{hash_column} = ? LIMIT 1"
-        );
-
-        let conn = self.db.connect().map_err(|error| error.to_string())?;
-        let mut rows = conn
-            .query(&query, params![key_hash.clone()])
-            .await
-            .map_err(|error| error.to_string())?;
-
-        let Some(row) = rows.next().await.map_err(|error| error.to_string())? else {
+        let Some(row) = self.store.fetch_ingest_key(&key_hash, hash_column).await? else {
             return Ok(None);
         };
 
-        let org_id: String = row.get(0).map_err(|error| error.to_string())?;
-        let self_managed_flag: i64 = row.get(1).map_err(|error| error.to_string())?;
-
         let resolved = ResolvedIngestKey {
-            org_id,
+            org_id: row.org_id,
             key_type,
             key_id: key_hash.chars().take(16).collect(),
-            self_managed: self_managed_flag != 0,
+            self_managed: row.self_managed,
         };
 
         self.cache
@@ -1980,33 +2019,22 @@ impl CloudflareConnectorResolver {
         }
 
         let secret_hash = hash_ingest_key(raw_secret, &self.lookup_hmac_key)?;
-        let conn = self.db.connect().map_err(|error| error.to_string())?;
-        let mut rows = conn
-            .query(
-                "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
-                        CASE WHEN s.sync_status = 'active' THEN 1 ELSE 0 END AS self_managed \
-                 FROM cloudflare_logpush_connectors c \
-                 LEFT JOIN org_tinybird_settings s ON s.org_id = c.org_id \
-                 WHERE c.id = ? AND c.secret_hash = ? AND c.enabled = 1 LIMIT 1",
-                params![connector_id.to_string(), secret_hash.clone()],
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-
-        let Some(row) = rows.next().await.map_err(|error| error.to_string())? else {
+        let Some(row) = self
+            .store
+            .fetch_connector(connector_id, &secret_hash)
+            .await?
+        else {
             return Ok(None);
         };
 
-        let self_managed_flag: i64 = row.get(4).map_err(|error| error.to_string())?;
-
         let resolved = ResolvedCloudflareConnector {
             connector_id: connector_id.to_string(),
-            org_id: row.get(0).map_err(|error| error.to_string())?,
-            service_name: row.get(1).map_err(|error| error.to_string())?,
-            zone_name: row.get(2).map_err(|error| error.to_string())?,
-            dataset: row.get(3).map_err(|error| error.to_string())?,
+            org_id: row.org_id,
+            service_name: row.service_name,
+            zone_name: row.zone_name,
+            dataset: row.dataset,
             secret_key_id: secret_hash.chars().take(16).collect(),
-            self_managed: self_managed_flag != 0,
+            self_managed: row.self_managed,
         };
 
         self.cache.insert(cache_key, resolved.clone()).await;
@@ -2015,35 +2043,231 @@ impl CloudflareConnectorResolver {
     }
 
     async fn record_success(&self, connector_id: &str) -> Result<(), String> {
-        let conn = self.db.connect().map_err(|error| error.to_string())?;
-        conn.execute(
-            "UPDATE cloudflare_logpush_connectors SET last_received_at = ?, last_error = NULL, updated_at = ? WHERE id = ?",
-            params![
-                current_time_millis() as i64,
-                current_time_millis() as i64,
-                connector_id.to_string()
-            ],
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-
-        Ok(())
+        self.store
+            .record_connector_success(connector_id, current_time_millis() as i64)
+            .await
     }
 
     async fn record_failure(&self, connector_id: &str, error_message: &str) -> Result<(), String> {
-        let conn = self.db.connect().map_err(|error| error.to_string())?;
-        conn.execute(
-            "UPDATE cloudflare_logpush_connectors SET last_error = ?, updated_at = ? WHERE id = ?",
-            params![
-                error_message.to_string(),
+        self.store
+            .record_connector_failure(
+                connector_id,
+                error_message,
                 current_time_millis() as i64,
-                connector_id.to_string()
+            )
+            .await
+    }
+}
+
+/// Cloudflare D1 REST-backed KeyStore. Hits
+/// `POST /accounts/{acct}/d1/database/{db}/query` for every cache miss.
+/// The HMAC-fingerprint canary, the 60s in-process cache, and SQL strings
+/// (which are vanilla SQLite, identical to libsql) all stay the same — only
+/// the transport changes.
+struct D1KeyStore {
+    http: reqwest::Client,
+    endpoint: String,
+    api_token: String,
+}
+
+impl D1KeyStore {
+    fn new(
+        http: reqwest::Client,
+        account_id: &str,
+        database_id: &str,
+        api_token: String,
+    ) -> Self {
+        Self {
+            http,
+            endpoint: format!(
+                "https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database/{database_id}/query"
+            ),
+            api_token,
+        }
+    }
+
+    async fn query(
+        &self,
+        sql: &str,
+        params: Vec<serde_json::Value>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let body = serde_json::json!({ "sql": sql, "params": params });
+        let response = self
+            .http
+            .post(&self.endpoint)
+            .bearer_auth(&self.api_token)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| format!("D1 request failed: {error}"))?;
+
+        let status = response.status();
+        let payload = response
+            .text()
+            .await
+            .map_err(|error| format!("D1 response read failed: {error}"))?;
+        if !status.is_success() {
+            return Err(format!("D1 HTTP {status}: {payload}"));
+        }
+
+        let parsed: D1Response = serde_json::from_str(&payload)
+            .map_err(|error| format!("D1 response parse failed: {error}: {payload}"))?;
+
+        if !parsed.success {
+            let messages: Vec<String> = parsed
+                .errors
+                .into_iter()
+                .map(|e| format!("[{}] {}", e.code, e.message))
+                .collect();
+            return Err(format!("D1 query failed: {}", messages.join("; ")));
+        }
+
+        // `result` is one entry per statement; we always submit one SQL string,
+        // so take the first. Empty `results` means no rows matched — caller
+        // turns that into `Ok(None)`.
+        let first = parsed
+            .result
+            .into_iter()
+            .next()
+            .ok_or_else(|| "D1 response missing result[0]".to_string())?;
+        Ok(first.results)
+    }
+
+    async fn execute(&self, sql: &str, params: Vec<serde_json::Value>) -> Result<(), String> {
+        let _ = self.query(sql, params).await?;
+        Ok(())
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct D1Response {
+    success: bool,
+    #[serde(default)]
+    errors: Vec<D1Error>,
+    #[serde(default)]
+    result: Vec<D1StatementResult>,
+}
+
+#[derive(serde::Deserialize)]
+struct D1Error {
+    code: i64,
+    message: String,
+}
+
+#[derive(serde::Deserialize)]
+struct D1StatementResult {
+    #[serde(default)]
+    results: Vec<serde_json::Value>,
+}
+
+/// Extract a string field from a D1 row JSON object, returning a descriptive
+/// error rather than panicking on a missing/wrong-typed column.
+fn d1_str(row: &serde_json::Value, key: &str) -> Result<String, String> {
+    row.get(key)
+        .and_then(|value| value.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("D1 row missing string field `{key}`: {row}"))
+}
+
+/// D1's JSON encoder represents the `CASE WHEN ... THEN 1 ELSE 0 END` as an
+/// integer (1/0). Accept either a JSON number or a bool defensively.
+fn d1_truthy(row: &serde_json::Value, key: &str) -> bool {
+    match row.get(key) {
+        Some(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(0) != 0,
+        Some(serde_json::Value::Bool(b)) => *b,
+        _ => false,
+    }
+}
+
+#[async_trait::async_trait]
+impl KeyStore for D1KeyStore {
+    async fn fetch_ingest_key(
+        &self,
+        key_hash: &str,
+        hash_column: &'static str,
+    ) -> Result<Option<KeyRow>, String> {
+        let sql = format!(
+            "SELECT k.org_id, \
+                    CASE WHEN s.sync_status = 'active' THEN 1 ELSE 0 END AS self_managed \
+             FROM org_ingest_keys k \
+             LEFT JOIN org_tinybird_settings s ON s.org_id = k.org_id \
+             WHERE k.{hash_column} = ? LIMIT 1"
+        );
+        let rows = self
+            .query(&sql, vec![serde_json::Value::String(key_hash.to_string())])
+            .await?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(None);
+        };
+        Ok(Some(KeyRow {
+            org_id: d1_str(&row, "org_id")?,
+            self_managed: d1_truthy(&row, "self_managed"),
+        }))
+    }
+
+    async fn fetch_connector(
+        &self,
+        connector_id: &str,
+        secret_hash: &str,
+    ) -> Result<Option<ConnectorRow>, String> {
+        let sql = "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
+                          CASE WHEN s.sync_status = 'active' THEN 1 ELSE 0 END AS self_managed \
+                   FROM cloudflare_logpush_connectors c \
+                   LEFT JOIN org_tinybird_settings s ON s.org_id = c.org_id \
+                   WHERE c.id = ? AND c.secret_hash = ? AND c.enabled = 1 LIMIT 1";
+        let rows = self
+            .query(
+                sql,
+                vec![
+                    serde_json::Value::String(connector_id.to_string()),
+                    serde_json::Value::String(secret_hash.to_string()),
+                ],
+            )
+            .await?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(None);
+        };
+        Ok(Some(ConnectorRow {
+            org_id: d1_str(&row, "org_id")?,
+            service_name: d1_str(&row, "service_name")?,
+            zone_name: d1_str(&row, "zone_name")?,
+            dataset: d1_str(&row, "dataset")?,
+            self_managed: d1_truthy(&row, "self_managed"),
+        }))
+    }
+
+    async fn record_connector_success(
+        &self,
+        connector_id: &str,
+        now_ms: i64,
+    ) -> Result<(), String> {
+        self.execute(
+            "UPDATE cloudflare_logpush_connectors SET last_received_at = ?, last_error = NULL, updated_at = ? WHERE id = ?",
+            vec![
+                serde_json::Value::Number(now_ms.into()),
+                serde_json::Value::Number(now_ms.into()),
+                serde_json::Value::String(connector_id.to_string()),
             ],
         )
         .await
-        .map_err(|error| error.to_string())?;
+    }
 
-        Ok(())
+    async fn record_connector_failure(
+        &self,
+        connector_id: &str,
+        error: &str,
+        now_ms: i64,
+    ) -> Result<(), String> {
+        self.execute(
+            "UPDATE cloudflare_logpush_connectors SET last_error = ?, updated_at = ? WHERE id = ?",
+            vec![
+                serde_json::Value::String(error.to_string()),
+                serde_json::Value::Number(now_ms.into()),
+                serde_json::Value::String(connector_id.to_string()),
+            ],
+        )
+        .await
     }
 }
 
@@ -2073,63 +2297,24 @@ fn current_time_millis() -> u128 {
         .unwrap_or(0)
 }
 
-async fn open_database(config: &AppConfig) -> Result<Database, String> {
-    let db_url = config
-        .db_url
-        .clone()
-        .unwrap_or_else(|| "file:../api/.data/maple.db".to_string());
-
-    if is_remote_db_url(&db_url) {
-        let auth_token = config
-            .db_auth_token
-            .clone()
-            .ok_or_else(|| "MAPLE_DB_AUTH_TOKEN is required for remote MAPLE_DB_URL".to_string())?;
-
-        return Builder::new_remote(db_url, auth_token)
-            .build()
-            .await
-            .map_err(|error| error.to_string());
-    }
-
-    let local_path = resolve_local_db_path(&db_url)?;
-    if let Some(parent) = local_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed to create DB directory: {error}"))?;
-    }
-
-    Builder::new_local(local_path)
-        .build()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-fn is_remote_db_url(db_url: &str) -> bool {
-    db_url.starts_with("libsql://")
-        || db_url.starts_with("https://")
-        || db_url.starts_with("http://")
-}
-
-fn resolve_local_db_path(db_url: &str) -> Result<PathBuf, String> {
-    if db_url.starts_with("file://") {
-        return file_url_to_path(db_url);
-    }
-
-    if let Some(raw_path) = db_url.strip_prefix("file:") {
-        let path = raw_path.trim();
-        if path.is_empty() {
-            return Err("Invalid MAPLE_DB_URL file path".to_string());
-        }
-        return Ok(PathBuf::from(path));
-    }
-
-    Ok(PathBuf::from(db_url))
-}
-
-fn file_url_to_path(file_url: &str) -> Result<PathBuf, String> {
-    let parsed = url::Url::parse(file_url).map_err(|error| format!("Invalid file URL: {error}"))?;
-    parsed
-        .to_file_path()
-        .map_err(|_| "Invalid MAPLE_DB_URL file path".to_string())
+/// Build the D1-backed KeyStore for this process. Production reads
+/// `org_ingest_keys` from Cloudflare D1 via the REST API; the API service
+/// writes to the same D1 database. Required env vars (`CLOUDFLARE_ACCOUNT_ID`,
+/// `MAPLE_DB_ID`, `CLOUDFLARE_API_TOKEN`) are validated at config-load time —
+/// failing startup beats failing every request.
+fn build_key_store(config: &AppConfig, http_client: reqwest::Client) -> Arc<dyn KeyStore> {
+    info!(
+        backend = "cloudflare-d1",
+        cf_account = %config.cf_account_id,
+        d1_database = %config.d1_database_id,
+        "Key store backend selected"
+    );
+    Arc::new(D1KeyStore::new(
+        http_client,
+        &config.cf_account_id,
+        &config.d1_database_id,
+        config.d1_api_token.clone(),
+    ))
 }
 
 fn parse_bool(name: &str, raw: Option<String>, default: bool) -> Result<bool, String> {
@@ -2271,20 +2456,6 @@ mod tests {
             Some(&INGEST_SOURCE.to_string())
         );
         assert!(!values.contains_key("org_id"));
-    }
-
-    #[test]
-    fn relative_file_url_resolves_for_local_db_default() {
-        let path = resolve_local_db_path("file:../api/.data/maple.db")
-            .expect("relative file URL should resolve");
-        assert_eq!(path, PathBuf::from("../api/.data/maple.db"));
-    }
-
-    #[test]
-    fn remote_db_urls_are_detected() {
-        assert!(is_remote_db_url("libsql://example.turso.io"));
-        assert!(is_remote_db_url("https://example.com"));
-        assert!(!is_remote_db_url("file:../api/.data/maple.db"));
     }
 
     #[test]
@@ -2440,40 +2611,65 @@ mod tests {
         assert_eq!(pool, "shared");
     }
 
-    async fn in_memory_db() -> Arc<Database> {
-        // libsql's local builder doesn't expose an in-memory mode directly, so
-        // use a uniquely-named temp file. The file is removed by the OS on
-        // process exit (tests use nextest/cargo test's sandbox by default).
-        let path = std::env::temp_dir().join(format!(
-            "maple-ingest-test-{}.db",
-            uuid::Uuid::new_v4()
-        ));
-        let db = Builder::new_local(&path)
-            .build()
-            .await
-            .expect("libsql builder should open temp db");
-        let conn = db.connect().expect("db should connect");
-        conn.execute_batch(
-            r#"
-            CREATE TABLE org_ingest_keys (
-                org_id TEXT NOT NULL,
-                public_key_hash TEXT,
-                private_key_hash TEXT
-            );
-            CREATE TABLE org_tinybird_settings (
-                org_id TEXT PRIMARY KEY,
-                sync_status TEXT NOT NULL
-            );
-            "#,
-        )
-        .await
-        .expect("schema should apply");
-        Arc::new(db)
+    /// In-memory KeyStore used to exercise the resolver's behavior (caching,
+    /// key-type inference, ResolvedIngestKey construction) without HTTP. Keyed
+    /// on the same `(hash, column)` shape the real D1 store sees.
+    #[derive(Default)]
+    struct FakeKeyStore {
+        keys: std::sync::Mutex<std::collections::HashMap<(String, &'static str), KeyRow>>,
     }
 
-    fn make_resolver(db: Arc<Database>) -> IngestKeyResolver {
+    impl FakeKeyStore {
+        fn insert_private(&self, raw_key: &str, row: KeyRow) {
+            let hash = hash_ingest_key(raw_key, "test-hmac-key").unwrap();
+            self.keys
+                .lock()
+                .unwrap()
+                .insert((hash, "private_key_hash"), row);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl KeyStore for FakeKeyStore {
+        async fn fetch_ingest_key(
+            &self,
+            key_hash: &str,
+            hash_column: &'static str,
+        ) -> Result<Option<KeyRow>, String> {
+            Ok(self
+                .keys
+                .lock()
+                .unwrap()
+                .get(&(key_hash.to_string(), hash_column))
+                .cloned())
+        }
+        async fn fetch_connector(
+            &self,
+            _connector_id: &str,
+            _secret_hash: &str,
+        ) -> Result<Option<ConnectorRow>, String> {
+            Ok(None)
+        }
+        async fn record_connector_success(
+            &self,
+            _connector_id: &str,
+            _now_ms: i64,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        async fn record_connector_failure(
+            &self,
+            _connector_id: &str,
+            _error: &str,
+            _now_ms: i64,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn make_resolver(store: Arc<FakeKeyStore>) -> IngestKeyResolver {
         IngestKeyResolver {
-            db,
+            store,
             lookup_hmac_key: "test-hmac-key".to_string(),
             cache: Cache::builder()
                 .time_to_live(Duration::from_secs(60))
@@ -2484,22 +2680,17 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_ingest_key_returns_self_managed_false_when_no_settings_row() {
-        let db = in_memory_db().await;
-        let resolver = make_resolver(Arc::clone(&db));
+        let store = Arc::new(FakeKeyStore::default());
+        store.insert_private(
+            "maple_sk_test_shared",
+            KeyRow {
+                org_id: "org_shared".to_string(),
+                self_managed: false,
+            },
+        );
 
-        let raw_key = "maple_sk_test_shared";
-        let hash = hash_ingest_key(raw_key, "test-hmac-key").unwrap();
-        db.connect()
-            .unwrap()
-            .execute(
-                "INSERT INTO org_ingest_keys (org_id, private_key_hash) VALUES (?, ?)",
-                params!["org_shared".to_string(), hash.clone()],
-            )
-            .await
-            .unwrap();
-
-        let resolved = resolver
-            .resolve_ingest_key(raw_key)
+        let resolved = make_resolver(store)
+            .resolve_ingest_key("maple_sk_test_shared")
             .await
             .expect("resolve should succeed")
             .expect("key should be found");
@@ -2510,27 +2701,17 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_ingest_key_returns_self_managed_true_when_active_settings_row() {
-        let db = in_memory_db().await;
-        let resolver = make_resolver(Arc::clone(&db));
+        let store = Arc::new(FakeKeyStore::default());
+        store.insert_private(
+            "maple_sk_test_byo",
+            KeyRow {
+                org_id: "org_byo".to_string(),
+                self_managed: true,
+            },
+        );
 
-        let raw_key = "maple_sk_test_byo";
-        let hash = hash_ingest_key(raw_key, "test-hmac-key").unwrap();
-        let conn = db.connect().unwrap();
-        conn.execute(
-            "INSERT INTO org_ingest_keys (org_id, private_key_hash) VALUES (?, ?)",
-            params!["org_byo".to_string(), hash.clone()],
-        )
-        .await
-        .unwrap();
-        conn.execute(
-            "INSERT INTO org_tinybird_settings (org_id, sync_status) VALUES (?, 'active')",
-            params!["org_byo".to_string()],
-        )
-        .await
-        .unwrap();
-
-        let resolved = resolver
-            .resolve_ingest_key(raw_key)
+        let resolved = make_resolver(store)
+            .resolve_ingest_key("maple_sk_test_byo")
             .await
             .expect("resolve should succeed")
             .expect("key should be found");
@@ -2540,35 +2721,90 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_ingest_key_treats_non_active_settings_as_not_self_managed() {
-        // Rows in 'error' / 'out_of_sync' must not route — the customer
-        // Tinybird may be broken, so stay on the shared pool until sync
-        // recovers.
-        let db = in_memory_db().await;
-        let resolver = make_resolver(Arc::clone(&db));
-
-        let raw_key = "maple_sk_test_broken";
-        let hash = hash_ingest_key(raw_key, "test-hmac-key").unwrap();
-        let conn = db.connect().unwrap();
-        conn.execute(
-            "INSERT INTO org_ingest_keys (org_id, private_key_hash) VALUES (?, ?)",
-            params!["org_broken".to_string(), hash.clone()],
-        )
-        .await
-        .unwrap();
-        conn.execute(
-            "INSERT INTO org_tinybird_settings (org_id, sync_status) VALUES (?, 'error')",
-            params!["org_broken".to_string()],
-        )
-        .await
-        .unwrap();
-
-        let resolved = resolver
-            .resolve_ingest_key(raw_key)
+    async fn resolve_ingest_key_returns_none_when_hash_missing() {
+        // Unknown key (e.g. before the API has written the row, or after a
+        // reroll under a different HMAC) must produce Ok(None) so the caller
+        // emits a 401 rather than crashing.
+        let store = Arc::new(FakeKeyStore::default());
+        let resolved = make_resolver(store)
+            .resolve_ingest_key("maple_sk_unknown")
             .await
-            .expect("resolve should succeed")
-            .expect("key should be found");
+            .expect("resolve should succeed");
+        assert!(resolved.is_none());
+    }
 
-        assert!(!resolved.self_managed);
+    #[test]
+    fn d1_response_parses_success_with_rows() {
+        // Canonical Cloudflare D1 response — `result` is an array of one
+        // statement result; `results` inside it is the row list. We always
+        // submit one SQL string so `result[0].results` is the row set.
+        let payload = serde_json::json!({
+            "success": true,
+            "errors": [],
+            "messages": [],
+            "result": [{
+                "results": [
+                    {"org_id": "org_test", "self_managed": 1}
+                ],
+                "success": true,
+                "meta": {"duration": 4.2}
+            }]
+        })
+        .to_string();
+        let parsed: D1Response = serde_json::from_str(&payload).expect("parses");
+        assert!(parsed.success);
+        let first = parsed.result.into_iter().next().expect("has result[0]");
+        assert_eq!(first.results.len(), 1);
+        let row = &first.results[0];
+        assert_eq!(d1_str(row, "org_id").unwrap(), "org_test");
+        assert!(d1_truthy(row, "self_managed"));
+    }
+
+    #[test]
+    fn d1_response_parses_empty_results_as_no_match() {
+        // No row → caller turns this into Ok(None) and the gateway 401s.
+        let payload = serde_json::json!({
+            "success": true,
+            "errors": [],
+            "messages": [],
+            "result": [{"results": [], "success": true}]
+        })
+        .to_string();
+        let parsed: D1Response = serde_json::from_str(&payload).expect("parses");
+        let first = parsed.result.into_iter().next().expect("has result[0]");
+        assert!(first.results.is_empty());
+    }
+
+    #[test]
+    fn d1_response_parses_failure_with_errors() {
+        // CF returns success=false plus a list of error objects. We surface
+        // these as Err(...) without leaking the API token.
+        let payload = serde_json::json!({
+            "success": false,
+            "errors": [{"code": 7500, "message": "no such table"}],
+            "messages": [],
+            "result": []
+        })
+        .to_string();
+        let parsed: D1Response = serde_json::from_str(&payload).expect("parses");
+        assert!(!parsed.success);
+        assert_eq!(parsed.errors.len(), 1);
+        assert_eq!(parsed.errors[0].code, 7500);
+        assert_eq!(parsed.errors[0].message, "no such table");
+    }
+
+    #[test]
+    fn d1_truthy_accepts_int_and_bool_self_managed() {
+        // The SQL is `CASE WHEN ... THEN 1 ELSE 0 END`; D1 returns it as a JSON
+        // number, but accept JSON bool defensively in case the encoding ever
+        // changes.
+        let int_one = serde_json::json!({"self_managed": 1});
+        let int_zero = serde_json::json!({"self_managed": 0});
+        let bool_true = serde_json::json!({"self_managed": true});
+        let missing = serde_json::json!({});
+        assert!(d1_truthy(&int_one, "self_managed"));
+        assert!(!d1_truthy(&int_zero, "self_managed"));
+        assert!(d1_truthy(&bool_true, "self_managed"));
+        assert!(!d1_truthy(&missing, "self_managed"));
     }
 }

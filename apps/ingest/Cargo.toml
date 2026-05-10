@@ -5,12 +5,12 @@ edition = "2021"
 
 [dependencies]
 axum = "0.8.8"
+async-trait = "0.1"
 tikv-jemallocator = "0.6"
 base64 = "0.22.1"
 chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
 flate2 = "1.1.5"
 hmac = "0.12.1"
-libsql = "0.9.29"
 dotenvy = "0.15.7"
 opentelemetry = "0.31"
 opentelemetry_sdk = { version = "0.31", features = [
