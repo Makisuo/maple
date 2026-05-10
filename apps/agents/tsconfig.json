@@ -1,0 +1,19 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"allowImportingTsExtensions": true,
+		"ignoreDeprecations": "6.0",
+		"jsx": "react-jsx",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"moduleResolution": "bundler",
+		"noImplicitAny": false,
+		"paths": {
+			"@/*": ["../api/src/*"]
+		},
+		"skipLibCheck": true,
+		"types": ["node", "@cloudflare/workers-types"],
+		"plugins": [{ "name": "@effect/language-service" }]
+	},
+	"include": ["src"]
+}

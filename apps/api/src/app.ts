@@ -4,6 +4,7 @@ import { HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
 import { McpLive } from "./mcp/app"
 import { AutumnRouter } from "./routes/autumn.http"
+import { AiGatewayRouter } from "./routes/ai.http"
 import { HttpAlertsLive } from "./routes/alerts.http"
 import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
@@ -137,6 +138,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 
 export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
+	AiGatewayRouter,
 	AutumnRouter,
 	IntegrationsCallbackRouter,
 	OAuthDiscoveryRouter,

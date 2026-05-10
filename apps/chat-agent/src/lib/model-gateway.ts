@@ -15,9 +15,7 @@ import {
 	renderCompactionPrompt,
 	type AgentModelGatewayShape,
 } from "@maple/agent-harness"
-
-export const DEFAULT_MODEL_ID = "moonshotai/kimi-k2.5:nitro"
-const DEFAULT_CONTEXT_WINDOW = 128_000
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MODEL_ID } from "@maple/ai"
 
 export const createChatModel = (apiKey: string): LanguageModel => {
 	const openrouter = createOpenAICompatible({

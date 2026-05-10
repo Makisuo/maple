@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useAgent } from "agents/react"
-import { useAgentChat } from "@cloudflare/ai-chat/react"
+import { useChat } from "@electric-ax/agents-runtime/react"
 import { useAuth } from "@clerk/clerk-react"
-import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
+import { requiresApproval } from "@maple/ai"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import { alertPromptSuggestions, type AlertContext } from "./alert-context"
 import { AlertAttachmentCard } from "./alert-attachment-card"
-import {
-	widgetFixAutoPrompt,
-	widgetFixSuggestions,
-	type WidgetFixContext,
-} from "./widget-fix-context"
+import { widgetFixAutoPrompt, widgetFixSuggestions, type WidgetFixContext } from "./widget-fix-context"
 import { WidgetFixAttachmentCard } from "./widget-fix-attachment-card"
 import {
 	deriveAutoContexts,
@@ -39,20 +34,16 @@ import { Shimmer } from "@/components/ai-elements/shimmer"
 import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator"
 import { Tool } from "@/components/ai-elements/tool"
 import { ApprovalCard } from "./approval-card"
-import type { UIMessage } from "ai"
+import {
+	ensureMapleChatSession,
+	observeMapleChatSession,
+	sendMapleApprovalResponse,
+	sendMapleChatMessage,
+	type EntityStreamDB,
+	type EntityTimelineSection,
+} from "@/lib/services/ai/electric-chat"
 
-function shouldShowThinkingIndicator(
-	message: UIMessage,
-	isLoading: boolean,
-	isLastMessage: boolean,
-): boolean {
-	if (!isLoading || !isLastMessage || message.role !== "assistant") return false
-	const parts = message.parts
-	if (parts.length === 0) return true
-	const lastPart = parts[parts.length - 1]
-	if (lastPart.type === "text" && (lastPart as { state?: string }).state === "streaming") return false
-	return true
-}
+type PromptStatus = "submitted" | "streaming" | "ready" | "error"
 
 const DEFAULT_SUGGESTIONS = [
 	"What's the overall system health?",
@@ -70,6 +61,45 @@ interface ChatConversationProps {
 	widgetFixContext?: WidgetFixContext
 }
 
+const isApprovalResponseText = (text: string): boolean => {
+	try {
+		const parsed = JSON.parse(text) as { approvalId?: unknown; approved?: unknown }
+		return typeof parsed.approvalId === "string" && typeof parsed.approved === "boolean"
+	} catch {
+		return false
+	}
+}
+
+const mapToolStatus = (status: string): string => {
+	switch (status) {
+		case "completed":
+			return "output-available"
+		case "failed":
+			return "output-error"
+		default:
+			return "input-available"
+	}
+}
+
+const parseApprovalResult = (result: string | undefined): { approvalId?: string; status?: string } | null => {
+	if (!result) return null
+	try {
+		const parsed = JSON.parse(result) as {
+			details?: { status?: unknown; approvalId?: unknown }
+		}
+		if (parsed.details?.status === "approval_required") {
+			return {
+				status: parsed.details.status,
+				approvalId:
+					typeof parsed.details.approvalId === "string" ? parsed.details.approvalId : undefined,
+			}
+		}
+		return null
+	} catch {
+		return null
+	}
+}
+
 export function ChatConversation({
 	tabId,
 	isActive,
@@ -78,7 +108,7 @@ export function ChatConversation({
 	alertContext,
 	widgetFixContext,
 }: ChatConversationProps) {
-	const { orgId, getToken } = useAuth()
+	const { orgId } = useAuth()
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive)
 
@@ -102,32 +132,14 @@ export function ChatConversation({
 			return next
 		})
 
-	const agentName = orgId ? `${orgId}:${tabId}` : tabId
-	const agent = useAgent({
-		agent: "ChatAgent",
-		name: agentName,
-		host: chatAgentUrl,
-		query: async () => ({ token: (await getToken()) ?? null }),
-		queryDeps: [orgId],
-		cacheTtl: 30_000,
-	})
-
-	const prepareSendMessagesRequest = useMemo(
-		() => async (opts: { headers?: HeadersInit }) => {
-			const token = await getToken()
-			const headers = new Headers(opts.headers ?? {})
-			if (token) headers.set("Authorization", `Bearer ${token}`)
-			const out: Record<string, string> = {}
-			headers.forEach((value, key) => {
-				out[key] = value
-			})
-			return { headers: out }
-		},
-		[getToken],
-	)
+	const [session, setSession] = useState<{ id: string; entityUrl: string } | null>(null)
+	const [db, setDb] = useState<EntityStreamDB | null>(null)
+	const [sessionError, setSessionError] = useState<string | null>(null)
+	const [pendingSend, setPendingSend] = useState(false)
+	const [answeredApprovals, setAnsweredApprovals] = useState<Set<string>>(() => new Set())
 
 	const body = useMemo<Record<string, unknown>>(() => {
-		const base: Record<string, unknown> = { orgId }
+		const base: Record<string, unknown> = {}
 		if (mode === "alert" && alertContext) {
 			base.mode = "alert"
 			base.alertContext = alertContext
@@ -144,29 +156,73 @@ export function ChatConversation({
 			base.pageContext = payload
 		}
 		return base
-	}, [orgId, mode, alertContext, widgetFixContext, activeContexts, referrerPath])
+	}, [mode, alertContext, widgetFixContext, activeContexts, referrerPath])
 
-	const { messages, sendMessage, status, addToolApprovalResponse } = useAgentChat({
-		agent,
-		body,
-		getInitialMessages: null,
-		prepareSendMessagesRequest,
-	})
+	useEffect(() => {
+		let cancelled = false
+		setSession(null)
+		setDb(null)
+		setSessionError(null)
+		setAnsweredApprovals(new Set())
+
+		ensureMapleChatSession({ tabId })
+			.then(async (nextSession) => {
+				const nextDb = await observeMapleChatSession(nextSession.entityUrl)
+				if (cancelled) return
+				setSession(nextSession)
+				setDb(nextDb)
+			})
+			.catch((error) => {
+				if (cancelled) return
+				setSessionError(error instanceof Error ? error.message : String(error))
+			})
+
+		return () => {
+			cancelled = true
+		}
+	}, [tabId, orgId])
+
+	const { sections, state: timelineState } = useChat(db)
+	const visibleSections = useMemo(
+		() =>
+			sections.filter(
+				(section) => section.kind !== "user_message" || !isApprovalResponseText(section.text),
+			),
+		[sections],
+	)
+	const visibleUserMessageCount = useMemo(
+		() => visibleSections.filter((section) => section.kind === "user_message").length,
+		[visibleSections],
+	)
+	const hasVisibleMessages = visibleSections.length > 0
 
 	const [hasSettled, setHasSettled] = useState(false)
 	useEffect(() => {
 		setHasSettled(false)
-	}, [agentName])
+	}, [tabId, orgId])
 	useEffect(() => {
-		if (messages.length > 0) {
+		if (hasVisibleMessages || sessionError) {
 			setHasSettled(true)
 			return
 		}
 		const t = setTimeout(() => setHasSettled(true), 600)
 		return () => clearTimeout(t)
-	}, [messages.length, agentName])
+	}, [hasVisibleMessages, sessionError, tabId, orgId])
 
-	const isLoading = status === "streaming" || status === "submitted"
+	const isInitializing = session == null && sessionError == null
+	const isLoading =
+		pendingSend ||
+		isInitializing ||
+		timelineState === "pending" ||
+		timelineState === "queued" ||
+		timelineState === "working"
+	const status: PromptStatus = sessionError
+		? "error"
+		: timelineState === "working"
+			? "streaming"
+			: isLoading
+				? "submitted"
+				: "ready"
 	const isAlertMode = mode === "alert" && !!alertContext
 	const isWidgetFixMode = mode === "widget-fix" && !!widgetFixContext
 	const suggestions = useMemo(() => {
@@ -176,24 +232,41 @@ export function ChatConversation({
 		return routeAware ?? DEFAULT_SUGGESTIONS
 	}, [isAlertMode, alertContext, isWidgetFixMode, widgetFixContext, activeContexts])
 
-	const handleSend = (text: string) => {
+	const handleSend = async (text: string) => {
 		if (!text.trim() || isLoading) return
-		if (messages.length === 0 && onFirstMessage) {
-			onFirstMessage(tabId, text.trim().slice(0, 40))
+		if (!session) return
+		const trimmed = text.trim()
+		if (visibleUserMessageCount === 0 && onFirstMessage) {
+			onFirstMessage(tabId, trimmed.slice(0, 40))
 		}
-		sendMessage({ text: text.trim() })
+		setPendingSend(true)
+		try {
+			await sendMapleChatMessage(session.id, { ...body, text: trimmed })
+		} finally {
+			setPendingSend(false)
+		}
+	}
+
+	const handleApprovalResponse = async (approvalId: string, approved: boolean) => {
+		if (!session) return
+		await sendMapleApprovalResponse(session.id, approvalId, approved)
+		setAnsweredApprovals((prev) => {
+			const next = new Set(prev)
+			next.add(approvalId)
+			return next
+		})
 	}
 
 	const widgetFixAutoSentRef = useRef<string | null>(null)
 	useEffect(() => {
 		if (!isWidgetFixMode || !isActive) return
 		if (!hasSettled || isLoading) return
-		if (messages.length > 0) return
+		if (visibleUserMessageCount > 0) return
 		if (widgetFixAutoSentRef.current === tabId) return
 		widgetFixAutoSentRef.current = tabId
 		handleSend(widgetFixAutoPrompt)
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isWidgetFixMode, isActive, hasSettled, isLoading, messages.length, tabId])
+	}, [isWidgetFixMode, isActive, hasSettled, isLoading, visibleUserMessageCount, tabId])
 
 	return (
 		<div className="flex h-full flex-col">
@@ -201,9 +274,16 @@ export function ChatConversation({
 			{isWidgetFixMode && <WidgetFixAttachmentCard ctx={widgetFixContext!} />}
 			<Conversation className="flex-1 min-h-0">
 				<ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
-					{!hasSettled && messages.length === 0 ? (
+					{!hasSettled && !hasVisibleMessages ? (
 						<ConversationLoadingSkeleton />
-					) : messages.length === 0 ? (
+					) : sessionError ? (
+						<div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
+							<p className="text-xs uppercase tracking-[0.14em] text-destructive/80">
+								Chat unavailable
+							</p>
+							<p className="max-w-sm text-sm text-muted-foreground">{sessionError}</p>
+						</div>
+					) : !hasVisibleMessages ? (
 						isAlertMode ? (
 							<div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
 								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
@@ -220,8 +300,8 @@ export function ChatConversation({
 									Diagnosing widget…
 								</p>
 								<p className="max-w-sm text-sm text-muted-foreground">
-									Maple AI is reading the broken widget config and the validation error.
-									It will propose a corrected widget JSON for you to approve.
+									Maple AI is reading the broken widget config and the validation error. It
+									will propose a corrected widget JSON for you to approve.
 								</p>
 							</div>
 						) : (
@@ -250,87 +330,24 @@ export function ChatConversation({
 						)
 					) : (
 						<>
-							{messages.map((message, messageIndex) => {
-								const isLastMessage = messageIndex === messages.length - 1
-								return (
-									<Message key={message.id} from={message.role}>
+							{visibleSections.map((section, sectionIndex) => (
+								<ChatTimelineSection
+									key={sectionIndex}
+									section={section}
+									isLoading={isLoading}
+									isLastSection={sectionIndex === visibleSections.length - 1}
+									answeredApprovals={answeredApprovals}
+									onApprovalResponse={handleApprovalResponse}
+								/>
+							))}
+							{isLoading &&
+								visibleSections[visibleSections.length - 1]?.kind === "user_message" && (
+									<Message from="assistant">
 										<MessageContent>
-											{message.parts.map((part, i) => {
-												if (part.type === "text") {
-													return <RichText key={i}>{part.text}</RichText>
-												}
-												if (
-													part.type.startsWith("tool-") ||
-													part.type === "dynamic-tool"
-												) {
-													const toolPart = part as {
-														type: string
-														toolCallId: string
-														toolName?: string
-														state: string
-														input?: unknown
-														output?: unknown
-														errorText?: string
-														approval?: { id: string }
-													}
-													const toolName = part.type.startsWith("tool-")
-														? part.type.replace(/^tool-/, "")
-														: (toolPart.toolName ?? "unknown")
-													if (
-														toolPart.state === "approval-requested" &&
-														toolPart.approval?.id
-													) {
-														return (
-															<ApprovalCard
-																key={toolPart.toolCallId ?? i}
-																toolName={toolName}
-																input={toolPart.input}
-																approvalId={toolPart.approval.id}
-																onApprove={(id) =>
-																	addToolApprovalResponse({
-																		id,
-																		approved: true,
-																	})
-																}
-																onDeny={(id) =>
-																	addToolApprovalResponse({
-																		id,
-																		approved: false,
-																	})
-																}
-															/>
-														)
-													}
-													return (
-														<Tool
-															key={toolPart.toolCallId ?? i}
-															toolName={toolName}
-															toolCallId={toolPart.toolCallId}
-															state={toolPart.state}
-															input={toolPart.input}
-															output={toolPart.output}
-															errorText={toolPart.errorText}
-														/>
-													)
-												}
-												return null
-											})}
-											{shouldShowThinkingIndicator(
-												message,
-												isLoading,
-												isLastMessage,
-											) && <ThinkingIndicator />}
+											<Shimmer>Thinking…</Shimmer>
 										</MessageContent>
 									</Message>
-								)
-							})}
-							{isLoading && messages[messages.length - 1]?.role === "user" && (
-								<Message from="assistant">
-									<MessageContent>
-										<Shimmer>Thinking…</Shimmer>
-									</MessageContent>
-								</Message>
-							)}
+								)}
 						</>
 					)}
 				</ConversationContent>
@@ -338,7 +355,7 @@ export function ChatConversation({
 			</Conversation>
 
 			<div className="mx-auto w-full max-w-3xl px-4 pb-4">
-				{(messages.length > 0 || isAlertMode || isWidgetFixMode) && (
+				{(hasVisibleMessages || isAlertMode || isWidgetFixMode) && (
 					<Suggestions className="mb-3">
 						{suggestions.map((s) => (
 							<Suggestion key={s} suggestion={s} onClick={() => handleSend(s)} />
@@ -364,11 +381,80 @@ export function ChatConversation({
 						disabled={isLoading}
 					/>
 					<PromptInputFooter>
-						<PromptInputSubmit status={status} disabled={isLoading && status !== "streaming"} />
+						<PromptInputSubmit status={status} disabled={isLoading} />
 					</PromptInputFooter>
 				</PromptInput>
 			</div>
 		</div>
+	)
+}
+
+function ChatTimelineSection({
+	section,
+	isLoading,
+	isLastSection,
+	answeredApprovals,
+	onApprovalResponse,
+}: {
+	section: EntityTimelineSection
+	isLoading: boolean
+	isLastSection: boolean
+	answeredApprovals: ReadonlySet<string>
+	onApprovalResponse: (approvalId: string, approved: boolean) => void | PromiseLike<void>
+}) {
+	if (section.kind === "user_message") {
+		return (
+			<Message from="user">
+				<MessageContent>
+					<RichText>{section.text}</RichText>
+				</MessageContent>
+			</Message>
+		)
+	}
+
+	return (
+		<Message from="assistant">
+			<MessageContent>
+				{section.items.map((item, i) => {
+					if (item.kind === "text") {
+						return <RichText key={i}>{item.text}</RichText>
+					}
+
+					const approval = parseApprovalResult(item.result)
+					if (
+						item.status === "completed" &&
+						requiresApproval(item.toolName) &&
+						approval?.approvalId &&
+						!answeredApprovals.has(approval.approvalId)
+					) {
+						return (
+							<ApprovalCard
+								key={item.toolCallId}
+								toolName={item.toolName}
+								input={item.args}
+								approvalId={approval.approvalId}
+								onApprove={(id) => onApprovalResponse(id, true)}
+								onDeny={(id) => onApprovalResponse(id, false)}
+							/>
+						)
+					}
+
+					return (
+						<Tool
+							key={item.toolCallId}
+							toolName={item.toolName}
+							toolCallId={item.toolCallId}
+							state={mapToolStatus(item.status)}
+							input={item.args}
+							output={item.result}
+							errorText={item.isError ? item.result : undefined}
+						/>
+					)
+				})}
+				{isLoading && isLastSection && !section.done && <ThinkingIndicator />}
+				{section.error ? <RichText>{section.error}</RichText> : null}
+			</MessageContent>
+		</Message>
 	)
 }
 

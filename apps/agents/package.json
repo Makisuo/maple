@@ -1,0 +1,31 @@
+{
+	"name": "@maple/agents",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "tsx src/dev.ts",
+		"runtime:quickstart": "electric-ax agents quickstart",
+		"runtime:start": "ELECTRIC_AGENTS_PORT=${ELECTRIC_AGENTS_PORT:-4438} electric-ax agents start",
+		"runtime:stop": "electric-ax agents stop",
+		"start": "node --import tsx src/server.ts",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run --passWithNoTests"
+	},
+	"dependencies": {
+		"@electric-ax/agents-runtime": "0.1.2",
+		"@maple/ai": "workspace:*",
+		"@maple/api": "workspace:*",
+		"@mariozechner/pi-ai": "^0.70.2",
+		"@tanstack/react-db": "^0.1.82",
+		"effect": "catalog:effect",
+		"tsx": "^4.21.0",
+		"zod": "^4.3.6"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@types/node": "catalog:tooling",
+		"electric-ax": "0.1.17",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	}
+}

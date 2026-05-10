@@ -31,6 +31,7 @@ export interface EnvShape {
 	readonly HAZEL_OAUTH_CLIENT_ID: Option.Option<string>
 	readonly HAZEL_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly HAZEL_OAUTH_SCOPES: string
+	readonly ELECTRIC_AGENTS_URL: string
 }
 
 const stringWithDefault = (key: string, fallback: string) =>
@@ -89,6 +90,7 @@ const envConfig = Config.all({
 		"HAZEL_OAUTH_SCOPES",
 		"openid email profile organizations:read channels:read channel-webhooks:write",
 	),
+	ELECTRIC_AGENTS_URL: stringWithDefault("ELECTRIC_AGENTS_URL", "http://localhost:4438"),
 })
 
 const makeEnv = Effect.gen(function* () {
