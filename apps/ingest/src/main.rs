@@ -84,13 +84,25 @@ struct AppConfig {
     forward_timeout: Duration,
     max_request_body_bytes: usize,
     require_tls: bool,
-    cf_account_id: String,
-    d1_database_id: String,
-    d1_api_token: String,
+    key_store_backend: KeyStoreBackend,
     lookup_hmac_key: String,
     autumn_secret_key: Option<String>,
     autumn_api_url: String,
     autumn_flush_interval_secs: u64,
+}
+
+#[derive(Clone)]
+enum KeyStoreBackend {
+    // No-DB local backend: every well-formed ingest key resolves to a single
+    // override org. Selected for single-tenant local dev so contributors don't
+    // need CF D1 credentials to boot the service.
+    Static { org_id: String },
+    // Cloudflare D1 REST backend used in multi-tenant / production deploys.
+    D1 {
+        cf_account_id: String,
+        d1_database_id: String,
+        d1_api_token: String,
+    },
 }
 
 impl AppConfig {
@@ -157,29 +169,7 @@ impl AppConfig {
             }
         }
 
-        let cf_account_id = std::env::var("CLOUDFLARE_ACCOUNT_ID")
-            .map_err(|_| "CLOUDFLARE_ACCOUNT_ID is required".to_string())?
-            .trim()
-            .to_string();
-        if cf_account_id.is_empty() {
-            return Err("CLOUDFLARE_ACCOUNT_ID is required".to_string());
-        }
-
-        let d1_database_id = std::env::var("MAPLE_DB_ID")
-            .map_err(|_| "MAPLE_DB_ID is required".to_string())?
-            .trim()
-            .to_string();
-        if d1_database_id.is_empty() {
-            return Err("MAPLE_DB_ID is required".to_string());
-        }
-
-        let d1_api_token = std::env::var("CLOUDFLARE_API_TOKEN")
-            .map_err(|_| "CLOUDFLARE_API_TOKEN is required".to_string())?
-            .trim()
-            .to_string();
-        if d1_api_token.is_empty() {
-            return Err("CLOUDFLARE_API_TOKEN is required".to_string());
-        }
+        let key_store_backend = resolve_key_store_backend()?;
 
         let lookup_hmac_key = std::env::var("MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY")
             .map_err(|_| "MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY is required".to_string())?
@@ -214,15 +204,84 @@ impl AppConfig {
             forward_timeout: Duration::from_millis(forward_timeout_ms),
             max_request_body_bytes,
             require_tls,
-            cf_account_id,
-            d1_database_id,
-            d1_api_token,
+            key_store_backend,
             lookup_hmac_key,
             autumn_secret_key,
             autumn_api_url,
             autumn_flush_interval_secs,
         })
     }
+}
+
+// Pick a KeyStore backend from env. `INGEST_KEY_STORE_BACKEND` (static|d1) wins
+// when set; otherwise `MAPLE_SELF_HOSTED_MODE=single_tenant` implies static; in
+// all other cases we require the three CF env vars and use D1.
+fn resolve_key_store_backend() -> Result<KeyStoreBackend, String> {
+    let backend_override = std::env::var("INGEST_KEY_STORE_BACKEND")
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty());
+
+    let self_hosted_mode = std::env::var("MAPLE_SELF_HOSTED_MODE")
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty());
+
+    let want_static = match backend_override.as_deref() {
+        Some("static") => true,
+        Some("d1") => false,
+        Some(other) => {
+            return Err(format!(
+                "INGEST_KEY_STORE_BACKEND must be `static` or `d1`, got `{other}`"
+            ));
+        }
+        None => self_hosted_mode.as_deref() == Some("single_tenant"),
+    };
+
+    if want_static {
+        let org_id = std::env::var("MAPLE_ORG_ID_OVERRIDE")
+            .map_err(|_| {
+                "MAPLE_ORG_ID_OVERRIDE is required for the static key store backend".to_string()
+            })?
+            .trim()
+            .to_string();
+        if org_id.is_empty() {
+            return Err(
+                "MAPLE_ORG_ID_OVERRIDE is required for the static key store backend".to_string(),
+            );
+        }
+        return Ok(KeyStoreBackend::Static { org_id });
+    }
+
+    let cf_account_id = std::env::var("CLOUDFLARE_ACCOUNT_ID")
+        .map_err(|_| "CLOUDFLARE_ACCOUNT_ID is required".to_string())?
+        .trim()
+        .to_string();
+    if cf_account_id.is_empty() {
+        return Err("CLOUDFLARE_ACCOUNT_ID is required".to_string());
+    }
+
+    let d1_database_id = std::env::var("MAPLE_DB_ID")
+        .map_err(|_| "MAPLE_DB_ID is required".to_string())?
+        .trim()
+        .to_string();
+    if d1_database_id.is_empty() {
+        return Err("MAPLE_DB_ID is required".to_string());
+    }
+
+    let d1_api_token = std::env::var("CLOUDFLARE_API_TOKEN")
+        .map_err(|_| "CLOUDFLARE_API_TOKEN is required".to_string())?
+        .trim()
+        .to_string();
+    if d1_api_token.is_empty() {
+        return Err("CLOUDFLARE_API_TOKEN is required".to_string());
+    }
+
+    Ok(KeyStoreBackend::D1 {
+        cf_account_id,
+        d1_database_id,
+        d1_api_token,
+    })
 }
 
 struct IngestKeyResolver {
@@ -2307,6 +2366,52 @@ impl KeyStore for D1KeyStore {
     }
 }
 
+// Local-dev / single-tenant KeyStore: every well-formed ingest key resolves to
+// the configured org. No DB, no network. Connector flows are no-ops since
+// Cloudflare Logpush is a production-only integration.
+struct StaticKeyStore {
+    org_id: String,
+}
+
+#[async_trait::async_trait]
+impl KeyStore for StaticKeyStore {
+    async fn fetch_ingest_key(
+        &self,
+        _key_hash: &str,
+        _hash_column: &'static str,
+    ) -> Result<Option<KeyRow>, String> {
+        Ok(Some(KeyRow {
+            org_id: self.org_id.clone(),
+            self_managed: false,
+        }))
+    }
+
+    async fn fetch_connector(
+        &self,
+        _connector_id: &str,
+        _secret_hash: &str,
+    ) -> Result<Option<ConnectorRow>, String> {
+        Ok(None)
+    }
+
+    async fn record_connector_success(
+        &self,
+        _connector_id: &str,
+        _now_ms: i64,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn record_connector_failure(
+        &self,
+        _connector_id: &str,
+        _error: &str,
+        _now_ms: i64,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 fn infer_ingest_key_type(raw_key: &str) -> Option<IngestKeyType> {
     if raw_key.starts_with("maple_pk_") {
         return Some(IngestKeyType::Public);
@@ -2333,34 +2438,53 @@ fn current_time_millis() -> u128 {
         .unwrap_or(0)
 }
 
-/// Build the D1-backed KeyStore for this process. Production reads
-/// `org_ingest_keys` from Cloudflare D1 via the REST API; the API service
-/// writes to the same D1 database. Required env vars are validated at
-/// config-load time, then we run an actual D1 query as a probe — if the
-/// schema/permissions/network are wrong, the deploy fails here with the full
-/// CF response in stderr instead of 503'ing every request.
+/// Build the KeyStore for this process. The `Static` variant resolves any
+/// well-formed ingest key to a single configured org — used for single-tenant
+/// local dev so contributors don't need CF D1 credentials to boot the service.
+/// The `D1` variant reads `org_ingest_keys` from Cloudflare D1 via the REST API
+/// (the API service writes to the same D1 database); a probe query runs at
+/// startup so any auth/schema/network issue surfaces here instead of 503'ing
+/// every request.
 async fn build_key_store(
     config: &AppConfig,
     http_client: reqwest::Client,
 ) -> Result<Arc<dyn KeyStore>, String> {
-    info!(
-        backend = "cloudflare-d1",
-        cf_account = %config.cf_account_id,
-        d1_database = %config.d1_database_id,
-        "Key store backend selected"
-    );
-    let store = D1KeyStore::new(
-        http_client,
-        &config.cf_account_id,
-        &config.d1_database_id,
-        config.d1_api_token.clone(),
-    );
-    store
-        .probe()
-        .await
-        .map_err(|error| format!("D1 startup probe failed: {error}"))?;
-    info!("D1 startup probe succeeded");
-    Ok(Arc::new(store))
+    match &config.key_store_backend {
+        KeyStoreBackend::Static { org_id } => {
+            info!(
+                backend = "static",
+                org_id = %org_id,
+                "Key store backend selected"
+            );
+            Ok(Arc::new(StaticKeyStore {
+                org_id: org_id.clone(),
+            }))
+        }
+        KeyStoreBackend::D1 {
+            cf_account_id,
+            d1_database_id,
+            d1_api_token,
+        } => {
+            info!(
+                backend = "cloudflare-d1",
+                cf_account = %cf_account_id,
+                d1_database = %d1_database_id,
+                "Key store backend selected"
+            );
+            let store = D1KeyStore::new(
+                http_client,
+                cf_account_id,
+                d1_database_id,
+                d1_api_token.clone(),
+            );
+            store
+                .probe()
+                .await
+                .map_err(|error| format!("D1 startup probe failed: {error}"))?;
+            info!("D1 startup probe succeeded");
+            Ok(Arc::new(store))
+        }
+    }
 }
 
 fn parse_bool(name: &str, raw: Option<String>, default: bool) -> Result<bool, String> {
