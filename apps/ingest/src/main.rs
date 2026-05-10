@@ -466,8 +466,17 @@ fn init_tracing(forward_endpoint: &str, bind_port: u16) -> Option<SdkTracerProvi
         ))
         .with_attribute(OtelKeyValue::new(
             "deployment.environment.name",
-            deployment_env,
+            deployment_env.clone(),
         ))
+        // Dual-emit the legacy `deployment.environment` key: every Tinybird MV
+        // (service_overview_spans_mv, service_map_*_mv, error_*_mv,
+        // logs_aggregates_hourly_mv, service_platforms_hourly_mv) still
+        // pre-extracts ResourceAttributes['deployment.environment'] at write
+        // time, so omitting it leaves DeploymentEnv='' for every ingest span
+        // and the services-table badge renders blank. OTel semconv permits
+        // emitting both during the deployment.environment ->
+        // deployment.environment.name transition.
+        .with_attribute(OtelKeyValue::new("deployment.environment", deployment_env))
         .with_attribute(OtelKeyValue::new("maple_org_id", internal_org_id))
         .build();
 
