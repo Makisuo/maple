@@ -55,8 +55,8 @@ export function SystemHealthCard({ props }: BaseComponentProps<SystemHealthCardP
 			{topErrors.length > 0 && (
 				<div className="space-y-1">
 					<p className="text-[10px] font-medium text-muted-foreground">Top Errors</p>
-					{topErrors.slice(0, 5).map((err, i) => (
-						<div key={`${err.errorType}-${i}`} className="flex items-center gap-2 text-[11px]">
+					{topErrors.slice(0, 5).map((err) => (
+						<div key={err.errorType} className="flex items-center gap-2 text-[11px]">
 							<span className="min-w-0 flex-1 truncate text-severity-error">
 								{err.errorType}
 							</span>

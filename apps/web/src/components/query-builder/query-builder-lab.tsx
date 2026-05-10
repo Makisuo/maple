@@ -274,8 +274,8 @@ function QueryBuilderAtomResults({ input }: { input: QueryBuilderTimeseriesInput
 
 							{warnings.length > 0 && (
 								<div className="space-y-1">
-									{warnings.map((warning, index) => (
-										<p key={`w-${index}`} className="text-[11px] text-muted-foreground">
+									{warnings.map((warning) => (
+										<p key={warning} className="text-[11px] text-muted-foreground">
 											- {warning}
 										</p>
 									))}

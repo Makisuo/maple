@@ -14,12 +14,12 @@ export function ErrorList({ props }: BaseComponentProps<ErrorListProps>) {
 
 	return (
 		<div className="max-h-[300px] space-y-1 overflow-y-auto">
-			{errors.map((err, i) => {
+			{errors.map((err) => {
 				const lastSeen = new Date(err.lastSeen)
 				const timeAgo = formatTimeAgo(lastSeen)
 				return (
 					<div
-						key={`${err.errorType}-${i}`}
+						key={err.errorType}
 						className="flex items-start gap-2 rounded p-1 text-[11px] hover:bg-muted/50"
 					>
 						<span className="min-w-0 flex-1 truncate text-severity-error" title={err.errorType}>

@@ -444,8 +444,8 @@ export function OrgClickHouseSettingsSection({
 												</button>
 												{isDrifted && isExpanded ? (
 													<ul className="mt-2 ml-6 space-y-1 font-mono text-xs">
-														{entry.columnDrifts.map((drift, idx) => (
-															<li key={`${entry.name}-${idx}`} className="text-muted-foreground">
+														{entry.columnDrifts.map((drift) => (
+															<li key={`${entry.name}-${drift.column}`} className="text-muted-foreground">
 																{drift.kind === "missing"
 																	? `– missing column \`${drift.column}\` (expected ${drift.expectedType})`
 																	: drift.kind === "extra"

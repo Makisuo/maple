@@ -64,7 +64,7 @@ function PricingSkeleton() {
 		>
 			{[0, 1, 2].map((i) => (
 				<div
-					key={i}
+					key={`plan-skeleton-${i}`}
 					className="rounded-xl border bg-card p-6 space-y-4"
 					style={{ animationDelay: `${i * 80}ms` }}
 				>

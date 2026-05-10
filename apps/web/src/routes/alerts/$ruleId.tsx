@@ -711,7 +711,7 @@ function ChecksPanel({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{filteredChecks.slice(0, 200).map((check, idx) => {
+						{filteredChecks.slice(0, 200).map((check) => {
 							const state: "firing" | "ok" | "pending" =
 								check.status === "breached"
 									? "firing"
@@ -727,7 +727,7 @@ function ChecksPanel({
 											? "text-muted-foreground"
 											: ""
 							return (
-								<TableRow key={`${check.timestamp}-${check.groupKey}-${idx}`}>
+								<TableRow key={`${check.timestamp}-${check.groupKey}`}>
 									<TableCell className="font-mono text-xs">
 										{new Date(check.timestamp).toLocaleString()}
 									</TableCell>

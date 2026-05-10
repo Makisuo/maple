@@ -32,9 +32,9 @@ export function StatCards({ props }: BaseComponentProps<StatCardsProps>) {
 
 	return (
 		<div className="flex flex-wrap gap-1.5">
-			{cards.map((card, i) => (
+			{cards.map((card) => (
 				<div
-					key={`${card.label}-${i}`}
+					key={card.label}
 					className="min-w-[80px] rounded border border-border/40 px-2 py-1.5"
 				>
 					<p className="text-[10px] text-muted-foreground">{card.label}</p>

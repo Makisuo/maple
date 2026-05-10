@@ -25,11 +25,11 @@ export function LogList({ props }: BaseComponentProps<LogListProps>) {
 				</p>
 			)}
 			<div className="max-h-[300px] space-y-0.5 overflow-y-auto">
-				{logs.map((log, i) => {
+				{logs.map((log) => {
 					const time = new Date(log.timestamp).toLocaleTimeString()
 					return (
 						<div
-							key={`${log.timestamp}-${i}`}
+							key={`${log.timestamp}-${log.body.slice(0, 30)}`}
 							className="flex items-start gap-1.5 rounded px-1 py-0.5 text-[11px] hover:bg-muted/50"
 						>
 							<span className="shrink-0 font-mono text-[10px] text-muted-foreground">

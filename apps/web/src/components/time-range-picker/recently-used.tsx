@@ -17,9 +17,9 @@ export function RecentlyUsed({ recentTimes, onSelect }: RecentlyUsedProps) {
 				Recently Used
 			</div>
 			<div className="flex flex-col gap-0.5">
-				{recentTimes.map((item, index) => (
+				{recentTimes.map((item) => (
 					<button
-						key={`${item.value}-${index}`}
+						key={item.value}
 						type="button"
 						onClick={() => onSelect(item)}
 						className={cn(
