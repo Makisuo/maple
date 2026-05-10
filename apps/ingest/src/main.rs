@@ -32,6 +32,7 @@ use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue as OtelKeyValue;
 use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
+use tracing::Instrument;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -686,9 +687,10 @@ async fn handle_signal(
         org_id = tracing::field::Empty,
         key_type = tracing::field::Empty,
     );
-    let _enter = span.enter();
 
-    let result = handle_signal_inner(&state, &headers, body, signal).await;
+    let result = handle_signal_inner(&state, &headers, body, signal)
+        .instrument(span)
+        .await;
     let duration = start.elapsed();
     let duration_ms = duration.as_millis() as u64;
 
@@ -743,9 +745,10 @@ async fn handle_cloudflare_logpush(
         org_id = tracing::field::Empty,
         connector_id = %connector_id,
     );
-    let _enter = span.enter();
 
-    let result = handle_cloudflare_logpush_inner(&state, &connector_id, secret.as_deref(), &headers, body).await;
+    let result = handle_cloudflare_logpush_inner(&state, &connector_id, secret.as_deref(), &headers, body)
+        .instrument(span)
+        .await;
     let duration = start.elapsed();
 
     match result {
