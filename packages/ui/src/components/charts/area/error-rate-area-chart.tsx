@@ -89,6 +89,7 @@ export function ErrorRateAreaChart({
 					axisLine={false}
 					tickMargin={8}
 					width={60}
+					domain={[0, (dataMax: number) => Math.min(1, Math.max(dataMax * 1.2, 0.01))]}
 					tickFormatter={(v) => formatErrorRate(v)}
 				/>
 				{tooltip !== "hidden" && (
