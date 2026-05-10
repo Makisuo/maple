@@ -345,7 +345,8 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 			"  group_by: traces=service.name|span.name|status.code|http.method|none; logs=service.name|severity|none; metrics=service.name|attr.<key>|none\n" +
 			"  Aliases accepted: service, span_name, status_code, http_method\n" +
 			"  Note: table requires a group_by field. list shows recent traces or logs.\n" +
-			"Custom JSON: provide dashboard_json with full widget definitions (use get_dashboard to see schema).",
+			"Custom JSON: provide dashboard_json with full widget definitions (use get_dashboard to see schema). " +
+			"For raw widget JSON, trace queries MUST include `metricName: \"\"`, `metricType: \"gauge\"`, and `whereClause` is a custom grammar (use `exists` not SQL `IS NULL`). See `maple://instructions` for the full widget JSON shape.",
 		Schema.Struct({
 			name: requiredStringParam("Dashboard name"),
 			template: optionalStringParam(

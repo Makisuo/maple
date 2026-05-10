@@ -74,7 +74,7 @@ const StrategySchema = Schema.Struct({
 	maxFallbackRangeSeconds: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
 })
 
-const QueryBuilderTimeseriesInputSchema = Schema.Struct({
+export const QueryBuilderTimeseriesInputSchema = Schema.Struct({
 	startTime: dateTimeString,
 	endTime: dateTimeString,
 	queries: Schema.mutable(Schema.Array(QueryDraftSchema)),

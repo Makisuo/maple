@@ -17,7 +17,7 @@ const TOOL = "add_dashboard_widget"
 export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 	server.tool(
 		TOOL,
-		"Add a single widget to an existing dashboard without re-sending the whole document. Pass the widget's visualization type plus JSON-encoded dataSource and display config. If layout_json is omitted the widget is auto-placed using the same grid logic as the web UI. Returns the new widget id.",
+		"Add a single widget to an existing dashboard without re-sending the whole document. Pass the widget's visualization type plus JSON-encoded dataSource and display config. If layout_json is omitted the widget is auto-placed using the same grid logic as the web UI. Returns the new widget id.\n\nTrace queries MUST include `metricName: \"\"`, `metricType: \"gauge\"` (required by the schema even though they're meaningless for traces). `whereClause` is a custom grammar (`=`, `>`, `<`, `>=`, `<=`, `contains`, `exists` joined by ` AND `) — there is NO SQL `IS NULL`/`IS NOT NULL`; use `<key> exists` to require an attribute. This tool returns success even when the stored shape will fail at query time — verify with inspect_chart_data or by loading the dashboard. See the `maple://instructions` resource for the full widget JSON shape (aggregations per source, groupBy prefixes, units, stat reduceToValue, hideSeries).",
 		Schema.Struct({
 			dashboard_id: requiredStringParam(
 				"ID of the dashboard to add the widget to (use list_dashboards to find IDs)",
