@@ -176,11 +176,26 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("ApiKeysSe
 				.pipe(Effect.mapError(toPersistenceError))
 		})
 
+		const resolveByBearer = Effect.fn("ApiKeysService.resolveByBearer")(function* (
+			bearerToken: string | undefined,
+		) {
+			if (!bearerToken || !bearerToken.startsWith(API_KEY_PREFIX)) {
+				return Option.none<ResolvedApiKey>()
+			}
+
+			const resolved = yield* resolveByKey(bearerToken)
+			if (Option.isSome(resolved)) {
+				yield* touchLastUsed(resolved.value.keyId).pipe(Effect.ignore, Effect.forkDetach)
+			}
+			return resolved
+		})
+
 		return {
 			list,
 			create,
 			revoke,
 			resolveByKey,
+			resolveByBearer,
 			touchLastUsed,
 		}
 	}),

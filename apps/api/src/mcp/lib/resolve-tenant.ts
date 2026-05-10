@@ -5,7 +5,6 @@ import { AuthService } from "@/services/AuthService"
 import { ApiKeysService } from "@/services/ApiKeysService"
 import { Env } from "@/services/Env"
 import { ActorId, OrgId, RoleName, UserId } from "@maple/domain/http"
-import { API_KEY_PREFIX } from "@maple/db"
 import {
 	McpAuthMissingError,
 	McpAuthInvalidError,
@@ -124,65 +123,60 @@ export const resolveMcpTenantContext = (
 			})
 		}
 
-		if (token && token.startsWith(API_KEY_PREFIX)) {
-			const apiKeys = yield* ApiKeysService
-			const resolved = yield* apiKeys.resolveByKey(token).pipe(
+		const apiKeys = yield* ApiKeysService
+		const apiKeyResolved = yield* apiKeys.resolveByBearer(token).pipe(
+			Effect.mapError(
+				(error) =>
+					new McpAuthInvalidError({
+						message: error.message || "API key validation failed",
+						reason: "api_key_lookup",
+					}),
+			),
+		)
+
+		if (Option.isSome(apiKeyResolved)) {
+			const validOrgId = yield* decodeOrgId(apiKeyResolved.value.orgId).pipe(
 				Effect.mapError(
-					(error) =>
-						new McpAuthInvalidError({
-							message: error.message || "API key validation failed",
-							reason: "api_key_lookup",
+					(e) =>
+						new McpInvalidTenantError({
+							message: e.message,
+							field: "orgId",
+						}),
+				),
+			)
+			const validUserId = yield* decodeUserId(apiKeyResolved.value.userId).pipe(
+				Effect.mapError(
+					(e) =>
+						new McpInvalidTenantError({
+							message: e.message,
+							field: "userId",
 						}),
 				),
 			)
 
-			if (Option.isSome(resolved)) {
-				// Touch lastUsedAt in the background — fire and forget
-				yield* apiKeys.touchLastUsed(resolved.value.keyId).pipe(Effect.ignore, Effect.forkDetach)
+			// Actor resolution: prefer an explicit agent override header, else the
+			// key's pinned agentActorId metadata. Both must be a valid ActorId; we
+			// silently drop malformed values rather than failing the request.
+			const keyActorId = extractAgentActorIdFromMetadata(apiKeyResolved.value.metadataJson)
+			const headerActorId = request.headers.get(AGENT_ACTOR_HEADER)
+			const actorIdCandidate = headerActorId ?? keyActorId
+			const actorIdOpt =
+				actorIdCandidate == null
+					? Option.none<
+							ReturnType<typeof decodeActorIdOption> extends Option.Option<infer A>
+								? A
+								: never
+						>()
+					: decodeActorIdOption(actorIdCandidate)
+			const actorId = Option.getOrUndefined(actorIdOpt)
 
-				const validOrgId = yield* decodeOrgId(resolved.value.orgId).pipe(
-					Effect.mapError(
-						(e) =>
-							new McpInvalidTenantError({
-								message: e.message,
-								field: "orgId",
-							}),
-					),
-				)
-				const validUserId = yield* decodeUserId(resolved.value.userId).pipe(
-					Effect.mapError(
-						(e) =>
-							new McpInvalidTenantError({
-								message: e.message,
-								field: "userId",
-							}),
-					),
-				)
-
-				// Actor resolution: prefer an explicit agent override header, else the
-				// key's pinned agentActorId metadata. Both must be a valid ActorId; we
-				// silently drop malformed values rather than failing the request.
-				const keyActorId = extractAgentActorIdFromMetadata(resolved.value.metadataJson)
-				const headerActorId = request.headers.get(AGENT_ACTOR_HEADER)
-				const actorIdCandidate = headerActorId ?? keyActorId
-				const actorIdOpt =
-					actorIdCandidate == null
-						? Option.none<
-								ReturnType<typeof decodeActorIdOption> extends Option.Option<infer A>
-									? A
-									: never
-							>()
-						: decodeActorIdOption(actorIdCandidate)
-				const actorId = Option.getOrUndefined(actorIdOpt)
-
-				return {
-					orgId: validOrgId,
-					userId: validUserId,
-					roles: apiKeyDefaultRoles,
-					authMode: "self_hosted",
-					...(actorId ? { actorId } : {}),
-				} as McpTenantContext
-			}
+			return {
+				orgId: validOrgId,
+				userId: validUserId,
+				roles: apiKeyDefaultRoles,
+				authMode: "self_hosted",
+				...(actorId ? { actorId } : {}),
+			} as McpTenantContext
 		}
 
 		// Fall back to existing Clerk / self-hosted session auth

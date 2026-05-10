@@ -155,7 +155,10 @@ export const AllRoutes = Layer.mergeAll(
 	),
 )
 
-export const ApiAuthLive = AuthorizationLive.pipe(Layer.provideMerge(Env.Default))
+export const ApiAuthLive = AuthorizationLive.pipe(
+	Layer.provideMerge(ApiKeysService.layer),
+	Layer.provideMerge(Env.Default),
+)
 
 // The OTLP tracer/logger is built per-request in worker.ts and injected via
 // `handler(request, services)`. The shared layer only installs the
