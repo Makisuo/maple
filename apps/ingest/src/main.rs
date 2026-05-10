@@ -674,16 +674,11 @@ async fn handle_signal(
     signal: Signal,
 ) -> Response {
     let start = Instant::now();
-    #[cfg_attr(not(feature = "trace-forwarder"), allow(unused_variables))]
     let body_bytes = body.len();
 
     gauge!("ingest_requests_in_flight").increment(1.0);
     let _guard = InFlightGuard;
 
-    // Feature-gated to avoid recursion: every customer batch this handler
-    // forwards would otherwise generate a self-span that gets exported back
-    // through this same handler. See `trace-forwarder` in Cargo.toml.
-    #[cfg(feature = "trace-forwarder")]
     let span = tracing::info_span!(
         "ingest",
         signal = signal.path(),
@@ -691,7 +686,6 @@ async fn handle_signal(
         org_id = tracing::field::Empty,
         key_type = tracing::field::Empty,
     );
-    #[cfg(feature = "trace-forwarder")]
     let _enter = span.enter();
 
     let result = handle_signal_inner(&state, &headers, body, signal).await;
@@ -736,15 +730,11 @@ async fn handle_cloudflare_logpush(
     body: Bytes,
 ) -> Response {
     let start = Instant::now();
-    #[cfg_attr(not(feature = "trace-forwarder"), allow(unused_variables))]
     let body_bytes = body.len();
 
     gauge!("ingest_requests_in_flight").increment(1.0);
     let _guard = InFlightGuard;
 
-    // See note on the corresponding info_span! in handle_signal — gated by the
-    // same `trace-forwarder` feature for the same recursion reason.
-    #[cfg(feature = "trace-forwarder")]
     let span = tracing::info_span!(
         "cloudflare_logpush",
         signal = "logs",
@@ -753,7 +743,6 @@ async fn handle_cloudflare_logpush(
         org_id = tracing::field::Empty,
         connector_id = %connector_id,
     );
-    #[cfg(feature = "trace-forwarder")]
     let _enter = span.enter();
 
     let result = handle_cloudflare_logpush_inner(&state, &connector_id, secret.as_deref(), &headers, body).await;

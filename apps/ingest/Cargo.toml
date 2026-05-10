@@ -3,14 +3,6 @@ name = "maple-ingest"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = []
-# Emit OpenTelemetry spans for the OTLP forward request handlers.
-# Off by default to prevent the gateway tracing every customer batch it forwards
-# (which would re-enter the same handler if the export endpoint resolves back to
-# this server). Enable only after switching the exporter to a bypass HTTP client.
-trace-forwarder = []
-
 [dependencies]
 axum = "0.8.8"
 tikv-jemallocator = "0.6"
