@@ -159,3 +159,7 @@ The Maple API traces itself via `@effect/opentelemetry` → ingest gateway → c
 - NEVER remove the `withTracerDisabledWhen` filter — it prevents noisy health check spans
 - Be careful adding spans to high-frequency internal paths (e.g., auth token validation on every request)
 - The OTLP export itself does NOT go through the API (it goes directly to the ingest gateway), so it won't create recursive traces
+
+**`apps/ingest` self-instrumentation:**
+
+The Rust ingest gateway also self-instruments via OTLP/HTTP, exporting to its own `INGEST_FORWARD_OTLP_ENDPOINT` (so its traces flow through the same downstream collector → Tinybird as customer traffic). It identifies itself with `service.name="ingest"` (canonical — replaces the legacy Prometheus-scrape `ingest-proxy` label) and `maple_org_id="internal"` (override via `MAPLE_INTERNAL_ORG_ID` env). The OTLP forward request handlers (`/v1/traces|logs|metrics`, cloudflare logpush) are gated behind a default-off `trace-forwarder` cargo feature to prevent each forwarded customer batch from generating a self-span that re-enters the same handler. Set `OTEL_TRACES_SAMPLER=parentbased_traceidratio` and `OTEL_TRACES_SAMPLER_ARG=0.1` in production. The `/metrics` Prometheus endpoint stays for backward compat.

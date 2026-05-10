@@ -29,12 +29,21 @@ use hmac::{Hmac, Mac};
 use libsql::{params, Builder, Database};
 use metrics::{counter, gauge, histogram};
 use moka::future::Cache;
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::KeyValue as OtelKeyValue;
+use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, InstrumentationScope, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource;
+use opentelemetry_sdk::runtime::Tokio as OtelTokio;
+use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
+use opentelemetry_sdk::trace::{BatchConfigBuilder, SdkTracerProvider};
+use opentelemetry_sdk::Resource as OtelResource;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use prost::Message;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -45,6 +54,18 @@ use tracing::{debug, error, info, warn, Span};
 
 const INGEST_SOURCE: &str = "maple-ingest-gateway";
 const CLOUDFLARE_LOGPUSH_SOURCE: &str = "cloudflare-logpush";
+
+/// Bearer token literal that the maple-onboard skill (and our docs) inline as a
+/// placeholder while the user hasn't created a real ingest key yet. The
+/// gateway accepts it from anyone, returns 200, and discards the body — so the
+/// instrumented app's full bootstrap path can run end-to-end before the user
+/// has signed up. See `skills/maple-onboard/SKILL.md`.
+const SENTINEL_TOKEN: &str = "MAPLE_TEST";
+const SENTINEL_ORG_ID: &str = "sentinel";
+
+fn is_sentinel_token(token: &str) -> bool {
+    token == SENTINEL_TOKEN
+}
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -327,18 +348,109 @@ impl IntoResponse for ApiError {
     }
 }
 
+fn init_tracing(forward_endpoint: &str, bind_port: u16) -> Option<SdkTracerProvider> {
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "maple_ingest=info,tower_http=info".into());
+
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .compact();
+
+    let deployment_env =
+        std::env::var("DEPLOYMENT_ENV").unwrap_or_else(|_| "development".to_string());
+    let internal_org_id =
+        std::env::var("MAPLE_INTERNAL_ORG_ID").unwrap_or_else(|_| "internal".to_string());
+
+    let forward_explicit = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT").is_ok();
+    let skip_dev = deployment_env == "development" && !forward_explicit;
+    let loopback = endpoint_loopback_to_self(forward_endpoint, bind_port);
+
+    if skip_dev || loopback {
+        if loopback {
+            eprintln!(
+                "INGEST_FORWARD_OTLP_ENDPOINT={forward_endpoint} resolves to this server's bind port {bind_port}; skipping OTel exporter to avoid recursion"
+            );
+        }
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .init();
+        return None;
+    }
+
+    let resource = OtelResource::builder()
+        .with_attribute(OtelKeyValue::new("service.name", "ingest"))
+        .with_attribute(OtelKeyValue::new(
+            "service.version",
+            env!("CARGO_PKG_VERSION"),
+        ))
+        .with_attribute(OtelKeyValue::new(
+            "service.instance.id",
+            uuid::Uuid::new_v4().to_string(),
+        ))
+        .with_attribute(OtelKeyValue::new("deployment.environment", deployment_env))
+        .with_attribute(OtelKeyValue::new("maple_org_id", internal_org_id))
+        .build();
+
+    let exporter = match SpanExporter::builder()
+        .with_http()
+        .with_endpoint(format!("{forward_endpoint}/v1/traces"))
+        .with_protocol(Protocol::HttpBinary)
+        .build()
+    {
+        Ok(exporter) => exporter,
+        Err(error) => {
+            eprintln!("Failed to build OTLP span exporter: {error}; falling back to stdout-only tracing");
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .init();
+            return None;
+        }
+    };
+
+    let batch_config = BatchConfigBuilder::default()
+        .with_max_queue_size(2048)
+        .with_max_export_batch_size(512)
+        .with_scheduled_delay(Duration::from_secs(5))
+        .build();
+
+    let processor = BatchSpanProcessor::builder(exporter, OtelTokio)
+        .with_batch_config(batch_config)
+        .build();
+
+    let provider = SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_span_processor(processor)
+        .build();
+
+    let tracer = provider.tracer("maple-ingest");
+    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
+        .with(otel_layer)
+        .init();
+
+    opentelemetry::global::set_tracer_provider(provider.clone());
+
+    Some(provider)
+}
+
+fn endpoint_loopback_to_self(forward_endpoint: &str, bind_port: u16) -> bool {
+    let Ok(parsed) = url::Url::parse(forward_endpoint) else {
+        return false;
+    };
+    let host = parsed.host_str().unwrap_or("");
+    let port = parsed.port_or_known_default().unwrap_or(0);
+    let host_is_loopback = matches!(host, "127.0.0.1" | "localhost" | "::1" | "0.0.0.0");
+    host_is_loopback && port == bind_port
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenvy::dotenv();
-
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "maple_ingest=info,tower_http=info".into()),
-        )
-        .with_target(false)
-        .compact()
-        .init();
 
     let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .install_recorder()
@@ -351,6 +463,8 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    let tracer_provider = init_tracing(&config.forward_endpoint, config.port);
 
     let database = match open_database(&config).await {
         Ok(database) => database,
@@ -442,21 +556,67 @@ async fn main() {
         }
     };
 
-    info!(
-        port = config.port,
-        forward_endpoint = %config.forward_endpoint,
-        forward_self_managed_endpoint = %config
-            .forward_self_managed_endpoint
-            .as_deref()
-            .unwrap_or("<unset>"),
-        require_tls = config.require_tls,
-        max_body_bytes = config.max_request_body_bytes,
-        "Maple ingest server listening"
-    );
+    {
+        // Emit a single startup span so the dashboard has an authoritative
+        // "ingest is alive" signal independent of customer traffic. Lives only
+        // for the duration of this block, then gets exported by the batch
+        // processor.
+        let span = tracing::info_span!(
+            "startup",
+            port = config.port,
+            forward_endpoint = %config.forward_endpoint,
+            require_tls = config.require_tls,
+        );
+        let _enter = span.enter();
+        info!(
+            port = config.port,
+            forward_endpoint = %config.forward_endpoint,
+            forward_self_managed_endpoint = %config
+                .forward_self_managed_endpoint
+                .as_deref()
+                .unwrap_or("<unset>"),
+            require_tls = config.require_tls,
+            max_body_bytes = config.max_request_body_bytes,
+            "Maple ingest server listening"
+        );
+    }
 
-    if let Err(error) = axum::serve(listener, app).await {
+    let serve_result = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+
+    if let Some(provider) = tracer_provider {
+        // Flush buffered spans on graceful exit. Errors here are non-fatal —
+        // the process is shutting down anyway.
+        let _ = provider.shutdown();
+    }
+
+    if let Err(error) = serve_result {
         eprintln!("Ingest server failed: {error}");
         std::process::exit(1);
+    }
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut sig) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            sig.recv().await;
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
     }
 }
 
@@ -514,11 +674,16 @@ async fn handle_signal(
     signal: Signal,
 ) -> Response {
     let start = Instant::now();
+    #[cfg_attr(not(feature = "trace-forwarder"), allow(unused_variables))]
     let body_bytes = body.len();
 
     gauge!("ingest_requests_in_flight").increment(1.0);
     let _guard = InFlightGuard;
 
+    // Feature-gated to avoid recursion: every customer batch this handler
+    // forwards would otherwise generate a self-span that gets exported back
+    // through this same handler. See `trace-forwarder` in Cargo.toml.
+    #[cfg(feature = "trace-forwarder")]
     let span = tracing::info_span!(
         "ingest",
         signal = signal.path(),
@@ -526,6 +691,7 @@ async fn handle_signal(
         org_id = tracing::field::Empty,
         key_type = tracing::field::Empty,
     );
+    #[cfg(feature = "trace-forwarder")]
     let _enter = span.enter();
 
     let result = handle_signal_inner(&state, &headers, body, signal).await;
@@ -540,9 +706,11 @@ async fn handle_signal(
             counter!("ingest_requests_total", "signal" => signal.path(), "status" => "ok", "error_kind" => "none")
                 .increment(1);
             if let Some(tracker) = &state.autumn_tracker {
-                let feature_id = signal.path();
-                let value_gb = decoded_bytes as f64 / 1_000_000_000.0;
-                tracker.track(&org_id, feature_id, value_gb);
+                if org_id != SENTINEL_ORG_ID {
+                    let feature_id = signal.path();
+                    let value_gb = decoded_bytes as f64 / 1_000_000_000.0;
+                    tracker.track(&org_id, feature_id, value_gb);
+                }
             }
             info!(
                 status = status_code,
@@ -568,11 +736,15 @@ async fn handle_cloudflare_logpush(
     body: Bytes,
 ) -> Response {
     let start = Instant::now();
+    #[cfg_attr(not(feature = "trace-forwarder"), allow(unused_variables))]
     let body_bytes = body.len();
 
     gauge!("ingest_requests_in_flight").increment(1.0);
     let _guard = InFlightGuard;
 
+    // See note on the corresponding info_span! in handle_signal — gated by the
+    // same `trace-forwarder` feature for the same recursion reason.
+    #[cfg(feature = "trace-forwarder")]
     let span = tracing::info_span!(
         "cloudflare_logpush",
         signal = "logs",
@@ -581,6 +753,7 @@ async fn handle_cloudflare_logpush(
         org_id = tracing::field::Empty,
         connector_id = %connector_id,
     );
+    #[cfg(feature = "trace-forwarder")]
     let _enter = span.enter();
 
     let result = handle_cloudflare_logpush_inner(&state, &connector_id, secret.as_deref(), &headers, body).await;
@@ -642,6 +815,19 @@ async fn handle_signal_inner(
         warn!("Missing ingest key");
         (ApiError::unauthorized("Missing ingest key"), "auth")
     })?;
+
+    if is_sentinel_token(&ingest_key) {
+        counter!("ingest_sentinel_total", "signal" => signal.path()).increment(1);
+        Span::current().record("org_id", SENTINEL_ORG_ID);
+        Span::current().record("key_type", "sentinel");
+        debug!("Sentinel token; skipping resolve and forward");
+        return Ok((
+            StatusCode::OK.into_response(),
+            0,
+            SENTINEL_ORG_ID.to_string(),
+            0,
+        ));
+    }
 
     let key_resolve_start = Instant::now();
     let resolved_key = state
@@ -1890,6 +2076,26 @@ mod tests {
         let hash_a = hash_ingest_key("maple_pk_123", "secret").unwrap();
         let hash_b = hash_ingest_key("maple_pk_123", "secret").unwrap();
         assert_eq!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn sentinel_token_matches_only_exact_literal() {
+        assert!(is_sentinel_token("MAPLE_TEST"));
+        assert!(!is_sentinel_token("maple_test"));
+        assert!(!is_sentinel_token(" MAPLE_TEST"));
+        assert!(!is_sentinel_token("MAPLE_TEST "));
+        assert!(!is_sentinel_token("MAPLE_TEST_KEY"));
+        assert!(!is_sentinel_token(""));
+        assert!(!is_sentinel_token("maple_pk_123"));
+    }
+
+    #[test]
+    fn extract_ingest_key_returns_sentinel_literal_unchanged() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer MAPLE_TEST".parse().unwrap());
+        let token = extract_ingest_key(&headers).expect("token present");
+        assert_eq!(token, SENTINEL_TOKEN);
+        assert!(is_sentinel_token(&token));
     }
 
     #[test]
