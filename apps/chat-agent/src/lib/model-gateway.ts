@@ -2,6 +2,7 @@ import {
 	generateText,
 	stepCountIs,
 	streamText,
+	type LanguageModel,
 	type LanguageModelUsage,
 	type ModelMessage,
 	type StreamTextOnFinishCallback,
@@ -15,8 +16,17 @@ import {
 	type AgentModelGatewayShape,
 } from "@maple/agent-harness"
 
-const DEFAULT_MODEL_ID = "moonshotai/kimi-k2.5:nitro"
+export const DEFAULT_MODEL_ID = "moonshotai/kimi-k2.5:nitro"
 const DEFAULT_CONTEXT_WINDOW = 128_000
+
+export const createChatModel = (apiKey: string): LanguageModel => {
+	const openrouter = createOpenAICompatible({
+		name: "openrouter",
+		baseURL: "https://openrouter.ai/api/v1",
+		apiKey,
+	})
+	return openrouter.chatModel(DEFAULT_MODEL_ID)
+}
 
 const parseCompactionSummary = (raw: string) => {
 	try {
@@ -50,13 +60,7 @@ export const createModelGateway = (
 	apiKey: string,
 	options: CreateModelGatewayOptions = {},
 ): AgentModelGatewayShape => {
-	const openrouter = createOpenAICompatible({
-		name: "openrouter",
-		baseURL: "https://openrouter.ai/api/v1",
-		apiKey,
-	})
-
-	const model = openrouter.chatModel(DEFAULT_MODEL_ID)
+	const model = createChatModel(apiKey)
 
 	return {
 		modelId: DEFAULT_MODEL_ID,

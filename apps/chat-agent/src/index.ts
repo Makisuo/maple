@@ -1,23 +1,23 @@
 import { AIChatAgent } from "@cloudflare/ai-chat"
 import {
 	tool,
+	convertToModelMessages,
 	createUIMessageStream,
 	createUIMessageStreamResponse,
-	type LanguageModelUsage,
+	stepCountIs,
+	streamText,
 	type StreamTextOnFinishCallback,
 	type ToolSet,
+	type UIMessage,
 } from "ai"
-import { Effect } from "effect"
 import { routeAgentRequest } from "agents"
-import { makeAgentHarnessRuntime, type AgentHarnessRuntime } from "@maple/agent-harness"
 import { z } from "zod"
 import type { Env } from "./lib/types"
 import { resolveOrgOpenrouterKey } from "@maple/api/agent"
 import { trackTokenUsage } from "./lib/autumn-tracker"
 import { createMapleAiTools } from "./lib/direct-tools"
 import { applyApprovalGates } from "./lib/gated-tools"
-import { createModelGateway } from "./lib/model-gateway"
-import { createDurableObjectSessionStore, type DurableSqlClient } from "./lib/session-store"
+import { createChatModel } from "./lib/model-gateway"
 import { SYSTEM_PROMPT, DASHBOARD_BUILDER_SYSTEM_PROMPT } from "./lib/system-prompt"
 import { orgIdFromDoName, parseDoNameFromUrl, verifyRequest } from "./lib/auth"
 
@@ -162,7 +162,7 @@ const formatWidgetFixContextBlock = (ctx: WidgetFixContext): string => {
 		"- Do NOT change `id`, `layout`, or `visualization` unless the schema error explicitly requires it.",
 		"- Preserve `display.title` and other display config that is not implicated by the error.",
 		"- Call `update_dashboard_widget` with `dashboard_id`, `widget_id`, and a complete corrected `widget_json` (full widget object as a JSON string).",
-		"- The user must approve the change. Do not attempt to bypass the approval gate.",
+		"- Maple renders an approval card for `update_dashboard_widget` automatically — do not narrate the approval step or emit Approve/Deny prose. Just call the tool.",
 		"- After the user approves, briefly confirm what changed and why.",
 	]
 	return lines.join("\n")
@@ -659,51 +659,16 @@ function createErrorResponse(errorMessage: string): Response {
 	return createUIMessageStreamResponse({ stream })
 }
 
-function extractLatestUserText(
-	messages: ReadonlyArray<{
-		role: string
-		parts: ReadonlyArray<{ type: string; text?: string }>
-	}>,
-): string | undefined {
-	for (let index = messages.length - 1; index >= 0; index -= 1) {
-		const message = messages[index]
-		if (!message || message.role !== "user") continue
-		const text = message.parts
-			.filter((part) => part.type === "text" && typeof part.text === "string")
-			.map((part) => part.text)
-			.join("\n")
-			.trim()
-		if (text.length > 0) return text
-	}
-	return undefined
-}
-
 export { ChatAgent }
 
 class ChatAgent extends AIChatAgent<Env> {
-	private buildHarness(
-		apiKey: string,
-		options: { onCompactionUsage?: (usage: LanguageModelUsage) => void } = {},
-	): AgentHarnessRuntime {
-		return makeAgentHarnessRuntime(
-			"default",
-			createDurableObjectSessionStore(this.sql.bind(this) as DurableSqlClient),
-			createModelGateway(apiKey, { onCompactionUsage: options.onCompactionUsage }),
-			{ definitions: [] },
-		)
-	}
-
 	async onChatMessage(
 		onFinish: Parameters<AIChatAgent<Env>["onChatMessage"]>[0],
 		options?: Parameters<AIChatAgent<Env>["onChatMessage"]>[1],
 	) {
-		const latestUserText = extractLatestUserText(this.messages)
-		if (!latestUserText) {
-			return createErrorResponse("A user text message is required")
-		}
 		return this.runChatTurn({
 			body: options?.body as Record<string, unknown> | undefined,
-			userText: latestUserText,
+			messages: this.messages,
 			requestId: options?.requestId,
 			abortSignal: options?.abortSignal,
 			onFinish: onFinish as StreamTextOnFinishCallback<ToolSet>,
@@ -725,9 +690,14 @@ class ChatAgent extends AIChatAgent<Env> {
 				}
 				const userText = (body.userText ?? "").trim()
 				if (!userText) return createErrorResponse("userText is required")
+				const syntheticMessage: UIMessage = {
+					id: `mobile-${crypto.randomUUID()}`,
+					role: "user",
+					parts: [{ type: "text", text: userText }],
+				}
 				return this.runChatTurn({
 					body: body as Record<string, unknown>,
-					userText,
+					messages: [...this.messages, syntheticMessage],
 					abortSignal: request.signal,
 					onFinish: async () => {},
 				})
@@ -747,12 +717,12 @@ class ChatAgent extends AIChatAgent<Env> {
 
 	private async runChatTurn(input: {
 		body: Record<string, unknown> | undefined
-		userText: string
+		messages: ReadonlyArray<UIMessage>
 		requestId?: string
 		abortSignal?: AbortSignal
 		onFinish: StreamTextOnFinishCallback<ToolSet>
 	}): Promise<Response> {
-		const { body, userText, abortSignal, onFinish } = input
+		const { body, messages, abortSignal, onFinish } = input
 
 		const orgId = this.resolveOrgId()
 		if (!orgId) {
@@ -775,21 +745,6 @@ class ChatAgent extends AIChatAgent<Env> {
 		const turnId = input.requestId ?? crypto.randomUUID()
 		const env = this.env
 		const ctx = this.ctx
-		const trackUsage = (
-			usage: LanguageModelUsage,
-			source: "chat" | "compaction",
-			idempotencyKey: string,
-		) => {
-			if (isByok || !env.AUTUMN_SECRET_KEY) return
-			const promise = trackTokenUsage(env, {
-				orgId,
-				inputTokens: usage.inputTokens ?? 0,
-				outputTokens: usage.outputTokens ?? 0,
-				idempotencyKey,
-				source,
-			})
-			ctx.waitUntil(promise)
-		}
 
 		const mode = (body?.mode as string) ?? "default"
 		const dashboardContext = body?.dashboardContext as DashboardContext | undefined
@@ -829,27 +784,33 @@ class ChatAgent extends AIChatAgent<Env> {
 
 			const wrappedOnFinish: StreamTextOnFinishCallback<ToolSet> = async (event) => {
 				await onFinish(event)
-				trackUsage(event.totalUsage, "chat", turnId)
+				if (!isByok && env.AUTUMN_SECRET_KEY) {
+					ctx.waitUntil(
+						trackTokenUsage(env, {
+							orgId,
+							inputTokens: event.totalUsage.inputTokens ?? 0,
+							outputTokens: event.totalUsage.outputTokens ?? 0,
+							idempotencyKey: turnId,
+							source: "chat",
+						}),
+					)
+				}
 			}
 
-			const { result } = await Effect.runPromise(
-				this.buildHarness(apiKey, {
-					onCompactionUsage: (usage) => {
-						trackUsage(
-							usage,
-							"compaction",
-							`${turnId}:compact:${crypto.randomUUID().slice(0, 8)}`,
-						)
-					},
-				}).prompt({
-					text: userText,
-					turnId,
-					system: systemPrompt,
-					abortSignal,
-					tools: allTools as ToolSet,
-					onFinish: wrappedOnFinish,
-				}),
-			)
+			const modelMessages = await convertToModelMessages(messages as UIMessage[], {
+				tools: allTools as ToolSet,
+				ignoreIncompleteToolCalls: true,
+			})
+
+			const result = streamText({
+				model: createChatModel(apiKey),
+				system: systemPrompt,
+				messages: modelMessages,
+				tools: allTools as ToolSet,
+				stopWhen: stepCountIs(20),
+				abortSignal,
+				onFinish: wrappedOnFinish,
+			})
 
 			return result.toUIMessageStreamResponse()
 		} catch (error) {
