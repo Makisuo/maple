@@ -300,7 +300,7 @@ struct ResolvedIngestKey {
     key_id: String,
     // When true, the org has an active BYO Tinybird configuration and its OTLP
     // payloads must be routed to the self-managed collector pool rather than the
-    // shared pool. Computed from a LEFT JOIN with `org_tinybird_settings` at
+    // shared pool. Computed from a LEFT JOIN with `org_clickhouse_settings` at
     // resolve time; cached alongside the rest of the key so the hot path stays
     // branch-free beyond a single boolean check.
     self_managed: bool,
@@ -559,9 +559,16 @@ async fn main() {
     };
 
     // Cloudflare D1 REST backend — the API writes ingest-key rows to D1, so
-    // ingest reads them from the same place. CF env vars were validated when
-    // AppConfig loaded, so this is infallible.
-    let store: Arc<dyn KeyStore> = build_key_store(&config, http_client.clone());
+    // ingest reads them from the same place. We run a probe query before
+    // accepting traffic; if anything is wrong (auth, schema, network) the
+    // deploy fails here rather than 503'ing forever.
+    let store: Arc<dyn KeyStore> = match build_key_store(&config, http_client.clone()).await {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("Key store init error: {error}");
+            std::process::exit(1);
+        }
+    };
 
     let autumn_tracker = config.autumn_secret_key.as_ref().map(|key| {
         AutumnTracker::spawn(
@@ -1985,7 +1992,7 @@ impl IngestKeyResolver {
             IngestKeyType::Connector => return Ok(None),
         };
 
-        // LEFT JOIN against org_tinybird_settings so the "self-managed?" flag is
+        // LEFT JOIN against org_clickhouse_settings so the "self-managed?" flag is
         // resolved in the same roundtrip as org_id. This hits the DB only on cache
         // miss; warm cache hits (>99% of traffic) skip this entirely.
         let Some(row) = self.store.fetch_ingest_key(&key_hash, hash_column).await? else {
@@ -2138,6 +2145,28 @@ impl D1KeyStore {
         let _ = self.query(sql, params).await?;
         Ok(())
     }
+
+    /// Startup sanity check: runs the actual production lookup query with a
+    /// stub hash. The row count doesn't matter — we just need CF to accept the
+    /// SQL. A 4xx, a `success:false`, a missing table, a missing column, an
+    /// auth failure: all surface here as an `Err(...)` that the caller turns
+    /// into a hard exit. This is the boot-time gate that prevents shipping a
+    /// binary whose D1 access is broken for any reason.
+    async fn probe(&self) -> Result<(), String> {
+        let sanity_sql = "SELECT k.org_id, \
+                                 CASE WHEN s.sync_status = 'connected' THEN 1 ELSE 0 END AS self_managed \
+                          FROM org_ingest_keys k \
+                          LEFT JOIN org_clickhouse_settings s ON s.org_id = k.org_id \
+                          WHERE k.private_key_hash = ? LIMIT 1";
+        self.query(
+            sanity_sql,
+            vec![serde_json::Value::String(
+                "__ingest_probe_no_match__".to_string(),
+            )],
+        )
+        .await
+        .map(|_| ())
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -2189,9 +2218,9 @@ impl KeyStore for D1KeyStore {
     ) -> Result<Option<KeyRow>, String> {
         let sql = format!(
             "SELECT k.org_id, \
-                    CASE WHEN s.sync_status = 'active' THEN 1 ELSE 0 END AS self_managed \
+                    CASE WHEN s.sync_status = 'connected' THEN 1 ELSE 0 END AS self_managed \
              FROM org_ingest_keys k \
-             LEFT JOIN org_tinybird_settings s ON s.org_id = k.org_id \
+             LEFT JOIN org_clickhouse_settings s ON s.org_id = k.org_id \
              WHERE k.{hash_column} = ? LIMIT 1"
         );
         let rows = self
@@ -2212,9 +2241,9 @@ impl KeyStore for D1KeyStore {
         secret_hash: &str,
     ) -> Result<Option<ConnectorRow>, String> {
         let sql = "SELECT c.org_id, c.service_name, c.zone_name, c.dataset, \
-                          CASE WHEN s.sync_status = 'active' THEN 1 ELSE 0 END AS self_managed \
+                          CASE WHEN s.sync_status = 'connected' THEN 1 ELSE 0 END AS self_managed \
                    FROM cloudflare_logpush_connectors c \
-                   LEFT JOIN org_tinybird_settings s ON s.org_id = c.org_id \
+                   LEFT JOIN org_clickhouse_settings s ON s.org_id = c.org_id \
                    WHERE c.id = ? AND c.secret_hash = ? AND c.enabled = 1 LIMIT 1";
         let rows = self
             .query(
@@ -2299,22 +2328,32 @@ fn current_time_millis() -> u128 {
 
 /// Build the D1-backed KeyStore for this process. Production reads
 /// `org_ingest_keys` from Cloudflare D1 via the REST API; the API service
-/// writes to the same D1 database. Required env vars (`CLOUDFLARE_ACCOUNT_ID`,
-/// `MAPLE_DB_ID`, `CLOUDFLARE_API_TOKEN`) are validated at config-load time —
-/// failing startup beats failing every request.
-fn build_key_store(config: &AppConfig, http_client: reqwest::Client) -> Arc<dyn KeyStore> {
+/// writes to the same D1 database. Required env vars are validated at
+/// config-load time, then we run an actual D1 query as a probe — if the
+/// schema/permissions/network are wrong, the deploy fails here with the full
+/// CF response in stderr instead of 503'ing every request.
+async fn build_key_store(
+    config: &AppConfig,
+    http_client: reqwest::Client,
+) -> Result<Arc<dyn KeyStore>, String> {
     info!(
         backend = "cloudflare-d1",
         cf_account = %config.cf_account_id,
         d1_database = %config.d1_database_id,
         "Key store backend selected"
     );
-    Arc::new(D1KeyStore::new(
+    let store = D1KeyStore::new(
         http_client,
         &config.cf_account_id,
         &config.d1_database_id,
         config.d1_api_token.clone(),
-    ))
+    );
+    store
+        .probe()
+        .await
+        .map_err(|error| format!("D1 startup probe failed: {error}"))?;
+    info!("D1 startup probe succeeded");
+    Ok(Arc::new(store))
 }
 
 fn parse_bool(name: &str, raw: Option<String>, default: bool) -> Result<bool, String> {
