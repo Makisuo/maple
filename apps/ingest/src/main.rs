@@ -686,17 +686,28 @@ async fn handle_signal(
         body_bytes,
         org_id = tracing::field::Empty,
         key_type = tracing::field::Empty,
+        self_managed = tracing::field::Empty,
+        payload_format = tracing::field::Empty,
+        content_encoding = tracing::field::Empty,
+        decoded_bytes = tracing::field::Empty,
+        item_count = tracing::field::Empty,
+        status_code = tracing::field::Empty,
+        duration_ms = tracing::field::Empty,
+        error_kind = tracing::field::Empty,
     );
+    let span_handle = span.clone();
 
     let result = handle_signal_inner(&state, &headers, body, signal)
         .instrument(span)
         .await;
     let duration = start.elapsed();
     let duration_ms = duration.as_millis() as u64;
+    span_handle.record("duration_ms", duration_ms);
 
     match result {
         Ok((response, item_count, org_id, decoded_bytes)) => {
             let status_code = response.status().as_u16();
+            span_handle.record("status_code", status_code);
             histogram!("ingest_request_duration_seconds", "signal" => signal.path(), "status" => "ok")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => signal.path(), "status" => "ok", "error_kind" => "none")
@@ -715,6 +726,8 @@ async fn handle_signal(
             response
         }
         Err((error, error_kind)) => {
+            span_handle.record("status_code", error.status.as_u16());
+            span_handle.record("error_kind", error_kind);
             histogram!("ingest_request_duration_seconds", "signal" => signal.path(), "status" => "error")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => signal.path(), "status" => "error", "error_kind" => error_kind)
@@ -744,16 +757,27 @@ async fn handle_cloudflare_logpush(
         body_bytes,
         org_id = tracing::field::Empty,
         connector_id = %connector_id,
+        self_managed = tracing::field::Empty,
+        item_count = tracing::field::Empty,
+        is_validation = tracing::field::Empty,
+        status_code = tracing::field::Empty,
+        duration_ms = tracing::field::Empty,
+        error_kind = tracing::field::Empty,
     );
+    let span_handle = span.clone();
 
     let result = handle_cloudflare_logpush_inner(&state, &connector_id, secret.as_deref(), &headers, body)
         .instrument(span)
         .await;
     let duration = start.elapsed();
+    span_handle.record("duration_ms", duration.as_millis() as u64);
 
     match result {
         Ok((response, item_count, org_id, is_validation)) => {
             let status_code = response.status().as_u16();
+            span_handle.record("status_code", status_code);
+            span_handle.record("item_count", item_count);
+            span_handle.record("is_validation", is_validation);
             histogram!("ingest_request_duration_seconds", "signal" => "logs", "status" => "ok")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => "logs", "status" => "ok", "error_kind" => "none")
@@ -778,6 +802,8 @@ async fn handle_cloudflare_logpush(
             response
         }
         Err((error, error_kind)) => {
+            span_handle.record("status_code", error.status.as_u16());
+            span_handle.record("error_kind", error_kind);
             histogram!("ingest_request_duration_seconds", "signal" => "logs", "status" => "error")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => "logs", "status" => "error", "error_kind" => error_kind)
@@ -842,6 +868,7 @@ async fn handle_signal_inner(
 
     Span::current().record("org_id", &resolved_key.org_id.as_str());
     Span::current().record("key_type", resolved_key.key_type.as_str());
+    Span::current().record("self_managed", resolved_key.self_managed);
     debug!(
         resolve_ms = key_resolve_start.elapsed().as_millis() as u64,
         "Authenticated"
@@ -870,12 +897,17 @@ async fn handle_signal_inner(
         warn!(content_type = %content_type, "Unsupported content type");
         (e, "unsupported_media")
     })?;
+    Span::current().record("payload_format", payload_format.label());
 
     let content_encoding = headers
         .get(CONTENT_ENCODING)
         .and_then(|value| value.to_str().ok())
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty() && value != "identity");
+    Span::current().record(
+        "content_encoding",
+        content_encoding.as_deref().unwrap_or("identity"),
+    );
 
     histogram!("ingest_request_body_bytes", "signal" => signal.path()).record(body.len() as f64);
 
@@ -886,6 +918,7 @@ async fn handle_signal_inner(
     })?;
 
     let encoding_label = content_encoding.as_deref().unwrap_or("identity");
+    Span::current().record("decoded_bytes", decoded_payload.len());
     debug!(
         decoded_bytes = decoded_payload.len(),
         encoding = encoding_label,
@@ -909,6 +942,7 @@ async fn handle_signal_inner(
             (e, "enrich")
         })?;
 
+    Span::current().record("item_count", enrich_result.item_count);
     debug!(item_count = enrich_result.item_count, "Payload enriched");
     counter!(
         "ingest_items_total",
@@ -923,6 +957,15 @@ async fn handle_signal_inner(
     let outbound_body = encode_payload(&enrich_result.payload, content_encoding.as_deref())
         .map_err(|e| (e, "encode"))?;
 
+    let outbound_bytes = outbound_body.len();
+    let forward_span = tracing::info_span!(
+        "forward",
+        signal = signal.path(),
+        outbound_bytes,
+        upstream_pool = tracing::field::Empty,
+        upstream_status = tracing::field::Empty,
+        forward_duration_ms = tracing::field::Empty,
+    );
     let response = forward_to_collector(
         state,
         signal,
@@ -931,6 +974,7 @@ async fn handle_signal_inner(
         outbound_body,
         &resolved_key,
     )
+    .instrument(forward_span)
     .await
     .map_err(|e| (e, "forward"))?;
 
@@ -980,6 +1024,7 @@ async fn handle_cloudflare_logpush_inner(
         })?;
 
     Span::current().record("org_id", &resolved.org_id.as_str());
+    Span::current().record("self_managed", resolved.self_managed);
     debug!(
         connector_id = %resolved.connector_id,
         org_id = %resolved.org_id,
@@ -1071,12 +1116,22 @@ async fn handle_cloudflare_logpush_inner(
             )
             .increment(item_count as u64);
 
+            let outbound = request.encode_to_vec();
+            let outbound_bytes = outbound.len();
+            let forward_span = tracing::info_span!(
+                "forward",
+                signal = Signal::Logs.path(),
+                outbound_bytes,
+                upstream_pool = tracing::field::Empty,
+                upstream_status = tracing::field::Empty,
+                forward_duration_ms = tracing::field::Empty,
+            );
             let response = match forward_to_collector(
                 state,
                 Signal::Logs,
                 "application/x-protobuf",
                 None,
-                request.encode_to_vec(),
+                outbound,
                 &ResolvedIngestKey {
                     org_id: resolved.org_id.clone(),
                     key_type: IngestKeyType::Connector,
@@ -1084,6 +1139,7 @@ async fn handle_cloudflare_logpush_inner(
                     self_managed: resolved.self_managed,
                 },
             )
+            .instrument(forward_span)
             .await
             {
                 Ok(response) => response,
@@ -1678,6 +1734,7 @@ async fn forward_to_collector(
 
     let url = format!("{endpoint}/v1/{}", signal.path());
     let outbound_bytes = body.len();
+    Span::current().record("upstream_pool", upstream_pool);
 
     debug!(url = %url, upstream_pool, outbound_bytes, "Forwarding to collector");
 
@@ -1728,6 +1785,11 @@ async fn forward_to_collector(
     .record(forward_duration.as_secs_f64());
 
     let upstream_status_code = response.status().as_u16();
+    Span::current().record("upstream_status", upstream_status_code);
+    Span::current().record(
+        "forward_duration_ms",
+        forward_duration.as_millis() as u64,
+    );
     let status_bucket = match upstream_status_code {
         200..=299 => "2xx",
         400..=499 => "4xx",
