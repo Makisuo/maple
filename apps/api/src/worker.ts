@@ -1,10 +1,9 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { WorkerConfigProviderLive, WorkerEnvironmentLive } from "@maple/effect-cloudflare"
-import { Context, Duration, Effect, FileSystem, Layer, Path } from "effect"
+import { Context, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } from "./app"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
@@ -49,49 +48,11 @@ const telemetry = MapleCloudflareSDK.make({
 // POST /mcp hangs indefinitely on Cloudflare Workers when `toWebHandler` is
 // called with no middleware (1101 in prod, miniflare "worker hung" locally).
 // Suspected Effect RpcServer / HttpRouter scope-propagation bug. Providing
-// ANY middleware — even a pass-through — unsticks it. We pair this with
-// `disableLogger: true` so Effect's default `HttpMiddleware.logger` does
-// not double-log; application logs flow through the OTLP logger installed by
+// ANY middleware — even a pass-through — unsticks it. Paired with
+// `disableLogger: true` so Effect's default `HttpMiddleware.logger` does not
+// double-log; application logs flow through the OTLP logger installed by
 // `telemetry.layer`.
-//
-// The middleware also enforces a per-request timeout. This MUST live inside
-// the Effect runtime (not as an outer `Promise.race`) because that's the only
-// way the timeout interrupts the inner fiber. Interruption runs `withSpan`
-// finalizers in reverse, which calls `end()` on every open span and pushes
-// it into the export buffer. An outer `Promise.race` rejects without
-// interrupting — finalizers never run, spans never end, and the failed
-// request becomes invisible in traces.
-//
-// 22s leaves margin under CF's 30s wall-clock cap for the post-response
-// `telemetry.flush(env)` to drain the buffer to OTLP.
-const REQUEST_TIMEOUT = Duration.seconds(22)
-
-const requestTimeoutMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) =>
-	Effect.timeoutOrElse(httpApp, {
-		duration: REQUEST_TIMEOUT,
-		orElse: () =>
-			Effect.gen(function* () {
-				const req = yield* HttpServerRequest.HttpServerRequest
-				const url = (() => {
-					try {
-						return new URL(req.url).pathname
-					} catch {
-						return req.url
-					}
-				})()
-				console.warn(
-					`[timeout] ${req.method} ${url} hit ${Duration.toMillis(REQUEST_TIMEOUT)}ms cap` +
-						` auth=${req.headers.authorization ? "yes" : "no"}` +
-						` mcp-session=${req.headers["mcp-session-id"] ?? "-"}` +
-						` method=${req.headers["x-mcp-debug-method"] ?? "-"}` +
-						` id=${req.headers["x-mcp-debug-id"] ?? "-"}`,
-				)
-				return HttpServerResponse.text(
-					`request timed out after ${Duration.toMillis(REQUEST_TIMEOUT)}ms`,
-					{ status: 504 },
-				)
-			}),
-	})
+const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpApp
 
 const buildHandler = () =>
 	HttpRouter.toWebHandler(
@@ -105,7 +66,7 @@ const buildHandler = () =>
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLive),
 		),
-		{ middleware: requestTimeoutMiddleware, disableLogger: true },
+		{ middleware: passThroughMiddleware, disableLogger: true },
 	)
 
 // Single isolate-wide handler — `toWebHandler` builds its own ManagedRuntime
@@ -151,10 +112,9 @@ const peekMcpFrame = (body: string): McpFrame => {
 	}
 }
 
-// Per-request timeout lives in `requestTimeoutMiddleware` above so that
-// finalizers run on interrupt and traces export. If the handler still throws
-// (layer construction failure, fatal runtime error), we surface it as a 504
-// outside Effect — these are rare and not the trace-export hot path.
+// The handler should never throw under normal operation — Effect surfaces
+// errors as HTTP responses. If it does (layer construction failure, fatal
+// runtime error), we surface it as a 504 outside Effect.
 //
 // MCP session persistence runs OUTSIDE the Effect runtime on purpose. Effect's
 // fiber scheduler doesn't reliably propagate AsyncLocalStorage through every
@@ -173,21 +133,17 @@ const handle = async (
 	const reqSid = isMcp ? request.headers.get("mcp-session-id") : null
 
 	// MCP diagnostics: buffer the body so we can peek the JSON-RPC method/id
-	// before handing it off to Effect. We re-emit the request with the buffered
-	// body and stash the parsed frame in custom headers so the inner timeout
-	// middleware can include them in `[timeout]` warnings.
+	// before handing it off to Effect, then re-emit the request with the
+	// buffered body so the inner handler still sees a readable stream.
 	let forwardRequest = request
 	let mcpFrame: McpFrame | null = null
 	const startedAt = Date.now()
 	if (isMcp) {
 		const bodyText = await request.text()
 		mcpFrame = peekMcpFrame(bodyText)
-		const headers = new Headers(request.headers)
-		headers.set("x-mcp-debug-method", mcpFrame.method)
-		headers.set("x-mcp-debug-id", mcpFrame.id)
 		forwardRequest = new Request(request.url, {
 			method: request.method,
-			headers,
+			headers: request.headers,
 			body: bodyText,
 		})
 		console.log(
