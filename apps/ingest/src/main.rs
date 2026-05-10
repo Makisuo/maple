@@ -1050,8 +1050,7 @@ async fn handle_signal_inner(
     debug!(item_count = enrich_result.item_count, "Payload enriched");
     counter!(
         "ingest_items_total",
-        "signal" => signal.path(),
-        "org_id" => resolved_key.org_id.clone()
+        "signal" => signal.path()
     )
     .increment(enrich_result.item_count as u64);
 
@@ -1221,8 +1220,7 @@ async fn handle_cloudflare_logpush_inner(
             let item_count = count_log_items(&request);
             counter!(
                 "ingest_cloudflare_records_total",
-                "dataset" => resolved.dataset.clone(),
-                "org_id" => resolved.org_id.clone()
+                "dataset" => resolved.dataset.clone()
             )
             .increment(item_count as u64);
 
