@@ -905,7 +905,15 @@ async fn handle_signal_inner(
     // --- Enrich ---
     let enrich_result = enrich_payload(signal, payload_format, &decoded_payload, &resolved_key)
         .map_err(|e| {
-            warn!(format = payload_format.label(), "Invalid OTLP payload");
+            warn!(
+                format = payload_format.label(),
+                signal = signal.path(),
+                org_id = resolved_key.org_id.as_str(),
+                key_type = resolved_key.key_type.as_str(),
+                decoded_bytes = decoded_payload.len(),
+                reason = %e.message,
+                "Invalid OTLP payload"
+            );
             (e, "enrich")
         })?;
 
