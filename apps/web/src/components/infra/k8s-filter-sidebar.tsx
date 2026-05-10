@@ -55,15 +55,15 @@ export function PodsFilterSidebarView({
 		(filters.computeTypes?.length ?? 0) > 0
 
 	return Result.builder(facetsResult)
-		.onInitial(() => <FilterSidebarLoading sectionCount={6} sticky />)
+		.onInitial(() => <FilterSidebarLoading sectionCount={6} />)
 		.onError((error) => (
-			<FilterSidebarError message={formatBackendError(error).description} sticky />
+			<FilterSidebarError message={formatBackendError(error).description} />
 		))
 		.onSuccess((facetsResponse, result) => {
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame sticky waiting={result.waiting}>
+				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection
@@ -212,15 +212,15 @@ export function NodesFilterSidebarView({
 		(filters.environments?.length ?? 0) > 0
 
 	return Result.builder(facetsResult)
-		.onInitial(() => <FilterSidebarLoading sectionCount={3} sticky />)
+		.onInitial(() => <FilterSidebarLoading sectionCount={3} />)
 		.onError((error) => (
-			<FilterSidebarError message={formatBackendError(error).description} sticky />
+			<FilterSidebarError message={formatBackendError(error).description} />
 		))
 		.onSuccess((facetsResponse, result) => {
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame sticky waiting={result.waiting}>
+				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection
@@ -294,15 +294,15 @@ export function WorkloadsFilterSidebarView({
 		(filters.computeTypes?.length ?? 0) > 0
 
 	return Result.builder(facetsResult)
-		.onInitial(() => <FilterSidebarLoading sectionCount={4} sticky />)
+		.onInitial(() => <FilterSidebarLoading sectionCount={4} />)
 		.onError((error) => (
-			<FilterSidebarError message={formatBackendError(error).description} sticky />
+			<FilterSidebarError message={formatBackendError(error).description} />
 		))
 		.onSuccess((facetsResponse, result) => {
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame sticky waiting={result.waiting}>
+				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection

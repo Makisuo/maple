@@ -17,7 +17,7 @@ import {
 import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
-	return <FilterSidebarLoading sectionCount={5} sticky />
+	return <FilterSidebarLoading sectionCount={5} />
 }
 
 export interface TracesFilterSidebarViewProps {
@@ -48,13 +48,13 @@ export function TracesFilterSidebarView({
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
 		.onError((error) => (
-			<FilterSidebarError message={formatBackendError(error).description} sticky />
+			<FilterSidebarError message={formatBackendError(error).description} />
 		))
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame sticky waiting={result.waiting}>
+				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<DurationRangeFilter

@@ -19,7 +19,7 @@ import { SEVERITY_COLORS } from "@/lib/severity"
 import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
-	return <FilterSidebarLoading sectionCount={3} sticky />
+	return <FilterSidebarLoading sectionCount={3} />
 }
 
 export function LogsFilterSidebar() {
@@ -87,7 +87,7 @@ export function LogsFilterSidebar() {
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
 		.onError((error) => (
-			<FilterSidebarError message={formatBackendError(error).description} sticky />
+			<FilterSidebarError message={formatBackendError(error).description} />
 		))
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
@@ -97,7 +97,7 @@ export function LogsFilterSidebar() {
 				(facets.deploymentEnvs?.length ?? 0) > 0
 
 			return (
-				<FilterSidebarFrame sticky waiting={result.waiting}>
+				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<div className="pb-3">

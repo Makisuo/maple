@@ -7,22 +7,15 @@ import { cn } from "@maple/ui/utils"
 
 interface FilterSidebarFrameProps {
 	children: ReactNode
-	sticky?: boolean
 	waiting?: boolean
 	className?: string
 }
 
-export function FilterSidebarFrame({
-	children,
-	sticky = false,
-	waiting = false,
-	className,
-}: FilterSidebarFrameProps) {
+export function FilterSidebarFrame({ children, waiting = false, className }: FilterSidebarFrameProps) {
 	return (
 		<div
 			className={cn(
-				"w-56 shrink-0 overflow-hidden",
-				sticky && "sticky top-0 self-start",
+				"flex h-full w-56 shrink-0 flex-col",
 				waiting && "opacity-60",
 				className,
 			)}
@@ -63,21 +56,26 @@ export function FilterSidebarBody({ children }: { children: ReactNode }) {
 	return (
 		<>
 			<Separator className="my-2" />
-			<ScrollArea className="h-[calc(100vh-220px)]">
-				<div className="space-y-1 pr-4">{children}</div>
-			</ScrollArea>
+			<div className="relative min-h-0 flex-1">
+				<ScrollArea className="h-full">
+					<div className="space-y-1 pr-4 pb-6">{children}</div>
+				</ScrollArea>
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-background to-transparent"
+				/>
+			</div>
 		</>
 	)
 }
 
 interface FilterSidebarLoadingProps {
 	sectionCount?: number
-	sticky?: boolean
 }
 
-export function FilterSidebarLoading({ sectionCount = 3, sticky = false }: FilterSidebarLoadingProps) {
+export function FilterSidebarLoading({ sectionCount = 3 }: FilterSidebarLoadingProps) {
 	return (
-		<FilterSidebarFrame sticky={sticky}>
+		<FilterSidebarFrame>
 			<div className="flex items-center justify-between py-2">
 				<Skeleton className="h-5 w-16" />
 			</div>
@@ -98,12 +96,11 @@ export function FilterSidebarLoading({ sectionCount = 3, sticky = false }: Filte
 
 interface FilterSidebarMessageProps {
 	message: string
-	sticky?: boolean
 }
 
-export function FilterSidebarError({ message, sticky = false }: FilterSidebarMessageProps) {
+export function FilterSidebarError({ message }: FilterSidebarMessageProps) {
 	return (
-		<FilterSidebarFrame sticky={sticky}>
+		<FilterSidebarFrame>
 			<FilterSidebarHeader />
 			<Separator className="my-2" />
 			<p className="text-sm text-muted-foreground py-4">{message}</p>
