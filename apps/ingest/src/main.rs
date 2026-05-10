@@ -389,7 +389,10 @@ fn init_tracing(forward_endpoint: &str, bind_port: u16) -> Option<SdkTracerProvi
             "service.instance.id",
             uuid::Uuid::new_v4().to_string(),
         ))
-        .with_attribute(OtelKeyValue::new("deployment.environment", deployment_env))
+        .with_attribute(OtelKeyValue::new(
+            "deployment.environment.name",
+            deployment_env,
+        ))
         .with_attribute(OtelKeyValue::new("maple_org_id", internal_org_id))
         .build();
 
@@ -564,9 +567,10 @@ async fn main() {
         // processor.
         let span = tracing::info_span!(
             "startup",
-            port = config.port,
-            forward_endpoint = %config.forward_endpoint,
-            require_tls = config.require_tls,
+            otel.kind = "internal",
+            "maple.ingest.port" = config.port,
+            "maple.ingest.forward_endpoint" = %config.forward_endpoint,
+            "maple.ingest.require_tls" = config.require_tls,
         );
         let _enter = span.enter();
         info!(
@@ -680,20 +684,26 @@ async fn handle_signal(
     gauge!("ingest_requests_in_flight").increment(1.0);
     let _guard = InFlightGuard;
 
+    let route = format!("/v1/{}", signal.path());
+    let otel_name = format!("POST {route}");
     let span = tracing::info_span!(
         "ingest",
-        signal = signal.path(),
-        body_bytes,
-        org_id = tracing::field::Empty,
-        key_type = tracing::field::Empty,
-        self_managed = tracing::field::Empty,
-        payload_format = tracing::field::Empty,
-        content_encoding = tracing::field::Empty,
-        decoded_bytes = tracing::field::Empty,
-        item_count = tracing::field::Empty,
-        status_code = tracing::field::Empty,
-        duration_ms = tracing::field::Empty,
-        error_kind = tracing::field::Empty,
+        otel.name = %otel_name,
+        otel.kind = "server",
+        otel.status_code = tracing::field::Empty,
+        "http.request.method" = "POST",
+        "http.route" = %route,
+        "http.request.body.size" = body_bytes,
+        "http.response.status_code" = tracing::field::Empty,
+        "error.type" = tracing::field::Empty,
+        "maple.signal" = signal.path(),
+        "maple.org_id" = tracing::field::Empty,
+        "maple.ingest.key_type" = tracing::field::Empty,
+        "maple.ingest.self_managed" = tracing::field::Empty,
+        "maple.ingest.payload_format" = tracing::field::Empty,
+        "maple.ingest.content_encoding" = tracing::field::Empty,
+        "maple.ingest.decoded_bytes" = tracing::field::Empty,
+        "maple.ingest.item_count" = tracing::field::Empty,
     );
     let span_handle = span.clone();
 
@@ -702,12 +712,12 @@ async fn handle_signal(
         .await;
     let duration = start.elapsed();
     let duration_ms = duration.as_millis() as u64;
-    span_handle.record("duration_ms", duration_ms);
 
     match result {
         Ok((response, item_count, org_id, decoded_bytes)) => {
             let status_code = response.status().as_u16();
-            span_handle.record("status_code", status_code);
+            span_handle.record("http.response.status_code", status_code);
+            span_handle.record("otel.status_code", "Ok");
             histogram!("ingest_request_duration_seconds", "signal" => signal.path(), "status" => "ok")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => signal.path(), "status" => "ok", "error_kind" => "none")
@@ -726,8 +736,9 @@ async fn handle_signal(
             response
         }
         Err((error, error_kind)) => {
-            span_handle.record("status_code", error.status.as_u16());
-            span_handle.record("error_kind", error_kind);
+            span_handle.record("http.response.status_code", error.status.as_u16());
+            span_handle.record("error.type", error_kind);
+            span_handle.record("otel.status_code", "Error");
             histogram!("ingest_request_duration_seconds", "signal" => signal.path(), "status" => "error")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => signal.path(), "status" => "error", "error_kind" => error_kind)
@@ -750,19 +761,25 @@ async fn handle_cloudflare_logpush(
     gauge!("ingest_requests_in_flight").increment(1.0);
     let _guard = InFlightGuard;
 
+    let route = format!("/v1/logpush/cloudflare/http_requests/{connector_id}");
+    let otel_name = format!("POST {route}");
     let span = tracing::info_span!(
         "cloudflare_logpush",
-        signal = "logs",
-        dataset = "http_requests",
-        body_bytes,
-        org_id = tracing::field::Empty,
-        connector_id = %connector_id,
-        self_managed = tracing::field::Empty,
-        item_count = tracing::field::Empty,
-        is_validation = tracing::field::Empty,
-        status_code = tracing::field::Empty,
-        duration_ms = tracing::field::Empty,
-        error_kind = tracing::field::Empty,
+        otel.name = %otel_name,
+        otel.kind = "server",
+        otel.status_code = tracing::field::Empty,
+        "http.request.method" = "POST",
+        "http.route" = "/v1/logpush/cloudflare/http_requests/{connector_id}",
+        "http.request.body.size" = body_bytes,
+        "http.response.status_code" = tracing::field::Empty,
+        "error.type" = tracing::field::Empty,
+        "maple.signal" = "logs",
+        "maple.org_id" = tracing::field::Empty,
+        "maple.cloudflare.connector_id" = %connector_id,
+        "maple.cloudflare.dataset" = "http_requests",
+        "maple.cloudflare.is_validation" = tracing::field::Empty,
+        "maple.ingest.self_managed" = tracing::field::Empty,
+        "maple.ingest.item_count" = tracing::field::Empty,
     );
     let span_handle = span.clone();
 
@@ -770,14 +787,14 @@ async fn handle_cloudflare_logpush(
         .instrument(span)
         .await;
     let duration = start.elapsed();
-    span_handle.record("duration_ms", duration.as_millis() as u64);
 
     match result {
         Ok((response, item_count, org_id, is_validation)) => {
             let status_code = response.status().as_u16();
-            span_handle.record("status_code", status_code);
-            span_handle.record("item_count", item_count);
-            span_handle.record("is_validation", is_validation);
+            span_handle.record("http.response.status_code", status_code);
+            span_handle.record("otel.status_code", "Ok");
+            span_handle.record("maple.ingest.item_count", item_count);
+            span_handle.record("maple.cloudflare.is_validation", is_validation);
             histogram!("ingest_request_duration_seconds", "signal" => "logs", "status" => "ok")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => "logs", "status" => "ok", "error_kind" => "none")
@@ -802,8 +819,9 @@ async fn handle_cloudflare_logpush(
             response
         }
         Err((error, error_kind)) => {
-            span_handle.record("status_code", error.status.as_u16());
-            span_handle.record("error_kind", error_kind);
+            span_handle.record("http.response.status_code", error.status.as_u16());
+            span_handle.record("error.type", error_kind);
+            span_handle.record("otel.status_code", "Error");
             histogram!("ingest_request_duration_seconds", "signal" => "logs", "status" => "error")
                 .record(duration.as_secs_f64());
             counter!("ingest_requests_total", "signal" => "logs", "status" => "error", "error_kind" => error_kind)
@@ -836,8 +854,8 @@ async fn handle_signal_inner(
 
     if is_sentinel_token(&ingest_key) {
         counter!("ingest_sentinel_total", "signal" => signal.path()).increment(1);
-        Span::current().record("org_id", SENTINEL_ORG_ID);
-        Span::current().record("key_type", "sentinel");
+        Span::current().record("maple.org_id", SENTINEL_ORG_ID);
+        Span::current().record("maple.ingest.key_type", "sentinel");
         debug!("Sentinel token; skipping resolve and forward");
         return Ok((
             StatusCode::OK.into_response(),
@@ -866,9 +884,9 @@ async fn handle_signal_inner(
     histogram!("ingest_key_resolution_duration_seconds")
         .record(key_resolve_start.elapsed().as_secs_f64());
 
-    Span::current().record("org_id", &resolved_key.org_id.as_str());
-    Span::current().record("key_type", resolved_key.key_type.as_str());
-    Span::current().record("self_managed", resolved_key.self_managed);
+    Span::current().record("maple.org_id", &resolved_key.org_id.as_str());
+    Span::current().record("maple.ingest.key_type", resolved_key.key_type.as_str());
+    Span::current().record("maple.ingest.self_managed", resolved_key.self_managed);
     debug!(
         resolve_ms = key_resolve_start.elapsed().as_millis() as u64,
         "Authenticated"
@@ -897,7 +915,7 @@ async fn handle_signal_inner(
         warn!(content_type = %content_type, "Unsupported content type");
         (e, "unsupported_media")
     })?;
-    Span::current().record("payload_format", payload_format.label());
+    Span::current().record("maple.ingest.payload_format", payload_format.label());
 
     let content_encoding = headers
         .get(CONTENT_ENCODING)
@@ -905,7 +923,7 @@ async fn handle_signal_inner(
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty() && value != "identity");
     Span::current().record(
-        "content_encoding",
+        "maple.ingest.content_encoding",
         content_encoding.as_deref().unwrap_or("identity"),
     );
 
@@ -918,7 +936,7 @@ async fn handle_signal_inner(
     })?;
 
     let encoding_label = content_encoding.as_deref().unwrap_or("identity");
-    Span::current().record("decoded_bytes", decoded_payload.len());
+    Span::current().record("maple.ingest.decoded_bytes", decoded_payload.len());
     debug!(
         decoded_bytes = decoded_payload.len(),
         encoding = encoding_label,
@@ -942,7 +960,7 @@ async fn handle_signal_inner(
             (e, "enrich")
         })?;
 
-    Span::current().record("item_count", enrich_result.item_count);
+    Span::current().record("maple.ingest.item_count", enrich_result.item_count);
     debug!(item_count = enrich_result.item_count, "Payload enriched");
     counter!(
         "ingest_items_total",
@@ -960,11 +978,17 @@ async fn handle_signal_inner(
     let outbound_bytes = outbound_body.len();
     let forward_span = tracing::info_span!(
         "forward",
-        signal = signal.path(),
-        outbound_bytes,
-        upstream_pool = tracing::field::Empty,
-        upstream_status = tracing::field::Empty,
-        forward_duration_ms = tracing::field::Empty,
+        otel.name = "POST",
+        otel.kind = "client",
+        otel.status_code = tracing::field::Empty,
+        "http.request.method" = "POST",
+        "http.request.body.size" = outbound_bytes,
+        "http.response.status_code" = tracing::field::Empty,
+        "url.full" = tracing::field::Empty,
+        "server.address" = tracing::field::Empty,
+        "error.type" = tracing::field::Empty,
+        "maple.signal" = signal.path(),
+        "maple.ingest.upstream_pool" = tracing::field::Empty,
     );
     let response = forward_to_collector(
         state,
@@ -1023,8 +1047,8 @@ async fn handle_cloudflare_logpush_inner(
             )
         })?;
 
-    Span::current().record("org_id", &resolved.org_id.as_str());
-    Span::current().record("self_managed", resolved.self_managed);
+    Span::current().record("maple.org_id", &resolved.org_id.as_str());
+    Span::current().record("maple.ingest.self_managed", resolved.self_managed);
     debug!(
         connector_id = %resolved.connector_id,
         org_id = %resolved.org_id,
@@ -1120,11 +1144,17 @@ async fn handle_cloudflare_logpush_inner(
             let outbound_bytes = outbound.len();
             let forward_span = tracing::info_span!(
                 "forward",
-                signal = Signal::Logs.path(),
-                outbound_bytes,
-                upstream_pool = tracing::field::Empty,
-                upstream_status = tracing::field::Empty,
-                forward_duration_ms = tracing::field::Empty,
+                otel.name = "POST",
+                otel.kind = "client",
+                otel.status_code = tracing::field::Empty,
+                "http.request.method" = "POST",
+                "http.request.body.size" = outbound_bytes,
+                "http.response.status_code" = tracing::field::Empty,
+                "url.full" = tracing::field::Empty,
+                "server.address" = tracing::field::Empty,
+                "error.type" = tracing::field::Empty,
+                "maple.signal" = Signal::Logs.path(),
+                "maple.ingest.upstream_pool" = tracing::field::Empty,
             );
             let response = match forward_to_collector(
                 state,
@@ -1734,7 +1764,13 @@ async fn forward_to_collector(
 
     let url = format!("{endpoint}/v1/{}", signal.path());
     let outbound_bytes = body.len();
-    Span::current().record("upstream_pool", upstream_pool);
+    Span::current().record("maple.ingest.upstream_pool", upstream_pool);
+    Span::current().record("url.full", url.as_str());
+    if let Ok(parsed) = url::Url::parse(&url) {
+        if let Some(host) = parsed.host_str() {
+            Span::current().record("server.address", host);
+        }
+    }
 
     debug!(url = %url, upstream_pool, outbound_bytes, "Forwarding to collector");
 
@@ -1751,6 +1787,8 @@ async fn forward_to_collector(
     let forward_start = Instant::now();
     let response = request_builder.send().await.map_err(|error| {
         let forward_duration = forward_start.elapsed();
+        Span::current().record("error.type", "transport");
+        Span::current().record("otel.status_code", "Error");
         histogram!(
             "ingest_forward_duration_seconds",
             "signal" => signal.path(),
@@ -1785,10 +1823,14 @@ async fn forward_to_collector(
     .record(forward_duration.as_secs_f64());
 
     let upstream_status_code = response.status().as_u16();
-    Span::current().record("upstream_status", upstream_status_code);
+    Span::current().record("http.response.status_code", upstream_status_code);
     Span::current().record(
-        "forward_duration_ms",
-        forward_duration.as_millis() as u64,
+        "otel.status_code",
+        if response.status().is_success() {
+            "Ok"
+        } else {
+            "Error"
+        },
     );
     let status_bucket = match upstream_status_code {
         200..=299 => "2xx",
