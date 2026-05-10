@@ -64,6 +64,14 @@ const CLOUDFLARE_LOGPUSH_SOURCE: &str = "cloudflare-logpush";
 const SENTINEL_TOKEN: &str = "MAPLE_TEST";
 const SENTINEL_ORG_ID: &str = "sentinel";
 
+/// Fixed input for the startup HMAC fingerprint. Hashing this with the
+/// configured `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` yields a value that operators
+/// can diff against the API's fingerprint to detect env-var drift between the
+/// two services. The sentinel must stay byte-identical with the API
+/// (`packages/db/src/ingest-key-hash.ts`); changing it on one side without the
+/// other defeats the comparison.
+const HMAC_FINGERPRINT_SENTINEL: &str = "MAPLE_HMAC_FINGERPRINT_V1";
+
 fn is_sentinel_token(token: &str) -> bool {
     token == SENTINEL_TOKEN
 }
@@ -566,6 +574,13 @@ async fn main() {
         }
     };
 
+    // First 8 chars of HMAC(lookup_hmac_key, fixed sentinel). One-way, so safe
+    // to log — operators can diff this against the API's fingerprint to detect
+    // env-var drift between the two services without ever printing the secret.
+    let hmac_fingerprint = hash_ingest_key(HMAC_FINGERPRINT_SENTINEL, &config.lookup_hmac_key)
+        .map(|h| h.chars().take(8).collect::<String>())
+        .unwrap_or_else(|_| "<error>".to_string());
+
     {
         // Emit a single startup span so the dashboard has an authoritative
         // "ingest is alive" signal independent of customer traffic. Lives only
@@ -577,6 +592,7 @@ async fn main() {
             "maple.ingest.port" = config.port,
             "maple.ingest.forward_endpoint" = %config.forward_endpoint,
             "maple.ingest.require_tls" = config.require_tls,
+            "maple.ingest.hmac_fingerprint" = %hmac_fingerprint,
         );
         let _enter = span.enter();
         info!(
@@ -588,6 +604,7 @@ async fn main() {
                 .unwrap_or("<unset>"),
             require_tls = config.require_tls,
             max_body_bytes = config.max_request_body_bytes,
+            hmac_fingerprint = %hmac_fingerprint,
             "Maple ingest server listening"
         );
     }

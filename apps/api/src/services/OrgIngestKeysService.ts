@@ -8,6 +8,7 @@ import {
 	UserId,
 } from "@maple/domain/http"
 import {
+	computeHmacFingerprint,
 	createIngestKeyId,
 	hashIngestKey,
 	inferIngestKeyType,
@@ -74,6 +75,13 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 		const env = yield* Env
 		const encryptionKey = yield* parseEncryptionKey(Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY))
 		const lookupHmacKey = yield* parseLookupHmacKey(Redacted.value(env.MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY))
+
+		// One-way fingerprint of the configured HMAC key. Operators diff this
+		// against the ingest gateway's `maple.ingest.hmac_fingerprint` to detect
+		// env-var drift between the two services without exposing the secret.
+		yield* Effect.logInfo("OrgIngestKeysService.hmac_fingerprint").pipe(
+			Effect.annotateLogs({ hmac_fingerprint: computeHmacFingerprint(lookupHmacKey) }),
+		)
 
 		const selectRow = Effect.fn("OrgIngestKeysService.selectRow")(function* (orgId: OrgId) {
 			const rows = yield* database
