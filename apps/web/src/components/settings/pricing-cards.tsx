@@ -293,7 +293,7 @@ export function PricingCards() {
 	const enterprisePlanFeatures = getPlanFeatures("enterprise")
 
 	return (
-		<div className="space-y-4">
+		<div className="space-y-6">
 			{/* Normal Plans Grid */}
 			<div
 				className={cn(
@@ -316,52 +316,37 @@ export function PricingCards() {
 						<Card
 							key={plan.id}
 							className={cn(
-								"flex flex-col relative transition-all duration-300 ease-out",
-								isActive && "ring-primary/20 bg-muted/30",
-								isUpgrade &&
-									"ring-primary/40 ring-2 shadow-[0_0_40px_-15px_rgba(var(--primary),0.3)] scale-[1.02] z-10",
-								!isUpgrade && "hover:ring-primary/20",
+								"flex flex-col transition-colors",
+								isActive && "bg-muted/40",
+								isUpgrade && "bg-muted/30 ring-1 ring-primary/30",
 							)}
 						>
-							{isUpgrade && (
-								<div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
-							)}
-							{trialAvailable && !isActive && (
-								<div className="mx-6 mt-6 -mb-2 rounded-md bg-primary/10 px-3 py-1.5 text-center text-xs font-medium text-primary">
-									{plan.freeTrial?.durationLength ?? TRIAL_DURATION_DAYS}-day free trial
-									included
-								</div>
-							)}
-							<CardHeader className="pt-6">
-								<div className="flex items-center justify-between">
+							<CardHeader>
+								<div className="flex items-center justify-between gap-2">
 									<CardTitle
 										className={cn(
-											"text-[11px] font-semibold uppercase tracking-widest",
+											"text-[10px] font-medium uppercase tracking-[0.14em]",
 											isUpgrade ? "text-primary" : "text-muted-foreground",
 										)}
 									>
 										{plan.name}
 									</CardTitle>
-									<div className="flex gap-2">
-										{isActive && isTrialing && daysRemaining != null ? (
-											<Badge
-												variant="secondary"
-												className="text-[10px] font-medium bg-secondary/50"
-											>
-												Trial · {daysRemaining}d left
-											</Badge>
-										) : isActive ? (
-											<Badge
-												variant="secondary"
-												className="text-[10px] font-medium bg-secondary/50"
-											>
-												Current
-											</Badge>
-										) : null}
-									</div>
+									{isActive && isTrialing && daysRemaining != null ? (
+										<Badge variant="secondary" className="text-[10px] font-medium">
+											Trial · {daysRemaining}d left
+										</Badge>
+									) : isActive ? (
+										<Badge variant="secondary" className="text-[10px] font-medium">
+											Current
+										</Badge>
+									) : isUpgrade ? (
+										<Badge variant="secondary" className="text-[10px] font-medium text-primary">
+											Recommended
+										</Badge>
+									) : null}
 								</div>
-								<div className="mt-4 flex items-baseline gap-1">
-									<span className="text-4xl font-semibold tracking-tight tabular-nums">
+								<div className="mt-3 flex items-baseline gap-1">
+									<span className="text-3xl font-semibold tracking-tight tabular-nums">
 										{price}
 									</span>
 									{interval && (
@@ -370,31 +355,26 @@ export function PricingCards() {
 										</span>
 									)}
 								</div>
-								<CardDescription className="mt-3 text-sm leading-relaxed text-muted-foreground">
+								<CardDescription className="mt-2 text-sm leading-relaxed text-muted-foreground">
 									{plan.description ?? getPlanDescription(getPlanSlug(plan))}
 								</CardDescription>
-								{getPlanSlug(plan) === "starter" && (
-									<div className="mt-3 rounded-md bg-primary/10 px-3 py-1.5 text-center text-xs font-medium text-primary">
-										Predictable pricing: no usage-based charges
-									</div>
-								)}
 							</CardHeader>
 
-							<CardContent className="flex flex-col gap-6 flex-1 pt-2 pb-6">
+							<CardContent className="flex flex-col gap-5 flex-1">
 								{features.length > 0 && (
 									<div>
-										<div className="text-muted-foreground/70 mb-4 text-[10px] font-semibold uppercase tracking-widest">
+										<div className="text-muted-foreground/70 mb-3 text-[10px] font-medium uppercase tracking-[0.14em]">
 											Data included
 										</div>
-										<div className="space-y-3">
+										<div className="space-y-2.5">
 											{features.map((feature) => {
 												const Icon = FEATURE_ICONS[feature.featureId]
 												return (
 													<div
 														key={feature.featureId}
-														className="flex items-center justify-between text-sm group/feature"
+														className="flex items-center justify-between text-sm"
 													>
-														<div className="text-muted-foreground flex items-center gap-3 transition-colors group-hover/feature:text-foreground">
+														<div className="text-muted-foreground flex items-center gap-2.5">
 															{Icon && <Icon className="size-4 opacity-70" />}
 															<span className="font-medium">
 																{feature.label}
@@ -420,14 +400,14 @@ export function PricingCards() {
 								<Separator className="bg-border/60" />
 
 								<div>
-									<div className="text-muted-foreground/70 mb-4 text-[10px] font-semibold uppercase tracking-widest">
+									<div className="text-muted-foreground/70 mb-3 text-[10px] font-medium uppercase tracking-[0.14em]">
 										Platform features
 									</div>
-									<div className="space-y-3">
+									<div className="space-y-2.5">
 										{planFeatures.map((feature) => (
 											<div
 												key={feature.label}
-												className="flex items-start gap-3 text-sm"
+												className="flex items-start gap-2.5 text-sm"
 											>
 												<CircleCheckIcon className="text-primary size-4 shrink-0 mt-0.5" />
 												<span className="text-muted-foreground leading-snug">
@@ -444,21 +424,17 @@ export function PricingCards() {
 								</div>
 							</CardContent>
 
-							<CardFooter className="mt-auto pt-4 pb-6 px-6 flex-col gap-2">
+							<CardFooter className="mt-auto flex-col gap-2 items-stretch">
 								<Button
 									variant={trialAvailable && !btn.disabled ? "default" : btn.variant}
 									disabled={btn.disabled || loadingPlanId === plan.id}
-									className={cn(
-										"w-full h-10 transition-all",
-										isUpgrade && "shadow-md hover:shadow-lg font-medium",
-										!isUpgrade && "font-medium",
-									)}
+									className="w-full font-medium"
 									onClick={() => handleCheckout(plan.id)}
 								>
 									{loadingPlanId === plan.id ? (
 										<Spinner className="size-4" />
 									) : trialAvailable && !btn.disabled ? (
-										`Start trial · card required`
+										`Start ${plan.freeTrial?.durationLength ?? TRIAL_DURATION_DAYS}-day trial`
 									) : isActive && isTrialing ? (
 										"Trialing"
 									) : (
@@ -466,9 +442,8 @@ export function PricingCards() {
 									)}
 								</Button>
 								{trialAvailable && !btn.disabled && (
-									<p className="text-[11px] text-muted-foreground text-center">
-										$0 due today · We won't charge for{" "}
-										{plan.freeTrial?.durationLength} days · Cancel anytime
+									<p className="text-[11px] text-muted-foreground text-center tabular-nums">
+										$0 due today · Card required · Cancel anytime
 									</p>
 								)}
 							</CardFooter>
@@ -477,46 +452,41 @@ export function PricingCards() {
 				})}
 			</div>
 
-			{/* Enterprise Full Width Plan */}
-			<Card className="flex flex-col overflow-hidden border-border/50 bg-primary/[0.02] shadow-sm mt-8 transition-colors hover:border-border">
-				<CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between p-8 pb-6">
-					<div className="max-w-xl">
-						<CardTitle className="text-[11px] font-semibold uppercase tracking-widest text-primary mb-3">
+			{/* Enterprise tonal band */}
+			<section className="rounded-lg border border-border/60 bg-background">
+				<div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
+					<div className="max-w-xl space-y-2">
+						<div className="text-[10px] font-medium uppercase tracking-[0.14em] text-primary">
 							Enterprise
-						</CardTitle>
-						<div className="flex items-baseline gap-1 mb-2">
-							<span className="text-4xl font-semibold tracking-tight">Custom</span>
 						</div>
-						<CardDescription className="text-[13px] leading-relaxed text-muted-foreground/90">
+						<div className="text-2xl font-semibold tracking-tight tabular-nums">Custom</div>
+						<p className="text-sm text-muted-foreground leading-relaxed">
 							Built for high-volume teams with custom compliance, data retention, and dedicated
 							support requirements.
-						</CardDescription>
+						</p>
 					</div>
 					<Button
 						variant="default"
-						className="w-full sm:w-auto shrink-0 h-10 shadow-sm"
+						className="w-full sm:w-auto shrink-0"
 						onClick={handleEnterpriseContact}
 					>
-						Talk to Founder
+						Talk to founder
 					</Button>
-				</CardHeader>
-
-				<Separator className="bg-border/40" />
-
-				<div className="p-8 pt-6 flex flex-col sm:flex-row gap-12">
-					<div className="flex-1">
-						<div className="text-muted-foreground/70 mb-5 text-[10px] font-semibold uppercase tracking-widest">
+				</div>
+				<div className="border-t border-border/60 grid grid-cols-1 divide-y divide-border/60 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+					<div className="p-6">
+						<div className="text-muted-foreground/70 mb-3 text-[10px] font-medium uppercase tracking-[0.14em]">
 							Data included
 						</div>
-						<div className="space-y-4">
+						<div className="space-y-2.5">
 							{ENTERPRISE_DATA_FEATURES.map((feature) => {
 								const Icon = FEATURE_ICONS[feature.featureId]
 								return (
 									<div
 										key={feature.featureId}
-										className="flex items-center justify-between gap-4 text-[13px] border-b border-border/30 pb-3 last:border-0 last:pb-0 group/feature"
+										className="flex items-center justify-between gap-4 text-sm"
 									>
-										<div className="text-muted-foreground flex items-center gap-3 transition-colors group-hover/feature:text-foreground">
+										<div className="text-muted-foreground flex items-center gap-2.5">
 											{Icon && <Icon className="size-4 opacity-70" />}
 											<span className="font-medium">{feature.label}</span>
 										</div>
@@ -528,23 +498,19 @@ export function PricingCards() {
 							})}
 						</div>
 					</div>
-
-					{/* Hairline border for high-DPI displays via CSS var */}
-					<div className="hidden sm:block w-[var(--border-hairline,1px)] bg-border/40" />
-
-					<div className="flex-1">
-						<div className="text-muted-foreground/70 mb-5 text-[10px] font-semibold uppercase tracking-widest">
+					<div className="p-6">
+						<div className="text-muted-foreground/70 mb-3 text-[10px] font-medium uppercase tracking-[0.14em]">
 							Platform features
 						</div>
-						<div className="space-y-4">
+						<div className="space-y-2.5">
 							{enterprisePlanFeatures.map((feature) => (
-								<div key={feature.label} className="flex items-start gap-3 text-[13px]">
-									<CircleCheckIcon className="text-primary size-[18px] shrink-0 mt-[2px]" />
+								<div key={feature.label} className="flex items-start gap-2.5 text-sm">
+									<CircleCheckIcon className="text-primary size-4 shrink-0 mt-0.5" />
 									<span className="text-muted-foreground leading-snug">
 										{feature.label}
 									</span>
 									{feature.value && (
-										<span className="font-semibold tabular-nums ml-auto shrink-0">
+										<span className="font-semibold tabular-nums text-xs ml-auto shrink-0">
 											{feature.value}
 										</span>
 									)}
@@ -553,7 +519,7 @@ export function PricingCards() {
 						</div>
 					</div>
 				</div>
-			</Card>
+			</section>
 
 			<Dialog
 				open={confirmDialog !== null}

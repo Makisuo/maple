@@ -1,6 +1,5 @@
 import { Progress as ProgressPrimitive } from "@base-ui/react/progress"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { FileIcon, PulseIcon, ChartLineIcon, type IconComponent } from "@/components/icons"
 import type { AggregatedUsage } from "@/lib/billing/usage"
 import { formatUsage, usagePercentage } from "@/lib/billing/usage"
@@ -43,26 +42,19 @@ function MeterRow({ icon: Icon, label, usedGB, limitGB }: MeterRowProps) {
 interface UsageMetersProps {
 	usage: AggregatedUsage
 	limits: PlanLimits
-	billingPeriodLabel: string
 }
 
-export function UsageMeters({ usage, limits, billingPeriodLabel }: UsageMetersProps) {
+export function UsageMeters({ usage, limits }: UsageMetersProps) {
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>Current Usage</CardTitle>
-				<CardDescription>{billingPeriodLabel}</CardDescription>
-			</CardHeader>
-			<CardContent className="space-y-5">
-				<MeterRow icon={FileIcon} label="Logs" usedGB={usage.logsGB} limitGB={limits.logsGB} />
-				<MeterRow icon={PulseIcon} label="Traces" usedGB={usage.tracesGB} limitGB={limits.tracesGB} />
-				<MeterRow
-					icon={ChartLineIcon}
-					label="Metrics"
-					usedGB={usage.metricsGB}
-					limitGB={limits.metricsGB}
-				/>
-			</CardContent>
-		</Card>
+		<div className="space-y-4">
+			<MeterRow icon={FileIcon} label="Logs" usedGB={usage.logsGB} limitGB={limits.logsGB} />
+			<MeterRow icon={PulseIcon} label="Traces" usedGB={usage.tracesGB} limitGB={limits.tracesGB} />
+			<MeterRow
+				icon={ChartLineIcon}
+				label="Metrics"
+				usedGB={usage.metricsGB}
+				limitGB={limits.metricsGB}
+			/>
+		</div>
 	)
 }
