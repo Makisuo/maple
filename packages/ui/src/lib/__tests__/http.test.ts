@@ -15,6 +15,7 @@ describe("getHttpInfo", () => {
 			route: "/checkout",
 			statusCode: 201,
 			isError: false,
+			kind: "server",
 		})
 	})
 
@@ -30,6 +31,7 @@ describe("getHttpInfo", () => {
 			route: "/users/123",
 			statusCode: 503,
 			isError: true,
+			kind: "server",
 		})
 	})
 
@@ -39,6 +41,7 @@ describe("getHttpInfo", () => {
 			route: "/checkout",
 			statusCode: null,
 			isError: false,
+			kind: "server",
 		})
 	})
 
@@ -48,6 +51,7 @@ describe("getHttpInfo", () => {
 			route: "/checkout",
 			statusCode: null,
 			isError: false,
+			kind: "server",
 		})
 	})
 
@@ -67,6 +71,7 @@ describe("getHttpInfo", () => {
 			route: "/orders/:id",
 			statusCode: 404,
 			isError: false,
+			kind: "server",
 		})
 	})
 
@@ -82,6 +87,7 @@ describe("getHttpInfo", () => {
 			route: "api.tinybird.co/v1/spans",
 			statusCode: 200,
 			isError: false,
+			kind: "client",
 		})
 	})
 
@@ -96,6 +102,7 @@ describe("getHttpInfo", () => {
 			route: "api.example.com/users/123",
 			statusCode: null,
 			isError: false,
+			kind: "client",
 		})
 	})
 
@@ -111,6 +118,7 @@ describe("getHttpInfo", () => {
 			route: "api.tinybird.co/v0/sql",
 			statusCode: null,
 			isError: false,
+			kind: "client",
 		})
 	})
 
@@ -120,6 +128,7 @@ describe("getHttpInfo", () => {
 			route: "api.tinybird.co/v1/spans",
 			statusCode: null,
 			isError: false,
+			kind: "client",
 		})
 	})
 
@@ -136,6 +145,7 @@ describe("getHttpInfo", () => {
 			route: "prd-artifacts-api/config-api/read",
 			statusCode: null,
 			isError: false,
+			kind: "client",
 		})
 	})
 
@@ -151,6 +161,7 @@ describe("getHttpInfo", () => {
 			route: "prd-artifacts-api/config-api/read",
 			statusCode: null,
 			isError: false,
+			kind: "client",
 		})
 	})
 
@@ -166,6 +177,7 @@ describe("getHttpInfo", () => {
 			route: "/v1/spans",
 			statusCode: null,
 			isError: false,
+			kind: "server",
 		})
 	})
 })

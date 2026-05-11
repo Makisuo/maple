@@ -8,6 +8,7 @@ export interface HttpInfo {
 	route: string | null
 	statusCode: number | null
 	isError: boolean
+	kind: "client" | "server"
 }
 
 const isHttpMethod = (s: string): s is HttpMethod => HTTP_METHODS.includes(s.toUpperCase() as HttpMethod)
@@ -89,7 +90,12 @@ const routeFromAttrs = (attrs: Record<string, string>, isClient: boolean): Optio
  * (e.g. `api.tinybird.co/v1/spans`) so the destination service is visible.
  */
 export function getHttpInfo(spanName: string, attrs: Record<string, string>): HttpInfo | null {
-	const isClient = spanName.startsWith("http.client ") || !!attrs["url.full"] || !!attrs["http.url"]
+	// Permissive: drives route extraction strategy. server spans can legitimately emit
+	// url.full too, but if they do we still want to fall back to host+path composition.
+	const useClientRoute = spanName.startsWith("http.client ") || !!attrs["url.full"] || !!attrs["http.url"]
+	// Strict: only mark as client when the span name explicitly says so. Callers with
+	// a real OTel span.kind value should pass it down and override this.
+	const kind: "client" | "server" = spanName.startsWith("http.client ") ? "client" : "server"
 	const nameInfo = parseSpanName(spanName)
 
 	const method = pipe(
@@ -99,7 +105,7 @@ export function getHttpInfo(spanName: string, attrs: Record<string, string>): Ht
 	if (Option.isNone(method)) return null
 
 	const route = pipe(
-		routeFromAttrs(attrs, isClient),
+		routeFromAttrs(attrs, useClientRoute),
 		Option.orElse(() =>
 			pipe(
 				nameInfo,
@@ -118,6 +124,7 @@ export function getHttpInfo(spanName: string, attrs: Record<string, string>): Ht
 		route,
 		statusCode,
 		isError: statusCode != null && statusCode >= 500,
+		kind,
 	}
 }
 

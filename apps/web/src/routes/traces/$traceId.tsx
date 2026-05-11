@@ -240,6 +240,7 @@ function TraceDetailPage() {
 								<HttpSpanLabel
 									spanName={rootSpan.spanName}
 									spanAttributes={rootSpan.spanAttributes}
+									spanKind={rootSpan.spanKind}
 									className="gap-3 text-2xl font-bold tracking-tight"
 									textClassName="text-2xl font-bold tracking-tight"
 								/>

@@ -167,6 +167,7 @@ export function TracesTableView({
 						<HttpSpanLabel
 							spanName={row.original.rootSpan.name || row.original.rootSpanName || "Unknown"}
 							spanAttributes={row.original.rootSpan.attributes}
+							spanKind={row.original.rootSpan.kind}
 							textClassName="text-xs"
 						/>
 						<span className="text-[10px] text-muted-foreground">

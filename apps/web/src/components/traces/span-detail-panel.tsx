@@ -263,6 +263,7 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 							<HttpSpanLabel
 								spanName={span.spanName}
 								spanAttributes={span.spanAttributes}
+								spanKind={span.spanKind}
 								textClassName="font-semibold text-sm"
 							/>
 						</div>
