@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-11T00:00:00Z",
+  "title": "Design System: Maple",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Amber Signal",
+        "canonical": "oklch(0.714 0.154 59)",
+        "tonalRamp": [
+          "oklch(0.18 0.04 59)",
+          "oklch(0.28 0.07 59)",
+          "oklch(0.38 0.1 59)",
+          "oklch(0.5 0.13 59)",
+          "oklch(0.62 0.15 59)",
+          "oklch(0.714 0.154 59)",
+          "oklch(0.82 0.13 59)",
+          "oklch(0.95 0.04 59)"
+        ]
+      },
+      "primary-light": {
+        "role": "primary",
+        "displayName": "Blue Beacon",
+        "canonical": "oklch(0.59 0.14 242)",
+        "tonalRamp": [
+          "oklch(0.18 0.04 242)",
+          "oklch(0.28 0.07 242)",
+          "oklch(0.38 0.1 242)",
+          "oklch(0.5 0.13 242)",
+          "oklch(0.59 0.14 242)",
+          "oklch(0.72 0.13 242)",
+          "oklch(0.86 0.06 242)",
+          "oklch(0.96 0.02 242)"
+        ]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Operator Canvas",
+        "canonical": "oklch(0.207 0.008 67)",
+        "tonalRamp": [
+          "oklch(0.12 0.005 67)",
+          "oklch(0.185 0.007 56)",
+          "oklch(0.207 0.008 67)",
+          "oklch(0.224 0.009 75)",
+          "oklch(0.26 0.012 67)",
+          "oklch(0.33 0.015 72)",
+          "oklch(0.603 0.023 72)",
+          "oklch(0.91 0.016 74)"
+        ]
+      },
+      "severity-error": {
+        "role": "semantic",
+        "displayName": "Severity Error (red-orange)",
+        "canonical": "oklch(0.654 0.176 30)",
+        "tonalRamp": [
+          "oklch(0.18 0.05 30)",
+          "oklch(0.28 0.09 30)",
+          "oklch(0.4 0.13 30)",
+          "oklch(0.5 0.16 30)",
+          "oklch(0.555 0.174 30)",
+          "oklch(0.654 0.176 30)",
+          "oklch(0.78 0.13 30)",
+          "oklch(0.92 0.05 30)"
+        ]
+      },
+      "severity-warn": {
+        "role": "semantic",
+        "displayName": "Severity Warn (amber)",
+        "canonical": "oklch(0.714 0.154 59)",
+        "tonalRamp": [
+          "oklch(0.18 0.04 59)",
+          "oklch(0.3 0.08 59)",
+          "oklch(0.45 0.11 59)",
+          "oklch(0.6 0.14 59)",
+          "oklch(0.714 0.154 59)",
+          "oklch(0.82 0.13 59)",
+          "oklch(0.9 0.08 59)",
+          "oklch(0.96 0.03 59)"
+        ]
+      },
+      "severity-info": {
+        "role": "semantic",
+        "displayName": "Severity Info (green)",
+        "canonical": "oklch(0.658 0.134 151)",
+        "tonalRamp": [
+          "oklch(0.2 0.04 151)",
+          "oklch(0.32 0.07 151)",
+          "oklch(0.45 0.1 151)",
+          "oklch(0.55 0.12 151)",
+          "oklch(0.658 0.134 151)",
+          "oklch(0.76 0.12 151)",
+          "oklch(0.88 0.07 151)",
+          "oklch(0.96 0.03 151)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display (proportional Geist)",
+        "purpose": "Page titles and section headers in the canvas. Reserved for moments where variable letterforms read better than monospace."
+      },
+      "body": {
+        "displayName": "Body (Geist Mono)",
+        "purpose": "Default app text. Geist Mono is intentionally the body voice so identifiers, timestamps, and durations align across rows."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Chip text, column headers, status pills, compact metadata. Slightly tighter weight and tracking."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Inline span IDs, query snippets, log payloads. Sugar High syntax tokens drive theme-aware highlighting."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "ease-operator",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Custom ease-out-quart used for severity pulse and infra reveals. Decisive end, no overshoot."
+      },
+      {
+        "name": "duration-hover",
+        "value": "120ms",
+        "purpose": "Sidebar / button hover tonal step transitions."
+      },
+      {
+        "name": "duration-pulse",
+        "value": "2400ms",
+        "purpose": "Severity beacon pulse cycle (infra dashboards). Respects prefers-reduced-motion."
+      },
+      {
+        "name": "duration-skeleton",
+        "value": "2000ms",
+        "purpose": "Skeleton shimmer for measurable wait states only — not for sub-second queries."
+      }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" },
+      { "name": "2xl", "value": "1536px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Single most important action per surface. Amber primary on warm dark canvas. Rarity is the point.",
+      "html": "<button class=\"ds-btn-primary\">Run query</button>",
+      "css": ".ds-btn-primary { background: oklch(0.714 0.154 59); color: oklch(0.207 0.008 67); border: none; border-radius: 8px; height: 32px; padding: 0 12px; font-family: 'Geist Mono Variable', ui-monospace, monospace; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.02em; cursor: pointer; transition: background 120ms ease, color 120ms ease; } .ds-btn-primary:hover { background: oklch(0.78 0.14 59); } .ds-btn-primary:focus-visible { outline: 2px solid oklch(0.58 0.02 65); outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "The everyday button. Muted background, hairline border, monospace label.",
+      "html": "<button class=\"ds-btn-secondary\">Export</button>",
+      "css": ".ds-btn-secondary { background: oklch(0.26 0.012 67); color: oklch(0.91 0.016 74); border: 1px solid oklch(0.268 0.012 67); border-radius: 8px; height: 32px; padding: 0 12px; font-family: 'Geist Mono Variable', ui-monospace, monospace; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.02em; cursor: pointer; transition: background 120ms ease; } .ds-btn-secondary:hover { background: oklch(0.33 0.015 72); } .ds-btn-secondary:focus-visible { outline: 2px solid oklch(0.58 0.02 65); outline-offset: 2px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Disappears when not under cursor. Sidebar items, table-row affordances.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: oklch(0.91 0.016 74); border: none; border-radius: 8px; height: 32px; padding: 0 8px; font-family: 'Geist Mono Variable', ui-monospace, monospace; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.02em; cursor: pointer; transition: background 120ms ease; } .ds-btn-ghost:hover { background: oklch(0.26 0.012 67); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Flat surface lifted by tone, not shadow. Hairline border.",
+      "html": "<section class=\"ds-card\"><header class=\"ds-card-title\">Service health</header><div class=\"ds-card-body\">42 spans / sec</div></section>",
+      "css": ".ds-card { background: oklch(0.224 0.009 75); color: oklch(0.91 0.016 74); border: 1px solid oklch(0.268 0.012 67); border-radius: 8px; padding: 16px; font-family: 'Geist Mono Variable', ui-monospace, monospace; } .ds-card-title { font-family: 'Geist Variable', ui-sans-serif, sans-serif; font-size: 0.875rem; font-weight: 600; letter-spacing: -0.01em; color: oklch(0.91 0.016 74); margin: 0 0 8px 0; } .ds-card-body { font-size: 0.875rem; line-height: 1.5; color: oklch(0.603 0.023 72); }"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Mono-typed input matching button height. Focus swaps border to ring; no glow.",
+      "html": "<label class=\"ds-input-label\"><span>Service</span><input class=\"ds-input\" type=\"text\" placeholder=\"checkout-api\" /></label>",
+      "css": ".ds-input-label { display: inline-flex; flex-direction: column; gap: 4px; font-family: 'Geist Mono Variable', ui-monospace, monospace; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.02em; color: oklch(0.603 0.023 72); } .ds-input { background: oklch(0.33 0.015 72); color: oklch(0.91 0.016 74); border: 1px solid oklch(0.268 0.012 67); border-radius: 6px; height: 32px; padding: 0 10px; font-family: 'Geist Mono Variable', ui-monospace, monospace; font-size: 0.875rem; transition: border-color 120ms ease; } .ds-input:focus-visible { outline: none; border-color: oklch(0.58 0.02 65); }"
+    },
+    {
+      "name": "Severity Chip — Error",
+      "kind": "chip",
+      "refersTo": "chip-severity-error",
+      "description": "Severity color is always paired with the explicit severity word — never color alone.",
+      "html": "<span class=\"ds-chip-error\">ERROR</span>",
+      "css": ".ds-chip-error { display: inline-block; background: oklch(0.654 0.176 30); color: oklch(0.207 0.008 67); border-radius: 4px; padding: 2px 6px; font-family: 'Geist Mono Variable', ui-monospace, monospace; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1; }"
+    },
+    {
+      "name": "Sidebar Item — Active",
+      "kind": "nav",
+      "refersTo": "sidebar",
+      "description": "Active state uses the amber primary as a leading icon stripe, not a fill. Item recedes into the sidebar tone.",
+      "html": "<a class=\"ds-sidebar-item ds-sidebar-item-active\" href=\"#\"><svg class=\"ds-sidebar-icon\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M3 12h4l3-8 4 16 3-8h4\"/></svg><span>Traces</span></a>",
+      "css": ".ds-sidebar-item { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; color: oklch(0.603 0.023 72); background: oklch(0.185 0.007 56); font-family: 'Geist Mono Variable', ui-monospace, monospace; font-size: 0.875rem; font-weight: 500; text-decoration: none; transition: background 120ms ease, color 120ms ease; } .ds-sidebar-item:hover { background: oklch(0.26 0.012 67); color: oklch(0.91 0.016 74); } .ds-sidebar-item-active { background: oklch(0.26 0.012 67); color: oklch(0.91 0.016 74); border-left: 1px solid oklch(0.714 0.154 59); padding-left: 9px; } .ds-sidebar-icon { color: oklch(0.714 0.154 59); flex: 0 0 auto; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Operator Terminal",
+    "overview": "Maple is an observability dashboard built for the engineer in the dark room at 2am — the body font is monospace, the default theme is dark, the textures are scanlines and dot-grids, the motion is a single restrained pulse. The aesthetic descends from the operations console, not the SaaS marketing site. Confidence comes from precision: every datum carries its unit, every span its identifier, every error its exact failure mode. The dashboard does not flatter the operator. It works.\n\nThe system explicitly rejects two reflexes. It rejects Datadog product chrome — gradient cards, upsell banners, top-nav clutter, hero-metric tiles. It rejects AI-startup neon-on-black — generic dark + electric accent + glow effects, the currently-saturated aesthetic that announces \"AI tool\" before the engineer has read a word. Maple's dark mode is warm-amber over warm-gray, not violet-cyan over black; its accents earn their saturation through severity meaning, not decorative chroma.\n\nThe shared visual posture is Linear / Vercel / Axiom adjacent: compact app shell, monospace prominence, severity color treated as semantic, restrained motion. North star references inform posture, not pixels — Maple is not a clone of any of them.",
+    "keyCharacteristics": [
+      "Mono is the body voice. Geist Mono is the default --font-sans; Geist (proportional) is reserved for display.",
+      "Dark by default, light when ambient demands. Light theme is a peer, not a fallback.",
+      "Flat surfaces, tonal depth. Zero shadows in the system; layering is done by lightness steps.",
+      "Severity-as-meaning. The 6-step severity ramp (trace → fatal) is the most semantically loaded color in the system, not the brand accent.",
+      "Compact density: 32px button height, text-xs baseline for tables and panels."
+    ],
+    "rules": [
+      {
+        "name": "The Tonal-Depth Rule",
+        "body": "Maple has no shadow tokens. None. Surfaces stack via lightness steps — sidebar (0.185) ↘ background (0.207) ↘ card (0.224) ↘ muted (0.26). If you need to lift an element, raise its lightness by one step. box-shadow is explicitly forbidden in app chrome.",
+        "section": "colors"
+      },
+      {
+        "name": "The Severity-Owns-Color Rule",
+        "body": "The severity ramp is the system's most legible semantic color. Do not use red for \"delete\" if it sits within 0.05 chroma of --severity-error in the same context — it dilutes the signal. Destructive actions get red only when the severity ramp is not on screen.",
+        "section": "colors"
+      },
+      {
+        "name": "The Service-Color-Is-Categorical Rule",
+        "body": "The 16-color service palette is for service identity only. Never for sentiment (\"green = good\"), state (\"blue = active\"), or charting metrics. Categorical color encoding fails for 16 hues under deuteranopia/protanopia, so service color always pairs with the service initial or icon.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono-As-Body Rule",
+        "body": "Geist Mono is --font-sans. The whole app body inherits it. Do not \"fix\" this by switching panels to proportional sans; the alignment of timestamps, IDs, and durations across rows is the point.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular-Numerals Rule",
+        "body": "Wherever numbers appear in dense rows (trace lists, log tables, percentiles), they must align. Geist Mono handles this natively — but in any proportional context (display sizes, dashboards), reach for font-variant-numeric: tabular-nums explicitly.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "No shadows. No glassmorphism. No \"elevation 3\" mid-element. If something needs to feel raised, raise its lightness one step — that's the system's vocabulary for depth.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Hairline Rule",
+        "body": "Borders are 1px in standard DPI, 0.5px on Retina (@media (min-resolution: 192dpi) { --border-hairline: 0.5px }). Never thicker by reflex. A 2px border in app chrome reads as a UI from 2014.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use Geist Mono as the default body voice. It is --font-sans. The alignment of timestamps and identifiers across rows is load-bearing.",
+      "Do convey depth through tonal layering (sidebar 0.185 → background 0.207 → card 0.224 → muted 0.26), not shadows.",
+      "Do reserve the amber primary for the single most important action per surface. Rarity is the point.",
+      "Do pair every severity color with an explicit label (\"ERROR\", \"WARN\"). Color is never the only signal.",
+      "Do respect prefers-reduced-motion. Pulse and flow animations already disable themselves; new motion must too.",
+      "Do use percentile-specific chart tokens (--chart-p50, --chart-p95, --chart-p99) for latency charts — they're tuned for the role.",
+      "Do keep borders hairline. 1px standard, 0.5px on Retina. Never thicker by reflex."
+    ],
+    "donts": [
+      "Don't use Datadog product chrome. No upsell banners, no gradient cards, no overpacked top nav. Maple's product surface competes with the data, not the brand.",
+      "Don't drift toward AI-startup neon-on-black. No electric purple/cyan on pure black, no glow effects, no glassmorphism. The amber-on-warm-gray is a deliberate refusal of that aesthetic.",
+      "Don't use #000 or #fff. Every neutral is tinted toward the warm gray family (hue ~67–75 in dark, ~286 in light).",
+      "Don't add shadows. No box-shadow in app chrome. The system is flat by doctrine; if you need lift, change tone.",
+      "Don't nest cards. A card inside a card is a structural failure. Use a divider or change background.",
+      "Don't use the hero-metric template — big number, small label, supporting stats, gradient accent. SaaS cliché.",
+      "Don't grid identical icon-cards. Repeated card+icon+title+blurb tiles are the SaaS-landing reflex; the dashboard rejects them.",
+      "Don't use gradient text (background-clip: text). Emphasis comes from weight or size, not chromatic decoration.",
+      "Don't use border-left or border-right > 1px as a colored accent stripe. The match-and-refuse ban — rewrite with full borders, leading icons, or nothing.",
+      "Don't repurpose a service color (--service-N) for sentiment, state, or chart metrics. It's categorical-only.",
+      "Don't ship loading spinners by default. Maple's stance is 'fast trust' — skeleton shimmers exist for measurable wait, but most queries should land before motion would help."
+    ]
+  }
+}
