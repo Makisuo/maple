@@ -1,12 +1,21 @@
 import type { ErrorComponentProps } from "@tanstack/react-router"
 import { Link, useRouter } from "@tanstack/react-router"
+import { useEffect } from "react"
 import { AlertWarningIcon, CircleQuestionIcon, HouseIcon } from "@/components/icons"
 import { Button, buttonVariants } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { formatBackendError } from "@/lib/error-messages"
+import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
 
 function RouteError({ error, reset }: ErrorComponentProps) {
 	const router = useRouter()
+	const isStaleChunk = isChunkLoadError(error)
+
+	useEffect(() => {
+		if (isStaleChunk && shouldAttemptChunkReload()) {
+			window.location.reload()
+		}
+	}, [isStaleChunk])
 
 	const { title, description } = formatBackendError(error)
 	const stack = error instanceof Error ? error.stack : undefined
@@ -25,11 +34,15 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 					size="sm"
 					variant="default"
 					onClick={() => {
+						if (isStaleChunk) {
+							window.location.reload()
+							return
+						}
 						reset()
 						router.invalidate()
 					}}
 				>
-					Try again
+					{isStaleChunk ? "Reload" : "Try again"}
 				</Button>
 				<Link to="/" className={buttonVariants({ size: "sm", variant: "outline" })}>
 					<HouseIcon size={14} />

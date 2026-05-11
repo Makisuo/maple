@@ -13,7 +13,19 @@ import {
 } from "./lib/services/common/self-hosted-auth"
 import { router, type RouterAuthContext } from "./router"
 import { appRegistry } from "./lib/registry"
+import { clearChunkReloadGuard, shouldAttemptChunkReload } from "./lib/chunk-reload"
 import "./styles.css"
+
+window.addEventListener("vite:preloadError", (event) => {
+	if (shouldAttemptChunkReload()) {
+		event.preventDefault()
+		window.location.reload()
+	}
+})
+
+window.addEventListener("load", () => {
+	clearChunkReloadGuard()
+})
 
 const root = document.getElementById("app")
 

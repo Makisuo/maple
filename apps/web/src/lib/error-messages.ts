@@ -1,5 +1,6 @@
 import { Cause, Exit } from "effect"
 import { HttpClientError } from "effect/unstable/http"
+import { isChunkLoadError } from "./chunk-reload"
 
 export interface FormattedError {
 	readonly title: string
@@ -191,6 +192,13 @@ export const formatBackendError = (input: unknown): FormattedError => {
 				title: "Server error",
 				description: error.message ?? `The Maple API returned ${status}.`,
 			}
+		}
+	}
+
+	if (isChunkLoadError(error)) {
+		return {
+			title: "Maple was updated",
+			description: "Reloading to pick up the new version…",
 		}
 	}
 
