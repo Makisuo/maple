@@ -127,6 +127,28 @@ const isNotFoundError = (error: unknown): boolean => {
 	return /(not[\s_-]?found|404|unknown entity)/i.test(message)
 }
 
+// undici's keep-alive pool will throw "fetch failed" / "Network connection lost"
+// / ECONNRESET when the runtime container is bounced between requests but the
+// API process holds onto stale sockets. These are transient — a single retry
+// with a fresh connection almost always succeeds.
+const isTransientFetchError = (error: unknown): boolean => {
+	const message = error instanceof Error ? error.message : String(error)
+	const causeMessage =
+		error instanceof Error && error.cause instanceof Error ? error.cause.message : ""
+	return /(network connection lost|fetch failed|econnreset|socket hang up|other side closed|terminated)/i.test(
+		`${message} ${causeMessage}`,
+	)
+}
+
+const retryOnTransient = async <T>(operation: () => Promise<T>): Promise<T> => {
+	try {
+		return await operation()
+	} catch (error) {
+		if (!isTransientFetchError(error)) throw error
+		return operation()
+	}
+}
+
 const ensureMapleChatEntity = async (input: {
 	readonly runtimeUrl: string
 	readonly orgId: string
@@ -139,7 +161,7 @@ const ensureMapleChatEntity = async (input: {
 	const client = makeRuntimeClient(input.runtimeUrl)
 
 	try {
-		await client.getEntityInfo(entityUrl)
+		await retryOnTransient(() => client.getEntityInfo(entityUrl))
 		return { id, entityUrl }
 	} catch (error) {
 		if (!isNotFoundError(error)) {
@@ -153,21 +175,23 @@ const ensureMapleChatEntity = async (input: {
 	}
 
 	try {
-		await client.spawnEntity({
-			type: MAPLE_CHAT_ENTITY_TYPE,
-			id,
-			args: {
-				orgId: input.orgId,
-				tabId: input.tabId,
-				userId: input.userId,
-				title: input.title,
-			},
-			tags: {
-				org_id: input.orgId,
-				tab_id: input.tabId,
-				surface: "web_chat",
-			},
-		})
+		await retryOnTransient(() =>
+			client.spawnEntity({
+				type: MAPLE_CHAT_ENTITY_TYPE,
+				id,
+				args: {
+					orgId: input.orgId,
+					tabId: input.tabId,
+					userId: input.userId,
+					title: input.title,
+				},
+				tags: {
+					org_id: input.orgId,
+					tab_id: input.tabId,
+					surface: "web_chat",
+				},
+			}),
+		)
 	} catch (error) {
 		throw new RuntimeUnreachable(
 			`Failed to spawn Maple chat entity in Electric runtime at ${input.runtimeUrl}: ${
@@ -339,11 +363,14 @@ export const AiGatewayRouter = HttpRouter.use((router) =>
 					}
 					yield* Effect.tryPromise({
 						try: () =>
-							client.sendEntityMessage({
-								targetUrl,
-								type: "approval_response",
-								payload: { approvalId, approved },
-							}),
+							retryOnTransient(() =>
+								client.sendEntityMessage({
+									targetUrl,
+									from: `user:${tenant.userId}`,
+									type: "approval_response",
+									payload: { approvalId, approved },
+								}),
+							),
 						catch: (error) => (error instanceof Error ? error : new Error(String(error))),
 					})
 					return json({ ok: true })
@@ -353,18 +380,21 @@ export const AiGatewayRouter = HttpRouter.use((router) =>
 				if (!text) return errorJson("text is required", 400)
 				yield* Effect.tryPromise({
 					try: () =>
-						client.sendEntityMessage({
-							targetUrl,
-							type: "user_message",
-							payload: {
-								text,
-								mode: body.mode,
-								pageContext: body.pageContext,
-								alertContext: body.alertContext,
-								widgetFixContext: body.widgetFixContext,
-								dashboardContext: body.dashboardContext,
-							},
-						}),
+						retryOnTransient(() =>
+							client.sendEntityMessage({
+								targetUrl,
+								from: `user:${tenant.userId}`,
+								type: "user_message",
+								payload: {
+									text,
+									mode: body.mode,
+									pageContext: body.pageContext,
+									alertContext: body.alertContext,
+									widgetFixContext: body.widgetFixContext,
+									dashboardContext: body.dashboardContext,
+								},
+							}),
+						),
 					catch: (error) => (error instanceof Error ? error : new Error(String(error))),
 				})
 				return json({ ok: true })
