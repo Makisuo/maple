@@ -73,7 +73,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 				<NavigationMenu className="hidden sm:flex">
 					<NavigationMenuList>
 						<NavigationMenuItem>
-							<NavigationMenuTrigger className="bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
+							<NavigationMenuTrigger className="h-8 bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
 								{m.nav_features()}
 							</NavigationMenuTrigger>
 							<NavigationMenuContent>
@@ -92,7 +92,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 						</NavigationMenuItem>
 
 						<NavigationMenuItem>
-							<NavigationMenuTrigger className="bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
+							<NavigationMenuTrigger className="h-8 bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
 								{m.nav_use_cases()}
 							</NavigationMenuTrigger>
 							<NavigationMenuContent>
@@ -107,7 +107,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 						</NavigationMenuItem>
 
 						<NavigationMenuItem>
-							<NavigationMenuTrigger className="bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
+							<NavigationMenuTrigger className="h-8 bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg">
 								{m.nav_integrations()}
 							</NavigationMenuTrigger>
 							<NavigationMenuContent>
@@ -124,7 +124,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 						<NavigationMenuItem>
 							<a
 								href={l("/pricing")}
-								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
 								{m.nav_pricing()}
 							</a>
@@ -133,7 +133,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 						<NavigationMenuItem>
 							<a
 								href={l("/roadmap")}
-								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
 								{m.nav_roadmap()}
 							</a>
@@ -142,7 +142,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 						<NavigationMenuItem>
 							<a
 								href="/docs"
-								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
 								Docs
 							</a>
@@ -290,7 +290,7 @@ function NavBarInner({ locale = "en" }: { locale?: string }) {
 							</a>
 							<a
 								href="https://app.maple.dev"
-								className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80"
+								className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80"
 							>
 								<CTAButton />
 							</a>
