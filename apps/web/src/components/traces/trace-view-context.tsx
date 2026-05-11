@@ -1,6 +1,7 @@
 import * as React from "react"
 import type { ReactNode } from "react"
 import type { SpanNode } from "@/api/tinybird/traces"
+import type { ColorByField } from "./color-by"
 
 interface TraceViewContextValue {
 	rootSpans: SpanNode[]
@@ -9,6 +10,8 @@ interface TraceViewContextValue {
 	services: string[]
 	selectedSpanId?: string
 	onSelectSpan?: (span: SpanNode) => void
+	colorBy: ColorByField
+	setColorBy: (next: ColorByField) => void
 }
 
 const TraceViewContext = React.createContext<TraceViewContextValue | null>(null)
@@ -23,6 +26,8 @@ export function TraceViewProvider({ children, ...value }: TraceViewContextValue 
 			value.services,
 			value.selectedSpanId,
 			value.onSelectSpan,
+			value.colorBy,
+			value.setColorBy,
 		],
 	)
 	return <TraceViewContext value={ctx}>{children}</TraceViewContext>

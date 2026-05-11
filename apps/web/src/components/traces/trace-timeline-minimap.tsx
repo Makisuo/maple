@@ -2,6 +2,8 @@ import * as React from "react"
 import type { SpanNode } from "@/api/tinybird/traces"
 import type { ViewportState } from "./trace-timeline-types"
 import { MINIMAP_HEIGHT } from "./trace-timeline-types"
+import { getValueHue } from "@maple/ui/colors"
+import { resolveColorValue, isStatusCodePreset, type ColorByField } from "./color-by"
 
 interface TraceTimelineMinimapProps {
 	rootSpans: SpanNode[]
@@ -9,6 +11,7 @@ interface TraceTimelineMinimapProps {
 	traceStartMs: number
 	traceEndMs: number
 	services: string[]
+	colorBy: ColorByField
 	viewport: ViewportState
 	onViewportChange: (viewport: ViewportState) => void
 }
@@ -21,16 +24,18 @@ interface MinimapSpan {
 	bgColor: string
 }
 
-const SERVICE_HUES = [50, 155, 255, 25, 100, 310, 200, 340]
+const NEUTRAL_MINIMAP_BG = "oklch(0.50 0.02 0)"
 
 function collectMinimapSpans(
 	rootSpans: SpanNode[],
 	traceStartMs: number,
 	totalDurationMs: number,
 	services: string[],
+	colorBy: ColorByField,
 ): { spans: MinimapSpan[]; maxDepth: number } {
 	const spans: MinimapSpan[] = []
 	let maxDepth = 0
+	const statusPreset = isStatusCodePreset(colorBy)
 
 	function visit(node: SpanNode) {
 		const startMs = new Date(node.startTime).getTime()
@@ -38,15 +43,26 @@ function collectMinimapSpans(
 		const widthPercent = (node.durationMs / totalDurationMs) * 100
 		maxDepth = Math.max(maxDepth, node.depth)
 
-		const serviceIndex = services.indexOf(node.serviceName)
-		const hue = SERVICE_HUES[serviceIndex % SERVICE_HUES.length]
+		const isError = node.statusCode === "Error"
+		let bgColor: string
+		if (isError && !statusPreset) {
+			bgColor = "oklch(0.50 0.18 25)"
+		} else {
+			const value = resolveColorValue(node, colorBy)
+			const indexHint =
+				colorBy.kind === "preset" && colorBy.key === "service" && value
+					? services.indexOf(value)
+					: undefined
+			const hue = getValueHue(value, indexHint)
+			bgColor = hue === null ? NEUTRAL_MINIMAP_BG : `oklch(0.50 0.14 ${hue})`
+		}
 
 		spans.push({
 			spanId: node.spanId,
 			depth: node.depth,
 			leftPercent: Math.max(0, leftPercent),
 			widthPercent: Math.min(widthPercent, 100 - Math.max(0, leftPercent)),
-			bgColor: node.statusCode === "Error" ? "oklch(0.50 0.18 25)" : `oklch(0.50 0.14 ${hue})`,
+			bgColor,
 		})
 
 		node.children.forEach(visit)
@@ -62,6 +78,7 @@ export function TraceTimelineMinimap({
 	traceStartMs,
 	traceEndMs,
 	services,
+	colorBy,
 	viewport,
 	onViewportChange,
 }: TraceTimelineMinimapProps) {
@@ -73,8 +90,8 @@ export function TraceTimelineMinimap({
 	} | null>(null)
 
 	const { spans } = React.useMemo(
-		() => collectMinimapSpans(rootSpans, traceStartMs, totalDurationMs, services),
-		[rootSpans, traceStartMs, totalDurationMs, services],
+		() => collectMinimapSpans(rootSpans, traceStartMs, totalDurationMs, services, colorBy),
+		[rootSpans, traceStartMs, totalDurationMs, services, colorBy],
 	)
 
 	const ROW_H = 3

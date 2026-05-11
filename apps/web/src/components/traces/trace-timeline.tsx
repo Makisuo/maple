@@ -4,7 +4,6 @@ import * as ReactDOM from "react-dom"
 import { ChevronExpandYIcon } from "@/components/icons"
 import { Button } from "@maple/ui/components/ui/button"
 import { getServiceLegendColor } from "@maple/ui/colors"
-import type { SpanNode } from "@/api/tinybird/traces"
 import { useContainerSize } from "@maple/ui/hooks/use-container-size"
 import { useTraceView } from "./trace-view-context"
 import { useTraceTimeline } from "./use-trace-timeline"
@@ -12,27 +11,61 @@ import { useTimelineGestures } from "./use-timeline-gestures"
 import { TraceTimelineSearch } from "./trace-timeline-search"
 import { TraceTimelineMinimap } from "./trace-timeline-minimap"
 import { TraceTimelineTimeAxis } from "./trace-timeline-time-axis"
-import { TraceTimelineRows } from "./trace-timeline-rows"
-import { TraceTimelineConnectors } from "./trace-timeline-connectors"
 import { TraceTimelineTooltipContent } from "./trace-timeline-tooltip"
-import { ROW_HEIGHT, ROW_GAP } from "./trace-timeline-types"
+import { TraceTimelineSidebar, SidebarResizeHandle } from "./trace-timeline-sidebar"
+import { TraceTimelineCanvas, type TraceTimelineCanvasHandle } from "./trace-timeline-canvas"
+import { useCanvasHitTest } from "./use-canvas-hit-test"
+import { useCanvasCrosshair } from "./use-canvas-crosshair"
+import { ColorByPicker } from "./color-by-picker"
+import {
+	ROW_GAP,
+	ROW_HEIGHT,
+	SIDEBAR_WIDTH_DEFAULT,
+	SIDEBAR_WIDTH_MAX,
+	SIDEBAR_WIDTH_MIN,
+	SIDEBAR_WIDTH_STORAGE_KEY,
+} from "./trace-timeline-types"
+
+function readSidebarWidth(): number {
+	if (typeof window === "undefined") return SIDEBAR_WIDTH_DEFAULT
+	const raw = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)
+	const n = raw ? Number(raw) : NaN
+	if (!Number.isFinite(n)) return SIDEBAR_WIDTH_DEFAULT
+	return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, n))
+}
 
 export function TraceTimeline() {
-	const { rootSpans, totalDurationMs, traceStartTime, services, selectedSpanId, onSelectSpan } =
-		useTraceView()
+	const {
+		rootSpans,
+		totalDurationMs,
+		traceStartTime,
+		services,
+		selectedSpanId,
+		onSelectSpan,
+		colorBy,
+		setColorBy,
+	} = useTraceView()
 	const containerRef = React.useRef<HTMLDivElement>(null)
 	const scrollRef = React.useRef<HTMLDivElement>(null)
+	const canvasViewportRef = React.useRef<HTMLDivElement>(null)
 	const searchInputRef = React.useRef<HTMLInputElement>(null)
-	const tooltipRef = React.useRef<HTMLDivElement>(null)
+	const canvasHandleRef = React.useRef<TraceTimelineCanvasHandle>(null)
 	const [scrollTop, setScrollTop] = React.useState(0)
-	const [hoveredSpan, setHoveredSpan] = React.useState<SpanNode | null>(null)
+	const [hoveredSpanId, setHoveredSpanId] = React.useState<string | null>(null)
 	const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null)
+	const [sidebarWidth, setSidebarWidth] = React.useState<number>(() => readSidebarWidth())
+
+	React.useEffect(() => {
+		if (typeof window === "undefined") return
+		window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
+	}, [sidebarWidth])
 
 	const containerSize = useContainerSize(scrollRef)
 
 	const {
 		bars,
 		totalRows,
+		parentIndexById,
 		state,
 		dispatch,
 		traceStartMs,
@@ -44,79 +77,115 @@ export function TraceTimeline() {
 		rootSpans,
 		totalDurationMs,
 		traceStartTime,
+		services,
+		colorBy,
 		defaultExpandDepth: Infinity,
 	})
 
-	const { isPanning, handleMouseDown } = useTimelineGestures({
-		scrollRef,
-		containerRef,
+	const { barRectsRef, findBarAt } = useCanvasHitTest()
+
+	const requestDraw = React.useCallback((kind: "main" | "overlay" | "both" = "both") => {
+		canvasHandleRef.current?.requestDraw(kind)
+	}, [])
+
+	const { cursorXRef, setCursorX } = useCanvasCrosshair(() => requestDraw("overlay"))
+
+	const { handleMouseDown, isPanning } = useTimelineGestures({
+		scrollRef: canvasViewportRef,
+		containerRef: canvasViewportRef,
 		viewport: state.viewport,
-		containerWidth: containerSize.width,
+		containerWidth: Math.max(0, containerSize.width - sidebarWidth),
 		traceStartMs,
 		traceEndMs,
 		dispatch,
+		isOnBar: (x, y) => findBarAt(x, y) !== null,
 	})
 
-	// Handle scroll
 	const handleScroll = React.useCallback(() => {
-		if (scrollRef.current) {
-			setScrollTop(scrollRef.current.scrollTop)
-		}
+		if (scrollRef.current) setScrollTop(scrollRef.current.scrollTop)
 	}, [])
 
-	// Hover tooltip (ref-based for performance)
-	const handleMouseMoveForTooltip = React.useCallback(
+	const handleCanvasMouseMove = React.useCallback(
 		(e: React.MouseEvent) => {
-			const target = e.target as HTMLElement
-			const barEl = target.closest("[data-span-id]") as HTMLElement | null
-			if (barEl) {
-				const spanId = barEl.getAttribute("data-span-id")
-				const span = bars.find((b) => b.span.spanId === spanId)?.span ?? null
-				setHoveredSpan(span)
-				if (span) {
-					setTooltipPos({
-						x: e.clientX,
-						y: e.clientY,
-					})
-				}
+			const el = canvasViewportRef.current
+			if (!el) return
+			const rect = el.getBoundingClientRect()
+			const cssX = e.clientX - rect.left
+			const cssY = e.clientY - rect.top
+			setCursorX(cssX)
+			const hit = findBarAt(cssX, cssY)
+			if (hit) {
+				if (hoveredSpanId !== hit.spanId) setHoveredSpanId(hit.spanId)
+				setTooltipPos({ x: e.clientX, y: e.clientY })
 			} else {
-				setHoveredSpan(null)
+				if (hoveredSpanId !== null) setHoveredSpanId(null)
 				setTooltipPos(null)
 			}
 		},
-		[bars],
+		[findBarAt, hoveredSpanId, setCursorX],
 	)
 
-	const handleMouseLeaveContainer = React.useCallback(() => {
-		setHoveredSpan(null)
+	const handleCanvasMouseLeave = React.useCallback(() => {
+		setCursorX(null)
+		setHoveredSpanId(null)
 		setTooltipPos(null)
-	}, [])
+	}, [setCursorX])
 
-	// Bar click handlers
-	const handleBarClick = React.useCallback(
+	const handleCanvasClick = React.useCallback(
+		(e: React.MouseEvent) => {
+			const el = canvasViewportRef.current
+			if (!el) return
+			const rect = el.getBoundingClientRect()
+			const hit = findBarAt(e.clientX - rect.left, e.clientY - rect.top)
+			if (hit && onSelectSpan) {
+				const bar = bars.find((b) => b.span.spanId === hit.spanId)
+				if (bar) onSelectSpan(bar.span)
+			}
+		},
+		[bars, findBarAt, onSelectSpan],
+	)
+
+	const handleCanvasDoubleClick = React.useCallback(
+		(e: React.MouseEvent) => {
+			const el = canvasViewportRef.current
+			if (!el) return
+			const rect = el.getBoundingClientRect()
+			const hit = findBarAt(e.clientX - rect.left, e.clientY - rect.top)
+			if (!hit) return
+			const bar = bars.find((b) => b.span.spanId === hit.spanId)
+			if (!bar) return
+			dispatch({
+				type: "ZOOM_TO_SPAN",
+				startMs: bar.startMs,
+				endMs: bar.endMs,
+				traceStartMs,
+				traceEndMs,
+			})
+		},
+		[bars, dispatch, findBarAt, traceEndMs, traceStartMs],
+	)
+
+	const handleSidebarBarClick = React.useCallback(
 		(spanId: string) => {
 			const bar = bars.find((b) => b.span.spanId === spanId)
-			if (bar && onSelectSpan) {
-				onSelectSpan(bar.span)
-			}
+			if (bar && onSelectSpan) onSelectSpan(bar.span)
 		},
 		[bars, onSelectSpan],
 	)
 
-	const handleBarDoubleClick = React.useCallback(
+	const handleSidebarBarDoubleClick = React.useCallback(
 		(spanId: string) => {
 			const bar = bars.find((b) => b.span.spanId === spanId)
-			if (bar) {
-				dispatch({
-					type: "ZOOM_TO_SPAN",
-					startMs: bar.startMs,
-					endMs: bar.endMs,
-					traceStartMs,
-					traceEndMs,
-				})
-			}
+			if (!bar) return
+			dispatch({
+				type: "ZOOM_TO_SPAN",
+				startMs: bar.startMs,
+				endMs: bar.endMs,
+				traceStartMs,
+				traceEndMs,
+			})
 		},
-		[bars, dispatch, traceStartMs, traceEndMs],
+		[bars, dispatch, traceEndMs, traceStartMs],
 	)
 
 	const handleCollapseToggle = React.useCallback(
@@ -126,23 +195,37 @@ export function TraceTimeline() {
 		[dispatch],
 	)
 
-	// Minimap viewport change
 	const handleMinimapViewportChange = React.useCallback(
 		(viewport: { startMs: number; endMs: number }) => {
-			dispatch({
-				type: "SET_VIEWPORT",
-				viewport,
-			})
+			dispatch({ type: "SET_VIEWPORT", viewport })
 		},
 		[dispatch],
 	)
 
-	// Zoom to fit
 	const handleZoomToFit = React.useCallback(() => {
 		dispatch({ type: "ZOOM_TO_FIT", traceStartMs, traceEndMs })
 	}, [dispatch, traceStartMs, traceEndMs])
 
-	// Keyboard navigation
+	const handleSidebarResize = React.useCallback((delta: number) => {
+		setSidebarWidth((w) =>
+			Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, w + delta)),
+		)
+	}, [])
+
+	// Scroll focused row into view when keyboard nav changes it.
+	React.useEffect(() => {
+		const el = scrollRef.current
+		if (!el || state.focusedIndex === null) return
+		const rowSize = ROW_HEIGHT + ROW_GAP
+		const rowTop = state.focusedIndex * rowSize
+		const rowBottom = rowTop + ROW_HEIGHT
+		if (rowTop < el.scrollTop) {
+			el.scrollTop = rowTop
+		} else if (rowBottom > el.scrollTop + el.clientHeight) {
+			el.scrollTop = rowBottom - el.clientHeight
+		}
+	}, [state.focusedIndex])
+
 	const handleKeyDown = React.useCallback(
 		(e: React.KeyboardEvent) => {
 			switch (e.key) {
@@ -157,7 +240,7 @@ export function TraceTimeline() {
 				case "ArrowRight":
 					if (state.focusedIndex !== null) {
 						const bar = bars[state.focusedIndex]
-						if (bar?.span.children.length > 0 && bar.isCollapsed) {
+						if (bar?.hasChildren && bar.isCollapsed) {
 							dispatch({ type: "TOGGLE_COLLAPSE", spanId: bar.span.spanId })
 						}
 					}
@@ -165,7 +248,7 @@ export function TraceTimeline() {
 				case "ArrowLeft":
 					if (state.focusedIndex !== null) {
 						const bar = bars[state.focusedIndex]
-						if (bar?.span.children.length > 0 && !bar.isCollapsed) {
+						if (bar?.hasChildren && !bar.isCollapsed) {
 							dispatch({ type: "TOGGLE_COLLAPSE", spanId: bar.span.spanId })
 						}
 					}
@@ -175,9 +258,7 @@ export function TraceTimeline() {
 					if (state.focusedIndex !== null) {
 						e.preventDefault()
 						const bar = bars[state.focusedIndex]
-						if (bar && onSelectSpan) {
-							onSelectSpan(bar.span)
-						}
+						if (bar && onSelectSpan) onSelectSpan(bar.span)
 					}
 					break
 				case "/":
@@ -226,9 +307,10 @@ export function TraceTimeline() {
 		],
 	)
 
-	// Grid lines from time axis ticks
-	const visibleDuration = state.viewport.endMs - state.viewport.startMs
-	const rowSize = ROW_HEIGHT + ROW_GAP
+	const hoveredSpan = React.useMemo(
+		() => (hoveredSpanId ? bars.find((b) => b.span.spanId === hoveredSpanId)?.span ?? null : null),
+		[bars, hoveredSpanId],
+	)
 
 	if (rootSpans.length === 0) {
 		return (
@@ -238,9 +320,10 @@ export function TraceTimeline() {
 		)
 	}
 
-	// Check if zoomed (viewport is narrower than full trace)
 	const fullDuration = traceEndMs - traceStartMs
+	const visibleDuration = state.viewport.endMs - state.viewport.startMs
 	const isZoomed = visibleDuration < fullDuration * 0.95
+	const canvasWidth = Math.max(0, containerSize.width - sidebarWidth)
 
 	return (
 		<div
@@ -248,10 +331,7 @@ export function TraceTimeline() {
 			className="border flex flex-col h-full outline-none relative"
 			tabIndex={0}
 			onKeyDown={handleKeyDown}
-			onMouseMove={handleMouseMoveForTooltip}
-			onMouseLeave={handleMouseLeaveContainer}
 		>
-			{/* Search bar */}
 			<TraceTimelineSearch
 				query={state.searchQuery}
 				onQueryChange={(q) => dispatch({ type: "SET_SEARCH", query: q })}
@@ -260,13 +340,13 @@ export function TraceTimeline() {
 				inputRef={searchInputRef}
 			/>
 
-			{/* Header with controls */}
 			<div className="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-1.5 shrink-0">
 				<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
 					<span className="font-medium">Timeline</span>
 					<span className="tabular-nums">{bars.length} spans</span>
 				</div>
 				<div className="flex items-center gap-1">
+					<ColorByPicker value={colorBy} onChange={setColorBy} rootSpans={rootSpans} />
 					{isZoomed && (
 						<Button
 							variant="ghost"
@@ -281,79 +361,89 @@ export function TraceTimeline() {
 				</div>
 			</div>
 
-			{/* Minimap */}
 			<TraceTimelineMinimap
 				rootSpans={rootSpans}
 				totalDurationMs={totalDurationMs}
 				traceStartMs={traceStartMs}
 				traceEndMs={traceEndMs}
 				services={services}
+				colorBy={colorBy}
 				viewport={state.viewport}
 				onViewportChange={handleMinimapViewportChange}
 			/>
 
-			{/* Time axis */}
-			<TraceTimelineTimeAxis
-				viewport={state.viewport}
-				ticks={timeAxisTicks}
-				traceStartMs={traceStartMs}
-			/>
+			<div className="flex border-b border-border shrink-0">
+				<div style={{ width: sidebarWidth }} className="shrink-0 border-r border-border" />
+				<div className="flex-1 min-w-0">
+					<TraceTimelineTimeAxis
+						viewport={state.viewport}
+						ticks={timeAxisTicks}
+						traceStartMs={traceStartMs}
+					/>
+				</div>
+			</div>
 
-			{/* Scrollable rows area */}
 			<div
 				ref={scrollRef}
-				className="flex-1 min-h-0 overflow-auto relative"
-				style={{ cursor: isPanning.current ? "grabbing" : undefined }}
+				className="flex flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative"
 				onScroll={handleScroll}
-				onMouseDown={handleMouseDown}
 			>
-				{/* Grid lines */}
-				<div
-					className="absolute inset-0 pointer-events-none z-0"
-					style={{ height: totalRows * rowSize }}
-				>
-					{timeAxisTicks.map((offsetMs) => {
-						const absMs = traceStartMs + offsetMs
-						const leftPercent = ((absMs - state.viewport.startMs) / visibleDuration) * 100
-						if (leftPercent < -1 || leftPercent > 101) return null
-						return (
-							<div
-								key={`grid-${offsetMs}`}
-								className="absolute top-0 bottom-0 border-l border-dashed border-foreground/[0.04]"
-								style={{ left: `${leftPercent}%` }}
-							/>
-						)
-					})}
-				</div>
-
-				{/* Connectors */}
-				<TraceTimelineConnectors
+				<TraceTimelineSidebar
 					bars={bars}
 					totalRows={totalRows}
 					scrollTop={scrollTop}
 					containerHeight={containerSize.height}
-				/>
-
-				{/* Span bars */}
-				<TraceTimelineRows
-					bars={bars}
-					totalRows={totalRows}
-					viewport={state.viewport}
-					services={services}
 					selectedSpanId={selectedSpanId}
 					focusedIndex={state.focusedIndex}
 					searchMatches={searchMatches}
 					isSearchActive={isSearchActive}
-					scrollTop={scrollTop}
-					containerHeight={containerSize.height}
-					containerWidth={containerSize.width}
-					onBarClick={handleBarClick}
-					onBarDoubleClick={handleBarDoubleClick}
+					hoveredSpanId={hoveredSpanId}
+					width={sidebarWidth}
+					onBarClick={handleSidebarBarClick}
+					onBarDoubleClick={handleSidebarBarDoubleClick}
 					onCollapseToggle={handleCollapseToggle}
+					onHoverSpan={setHoveredSpanId}
 				/>
+				<div className="relative flex-1 min-w-0">
+					<SidebarResizeHandle onResize={handleSidebarResize} />
+					<div
+						ref={canvasViewportRef}
+						className="sticky top-0 left-0 right-0"
+						style={{
+							height: containerSize.height,
+							cursor: isPanning.current ? "grabbing" : "crosshair",
+						}}
+						onMouseMove={handleCanvasMouseMove}
+						onMouseLeave={handleCanvasMouseLeave}
+						onMouseDown={handleMouseDown}
+						onClick={handleCanvasClick}
+						onDoubleClick={handleCanvasDoubleClick}
+					>
+						<TraceTimelineCanvas
+							ref={canvasHandleRef}
+							bars={bars}
+							totalRows={totalRows}
+							parentIndexById={parentIndexById}
+							viewport={state.viewport}
+							traceStartMs={traceStartMs}
+							timeAxisTicks={timeAxisTicks}
+							scrollTop={scrollTop}
+							selectedSpanId={selectedSpanId}
+							focusedIndex={state.focusedIndex}
+							searchMatches={searchMatches}
+							isSearchActive={isSearchActive}
+							barRectsRef={barRectsRef}
+							cursorXRef={cursorXRef}
+							hoveredSpanId={hoveredSpanId}
+						/>
+					</div>
+					<div
+						aria-hidden
+						style={{ height: totalRows * (ROW_HEIGHT + ROW_GAP), width: canvasWidth }}
+					/>
+				</div>
 			</div>
 
-			{/* Legend */}
 			<div className="flex items-center justify-between border-t border-border bg-muted/30 px-3 py-1.5 text-[10px] text-muted-foreground shrink-0">
 				<div className="flex items-center gap-3 text-foreground/30">
 					<span>
@@ -398,12 +488,10 @@ export function TraceTimeline() {
 				</div>
 			</div>
 
-			{/* Floating tooltip — uses fixed positioning to escape overflow clipping */}
 			{hoveredSpan &&
 				tooltipPos &&
 				ReactDOM.createPortal(
 					<div
-						ref={tooltipRef}
 						className="fixed z-[9999] pointer-events-none"
 						style={{
 							left: tooltipPos.x,

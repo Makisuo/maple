@@ -153,6 +153,33 @@ export function getServiceBorderColor(serviceName: string, services: string[]): 
 }
 
 /**
+ * Trace timeline palette — distinct from the legend palette so bars stay
+ * readable against the dark timeline background.
+ */
+const TIMELINE_HUES = [50, 155, 255, 25, 100, 310, 200, 340]
+
+/**
+ * Resolve a hue for a string value, used to color trace timeline bars by
+ * an arbitrary attribute. Returns null for empty/missing values so callers
+ * can render a neutral fallback.
+ *
+ * When indexHint is supplied (e.g. position of a service in the trace's
+ * services array), it is used instead of hashing — this preserves the
+ * positional service palette that already exists in production traces.
+ */
+export function getValueHue(value: string | undefined | null, indexHint?: number): number | null {
+	if (value == null || value === "") return null
+	if (indexHint != null && indexHint >= 0) {
+		return TIMELINE_HUES[indexHint % TIMELINE_HUES.length]
+	}
+	let hash = 0
+	for (let i = 0; i < value.length; i++) {
+		hash = value.charCodeAt(i) + ((hash << 5) - hash)
+	}
+	return TIMELINE_HUES[Math.abs(hash) % TIMELINE_HUES.length]
+}
+
+/**
  * Calculate self-time for a span (duration minus overlapping children time)
  */
 export function calculateSelfTime(
