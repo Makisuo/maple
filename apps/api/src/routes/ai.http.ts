@@ -6,7 +6,7 @@ import {
 	mapleChatEntityUrl,
 } from "@maple/ai"
 import { createHmac, timingSafeEqual } from "node:crypto"
-import { Effect, Redacted } from "effect"
+import { Cause, Effect, Redacted } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { AuthService, type AuthServiceShape } from "../services/AuthService"
 import { Env, type EnvShape } from "../services/Env"
@@ -127,6 +127,30 @@ const isNotFoundError = (error: unknown): boolean => {
 	return /(not[\s_-]?found|404|unknown entity)/i.test(message)
 }
 
+const isAlreadyExistsError = (error: unknown): boolean => {
+	const message = error instanceof Error ? error.message : String(error)
+	return /(duplicate key|already exists|entities_pkey|conflict|\b409\b)/i.test(message)
+}
+
+// Build a JSON error response from any Cause — recoverable failures, defects,
+// and interruptions. Guarantees we never send 5xx with an empty body: defects
+// that would otherwise bypass Effect.catch and hit the framework's default
+// 500-no-body handler are mapped here. The pretty cause is logged server-side
+// so we can debug from telemetry while keeping the client payload tidy.
+const errorResponseFromCause = (
+	cause: Cause.Cause<unknown>,
+	route: string,
+): HttpServerResponse.HttpServerResponse => {
+	const squashed = Cause.squash(cause)
+	const originalError =
+		squashed instanceof Error ? squashed : new Error(String(squashed ?? "unknown error"))
+	const isRuntimeUnreachable = originalError instanceof RuntimeUnreachable
+	const status = isRuntimeUnreachable || isTransientFetchError(originalError) ? 502 : 500
+	const message = originalError.message || `Internal error (${originalError.name || "unknown"})`
+	console.error(`[ai-gateway] ${route} failed (${status}):`, Cause.pretty(cause))
+	return errorJson(message, status)
+}
+
 // undici's keep-alive pool will throw "fetch failed" / "Network connection lost"
 // / ECONNRESET when the runtime container is bounced between requests but the
 // API process holds onto stale sockets. These are transient — a single retry
@@ -164,13 +188,17 @@ const ensureMapleChatEntity = async (input: {
 		await retryOnTransient(() => client.getEntityInfo(entityUrl))
 		return { id, entityUrl }
 	} catch (error) {
-		if (!isNotFoundError(error)) {
+		if (isNotFoundError(error)) {
+			// fall through to spawn
+		} else if (isTransientFetchError(error)) {
 			throw new RuntimeUnreachable(
 				`Electric Agents runtime unreachable at ${input.runtimeUrl}: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 				{ cause: error },
 			)
+		} else {
+			throw error instanceof Error ? error : new Error(String(error))
 		}
 	}
 
@@ -193,12 +221,27 @@ const ensureMapleChatEntity = async (input: {
 			}),
 		)
 	} catch (error) {
-		throw new RuntimeUnreachable(
-			`Failed to spawn Maple chat entity in Electric runtime at ${input.runtimeUrl}: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-			{ cause: error },
-		)
+		// A duplicate-key / "already exists" response means a prior spawn
+		// half-committed the postgres row (e.g. its durable stream creation
+		// crashed) or two requests raced. The entity logically exists from the
+		// caller's point of view; treat it as idempotent success rather than
+		// returning 502 and forcing the user to wipe volumes.
+		if (isAlreadyExistsError(error)) {
+			console.warn(
+				`[maple-chat] entity ${id} already exists on spawn; treating as idempotent. ` +
+					`Underlying error: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			return { id, entityUrl }
+		}
+		if (isTransientFetchError(error)) {
+			throw new RuntimeUnreachable(
+				`Failed to spawn Maple chat entity in Electric runtime at ${input.runtimeUrl}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+				{ cause: error },
+			)
+		}
+		throw error instanceof Error ? error : new Error(String(error))
 	}
 
 	return { id, entityUrl }
@@ -279,7 +322,11 @@ const proxyRuntimeRequest = (
 			return HttpServerResponse.fromWeb(response)
 		},
 		catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-	}).pipe(Effect.catch((error) => Effect.succeed(errorJson(error.message, 502))))
+	}).pipe(
+		Effect.catchCause((cause) =>
+			Effect.succeed(errorResponseFromCause(cause, "proxyRuntimeRequest")),
+		),
+	)
 
 export const AiGatewayRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
@@ -316,12 +363,9 @@ export const AiGatewayRouter = HttpRouter.use((router) =>
 					observeTokenExpiresAt: issued.expiresAt,
 				})
 			}).pipe(
-				Effect.catch((error) => {
-					if (error instanceof RuntimeUnreachable) {
-						return Effect.succeed(errorJson(error.message, 502))
-					}
-					return Effect.fail(error)
-				}),
+				Effect.catchCause((cause) =>
+					Effect.succeed(errorResponseFromCause(cause, "POST /api/ai/sessions")),
+				),
 			),
 		)
 
@@ -337,7 +381,13 @@ export const AiGatewayRouter = HttpRouter.use((router) =>
 				}
 				const issued = createObserveToken(env, tenant.orgId, sessionId)
 				return json({ observeToken: issued.token, observeTokenExpiresAt: issued.expiresAt })
-			}),
+			}).pipe(
+				Effect.catchCause((cause) =>
+					Effect.succeed(
+						errorResponseFromCause(cause, "POST /api/ai/sessions/:sessionId/observe-token"),
+					),
+				),
+			),
 		)
 
 		yield* router.add("POST", "/api/ai/sessions/:sessionId/messages", (req) =>
@@ -398,18 +448,28 @@ export const AiGatewayRouter = HttpRouter.use((router) =>
 					catch: (error) => (error instanceof Error ? error : new Error(String(error))),
 				})
 				return json({ ok: true })
-			}),
+			}).pipe(
+				Effect.catchCause((cause) =>
+					Effect.succeed(
+						errorResponseFromCause(cause, "POST /api/ai/sessions/:sessionId/messages"),
+					),
+				),
+			),
 		)
 
 		const runtimeProxyHandler = (req: HttpServerRequest.HttpServerRequest) =>
 			Effect.gen(function* () {
 				const authorized = yield* authorizeRuntimeRequest(req, env, auth).pipe(
 					Effect.as(true),
-					Effect.catch(() => Effect.succeed(false)),
+					Effect.catchCause(() => Effect.succeed(false)),
 				)
 				if (!authorized) return errorJson("Unauthorized", 401)
 				return yield* proxyRuntimeRequest(req, env.ELECTRIC_AGENTS_URL)
-			})
+			}).pipe(
+				Effect.catchCause((cause) =>
+					Effect.succeed(errorResponseFromCause(cause, "/api/ai/runtime/*")),
+				),
+			)
 
 		for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"] as const) {
 			yield* router.add(method, "/api/ai/runtime/*", runtimeProxyHandler)

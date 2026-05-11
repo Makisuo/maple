@@ -1,0 +1,38 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 371babe98a353cac1c7a3981820e906f0ef14ded..9d7ae3be1581f52cf211ba198f253818772b7d16 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -1022,6 +1022,14 @@ var StreamResponseImpl = class {
+ 	async #trySSEReconnect() {
+ 		if (!this.#syncState.shouldUseSse()) return null;
+ 		if (!this.#shouldContinueLive() || !this.#startSSE) return null;
++		// PausedState delegates shouldUseSse() to its inner SSEState, so it
++		// slips past the gate above, but PausedState itself does not expose
++		// handleConnectionEnd. Skip the reconnect attempt while paused — pull()
++		// is already awaiting #pausePromise and will resume the inner SSEState
++		// cleanly when the page becomes visible again. Without this guard the
++		// call below throws "handleConnectionEnd is not a function" and rejects
++		// every active subscriber via streamResponse.closed.
++		if (!(this.#syncState instanceof SSEState)) return null;
+ 		const result = this.#syncState.handleConnectionEnd(Date.now(), this.#abortController.signal.aborted, this.#sseResilience);
+ 		this.#syncState = result.state;
+ 		if (result.action === `fallback`) {
+diff --git a/dist/index.js b/dist/index.js
+index 3c5939e8ef0efc13b629302d27ca0ecd6203ac78..f710a9fd10f534b3e47e32f996db168de858e785 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -998,6 +998,14 @@ var StreamResponseImpl = class {
+ 	async #trySSEReconnect() {
+ 		if (!this.#syncState.shouldUseSse()) return null;
+ 		if (!this.#shouldContinueLive() || !this.#startSSE) return null;
++		// PausedState delegates shouldUseSse() to its inner SSEState, so it
++		// slips past the gate above, but PausedState itself does not expose
++		// handleConnectionEnd. Skip the reconnect attempt while paused — pull()
++		// is already awaiting #pausePromise and will resume the inner SSEState
++		// cleanly when the page becomes visible again. Without this guard the
++		// call below throws "handleConnectionEnd is not a function" and rejects
++		// every active subscriber via streamResponse.closed.
++		if (!(this.#syncState instanceof SSEState)) return null;
+ 		const result = this.#syncState.handleConnectionEnd(Date.now(), this.#abortController.signal.aborted, this.#sseResilience);
+ 		this.#syncState = result.state;
+ 		if (result.action === `fallback`) {

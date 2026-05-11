@@ -44,7 +44,7 @@ const printRuntimeStartupHelp = (error: unknown) => {
 		console.error("")
 		console.error(
 			"Note: DURABLE_STREAMS_WRITE_URL is not the same thing as ELECTRIC_AGENTS_URL. " +
-				"Leave ELECTRIC_AGENTS_URL as http://localhost:4437 for local Electric Agents unless you are running a custom runtime server.",
+				"Leave ELECTRIC_AGENTS_URL as http://localhost:4438 for local Electric Agents unless you are running a custom runtime server.",
 		)
 	}
 }

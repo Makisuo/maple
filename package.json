@@ -87,6 +87,7 @@
 		}
 	},
 	"patchedDependencies": {
-		"effect@4.0.0-beta.64": "patches/effect@4.0.0-beta.64.patch"
+		"effect@4.0.0-beta.64": "patches/effect@4.0.0-beta.64.patch",
+		"@electric-ax/durable-streams-client-beta@0.3.1": "patches/@electric-ax%2Fdurable-streams-client-beta@0.3.1.patch"
 	}
 }
