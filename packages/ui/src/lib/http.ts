@@ -58,15 +58,15 @@ const parseSpanName = (name: string): Option.Option<NameInfo> => {
 }
 
 const clientRouteFromAttrs = (attrs: Record<string, string>): Option.Option<string> => {
-	const host = attrs["server.address"] ?? attrs["net.peer.name"]
+	// Prefer parsing url.full / http.url first — new URL() reliably strips the scheme.
+	// Some emitters put a scheme into server.address, which would otherwise leak through.
+	const fromFullUrl = pipe(Option.fromNullishOr(attrs["url.full"] ?? attrs["http.url"]), Option.flatMap(parseUrlHostPath))
+	if (Option.isSome(fromFullUrl)) return fromFullUrl
+
+	const host = (attrs["server.address"] ?? attrs["net.peer.name"])?.replace(/^https?:\/\//, "")
 	const path = attrs["url.path"] ?? attrs["http.target"]
 	if (host && path) return Option.some(`${host}${path}`)
-
-	return pipe(
-		Option.fromNullishOr(attrs["url.full"] ?? attrs["http.url"]),
-		Option.flatMap(parseUrlHostPath),
-		Option.orElse(() => Option.fromNullishOr(path)),
-	)
+	return Option.fromNullishOr(path)
 }
 
 const serverRouteFromAttrs = (attrs: Record<string, string>): Option.Option<string> =>

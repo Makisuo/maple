@@ -62,8 +62,16 @@ const DEFAULT_OFFSET = 0
 
 const LIST_PROJECTED_COLUMNS = [
 	"spanAttributes.http.method",
+	"spanAttributes.http.request.method",
 	"spanAttributes.http.route",
+	"spanAttributes.http.target",
 	"spanAttributes.http.status_code",
+	"spanAttributes.http.response.status_code",
+	"spanAttributes.http.url",
+	"spanAttributes.url.full",
+	"spanAttributes.url.path",
+	"spanAttributes.server.address",
+	"spanAttributes.net.peer.name",
 ] as const
 
 export interface TraceRootSpanSummary {
@@ -144,9 +152,22 @@ function buildResourceAttributeFilters(input: ListTracesInput): AttributeFilter[
 function transformSpanListRow(row: Record<string, unknown>): Trace {
 	const spanAttrs = (row.spanAttributes ?? {}) as Record<string, string>
 	const rootSpanAttributes: Record<string, string> = {}
-	if (spanAttrs["http.method"]) rootSpanAttributes["http.method"] = spanAttrs["http.method"]
-	if (spanAttrs["http.route"]) rootSpanAttributes["http.route"] = spanAttrs["http.route"]
-	if (spanAttrs["http.status_code"]) rootSpanAttributes["http.status_code"] = spanAttrs["http.status_code"]
+	const PROJECTED_ATTR_KEYS = [
+		"http.method",
+		"http.request.method",
+		"http.route",
+		"http.target",
+		"http.status_code",
+		"http.response.status_code",
+		"http.url",
+		"url.full",
+		"url.path",
+		"server.address",
+		"net.peer.name",
+	] as const
+	for (const key of PROJECTED_ATTR_KEYS) {
+		if (spanAttrs[key]) rootSpanAttributes[key] = spanAttrs[key]
+	}
 
 	const timestamp = String(row.timestamp)
 	return {

@@ -123,6 +123,37 @@ describe("getHttpInfo", () => {
 		})
 	})
 
+	it("prefers url.full over a scheme-tainted server.address", () => {
+		expect(
+			getHttpInfo("http.client GET", {
+				"http.request.method": "GET",
+				"server.address": "http://prd-artifacts-api",
+				"url.path": "/config-api/read",
+				"url.full": "http://prd-artifacts-api/config-api/read",
+			}),
+		).toEqual({
+			method: "GET",
+			route: "prd-artifacts-api/config-api/read",
+			statusCode: null,
+			isError: false,
+		})
+	})
+
+	it("strips a scheme prefix from server.address when url.full is absent", () => {
+		expect(
+			getHttpInfo("http.client GET", {
+				"http.request.method": "GET",
+				"server.address": "http://prd-artifacts-api",
+				"url.path": "/config-api/read",
+			}),
+		).toEqual({
+			method: "GET",
+			route: "prd-artifacts-api/config-api/read",
+			statusCode: null,
+			isError: false,
+		})
+	})
+
 	it("server spans keep path-only when only http.route is set", () => {
 		expect(
 			getHttpInfo("http.server GET", {
