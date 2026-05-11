@@ -32,3 +32,4 @@ apps/chat-agent/.dev.vars
 .sst
 /bin/
 /apps/agents/logs
+/logs
