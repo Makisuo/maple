@@ -47,7 +47,12 @@ export interface SearchTracesInput {
 	readonly maxDurationMs?: number
 	readonly httpMethod?: string
 	readonly traceId?: string
-	readonly attributeFilters?: ReadonlyArray<{ key: string; value: string; mode?: string }>
+	readonly attributeFilters?: ReadonlyArray<{
+		key: string
+		value: string
+		mode?: string
+		negated?: boolean
+	}>
 	readonly rootOnly?: boolean
 	readonly limit?: number
 	readonly offset?: number

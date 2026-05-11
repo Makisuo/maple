@@ -102,7 +102,7 @@ export function AdvancedFilterDialog({ initialValue, onApply }: AdvancedFilterDi
 						autocompleteScope="trace_search"
 						maxSuggestions={20}
 						onChange={setValue}
-						placeholder='service.name = "checkout" AND attr.http.route = "/orders/:id"'
+						placeholder='service.name = "checkout" AND attr.http.route != "/health"'
 						textareaClassName="font-mono text-sm leading-relaxed resize-y min-h-[200px]"
 						ariaLabel="Advanced traces where clause"
 					/>

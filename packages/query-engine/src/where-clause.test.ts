@@ -211,4 +211,34 @@ describe("parseWhereClause", () => {
 		const result = parseWhereClause('Service.Name = "api"')
 		expect(result.clauses[0].key).toBe("service.name")
 	})
+
+	it("parses != operator", () => {
+		const result = parseWhereClause('service.name != "checkout"')
+		expect(result.clauses).toEqual([{ key: "service.name", operator: "!=", value: "checkout" }])
+		expect(result.warnings).toEqual([])
+	})
+
+	it("parses !contains operator", () => {
+		const result = parseWhereClause('attr.http.route !contains "/health"')
+		expect(result.clauses).toEqual([{ key: "attr.http.route", operator: "!contains", value: "/health" }])
+		expect(result.warnings).toEqual([])
+	})
+
+	it("parses !exists operator", () => {
+		const result = parseWhereClause("attr.user_id !exists")
+		expect(result.clauses).toEqual([{ key: "attr.user_id", operator: "!exists", value: "" }])
+		expect(result.warnings).toEqual([])
+	})
+
+	it("parses mixed positive and negative clauses", () => {
+		const result = parseWhereClause(
+			'service.name = "api" AND span.name != "GET /health" AND attr.user_id !exists',
+		)
+		expect(result.clauses).toEqual([
+			{ key: "service.name", operator: "=", value: "api" },
+			{ key: "span.name", operator: "!=", value: "GET /health" },
+			{ key: "attr.user_id", operator: "!exists", value: "" },
+		])
+		expect(result.warnings).toEqual([])
+	})
 })

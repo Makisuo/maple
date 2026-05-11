@@ -709,6 +709,7 @@ type AttrFilterArray = Array<{
 	key: string
 	value?: string
 	mode: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains"
+	negated?: boolean
 }>
 
 function extractTracesOpts(filters: Record<string, unknown> | undefined) {
@@ -731,6 +732,9 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
 		attributeFilters: filters?.attributeFilters as AttrFilterArray | undefined,
 		resourceAttributeFilters: filters?.resourceAttributeFilters as AttrFilterArray | undefined,
 		groupByAttributeKeys: filters?.groupByAttributeKeys as string[] | undefined,
+		excludedServiceNames: filters?.excludedServiceNames as readonly string[] | undefined,
+		excludedSpanNames: filters?.excludedSpanNames as readonly string[] | undefined,
+		excludedEnvironments: filters?.excludedEnvironments as readonly string[] | undefined,
 	}
 }
 

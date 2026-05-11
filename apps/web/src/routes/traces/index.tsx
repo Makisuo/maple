@@ -25,6 +25,7 @@ const AttributeFilterParam = Schema.Struct({
 	key: Schema.String,
 	value: Schema.String,
 	matchMode: Schema.optional(Schema.Literals(["contains"])),
+	negated: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
 })
 
 const tracesSearchSchema = Schema.Struct({
@@ -46,6 +47,11 @@ const tracesSearchSchema = Schema.Struct({
 	serviceMatchMode: ContainsMatchMode,
 	spanNameMatchMode: ContainsMatchMode,
 	deploymentEnvMatchMode: ContainsMatchMode,
+	excludedServices: OptionalStringArrayParam,
+	excludedSpanNames: OptionalStringArrayParam,
+	excludedDeploymentEnvs: OptionalStringArrayParam,
+	excludedHttpMethods: OptionalStringArrayParam,
+	excludedHttpStatusCodes: OptionalStringArrayParam,
 })
 
 export type TracesSearchParams = Schema.Schema.Type<typeof tracesSearchSchema>

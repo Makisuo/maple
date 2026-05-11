@@ -593,6 +593,34 @@ describe("tracesListQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("FROM traces")
 	})
+
+	it("emits NOT IN for excludedServiceNames", () => {
+		const q = tracesListQuery({ excludedServiceNames: ["checkout", "billing"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ServiceName NOT IN ('checkout', 'billing')")
+	})
+
+	it("emits NOT IN for excludedSpanNames", () => {
+		const q = tracesListQuery({ excludedSpanNames: ["GET /health"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("SpanName NOT IN ('GET /health')")
+	})
+
+	it("wraps a negated attribute filter in NOT (...)", () => {
+		const q = tracesListQuery({
+			attributeFilters: [{ key: "env", value: "prod", mode: "equals", negated: true }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("NOT (SpanAttributes['env'] = 'prod')")
+	})
+
+	it("wraps a negated contains attribute filter in NOT (positionCaseInsensitive ...)", () => {
+		const q = tracesListQuery({
+			attributeFilters: [{ key: "http.route", value: "/health", mode: "contains", negated: true }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("NOT (positionCaseInsensitive(SpanAttributes['http.route'], '/health') > 0)")
+	})
 })
 
 // ---------------------------------------------------------------------------

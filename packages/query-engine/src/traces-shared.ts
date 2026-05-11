@@ -51,27 +51,28 @@ export function buildAttrFilterCondition(
 	const colExpr: CH.Expr<string> = CH.mapGet(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
 	const value = af.value ?? ""
 
-	if (af.mode === "exists") {
-		return CH.mapContains(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
-	}
+	const positive = ((): CH.Condition => {
+		if (af.mode === "exists") {
+			return CH.mapContains(CH.dynamicColumn<Record<string, string>>(mapName), af.key)
+		}
+		if (af.mode === "contains") {
+			return CH.positionCaseInsensitive(colExpr, CH.lit(value)).gt(0)
+		}
+		if (af.mode === "gt") {
+			return CH.toFloat64OrZero(colExpr).gt(Number(value))
+		}
+		if (af.mode === "gte") {
+			return CH.toFloat64OrZero(colExpr).gte(Number(value))
+		}
+		if (af.mode === "lt") {
+			return CH.toFloat64OrZero(colExpr).lt(Number(value))
+		}
+		if (af.mode === "lte") {
+			return CH.toFloat64OrZero(colExpr).lte(Number(value))
+		}
+		// equals (default)
+		return colExpr.eq(value)
+	})()
 
-	if (af.mode === "contains") {
-		return CH.positionCaseInsensitive(colExpr, CH.lit(value)).gt(0)
-	}
-
-	if (af.mode === "gt") {
-		return CH.toFloat64OrZero(colExpr).gt(Number(value))
-	}
-	if (af.mode === "gte") {
-		return CH.toFloat64OrZero(colExpr).gte(Number(value))
-	}
-	if (af.mode === "lt") {
-		return CH.toFloat64OrZero(colExpr).lt(Number(value))
-	}
-	if (af.mode === "lte") {
-		return CH.toFloat64OrZero(colExpr).lte(Number(value))
-	}
-
-	// equals (default)
-	return colExpr.eq(value)
+	return af.negated ? CH.not(positive) : positive
 }

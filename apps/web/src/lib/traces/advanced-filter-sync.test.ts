@@ -192,6 +192,33 @@ describe("parseWhereClause", () => {
 		expect(filters.service).toBe("checkout")
 		expect(filters.matchModes).toBeUndefined()
 	})
+
+	it("routes != on named fields to excluded* arrays", () => {
+		const { filters } = parseWhereClause('service.name != "checkout" AND span.name != "GET /health"')
+		expect(filters.excludedServices).toEqual(["checkout"])
+		expect(filters.excludedSpanNames).toEqual(["GET /health"])
+		expect(filters.service).toBeUndefined()
+		expect(filters.spanName).toBeUndefined()
+	})
+
+	it("marks attr.* filters as negated for !=", () => {
+		const { filters } = parseWhereClause('attr.env != "prod"')
+		expect(filters.attributeFilters).toEqual([
+			{ key: "env", value: "prod", matchMode: undefined, negated: true },
+		])
+	})
+
+	it("marks attr.* filters as negated for !contains", () => {
+		const { filters } = parseWhereClause('attr.http.route !contains "/health"')
+		expect(filters.attributeFilters).toEqual([
+			{ key: "http.route", value: "/health", matchMode: "contains", negated: true },
+		])
+	})
+
+	it("aggregates multiple excluded values for the same field", () => {
+		const { filters } = parseWhereClause('service.name != "checkout" AND service.name != "billing"')
+		expect(filters.excludedServices).toEqual(["checkout", "billing"])
+	})
 })
 
 describe("toWhereClause", () => {
@@ -282,6 +309,44 @@ describe("toWhereClause", () => {
 		const { filters } = parseWhereClause(original)
 		const clause = toWhereClause(filters)
 		expect(clause).toBe('attr.http.route = "/api" AND attr.db.system contains "postgres"')
+	})
+
+	it("emits != for negated attribute filters", () => {
+		const clause = toWhereClause({
+			attributeFilters: [{ key: "env", value: "prod", negated: true }],
+			resourceAttributeFilters: [],
+		})
+		expect(clause).toBe('attr.env != "prod"')
+	})
+
+	it("emits !contains for negated contains attribute filters", () => {
+		const clause = toWhereClause({
+			attributeFilters: [{ key: "http.route", value: "/health", matchMode: "contains", negated: true }],
+			resourceAttributeFilters: [],
+		})
+		expect(clause).toBe('attr.http.route !contains "/health"')
+	})
+
+	it("emits != clauses for excluded named-field arrays", () => {
+		const clause = toWhereClause({
+			attributeFilters: [],
+			resourceAttributeFilters: [],
+			excludedServices: ["checkout"],
+			excludedSpanNames: ["GET /health"],
+		})
+		expect(clause).toBe('service.name != "checkout" AND span.name != "GET /health"')
+	})
+
+	it("round-trips negated clauses (canonical emit order: attr.* before excluded named fields)", () => {
+		const input =
+			'service.name = "api" AND span.name != "GET /health" AND attr.http.route !contains "/health"'
+		const { filters } = parseWhereClause(input)
+		const clause = toWhereClause(filters)
+		expect(clause).toBe(
+			'service.name = "api" AND attr.http.route !contains "/health" AND span.name != "GET /health"',
+		)
+		// And parsing the emitted output yields the same filter state.
+		expect(parseWhereClause(clause ?? "").filters).toEqual(filters)
 	})
 })
 
@@ -405,5 +470,26 @@ describe("applyWhereClause", () => {
 			{ key: "http.route", value: "/api", matchMode: undefined },
 			{ key: "db.system", value: "postgresql", matchMode: undefined },
 		])
+	})
+
+	it("merges excluded named-field clauses into excluded* search params", () => {
+		const result = applyWhereClause({}, 'service.name != "checkout" AND span.name != "GET /health"')
+
+		expect(result.excludedServices).toEqual(["checkout"])
+		expect(result.excludedSpanNames).toEqual(["GET /health"])
+	})
+
+	it("merges negated attribute filters", () => {
+		const result = applyWhereClause({}, 'attr.http.route !contains "/health"')
+
+		expect(result.attributeFilters).toEqual([
+			{ key: "http.route", value: "/health", matchMode: "contains", negated: true },
+		])
+	})
+
+	it("clears excluded* params when clause is empty", () => {
+		const result = applyWhereClause({ excludedServices: ["checkout"] }, "")
+
+		expect(result.excludedServices).toBeUndefined()
 	})
 })

@@ -24,6 +24,7 @@ const AttributeFilterInput = Schema.Struct({
 	key: Schema.String,
 	value: Schema.String,
 	matchMode: Schema.optional(Schema.String),
+	negated: Schema.optional(Schema.Boolean),
 })
 
 const ListTracesInputSchema = Schema.Struct({
@@ -47,6 +48,11 @@ const ListTracesInputSchema = Schema.Struct({
 	serviceMatchMode: ContainsMatchMode,
 	spanNameMatchMode: ContainsMatchMode,
 	deploymentEnvMatchMode: ContainsMatchMode,
+	excludedServices: Schema.optional(Schema.Array(Schema.String)),
+	excludedSpanNames: Schema.optional(Schema.Array(Schema.String)),
+	excludedDeploymentEnvs: Schema.optional(Schema.Array(Schema.String)),
+	excludedHttpMethods: Schema.optional(Schema.Array(Schema.String)),
+	excludedHttpStatusCodes: Schema.optional(Schema.Array(Schema.String)),
 })
 
 export type ListTracesInput = Schema.Schema.Type<typeof ListTracesInputSchema>
@@ -103,8 +109,15 @@ function buildAttributeFilters(input: ListTracesInput): AttributeFilter[] {
 				key: af.key,
 				value: af.value,
 				mode: af.matchMode === "contains" ? "contains" : "equals",
+				negated: af.negated || undefined,
 			})
 		}
+	}
+	for (const m of input.excludedHttpMethods ?? []) {
+		filters.push({ key: "http.method", value: m, mode: "equals", negated: true })
+	}
+	for (const s of input.excludedHttpStatusCodes ?? []) {
+		filters.push({ key: "http.status_code", value: s, mode: "equals", negated: true })
 	}
 
 	return filters
@@ -119,6 +132,7 @@ function buildResourceAttributeFilters(input: ListTracesInput): AttributeFilter[
 				key: rf.key,
 				value: rf.value,
 				mode: rf.matchMode === "contains" ? "contains" : "equals",
+				negated: rf.negated || undefined,
 			})
 		}
 	}
@@ -201,6 +215,11 @@ const listTracesEffect = Effect.fn("QueryEngine.listTraces")(function* ({ data }
 				attributeFilters: attributeFilters.length > 0 ? attributeFilters : undefined,
 				resourceAttributeFilters:
 					resourceAttributeFilters.length > 0 ? resourceAttributeFilters : undefined,
+				excludedServiceNames: input.excludedServices?.length ? input.excludedServices : undefined,
+				excludedSpanNames: input.excludedSpanNames?.length ? input.excludedSpanNames : undefined,
+				excludedEnvironments: input.excludedDeploymentEnvs?.length
+					? input.excludedDeploymentEnvs
+					: undefined,
 			},
 		},
 	})

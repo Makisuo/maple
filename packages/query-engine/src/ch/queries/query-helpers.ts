@@ -66,6 +66,9 @@ export interface TracesBaseWhereOpts {
 	matchModes?: TracesMatchModes
 	minDurationMs?: number
 	maxDurationMs?: number
+	excludedServiceNames?: readonly string[]
+	excludedSpanNames?: readonly string[]
+	excludedEnvironments?: readonly string[]
 }
 
 /**
@@ -131,6 +134,17 @@ export function tracesBaseWhereConditions(
 			conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes"))
 		}
 	}
+	if (opts.excludedServiceNames?.length) {
+		conditions.push(CH.notInList($.ServiceName, opts.excludedServiceNames))
+	}
+	if (opts.excludedSpanNames?.length) {
+		conditions.push(CH.notInList($.SpanName, opts.excludedSpanNames))
+	}
+	if (opts.excludedEnvironments?.length) {
+		conditions.push(
+			CH.notInList($.ResourceAttributes.get("deployment.environment"), opts.excludedEnvironments),
+		)
+	}
 
 	return conditions
 }
@@ -152,6 +166,7 @@ export function tracesBaseWhereConditions(
 /** Returns true iff the opts + groupBy can be served by service_overview_spans_mv. */
 export function canUseServiceOverviewMv(opts: TracesBaseWhereOpts, groupBy?: readonly string[]): boolean {
 	if (opts.spanName) return false
+	if (opts.excludedSpanNames?.length) return false
 	if (opts.attributeFilters?.length) return false
 	if (opts.resourceAttributeFilters?.length) return false
 	if (groupBy) {
@@ -200,6 +215,12 @@ export function serviceOverviewWhereConditions(
 	}
 	if (opts.commitShas?.length) {
 		conditions.push(CH.inList($.CommitSha, opts.commitShas))
+	}
+	if (opts.excludedServiceNames?.length) {
+		conditions.push(CH.notInList($.ServiceName, opts.excludedServiceNames))
+	}
+	if (opts.excludedEnvironments?.length) {
+		conditions.push(CH.notInList($.DeploymentEnv, opts.excludedEnvironments))
 	}
 
 	return conditions
@@ -273,6 +294,15 @@ export function tracesAggregatesWhereConditions(
 		} else {
 			conditions.push(CH.inList($.DeploymentEnv, opts.environments))
 		}
+	}
+	if (opts.excludedServiceNames?.length) {
+		conditions.push(CH.notInList($.ServiceName, opts.excludedServiceNames))
+	}
+	if (opts.excludedSpanNames?.length) {
+		conditions.push(CH.notInList($.SpanName, opts.excludedSpanNames))
+	}
+	if (opts.excludedEnvironments?.length) {
+		conditions.push(CH.notInList($.DeploymentEnv, opts.excludedEnvironments))
 	}
 
 	// Note: minDurationMs/maxDurationMs filtering is intentionally *not* supported

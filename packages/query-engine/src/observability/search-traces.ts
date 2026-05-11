@@ -103,11 +103,13 @@ const spanLevelSearch = (
 
 	const attrConditions = pipe(
 		input.attributeFilters ?? [],
-		Arr.map((af) =>
-			af.mode === "contains"
-				? `positionCaseInsensitive(SpanAttributes['${esc(af.key)}'], '${esc(af.value)}') > 0`
-				: `SpanAttributes['${esc(af.key)}'] = '${esc(af.value)}'`,
-		),
+		Arr.map((af) => {
+			const positive =
+				af.mode === "contains"
+					? `positionCaseInsensitive(SpanAttributes['${esc(af.key)}'], '${esc(af.value)}') > 0`
+					: `SpanAttributes['${esc(af.key)}'] = '${esc(af.value)}'`
+			return af.negated ? `NOT (${positive})` : positive
+		}),
 	)
 
 	const allConditions = [...conditions, ...attrConditions]

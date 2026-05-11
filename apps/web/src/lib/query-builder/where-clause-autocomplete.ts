@@ -288,6 +288,28 @@ function findFirstOperator(segment: string): OperatorMatch | null {
 			continue
 		}
 
+		if (char === "!") {
+			if (segment[index + 1] === "=") {
+				return { position: index, length: 2, operator: "!=" }
+			}
+			// Allow "!contains" / "! contains" — find the keyword skipping optional whitespace
+			let lookahead = index + 1
+			while (lookahead < segment.length && isSpace(segment[lookahead])) lookahead += 1
+			if (segment.slice(lookahead, lookahead + 8).toLowerCase() === "contains") {
+				const after = segment[lookahead + 8]
+				if (isSpace(after) || after === undefined) {
+					return { position: index, length: lookahead + 8 - index, operator: "!contains" }
+				}
+			}
+			if (segment.slice(lookahead, lookahead + 6).toLowerCase() === "exists") {
+				const after = segment[lookahead + 6]
+				if (isSpace(after) || after === undefined) {
+					return { position: index, length: lookahead + 6 - index, operator: "!exists" }
+				}
+			}
+			// Lone "!" with no recognized follower — skip and continue scanning
+		}
+
 		if (char === "<") {
 			if (segment[index + 1] === "=") {
 				return { position: index, length: 2, operator: "<=" }
@@ -406,8 +428,8 @@ function parseWhereClauseContext(expression: string, cursor: number): ParsedWher
 		}
 	}
 
-	// EXISTS takes no value — go straight to conjunction context
-	if (operatorMatch.operator === "exists") {
+	// EXISTS / !EXISTS takes no value — go straight to conjunction context
+	if (operatorMatch.operator === "exists" || operatorMatch.operator === "!exists") {
 		const tail = trimmedSegment.slice(operatorMatch.position + operatorMatch.length)
 		const tailTrimmed = tail.trimStart()
 		return {
@@ -812,6 +834,13 @@ function buildSuggestions(
 				description: "Exact match",
 			},
 			{
+				id: "operator:not-equal",
+				kind: "operator",
+				label: "!=",
+				insertText: "!=",
+				description: "Not equal",
+			},
+			{
 				id: "operator:gt",
 				kind: "operator",
 				label: ">",
@@ -847,11 +876,25 @@ function buildSuggestions(
 				description: "Substring match",
 			},
 			{
+				id: "operator:not-contains",
+				kind: "operator",
+				label: "!contains",
+				insertText: "!contains",
+				description: "Substring does not match",
+			},
+			{
 				id: "operator:exists",
 				kind: "operator",
 				label: "exists",
 				insertText: "exists",
 				description: "Key exists",
+			},
+			{
+				id: "operator:not-exists",
+				kind: "operator",
+				label: "!exists",
+				insertText: "!exists",
+				description: "Key does not exist",
 			},
 		]
 

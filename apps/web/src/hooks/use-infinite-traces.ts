@@ -40,6 +40,11 @@ function buildQueryParams(
 		serviceMatchMode: filters?.serviceMatchMode,
 		spanNameMatchMode: filters?.spanNameMatchMode,
 		deploymentEnvMatchMode: filters?.deploymentEnvMatchMode,
+		excludedServices: filters?.excludedServices,
+		excludedSpanNames: filters?.excludedSpanNames,
+		excludedDeploymentEnvs: filters?.excludedDeploymentEnvs,
+		excludedHttpMethods: filters?.excludedHttpMethods,
+		excludedHttpStatusCodes: filters?.excludedHttpStatusCodes,
 	}
 }
 

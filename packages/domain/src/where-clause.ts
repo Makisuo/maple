@@ -4,7 +4,18 @@ import { Match, Schema } from "effect"
 // Schemas
 // ---------------------------------------------------------------------------
 
-export const Operator = Schema.Literals(["=", ">", "<", ">=", "<=", "contains", "exists"])
+export const Operator = Schema.Literals([
+	"=",
+	"!=",
+	">",
+	"<",
+	">=",
+	"<=",
+	"contains",
+	"!contains",
+	"exists",
+	"!exists",
+])
 export type Operator = Schema.Schema.Type<typeof Operator>
 
 export const ParsedClause = Schema.Struct({
@@ -89,13 +100,37 @@ export function parseWhereClause(expression: string): ParseWhereClauseResult {
 	const warnings: WhereClauseParseWarning[] = []
 
 	for (const part of parts) {
-		// Try "exists" operator first (no value)
+		// Try "!exists" operator (no value) BEFORE "exists" so the longer prefix wins
+		const notExistsMatch = part.match(/^([a-zA-Z0-9_.-]+)\s+!\s*exists$/i)
+		if (notExistsMatch) {
+			clauses.push({
+				key: notExistsMatch[1].trim().toLowerCase(),
+				operator: "!exists",
+				value: "",
+			})
+			continue
+		}
+
+		// Try "exists" operator (no value)
 		const existsMatch = part.match(/^([a-zA-Z0-9_.-]+)\s+exists$/i)
 		if (existsMatch) {
 			clauses.push({
 				key: existsMatch[1].trim().toLowerCase(),
 				operator: "exists",
 				value: "",
+			})
+			continue
+		}
+
+		// Try "!contains" operator BEFORE "contains" so the longer prefix wins
+		const notContainsMatch = part.match(
+			/^([a-zA-Z0-9_.-]+)\s+!\s*contains\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))$/i,
+		)
+		if (notContainsMatch) {
+			clauses.push({
+				key: notContainsMatch[1].trim().toLowerCase(),
+				operator: "!contains",
+				value: (notContainsMatch[2] ?? notContainsMatch[3] ?? notContainsMatch[4] ?? "").trim(),
 			})
 			continue
 		}
@@ -111,8 +146,8 @@ export function parseWhereClause(expression: string): ParseWhereClauseResult {
 			continue
 		}
 
-		// Try comparison operators: <=, >=, <, >, =
-		const compMatch = part.match(/^([a-zA-Z0-9_.-]+)\s*(<=|>=|<|>|=)\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/)
+		// Try comparison operators: !=, <=, >=, <, >, =
+		const compMatch = part.match(/^([a-zA-Z0-9_.-]+)\s*(!=|<=|>=|<|>|=)\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))$/)
 		if (compMatch) {
 			const unquotedToken = compMatch[5]
 			// Detect unclosed quote in unquoted capture

@@ -23,18 +23,48 @@ describe("where clause autocomplete", () => {
 			expression,
 			cursor: expression.length,
 			dataSource: "logs",
+			maxSuggestions: 20,
 		})
 
 		expect(result.context).toBe("operator")
 		expect(result.suggestions.map((item) => item.insertText)).toEqual([
 			"=",
+			"!=",
 			">",
 			"<",
 			">=",
 			"<=",
 			"contains",
+			"!contains",
 			"exists",
+			"!exists",
 		])
+	})
+
+	it("treats != as an operator and parses value context after it", () => {
+		const expression = 'service.name != "chec'
+		const result = getWhereClauseAutocomplete({
+			expression,
+			cursor: expression.length,
+			dataSource: "traces",
+			values: {
+				services: ["checkout", "cart"],
+			},
+		})
+
+		expect(result.context).toBe("value")
+		expect(result.suggestions.some((item) => item.insertText.includes("checkout"))).toBe(true)
+	})
+
+	it("treats !exists as a no-value operator and routes to conjunction context", () => {
+		const expression = "attr.user_id !exists "
+		const result = getWhereClauseAutocomplete({
+			expression,
+			cursor: expression.length,
+			dataSource: "traces",
+		})
+
+		expect(result.context).toBe("conjunction")
 	})
 
 	it("suggests values for the active key", () => {

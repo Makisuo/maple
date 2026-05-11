@@ -10,6 +10,7 @@ export interface AttributeFilterEntry {
 	key: string
 	value: string
 	matchMode?: FilterMatchMode
+	negated?: boolean
 }
 
 export interface TracesSearchLike {
@@ -30,6 +31,11 @@ export interface TracesSearchLike {
 	serviceMatchMode?: FilterMatchMode
 	spanNameMatchMode?: FilterMatchMode
 	deploymentEnvMatchMode?: FilterMatchMode
+	excludedServices?: string[]
+	excludedSpanNames?: string[]
+	excludedDeploymentEnvs?: string[]
+	excludedHttpMethods?: string[]
+	excludedHttpStatusCodes?: string[]
 }
 
 export type FilterMatchMode = "contains"
@@ -47,6 +53,11 @@ export interface ParsedWhereClauseFilters {
 	attributeFilters: AttributeFilterEntry[]
 	resourceAttributeFilters: AttributeFilterEntry[]
 	matchModes?: Partial<Record<string, FilterMatchMode>>
+	excludedServices?: string[]
+	excludedSpanNames?: string[]
+	excludedDeploymentEnvs?: string[]
+	excludedHttpMethods?: string[]
+	excludedHttpStatusCodes?: string[]
 }
 
 function quoteValue(value: string): string {
@@ -71,7 +82,10 @@ export function parseWhereClause(whereClause: string | undefined): {
 
 	for (const clause of clauses) {
 		const key = normalizeKey(clause.key)
-		const isContains = clause.operator === "contains"
+		const isContains = clause.operator === "contains" || clause.operator === "!contains"
+		const isExists = clause.operator === "exists" || clause.operator === "!exists"
+		const isNegated =
+			clause.operator === "!=" || clause.operator === "!contains" || clause.operator === "!exists"
 
 		function setMatchMode(modeKey: string) {
 			if (isContains) {
@@ -88,6 +102,7 @@ export function parseWhereClause(whereClause: string | undefined): {
 				key: attributeKey,
 				value: clause.value,
 				matchMode: isContains ? "contains" : undefined,
+				negated: isNegated || undefined,
 			})
 			continue
 		}
@@ -99,28 +114,57 @@ export function parseWhereClause(whereClause: string | undefined): {
 				key: resourceKey,
 				value: clause.value,
 				matchMode: isContains ? "contains" : undefined,
+				negated: isNegated || undefined,
 			})
+			continue
+		}
+
+		// `exists` / `!exists` are only meaningful on attr.* / resource.* keys.
+		// On named fields they're not currently supported — skip to avoid silently
+		// dropping the value into a positive match.
+		if (isExists) {
+			hasIncompleteClauses = true
 			continue
 		}
 
 		parsed = Match.value(key).pipe(
 			Match.when("service.name", () => {
+				if (isNegated) {
+					const current = parsed.excludedServices ?? []
+					return { ...parsed, excludedServices: [...current, clause.value] }
+				}
 				setMatchMode("service")
 				return { ...parsed, service: clause.value }
 			}),
 			Match.when("span.name", () => {
+				if (isNegated) {
+					const current = parsed.excludedSpanNames ?? []
+					return { ...parsed, excludedSpanNames: [...current, clause.value] }
+				}
 				setMatchMode("spanName")
 				return { ...parsed, spanName: clause.value }
 			}),
 			Match.when("deployment.environment", () => {
+				if (isNegated) {
+					const current = parsed.excludedDeploymentEnvs ?? []
+					return { ...parsed, excludedDeploymentEnvs: [...current, clause.value] }
+				}
 				setMatchMode("deploymentEnv")
 				return { ...parsed, deploymentEnv: clause.value }
 			}),
 			Match.when("http.method", () => {
+				if (isNegated) {
+					const current = parsed.excludedHttpMethods ?? []
+					return { ...parsed, excludedHttpMethods: [...current, clause.value] }
+				}
 				setMatchMode("httpMethod")
 				return { ...parsed, httpMethod: clause.value }
 			}),
 			Match.when("http.status_code", () => {
+				if (isNegated) {
+					const current = parsed.excludedHttpStatusCodes ?? []
+					return { ...parsed, excludedHttpStatusCodes: [...current, clause.value] }
+				}
 				setMatchMode("httpStatusCode")
 				return { ...parsed, httpStatusCode: clause.value }
 			}),
@@ -211,13 +255,31 @@ export function toWhereClause(filters: ParsedWhereClauseFilters): string | undef
 	}
 
 	for (const af of filters.attributeFilters) {
-		const afOp = af.matchMode === "contains" ? "contains" : "="
+		const afOp =
+			af.matchMode === "contains" ? (af.negated ? "!contains" : "contains") : af.negated ? "!=" : "="
 		clauses.push(`attr.${af.key} ${afOp} ${quoteValue(af.value)}`)
 	}
 
 	for (const rf of filters.resourceAttributeFilters) {
-		const rfOp = rf.matchMode === "contains" ? "contains" : "="
+		const rfOp =
+			rf.matchMode === "contains" ? (rf.negated ? "!contains" : "contains") : rf.negated ? "!=" : "="
 		clauses.push(`resource.${rf.key} ${rfOp} ${quoteValue(rf.value)}`)
+	}
+
+	for (const v of filters.excludedServices ?? []) {
+		clauses.push(`service.name != ${quoteValue(v)}`)
+	}
+	for (const v of filters.excludedSpanNames ?? []) {
+		clauses.push(`span.name != ${quoteValue(v)}`)
+	}
+	for (const v of filters.excludedDeploymentEnvs ?? []) {
+		clauses.push(`deployment.environment != ${quoteValue(v)}`)
+	}
+	for (const v of filters.excludedHttpMethods ?? []) {
+		clauses.push(`http.method != ${quoteValue(v)}`)
+	}
+	for (const v of filters.excludedHttpStatusCodes ?? []) {
+		clauses.push(`http.status_code != ${quoteValue(v)}`)
 	}
 
 	if (clauses.length === 0) {
@@ -253,6 +315,11 @@ export function applyWhereClause(search: TracesSearchLike, whereClause: string):
 			serviceMatchMode: undefined,
 			spanNameMatchMode: undefined,
 			deploymentEnvMatchMode: undefined,
+			excludedServices: undefined,
+			excludedSpanNames: undefined,
+			excludedDeploymentEnvs: undefined,
+			excludedHttpMethods: undefined,
+			excludedHttpStatusCodes: undefined,
 		}
 	}
 
@@ -280,5 +347,18 @@ export function applyWhereClause(search: TracesSearchLike, whereClause: string):
 		serviceMatchMode: filters.service ? modes.service : search.serviceMatchMode,
 		spanNameMatchMode: filters.spanName ? modes.spanName : search.spanNameMatchMode,
 		deploymentEnvMatchMode: filters.deploymentEnv ? modes.deploymentEnv : search.deploymentEnvMatchMode,
+		excludedServices: filters.excludedServices?.length ? filters.excludedServices : search.excludedServices,
+		excludedSpanNames: filters.excludedSpanNames?.length
+			? filters.excludedSpanNames
+			: search.excludedSpanNames,
+		excludedDeploymentEnvs: filters.excludedDeploymentEnvs?.length
+			? filters.excludedDeploymentEnvs
+			: search.excludedDeploymentEnvs,
+		excludedHttpMethods: filters.excludedHttpMethods?.length
+			? filters.excludedHttpMethods
+			: search.excludedHttpMethods,
+		excludedHttpStatusCodes: filters.excludedHttpStatusCodes?.length
+			? filters.excludedHttpStatusCodes
+			: search.excludedHttpStatusCodes,
 	}
 }

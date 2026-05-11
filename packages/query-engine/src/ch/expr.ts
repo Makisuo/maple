@@ -186,6 +186,16 @@ export function inList(expr: Expr<string>, values: readonly string[]): Condition
 	return makeCond(raw(`${compile(expr.toFragment())} IN (${escaped})`))
 }
 
+export function notInList(expr: Expr<string>, values: readonly string[]): Condition {
+	const escaped = values.map((v) => compile(str(v))).join(", ")
+	return makeCond(raw(`${compile(expr.toFragment())} NOT IN (${escaped})`))
+}
+
+/** Wrap a condition in NOT (...). */
+export function not(condition: Condition): Condition {
+	return makeCond(raw(`NOT (${compile(condition.toFragment())})`))
+}
+
 // ---------------------------------------------------------------------------
 // Raw expression (escape hatch)
 // ---------------------------------------------------------------------------

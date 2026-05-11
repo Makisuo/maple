@@ -31,6 +31,7 @@ export const AttributeFilter = Schema.Struct({
 	key: Schema.String,
 	value: Schema.optional(Schema.String),
 	mode: Schema.Literals(["equals", "exists", "gt", "gte", "lt", "lte", "contains"]),
+	negated: Schema.optional(Schema.Boolean),
 })
 export type AttributeFilter = Schema.Schema.Type<typeof AttributeFilter>
 
@@ -54,6 +55,9 @@ export const TracesFilters = Schema.Struct({
 	matchModes: Schema.optional(TracesMatchModes),
 	attributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
 	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
+	excludedServiceNames: Schema.optional(Schema.Array(Schema.String)),
+	excludedSpanNames: Schema.optional(Schema.Array(Schema.String)),
+	excludedEnvironments: Schema.optional(Schema.Array(Schema.String)),
 })
 export type TracesFilters = Schema.Schema.Type<typeof TracesFilters>
 
