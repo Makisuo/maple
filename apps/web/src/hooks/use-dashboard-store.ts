@@ -139,6 +139,13 @@ function parseDashboards(raw: readonly unknown[]): Dashboard[] {
 // Returns the previous array unchanged if every dashboard's id+updatedAt
 // matches a previous entry. Preserving identity here breaks the cascade
 // where every list-query refetch invalidates every memoised widget render.
+//
+// Also guards against stale-refetch overwrite: if the local optimistic copy
+// has a strictly newer updatedAt than the candidate, the candidate is from a
+// list refetch that started before our last mutation landed. Keep the local
+// copy; the next post-mutation refetch will settle the state. Without this,
+// an optimistic delete can be silently reverted when an in-flight GET
+// /api/dashboards lands after our PUT.
 function reconcileDashboards(previous: readonly Dashboard[], next: Dashboard[]): Dashboard[] {
 	if (previous.length !== next.length) return next
 
@@ -150,6 +157,9 @@ function reconcileDashboards(previous: readonly Dashboard[], next: Dashboard[]):
 		const prior = previousById.get(candidate.id)
 		if (prior && prior.updatedAt === candidate.updatedAt) {
 			reconciled.push(prior)
+		} else if (prior && prior.updatedAt > candidate.updatedAt) {
+			reconciled.push(prior)
+			allMatched = false
 		} else {
 			reconciled.push(candidate)
 			allMatched = false
@@ -480,14 +490,39 @@ export function useDashboardStore() {
 	)
 
 	const removeWidget = useCallback(
-		(dashboardId: string, widgetId: string) => {
+		(dashboardId: string, widgetId: string): DashboardWidget | undefined => {
+			// Capture the widget from the current ref synchronously so the caller
+			// can offer an undo. mutateDashboard runs through a FIFO queue, so
+			// snapshotting here matches what the async write will actually delete.
+			const removed = dashboardsRef.current
+				.find((d) => d.id === dashboardId)
+				?.widgets.find((w) => w.id === widgetId)
+
 			mutateDashboard(dashboardId, (dashboard) => ({
 				...dashboard,
 				widgets: dashboard.widgets.filter((widget) => widget.id !== widgetId),
 				updatedAt: new Date().toISOString(),
 			}))
+
+			return removed
 		},
 		[mutateDashboard],
+	)
+
+	const restoreWidget = useCallback(
+		(dashboardId: string, widget: DashboardWidget) => {
+			if (readOnly) return
+			mutateDashboard(dashboardId, (dashboard) => {
+				// Idempotent: a server refetch may have already reinstated the widget.
+				if (dashboard.widgets.some((w) => w.id === widget.id)) return dashboard
+				return {
+					...dashboard,
+					widgets: [...dashboard.widgets, widget],
+					updatedAt: new Date().toISOString(),
+				}
+			})
+		},
+		[mutateDashboard, readOnly],
 	)
 
 	const updateWidgetDisplay = useCallback(
@@ -621,6 +656,7 @@ export function useDashboardStore() {
 		addWidget,
 		cloneWidget,
 		removeWidget,
+		restoreWidget,
 		updateWidgetDisplay,
 		updateWidgetLayouts,
 		updateWidget,

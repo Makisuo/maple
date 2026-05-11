@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Atom, useAtom } from "@/lib/effect-atom"
@@ -54,6 +54,7 @@ function DashboardViewPage() {
 
 	const {
 		dashboards,
+		isLoading,
 		readOnly,
 		persistenceError,
 		updateDashboard,
@@ -61,6 +62,7 @@ function DashboardViewPage() {
 		addWidget,
 		cloneWidget,
 		removeWidget,
+		restoreWidget,
 		updateWidgetDisplay,
 		updateWidgetLayouts,
 		autoLayoutWidgets,
@@ -97,9 +99,34 @@ function DashboardViewPage() {
 	}
 
 	if (!activeDashboard) {
+		if (isLoading) {
+			return (
+				<DashboardLayout
+					breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}
+				>
+					<div className="py-12 text-sm text-muted-foreground">Loading dashboard…</div>
+				</DashboardLayout>
+			)
+		}
 		return (
-			<DashboardLayout breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}>
-				<div className="py-12 text-sm text-muted-foreground">Loading dashboard…</div>
+			<DashboardLayout
+				breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "Not found" }]}
+			>
+				<div className="flex flex-col items-center gap-3 py-24">
+					<p className="text-sm font-medium text-foreground">Dashboard not found</p>
+					<p className="text-xs text-muted-foreground">
+						No dashboard with id{" "}
+						<code className="break-all rounded bg-muted px-1.5 py-0.5 text-foreground">
+							{dashboardId}
+						</code>
+					</p>
+					<Link
+						to="/dashboards"
+						className="mt-2 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+					>
+						← Back to all dashboards
+					</Link>
+				</div>
 			</DashboardLayout>
 		)
 	}
@@ -117,6 +144,7 @@ function DashboardViewPage() {
 				store={{
 					addWidget,
 					removeWidget,
+					restoreWidget,
 					cloneWidget,
 					updateWidgetDisplay,
 					updateWidgetLayouts,

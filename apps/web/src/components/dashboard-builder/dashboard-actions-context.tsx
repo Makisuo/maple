@@ -1,8 +1,10 @@
 import * as React from "react"
 import type { ReactNode } from "react"
 import { useNavigate } from "@tanstack/react-router"
+import { toast } from "sonner"
 
 import type {
+	DashboardWidget,
 	VisualizationType,
 	WidgetDataSource,
 	WidgetDisplayConfig,
@@ -40,7 +42,8 @@ interface DashboardActionsProviderProps {
 			dataSource: WidgetDataSource,
 			display: WidgetDisplayConfig,
 		) => void
-		removeWidget: (dashboardId: string, widgetId: string) => void
+		removeWidget: (dashboardId: string, widgetId: string) => DashboardWidget | undefined
+		restoreWidget: (dashboardId: string, widget: DashboardWidget) => void
 		cloneWidget: (dashboardId: string, widgetId: string) => void
 		updateWidgetDisplay: (
 			dashboardId: string,
@@ -77,7 +80,15 @@ export function DashboardActionsProvider({
 			readOnly,
 			removeWidget: (widgetId) => {
 				if (readOnly) return
-				store.removeWidget(dashboardId, widgetId)
+				const removed = store.removeWidget(dashboardId, widgetId)
+				if (!removed) return
+				toast("Widget removed", {
+					action: {
+						label: "Undo",
+						onClick: () => store.restoreWidget(dashboardId, removed),
+					},
+					duration: 6000,
+				})
 			},
 			cloneWidget: (widgetId) => {
 				if (readOnly) return
