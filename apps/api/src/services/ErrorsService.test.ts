@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
 import { ErrorPersistenceError } from "@maple/domain/http"
-import { describeCause, makePersistenceError } from "./ErrorsService"
+import { DatabaseError } from "./DatabaseLive"
+import { describeCause, isBusyDatabaseError, makePersistenceError } from "./ErrorsService"
 
 describe("makePersistenceError", () => {
 	it("omits the cause key when the source has no cause", () => {
@@ -40,5 +41,28 @@ describe("describeCause", () => {
 
 	it("returns the string itself for string causes", () => {
 		expect(describeCause("oops")).toBe("oops")
+	})
+})
+
+describe("isBusyDatabaseError", () => {
+	const makeError = (message: string, cause: unknown = null) =>
+		new DatabaseError({ message, cause })
+
+	it("matches SQLITE_BUSY in message", () => {
+		expect(isBusyDatabaseError(makeError("SQLITE_BUSY: database is locked"))).toBe(true)
+	})
+
+	it("matches D1_BUSY in message", () => {
+		expect(isBusyDatabaseError(makeError("D1_BUSY: write conflict"))).toBe(true)
+	})
+
+	it("matches busy pattern in nested cause", () => {
+		const cause = new Error("internal SQLITE_BUSY trying to commit")
+		expect(isBusyDatabaseError(makeError("wrapper", cause))).toBe(true)
+	})
+
+	it("rejects unrelated database errors", () => {
+		expect(isBusyDatabaseError(makeError("UNIQUE constraint failed"))).toBe(false)
+		expect(isBusyDatabaseError(makeError("no such table"))).toBe(false)
 	})
 })

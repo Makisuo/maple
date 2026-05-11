@@ -7,7 +7,7 @@ import {
 import type { OrgId } from "@maple/domain"
 import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Tinybird } from "@tinybirdco/sdk"
-import { Effect, Layer, Option, Redacted, Context } from "effect"
+import { Effect, Layer, Option, Redacted, Schedule, Context } from "effect"
 import { Env } from "./Env"
 import type { TenantContext } from "./AuthService"
 import { OrgClickHouseSettingsService } from "./OrgClickHouseSettingsService"
@@ -200,6 +200,18 @@ const schemaDriftClickHouseTypes = new Set([
 	"THERE_IS_NO_COLUMN",
 	"NOT_FOUND_COLUMN_IN_BLOCK",
 ])
+
+// Only retry transient upstream failures (5xx, 408, 429, network blips). Non-transient
+// errors (auth, config, schema_drift, query) re-fail immediately — there's nothing to
+// recover from by trying again. Caps at 2 retries (3 attempts total) to bound worst-case
+// tail latency: at concurrency=4 in the alerting tick, a fully-degraded warehouse can
+// still let the tick finish within its 60s window.
+const TRANSIENT_RETRY_SCHEDULE = Schedule.exponential("100 millis", 2.0).pipe(
+	Schedule.both(Schedule.recurs(2)),
+)
+
+const isTransientUpstreamError = (error: WarehouseSqlError): boolean =>
+	error._tag === "@maple/http/errors/TinybirdQueryError" && error.category === "upstream"
 
 export class WarehouseQueryService extends Context.Service<
 	WarehouseQueryService,
@@ -479,20 +491,34 @@ export class WarehouseQueryService extends Context.Service<
 
 				const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
 				const client = getCachedOrCreateClient(cacheKey, resolved.config)
+				let retryAttempts = 0
 				const result = yield* Effect.tryPromise({
 					try: () => client.sql(finalSql),
 					catch: (error) => mapTinybirdError(pipe, error),
 				}).pipe(
 					Effect.tapError((error) =>
+						isTransientUpstreamError(error)
+							? Effect.sync(() => {
+									retryAttempts++
+								})
+							: Effect.void,
+					),
+					Effect.retry({
+						schedule: TRANSIENT_RETRY_SCHEDULE,
+						while: isTransientUpstreamError,
+					}),
+					Effect.tapError((error) =>
 						Effect.gen(function* () {
 							const elapsedMs = Date.now() - startedAtMs
 							yield* Effect.annotateCurrentSpan("db.duration_ms", elapsedMs)
+							yield* Effect.annotateCurrentSpan("db.retry.attempts", retryAttempts)
 							yield* Effect.logError("WarehouseQueryService.executeSql failed", {
 								pipe,
 								context: options?.context,
 								orgId: tenant.orgId,
 								backend: resolved.config._tag,
 								durationMs: elapsedMs,
+								retryAttempts,
 								error: String(error),
 								message: error.message,
 								sql: truncateSql(finalSql, SQL_LOG_MAX),
@@ -506,6 +532,7 @@ export class WarehouseQueryService extends Context.Service<
 
 				yield* Effect.annotateCurrentSpan("result.rowCount", result.data.length)
 				yield* Effect.annotateCurrentSpan("db.duration_ms", Date.now() - startedAtMs)
+				yield* Effect.annotateCurrentSpan("db.retry.attempts", retryAttempts)
 				return result.data
 			})
 

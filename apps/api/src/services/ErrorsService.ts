@@ -55,7 +55,7 @@ import {
 } from "@maple/db"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
 import { CH } from "@maple/query-engine"
-import { Array as Arr, Cause, Context, Effect, Layer, Schema } from "effect"
+import { Array as Arr, Cause, Context, Effect, Layer, Schedule, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import { Database, DatabaseError, type DatabaseClient } from "./DatabaseLive"
 import { Env } from "./Env"
@@ -109,6 +109,28 @@ export const makePersistenceError = (error: unknown): ErrorPersistenceError => {
 	}
 	return new ErrorPersistenceError(baseFor("Error persistence failure", error))
 }
+
+// Concurrent ticks against D1 (file-locked SQLite under the hood) occasionally surface
+// busy/locked errors. They're harmless to retry — the next attempt usually succeeds in
+// ms. Only this predicate's match retries; anything else fails fast.
+const BUSY_ERROR_PATTERN = /SQLITE_BUSY|database is locked|D1_BUSY|busy/i
+
+const causeMessage = (cause: unknown): string | undefined => {
+	if (cause instanceof Error) return cause.message
+	if (typeof cause === "string") return cause
+	return undefined
+}
+
+export const isBusyDatabaseError = (error: DatabaseError): boolean => {
+	if (BUSY_ERROR_PATTERN.test(error.message)) return true
+	const inner = causeMessage(error.cause)
+	if (inner && BUSY_ERROR_PATTERN.test(inner)) return true
+	return false
+}
+
+const BUSY_RETRY_SCHEDULE = Schedule.exponential("50 millis", 2.0).pipe(
+	Schedule.both(Schedule.recurs(3)),
+)
 
 // ---------------------------------------------------------------------------
 // Transition matrix. Rows = from, values = set of allowed "to" states.
@@ -292,6 +314,10 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
 
 		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 			database.execute(fn).pipe(
+				Effect.retry({
+					schedule: BUSY_RETRY_SCHEDULE,
+					while: isBusyDatabaseError,
+				}),
 				Effect.tapError((error) =>
 					Effect.logError("ErrorsService dbExecute failed").pipe(
 						Effect.annotateLogs({
@@ -2179,7 +2205,7 @@ export class ErrorsService extends Context.Service<ErrorsService, ErrorsServiceS
 							}),
 						),
 					),
-				{ concurrency: 16 },
+				{ concurrency: 4 },
 			)
 
 			const totals = results.reduce(
