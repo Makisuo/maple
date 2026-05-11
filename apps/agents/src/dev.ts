@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
+import path from "node:path"
 import { readAgentsEnv } from "./env"
 
 const skipRuntimeStart = process.env.MAPLE_AGENTS_SKIP_RUNTIME_START === "1"
@@ -37,13 +39,16 @@ const waitForRuntimeReady = async (timeoutMs = 30_000): Promise<RuntimeReadiness
 	return last
 }
 
-const runElectric = (args: string[], allowFailure = false): number => {
+const runtimePortFromUrl = (): string => {
 	const runtimeUrl = new URL(env.ELECTRIC_AGENTS_URL)
-	const runtimePort = runtimeUrl.port || (runtimeUrl.protocol === "https:" ? "443" : "80")
+	return runtimeUrl.port || (runtimeUrl.protocol === "https:" ? "443" : "80")
+}
+
+const runElectric = (args: string[], allowFailure = false): number => {
 	const result = spawnSync("electric-ax", ["agents", ...args], {
 		env: {
 			...process.env,
-			ELECTRIC_AGENTS_PORT: process.env.ELECTRIC_AGENTS_PORT ?? runtimePort,
+			ELECTRIC_AGENTS_PORT: process.env.ELECTRIC_AGENTS_PORT ?? runtimePortFromUrl(),
 		},
 		stdio: "inherit",
 	})
@@ -63,8 +68,34 @@ const runElectric = (args: string[], allowFailure = false): number => {
 	return status
 }
 
+// Apply the FileBackedStreamStore hot-patch inside the runtime container so
+// spawning a stream stops 500ing on the LMDB read-after-write race. The script
+// is idempotent — safe to run when the container is already patched — and
+// restarts the container only on a fresh patch application.
+const patchRuntimeContainer = (): void => {
+	const scriptPath = path.resolve(
+		path.dirname(fileURLToPath(import.meta.url)),
+		"..",
+		"scripts",
+		"patch-runtime.mjs",
+	)
+	const result = spawnSync("node", [scriptPath], {
+		env: {
+			...process.env,
+			ELECTRIC_AGENTS_PORT: process.env.ELECTRIC_AGENTS_PORT ?? runtimePortFromUrl(),
+		},
+		stdio: "inherit",
+	})
+	if (result.status !== 0) {
+		console.error(
+			"[maple-agents] FileBackedStreamStore hot-patch failed — chat spawns may 500 until upstream ships a fix.",
+		)
+	}
+}
+
 if (!skipRuntimeStart && (await checkRuntimeReady()).ready) {
 	console.log(`[maple-agents] Electric Agents runtime already running at ${env.ELECTRIC_AGENTS_URL}.`)
+	patchRuntimeContainer()
 } else if (!skipRuntimeStart) {
 	const initial = await checkRuntimeReady()
 	if (initial.detail) {
@@ -89,6 +120,8 @@ if (!skipRuntimeStart && (await checkRuntimeReady()).ready) {
 		if (ready.detail) console.error(`[maple-agents] Last readiness error: ${ready.detail}`)
 		process.exit(1)
 	}
+
+	patchRuntimeContainer()
 } else {
 	console.log("[maple-agents] Skipping Electric runtime auto-start.")
 }

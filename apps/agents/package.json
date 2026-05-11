@@ -5,7 +5,7 @@
 	"scripts": {
 		"dev": "tsx src/dev.ts",
 		"runtime:quickstart": "electric-ax agents quickstart",
-		"runtime:start": "ELECTRIC_AGENTS_PORT=${ELECTRIC_AGENTS_PORT:-4438} electric-ax agents start",
+		"runtime:start": "ELECTRIC_AGENTS_PORT=${ELECTRIC_AGENTS_PORT:-4438} electric-ax agents start && ELECTRIC_AGENTS_PORT=${ELECTRIC_AGENTS_PORT:-4438} node scripts/patch-runtime.mjs",
 		"runtime:stop": "electric-ax agents stop",
 		"start": "node --import tsx src/server.ts",
 		"typecheck": "tsc --noEmit",

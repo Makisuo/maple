@@ -303,6 +303,45 @@ const readRequestBody = async (
 	return undefined
 }
 
+// Wrap the upstream response body so a mid-stream undici error
+// ("Network connection lost", "Other side closed", ECONNRESET, etc.) — caused
+// by the runtime container restarting, the keepalive socket dying, or a network
+// blip — closes our outgoing SSE stream cleanly instead of bubbling as an
+// "Uncaught" worker error. SSE clients are designed to reconnect on EOF, so
+// closing the stream gracefully is the right user-facing behavior here.
+const wrapUpstreamBody = (
+	body: ReadableStream<Uint8Array> | null,
+	target: URL,
+): ReadableStream<Uint8Array> | null => {
+	if (!body) return null
+	const reader = body.getReader()
+	return new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			try {
+				const { done, value } = await reader.read()
+				if (done) {
+					controller.close()
+					return
+				}
+				if (value) controller.enqueue(value)
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err)
+				console.warn(
+					`[ai-gateway] upstream stream terminated for ${target.pathname}: ${message}`,
+				)
+				controller.close()
+			}
+		},
+		async cancel(reason) {
+			try {
+				await reader.cancel(reason)
+			} catch {
+				// already cancelled / errored — fine
+			}
+		},
+	})
+}
+
 const proxyRuntimeRequest = (
 	req: HttpServerRequest.HttpServerRequest,
 	runtimeUrl: string,
@@ -319,7 +358,12 @@ const proxyRuntimeRequest = (
 			const headers = buildProxyHeaders(req.headers as Record<string, string>)
 			const body = await readRequestBody(req)
 			const response = await fetch(target, { method: req.method, headers, body })
-			return HttpServerResponse.fromWeb(response)
+			const safeResponse = new Response(wrapUpstreamBody(response.body, target), {
+				status: response.status,
+				statusText: response.statusText,
+				headers: response.headers,
+			})
+			return HttpServerResponse.fromWeb(safeResponse)
 		},
 		catch: (error) => (error instanceof Error ? error : new Error(String(error))),
 	}).pipe(
