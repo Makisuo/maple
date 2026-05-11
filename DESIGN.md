@@ -293,7 +293,6 @@ The `/infra` route introduces two textures unique to Maple. They are sparingly u
 - **Don't nest cards.** A card inside a card is a structural failure. Use a divider or change background.
 - **Don't use the hero-metric template** — big number, small label, supporting stats, gradient accent. SaaS cliché.
 - **Don't grid identical icon-cards.** Repeated card+icon+title+blurb tiles are the SaaS-landing reflex; the dashboard rejects them.
-- **Don't use gradient text** (`background-clip: text`). Emphasis comes from weight or size, not chromatic decoration.
 - **Don't use border-left or border-right > 1px as a colored accent stripe.** The match-and-refuse ban — rewrite with full borders, leading icons, or nothing.
 - **Don't repurpose a service color** (`--service-N`) for sentiment, state, or chart metrics. It's categorical-only.
 - **Don't ship loading spinners by default.** Maple's stance is "fast trust" — skeleton shimmers exist for measurable wait, but most queries should land before motion would help.
