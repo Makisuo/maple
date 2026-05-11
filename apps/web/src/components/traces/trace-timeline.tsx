@@ -323,7 +323,6 @@ export function TraceTimeline() {
 	const fullDuration = traceEndMs - traceStartMs
 	const visibleDuration = state.viewport.endMs - state.viewport.startMs
 	const isZoomed = visibleDuration < fullDuration * 0.95
-	const canvasWidth = Math.max(0, containerSize.width - sidebarWidth)
 
 	return (
 		<div
@@ -383,34 +382,36 @@ export function TraceTimeline() {
 				</div>
 			</div>
 
-			<div
-				ref={scrollRef}
-				className="flex flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative"
-				onScroll={handleScroll}
-			>
-				<TraceTimelineSidebar
-					bars={bars}
-					totalRows={totalRows}
-					scrollTop={scrollTop}
-					containerHeight={containerSize.height}
-					selectedSpanId={selectedSpanId}
-					focusedIndex={state.focusedIndex}
-					searchMatches={searchMatches}
-					isSearchActive={isSearchActive}
-					hoveredSpanId={hoveredSpanId}
-					width={sidebarWidth}
-					onBarClick={handleSidebarBarClick}
-					onBarDoubleClick={handleSidebarBarDoubleClick}
-					onCollapseToggle={handleCollapseToggle}
-					onHoverSpan={setHoveredSpanId}
-				/>
+			<div className="flex flex-1 min-h-0 relative">
+				<div
+					ref={scrollRef}
+					className="overflow-y-auto overflow-x-hidden shrink-0"
+					style={{ width: sidebarWidth }}
+					onScroll={handleScroll}
+				>
+					<TraceTimelineSidebar
+						bars={bars}
+						totalRows={totalRows}
+						scrollTop={scrollTop}
+						containerHeight={containerSize.height}
+						selectedSpanId={selectedSpanId}
+						focusedIndex={state.focusedIndex}
+						searchMatches={searchMatches}
+						isSearchActive={isSearchActive}
+						hoveredSpanId={hoveredSpanId}
+						width={sidebarWidth}
+						onBarClick={handleSidebarBarClick}
+						onBarDoubleClick={handleSidebarBarDoubleClick}
+						onCollapseToggle={handleCollapseToggle}
+						onHoverSpan={setHoveredSpanId}
+					/>
+				</div>
 				<div className="relative flex-1 min-w-0">
 					<SidebarResizeHandle onResize={handleSidebarResize} />
 					<div
 						ref={canvasViewportRef}
-						className="sticky top-0 left-0 right-0"
+						className="absolute inset-0"
 						style={{
-							height: containerSize.height,
 							cursor: isPanning.current ? "grabbing" : "crosshair",
 						}}
 						onMouseMove={handleCanvasMouseMove}
@@ -418,6 +419,15 @@ export function TraceTimeline() {
 						onMouseDown={handleMouseDown}
 						onClick={handleCanvasClick}
 						onDoubleClick={handleCanvasDoubleClick}
+						onWheel={(e) => {
+							// Forward vertical wheel to the sidebar scroller so the canvas
+							// stays in sync. Horizontal wheel is consumed by the gestures hook.
+							if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && !e.ctrlKey && !e.metaKey) {
+								if (scrollRef.current) {
+									scrollRef.current.scrollTop += e.deltaY
+								}
+							}
+						}}
 					>
 						<TraceTimelineCanvas
 							ref={canvasHandleRef}
@@ -437,10 +447,6 @@ export function TraceTimeline() {
 							hoveredSpanId={hoveredSpanId}
 						/>
 					</div>
-					<div
-						aria-hidden
-						style={{ height: totalRows * (ROW_HEIGHT + ROW_GAP), width: canvasWidth }}
-					/>
 				</div>
 			</div>
 

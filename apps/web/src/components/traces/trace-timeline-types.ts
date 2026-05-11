@@ -10,6 +10,10 @@ export interface TimelineBar {
 	isError: boolean
 	isCollapsed: boolean
 	childCount: number
+	serviceIndex: number
+	fill: string
+	borderColor: string
+	hasChildren: boolean
 }
 
 export interface ViewportState {
@@ -39,9 +43,22 @@ export type TimelineAction =
 	| { type: "EXPAND_ALL"; spanIds: string[] }
 	| { type: "COLLAPSE_ALL" }
 
+export interface BarRect {
+	spanId: string
+	row: number
+	x: number
+	y: number
+	w: number
+	h: number
+}
+
 export const ROW_HEIGHT = 28
 export const ROW_GAP = 1
 export const MINIMAP_HEIGHT = 36
 export const TIME_AXIS_HEIGHT = 28
 export const DEPTH_INDENT = 16
 export const OVERSCAN = 5
+export const SIDEBAR_WIDTH_DEFAULT = 320
+export const SIDEBAR_WIDTH_MIN = 180
+export const SIDEBAR_WIDTH_MAX = 640
+export const SIDEBAR_WIDTH_STORAGE_KEY = "traceTimelineSidebarWidth"

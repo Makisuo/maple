@@ -19,14 +19,16 @@ interface UseTimelineGesturesOptions {
 	traceStartMs: number
 	traceEndMs: number
 	dispatch: (action: TimelineAction) => void
+	/**
+	 * Returns true when the cursor is over a bar — used to decide whether
+	 * mousedown starts a pan or is treated as a click on a bar.
+	 */
+	isOnBar?: (cssX: number, cssY: number) => boolean
 }
 
 /**
  * Encapsulates wheel-zoom and mouse-drag-pan gestures for the trace timeline.
- * Returns event handler props to attach to the scroll container.
- *
- * On React Native, replace with react-native-gesture-handler Pinch/Pan gestures
- * that dispatch the same ZOOM/PAN/SET_VIEWPORT actions.
+ * Returns event handler props to attach to the canvas container.
  */
 export function useTimelineGestures({
 	scrollRef,
@@ -36,6 +38,7 @@ export function useTimelineGestures({
 	traceStartMs,
 	traceEndMs,
 	dispatch,
+	isOnBar,
 }: UseTimelineGesturesOptions) {
 	const isPanning = React.useRef(false)
 	const panStart = React.useRef<{ x: number; viewportStartMs: number; viewportEndMs: number } | null>(null)
@@ -76,12 +79,16 @@ export function useTimelineGestures({
 		return () => el.removeEventListener("wheel", handler)
 	}, [scrollRef])
 
-	// Panning via mouse drag
+	// Panning via mouse drag (only when not on a bar)
 	const handleMouseDown = React.useCallback(
 		(e: React.MouseEvent) => {
-			// Only start pan if clicking on empty area (not on a bar)
-			const target = e.target as HTMLElement
-			if (target.closest("[data-span-id]")) return
+			const el = containerRef.current
+			if (el && isOnBar) {
+				const rect = el.getBoundingClientRect()
+				const cssX = e.clientX - rect.left
+				const cssY = e.clientY - rect.top
+				if (isOnBar(cssX, cssY)) return
+			}
 
 			isPanning.current = true
 			panStart.current = {
@@ -91,7 +98,7 @@ export function useTimelineGestures({
 			}
 			e.preventDefault()
 		},
-		[viewport],
+		[viewport, containerRef, isOnBar],
 	)
 
 	React.useEffect(() => {
