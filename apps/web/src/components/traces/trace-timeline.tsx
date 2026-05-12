@@ -400,6 +400,7 @@ export function TraceTimeline() {
 						isSearchActive={isSearchActive}
 						hoveredSpanId={hoveredSpanId}
 						width={sidebarWidth}
+						services={services}
 						onBarClick={handleSidebarBarClick}
 						onBarDoubleClick={handleSidebarBarDoubleClick}
 						onCollapseToggle={handleCollapseToggle}

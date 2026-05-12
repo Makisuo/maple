@@ -2,6 +2,7 @@ import * as React from "react"
 
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
+import { getServiceLegendColor } from "@maple/ui/colors"
 import { formatDuration } from "@/lib/format"
 import { getCacheInfo } from "@/lib/cache"
 import type { TimelineBar } from "./trace-timeline-types"
@@ -18,6 +19,7 @@ interface TraceTimelineSidebarProps {
 	isSearchActive: boolean
 	hoveredSpanId: string | null
 	width: number
+	services: string[]
 	onBarClick: (spanId: string) => void
 	onBarDoubleClick: (spanId: string) => void
 	onCollapseToggle: (spanId: string) => void
@@ -37,6 +39,7 @@ export function TraceTimelineSidebar({
 	isSearchActive,
 	hoveredSpanId,
 	width,
+	services,
 	onBarClick,
 	onBarDoubleClick,
 	onCollapseToggle,
@@ -176,7 +179,10 @@ export function TraceTimelineSidebar({
 							>
 								{bar.span.spanName}
 							</span>
-							<span className="truncate text-[10px] text-muted-foreground shrink-0">
+							<span
+								className="truncate text-[10px] shrink-0"
+								style={{ color: getServiceLegendColor(bar.span.serviceName, services) }}
+							>
 								{bar.span.serviceName}
 							</span>
 							{cacheInfo?.result && (

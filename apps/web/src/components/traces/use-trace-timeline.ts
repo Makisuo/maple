@@ -74,7 +74,7 @@ export function layoutSpans(
 
 		const value = resolveColorValue(node, colorBy)
 		const indexHint = colorByService && value ? services.indexOf(value) : undefined
-		const hue = getValueHue(value, indexHint)
+		const hue = getValueHue(value, indexHint, services.length)
 
 		const bar: TimelineBar = {
 			span: node,

@@ -53,7 +53,7 @@ function collectMinimapSpans(
 				colorBy.kind === "preset" && colorBy.key === "service" && value
 					? services.indexOf(value)
 					: undefined
-			const hue = getValueHue(value, indexHint)
+			const hue = getValueHue(value, indexHint, services.length)
 			bgColor = hue === null ? NEUTRAL_MINIMAP_BG : `oklch(0.50 0.14 ${hue})`
 		}
 
