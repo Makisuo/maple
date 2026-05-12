@@ -698,6 +698,56 @@ export const metricAttributeKeysMv = defineMaterializedView("metric_attribute_ke
 	],
 })
 
+export const logAttributeValuesMv = defineMaterializedView("log_attribute_values_mv", {
+	description: "Aggregates log attribute values from logs hourly.",
+	datasource: attributeValuesHourly,
+	nodes: [
+		node({
+			name: "log_attribute_values_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          AttributeKey,
+          AttributeValue,
+          'log' AS AttributeScope,
+          count() AS UsageCount
+        FROM logs
+        ARRAY JOIN
+          mapKeys(LogAttributes) AS AttributeKey,
+          mapValues(LogAttributes) AS AttributeValue
+        WHERE AttributeValue != ''
+        GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
+      `,
+		}),
+	],
+})
+
+export const metricAttributeValuesMv = defineMaterializedView("metric_attribute_values_mv", {
+	description: "Aggregates metric attribute values from metrics_sum hourly.",
+	datasource: attributeValuesHourly,
+	nodes: [
+		node({
+			name: "metric_attribute_values_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(TimeUnix)) AS Hour,
+          AttributeKey,
+          AttributeValue,
+          'metric' AS AttributeScope,
+          count() AS UsageCount
+        FROM metrics_sum
+        ARRAY JOIN
+          mapKeys(Attributes) AS AttributeKey,
+          mapValues(Attributes) AS AttributeValue
+        WHERE AttributeValue != ''
+        GROUP BY OrgId, Hour, AttributeKey, AttributeValue, AttributeScope
+      `,
+		}),
+	],
+})
+
 export const traceSpanAttributeValuesMv = defineMaterializedView("trace_span_attribute_values_mv", {
 	description: "Aggregates span attribute values from traces hourly.",
 	datasource: attributeValuesHourly,

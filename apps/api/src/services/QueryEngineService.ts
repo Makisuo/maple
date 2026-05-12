@@ -1392,10 +1392,18 @@ export const makeQueryEngineExecute = (warehouse: QueryEngineWarehouse) =>
 
 		// ---- Attribute Values ----
 		if (request.query.kind === "attributeValues") {
-			const queryFn =
-				request.query.scope === "resource"
-					? CH.resourceAttributeValuesQuery
-					: CH.spanAttributeValuesQuery
+			const queryFn = (() => {
+				switch (request.query.scope) {
+					case "resource":
+						return CH.resourceAttributeValuesQuery
+					case "log":
+						return CH.logAttributeValuesQuery
+					case "metric":
+						return CH.metricAttributeValuesQuery
+					default:
+						return CH.spanAttributeValuesQuery
+				}
+			})()
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
@@ -1407,7 +1415,7 @@ export const makeQueryEngineExecute = (warehouse: QueryEngineWarehouse) =>
 			return new QueryEngineExecuteResponse({
 				result: {
 					kind: "attributeValues",
-					source: "traces",
+					source: request.query.source,
 					data: rows.map((row) => ({ value: row.attributeValue, count: Number(row.usageCount) })),
 				},
 			})

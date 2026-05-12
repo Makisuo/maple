@@ -237,8 +237,8 @@ export type TracesStatsQuery = Schema.Schema.Type<typeof TracesStatsQuery>
 
 export const AttributeValuesQuery = Schema.Struct({
 	kind: Schema.Literal("attributeValues"),
-	source: Schema.Literal("traces"),
-	scope: Schema.Literals(["span", "resource"]),
+	source: Schema.Literals(["traces", "logs", "metrics"]),
+	scope: Schema.Literals(["span", "resource", "log", "metric"]),
 	attributeKey: Schema.String,
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(500)),
@@ -356,7 +356,7 @@ export const QueryEngineResult = Schema.Union([
 	}),
 	Schema.Struct({
 		kind: Schema.Literal("attributeValues"),
-		source: Schema.Literal("traces"),
+		source: Schema.Literals(["traces", "logs", "metrics"]),
 		data: Schema.Array(AttributeValueItem),
 	}),
 	Schema.Struct({

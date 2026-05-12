@@ -14,7 +14,12 @@ import {
 	getErrorsSummary,
 	getErrorsTimeseries,
 } from "@/api/tinybird/errors"
-import { getLogsFacets, listLogs } from "@/api/tinybird/logs"
+import {
+	getLogAttributeKeys,
+	getLogAttributeValues,
+	getLogsFacets,
+	listLogs,
+} from "@/api/tinybird/logs"
 import {
 	getMetricAttributeKeys,
 	getMetricTimeSeries,
@@ -304,5 +309,13 @@ export const getResourceAttributeKeysResultAtom = makeQueryAtomFamily(getResourc
 })
 
 export const getResourceAttributeValuesResultAtom = makeQueryAtomFamily(getResourceAttributeValues, {
+	staleTime: 30_000,
+})
+
+export const getLogAttributeKeysResultAtom = makeQueryAtomFamily(getLogAttributeKeys, {
+	staleTime: 60_000,
+})
+
+export const getLogAttributeValuesResultAtom = makeQueryAtomFamily(getLogAttributeValues, {
 	staleTime: 30_000,
 })

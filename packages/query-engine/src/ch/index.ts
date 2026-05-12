@@ -152,6 +152,8 @@ export {
 	attributeKeysQuery,
 	spanAttributeValuesQuery,
 	resourceAttributeValuesQuery,
+	logAttributeValuesQuery,
+	metricAttributeValuesQuery,
 	type AttributeKeysQueryOpts,
 	type AttributeKeysOutput,
 	type AttributeValuesOpts,

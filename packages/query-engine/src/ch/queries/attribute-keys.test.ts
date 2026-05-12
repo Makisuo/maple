@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { compileCH } from "../compile"
-import { attributeKeysQuery, spanAttributeValuesQuery, resourceAttributeValuesQuery } from "./attribute-keys"
+import {
+	attributeKeysQuery,
+	logAttributeValuesQuery,
+	metricAttributeValuesQuery,
+	resourceAttributeValuesQuery,
+	spanAttributeValuesQuery,
+} from "./attribute-keys"
 
 const baseParams = {
 	orgId: "org_1",
@@ -88,5 +94,35 @@ describe("resourceAttributeValuesQuery", () => {
 		expect(sql).toContain("AttributeKey = 'host.name'")
 		expect(sql).toContain("GROUP BY attributeValue")
 		expect(sql).toContain("ORDER BY usageCount DESC")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// logAttributeValuesQuery
+// ---------------------------------------------------------------------------
+
+describe("logAttributeValuesQuery", () => {
+	it("compiles log attribute values", () => {
+		const q = logAttributeValuesQuery({ attributeKey: "user.id" })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("FROM attribute_values_hourly")
+		expect(sql).toContain("AttributeValue AS attributeValue")
+		expect(sql).toContain("AttributeScope = 'log'")
+		expect(sql).toContain("AttributeKey = 'user.id'")
+		expect(sql).toContain("LIMIT 50")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// metricAttributeValuesQuery
+// ---------------------------------------------------------------------------
+
+describe("metricAttributeValuesQuery", () => {
+	it("compiles metric attribute values", () => {
+		const q = metricAttributeValuesQuery({ attributeKey: "deployment.environment" })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("FROM attribute_values_hourly")
+		expect(sql).toContain("AttributeScope = 'metric'")
+		expect(sql).toContain("AttributeKey = 'deployment.environment'")
 	})
 })

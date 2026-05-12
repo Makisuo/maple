@@ -7,6 +7,7 @@ import {
 	TinybirdDateTimeString,
 	decodeInput,
 	executeQueryEngine,
+	extractAttributeValues,
 	extractCount,
 	extractFacets,
 	runTinybirdQuery,
@@ -243,5 +244,108 @@ const getLogsFacetsEffect = Effect.fn("QueryEngine.getLogsFacets")(function* ({
 
 	return {
 		data: { services, severities, deploymentEnvs },
+	}
+})
+
+// ---------------------------------------------------------------------------
+// Log attribute keys / values
+// Backed by `log_attribute_keys_mv` and `log_attribute_values_mv` →
+// `attribute_keys_hourly` / `attribute_values_hourly`. Reads the rollup, not
+// the raw `logs` table — autocomplete on log attribute name/value stays fast
+// regardless of tenant log volume.
+// ---------------------------------------------------------------------------
+
+const GetLogAttributeKeysInputSchema = Schema.Struct({
+	startTime: Schema.optional(TinybirdDateTimeString),
+	endTime: Schema.optional(TinybirdDateTimeString),
+})
+
+export type GetLogAttributeKeysInput = Schema.Schema.Type<typeof GetLogAttributeKeysInputSchema>
+
+export interface LogAttributeKeysResponse {
+	data: Array<{ attributeKey: string; usageCount: number }>
+}
+
+export function getLogAttributeKeys({ data }: { data: GetLogAttributeKeysInput }) {
+	return getLogAttributeKeysEffect({ data })
+}
+
+const getLogAttributeKeysEffect = Effect.fn("QueryEngine.getLogAttributeKeys")(function* ({
+	data,
+}: {
+	data: GetLogAttributeKeysInput
+}) {
+	const input = yield* decodeInput(GetLogAttributeKeysInputSchema, data ?? {}, "getLogAttributeKeys")
+	const fallback = defaultLogsTimeRange()
+	const request = new QueryEngineExecuteRequest({
+		startTime: input.startTime ?? fallback.startTime,
+		endTime: input.endTime ?? fallback.endTime,
+		query: { kind: "attributeKeys" as const, source: "logs" as const },
+	})
+	const response = yield* executeQueryEngine("queryEngine.getLogAttributeKeys", request)
+	const result = response.result
+	if (result.kind !== "attributeKeys") return { data: [] }
+
+	return {
+		data: result.data.map((row) => ({
+			attributeKey: row.key,
+			usageCount: Number(row.count),
+		})),
+	}
+})
+
+const GetLogAttributeValuesInputSchema = Schema.Struct({
+	startTime: Schema.optional(TinybirdDateTimeString),
+	endTime: Schema.optional(TinybirdDateTimeString),
+	attributeKey: Schema.String,
+})
+
+export type GetLogAttributeValuesInput = Schema.Schema.Type<typeof GetLogAttributeValuesInputSchema>
+
+export interface LogAttributeValuesResponse {
+	data: Array<{ attributeValue: string; usageCount: number }>
+}
+
+export function getLogAttributeValues({ data }: { data: GetLogAttributeValuesInput }) {
+	return getLogAttributeValuesEffect({ data })
+}
+
+const getLogAttributeValuesEffect = Effect.fn("QueryEngine.getLogAttributeValues")(function* ({
+	data,
+}: {
+	data: GetLogAttributeValuesInput
+}) {
+	const input = yield* decodeInput(
+		GetLogAttributeValuesInputSchema,
+		data ?? {},
+		"getLogAttributeValues",
+	)
+
+	yield* Effect.annotateCurrentSpan("attributeKey", input.attributeKey)
+
+	if (!input.attributeKey) {
+		return { data: [] }
+	}
+
+	const fallback = defaultLogsTimeRange()
+	const response = yield* executeQueryEngine(
+		"queryEngine.getLogAttributeValues",
+		new QueryEngineExecuteRequest({
+			startTime: input.startTime ?? fallback.startTime,
+			endTime: input.endTime ?? fallback.endTime,
+			query: {
+				kind: "attributeValues" as const,
+				source: "logs" as const,
+				scope: "log" as const,
+				attributeKey: input.attributeKey,
+			},
+		}),
+	)
+
+	return {
+		data: extractAttributeValues(response).map((row) => ({
+			attributeValue: row.value,
+			usageCount: Number(row.count),
+		})),
 	}
 })
