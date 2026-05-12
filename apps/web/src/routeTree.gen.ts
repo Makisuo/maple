@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WidgetLabRouteImport } from './routes/widget-lab'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -48,6 +49,11 @@ import { Route as InfraKubernetesNodesNodeNameRouteImport } from './routes/infra
 import { Route as DashboardsDashboardIdWidgetsWidgetIdRouteImport } from './routes/dashboards/$dashboardId_.widgets.$widgetId'
 import { Route as InfraKubernetesWorkloadsKindWorkloadNameRouteImport } from './routes/infra/kubernetes/workloads/$kind/$workloadName'
 
+const WidgetLabRoute = WidgetLabRouteImport.update({
+  id: '/widget-lab',
+  path: '/widget-lab',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
   path: '/sign-up',
@@ -262,6 +268,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/widget-lab': typeof WidgetLabRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
@@ -302,6 +309,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/widget-lab': typeof WidgetLabRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
@@ -343,6 +351,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
+  '/widget-lab': typeof WidgetLabRoute
   '/alerts/$ruleId': typeof AlertsRuleIdRoute
   '/alerts/create': typeof AlertsCreateRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
@@ -385,6 +394,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/widget-lab'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/dashboards/$dashboardId'
@@ -425,6 +435,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/widget-lab'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/dashboards/$dashboardId'
@@ -465,6 +476,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sign-in'
     | '/sign-up'
+    | '/widget-lab'
     | '/alerts/$ruleId'
     | '/alerts/create'
     | '/dashboards/$dashboardId'
@@ -506,6 +518,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
+  WidgetLabRoute: typeof WidgetLabRoute
   AlertsRuleIdRoute: typeof AlertsRuleIdRoute
   AlertsCreateRoute: typeof AlertsCreateRoute
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
@@ -533,6 +546,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/widget-lab': {
+      id: '/widget-lab'
+      path: '/widget-lab'
+      fullPath: '/widget-lab'
+      preLoaderRoute: typeof WidgetLabRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-up': {
       id: '/sign-up'
       path: '/sign-up'
@@ -818,6 +838,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
+  WidgetLabRoute: WidgetLabRoute,
   AlertsRuleIdRoute: AlertsRuleIdRoute,
   AlertsCreateRoute: AlertsCreateRoute,
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,

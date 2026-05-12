@@ -92,9 +92,13 @@ const COLOR_SCALES: Record<string, string[]> = {
 	],
 }
 
+function clamp(value: number, lo: number, hi: number): number {
+	if (!Number.isFinite(value)) return lo
+	return Math.max(lo, Math.min(hi, value))
+}
+
 function clamp01(value: number): number {
-	if (!Number.isFinite(value)) return 0
-	return Math.max(0, Math.min(1, value))
+	return clamp(value, 0, 1)
 }
 
 /**
@@ -129,52 +133,64 @@ function formatScalar(value: number, unit?: string): string {
 	return unit ? formatValueByUnit(value, unit) : formatNumber(value)
 }
 
-// Recognise ISO-8601-shaped strings. Used to opt the y-axis into the
-// compact HH:MM presentation when every tick is a timestamp.
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?$/
 
-/**
- * If every y-axis tick is an ISO timestamp, render the time-of-day only.
- * Date context drops into the tooltip (which shows the full original
- * string verbatim), so we don't waste vertical space on a header.
- */
 function shortenYLabel(raw: string, allIso: boolean): string {
 	if (!allIso) return raw
 	const tIdx = raw.indexOf("T")
 	if (tIdx < 0) return raw
-	return raw.slice(tIdx + 1).replace(/\.\d+Z?$/, "").replace(/Z$/, "").slice(0, 5)
+	return raw
+		.slice(tIdx + 1)
+		.replace(/\.\d+Z?$/, "")
+		.replace(/Z$/, "")
+		.slice(0, 5)
 }
 
 /**
- * Pick evenly spaced tick indices for a categorical axis. Always includes
- * the first and last index so the axis is clearly bounded.
+ * Pick x-axis tick indices using a fixed STRIDE guaranteed to give each
+ * label `minLabelPx` of horizontal room. First and last index are always
+ * included so the axis range is clearly bounded; intermediate picks step by
+ * `stride` from index 0. A trailing pick is dropped if it would land within
+ * one stride of `count - 1` (which we always append).
  */
-function pickEvenTicks(count: number, maxTicks: number): number[] {
+function pickXTicks(count: number, cellStridePx: number, minLabelPx: number): number[] {
 	if (count <= 0) return []
-	if (count <= maxTicks) return Array.from({ length: count }, (_, i) => i)
-	const ticks = new Set<number>()
-	for (let i = 0; i < maxTicks; i += 1) {
-		ticks.add(Math.round((i * (count - 1)) / (maxTicks - 1)))
-	}
-	return Array.from(ticks).sort((a, b) => a - b)
+	if (count === 1) return [0]
+	const stride = Math.max(1, Math.ceil(minLabelPx / cellStridePx))
+	// Endpoints only — even one intermediate would crowd the axis.
+	if (stride * 2 > count - 1) return [0, count - 1]
+	const out: number[] = [0]
+	for (let i = stride; i < count - stride; i += stride) out.push(i)
+	out.push(count - 1)
+	return out
 }
 
-// Layout budget. Every constant here is in CSS pixels and is consumed by
-// both the `ResizeObserver` cell-sizing math and the JSX positioning.
-const CELL_GAP = 1.5
-const Y_LABEL_WIDTH = 56 // sans-serif HH:MM or short categorical labels
-const X_LABEL_HEIGHT = 18 // single horizontal text row, no rotation
-const LEGEND_HEIGHT = 22 // gradient bar + min/max labels
-const PLOT_PADDING = 8 // outer padding around the chart
+// ──────────────────────────────────────────────────────────────────────────────
+// Layout constants. Every dimension here is in CSS pixels.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const CELL_GAP = 2
+const X_AXIS_H = 20
+const LEGEND_HEIGHT = 22
+const GAP_GRID_TO_LEGEND = 8
+const PLOT_PAD_X = 6
+const PLOT_PAD_TOP = 2
+const PLOT_PAD_BOTTOM = 4
 
 const MIN_CELL = 6
-const MAX_CELL = 36
+// Upper bounds keep cells from ballooning on huge cards with tiny grids.
+// Wider than tall — matches the grafana / signoz time-bucket heatmap shape.
+const MAX_CELL_W = 96
+const MAX_CELL_H = 64
 
-// Number of x-axis label ticks — Grafana-style restraint. Five labels is
-// the sweet spot: enough to anchor the axis without becoming a wall.
-const X_TICK_COUNT = 5
+const LABEL_FONT_PX = 11
+const LABEL_CHAR_PX = 6.3 // tabular-nums approximation at 11px
+const LABEL_GUTTER_PX = 6
+const Y_LABEL_MIN_PX = 36
+const Y_LABEL_MAX_PX = 96
+
 // Minimum vertical room each y-label needs to avoid stacking neighbours.
-const Y_LABEL_MIN_PX = 14
+const Y_LABEL_MIN_VERTICAL_PX = 13
 
 interface HoverState {
 	x: string
@@ -182,6 +198,77 @@ interface HoverState {
 	xIdx: number
 	yIdx: number
 	value: number | null
+}
+
+interface LayoutResult {
+	cellW: number
+	cellH: number
+	gridW: number
+	gridH: number
+	yLabelW: number
+	xTickIndices: number[]
+	yTickIndices: number[]
+	gridOffsetX: number
+}
+
+function computeLayout(
+	containerW: number,
+	containerH: number,
+	xValues: string[],
+	yValues: string[],
+	allYIso: boolean,
+): LayoutResult | null {
+	if (containerW <= 0 || containerH <= 0) return null
+	if (xValues.length === 0 || yValues.length === 0) return null
+
+	const longestYChars = yValues.reduce(
+		(m, v) => Math.max(m, shortenYLabel(v, allYIso).length),
+		0,
+	)
+	const yLabelW = clamp(longestYChars * LABEL_CHAR_PX + 10, Y_LABEL_MIN_PX, Y_LABEL_MAX_PX)
+
+	const availW = containerW - yLabelW - PLOT_PAD_X * 2
+	if (availW <= 0) return null
+
+	const naturalCellW = (availW - (xValues.length - 1) * CELL_GAP) / xValues.length
+	const cellW = clamp(Math.floor(naturalCellW), MIN_CELL, MAX_CELL_W)
+
+	const availH = containerH - X_AXIS_H - LEGEND_HEIGHT - GAP_GRID_TO_LEGEND - PLOT_PAD_TOP - PLOT_PAD_BOTTOM
+	if (availH <= 0) return null
+
+	const naturalCellH = (availH - (yValues.length - 1) * CELL_GAP) / yValues.length
+	const cellH = clamp(Math.floor(naturalCellH), MIN_CELL, MAX_CELL_H)
+
+	const gridW = xValues.length * cellW + (xValues.length - 1) * CELL_GAP
+	const gridH = yValues.length * cellH + (yValues.length - 1) * CELL_GAP
+
+	// Center the grid horizontally when the cell width is capped.
+	const gridOffsetX = Math.max(0, Math.floor((availW - gridW) / 2))
+
+	// X-tick density — guaranteed non-overlap via stride-based picking.
+	const longestXChars = xValues.reduce((m, v) => Math.max(m, v.length), 0)
+	const longestXPx = longestXChars * LABEL_CHAR_PX
+	const xTickIndices = pickXTicks(xValues.length, cellW + CELL_GAP, longestXPx + LABEL_GUTTER_PX)
+
+	// Y-tick density. Aim for >= Y_LABEL_MIN_VERTICAL_PX between visible labels.
+	const yStride = cellH + CELL_GAP
+	const yTickStep = Math.max(1, Math.ceil(Y_LABEL_MIN_VERTICAL_PX / yStride))
+	const yTickIndices: number[] = []
+	for (let i = 0; i < yValues.length; i += yTickStep) yTickIndices.push(i)
+	if (yTickIndices[yTickIndices.length - 1] !== yValues.length - 1) {
+		yTickIndices.push(yValues.length - 1)
+	}
+
+	return {
+		cellW,
+		cellH,
+		gridW,
+		gridH,
+		yLabelW,
+		xTickIndices,
+		yTickIndices,
+		gridOffsetX,
+	}
 }
 
 export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatmap }: BaseChartProps) {
@@ -214,7 +301,7 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 	const palette = COLOR_SCALES[heatmap?.colorScale ?? "blues"] ?? COLOR_SCALES.blues
 
 	const containerRef = React.useRef<HTMLDivElement | null>(null)
-	const [cellSize, setCellSize] = React.useState<number>(14)
+	const [size, setSize] = React.useState<{ w: number; h: number }>({ w: 0, h: 0 })
 
 	React.useEffect(() => {
 		const el = containerRef.current
@@ -222,23 +309,22 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 		const ro = new ResizeObserver((entries) => {
 			const rect = entries[0]?.contentRect
 			if (!rect) return
-			if (xValues.length === 0 || yValues.length === 0) return
-			const availW = rect.width - Y_LABEL_WIDTH - PLOT_PADDING * 2
-			const availH =
-				rect.height - X_LABEL_HEIGHT - LEGEND_HEIGHT - PLOT_PADDING * 2 - 8 /* gap above legend */
-			const perX = (availW - (xValues.length - 1) * CELL_GAP) / xValues.length
-			const perY = (availH - (yValues.length - 1) * CELL_GAP) / yValues.length
-			const next = Math.max(MIN_CELL, Math.min(MAX_CELL, Math.floor(Math.min(perX, perY))))
-			setCellSize(next)
+			setSize({ w: Math.floor(rect.width), h: Math.floor(rect.height) })
 		})
 		ro.observe(el)
 		return () => ro.disconnect()
-	}, [xValues.length, yValues.length])
+	}, [])
+
+	const allYIso = React.useMemo(() => yValues.every((v) => ISO_RE.test(v)), [yValues])
+
+	const layout = React.useMemo(
+		() => computeLayout(size.w, size.h, xValues, yValues, allYIso),
+		[size.w, size.h, xValues, yValues, allYIso],
+	)
 
 	const [hover, setHover] = React.useState<HoverState | null>(null)
 
-	// Empty state — a quiet placeholder, sans-serif to match the new
-	// chart aesthetic. No monospace, no uppercase tracking.
+	// Empty state — a quiet placeholder with a tiny suggestive grid.
 	if (xValues.length === 0 || yValues.length === 0) {
 		return (
 			<div ref={containerRef} className={cn("relative h-full w-full", className)}>
@@ -262,62 +348,36 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 		)
 	}
 
-	const allYIso = yValues.every((v) => ISO_RE.test(v))
-	const stride = cellSize + CELL_GAP
-	const gridWidth = xValues.length * cellSize + (xValues.length - 1) * CELL_GAP
-	const gridHeight = yValues.length * cellSize + (yValues.length - 1) * CELL_GAP
+	if (!layout) {
+		return <div ref={containerRef} className={cn("relative h-full w-full", className)} />
+	}
 
-	// Position helpers in plot-local coordinates (origin at top-left of
-	// the cell grid).
-	const colCenterX = (xi: number) => xi * stride + cellSize / 2
-	const rowCenterY = (yi: number) => yi * stride + cellSize / 2
+	const { cellW, cellH, gridW, gridH, yLabelW, xTickIndices, yTickIndices, gridOffsetX } = layout
 
-	// X-axis ticks: pick ~5 evenly spaced indices. The labels render
-	// horizontally below the cell grid; truncation happens only if the
-	// stride between two ticks is narrower than the label text.
-	const xTickIndices = React.useMemo(
-		() => pickEvenTicks(xValues.length, X_TICK_COUNT),
-		[xValues.length],
-	)
+	const xStride = cellW + CELL_GAP
+	const yStride = cellH + CELL_GAP
+	const colCenterX = (xi: number) => xi * xStride + cellW / 2
+	const rowCenterY = (yi: number) => yi * yStride + cellH / 2
 
-	// X-label budget per shown tick: roughly the distance between adjacent
-	// ticks, minus a 4px gutter so labels never visually collide.
-	const xLabelMaxPx =
-		xTickIndices.length > 1
-			? ((xValues.length - 1) * stride) / (xTickIndices.length - 1) - 4
-			: gridWidth
-	const xLabelMaxChars = Math.max(4, Math.floor(xLabelMaxPx / 6))
-
-	// Y-axis ticks: density based on cell row height. We aim for ≥14px of
-	// vertical room per label so they never stack.
-	const yTickStride = Math.max(1, Math.ceil(Y_LABEL_MIN_PX / stride))
-	const yTickIndices = React.useMemo(() => {
-		const out: number[] = []
-		for (let i = 0; i < yValues.length; i += yTickStride) out.push(i)
-		// Always include the last row so the axis range is clearly bounded.
-		if (out.length > 0 && out[out.length - 1] !== yValues.length - 1) {
-			out.push(yValues.length - 1)
-		}
-		return out
-	}, [yValues.length, yTickStride])
-
-	// Legend: just two endpoints in linear mode; add a geometric midpoint
-	// in log mode so the spacing is communicated.
-	const legendTicks = React.useMemo(() => {
-		if (span <= 0) return [{ value: min, pct: 0, anchor: "start" as const }]
-		const out: Array<{ value: number; pct: number; anchor: "start" | "middle" | "end" }> = [
-			{ value: min, pct: 0, anchor: "start" },
-		]
-		if (scaleType === "log") {
-			out.push({ value: min + Math.expm1(0.5 * Math.log1p(span)), pct: 50, anchor: "middle" })
-		}
-		out.push({ value: max, pct: 100, anchor: "end" })
-		return out
-	}, [min, max, span, scaleType])
-
-	// Constrain the legend bar to the chart-grid width — feels more
-	// anchored than letting it stretch the whole container.
-	const legendBarWidth = Math.min(280, gridWidth)
+	// Legend ticks: linear shows endpoints; log adds a geometric midpoint so
+	// the spacing reads as logarithmic.
+	const legendTicks: Array<{ value: number; pct: number; anchor: "start" | "middle" | "end" }> =
+		span <= 0
+			? [{ value: min, pct: 0, anchor: "start" }]
+			: scaleType === "log"
+				? [
+						{ value: min, pct: 0, anchor: "start" },
+						{
+							value: min + Math.expm1(0.5 * Math.log1p(span)),
+							pct: 50,
+							anchor: "middle",
+						},
+						{ value: max, pct: 100, anchor: "end" },
+					]
+				: [
+						{ value: min, pct: 0, anchor: "start" },
+						{ value: max, pct: 100, anchor: "end" },
+					]
 
 	const noDataFill = "color-mix(in oklch, var(--muted-foreground) 10%, transparent)"
 
@@ -334,61 +394,62 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 		})
 	}
 
+	const plotLeft = yLabelW + gridOffsetX
+
 	return (
 		<div ref={containerRef} className={cn("relative h-full w-full select-none", className)}>
 			<div
-				className="absolute inset-0 flex flex-col"
-				style={{ padding: PLOT_PADDING }}
+				className="absolute inset-0"
+				style={{
+					padding: `${PLOT_PAD_TOP}px ${PLOT_PAD_X}px ${PLOT_PAD_BOTTOM}px ${PLOT_PAD_X}px`,
+				}}
 			>
-				{/* Plot area */}
-				<div className="relative min-h-0 flex-1">
-					{/* Y-axis labels — absolutely positioned at row centers so
-						 the axis stays aligned with the cell grid regardless of
-						 row stride. */}
-					<div className="absolute inset-y-0 left-0" style={{ width: Y_LABEL_WIDTH }}>
-						<div
-							className="relative"
-							style={{ width: "100%", height: gridHeight }}
-						>
-							{yTickIndices.map((yi) => {
-								const raw = yValues[yi]
-								const label = shortenYLabel(raw, allYIso)
-								const isActive = hover?.yIdx === yi
-								return (
-									<div
-										key={raw}
-										title={raw}
-										className={cn(
-											"absolute right-0 truncate text-right text-[11px] tabular-nums transition-colors",
-											isActive
-												? "text-[var(--primary)]"
-												: "text-muted-foreground/85",
-										)}
-										style={{
-											top: rowCenterY(yi),
-											transform: "translateY(-50%)",
-											paddingRight: 8,
-											width: Y_LABEL_WIDTH,
-										}}
-									>
-										{label}
-									</div>
-								)
-							})}
-						</div>
+				{/* Plot column: cell grid + x-axis + legend, stacked. */}
+				<div className="relative h-full w-full">
+					{/* Y-axis labels — anchored to row centers so the axis stays
+					    aligned with the cell grid regardless of row stride. */}
+					<div
+						className="absolute top-0"
+						style={{ left: gridOffsetX, width: yLabelW, height: gridH }}
+					>
+						{yTickIndices.map((yi) => {
+							const raw = yValues[yi]
+							const label = shortenYLabel(raw, allYIso)
+							const isActive = hover?.yIdx === yi
+							return (
+								<div
+									key={raw}
+									title={raw}
+									className={cn(
+										"absolute right-0 truncate text-right tabular-nums transition-colors",
+										isActive ? "text-[var(--primary)]" : "text-muted-foreground/85",
+									)}
+									style={{
+										top: rowCenterY(yi),
+										transform: "translateY(-50%)",
+										paddingRight: LABEL_GUTTER_PX,
+										width: yLabelW,
+										fontSize: LABEL_FONT_PX,
+										lineHeight: 1,
+									}}
+								>
+									{label}
+								</div>
+							)
+						})}
 					</div>
 
 					{/* Cell grid */}
 					<div
-						className="absolute left-0 top-0"
-						style={{ marginLeft: Y_LABEL_WIDTH }}
+						className="absolute top-0"
+						style={{ left: plotLeft }}
 						onPointerLeave={() => setHover(null)}
 					>
 						<div
 							className="grid"
 							style={{
-								gridTemplateColumns: `repeat(${xValues.length}, ${cellSize}px)`,
-								gridTemplateRows: `repeat(${yValues.length}, ${cellSize}px)`,
+								gridTemplateColumns: `repeat(${xValues.length}, ${cellW}px)`,
+								gridTemplateRows: `repeat(${yValues.length}, ${cellH}px)`,
 								gap: `${CELL_GAP}px`,
 							}}
 						>
@@ -399,8 +460,8 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 									const value = lookup.get(key) ?? 0
 									const t = normalize(value, min, span, scaleType)
 									const isHover = hover?.xIdx === xi && hover?.yIdx === yi
-									const isInCol = hover?.xIdx === xi
-									const isInRow = hover?.yIdx === yi
+									const isCrossRow = hover && hover.yIdx === yi && hover.xIdx !== xi
+									const isCrossCol = hover && hover.xIdx === xi && hover.yIdx !== yi
 
 									const fill = !has
 										? noDataFill
@@ -413,15 +474,20 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 											key={key}
 											onPointerEnter={() => handlePointerEnter(xi, yi)}
 											className={cn(
-												"relative transition-[box-shadow]",
+												"relative transition-[box-shadow,filter] duration-150",
 												isHover && "z-10",
 											)}
 											style={{
 												backgroundColor: fill,
+												borderRadius: 1.5,
 												boxShadow: isHover
-													? "0 0 0 1.5px var(--foreground)"
-													: isInCol || isInRow
-														? "inset 0 0 0 1px color-mix(in oklch, var(--primary) 45%, transparent)"
+													? "0 0 0 1.5px var(--foreground), 0 0 0 3.5px color-mix(in oklch, var(--foreground) 28%, transparent)"
+													: isCrossRow || isCrossCol
+														? "inset 0 0 0 1px color-mix(in oklch, var(--foreground) 35%, transparent)"
+														: undefined,
+												filter:
+													hover && !isHover && !isCrossRow && !isCrossCol
+														? "saturate(0.55) brightness(0.92)"
 														: undefined,
 											}}
 										/>
@@ -430,29 +496,16 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 							)}
 						</div>
 
-						{/* X-axis ticks + labels, anchored to the bottom of the
-							 cell grid in the same coordinate system. */}
+						{/* X-axis: ticks + labels, anchored under the cell grid. */}
 						<div
-							className="absolute left-0 right-0"
-							style={{ top: gridHeight, height: X_LABEL_HEIGHT }}
+							className="absolute"
+							style={{ left: 0, top: gridH, width: gridW, height: X_AXIS_H }}
 						>
 							{xTickIndices.map((xi, ti) => {
 								const raw = xValues[xi]
 								const isActive = hover?.xIdx === xi
-								const display =
-									raw.length > xLabelMaxChars
-										? `${raw.slice(0, Math.max(1, xLabelMaxChars - 1))}…`
-										: raw
-								// Anchor endpoints so the first label stays clear of the
-								// y-axis column and the last doesn't run past the grid's
-								// right edge. Interior labels center over their tick.
 								const isFirst = ti === 0
 								const isLast = ti === xTickIndices.length - 1
-								const labelTransform = isFirst
-									? "translateX(0)"
-									: isLast
-										? "translateX(-100%)"
-										: "translateX(-50%)"
 								return (
 									<React.Fragment key={raw}>
 										<div
@@ -462,7 +515,7 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 												left: colCenterX(xi),
 												top: 0,
 												width: 1,
-												height: 4,
+												height: 3,
 												transform: "translateX(-0.5px)",
 												background:
 													"color-mix(in oklch, var(--border) 80%, transparent)",
@@ -471,7 +524,7 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 										<div
 											title={raw}
 											className={cn(
-												"absolute whitespace-nowrap text-[10.5px] tabular-nums transition-colors",
+												"absolute whitespace-nowrap tabular-nums transition-colors",
 												isActive
 													? "text-[var(--primary)]"
 													: "text-muted-foreground/85",
@@ -479,23 +532,30 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 											style={{
 												left: colCenterX(xi),
 												top: 5,
-												transform: labelTransform,
+												transform: isFirst
+													? "translateX(0)"
+													: isLast
+														? "translateX(-100%)"
+														: "translateX(-50%)",
+												fontSize: LABEL_FONT_PX,
+												lineHeight: 1,
 											}}
 										>
-											{display}
+											{raw}
 										</div>
 									</React.Fragment>
 								)
 							})}
 						</div>
 
-						{/* Tooltip */}
+						{/* Tooltip — anchored above hovered cell. */}
 						{tooltip !== "hidden" && hover && (
 							<div
-								className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-[color-mix(in_oklch,var(--border)_80%,var(--foreground)_15%)] bg-popover/95 px-2.5 py-1.5 text-[11px] shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] backdrop-blur-sm"
+								className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-[color-mix(in_oklch,var(--border)_80%,var(--foreground)_15%)] bg-popover/95 px-2.5 py-1.5 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.55)] backdrop-blur-sm"
 								style={{
 									left: colCenterX(hover.xIdx),
-									top: rowCenterY(hover.yIdx) - 8,
+									top: rowCenterY(hover.yIdx) - 10,
+									fontSize: LABEL_FONT_PX,
 								}}
 							>
 								<div className="font-medium text-foreground">
@@ -515,48 +575,49 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 							</div>
 						)}
 					</div>
-				</div>
 
-				{/* Horizontal legend strip — anchored under the cell grid,
-					 starting at the same x-offset as the grid (Y_LABEL_WIDTH).
-					 The gradient itself is built with `linear-gradient(in oklch
-					 to right, …)` so the bar's transition matches what cells
-					 do per-value. */}
-				<div
-					className="shrink-0"
-					style={{
-						marginLeft: Y_LABEL_WIDTH,
-						marginTop: 8,
-						height: LEGEND_HEIGHT,
-						width: legendBarWidth,
-					}}
-				>
+					{/* Legend strip — same width as the cell grid, anchored under
+					    the x-axis. A thin gradient bar plus endpoint values. */}
 					<div
+						className="absolute"
 						style={{
-							height: 8,
-							width: "100%",
-							background: `linear-gradient(in oklch to right, ${palette.join(", ")})`,
-							borderRadius: 1,
+							left: plotLeft,
+							top: gridH + X_AXIS_H + GAP_GRID_TO_LEGEND,
+							width: gridW,
+							height: LEGEND_HEIGHT,
 						}}
-					/>
-					<div className="relative mt-1.5" style={{ height: 12 }}>
-						{legendTicks.map(({ value, pct, anchor }) => (
-							<div
-								key={pct}
-								className="absolute text-[10.5px] tabular-nums text-muted-foreground/85"
-								style={{
-									left: `${pct}%`,
-									transform:
-										anchor === "start"
-											? "translateX(0)"
-											: anchor === "end"
-												? "translateX(-100%)"
-												: "translateX(-50%)",
-								}}
-							>
-								{formatScalar(value, unit)}
-							</div>
-						))}
+					>
+						<div
+							style={{
+								height: 10,
+								width: "100%",
+								background: `linear-gradient(in oklch to right, ${palette.join(", ")})`,
+								borderRadius: 2,
+								boxShadow:
+									"inset 0 0 0 0.5px color-mix(in oklch, var(--foreground) 12%, transparent)",
+							}}
+						/>
+						<div className="relative mt-1.5" style={{ height: 12 }}>
+							{legendTicks.map(({ value, pct, anchor }) => (
+								<div
+									key={pct}
+									className="absolute tabular-nums text-muted-foreground/85"
+									style={{
+										left: `${pct}%`,
+										transform:
+											anchor === "start"
+												? "translateX(0)"
+												: anchor === "end"
+													? "translateX(-100%)"
+													: "translateX(-50%)",
+										fontSize: LABEL_FONT_PX - 0.5,
+										lineHeight: 1,
+									}}
+								>
+									{formatScalar(value, unit)}
+								</div>
+							))}
+						</div>
 					</div>
 				</div>
 			</div>
