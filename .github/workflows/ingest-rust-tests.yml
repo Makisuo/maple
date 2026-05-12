@@ -1,0 +1,43 @@
+name: Ingest Rust Tests
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "apps/ingest/**"
+            - "packages/db/drizzle/**"
+            - "packages/db/src/schema/**"
+            - ".github/workflows/ingest-rust-tests.yml"
+    pull_request:
+        paths:
+            - "apps/ingest/**"
+            - "packages/db/drizzle/**"
+            - "packages/db/src/schema/**"
+            - ".github/workflows/ingest-rust-tests.yml"
+    workflow_dispatch:
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    test:
+        name: Cargo test
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: apps/ingest
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+            - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+              with:
+                  workspaces: apps/ingest
+
+            - name: Run ingest unit and fake Tinybird e2e tests
+              run: cargo test
