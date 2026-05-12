@@ -45,6 +45,8 @@ function makeState(): QueryBuilderWidgetState {
 		listLimit: "",
 		listColumns: [],
 		listRootOnly: true,
+		heatmapColorScale: "blues",
+		heatmapScaleType: "linear",
 	}
 }
 

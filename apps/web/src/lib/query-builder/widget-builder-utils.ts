@@ -54,6 +54,9 @@ export interface QueryBuilderWidgetState {
 	listLimit: string
 	listColumns: ListColumnDraft[]
 	listRootOnly: boolean
+	// Heatmap-specific
+	heatmapColorScale: "viridis" | "magma" | "cividis" | "blues" | "reds"
+	heatmapScaleType: "linear" | "log"
 }
 
 export function inferDisplayUnitForQuery(query: QueryBuilderQueryDraft): ValueUnit | undefined {
@@ -241,6 +244,8 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		listColumns: (widget.display.columns ??
 			(listDs === "logs" ? LOG_DEFAULT_COLUMNS : TRACE_DEFAULT_COLUMNS)) as ListColumnDraft[],
 		listRootOnly: widget.display.listRootOnly ?? true,
+		heatmapColorScale: widget.display.heatmap?.colorScale ?? "blues",
+		heatmapScaleType: widget.display.heatmap?.scaleType ?? "linear",
 	} satisfies Omit<QueryBuilderWidgetState, "queries" | "formulas">
 
 	// List widgets don't use the query builder — return early with a dummy query
@@ -513,6 +518,12 @@ export function buildWidgetDisplay(
 		display.unit = state.unit
 	}
 	if (state.visualization === "stat") display.unit = state.unit
+	if (state.visualization === "heatmap") {
+		display.heatmap = {
+			colorScale: state.heatmapColorScale,
+			scaleType: state.heatmapScaleType,
+		}
+	}
 	if (state.visualization === "table") {
 		const groupByQuery = state.queries.find((query) => isVisibleQuery(query) && hasActiveGroupBy(query))
 		if (groupByQuery) {

@@ -148,7 +148,7 @@ export interface WidgetDisplayConfig {
 	// Heatmap-specific
 	heatmap?: {
 		colorScale?: "viridis" | "magma" | "cividis" | "blues" | "reds"
-		bucketCount?: number
+		scaleType?: "linear" | "log"
 	}
 
 	// Markdown-specific

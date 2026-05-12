@@ -5,6 +5,7 @@ import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
 import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
+import { HeatmapWidget } from "@/components/dashboard-builder/widgets/heatmap-widget"
 import { QueryPanel } from "@/components/dashboard-builder/config/query-panel"
 import { FormulaPanel } from "@/components/dashboard-builder/config/formula-panel"
 import { WidgetSettingsBar } from "@/components/dashboard-builder/config/widget-settings-bar"
@@ -60,6 +61,9 @@ const WidgetPreview = React.memo(function WidgetPreview({ widget }: { widget: Da
 	}
 	if (widget.visualization === "list") {
 		return <ListWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
+	}
+	if (widget.visualization === "heatmap") {
+		return <HeatmapWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
 	}
 	return <ChartWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
 })

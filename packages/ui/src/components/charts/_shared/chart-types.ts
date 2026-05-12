@@ -43,7 +43,7 @@ export interface BaseChartProps {
 	}
 	heatmap?: {
 		colorScale?: "viridis" | "magma" | "cividis" | "blues" | "reds"
-		bucketCount?: number
+		scaleType?: "linear" | "log"
 	}
 }
 

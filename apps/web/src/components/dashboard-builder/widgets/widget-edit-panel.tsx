@@ -186,6 +186,21 @@ export function WidgetEditPanel({ widget, onUpdateDisplay }: WidgetEditPanelProp
 						<option value="magma">Magma</option>
 						<option value="cividis">Cividis</option>
 					</select>
+					<label className="flex items-center gap-2 text-[10px]">
+						<input
+							type="checkbox"
+							checked={(widget.display.heatmap?.scaleType ?? "linear") === "log"}
+							onChange={(e) =>
+								onUpdateDisplay({
+									heatmap: {
+										...widget.display.heatmap,
+										scaleType: e.target.checked ? "log" : "linear",
+									},
+								})
+							}
+						/>
+						Log-scale color binning
+					</label>
 				</div>
 			)}
 

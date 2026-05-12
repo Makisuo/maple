@@ -59,6 +59,8 @@ export function WidgetSettingsBar() {
 		unit,
 		tableLimit,
 		legendPosition,
+		heatmapColorScale,
+		heatmapScaleType,
 	} = state
 
 	const onChange = (updates: Record<string, unknown>) => setState((current) => ({ ...current, ...updates }))
@@ -67,6 +69,7 @@ export function WidgetSettingsBar() {
 	const isStat = visualization === "stat"
 	const isTable = visualization === "table"
 	const isList = visualization === "list"
+	const isHeatmap = visualization === "heatmap"
 
 	const chartStyleOptions = isChart
 		? chartRegistry
@@ -231,6 +234,58 @@ export function WidgetSettingsBar() {
 						</button>
 					</div>
 				</div>
+			)}
+
+			{isHeatmap && (
+				<>
+					<div className="h-px bg-border" />
+					<div className="space-y-1.5">
+						<p className="text-[11px] uppercase tracking-wide text-muted-foreground">Color scale</p>
+						<Select
+							items={Object.fromEntries(
+								(["blues", "reds", "viridis", "magma", "cividis"] as const).map((c) => [
+									c,
+									c[0].toUpperCase() + c.slice(1),
+								]),
+							)}
+							value={heatmapColorScale}
+							onValueChange={(value) =>
+								onChange({ heatmapColorScale: value as typeof heatmapColorScale })
+							}
+						>
+							<SelectTrigger className="w-full">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{(["blues", "reds", "viridis", "magma", "cividis"] as const).map((c) => (
+									<SelectItem key={c} value={c}>
+										{c[0].toUpperCase() + c.slice(1)}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="space-y-1.5">
+						<p className="text-[11px] uppercase tracking-wide text-muted-foreground">Color scaling</p>
+						<div className="flex h-9 rounded-md border bg-muted/40 p-0.5">
+							{(["linear", "log"] as const).map((mode) => (
+								<button
+									key={mode}
+									type="button"
+									onClick={() => onChange({ heatmapScaleType: mode })}
+									className={cn(
+										"flex-1 text-xs rounded-sm transition-colors capitalize",
+										heatmapScaleType === mode
+											? "bg-background text-foreground shadow-sm"
+											: "text-muted-foreground hover:text-foreground",
+									)}
+								>
+									{mode}
+								</button>
+							))}
+						</div>
+					</div>
+				</>
 			)}
 
 			{(isChart || isStat) && <div className="h-px bg-border" />}

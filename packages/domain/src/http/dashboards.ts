@@ -127,6 +127,14 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 	listDataSource: Schema.optional(Schema.String),
 	listWhereClause: Schema.optional(Schema.String),
 	listLimit: Schema.optional(Schema.Number),
+
+	// Heatmap-specific
+	heatmap: Schema.optional(
+		Schema.Struct({
+			colorScale: Schema.optional(Schema.String),
+			scaleType: Schema.optional(Schema.String),
+		}),
+	),
 })
 
 export const WidgetLayoutSchema = Schema.Struct({
