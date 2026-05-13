@@ -6,8 +6,8 @@
 		"jsx": "react-jsx",
 		"baseUrl": ".",
 		"ignoreDeprecations": "6.0",
-		"lib": ["ESNext"],
-		"types": ["node", "@cloudflare/workers-types"],
+		"lib": ["ESNext", "DOM"],
+		"types": ["node"],
 		"strict": true,
 		"noUnusedLocals": false,
 		"noUnusedParameters": false,
@@ -19,11 +19,6 @@
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
 		"paths": {
-			"@/mcp/*": ["../api/src/mcp/*"],
-			"@/services/*": ["../api/src/services/*"],
-			"@/lib/*": ["../api/src/lib/*"],
-			"@/dashboard-templates": ["../api/src/dashboard-templates/index.ts"],
-			"@/dashboard-templates/*": ["../api/src/dashboard-templates/*"],
 			"@/*": ["./src/*"]
 		}
 	},

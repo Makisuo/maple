@@ -1,4 +1,3 @@
-import { useEffect } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { useCustomer } from "autumn-js/react"
 import {
@@ -13,7 +12,6 @@ import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { Toaster } from "@maple/ui/components/ui/sonner"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import type { RouterAuthContext } from "@/router"
-import { captureChatReferrer } from "@/components/chat/auto-contexts"
 
 const PUBLIC_PATHS = new Set(["/sign-in", "/sign-up", "/org-required"])
 
@@ -41,10 +39,6 @@ export const Route = createRootRouteWithContext<{ auth: RouterAuthContext }>()({
 })
 
 function AppFrame() {
-	const pathname = useRouterState({ select: (s) => s.location.pathname })
-	useEffect(() => {
-		captureChatReferrer(pathname)
-	}, [pathname])
 	return (
 		<>
 			<Outlet />

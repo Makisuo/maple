@@ -3,7 +3,6 @@ import { CloudflareStateStore } from "alchemy/state"
 import { parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi } from "./apps/api/alchemy.run.ts"
-import { createChatAgentWorker } from "./apps/chat-agent/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
 import { createMapleWeb } from "./apps/web/alchemy.run.ts"
 
@@ -30,17 +29,12 @@ if (!resolvedApiUrl) {
 	throw new Error("api worker deployed without a url — set `url: true` or provide a custom domain")
 }
 
-const chatAgent = await createChatAgentWorker({
-	stage,
-	domains,
-	mapleApiUrl: resolvedApiUrl,
-	mapleDb,
-})
-
-const resolvedChatAgentUrl = domains.chat ? `https://${domains.chat}` : chatAgent.url
-if (!resolvedChatAgentUrl) {
-	throw new Error("chat-agent worker deployed without a url — set `url: true` or provide a custom domain")
-}
+// chat-agent is no longer deployed via alchemy — it now runs as a Node process
+// alongside the electric-ax agents-server. The web app talks to it via
+// VITE_AGENTS_URL (set in the deployment env), so we just pass an empty string
+// here until production deployment is wired up.
+const resolvedChatAgentUrl =
+	process.env.VITE_AGENTS_URL?.trim() || "http://localhost:4700"
 
 // ingest is not currently deployed via alchemy; for non-custom-domain stages,
 // fall back to a caller-supplied env var or the public Maple ingest endpoint.

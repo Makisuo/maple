@@ -1,0 +1,14 @@
+[mcp_servers.maple]
+url = "https://api.maple.dev/mcp"
+
+[mcp_servers.maple.http_headers]
+Authorization = "Bearer maple_ak_AT8d5O9s6_FPzyf_vYdUukZV-7q2CZEejOCaDCV6ew0"
+
+[mcp_servers.maple-local]
+url = "http://localhost:3472/mcp"
+
+[mcp_servers.maple-local.http_headers]
+Authorization = "Bearer maple_ak_-_jaeRtVbpwfJP2V9rtUC8036xAiIiigiYR-1yDr1jE"
+
+[mcp_servers.tinybird]
+url = "https://mcp.tinybird.co?token=p.eyJ1IjogImI0ZTkyYzFiLWU5MWQtNDNmNy1hYWVmLTgyNGRlMjc2YzVjMCIsICJpZCI6ICJmMGNiMWU3OS1kMmJlLTQxYTYtYjE2Ni00MTYwMmIxOTk0MTEiLCAiaG9zdCI6ICJldV9zaGFyZWQifQ.IKZ0o-dtPichkDj-J9G2z8WHv8BkDvkBDajWc8VJDTU"

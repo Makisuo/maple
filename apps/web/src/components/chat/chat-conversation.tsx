@@ -1,25 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useAgent } from "agents/react"
-import { useAgentChat } from "@cloudflare/ai-chat/react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
-import { alertPromptSuggestions, type AlertContext } from "./alert-context"
-import { AlertAttachmentCard } from "./alert-attachment-card"
-import {
-	widgetFixAutoPrompt,
-	widgetFixSuggestions,
-	type WidgetFixContext,
-} from "./widget-fix-context"
-import { WidgetFixAttachmentCard } from "./widget-fix-attachment-card"
-import {
-	deriveAutoContexts,
-	readChatReferrer,
-	suggestionsForContexts,
-	type AutoContext,
-	type PageContextPayload,
-} from "./auto-contexts"
-import { PageContextChips } from "./page-context-chips"
 import {
 	Conversation,
 	ConversationContent,
@@ -36,23 +18,6 @@ import {
 } from "@/components/ai-elements/prompt-input"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import { Shimmer } from "@/components/ai-elements/shimmer"
-import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator"
-import { Tool } from "@/components/ai-elements/tool"
-import { ApprovalCard } from "./approval-card"
-import type { UIMessage } from "ai"
-
-function shouldShowThinkingIndicator(
-	message: UIMessage,
-	isLoading: boolean,
-	isLastMessage: boolean,
-): boolean {
-	if (!isLoading || !isLastMessage || message.role !== "assistant") return false
-	const parts = message.parts
-	if (parts.length === 0) return true
-	const lastPart = parts[parts.length - 1]
-	if (lastPart.type === "text" && (lastPart as { state?: string }).state === "streaming") return false
-	return true
-}
 
 const DEFAULT_SUGGESTIONS = [
 	"What's the overall system health?",
@@ -65,266 +30,289 @@ interface ChatConversationProps {
 	tabId: string
 	isActive: boolean
 	onFirstMessage?: (tabId: string, text: string) => void
-	mode?: "alert" | "widget-fix"
-	alertContext?: AlertContext
-	widgetFixContext?: WidgetFixContext
 }
 
-export function ChatConversation({
-	tabId,
-	isActive,
-	onFirstMessage,
-	mode,
-	alertContext,
-	widgetFixContext,
-}: ChatConversationProps) {
+// --- Stream event shapes (matches durable-streams JSON output) ----------------
+
+interface StreamEventBase {
+	type: string
+	key: string
+	value: Record<string, unknown>
+	headers?: { operation?: string; offset?: string }
+}
+type UserMessageSection = {
+	kind: "user_message"
+	key: string
+	text: string
+	timestamp?: number
+}
+type AgentReplySection = {
+	kind: "agent_response"
+	runId: string
+	text: string
+	done: boolean
+}
+type RenderSection = UserMessageSection | AgentReplySection
+
+interface RunState {
+	status?: "started" | "completed" | "failed"
+}
+
+function buildSectionsFromEvents(events: StreamEventBase[]): RenderSection[] {
+	const sections: RenderSection[] = []
+	const deltasByRun = new Map<string, string[]>()
+	const runStatus = new Map<string, RunState>()
+	const runOrder: string[] = []
+
+	for (const e of events) {
+		const v = e.value
+		if (e.type === "message_received") {
+			const payload = v.payload as { text?: string } | undefined
+			if (v.message_type === "user_message" && payload?.text) {
+				sections.push({
+					kind: "user_message",
+					key: e.key,
+					text: payload.text,
+					timestamp:
+						typeof v.timestamp === "string"
+							? Date.parse(v.timestamp)
+							: undefined,
+				})
+			}
+		} else if (e.type === "run") {
+			const runId = e.key
+			if (!runStatus.has(runId)) runOrder.push(runId)
+			runStatus.set(runId, { status: v.status as RunState["status"] })
+		} else if (e.type === "text_delta") {
+			const runId = (v.run_id as string) ?? ""
+			if (!runId) continue
+			if (!deltasByRun.has(runId)) {
+				deltasByRun.set(runId, [])
+				if (!runStatus.has(runId)) {
+					runStatus.set(runId, {})
+					runOrder.push(runId)
+				}
+			}
+			deltasByRun.get(runId)!.push((v.delta as string) ?? "")
+		}
+	}
+
+	// Inject agent_response sections in the order runs first appeared.
+	for (const runId of runOrder) {
+		const deltas = deltasByRun.get(runId) ?? []
+		if (deltas.length === 0) continue
+		sections.push({
+			kind: "agent_response",
+			runId,
+			text: deltas.join(""),
+			done: runStatus.get(runId)?.status === "completed",
+		})
+	}
+
+	return sections
+}
+
+export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConversationProps) {
 	const { orgId, getToken } = useAuth()
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive)
 
-	const referrerPath = useMemo(() => readChatReferrer(), [tabId])
-	const derivedContexts = useMemo<AutoContext[]>(
-		() => (referrerPath ? deriveAutoContexts(referrerPath) : []),
-		[referrerPath],
-	)
-	const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
+	const [streamUrl, setStreamUrl] = useState<string | null>(null)
+	const [events, setEvents] = useState<StreamEventBase[]>([])
+	const [connectionError, setConnectionError] = useState<string | null>(null)
+	const [isAwaitingReply, setIsAwaitingReply] = useState(false)
+
+	// Stash getToken in a ref so its unstable reference (Clerk re-creates the
+	// function on every render) doesn't retrigger the init effect.
+	const getTokenRef = useRef(getToken)
 	useEffect(() => {
-		setDismissed(new Set())
-	}, [referrerPath])
-	const activeContexts = useMemo(
-		() => derivedContexts.filter((c) => !dismissed.has(c.id)),
-		[derivedContexts, dismissed],
-	)
-	const dismissContext = (id: string) =>
-		setDismissed((prev) => {
-			const next = new Set(prev)
-			next.add(id)
-			return next
-		})
+		getTokenRef.current = getToken
+	}, [getToken])
 
-	const agentName = orgId ? `${orgId}:${tabId}` : tabId
-	const agent = useAgent({
-		agent: "ChatAgent",
-		name: agentName,
-		host: chatAgentUrl,
-		query: async () => ({ token: (await getToken()) ?? null }),
-		queryDeps: [orgId],
-		cacheTtl: 30_000,
-	})
-
-	const prepareSendMessagesRequest = useMemo(
-		() => async (opts: { headers?: HeadersInit }) => {
-			const token = await getToken()
-			const headers = new Headers(opts.headers ?? {})
-			if (token) headers.set("Authorization", `Bearer ${token}`)
-			const out: Record<string, string> = {}
-			headers.forEach((value, key) => {
-				out[key] = value
-			})
-			return { headers: out }
-		},
-		[getToken],
-	)
-
-	const body = useMemo<Record<string, unknown>>(() => {
-		const base: Record<string, unknown> = { orgId }
-		if (mode === "alert" && alertContext) {
-			base.mode = "alert"
-			base.alertContext = alertContext
+	// Step 1: call /init to spawn the entity (idempotent) and get the stream URL.
+	useEffect(() => {
+		if (!orgId) {
+			setStreamUrl(null)
+			return
 		}
-		if (mode === "widget-fix" && widgetFixContext) {
-			base.mode = "widget-fix"
-			base.widgetFixContext = widgetFixContext
-		}
-		if (mode !== "widget-fix" && activeContexts.length > 0 && referrerPath) {
-			const payload: PageContextPayload = {
-				pathname: referrerPath,
-				contexts: activeContexts,
+		let cancelled = false
+		setConnectionError(null)
+		;(async () => {
+			try {
+				const token = await getTokenRef.current()
+				const res = await fetch(
+					`${chatAgentUrl}/api/chat/${encodeURIComponent(tabId)}/init`,
+					{
+						method: "POST",
+						headers: token ? { Authorization: `Bearer ${token}` } : {},
+					},
+				)
+				if (!res.ok) {
+					throw new Error(`init failed (${res.status})`)
+				}
+				const { streamUrl: url } = (await res.json()) as {
+					streamUrl: string
+				}
+				if (cancelled) return
+				setStreamUrl(url)
+			} catch (err) {
+				if (cancelled) return
+				setConnectionError(err instanceof Error ? err.message : String(err))
 			}
-			base.pageContext = payload
+		})()
+		return () => {
+			cancelled = true
 		}
-		return base
-	}, [orgId, mode, alertContext, widgetFixContext, activeContexts, referrerPath])
+	}, [orgId, tabId])
 
-	const { messages, sendMessage, status, addToolApprovalResponse } = useAgentChat({
-		agent,
-		body,
-		getInitialMessages: null,
-		prepareSendMessagesRequest,
-	})
+	// Step 2: poll the stream URL. This bypasses the broken SSE/durable-streams
+	// client integration in @electric-ax/agents-runtime@0.1.3 (where
+	// `db.preload()` hangs on `markUpToDate` and `useChat`+`useLiveQuery`
+	// never surface events). Plain JSON GET works fine.
+	useEffect(() => {
+		if (!streamUrl) {
+			setEvents([])
+			return
+		}
+		let cancelled = false
+		let timer: ReturnType<typeof setTimeout> | null = null
 
+		const poll = async () => {
+			try {
+				const res = await fetch(streamUrl, {
+					headers: { Accept: "application/json" },
+				})
+				if (!res.ok) throw new Error(`stream ${res.status}`)
+				const data = (await res.json()) as StreamEventBase[]
+				if (cancelled) return
+				setEvents(data)
+			} catch (err) {
+				if (cancelled) return
+				console.warn("[chat] poll failed", err)
+			} finally {
+				if (!cancelled) timer = setTimeout(poll, 1000)
+			}
+		}
+		void poll()
+
+		return () => {
+			cancelled = true
+			if (timer) clearTimeout(timer)
+		}
+	}, [streamUrl])
+
+	const sections = useMemo(() => buildSectionsFromEvents(events), [events])
+
+	// Track whether the latest run completed; if the last section is a
+	// user_message (or empty), we're awaiting the next agent reply.
+	const lastSection = sections[sections.length - 1]
+	const agentRunInProgress =
+		lastSection?.kind === "agent_response" && !lastSection.done
+	const showThinking = isAwaitingReply || agentRunInProgress
+	useEffect(() => {
+		if (lastSection?.kind === "agent_response" && lastSection.done) {
+			setIsAwaitingReply(false)
+		}
+	}, [lastSection])
+
+	const isLoading = showThinking
+
+	const sendMessage = useCallback(
+		async (text: string) => {
+			if (!text.trim() || !orgId) return
+			const token = await getTokenRef.current()
+			const res = await fetch(
+				`${chatAgentUrl}/api/chat/${encodeURIComponent(tabId)}/message`,
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						...(token ? { Authorization: `Bearer ${token}` } : {}),
+					},
+					body: JSON.stringify({ text }),
+				},
+			)
+			if (!res.ok) {
+				const body = await res.text().catch(() => "")
+				throw new Error(`send failed (${res.status}): ${body || res.statusText}`)
+			}
+		},
+		[orgId, tabId],
+	)
+
+	const messageCount = sections.length
 	const [hasSettled, setHasSettled] = useState(false)
 	useEffect(() => {
 		setHasSettled(false)
-	}, [agentName])
+	}, [tabId])
 	useEffect(() => {
-		if (messages.length > 0) {
+		if (messageCount > 0) {
 			setHasSettled(true)
 			return
 		}
 		const t = setTimeout(() => setHasSettled(true), 600)
 		return () => clearTimeout(t)
-	}, [messages.length, agentName])
-
-	const isLoading = status === "streaming" || status === "submitted"
-	const isAlertMode = mode === "alert" && !!alertContext
-	const isWidgetFixMode = mode === "widget-fix" && !!widgetFixContext
-	const suggestions = useMemo(() => {
-		if (isAlertMode) return alertPromptSuggestions(alertContext!)
-		if (isWidgetFixMode) return widgetFixSuggestions(widgetFixContext!)
-		const routeAware = suggestionsForContexts(activeContexts)
-		return routeAware ?? DEFAULT_SUGGESTIONS
-	}, [isAlertMode, alertContext, isWidgetFixMode, widgetFixContext, activeContexts])
+	}, [messageCount, tabId])
 
 	const handleSend = (text: string) => {
-		if (!text.trim() || isLoading) return
-		if (messages.length === 0 && onFirstMessage) {
-			onFirstMessage(tabId, text.trim().slice(0, 40))
+		const trimmed = text.trim()
+		if (!trimmed || isLoading) return
+		if (messageCount === 0 && onFirstMessage) {
+			onFirstMessage(tabId, trimmed.slice(0, 40))
 		}
-		sendMessage({ text: text.trim() })
+		setIsAwaitingReply(true)
+		void sendMessage(trimmed).catch((err) => {
+			console.error("[chat] sendMessage failed", err)
+			setIsAwaitingReply(false)
+		})
 	}
-
-	const widgetFixAutoSentRef = useRef<string | null>(null)
-	useEffect(() => {
-		if (!isWidgetFixMode || !isActive) return
-		if (!hasSettled || isLoading) return
-		if (messages.length > 0) return
-		if (widgetFixAutoSentRef.current === tabId) return
-		widgetFixAutoSentRef.current = tabId
-		handleSend(widgetFixAutoPrompt)
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isWidgetFixMode, isActive, hasSettled, isLoading, messages.length, tabId])
 
 	return (
 		<div className="flex h-full flex-col">
-			{isAlertMode && <AlertAttachmentCard alert={alertContext!} />}
-			{isWidgetFixMode && <WidgetFixAttachmentCard ctx={widgetFixContext!} />}
 			<Conversation className="flex-1 min-h-0">
 				<ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
-					{!hasSettled && messages.length === 0 ? (
+					{!hasSettled && messageCount === 0 ? (
 						<ConversationLoadingSkeleton />
-					) : messages.length === 0 ? (
-						isAlertMode ? (
-							<div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
-								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
-									Ready to investigate
-								</p>
-								<p className="max-w-sm text-sm text-muted-foreground">
-									The alert above is attached to every message in this thread. Start with a
-									suggestion or ask your own question.
-								</p>
-							</div>
-						) : isWidgetFixMode ? (
-							<div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
-								<p className="text-xs uppercase tracking-[0.14em] text-muted-foreground/70">
-									Diagnosing widget…
-								</p>
-								<p className="max-w-sm text-sm text-muted-foreground">
-									Maple AI is reading the broken widget config and the validation error.
-									It will propose a corrected widget JSON for you to approve.
-								</p>
-							</div>
-						) : (
-							<ConversationEmptyState
-								title="Maple AI"
-								description="Ask me about your traces, logs, errors, and services."
-							>
-								<div className="mt-4 flex flex-col items-center gap-3">
-									<div className="space-y-1 text-center">
-										<h3 className="text-sm font-medium">Maple AI</h3>
-										<p className="text-muted-foreground text-sm">
-											Ask me about your traces, logs, errors, and services.
-										</p>
-									</div>
-									<Suggestions className="mt-2 justify-center">
-										{suggestions.map((s) => (
-											<Suggestion
-												key={s}
-												suggestion={s}
-												onClick={() => handleSend(s)}
-											/>
-										))}
-									</Suggestions>
+					) : messageCount === 0 ? (
+						<ConversationEmptyState
+							title="Maple AI"
+							description="Ask me about your traces, logs, errors, and services."
+						>
+							<div className="mt-4 flex flex-col items-center gap-3">
+								<div className="space-y-1 text-center">
+									<h3 className="text-sm font-medium">Maple AI</h3>
+									<p className="text-muted-foreground text-sm">
+										Ask me about your traces, logs, errors, and services.
+									</p>
 								</div>
-							</ConversationEmptyState>
-						)
+								<Suggestions className="mt-2 justify-center">
+									{DEFAULT_SUGGESTIONS.map((s) => (
+										<Suggestion key={s} suggestion={s} onClick={() => handleSend(s)} />
+									))}
+								</Suggestions>
+							</div>
+						</ConversationEmptyState>
 					) : (
 						<>
-							{messages.map((message, messageIndex) => {
-								const isLastMessage = messageIndex === messages.length - 1
+							{sections.map((section) => {
+								if (section.kind === "user_message") {
+									return (
+										<Message key={`u:${section.key}`} from="user">
+											<MessageContent>
+												<RichText>{section.text}</RichText>
+											</MessageContent>
+										</Message>
+									)
+								}
 								return (
-									<Message key={message.id} from={message.role}>
+									<Message key={`a:${section.runId}`} from="assistant">
 										<MessageContent>
-											{message.parts.map((part, i) => {
-												if (part.type === "text") {
-													return <RichText key={i}>{part.text}</RichText>
-												}
-												if (
-													part.type.startsWith("tool-") ||
-													part.type === "dynamic-tool"
-												) {
-													const toolPart = part as {
-														type: string
-														toolCallId: string
-														toolName?: string
-														state: string
-														input?: unknown
-														output?: unknown
-														errorText?: string
-														approval?: { id: string }
-													}
-													const toolName = part.type.startsWith("tool-")
-														? part.type.replace(/^tool-/, "")
-														: (toolPart.toolName ?? "unknown")
-													if (
-														toolPart.state === "approval-requested" &&
-														toolPart.approval?.id
-													) {
-														return (
-															<ApprovalCard
-																key={toolPart.toolCallId ?? i}
-																toolName={toolName}
-																input={toolPart.input}
-																approvalId={toolPart.approval.id}
-																onApprove={(id) =>
-																	addToolApprovalResponse({
-																		id,
-																		approved: true,
-																	})
-																}
-																onDeny={(id) =>
-																	addToolApprovalResponse({
-																		id,
-																		approved: false,
-																	})
-																}
-															/>
-														)
-													}
-													return (
-														<Tool
-															key={toolPart.toolCallId ?? i}
-															toolName={toolName}
-															toolCallId={toolPart.toolCallId}
-															state={toolPart.state}
-															input={toolPart.input}
-															output={toolPart.output}
-															errorText={toolPart.errorText}
-														/>
-													)
-												}
-												return null
-											})}
-											{shouldShowThinkingIndicator(
-												message,
-												isLoading,
-												isLastMessage,
-											) && <ThinkingIndicator />}
+											<RichText>{section.text}</RichText>
 										</MessageContent>
 									</Message>
 								)
 							})}
-							{isLoading && messages[messages.length - 1]?.role === "user" && (
+							{isAwaitingReply && lastSection?.kind === "user_message" && (
 								<Message from="assistant">
 									<MessageContent>
 										<Shimmer>Thinking…</Shimmer>
@@ -333,20 +321,22 @@ export function ChatConversation({
 							)}
 						</>
 					)}
+					{connectionError && (
+						<div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+							Connection error: {connectionError}
+						</div>
+					)}
 				</ConversationContent>
 				<ConversationScrollButton />
 			</Conversation>
 
 			<div className="mx-auto w-full max-w-3xl px-4 pb-4">
-				{(messages.length > 0 || isAlertMode || isWidgetFixMode) && (
+				{messageCount > 0 && (
 					<Suggestions className="mb-3">
-						{suggestions.map((s) => (
+						{DEFAULT_SUGGESTIONS.map((s) => (
 							<Suggestion key={s} suggestion={s} onClick={() => handleSend(s)} />
 						))}
 					</Suggestions>
-				)}
-				{!isWidgetFixMode && (
-					<PageContextChips contexts={activeContexts} onDismiss={dismissContext} />
 				)}
 				<PromptInput
 					onSubmit={({ text }) => handleSend(text)}
@@ -354,17 +344,14 @@ export function ChatConversation({
 				>
 					<PromptInputTextarea
 						ref={textareaRef}
-						placeholder={
-							isAlertMode
-								? "Ask about this alert..."
-								: isWidgetFixMode
-									? "Ask about this widget..."
-									: "Ask about your system..."
-						}
+						placeholder="Ask about your system..."
 						disabled={isLoading}
 					/>
 					<PromptInputFooter>
-						<PromptInputSubmit status={status} disabled={isLoading && status !== "streaming"} />
+						<PromptInputSubmit
+							status={isLoading ? "streaming" : "ready"}
+							disabled={isLoading}
+						/>
 					</PromptInputFooter>
 				</PromptInput>
 			</div>

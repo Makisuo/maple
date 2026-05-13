@@ -1,65 +1,27 @@
-import { useEffect } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@maple/ui/components/ui/sidebar"
 import { useChatTabs } from "@/hooks/use-chat-tabs"
 import { ChatTabBar } from "./chat-tabs"
 import { ChatConversation } from "./chat-conversation"
-import { alertTabId, alertTabTitle, type AlertContext } from "./alert-context"
-import {
-	widgetFixTabId,
-	widgetFixTabTitle,
-	type WidgetFixContext,
-} from "./widget-fix-context"
 
 interface ChatPageProps {
 	initialTabId?: string
-	mode?: "alert" | "widget-fix"
-	alertContext?: AlertContext
-	widgetFixContext?: WidgetFixContext
 }
 
-export function ChatPage({ initialTabId, mode, alertContext, widgetFixContext }: ChatPageProps) {
+export function ChatPage({ initialTabId }: ChatPageProps) {
 	const { orgId } = useAuth()
 	if (!orgId) return null
-	return (
-		<ChatPageInner
-			orgId={orgId}
-			initialTabId={initialTabId}
-			mode={mode}
-			alertContext={alertContext}
-			widgetFixContext={widgetFixContext}
-		/>
-	)
+	return <ChatPageInner orgId={orgId} initialTabId={initialTabId} />
 }
 
 interface ChatPageInnerProps extends ChatPageProps {
 	orgId: string
 }
 
-function ChatPageInner({
-	orgId,
-	initialTabId,
-	mode,
-	alertContext,
-	widgetFixContext,
-}: ChatPageInnerProps) {
-	const { tabs, activeTabId, createTab, closeTab, setActiveTab, renameTab, ensureTab } =
+function ChatPageInner({ orgId, initialTabId }: ChatPageInnerProps) {
+	const { tabs, activeTabId, createTab, closeTab, setActiveTab, renameTab } =
 		useChatTabs(orgId, initialTabId)
-
-	useEffect(() => {
-		if (mode !== "alert" || !alertContext) return
-		ensureTab(alertTabId(alertContext), alertTabTitle(alertContext))
-	}, [mode, alertContext, ensureTab])
-
-	useEffect(() => {
-		if (mode !== "widget-fix" || !widgetFixContext) return
-		ensureTab(widgetFixTabId(widgetFixContext), widgetFixTabTitle(widgetFixContext))
-	}, [mode, widgetFixContext, ensureTab])
-
-	const alertTab = mode === "alert" && alertContext ? alertTabId(alertContext) : undefined
-	const widgetFixTab =
-		mode === "widget-fix" && widgetFixContext ? widgetFixTabId(widgetFixContext) : undefined
 
 	return (
 		<SidebarProvider>
@@ -76,25 +38,19 @@ function ChatPageInner({
 					/>
 				</header>
 				<div className="relative min-h-0 flex-1 bg-background">
-					{tabs.map((tab) => {
-						const isAlertTab = tab.id === alertTab
-						const isWidgetFixTab = tab.id === widgetFixTab
-						return (
-							<div
-								key={tab.id}
-								className={tab.id === activeTabId ? "flex h-full flex-col" : "hidden"}
-							>
-								<ChatConversation
-									tabId={tab.id}
-									isActive={tab.id === activeTabId}
-									onFirstMessage={(id, text) => renameTab(id, text)}
-									mode={isAlertTab ? "alert" : isWidgetFixTab ? "widget-fix" : undefined}
-									alertContext={isAlertTab ? alertContext : undefined}
-									widgetFixContext={isWidgetFixTab ? widgetFixContext : undefined}
-								/>
-							</div>
-						)
-					})}
+					{/* Only mount the active tab. Mounting all of them opens one
+					    long-poll stream per tab; on HTTP/1.1 (no HTTPS in dev),
+					    the browser caps at ~6 concurrent connections per origin
+					    and the streams deadlock. */}
+					{activeTabId && (
+						<div key={activeTabId} className="flex h-full flex-col">
+							<ChatConversation
+								tabId={activeTabId}
+								isActive
+								onFirstMessage={(id, text) => renameTab(id, text)}
+							/>
+						</div>
+					)}
 				</div>
 			</SidebarInset>
 		</SidebarProvider>

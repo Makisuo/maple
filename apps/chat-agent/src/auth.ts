@@ -1,15 +1,21 @@
 import { createClerkClient } from "@clerk/backend"
-import type { Env } from "./types"
 
 export interface VerifiedRequest {
 	orgId: string
 	userId: string
 }
 
-const TOKEN_QUERY_PARAM = "token"
-const ALLOWED_TOKEN_HEADERS = ["authorization", "x-maple-auth"]
+export interface AuthEnv {
+	MAPLE_AUTH_MODE?: string
+	MAPLE_ROOT_PASSWORD?: string
+	CLERK_SECRET_KEY?: string
+	CLERK_PUBLISHABLE_KEY?: string
+	CLERK_JWT_KEY?: string
+}
 
-const getAuthMode = (env: Env): "clerk" | "self_hosted" =>
+const ALLOWED_TOKEN_HEADERS = ["authorization", "x-maple-auth"] as const
+
+const getAuthMode = (env: AuthEnv): "clerk" | "self_hosted" =>
 	env.MAPLE_AUTH_MODE?.toLowerCase() === "clerk" ? "clerk" : "self_hosted"
 
 const extractBearerToken = (request: Request): string | undefined => {
@@ -20,9 +26,6 @@ const extractBearerToken = (request: Request): string | undefined => {
 		if (scheme && token && scheme.toLowerCase() === "bearer") return token
 		if (header && !token && headerName !== "authorization") return header
 	}
-	const url = new URL(request.url)
-	const queryToken = url.searchParams.get(TOKEN_QUERY_PARAM)
-	if (queryToken) return queryToken
 	return undefined
 }
 
@@ -46,7 +49,10 @@ const constantTimeEqual = (a: Uint8Array, b: Uint8Array): boolean => {
 	return mismatch === 0
 }
 
-const verifyHs256 = async (token: string, secret: string): Promise<{ sub: string; org_id: string } | undefined> => {
+const verifyHs256 = async (
+	token: string,
+	secret: string,
+): Promise<{ sub: string; org_id: string } | undefined> => {
 	const parts = token.split(".")
 	if (parts.length !== 3) return undefined
 	const [encodedHeader, encodedPayload, encodedSignature] = parts as [string, string, string]
@@ -90,7 +96,7 @@ const verifyHs256 = async (token: string, secret: string): Promise<{ sub: string
 }
 
 let cachedClerk: ReturnType<typeof createClerkClient> | undefined
-const getClerk = (env: Env) => {
+const getClerk = (env: AuthEnv) => {
 	if (!env.CLERK_SECRET_KEY) return undefined
 	if (cachedClerk) return cachedClerk
 	cachedClerk = createClerkClient({
@@ -101,7 +107,10 @@ const getClerk = (env: Env) => {
 	return cachedClerk
 }
 
-export const verifyRequest = async (request: Request, env: Env): Promise<VerifiedRequest | undefined> => {
+export const verifyRequest = async (
+	request: Request,
+	env: AuthEnv,
+): Promise<VerifiedRequest | undefined> => {
 	const token = extractBearerToken(request)
 	if (!token) return undefined
 
@@ -128,18 +137,15 @@ export const verifyRequest = async (request: Request, env: Env): Promise<Verifie
 	return { orgId: payload.org_id, userId: payload.sub }
 }
 
-export const parseDoNameFromUrl = (url: URL): string | undefined => {
-	const match = url.pathname.match(/^\/agents\/[^/]+\/([^/]+)/)
-	if (!match || !match[1]) return undefined
-	try {
-		return decodeURIComponent(match[1])
-	} catch {
-		return match[1]
-	}
-}
+/**
+ * Encode an org-scoped entity id from orgId + tabId. The agents-server treats
+ * `/` as a path separator inside entity URLs, so we use `--` to namespace.
+ */
+export const entityIdForTab = (orgId: string, tabId: string): string =>
+	`${orgId}--${tabId}`
 
-export const orgIdFromDoName = (name: string): string | undefined => {
-	const idx = name.indexOf(":")
+export const orgIdFromEntityId = (entityId: string): string | undefined => {
+	const idx = entityId.indexOf("--")
 	if (idx <= 0) return undefined
-	return name.slice(0, idx)
+	return entityId.slice(0, idx)
 }
