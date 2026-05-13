@@ -7,12 +7,14 @@ on:
             - "apps/ingest/**"
             - "packages/db/drizzle/**"
             - "packages/db/src/schema/**"
+            - ".github/scripts/format-ingest-benchmark-comment.py"
             - ".github/workflows/ingest-rust-tests.yml"
     pull_request:
         paths:
             - "apps/ingest/**"
             - "packages/db/drizzle/**"
             - "packages/db/src/schema/**"
+            - ".github/scripts/format-ingest-benchmark-comment.py"
             - ".github/workflows/ingest-rust-tests.yml"
     workflow_dispatch:
 
@@ -26,7 +28,7 @@ permissions:
 
 jobs:
     test:
-        name: Cargo test and bench
+        name: Cargo test and load benchmark
         runs-on: ubuntu-latest
         defaults:
             run:
@@ -42,48 +44,93 @@ jobs:
 
             - name: Run ingest unit and fake Tinybird e2e tests
               run: |
+                  set +e
                   set -o pipefail
                   cargo test 2>&1 | tee "$RUNNER_TEMP/ingest-cargo-test.txt"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-cargo-test.exit"
+                  exit 0
 
-            - name: Run Criterion ingest benchmarks
+            - name: Build PR ingest and benchmark binaries
               run: |
+                  set +e
+                  cargo build --release --bin maple-ingest --bin load_test 2>&1 | tee "$RUNNER_TEMP/ingest-head-build.txt"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-head-build.exit"
+                  mkdir -p "$RUNNER_TEMP/head"
+                  if [ -x target/release/maple-ingest ]; then
+                    cp target/release/maple-ingest "$RUNNER_TEMP/head/maple-ingest"
+                  fi
+                  if [ -x target/release/load_test ]; then
+                    cp target/release/load_test "$RUNNER_TEMP/head/load_test"
+                  fi
+                  exit 0
+
+            - name: Run PR native ingest load benchmark
+              run: |
+                  set +e
                   set -o pipefail
-                  cargo bench --bench ingest_bench -- --sample-size 10 --warm-up-time 1 --measurement-time 1 2>&1 | tee "$RUNNER_TEMP/ingest-criterion-bench.txt"
+                  LOAD_TEST_INGEST_BIN="$RUNNER_TEMP/head/maple-ingest" \
+                    LOAD_TEST_INGEST_MODE=tinybird \
+                    LOAD_TEST_REQUESTS=2000 \
+                    LOAD_TEST_CONCURRENCY=64 \
+                    LOAD_TEST_BATCH_LOGS=10 \
+                    LOAD_TEST_INGEST_PORT=3475 \
+                    LOAD_TEST_QUEUE_DIR="$RUNNER_TEMP/head-wal" \
+                    "$RUNNER_TEMP/head/load_test" 2>&1 | tee "$RUNNER_TEMP/ingest-head-load.json"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-head-load.exit"
+                  exit 0
+
+            - name: Build main ingest binary
+              if: ${{ github.event_name == 'pull_request' }}
+              run: |
+                  set +e
+                  git fetch origin "${{ github.base_ref }}" --depth=1
+                  git worktree add "$RUNNER_TEMP/base" FETCH_HEAD
+                  (
+                    cd "$RUNNER_TEMP/base/apps/ingest"
+                    cargo build --release --bin maple-ingest
+                  ) 2>&1 | tee "$RUNNER_TEMP/ingest-base-build.txt"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-base-build.exit"
+                  exit 0
+
+            - name: Run main collector-forwarding load benchmark
+              if: ${{ github.event_name == 'pull_request' }}
+              run: |
+                  set +e
+                  set -o pipefail
+                  LOAD_TEST_INGEST_BIN="$RUNNER_TEMP/base/apps/ingest/target/release/maple-ingest" \
+                    LOAD_TEST_INGEST_MODE=forward \
+                    LOAD_TEST_REQUESTS=2000 \
+                    LOAD_TEST_CONCURRENCY=64 \
+                    LOAD_TEST_BATCH_LOGS=10 \
+                    LOAD_TEST_INGEST_PORT=3476 \
+                    LOAD_TEST_QUEUE_DIR="$RUNNER_TEMP/base-wal" \
+                    "$RUNNER_TEMP/head/load_test" 2>&1 | tee "$RUNNER_TEMP/ingest-base-load.json"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-base-load.exit"
+                  exit 0
 
             - name: Comment PR with ingest test results
               if: ${{ always() && github.event_name == 'pull_request' }}
               env:
                   GH_TOKEN: ${{ github.token }}
                   PR_NUMBER: ${{ github.event.pull_request.number }}
+                  TEST_OUTPUT: ${{ runner.temp }}/ingest-cargo-test.txt
+                  HEAD_LOAD_JSON: ${{ runner.temp }}/ingest-head-load.json
+                  BASE_LOAD_JSON: ${{ runner.temp }}/ingest-base-load.json
+                  COMMENT_OUTPUT: ${{ runner.temp }}/ingest-results-comment.md
               run: |
-                  test_output="$RUNNER_TEMP/ingest-cargo-test.txt"
-                  bench_output="$RUNNER_TEMP/ingest-criterion-bench.txt"
-                  body="$RUNNER_TEMP/ingest-results-comment.md"
+                  python "$GITHUB_WORKSPACE/.github/scripts/format-ingest-benchmark-comment.py"
+                  gh pr comment "$PR_NUMBER" --body-file "$COMMENT_OUTPUT"
 
-                  {
-                    echo "## Ingest Rust Results"
-                    echo
-                    echo "**Commit:** \`${GITHUB_SHA}\`"
-                    echo
-                    echo "### cargo test"
-                    echo
-                    echo '```text'
-                    if [ -f "$test_output" ]; then
-                      tail -n 80 "$test_output"
-                    else
-                      echo "cargo test did not produce output."
+            - name: Fail if ingest checks failed
+              if: ${{ always() }}
+              run: |
+                  failed=0
+                  for file in "$RUNNER_TEMP"/ingest-*.exit; do
+                    [ -f "$file" ] || continue
+                    code=$(cat "$file")
+                    if [ "$code" != "0" ]; then
+                      echo "::error file=$file::step failed with exit code $code"
+                      failed=1
                     fi
-                    echo '```'
-                    echo
-                    echo "### Criterion benchmarks"
-                    echo
-                    echo '```text'
-                    if [ -f "$bench_output" ]; then
-                      tail -n 120 "$bench_output"
-                    else
-                      echo "criterion benchmark did not run."
-                    fi
-                    echo '```'
-                  } > "$body"
-
-                  gh pr comment "$PR_NUMBER" --body-file "$body"
+                  done
+                  exit "$failed"

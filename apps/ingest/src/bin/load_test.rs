@@ -8,7 +8,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::header::CONTENT_ENCODING;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::Router;
 use flate2::read::GzDecoder;
@@ -28,6 +29,7 @@ const INGEST_KEY: &str = "maple_pk_loadtest";
 
 #[derive(Clone, Debug)]
 struct LoadConfig {
+    ingest_mode: IngestMode,
     requests: u64,
     concurrency: usize,
     batch_logs: usize,
@@ -37,6 +39,12 @@ struct LoadConfig {
     max_rss_mb: Option<u64>,
     min_rps: Option<f64>,
     queue_dir: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum IngestMode {
+    Tinybird,
+    Forward,
 }
 
 #[derive(Clone)]
@@ -62,6 +70,7 @@ struct MonitorSummary {
 
 #[derive(Debug, Serialize)]
 struct LoadSummary {
+    ingest_mode: &'static str,
     requests: u64,
     successes: u64,
     failures: u64,
@@ -89,6 +98,7 @@ async fn main() -> Result<(), DynError> {
     let fake_app = Router::new()
         .route("/health", get(|| async { "OK" }))
         .route("/v0/events", post(fake_tinybird_import))
+        .route("/v1/logs", post(fake_collector_logs))
         .with_state(fake_state.clone());
     tokio::spawn(async move {
         if let Err(error) = axum::serve(fake_listener, fake_app).await {
@@ -120,6 +130,7 @@ async fn main() -> Result<(), DynError> {
     let monitor_summary = summarize_samples(sample_rx);
     latencies.sort_unstable();
     let summary = LoadSummary {
+        ingest_mode: cfg.ingest_mode.as_str(),
         requests: cfg.requests,
         successes,
         failures,
@@ -155,6 +166,7 @@ impl LoadConfig {
             });
 
         Ok(Self {
+            ingest_mode: IngestMode::from_env()?,
             requests: env_u64("LOAD_TEST_REQUESTS", 10_000)?,
             concurrency: env_usize("LOAD_TEST_CONCURRENCY", 128)?,
             batch_logs: env_usize("LOAD_TEST_BATCH_LOGS", 10)?,
@@ -167,6 +179,27 @@ impl LoadConfig {
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| unique_temp_dir("maple-ingest-load-wal")),
         })
+    }
+}
+
+impl IngestMode {
+    fn from_env() -> Result<Self, DynError> {
+        let raw = std::env::var("LOAD_TEST_INGEST_MODE")
+            .unwrap_or_else(|_| "tinybird".to_string())
+            .trim()
+            .to_ascii_lowercase();
+        match raw.as_str() {
+            "tinybird" | "native" => Ok(Self::Tinybird),
+            "forward" | "collector" => Ok(Self::Forward),
+            _ => Err("LOAD_TEST_INGEST_MODE must be tinybird or forward".into()),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Tinybird => "tinybird",
+            Self::Forward => "forward",
+        }
     }
 }
 
@@ -183,19 +216,16 @@ impl Default for FakeTinybirdState {
 async fn fake_tinybird_import(
     State(state): State<FakeTinybirdState>,
     Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
     if !query.contains_key("name") {
         return StatusCode::BAD_REQUEST;
     }
 
-    let mut decoded = String::new();
-    if GzDecoder::new(&body[..])
-        .read_to_string(&mut decoded)
-        .is_err()
-    {
+    let Some(decoded) = decode_body(&headers, &body) else {
         return StatusCode::BAD_REQUEST;
-    }
+    };
 
     state.imports.fetch_add(1, Ordering::Relaxed);
     state.bytes.fetch_add(body.len() as u64, Ordering::Relaxed);
@@ -204,6 +234,36 @@ async fn fake_tinybird_import(
         Ordering::Relaxed,
     );
     StatusCode::OK
+}
+
+async fn fake_collector_logs(State(state): State<FakeTinybirdState>, body: Bytes) -> StatusCode {
+    let Ok(request) = ExportLogsServiceRequest::decode(&body[..]) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    let rows = request
+        .resource_logs
+        .iter()
+        .flat_map(|resource_logs| &resource_logs.scope_logs)
+        .map(|scope_logs| scope_logs.log_records.len() as u64)
+        .sum::<u64>();
+    state.imports.fetch_add(1, Ordering::Relaxed);
+    state.bytes.fetch_add(body.len() as u64, Ordering::Relaxed);
+    state.rows.fetch_add(rows, Ordering::Relaxed);
+    StatusCode::OK
+}
+
+fn decode_body(headers: &HeaderMap, body: &[u8]) -> Option<String> {
+    let content_encoding = headers
+        .get(CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().to_ascii_lowercase());
+    if content_encoding.as_deref() == Some("gzip") {
+        let mut decoded = String::new();
+        GzDecoder::new(body).read_to_string(&mut decoded).ok()?;
+        Some(decoded)
+    } else {
+        String::from_utf8(body.to_vec()).ok()
+    }
 }
 
 fn spawn_ingest(cfg: &LoadConfig, tinybird_host: &str) -> Result<Child, DynError> {
@@ -216,9 +276,11 @@ fn spawn_ingest(cfg: &LoadConfig, tinybird_host: &str) -> Result<Child, DynError
     }
 
     std::fs::create_dir_all(&cfg.queue_dir)?;
-    let child = Command::new(&cfg.ingest_bin)
+    let mut command = Command::new(&cfg.ingest_bin);
+    command
         .env("INGEST_PORT", cfg.ingest_port.to_string())
-        .env("INGEST_WRITE_MODE", "tinybird")
+        .env("INGEST_WRITE_MODE", cfg.ingest_mode.as_str())
+        .env("INGEST_FORWARD_OTLP_ENDPOINT", tinybird_host)
         .env("TINYBIRD_HOST", tinybird_host)
         .env("TINYBIRD_TOKEN", "load-test-token")
         .env("INGEST_KEY_STORE_BACKEND", "static")
@@ -235,9 +297,8 @@ fn spawn_ingest(cfg: &LoadConfig, tinybird_host: &str) -> Result<Child, DynError
         .env("INGEST_ORG_MAX_IN_FLIGHT", "100000")
         .env("RUST_LOG", "warn")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    Ok(child)
+        .stderr(Stdio::null());
+    Ok(command.spawn()?)
 }
 
 async fn wait_for_ingest_health(port: u16) -> Result<(), DynError> {
