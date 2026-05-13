@@ -60,6 +60,12 @@ async function ensureAssistantEntity(
 			// subscription registers.
 			initialMessage: "ready",
 		})
+		// The shared-state stream is created lazily by `ctx.mkdb()` inside the
+		// handler's first wake. The frontend subscribes to it immediately on
+		// `/init`, so we race the wake — if we lose, the client gets a 404.
+		// Pre-create the stream here so it's always there when the client
+		// connects. `ensureSharedStateStream` is idempotent.
+		await runtimeClient.ensureSharedStateStream(chatroomId)
 		return { entityUrl: info.entityUrl, chatroomId }
 	})()
 	inflightSpawns.set(entityId, promise)
