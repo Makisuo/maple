@@ -14,7 +14,14 @@ import {
 
 const AGENTS_URL = process.env.AGENTS_URL ?? "http://localhost:4440"
 const PORT = Number(process.env.PORT ?? 4700)
-const SERVE_URL = process.env.SERVE_URL ?? `http://localhost:${PORT}`
+// Default to `host.docker.internal` because the agents-server runs in
+// Docker and registers our `SERVE_URL` as the webhook target — wakes need
+// a hostname the container can resolve. `localhost` from inside the
+// container points to the container itself, so wakes silently 404 and
+// the agent appears to "not respond". On macOS/Windows Docker this is
+// built in; on Linux the compose file already declares the host-gateway
+// extra_hosts mapping. Override in non-Docker production deployments.
+const SERVE_URL = process.env.SERVE_URL ?? `http://host.docker.internal:${PORT}`
 
 const authEnv: AuthEnv = {
 	MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE,

@@ -100,10 +100,11 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 	})
 	const sectionCount = renderableSections.length
 	const lastSection = renderableSections[sectionCount - 1]
+	// A brand-new entity reports `state === "pending"` until the user sends
+	// the first message — we shouldn't disable the input in that case.
 	const agentRunInProgress =
 		state === "working" ||
 		state === "queued" ||
-		state === "pending" ||
 		(lastSection?.kind === "agent_response" && !lastSection.done)
 	const isLoading = isSending || agentRunInProgress
 
