@@ -33,3 +33,13 @@ latency, export catch-up time, max RSS, max CPU, average CPU, and exported rows.
 
 The GitHub Actions workflow `Ingest Load Tests` is manual (`workflow_dispatch`)
 so large runs do not make normal PR CI noisy or flaky.
+
+For always-on microbenchmarks, the ingest CI runs Criterion:
+
+```sh
+cargo bench --bench ingest_bench -- --sample-size 10 --warm-up-time 1 --measurement-time 1
+```
+
+Those benchmarks measure WAL-acked native accepts for representative log and
+trace OTLP batches. The `Ingest Rust Tests` workflow posts the captured cargo
+test and Criterion output back to pull requests.

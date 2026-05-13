@@ -50,3 +50,10 @@ uuid = { version = "1", features = ["v4"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 moka = { version = "0.12", features = ["future"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "ingest_bench"
+harness = false

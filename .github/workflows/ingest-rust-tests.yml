@@ -22,10 +22,11 @@ concurrency:
 
 permissions:
     contents: read
+    pull-requests: write
 
 jobs:
     test:
-        name: Cargo test
+        name: Cargo test and bench
         runs-on: ubuntu-latest
         defaults:
             run:
@@ -40,4 +41,49 @@ jobs:
                   workspaces: apps/ingest
 
             - name: Run ingest unit and fake Tinybird e2e tests
-              run: cargo test
+              run: |
+                  set -o pipefail
+                  cargo test 2>&1 | tee "$RUNNER_TEMP/ingest-cargo-test.txt"
+
+            - name: Run Criterion ingest benchmarks
+              run: |
+                  set -o pipefail
+                  cargo bench --bench ingest_bench -- --sample-size 10 --warm-up-time 1 --measurement-time 1 2>&1 | tee "$RUNNER_TEMP/ingest-criterion-bench.txt"
+
+            - name: Comment PR with ingest test results
+              if: ${{ always() && github.event_name == 'pull_request' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+              run: |
+                  test_output="$RUNNER_TEMP/ingest-cargo-test.txt"
+                  bench_output="$RUNNER_TEMP/ingest-criterion-bench.txt"
+                  body="$RUNNER_TEMP/ingest-results-comment.md"
+
+                  {
+                    echo "## Ingest Rust Results"
+                    echo
+                    echo "**Commit:** \`${GITHUB_SHA}\`"
+                    echo
+                    echo "### cargo test"
+                    echo
+                    echo '```text'
+                    if [ -f "$test_output" ]; then
+                      tail -n 80 "$test_output"
+                    else
+                      echo "cargo test did not produce output."
+                    fi
+                    echo '```'
+                    echo
+                    echo "### Criterion benchmarks"
+                    echo
+                    echo '```text'
+                    if [ -f "$bench_output" ]; then
+                      tail -n 120 "$bench_output"
+                    else
+                      echo "criterion benchmark did not run."
+                    fi
+                    echo '```'
+                  } > "$body"
+
+                  gh pr comment "$PR_NUMBER" --body-file "$body"

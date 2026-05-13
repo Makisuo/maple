@@ -2,7 +2,6 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 mod autumn;
-mod telemetry;
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -29,6 +28,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
+use maple_ingest::telemetry::{PipelineError, SamplingPolicy, TelemetryPipeline, TinybirdConfig};
 use metrics::{counter, gauge, histogram};
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
@@ -49,7 +49,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use sha2::Sha256;
-use telemetry::{PipelineError, SamplingPolicy, TelemetryPipeline, TinybirdConfig};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::Instrument;
 use tracing::{debug, error, info, warn, Span};
