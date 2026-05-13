@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
+import { agentsUrl } from "@/lib/electric-agents-client"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import {
 	Conversation,
@@ -32,8 +33,6 @@ interface ChatConversationProps {
 	onFirstMessage?: (tabId: string, text: string) => void
 }
 
-// --- Stream event shapes (matches durable-streams JSON output) ----------------
-
 interface StreamEventBase {
 	type: string
 	key: string
@@ -44,7 +43,6 @@ type UserMessageSection = {
 	kind: "user_message"
 	key: string
 	text: string
-	timestamp?: number
 }
 type AgentReplySection = {
 	kind: "agent_response"
@@ -54,59 +52,47 @@ type AgentReplySection = {
 }
 type RenderSection = UserMessageSection | AgentReplySection
 
-interface RunState {
-	status?: "started" | "completed" | "failed"
-}
-
 function buildSectionsFromEvents(events: StreamEventBase[]): RenderSection[] {
+	// Walk events in stream order. Emit each `agent_response` section at the
+	// point its `run` starts so user messages and agent replies stay
+	// interleaved correctly (U1 → A1 → U2 → A2 instead of U1, U2, A1, A2).
 	const sections: RenderSection[] = []
-	const deltasByRun = new Map<string, string[]>()
-	const runStatus = new Map<string, RunState>()
-	const runOrder: string[] = []
+	const agentByRunId = new Map<string, AgentReplySection>()
 
 	for (const e of events) {
 		const v = e.value
-		if (e.type === "message_received") {
+		if (e.type === "inbox") {
 			const payload = v.payload as { text?: string } | undefined
 			if (v.message_type === "user_message" && payload?.text) {
-				sections.push({
-					kind: "user_message",
-					key: e.key,
-					text: payload.text,
-					timestamp:
-						typeof v.timestamp === "string"
-							? Date.parse(v.timestamp)
-							: undefined,
-				})
+				sections.push({ kind: "user_message", key: e.key, text: payload.text })
 			}
-		} else if (e.type === "run") {
+			continue
+		}
+		if (e.type === "run") {
 			const runId = e.key
-			if (!runStatus.has(runId)) runOrder.push(runId)
-			runStatus.set(runId, { status: v.status as RunState["status"] })
-		} else if (e.type === "text_delta") {
+			const status = v.status as string | undefined
+			let section = agentByRunId.get(runId)
+			if (!section) {
+				section = { kind: "agent_response", runId, text: "", done: false }
+				agentByRunId.set(runId, section)
+				sections.push(section)
+			}
+			if (status === "completed") section.done = true
+			continue
+		}
+		if (e.type === "text_delta") {
 			const runId = (v.run_id as string) ?? ""
 			if (!runId) continue
-			if (!deltasByRun.has(runId)) {
-				deltasByRun.set(runId, [])
-				if (!runStatus.has(runId)) {
-					runStatus.set(runId, {})
-					runOrder.push(runId)
-				}
+			let section = agentByRunId.get(runId)
+			if (!section) {
+				// text_delta arrived before its run row — synthesize an empty
+				// agent_response so the deltas have somewhere to land.
+				section = { kind: "agent_response", runId, text: "", done: false }
+				agentByRunId.set(runId, section)
+				sections.push(section)
 			}
-			deltasByRun.get(runId)!.push((v.delta as string) ?? "")
+			section.text += (v.delta as string) ?? ""
 		}
-	}
-
-	// Inject agent_response sections in the order runs first appeared.
-	for (const runId of runOrder) {
-		const deltas = deltasByRun.get(runId) ?? []
-		if (deltas.length === 0) continue
-		sections.push({
-			kind: "agent_response",
-			runId,
-			text: deltas.join(""),
-			done: runStatus.get(runId)?.status === "completed",
-		})
 	}
 
 	return sections
@@ -122,14 +108,12 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 	const [connectionError, setConnectionError] = useState<string | null>(null)
 	const [isAwaitingReply, setIsAwaitingReply] = useState(false)
 
-	// Stash getToken in a ref so its unstable reference (Clerk re-creates the
-	// function on every render) doesn't retrigger the init effect.
 	const getTokenRef = useRef(getToken)
 	useEffect(() => {
 		getTokenRef.current = getToken
 	}, [getToken])
 
-	// Step 1: call /init to spawn the entity (idempotent) and get the stream URL.
+	// Step 1: POST /init → spawn entity (idempotent) + get the stream URL.
 	useEffect(() => {
 		if (!orgId) {
 			setStreamUrl(null)
@@ -147,14 +131,13 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 						headers: token ? { Authorization: `Bearer ${token}` } : {},
 					},
 				)
-				if (!res.ok) {
-					throw new Error(`init failed (${res.status})`)
-				}
-				const { streamUrl: url } = (await res.json()) as {
+				if (!res.ok) throw new Error(`init failed (${res.status})`)
+				const { entityUrl } = (await res.json()) as {
+					entityUrl: string
 					streamUrl: string
 				}
 				if (cancelled) return
-				setStreamUrl(url)
+				setStreamUrl(`${agentsUrl}${entityUrl}/main`)
 			} catch (err) {
 				if (cancelled) return
 				setConnectionError(err instanceof Error ? err.message : String(err))
@@ -165,57 +148,100 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 		}
 	}, [orgId, tabId])
 
-	// Step 2: poll the stream URL. This bypasses the broken SSE/durable-streams
-	// client integration in @electric-ax/agents-runtime@0.1.3 (where
-	// `db.preload()` hangs on `markUpToDate` and `useChat`+`useLiveQuery`
-	// never surface events). Plain JSON GET works fine.
+	// Step 2: subscribe to the entity stream via SSE so we get token-by-token
+	// streaming. We use the EventSource directly instead of `useChat(db)` /
+	// `createEntityStreamDB` because the durable-streams-state-beta consumer
+	// inside @electric-ax/agents-runtime buffers all dispatched events in a
+	// pending handler that only commits on `markUpToDate()` — and the
+	// agents-server's entity-stream proxy never emits `upToDate:true` in its
+	// SSE control frames. So events arrive but never become collection rows.
+	// TODO(upstream): switch back to `useChat(db)` once the agents-server
+	// emits `upToDate` (tracked as PR-A in upstream-electric-agents-fixes).
 	useEffect(() => {
 		if (!streamUrl) {
 			setEvents([])
 			return
 		}
 		let cancelled = false
-		let timer: ReturnType<typeof setTimeout> | null = null
-
-		const poll = async () => {
+		const abort = new AbortController()
+		const consume = async () => {
 			try {
-				const res = await fetch(streamUrl, {
-					headers: { Accept: "application/json" },
+				const res = await fetch(`${streamUrl}?offset=-1&live=sse`, {
+					headers: { Accept: "text/event-stream" },
+					signal: abort.signal,
 				})
-				if (!res.ok) throw new Error(`stream ${res.status}`)
-				const data = (await res.json()) as StreamEventBase[]
-				if (cancelled) return
-				setEvents(data)
+				if (!res.ok || !res.body) {
+					throw new Error(`stream ${res.status}`)
+				}
+				const reader = res.body.getReader()
+				const decoder = new TextDecoder()
+				let buffer = ""
+				let currentEvent: { name: string | null; data: string[] } = {
+					name: null,
+					data: [],
+				}
+				const dispatchFrame = () => {
+					if (currentEvent.name !== "data" || currentEvent.data.length === 0) {
+						currentEvent = { name: null, data: [] }
+						return
+					}
+					const payload = currentEvent.data.join("\n")
+					currentEvent = { name: null, data: [] }
+					let parsed: unknown
+					try {
+						parsed = JSON.parse(payload)
+					} catch {
+						return
+					}
+					const incoming = Array.isArray(parsed)
+						? (parsed as StreamEventBase[])
+						: [parsed as StreamEventBase]
+					setEvents((prev) => [...prev, ...incoming])
+				}
+				while (!cancelled) {
+					const { value, done } = await reader.read()
+					if (done) break
+					buffer += decoder.decode(value, { stream: true })
+					// SSE frames are delimited by blank lines; parse line by line.
+					let nl: number
+					while ((nl = buffer.indexOf("\n")) !== -1) {
+						const line = buffer.slice(0, nl).replace(/\r$/, "")
+						buffer = buffer.slice(nl + 1)
+						if (line === "") {
+							dispatchFrame()
+							continue
+						}
+						if (line.startsWith("event:")) {
+							currentEvent.name = line.slice(6).trim()
+						} else if (line.startsWith("data:")) {
+							currentEvent.data.push(line.slice(5).replace(/^ /, ""))
+						}
+					}
+				}
 			} catch (err) {
 				if (cancelled) return
-				console.warn("[chat] poll failed", err)
-			} finally {
-				if (!cancelled) timer = setTimeout(poll, 1000)
+				if ((err as { name?: string }).name === "AbortError") return
+				console.warn("[chat] sse read failed", err)
 			}
 		}
-		void poll()
-
+		void consume()
 		return () => {
 			cancelled = true
-			if (timer) clearTimeout(timer)
+			abort.abort()
 		}
 	}, [streamUrl])
 
 	const sections = useMemo(() => buildSectionsFromEvents(events), [events])
 
-	// Track whether the latest run completed; if the last section is a
-	// user_message (or empty), we're awaiting the next agent reply.
 	const lastSection = sections[sections.length - 1]
 	const agentRunInProgress =
 		lastSection?.kind === "agent_response" && !lastSection.done
-	const showThinking = isAwaitingReply || agentRunInProgress
+	const isLoading = isAwaitingReply || agentRunInProgress
 	useEffect(() => {
 		if (lastSection?.kind === "agent_response" && lastSection.done) {
 			setIsAwaitingReply(false)
 		}
 	}, [lastSection])
-
-	const isLoading = showThinking
 
 	const sendMessage = useCallback(
 		async (text: string) => {

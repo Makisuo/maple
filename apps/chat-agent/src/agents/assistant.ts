@@ -21,7 +21,7 @@ export function registerAssistantAgent(registry: EntityRegistry): void {
 			const hasUserMessage = ctx.events.some((e) => {
 				const evt = e as { type?: string; value?: { message_type?: string } }
 				return (
-					evt.type === "message_received" &&
+					evt.type === "inbox" &&
 					evt.value?.message_type === "user_message"
 				)
 			})

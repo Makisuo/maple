@@ -2,6 +2,7 @@ import http from "node:http"
 import {
 	createEntityRegistry,
 	createRuntimeHandler,
+	createRuntimeServerClient,
 } from "@electric-ax/agents-runtime"
 import { ASSISTANT_TYPE, registerAssistantAgent } from "./agents/assistant.js"
 import {
@@ -14,13 +15,6 @@ import {
 const AGENTS_URL = process.env.AGENTS_URL ?? "http://localhost:4437"
 const PORT = Number(process.env.PORT ?? 4700)
 const SERVE_URL = process.env.SERVE_URL ?? `http://localhost:${PORT}`
-// Webhook URL the agents-server should call when an entity wakes. Must be a
-// loopback URL (localhost/127.0.0.x) to pass the agents-server's webhook
-// allowlist — even when the server runs inside Docker. The container
-// rewrites it back to a host-reachable address via
-// ELECTRIC_AGENTS_REWRITE_LOOPBACK_WEBHOOKS_TO.
-const WEBHOOK_URL =
-	process.env.WEBHOOK_URL ?? `http://localhost:${PORT}/webhook`
 
 const authEnv: AuthEnv = {
 	MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE,
@@ -39,26 +33,17 @@ const runtime = createRuntimeHandler({
 	registry,
 })
 
-// NOTE: We talk to the agents-server REST API directly rather than going
-// through the runtime's bundled `createRuntimeServerClient`. The published
-// @electric-ax/agents-runtime@0.1.3 ships a bundle where that client's
-// spawn/send/get paths drop the required `/_electric/entities` prefix; the
-// fix is on HEAD but unreleased. Swap to the helper once a newer version
-// ships.
+const runtimeClient = createRuntimeServerClient({ baseUrl: AGENTS_URL })
 
 interface SpawnedEntityInfo {
-	url: string
-	type: string
-	status: string
-	streams: { main: string; error: string }
+	entityUrl: string
+	streamPath: string
 }
 
-// Single-flight per entityId: the bundled durable-streams server returns
-// 500 (and rolls back the postgres insert) when two PUTs for the same
-// entity URL race — and React StrictMode double-mounts the chat panel in
-// dev, firing two simultaneous /init calls for every new tab. Coalesce
-// concurrent spawns at this process so the agents-server only sees one
-// PUT in flight per entity at a time.
+// Single-flight per entityId: the bundled durable-streams server still
+// returns 500 when two PUTs for the same entity URL race, and React
+// StrictMode double-mounts the chat panel in dev. Coalesce concurrent
+// spawns so the agents-server only sees one PUT in flight per entity.
 const inflightSpawns = new Map<string, Promise<SpawnedEntityInfo>>()
 
 async function spawnAssistantEntity(
@@ -67,62 +52,20 @@ async function spawnAssistantEntity(
 ): Promise<SpawnedEntityInfo> {
 	const existing = inflightSpawns.get(entityId)
 	if (existing) return existing
-	const promise = doSpawnAssistantEntity(entityId, args)
+	const promise = (async () => {
+		const info = await runtimeClient.spawnEntity({
+			type: ASSISTANT_TYPE,
+			id: entityId,
+			args,
+			tags: { org_id: args.orgId },
+		})
+		return { entityUrl: info.entityUrl, streamPath: info.streamPath }
+	})()
 	inflightSpawns.set(entityId, promise)
 	try {
 		return await promise
 	} finally {
 		inflightSpawns.delete(entityId)
-	}
-}
-
-async function doSpawnAssistantEntity(
-	entityId: string,
-	args: { orgId: string; tabId: string },
-): Promise<SpawnedEntityInfo> {
-	const url = `${AGENTS_URL}/_electric/entities/${ASSISTANT_TYPE}/${encodeURIComponent(entityId)}`
-	const res = await fetch(url, {
-		method: "PUT",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ args, tags: { org_id: args.orgId } }),
-	})
-	if (res.ok) {
-		return (await res.json()) as SpawnedEntityInfo
-	}
-	// Two failure modes both recover via GET:
-	//  - 409 DUPLICATE_URL: entity already exists from an earlier spawn
-	//  - 500 INTERNAL_SERVER_ERROR: false negative from the bundled durable-
-	//    streams server's `streamMetaToStream` race (it commits the entity
-	//    row + stream to disk, then throws on the immediate-read map step).
-	//    The stream is actually usable; GET returns the full info.
-	if (res.status === 409 || res.status === 500) {
-		const getRes = await fetch(url, { method: "GET" })
-		if (getRes.ok) {
-			return (await getRes.json()) as SpawnedEntityInfo
-		}
-		const getBody = await getRes.text().catch(() => "")
-		throw new Error(
-			`spawn ${entityId} failed (${res.status}); recovery GET also failed (${getRes.status}): ${getBody}`,
-		)
-	}
-	const body = await res.text().catch(() => "")
-	throw new Error(`spawn ${entityId} failed (${res.status}): ${body}`)
-}
-
-async function sendUserMessage(
-	entityUrl: string,
-	payload: { text: string },
-	from: string,
-): Promise<void> {
-	const url = `${AGENTS_URL}/_electric/entities${entityUrl}/send`
-	const res = await fetch(url, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ payload, from, type: "user_message" }),
-	})
-	if (!res.ok) {
-		const body = await res.text().catch(() => "")
-		throw new Error(`send to ${entityUrl} failed (${res.status}): ${body}`)
 	}
 }
 
@@ -197,8 +140,8 @@ async function handleInit(
 			tabId,
 		})
 		writeJson(res, 200, {
-			entityUrl: info.url,
-			streamUrl: `${AGENTS_URL}${info.streams.main}`,
+			entityUrl: info.entityUrl,
+			streamUrl: `${AGENTS_URL}${info.streamPath}`,
 		})
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
@@ -236,8 +179,12 @@ async function handleSendMessage(
 			orgId: verified.orgId,
 			tabId,
 		})
-		await sendUserMessage(info.url, { text }, `user:${verified.userId}`)
-		writeJson(res, 202, { entityUrl: info.url })
+		await runtimeClient.sendEntityMessage({
+			targetUrl: info.entityUrl,
+			payload: { text },
+			type: "user_message",
+		})
+		writeJson(res, 202, { entityUrl: info.entityUrl })
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		console.error("[chat-agent] send failed:", message)
@@ -248,10 +195,12 @@ async function handleSendMessage(
 const SEND_MESSAGE_PATH = /^\/api\/chat\/([^/]+)\/message$/
 const INIT_PATH = /^\/api\/chat\/([^/]+)\/init$/
 
-// The agents-server's `publicUrl` must be loopback for in-container webhook
-// validation, so the wake notification it sends us embeds a `callback` URL
-// like `http://localhost:4437/...` that's unreachable from the host. Rewrite
-// the body so the runtime's `fetch(callback, ...)` hits the host-mapped port.
+// The agents-server's `publicUrl` must be a loopback URL to pass its own
+// webhook allowlist (see `isLocalDevHost` in @durable-streams/server). The
+// wake notifications we receive therefore embed a `callback` URL like
+// `http://localhost:4437/_electric/callback-forward/...` that the
+// agents-server can reach internally but our host-side runtime cannot.
+// Rewrite the body so the runtime fetches the host-mapped port.
 const INTERNAL_BASE_URL =
 	process.env.AGENTS_INTERNAL_BASE_URL ?? "http://localhost:4437"
 
@@ -264,12 +213,6 @@ async function handleWebhookWithCallbackRewrite(
 	const raw = Buffer.concat(chunks).toString("utf8")
 	const rewritten = raw.split(INTERNAL_BASE_URL).join(AGENTS_URL)
 
-	// Build a proper fetch Request ourselves and call handleWebhookRequest
-	// directly. The bundled runtime's `onEnter` → `toFetchRequest` does
-	// `new Request(url, { body: Buffer.from(...) })`, which Node 24's undici
-	// rejects with "Cannot read properties of undefined (reading
-	// 'Symbol(kState)')" because Buffer isn't an accepted BodyInit there.
-	// Passing a Uint8Array works around the upstream bug.
 	const host = req.headers.host ?? `localhost:${PORT}`
 	const url = `http://${host}${req.url ?? "/webhook"}`
 	const headers = new Headers()
@@ -291,9 +234,6 @@ async function handleWebhookWithCallbackRewrite(
 
 	const response = await runtime.handleWebhookRequest(fetchReq)
 
-	// Force 204 → 200 because the agents-server's subscription proxy
-	// upstream re-wraps our reply via `new Response(body, { status })`
-	// which throws on 204.
 	const status = response.status === 204 ? 200 : response.status
 	const respHeaders: Record<string, string> = {}
 	response.headers.forEach((value, key) => {
@@ -354,42 +294,9 @@ const server = http.createServer(async (req, res) => {
 	writeJson(res, 404, { error: "Not Found" })
 })
 
-async function registerWebhookSubscription(): Promise<void> {
-	// Workaround for @electric-ax/agents-runtime@0.1.3: the bundled
-	// registerTypes() PUTs to `${baseUrl}/${type}/**?subscription=...` with
-	// `{ webhook: "url" }` — but the agents-server's subscription proxy
-	// only handles PUT /v1/stream-meta/subscriptions/{id} with body
-	// `{ type: "webhook", webhook: { url }, pattern }`. The bundled call
-	// hits `proxyPassThrough` instead and silently no-ops, leaving no row
-	// in `subscription_webhooks` and no wake delivery. Re-issue the PUT
-	// with the correct shape so the agents-server registers our webhook.
-	const subId = `${ASSISTANT_TYPE}-handler`
-	const subUrl = `${AGENTS_URL}/v1/stream-meta/subscriptions/${encodeURIComponent(subId)}`
-	const res = await fetch(subUrl, {
-		method: "PUT",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			type: "webhook",
-			webhook: { url: WEBHOOK_URL },
-			pattern: `${ASSISTANT_TYPE}/**`,
-		}),
-	})
-	if (!res.ok) {
-		const body = await res.text().catch(() => "")
-		throw new Error(
-			`subscription PUT failed (${res.status}): ${body || res.statusText}`,
-		)
-	}
-}
-
 server.listen(PORT, async () => {
 	try {
 		await runtime.registerTypes()
-		// In agents-server >=0.4.0 each spawned entity gets its own auto-
-		// subscription (visible in the spawn response's `dispatch_policy`).
-		// Skipping the explicit type-wide subscription avoids double wake
-		// delivery on every message (which races for the wake claim token
-		// and 401s mid-stream).
 		console.log(
 			`[chat-agent] listening on :${PORT} (agents-server: ${AGENTS_URL}, types: ${runtime.typeNames.join(", ")})`,
 		)
