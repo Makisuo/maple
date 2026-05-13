@@ -342,10 +342,14 @@ const server = http.createServer(async (req, res) => {
 // retry on demand — but we surface a clear hint.
 async function preflightAgentsServer(): Promise<void> {
 	try {
-		const res = await fetch(`${AGENTS_URL}/health`, {
+		// agents-server has no /health endpoint today. `/` returns 302 to the
+		// admin UI when alive — that's enough to confirm reachability without
+		// hitting a privileged route.
+		const res = await fetch(`${AGENTS_URL}/`, {
+			redirect: "manual",
 			signal: AbortSignal.timeout(2000),
 		})
-		if (!res.ok) throw new Error(`HTTP ${res.status}`)
+		if (res.status >= 500) throw new Error(`HTTP ${res.status}`)
 		console.log(`[chat-agent] agents-server reachable at ${AGENTS_URL}`)
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)

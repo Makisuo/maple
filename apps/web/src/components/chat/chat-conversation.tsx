@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { useLiveQuery } from "@tanstack/react-db"
-import type { ChatMessage } from "@maple/domain/chat"
 import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
 import { useChatroom } from "@/hooks/use-chatroom"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
