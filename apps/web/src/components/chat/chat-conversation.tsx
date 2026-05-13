@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
+import { useLiveQuery } from "@tanstack/react-db"
+import type { ChatMessage } from "@maple/domain/chat"
 import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
-import { agentsUrl } from "@/lib/electric-agents-client"
+import { useChatroom } from "@/hooks/use-chatroom"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
 import {
 	Conversation,
@@ -33,79 +35,13 @@ interface ChatConversationProps {
 	onFirstMessage?: (tabId: string, text: string) => void
 }
 
-interface StreamEventBase {
-	type: string
-	key: string
-	value: Record<string, unknown>
-	headers?: { operation?: string; offset?: string }
-}
-type UserMessageSection = {
-	kind: "user_message"
-	key: string
-	text: string
-}
-type AgentReplySection = {
-	kind: "agent_response"
-	runId: string
-	text: string
-	done: boolean
-}
-type RenderSection = UserMessageSection | AgentReplySection
-
-function buildSectionsFromEvents(events: StreamEventBase[]): RenderSection[] {
-	// Walk events in stream order. Emit each `agent_response` section at the
-	// point its `run` starts so user messages and agent replies stay
-	// interleaved correctly (U1 → A1 → U2 → A2 instead of U1, U2, A1, A2).
-	const sections: RenderSection[] = []
-	const agentByRunId = new Map<string, AgentReplySection>()
-
-	for (const e of events) {
-		const v = e.value
-		if (e.type === "inbox") {
-			const payload = v.payload as { text?: string } | undefined
-			if (v.message_type === "user_message" && payload?.text) {
-				sections.push({ kind: "user_message", key: e.key, text: payload.text })
-			}
-			continue
-		}
-		if (e.type === "run") {
-			const runId = e.key
-			const status = v.status as string | undefined
-			let section = agentByRunId.get(runId)
-			if (!section) {
-				section = { kind: "agent_response", runId, text: "", done: false }
-				agentByRunId.set(runId, section)
-				sections.push(section)
-			}
-			if (status === "completed") section.done = true
-			continue
-		}
-		if (e.type === "text_delta") {
-			const runId = (v.run_id as string) ?? ""
-			if (!runId) continue
-			let section = agentByRunId.get(runId)
-			if (!section) {
-				// text_delta arrived before its run row — synthesize an empty
-				// agent_response so the deltas have somewhere to land.
-				section = { kind: "agent_response", runId, text: "", done: false }
-				agentByRunId.set(runId, section)
-				sections.push(section)
-			}
-			section.text += (v.delta as string) ?? ""
-		}
-	}
-
-	return sections
-}
-
 export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConversationProps) {
 	const { orgId, getToken } = useAuth()
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive)
 
-	const [streamUrl, setStreamUrl] = useState<string | null>(null)
-	const [events, setEvents] = useState<StreamEventBase[]>([])
-	const [connectionError, setConnectionError] = useState<string | null>(null)
+	const [chatroomId, setChatroomId] = useState<string | null>(null)
+	const [initError, setInitError] = useState<string | null>(null)
 	const [isAwaitingReply, setIsAwaitingReply] = useState(false)
 
 	const getTokenRef = useRef(getToken)
@@ -113,14 +49,15 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 		getTokenRef.current = getToken
 	}, [getToken])
 
-	// Step 1: POST /init → spawn entity (idempotent) + get the stream URL.
+	// Spawn the entity (idempotent) and learn its chatroomId. The chatroomId
+	// is the shared-state stream the assistant + frontend both observe.
 	useEffect(() => {
 		if (!orgId) {
-			setStreamUrl(null)
+			setChatroomId(null)
 			return
 		}
 		let cancelled = false
-		setConnectionError(null)
+		setInitError(null)
 		;(async () => {
 			try {
 				const token = await getTokenRef.current()
@@ -132,15 +69,12 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 					},
 				)
 				if (!res.ok) throw new Error(`init failed (${res.status})`)
-				const { entityUrl } = (await res.json()) as {
-					entityUrl: string
-					streamUrl: string
-				}
+				const body = (await res.json()) as { chatroomId: string }
 				if (cancelled) return
-				setStreamUrl(`${agentsUrl}${entityUrl}/main`)
+				setChatroomId(body.chatroomId)
 			} catch (err) {
 				if (cancelled) return
-				setConnectionError(err instanceof Error ? err.message : String(err))
+				setInitError(err instanceof Error ? err.message : String(err))
 			}
 		})()
 		return () => {
@@ -148,100 +82,26 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 		}
 	}, [orgId, tabId])
 
-	// Step 2: subscribe to the entity stream via SSE so we get token-by-token
-	// streaming. We use the EventSource directly instead of `useChat(db)` /
-	// `createEntityStreamDB` because the durable-streams-state-beta consumer
-	// inside @electric-ax/agents-runtime buffers all dispatched events in a
-	// pending handler that only commits on `markUpToDate()` — and the
-	// agents-server's entity-stream proxy never emits `upToDate:true` in its
-	// SSE control frames. So events arrive but never become collection rows.
-	// TODO(upstream): switch back to `useChat(db)` once the agents-server
-	// emits `upToDate` (tracked as PR-A in upstream-electric-agents-fixes).
-	useEffect(() => {
-		if (!streamUrl) {
-			setEvents([])
-			return
-		}
-		let cancelled = false
-		const abort = new AbortController()
-		const consume = async () => {
-			try {
-				const res = await fetch(`${streamUrl}?offset=-1&live=sse`, {
-					headers: { Accept: "text/event-stream" },
-					signal: abort.signal,
-				})
-				if (!res.ok || !res.body) {
-					throw new Error(`stream ${res.status}`)
-				}
-				const reader = res.body.getReader()
-				const decoder = new TextDecoder()
-				let buffer = ""
-				let currentEvent: { name: string | null; data: string[] } = {
-					name: null,
-					data: [],
-				}
-				const dispatchFrame = () => {
-					if (currentEvent.name !== "data" || currentEvent.data.length === 0) {
-						currentEvent = { name: null, data: [] }
-						return
-					}
-					const payload = currentEvent.data.join("\n")
-					currentEvent = { name: null, data: [] }
-					let parsed: unknown
-					try {
-						parsed = JSON.parse(payload)
-					} catch {
-						return
-					}
-					const incoming = Array.isArray(parsed)
-						? (parsed as StreamEventBase[])
-						: [parsed as StreamEventBase]
-					setEvents((prev) => [...prev, ...incoming])
-				}
-				while (!cancelled) {
-					const { value, done } = await reader.read()
-					if (done) break
-					buffer += decoder.decode(value, { stream: true })
-					// SSE frames are delimited by blank lines; parse line by line.
-					let nl: number
-					while ((nl = buffer.indexOf("\n")) !== -1) {
-						const line = buffer.slice(0, nl).replace(/\r$/, "")
-						buffer = buffer.slice(nl + 1)
-						if (line === "") {
-							dispatchFrame()
-							continue
-						}
-						if (line.startsWith("event:")) {
-							currentEvent.name = line.slice(6).trim()
-						} else if (line.startsWith("data:")) {
-							currentEvent.data.push(line.slice(5).replace(/^ /, ""))
-						}
-					}
-				}
-			} catch (err) {
-				if (cancelled) return
-				if ((err as { name?: string }).name === "AbortError") return
-				console.warn("[chat] sse read failed", err)
-			}
-		}
-		void consume()
-		return () => {
-			cancelled = true
-			abort.abort()
-		}
-	}, [streamUrl])
+	const { messages: messagesCollection, error: subscribeError } = useChatroom(chatroomId)
 
-	const sections = useMemo(() => buildSectionsFromEvents(events), [events])
+	const { data: messages = [] } = useLiveQuery(
+		(q) => {
+			if (!messagesCollection) return null as never
+			return q
+				.from({ m: messagesCollection })
+				.orderBy(({ m }) => m.timestamp, "asc")
+				.select(({ m }) => m)
+		},
+		[messagesCollection],
+	)
 
-	const lastSection = sections[sections.length - 1]
-	const agentRunInProgress =
-		lastSection?.kind === "agent_response" && !lastSection.done
-	const isLoading = isAwaitingReply || agentRunInProgress
+	const messageCount = messages.length
+	const lastMessage = messages[messageCount - 1]
+	const isWaitingForAgent = isAwaitingReply && lastMessage?.role !== "agent"
+
 	useEffect(() => {
-		if (lastSection?.kind === "agent_response" && lastSection.done) {
-			setIsAwaitingReply(false)
-		}
-	}, [lastSection])
+		if (lastMessage?.role === "agent") setIsAwaitingReply(false)
+	}, [lastMessage?.role, lastMessage?.key])
 
 	const sendMessage = useCallback(
 		async (text: string) => {
@@ -266,7 +126,6 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 		[orgId, tabId],
 	)
 
-	const messageCount = sections.length
 	const [hasSettled, setHasSettled] = useState(false)
 	useEffect(() => {
 		setHasSettled(false)
@@ -282,7 +141,7 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 
 	const handleSend = (text: string) => {
 		const trimmed = text.trim()
-		if (!trimmed || isLoading) return
+		if (!trimmed || isWaitingForAgent) return
 		if (messageCount === 0 && onFirstMessage) {
 			onFirstMessage(tabId, trimmed.slice(0, 40))
 		}
@@ -292,6 +151,8 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 			setIsAwaitingReply(false)
 		})
 	}
+
+	const connectionError = initError ?? subscribeError
 
 	return (
 		<div className="flex h-full flex-col">
@@ -320,25 +181,14 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 						</ConversationEmptyState>
 					) : (
 						<>
-							{sections.map((section) => {
-								if (section.kind === "user_message") {
-									return (
-										<Message key={`u:${section.key}`} from="user">
-											<MessageContent>
-												<RichText>{section.text}</RichText>
-											</MessageContent>
-										</Message>
-									)
-								}
-								return (
-									<Message key={`a:${section.runId}`} from="assistant">
-										<MessageContent>
-											<RichText>{section.text}</RichText>
-										</MessageContent>
-									</Message>
-								)
-							})}
-							{isAwaitingReply && lastSection?.kind === "user_message" && (
+							{messages.map((m) => (
+								<Message key={m.key} from={m.role === "user" ? "user" : "assistant"}>
+									<MessageContent>
+										<RichText>{m.text}</RichText>
+									</MessageContent>
+								</Message>
+							))}
+							{isWaitingForAgent && (
 								<Message from="assistant">
 									<MessageContent>
 										<Shimmer>Thinking…</Shimmer>
@@ -371,12 +221,12 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 					<PromptInputTextarea
 						ref={textareaRef}
 						placeholder="Ask about your system..."
-						disabled={isLoading}
+						disabled={isWaitingForAgent}
 					/>
 					<PromptInputFooter>
 						<PromptInputSubmit
-							status={isLoading ? "streaming" : "ready"}
-							disabled={isLoading}
+							status={isWaitingForAgent ? "streaming" : "ready"}
+							disabled={isWaitingForAgent}
 						/>
 					</PromptInputFooter>
 				</PromptInput>

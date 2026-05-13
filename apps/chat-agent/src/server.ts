@@ -12,7 +12,7 @@ import {
 	type AuthEnv,
 } from "./auth.js"
 
-const AGENTS_URL = process.env.AGENTS_URL ?? "http://localhost:4437"
+const AGENTS_URL = process.env.AGENTS_URL ?? "http://localhost:4440"
 const PORT = Number(process.env.PORT ?? 4700)
 const SERVE_URL = process.env.SERVE_URL ?? `http://localhost:${PORT}`
 
@@ -35,31 +35,32 @@ const runtime = createRuntimeHandler({
 
 const runtimeClient = createRuntimeServerClient({ baseUrl: AGENTS_URL })
 
-interface SpawnedEntityInfo {
-	entityUrl: string
-	streamPath: string
-}
-
 // Single-flight per entityId: the bundled durable-streams server still
 // returns 500 when two PUTs for the same entity URL race, and React
 // StrictMode double-mounts the chat panel in dev. Coalesce concurrent
 // spawns so the agents-server only sees one PUT in flight per entity.
-const inflightSpawns = new Map<string, Promise<SpawnedEntityInfo>>()
+const inflightSpawns = new Map<string, Promise<{ entityUrl: string; chatroomId: string }>>()
 
-async function spawnAssistantEntity(
+async function ensureAssistantEntity(
 	entityId: string,
 	args: { orgId: string; tabId: string },
-): Promise<SpawnedEntityInfo> {
+): Promise<{ entityUrl: string; chatroomId: string }> {
 	const existing = inflightSpawns.get(entityId)
 	if (existing) return existing
+	const chatroomId = entityId // one chatroom per (orgId, tabId) tuple
 	const promise = (async () => {
 		const info = await runtimeClient.spawnEntity({
 			type: ASSISTANT_TYPE,
 			id: entityId,
-			args,
+			args: { orgId: args.orgId, tabId: args.tabId, chatroomId },
 			tags: { org_id: args.orgId },
+			// agents-runtime skips the handler on first wake if there's no
+			// inbound input. A placeholder initialMessage forces the entity
+			// to enter the handler once so `mkdb` runs and the wake-on-change
+			// subscription registers.
+			initialMessage: "ready",
 		})
-		return { entityUrl: info.entityUrl, streamPath: info.streamPath }
+		return { entityUrl: info.entityUrl, chatroomId }
 	})()
 	inflightSpawns.set(entityId, promise)
 	try {
@@ -135,18 +136,54 @@ async function handleInit(
 	if (!verified) return
 	const entityId = entityIdForTab(verified.orgId, tabId)
 	try {
-		const info = await spawnAssistantEntity(entityId, {
+		const info = await ensureAssistantEntity(entityId, {
 			orgId: verified.orgId,
 			tabId,
 		})
 		writeJson(res, 200, {
 			entityUrl: info.entityUrl,
-			streamUrl: `${AGENTS_URL}${info.streamPath}`,
+			chatroomId: info.chatroomId,
+			agentsUrl: AGENTS_URL,
 		})
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		console.error("[chat-agent] init failed:", message)
 		writeJson(res, 500, { error: message })
+	}
+}
+
+// Post a user message directly into the chatroom's shared-state stream. The
+// agent wakes via the `wake: { on: 'change', collections: ['shared:message'] }`
+// subscription it registered in `assistant.ts`.
+async function postUserMessageToSharedState(
+	chatroomId: string,
+	userName: string,
+	text: string,
+): Promise<void> {
+	await runtimeClient.ensureSharedStateStream(chatroomId)
+	const streamPath = runtimeClient.getSharedStateStreamPath(chatroomId)
+	const msgKey = crypto.randomUUID()
+	const event = {
+		type: "shared:message",
+		key: msgKey,
+		headers: { operation: "insert" },
+		value: {
+			key: msgKey,
+			role: "user",
+			sender: "user",
+			senderName: userName,
+			text,
+			timestamp: Date.now(),
+		},
+	}
+	const res = await fetch(`${AGENTS_URL}${streamPath}`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(event),
+	})
+	if (!res.ok) {
+		const body = await res.text().catch(() => "")
+		throw new Error(`shared-state POST failed (${res.status}): ${body}`)
 	}
 }
 
@@ -175,16 +212,15 @@ async function handleSendMessage(
 	const entityId = entityIdForTab(verified.orgId, tabId)
 
 	try {
-		const info = await spawnAssistantEntity(entityId, {
+		const info = await ensureAssistantEntity(entityId, {
 			orgId: verified.orgId,
 			tabId,
 		})
-		await runtimeClient.sendEntityMessage({
-			targetUrl: info.entityUrl,
-			payload: { text },
-			type: "user_message",
+		await postUserMessageToSharedState(info.chatroomId, "You", text)
+		writeJson(res, 202, {
+			entityUrl: info.entityUrl,
+			chatroomId: info.chatroomId,
 		})
-		writeJson(res, 202, { entityUrl: info.entityUrl })
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		console.error("[chat-agent] send failed:", message)
@@ -201,6 +237,10 @@ const INIT_PATH = /^\/api\/chat\/([^/]+)\/init$/
 // `http://localhost:4437/_electric/callback-forward/...` that the
 // agents-server can reach internally but our host-side runtime cannot.
 // Rewrite the body so the runtime fetches the host-mapped port.
+//
+// TODO(upstream): drop this once `ELECTRIC_AGENTS_BASE_URL` can be set to
+// a non-loopback URL — tracked as upstream bug #5 in
+// `docs/electric-agents-upstream-issues.md`.
 const INTERNAL_BASE_URL =
 	process.env.AGENTS_INTERNAL_BASE_URL ?? "http://localhost:4437"
 
@@ -234,6 +274,9 @@ async function handleWebhookWithCallbackRewrite(
 
 	const response = await runtime.handleWebhookRequest(fetchReq)
 
+	// undici's Response() throws on status 204 — the agents-server proxy
+	// relays our reply through one. Rewrite to 200.
+	// TODO(upstream): drop once agents-runtime ships the fix.
 	const status = response.status === 204 ? 200 : response.status
 	const respHeaders: Record<string, string> = {}
 	response.headers.forEach((value, key) => {
@@ -294,7 +337,27 @@ const server = http.createServer(async (req, res) => {
 	writeJson(res, 404, { error: "Not Found" })
 })
 
+// Preflight: catch the common dev-onboarding miss where the user forgot to
+// start the agents-server stack. We don't fail-fast — registerTypes will
+// retry on demand — but we surface a clear hint.
+async function preflightAgentsServer(): Promise<void> {
+	try {
+		const res = await fetch(`${AGENTS_URL}/health`, {
+			signal: AbortSignal.timeout(2000),
+		})
+		if (!res.ok) throw new Error(`HTTP ${res.status}`)
+		console.log(`[chat-agent] agents-server reachable at ${AGENTS_URL}`)
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err)
+		console.warn(
+			`[chat-agent] agents-server not reachable at ${AGENTS_URL} (${message}).\n` +
+				`            Run \`bun electric:up\` from the repo root, then retry.`,
+		)
+	}
+}
+
 server.listen(PORT, async () => {
+	await preflightAgentsServer()
 	try {
 		await runtime.registerTypes()
 		console.log(

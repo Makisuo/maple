@@ -348,6 +348,7 @@
       "dependencies": {
         "@tinybirdco/sdk": "catalog:tinybird",
         "effect": "catalog:effect",
+        "zod": "^4.3.6",
       },
       "devDependencies": {
         "@effect/language-service": "catalog:effect",

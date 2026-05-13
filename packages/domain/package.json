@@ -4,6 +4,7 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
+		"./chat": "./src/chat/index.ts",
 		"./http": "./src/http/index.ts",
 		"./primitives": "./src/primitives.ts",
 		"./query-engine": "./src/query-engine.ts",
@@ -20,7 +21,8 @@
 	},
 	"dependencies": {
 		"@tinybirdco/sdk": "catalog:tinybird",
-		"effect": "catalog:effect"
+		"effect": "catalog:effect",
+		"zod": "^4.3.6"
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",

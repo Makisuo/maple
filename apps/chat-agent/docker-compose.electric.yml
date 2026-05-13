@@ -1,0 +1,84 @@
+# Pinned electric-agents stack for Maple chat-agent local dev.
+# Started by `bun electric:up` from the repo root. State lives in named
+# volumes; reset with `bun electric:reset`.
+#
+# Image names / env keys mirror electric-ax's bundled
+# `docker-compose.full.yml`. Kept here (rather than referenced via a
+# `node_modules/.bun/electric-ax@*/...` glob) so a `bun install` that bumps
+# `electric-ax` doesn't surprise local dev.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_connections=300
+      - -c
+      - shared_buffers=256MB
+    environment:
+      POSTGRES_DB: electric_agents
+      POSTGRES_USER: electric_agents
+      POSTGRES_PASSWORD: electric_agents
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U electric_agents -d electric_agents
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - electric-agents-postgres-data:/var/lib/postgresql
+
+  electric:
+    image: electricsql/electric:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://electric_agents:electric_agents@postgres:5432/electric_agents
+      ELECTRIC_INSECURE: "true"
+
+  electric-agents:
+    # 0.4.0 fixes the pre-0.4 webhook-forward body parser crash. Bump in
+    # tandem with `@electric-ax/agents-runtime` in apps/chat-agent/package.json.
+    image: electricax/agents-server:0.4.0
+    pull_policy: always
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      electric:
+        condition: service_started
+    environment:
+      ELECTRIC_AGENTS_LOG_LEVEL: ${ELECTRIC_AGENTS_LOG_LEVEL:-info}
+      # `publicUrl` MUST be a loopback URL — the agents-server's webhook
+      # allowlist rejects anything else (upstream bug #5). The host runtime
+      # rewrites the embedded URL back to AGENTS_URL inside
+      # `handleWebhookWithCallbackRewrite`.
+      ELECTRIC_AGENTS_BASE_URL: http://localhost:4437
+      DATABASE_URL: postgres://electric_agents:electric_agents@postgres:5432/electric_agents
+      ELECTRIC_AGENTS_HOST: 0.0.0.0
+      ELECTRIC_AGENTS_PORT: 4437
+      ELECTRIC_AGENTS_STREAMS_DATA_DIR: /var/lib/electric-agents/streams
+      ELECTRIC_AGENTS_ELECTRIC_URL: http://electric:3000
+      # Route outbound webhooks from the agents-server back to the host
+      # (where the chat-agent Node process listens on :4700).
+      ELECTRIC_AGENTS_REWRITE_LOOPBACK_WEBHOOKS_TO: host.docker.internal:4700
+    ports:
+      # host 4440 → container 4437. Don't bind 4437 on the host directly —
+      # OrbStack can keep a stale port-forward alive past `docker rm` and
+      # leave 4437 unbindable.
+      - "4440:4437"
+    volumes:
+      - electric-agents-streams-data:/var/lib/electric-agents/streams
+
+volumes:
+  electric-agents-postgres-data:
+  electric-agents-streams-data:

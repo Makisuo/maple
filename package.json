@@ -26,6 +26,10 @@
 		"clickhouse:schema": "bun run ./scripts/generate-clickhouse-schema.ts && bun run ./scripts/lint-clickhouse-schema.ts",
 		"clickhouse:schema:check": "bun run ./scripts/generate-clickhouse-schema.ts --check && bun run ./scripts/lint-clickhouse-schema.ts",
 		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
+		"electric:up": "docker compose -p maple-electric-agents -f apps/chat-agent/docker-compose.electric.yml up -d",
+		"electric:down": "docker compose -p maple-electric-agents -f apps/chat-agent/docker-compose.electric.yml down",
+		"electric:reset": "docker compose -p maple-electric-agents -f apps/chat-agent/docker-compose.electric.yml down -v",
+		"electric:logs": "docker compose -p maple-electric-agents -f apps/chat-agent/docker-compose.electric.yml logs -f electric-agents",
 		"typecheck": "turbo typecheck"
 	},
 	"dependencies": {},

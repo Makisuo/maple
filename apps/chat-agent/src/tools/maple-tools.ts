@@ -49,8 +49,11 @@ export async function createMapleAgentTools({
 	orgId,
 	env,
 }: MapleToolsContext): Promise<AgentTool[]> {
-	const { runtime, mapleToolDefinitions, toInputSchema } =
-		await getMapleAgentSetup(env)
+	// Node-side runtime: we don't have a Cloudflare D1 binding, so wire the
+	// libsql-backed Database layer that points at apps/api/.data/maple.db.
+	const { runtime, mapleToolDefinitions, toInputSchema } = await getMapleAgentSetup(env, {
+		database: "libsql",
+	})
 
 	const internalServiceToken = String(env.INTERNAL_SERVICE_TOKEN ?? "")
 	const requestLayer = Layer.succeed(
