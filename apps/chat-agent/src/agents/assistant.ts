@@ -1,6 +1,7 @@
-import type { EntityRegistry } from "@electric-ax/agents-runtime"
+import type { AgentTool, EntityRegistry } from "@electric-ax/agents-runtime"
 import { z } from "zod"
 import { SYSTEM_PROMPT } from "../system-prompt.js"
+import { createMapleAgentTools } from "../tools/maple-tools.js"
 
 const assistantArgs = z.object({
 	orgId: z.string().min(1),
@@ -9,9 +10,29 @@ const assistantArgs = z.object({
 
 export const ASSISTANT_TYPE = "assistant"
 
+// Cache the Maple tools per-org. `getMapleAgentSetup` builds an Effect
+// ManagedRuntime that's relatively expensive to set up (it pulls in the
+// whole API service layer); we want one runtime per process, not per wake.
+const mapleToolsCache = new Map<string, Promise<AgentTool[]>>()
+
+function getMapleToolsForOrg(orgId: string): Promise<AgentTool[]> {
+	const existing = mapleToolsCache.get(orgId)
+	if (existing) return existing
+	const built = createMapleAgentTools({
+		orgId,
+		env: process.env as Record<string, unknown>,
+	}).catch((err) => {
+		// Don't poison the cache on transient failure.
+		mapleToolsCache.delete(orgId)
+		throw err
+	})
+	mapleToolsCache.set(orgId, built)
+	return built
+}
+
 export function registerAssistantAgent(registry: EntityRegistry): void {
 	registry.define(ASSISTANT_TYPE, {
-		description: "Maple observability assistant (baseline)",
+		description: "Maple observability assistant",
 		creationSchema: assistantArgs,
 
 		async handler(ctx) {
@@ -27,13 +48,28 @@ export function registerAssistantAgent(registry: EntityRegistry): void {
 			})
 			if (!hasUserMessage) return
 
+			const args = ctx.args as { orgId: string; tabId: string }
+
+			let mapleTools: AgentTool[] = []
+			try {
+				mapleTools = await getMapleToolsForOrg(args.orgId)
+				console.log(
+					`[assistant] wake for org=${args.orgId} tab=${args.tabId} mapleTools=${mapleTools.length}`,
+				)
+			} catch (err) {
+				console.error(
+					"[assistant] failed to load Maple tools; falling back to electric-only:",
+					err,
+				)
+			}
+
 			try {
 				ctx.useAgent({
 					systemPrompt: SYSTEM_PROMPT,
 					model: "moonshotai/kimi-k2.5",
 					provider: "openrouter",
 					getApiKey: () => process.env.OPENROUTER_API_KEY,
-					tools: [...ctx.electricTools],
+					tools: [...mapleTools, ...ctx.electricTools],
 				})
 				await ctx.agent.run()
 			} catch (err) {

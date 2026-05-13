@@ -10,12 +10,15 @@
 	"dependencies": {
 		"@clerk/backend": "^2.30.1",
 		"@electric-ax/agents-runtime": "^0.2.1",
+		"@maple/api": "workspace:*",
+		"@maple/domain": "workspace:*",
 		"@sinclair/typebox": "^0.34.48",
 		"@tanstack/db": "^0.6.4",
 		"effect": "catalog:effect",
 		"zod": "^4.3.6"
 	},
 	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20250214.0",
 		"@types/node": "catalog:tooling",
 		"tsx": "^4.19.0",
 		"typescript": "catalog:tooling"
