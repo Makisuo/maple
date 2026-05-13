@@ -35,38 +35,31 @@ const runtime = createRuntimeHandler({
 
 const runtimeClient = createRuntimeServerClient({ baseUrl: AGENTS_URL })
 
+interface SpawnedEntityInfo {
+	entityUrl: string
+	streamPath: string
+}
+
 // Single-flight per entityId: the bundled durable-streams server still
 // returns 500 when two PUTs for the same entity URL race, and React
 // StrictMode double-mounts the chat panel in dev. Coalesce concurrent
 // spawns so the agents-server only sees one PUT in flight per entity.
-const inflightSpawns = new Map<string, Promise<{ entityUrl: string; chatroomId: string }>>()
+const inflightSpawns = new Map<string, Promise<SpawnedEntityInfo>>()
 
 async function ensureAssistantEntity(
 	entityId: string,
 	args: { orgId: string; tabId: string },
-): Promise<{ entityUrl: string; chatroomId: string }> {
+): Promise<SpawnedEntityInfo> {
 	const existing = inflightSpawns.get(entityId)
 	if (existing) return existing
-	const chatroomId = entityId // one chatroom per (orgId, tabId) tuple
 	const promise = (async () => {
 		const info = await runtimeClient.spawnEntity({
 			type: ASSISTANT_TYPE,
 			id: entityId,
-			args: { orgId: args.orgId, tabId: args.tabId, chatroomId },
+			args: { orgId: args.orgId, tabId: args.tabId },
 			tags: { org_id: args.orgId },
-			// agents-runtime skips the handler on first wake if there's no
-			// inbound input. A placeholder initialMessage forces the entity
-			// to enter the handler once so `mkdb` runs and the wake-on-change
-			// subscription registers.
-			initialMessage: "ready",
 		})
-		// The shared-state stream is created lazily by `ctx.mkdb()` inside the
-		// handler's first wake. The frontend subscribes to it immediately on
-		// `/init`, so we race the wake — if we lose, the client gets a 404.
-		// Pre-create the stream here so it's always there when the client
-		// connects. `ensureSharedStateStream` is idempotent.
-		await runtimeClient.ensureSharedStateStream(chatroomId)
-		return { entityUrl: info.entityUrl, chatroomId }
+		return { entityUrl: info.entityUrl, streamPath: info.streamPath }
 	})()
 	inflightSpawns.set(entityId, promise)
 	try {
@@ -148,48 +141,13 @@ async function handleInit(
 		})
 		writeJson(res, 200, {
 			entityUrl: info.entityUrl,
-			chatroomId: info.chatroomId,
+			streamUrl: `${AGENTS_URL}${info.streamPath}`,
 			agentsUrl: AGENTS_URL,
 		})
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		console.error("[chat-agent] init failed:", message)
 		writeJson(res, 500, { error: message })
-	}
-}
-
-// Post a user message directly into the chatroom's shared-state stream. The
-// agent wakes via the `wake: { on: 'change', collections: ['shared:message'] }`
-// subscription it registered in `assistant.ts`.
-async function postUserMessageToSharedState(
-	chatroomId: string,
-	userName: string,
-	text: string,
-): Promise<void> {
-	await runtimeClient.ensureSharedStateStream(chatroomId)
-	const streamPath = runtimeClient.getSharedStateStreamPath(chatroomId)
-	const msgKey = crypto.randomUUID()
-	const event = {
-		type: "shared:message",
-		key: msgKey,
-		headers: { operation: "insert" },
-		value: {
-			key: msgKey,
-			role: "user",
-			sender: "user",
-			senderName: userName,
-			text,
-			timestamp: Date.now(),
-		},
-	}
-	const res = await fetch(`${AGENTS_URL}${streamPath}`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(event),
-	})
-	if (!res.ok) {
-		const body = await res.text().catch(() => "")
-		throw new Error(`shared-state POST failed (${res.status}): ${body}`)
 	}
 }
 
@@ -222,11 +180,12 @@ async function handleSendMessage(
 			orgId: verified.orgId,
 			tabId,
 		})
-		await postUserMessageToSharedState(info.chatroomId, "You", text)
-		writeJson(res, 202, {
-			entityUrl: info.entityUrl,
-			chatroomId: info.chatroomId,
+		await runtimeClient.sendEntityMessage({
+			targetUrl: info.entityUrl,
+			payload: { text },
+			type: "user_message",
 		})
+		writeJson(res, 202, { entityUrl: info.entityUrl })
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
 		console.error("[chat-agent] send failed:", message)

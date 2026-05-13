@@ -1,19 +1,13 @@
 /**
- * Subscribe to a chatroom's shared-state message collection via the
- * Electric Agents runtime. Returns a TanStack DB `Collection` that the
- * caller drives with `useLiveQuery` for reactive renders.
- *
- * Pattern lifted from the upstream `agents-chat-starter` example
- * (`src/ui/hooks/useChatroom.ts`); narrowed to a single collection because
- * Maple's chat is one assistant per tab rather than a multi-agent room.
+ * Subscribe to the assistant entity's stream via `@electric-ax/agents-runtime`.
+ * Returns the EntityStreamDB so callers can pass it to `useChat(db)` for a
+ * fully-materialized streaming timeline (user messages + agent responses
+ * + tool calls, accumulating in real time as text_deltas land).
  */
 import { useEffect, useState } from "react"
-import { createAgentsClient, db } from "@electric-ax/agents-runtime"
-import type { Collection } from "@tanstack/react-db"
-import { chatroomSchema, type ChatMessage } from "@maple/domain/chat"
+import { createAgentsClient, entity } from "@electric-ax/agents-runtime"
+import type { EntityStreamDB } from "@electric-ax/agents-runtime"
 import { agentsUrl } from "@/lib/electric-agents-client"
-
-export type MessagesCollection = Collection<ChatMessage>
 
 async function retry<T>(
 	fn: () => Promise<T>,
@@ -33,16 +27,16 @@ async function retry<T>(
 	throw lastErr ?? new Error("retry exhausted")
 }
 
-export function useChatroom(chatroomId: string | null): {
-	messages: MessagesCollection | null
+export function useChatroom(entityUrl: string | null): {
+	db: EntityStreamDB | null
 	error: string | null
 } {
-	const [messages, setMessages] = useState<MessagesCollection | null>(null)
+	const [db, setDb] = useState<EntityStreamDB | null>(null)
 	const [error, setError] = useState<string | null>(null)
 
 	useEffect(() => {
-		if (!chatroomId) {
-			setMessages(null)
+		if (!entityUrl) {
+			setDb(null)
 			setError(null)
 			return
 		}
@@ -51,16 +45,15 @@ export function useChatroom(chatroomId: string | null): {
 		;(async () => {
 			try {
 				const client = createAgentsClient({ baseUrl: agentsUrl })
-				const handle = await retry(() => client.observe(db(chatroomId, chatroomSchema)))
+				const handle = await retry(() => client.observe(entity(entityUrl)))
 				if (cancelled) {
 					;(handle as unknown as { close?: () => void }).close?.()
 					return
 				}
-				close = () => (handle as unknown as { close?: () => void }).close?.() ?? undefined
-				const collection = (handle as unknown as {
-					collections: { messages: MessagesCollection }
-				}).collections.messages
-				setMessages(collection)
+				close = () => {
+					;(handle as unknown as { close?: () => void }).close?.()
+				}
+				setDb(handle as unknown as EntityStreamDB)
 				setError(null)
 			} catch (err) {
 				if (cancelled) return
@@ -71,7 +64,7 @@ export function useChatroom(chatroomId: string | null): {
 			cancelled = true
 			close()
 		}
-	}, [chatroomId])
+	}, [entityUrl])
 
-	return { messages, error }
+	return { db, error }
 }

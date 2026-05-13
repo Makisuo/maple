@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
-import { useLiveQuery } from "@tanstack/react-db"
+import { useChat } from "@electric-ax/agents-runtime/react"
 import { chatAgentUrl } from "@/lib/services/common/chat-agent-url"
 import { useChatroom } from "@/hooks/use-chatroom"
 import { useTypeAnywhereFocus } from "@/hooks/use-type-anywhere-focus"
@@ -39,20 +39,20 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	useTypeAnywhereFocus(textareaRef, isActive)
 
-	const [chatroomId, setChatroomId] = useState<string | null>(null)
+	const [entityUrl, setEntityUrl] = useState<string | null>(null)
 	const [initError, setInitError] = useState<string | null>(null)
-	const [isAwaitingReply, setIsAwaitingReply] = useState(false)
+	const [isSending, setIsSending] = useState(false)
 
 	const getTokenRef = useRef(getToken)
 	useEffect(() => {
 		getTokenRef.current = getToken
 	}, [getToken])
 
-	// Spawn the entity (idempotent) and learn its chatroomId. The chatroomId
-	// is the shared-state stream the assistant + frontend both observe.
+	// 1. Spawn entity (idempotent) and learn its entityUrl. The entity's
+	//    durable stream is what useChat materializes into a timeline.
 	useEffect(() => {
 		if (!orgId) {
-			setChatroomId(null)
+			setEntityUrl(null)
 			return
 		}
 		let cancelled = false
@@ -68,9 +68,9 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 					},
 				)
 				if (!res.ok) throw new Error(`init failed (${res.status})`)
-				const body = (await res.json()) as { chatroomId: string }
+				const body = (await res.json()) as { entityUrl: string }
 				if (cancelled) return
-				setChatroomId(body.chatroomId)
+				setEntityUrl(body.entityUrl)
 			} catch (err) {
 				if (cancelled) return
 				setInitError(err instanceof Error ? err.message : String(err))
@@ -81,26 +81,37 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 		}
 	}, [orgId, tabId])
 
-	const { messages: messagesCollection, error: subscribeError } = useChatroom(chatroomId)
+	// 2. Observe the entity stream as a TanStack DB EntityStreamDB and feed
+	//    it to `useChat(db)`. The hook returns `sections` that already merge
+	//    user messages + streaming agent responses (text_delta accumulates
+	//    in `items[].text` in real time) + tool calls.
+	const { db, error: subscribeError } = useChatroom(entityUrl)
+	const { sections, state } = useChat(db)
 
-	const { data: messages = [] } = useLiveQuery(
-		(q) => {
-			if (!messagesCollection) return null as never
-			return q
-				.from({ m: messagesCollection })
-				.orderBy(({ m }) => m.timestamp, "asc")
-				.select(({ m }) => m)
-		},
-		[messagesCollection],
-	)
-
-	const messageCount = messages.length
-	const lastMessage = messages[messageCount - 1]
-	const isWaitingForAgent = isAwaitingReply && lastMessage?.role !== "agent"
+	const renderableSections = sections.filter((s) => {
+		if (s.kind === "user_message") {
+			// Skip the "ready" placeholder (it has isInitial set when wired
+			// through initialMessage, but we no longer send one — keep guard
+			// anyway in case an older entity is loaded).
+			return !(s.isInitial && (s.text === "ready" || s.text === ""))
+		}
+		if (s.kind === "wake") return false
+		return true
+	})
+	const sectionCount = renderableSections.length
+	const lastSection = renderableSections[sectionCount - 1]
+	const agentRunInProgress =
+		state === "working" ||
+		state === "queued" ||
+		state === "pending" ||
+		(lastSection?.kind === "agent_response" && !lastSection.done)
+	const isLoading = isSending || agentRunInProgress
 
 	useEffect(() => {
-		if (lastMessage?.role === "agent") setIsAwaitingReply(false)
-	}, [lastMessage?.role, lastMessage?.key])
+		if (lastSection?.kind === "agent_response" && lastSection.done) {
+			setIsSending(false)
+		}
+	}, [lastSection])
 
 	const sendMessage = useCallback(
 		async (text: string) => {
@@ -130,24 +141,24 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 		setHasSettled(false)
 	}, [tabId])
 	useEffect(() => {
-		if (messageCount > 0) {
+		if (sectionCount > 0) {
 			setHasSettled(true)
 			return
 		}
 		const t = setTimeout(() => setHasSettled(true), 600)
 		return () => clearTimeout(t)
-	}, [messageCount, tabId])
+	}, [sectionCount, tabId])
 
 	const handleSend = (text: string) => {
 		const trimmed = text.trim()
-		if (!trimmed || isWaitingForAgent) return
-		if (messageCount === 0 && onFirstMessage) {
+		if (!trimmed || isLoading) return
+		if (sectionCount === 0 && onFirstMessage) {
 			onFirstMessage(tabId, trimmed.slice(0, 40))
 		}
-		setIsAwaitingReply(true)
+		setIsSending(true)
 		void sendMessage(trimmed).catch((err) => {
 			console.error("[chat] sendMessage failed", err)
-			setIsAwaitingReply(false)
+			setIsSending(false)
 		})
 	}
 
@@ -157,9 +168,9 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 		<div className="flex h-full flex-col">
 			<Conversation className="flex-1 min-h-0">
 				<ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 py-6">
-					{!hasSettled && messageCount === 0 ? (
+					{!hasSettled && sectionCount === 0 ? (
 						<ConversationLoadingSkeleton />
-					) : messageCount === 0 ? (
+					) : sectionCount === 0 ? (
 						<ConversationEmptyState
 							title="Maple AI"
 							description="Ask me about your traces, logs, errors, and services."
@@ -180,14 +191,33 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 						</ConversationEmptyState>
 					) : (
 						<>
-							{messages.map((m) => (
-								<Message key={m.key} from={m.role === "user" ? "user" : "assistant"}>
-									<MessageContent>
-										<RichText>{m.text}</RichText>
-									</MessageContent>
-								</Message>
-							))}
-							{isWaitingForAgent && (
+							{renderableSections.map((section, idx) => {
+								if (section.kind === "user_message") {
+									return (
+										<Message key={`u:${idx}:${section.timestamp}`} from="user">
+											<MessageContent>
+												<RichText>{section.text}</RichText>
+											</MessageContent>
+										</Message>
+									)
+								}
+								if (section.kind !== "agent_response") return null
+								const text = section.items
+									.filter(
+										(it): it is { kind: "text"; text: string } =>
+											it.kind === "text",
+									)
+									.map((it) => it.text)
+									.join("")
+								return (
+									<Message key={`a:${idx}`} from="assistant">
+										<MessageContent>
+											<RichText>{text}</RichText>
+										</MessageContent>
+									</Message>
+								)
+							})}
+							{isSending && lastSection?.kind === "user_message" && (
 								<Message from="assistant">
 									<MessageContent>
 										<Shimmer>Thinking…</Shimmer>
@@ -206,7 +236,7 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 			</Conversation>
 
 			<div className="mx-auto w-full max-w-3xl px-4 pb-4">
-				{messageCount > 0 && (
+				{sectionCount > 0 && (
 					<Suggestions className="mb-3">
 						{DEFAULT_SUGGESTIONS.map((s) => (
 							<Suggestion key={s} suggestion={s} onClick={() => handleSend(s)} />
@@ -220,12 +250,12 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 					<PromptInputTextarea
 						ref={textareaRef}
 						placeholder="Ask about your system..."
-						disabled={isWaitingForAgent}
+						disabled={isLoading}
 					/>
 					<PromptInputFooter>
 						<PromptInputSubmit
-							status={isWaitingForAgent ? "streaming" : "ready"}
-							disabled={isWaitingForAgent}
+							status={isLoading ? "streaming" : "ready"}
+							disabled={isLoading}
 						/>
 					</PromptInputFooter>
 				</PromptInput>
