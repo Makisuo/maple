@@ -115,17 +115,18 @@ jobs:
                   set +e
                   git fetch origin "${{ github.base_ref }}" --depth=1
                   git worktree add "$RUNNER_TEMP/base" FETCH_HEAD
+                  # Only build maple-ingest; load_test may not exist on the base
+                  # branch (it's added by the PR that introduces the harness).
+                  # The probe + benchmark steps always use the head's load_test
+                  # binary pointed at the base's maple-ingest.
                   (
                     cd "$RUNNER_TEMP/base/apps/ingest"
-                    cargo build --release --bin maple-ingest --bin load_test
+                    cargo build --release --bin maple-ingest
                   ) 2>&1 | tee "$RUNNER_TEMP/ingest-base-build.txt"
                   echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-base-build.exit"
                   mkdir -p "$RUNNER_TEMP/base-bin"
                   if [ -x "$RUNNER_TEMP/base/apps/ingest/target/release/maple-ingest" ]; then
                     cp "$RUNNER_TEMP/base/apps/ingest/target/release/maple-ingest" "$RUNNER_TEMP/base-bin/maple-ingest"
-                  fi
-                  if [ -x "$RUNNER_TEMP/base/apps/ingest/target/release/load_test" ]; then
-                    cp "$RUNNER_TEMP/base/apps/ingest/target/release/load_test" "$RUNNER_TEMP/base-bin/load_test"
                   fi
                   exit 0
 
