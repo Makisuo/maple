@@ -149,7 +149,14 @@ async fn main() -> Result<(), DynError> {
         avg_cpu_percent: monitor_summary.avg_cpu_percent,
     };
 
-    println!("{}", serde_json::to_string_pretty(&summary)?);
+    let pretty = serde_json::to_string_pretty(&summary)?;
+    println!("{pretty}");
+    if let Ok(report_path) = std::env::var("LOAD_TEST_REPORT_PATH") {
+        let report_path = report_path.trim();
+        if !report_path.is_empty() {
+            std::fs::write(report_path, &pretty)?;
+        }
+    }
     enforce_thresholds(&cfg, &summary)?;
     let _ = std::fs::remove_dir_all(&cfg.queue_dir);
     Ok(())
