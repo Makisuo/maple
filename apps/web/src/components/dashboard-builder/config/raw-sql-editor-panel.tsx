@@ -5,6 +5,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import { cn } from "@maple/ui/utils"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
+import { highlightSql } from "@/lib/sql-highlight"
 
 const MACRO_HINTS: Array<{ token: string; description: string }> = [
 	{ token: "$__orgFilter", description: "Required — expands to OrgId = '<your org>'" },
@@ -33,6 +34,7 @@ export function RawSqlEditorPanel({
 	onRunPreview,
 }: RawSqlEditorPanelProps) {
 	const [collapsed, setCollapsed] = React.useState(false)
+	const preRef = React.useRef<HTMLPreElement>(null)
 	const missingOrgFilter = !draft.sql.includes("$__orgFilter")
 
 	return (
@@ -72,12 +74,32 @@ export function RawSqlEditorPanel({
 				{/* Body — matches QueryPanel's p-3 space-y-3 rhythm */}
 				{!collapsed && (
 					<div className="p-3 space-y-3">
-						<textarea
-							value={draft.sql}
-							onChange={(e) => onDraftChange({ ...draft, sql: e.target.value })}
-							spellCheck={false}
-							className="w-full text-xs font-mono bg-background border border-border rounded-sm px-2 py-1.5 min-h-[200px] resize-y outline-none focus:ring-1 focus:ring-foreground/20"
-						/>
+						<div className="relative w-full text-xs font-mono leading-5">
+							<pre
+								ref={preRef}
+								aria-hidden
+								className="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre-wrap break-words rounded-sm border border-transparent px-2 py-1.5 leading-5"
+							>
+								<code
+									className="font-mono"
+									dangerouslySetInnerHTML={{
+										__html: `${highlightSql(draft.sql)}\n`,
+									}}
+								/>
+							</pre>
+							<textarea
+								value={draft.sql}
+								onChange={(e) => onDraftChange({ ...draft, sql: e.target.value })}
+								onScroll={(e) => {
+									const pre = preRef.current
+									if (!pre) return
+									pre.scrollTop = e.currentTarget.scrollTop
+									pre.scrollLeft = e.currentTarget.scrollLeft
+								}}
+								spellCheck={false}
+								className="relative w-full bg-transparent text-transparent caret-foreground border border-border rounded-sm px-2 py-1.5 min-h-[200px] resize-y outline-none focus:ring-1 focus:ring-foreground/20 leading-5"
+							/>
+						</div>
 
 						{/* Macros + bucket seconds — sit on the same row, like QueryPanel's
 						    add-on toggle bar above the body */}
