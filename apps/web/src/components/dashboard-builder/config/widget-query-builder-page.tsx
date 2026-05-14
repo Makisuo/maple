@@ -319,8 +319,12 @@ export function WidgetQueryBuilderPage({
 							}}
 						/>
 					</div>
+					{/* Key on mode forces a full unmount/remount of the preview tree on
+					    Source toggle. Without this, SVG-rendered charts (notably the pie
+					    donut) hold internal state between data swaps and ghost-render
+					    the previous slices on top of the new ones. */}
 					<div className="h-[400px]">
-						<WidgetPreview widget={previewWidget} />
+						<WidgetPreview key={mode} widget={previewWidget} />
 					</div>
 				</div>
 
