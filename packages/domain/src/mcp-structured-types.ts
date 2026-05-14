@@ -389,6 +389,7 @@ export interface GetDashboardData {
 
 export interface CreateDashboardData {
 	dashboard: DashboardRow
+	validation?: WidgetInspectionSummary
 }
 
 export interface UpdateDashboardData {
@@ -398,11 +399,13 @@ export interface UpdateDashboardData {
 export interface AddDashboardWidgetData {
 	dashboard: DashboardRow
 	widgetId: string
+	validation?: WidgetInspectionSummary
 }
 
 export interface UpdateDashboardWidgetData {
 	dashboard: DashboardRow
 	widgetId: string
+	validation?: WidgetInspectionSummary
 }
 
 export interface RemoveDashboardWidgetData {
@@ -521,6 +524,7 @@ export type InspectChartFlag =
 	| "CARDINALITY_EXPLOSION"
 	| "UNIT_MISMATCH"
 	| "BROKEN_BREAKDOWN"
+	| "BUILDER_WARNINGS"
 
 export type InspectChartVerdict = "looks_healthy" | "suspicious" | "broken"
 
@@ -558,6 +562,33 @@ export interface InspectChartQueryResult {
 	stats: InspectChartQueryStats
 	reducedValue?: number | null
 	flags: InspectChartFlag[]
+	builderWarnings?: string[]
+}
+
+export type WidgetInspectionVerdict = InspectChartVerdict | "unsupported" | "skipped" | "error"
+
+export interface WidgetInspectionEntry {
+	widgetId: string
+	title?: string
+	visualization: string
+	verdict: WidgetInspectionVerdict
+	flags: InspectChartFlag[]
+	note?: string
+}
+
+export interface WidgetInspectionSummary {
+	ran: boolean
+	inspected: WidgetInspectionEntry[]
+	healthyCount: number
+	suspiciousCount: number
+	brokenCount: number
+	skippedCount: number
+	capped: boolean
+	timeRange?: {
+		startTime: string
+		endTime: string
+		source: "override" | "dashboard" | "fallback"
+	}
 }
 
 export interface InspectChartDataData {

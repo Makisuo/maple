@@ -8,6 +8,7 @@ import {
 	PortableDashboardDocument,
 } from "@maple/domain/http"
 import { DASHBOARD_TEMPLATES, getTemplate } from "@/dashboard-templates"
+import { formatValidationSummary, inspectWidgetsAfterMutation } from "../lib/inspect-widget"
 import {
 	CHART_DISPLAY_AREA,
 	chartDisplayForMetric,
@@ -346,7 +347,9 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 			"  Aliases accepted: service, span_name, status_code, http_method\n" +
 			"  Note: table requires a group_by field. list shows recent traces or logs.\n" +
 			"Custom JSON: provide dashboard_json with full widget definitions (use get_dashboard to see schema). " +
-			"For raw widget JSON, trace queries MUST include `metricName: \"\"`, `metricType: \"gauge\"`, and `whereClause` is a custom grammar (use `exists` not SQL `IS NULL`). See `maple://instructions` for the full widget JSON shape.",
+			"For raw widget JSON, trace queries MUST include `metricName: \"\"`, `metricType: \"gauge\"`, and `whereClause` is a custom grammar (use `exists` not SQL `IS NULL`). See `maple://instructions` for the full widget JSON shape.\n\n" +
+			"After persistence, automatically validates every inspectable widget (custom_query_builder_timeseries/breakdown) and includes a per-widget verdict (looks_healthy/suspicious/broken) + sanity flags in the response. " +
+			"Pass `validate: \"false\"` to skip validation when creating dashboards with many widgets.",
 		Schema.Struct({
 			name: requiredStringParam("Dashboard name"),
 			template: optionalStringParam(
@@ -367,6 +370,9 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 			),
 			dashboard_json: optionalStringParam(
 				"Full dashboard JSON string for complete control over widget configuration.",
+			),
+			validate: optionalStringParam(
+				"Set to 'false' to skip automatic data validation on the created widgets. Default: validate.",
 			),
 		}),
 		Effect.fn("McpTool.createDashboard")(function* (params) {
@@ -518,6 +524,14 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				),
 			)
 
+			const validate = params.validate !== "false"
+			const validation = yield* inspectWidgetsAfterMutation({
+				tenant,
+				dashboard,
+				widgetIds: dashboard.widgets.map((w) => w.id),
+				validate,
+			})
+
 			const lines: string[] = [
 				`## Dashboard Created`,
 				`ID: ${dashboard.id}`,
@@ -536,6 +550,11 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 				lines.push(`Source: simplified widget specs`)
 			}
 
+			const validationBlock = formatValidationSummary(validation, false)
+			if (validationBlock) {
+				lines.push("", validationBlock)
+			}
+
 			return {
 				content: createDualContent(lines.join("\n"), {
 					tool: "create_dashboard",
@@ -549,6 +568,7 @@ export function registerCreateDashboardTool(server: McpToolRegistrar) {
 							createdAt: dashboard.createdAt,
 							updatedAt: dashboard.updatedAt,
 						},
+						...(validation.ran && { validation }),
 					},
 				}),
 			}

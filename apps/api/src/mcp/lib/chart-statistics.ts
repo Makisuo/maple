@@ -13,6 +13,7 @@ export type ChartFlag =
 	| "CARDINALITY_EXPLOSION"
 	| "UNIT_MISMATCH"
 	| "BROKEN_BREAKDOWN"
+	| "BUILDER_WARNINGS"
 
 export type ChartVerdict = "looks_healthy" | "suspicious" | "broken"
 
