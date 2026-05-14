@@ -10,9 +10,11 @@ Maple is an OpenTelemetry observability platform built with TanStack Start (Reac
 
 ```bash
 # Development
-bun dev              # Start dev server on port 3471
-bun dev:portless     # Run all apps on https://<worktree>-<app>.localhost (worktree-safe, ephemeral ports)
+bun dev              # Run all apps via portless on https://[<worktree>.]<app>.localhost
 bun typecheck        # TypeScript type checking
+
+# First-time setup (once per machine): install portless's local CA into your system trust store
+npx portless trust
 
 # Testing
 bun test             # Run Vitest tests

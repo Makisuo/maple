@@ -8,8 +8,7 @@
 	],
 	"scripts": {
 		"build": "turbo build",
-		"dev": "turbo dev --ui=tui",
-		"dev:portless": "bun run scripts/portless-dev.ts",
+		"dev": "portless",
 		"dev:alerting": "bun --filter=@maple/alerting dev",
 		"format": "oxfmt && oxlint --ignore-pattern '.context/**' --fix",
 		"alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk",
@@ -39,7 +38,7 @@
 		"alchemy": "^0.91.2",
 		"oxfmt": "^0.47.0",
 		"oxlint": "^1.62.0",
-		"portless": "^0.10.3",
+		"portless": "^0.13.0",
 		"turbo": "^2.9.3",
 		"typescript": "catalog:tooling"
 	},
