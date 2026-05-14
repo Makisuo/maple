@@ -2,6 +2,7 @@
 	"name": "@maple/api",
 	"private": true,
 	"type": "module",
+	"portless": { "name": "api", "script": "dev:app" },
 	"exports": {
 		".": "./src/index.ts",
 		"./agent": "./src/agent.ts",
@@ -9,7 +10,8 @@
 	},
 	"scripts": {
 		"db:generate": "bun run --cwd ../../packages/db db:generate",
-		"dev": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-3472} --inspector-port=$((${PORT:-3472} + 10000))",
+		"dev": "portless",
+		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-3472} --inspector-port=$((${PORT:-3472} + 10000))",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit",
 		"typecheck:test": "tsc --noEmit -p tsconfig.test.json",

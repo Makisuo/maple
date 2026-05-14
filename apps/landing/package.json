@@ -2,8 +2,10 @@
 	"name": "@maple/landing",
 	"version": "0.0.1",
 	"type": "module",
+	"portless": { "name": "landing", "script": "dev:app" },
 	"scripts": {
-		"dev": "astro dev --port ${PORT:-3391} --host ${HOST:-127.0.0.1}",
+		"dev": "portless",
+		"dev:app": "astro dev --port ${PORT:-3391} --host ${HOST:-127.0.0.1}",
 		"build": "astro build",
 		"preview": "astro preview",
 		"astro": "astro"

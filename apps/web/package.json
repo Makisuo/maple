@@ -2,8 +2,10 @@
 	"name": "@maple/web",
 	"private": true,
 	"type": "module",
+	"portless": { "name": "web", "script": "dev:app" },
 	"scripts": {
-		"dev": "vite dev --port ${PORT:-3471} --host ${HOST:-127.0.0.1}",
+		"dev": "portless",
+		"dev:app": "vite dev --port ${PORT:-3471} --host ${HOST:-127.0.0.1}",
 		"build": "vite build",
 		"preview": "vite preview",
 		"test": "vitest run --passWithNoTests",
