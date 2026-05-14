@@ -2,7 +2,7 @@
 	"name": "@maple/ingest",
 	"private": true,
 	"scripts": {
-		"dev": "set -a && source ../../.env.local && set +a && if [ -n \"$PORTLESS_PREFIX\" ]; then portless \"$PORTLESS_PREFIX-ingest\" sh -c 'INGEST_PORT=$PORT cargo run'; else cargo run; fi",
+		"dev": "set -a && source ../../.env.local && set +a && INGEST_PORT=${PORT:-3473} cargo run",
 		"start": "cargo run --release",
 		"build": "cargo build --release",
 		"test": "cargo test",

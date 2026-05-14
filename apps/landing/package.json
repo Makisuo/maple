@@ -3,7 +3,7 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "if [ -n \"$PORTLESS_PREFIX\" ]; then portless \"$PORTLESS_PREFIX-landing\" astro dev; else astro dev --port 3391; fi",
+		"dev": "astro dev --port ${PORT:-3391} --host ${HOST:-127.0.0.1}",
 		"build": "astro build",
 		"preview": "astro preview",
 		"astro": "astro"

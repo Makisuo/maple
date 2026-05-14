@@ -5,11 +5,18 @@ import tanstackRouter from "@tanstack/router-plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import alchemy from "alchemy/cloudflare/vite"
+import { siblingUrl } from "@maple/infra/dev-urls"
 
 const envDir = path.resolve(import.meta.dirname, "../..")
 
 export default defineConfig(({ mode }) => {
 	const env = loadEnv(mode, envDir, "")
+
+	if (process.env.PORTLESS_URL) {
+		process.env.VITE_API_BASE_URL ??= siblingUrl("api")
+		process.env.VITE_INGEST_URL ??= siblingUrl("ingest")
+		process.env.VITE_CHAT_AGENT_URL ??= siblingUrl("chat-agent")
+	}
 
 	if (!process.env.VITE_MAPLE_AUTH_MODE) {
 		process.env.VITE_MAPLE_AUTH_MODE = env.MAPLE_AUTH_MODE?.trim() || "self_hosted"

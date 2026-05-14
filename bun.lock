@@ -14,7 +14,7 @@
         "alchemy": "^0.91.2",
         "oxfmt": "^0.47.0",
         "oxlint": "^1.62.0",
-        "portless": "^0.10.3",
+        "portless": "^0.13.0",
         "turbo": "^2.9.3",
         "typescript": "catalog:tooling",
       },
@@ -402,6 +402,7 @@
       "devDependencies": {
         "@types/node": "catalog:tooling",
         "typescript": "catalog:tooling",
+        "vitest": "catalog:",
       },
     },
     "packages/otel-helpers": {
@@ -3790,7 +3791,7 @@
 
     "points-on-path": ["points-on-path@0.2.1", "", { "dependencies": { "path-data-parser": "0.1.0", "points-on-curve": "0.2.0" } }, "sha512-25ClnWWuw7JbWZcgqY/gJ4FQWadKxGWk+3kR/7kD0tCaDtPPMj7oHu2ToLaVhfpnHrZzYby2w6tUA0eOIuUg8g=="],
 
-    "portless": ["portless@0.10.3", "", { "os": [ "linux", "win32", "darwin", ], "bin": { "portless": "dist/cli.js" } }, "sha512-lXbVUsNiwWMKJGMi49HhTMW0lS7u0EzawonDZQ+yglSnHioiQK18Y4Fe0Ilk+TuXej71E/nTOHIFIBjUGvTm9w=="],
+    "portless": ["portless@0.13.0", "", { "os": [ "linux", "win32", "darwin", ], "bin": { "portless": "dist/cli.js" } }, "sha512-PxMZ5BHH+ZZi9rTq4T8m003aZxh56qI0aBdNsxLn7jrTtvNJYBWYD3lc5PuQrom/aVh6z8iLb+tKUI6b7QNYQw=="],
 
     "postcss": ["postcss@8.5.12", "", { "dependencies": { "nanoid": "^3.3.11", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-W62t/Se6rA0Az3DfCL0AqJwXuKwBeYg6nOaIgzP+xZ7N5BFCI7DYi1qs6ygUYT6rvfi6t9k65UMLJC+PHZpDAA=="],
 
