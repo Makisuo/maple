@@ -192,11 +192,30 @@ function ChatSidebarRow({
 		}
 	}
 
+	const handleRowClick = () => {
+		if (isRenaming) return
+		onSelect(tab.id)
+	}
+
+	const handleRowKey = (e: KeyboardEvent<HTMLDivElement>) => {
+		if (isRenaming) return
+		if (e.key === "Enter" || e.key === " ") {
+			e.preventDefault()
+			onSelect(tab.id)
+		}
+	}
+
 	return (
 		<li>
 			<div
+				role={isRenaming ? undefined : "button"}
+				tabIndex={isRenaming ? undefined : 0}
+				onClick={handleRowClick}
+				onDoubleClick={isRenaming ? undefined : onStartRename}
+				onKeyDown={handleRowKey}
 				className={cn(
 					"group relative flex h-8 items-center gap-2 rounded-md px-2 text-sm transition-colors",
+					!isRenaming && "cursor-pointer",
 					isActive
 						? "bg-sidebar-accent text-sidebar-accent-foreground"
 						: "text-sidebar-foreground/85 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
@@ -210,18 +229,16 @@ function ChatSidebarRow({
 						onChange={(e) => setDraft(e.target.value)}
 						onBlur={commit}
 						onKeyDown={handleKey}
+						onClick={(e) => e.stopPropagation()}
 						className="min-w-0 flex-1 bg-transparent text-sm outline-none ring-1 ring-ring/50 rounded-sm px-1 -mx-1"
 					/>
 				) : (
-					<button
-						type="button"
-						onClick={() => onSelect(tab.id)}
-						onDoubleClick={onStartRename}
+					<span
 						className="min-w-0 flex-1 truncate text-left"
 						title={tab.title}
 					>
 						{tab.title}
-					</button>
+					</span>
 				)}
 				{!isRenaming && (
 					<DropdownMenu>

@@ -114,11 +114,7 @@ export function useChatTabs(orgId: string, initialTabId?: string) {
 		(id: string) => {
 			setState((prev) => {
 				if (prev.activeTabId === id) return prev
-				const next = {
-					...prev,
-					activeTabId: id,
-					tabs: prev.tabs.map((t) => (t.id === id ? { ...t, updatedAt: Date.now() } : t)),
-				}
+				const next = { ...prev, activeTabId: id }
 				saveState(orgId, next)
 				return next
 			})

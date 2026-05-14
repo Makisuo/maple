@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react"
+import { lazy, Suspense, useState } from "react"
 import {
 	ChartBarIcon,
 	ChevronDownIcon,
@@ -156,16 +156,7 @@ export function Tool(props: ToolProps) {
 	const label = toolLabels[toolName] ?? toolName
 	const Icon = toolIcons[toolName] ?? CodeIcon
 
-	const [open, setOpen] = useState(true)
-	const prevStatusRef = useRef(status)
-
-	// Auto-open when the tool completes or errors
-	useEffect(() => {
-		if (prevStatusRef.current === "running" && (status === "completed" || status === "error")) {
-			setOpen(true)
-		}
-		prevStatusRef.current = status
-	}, [status])
+	const [open, setOpen] = useState(false)
 
 	const hasInput =
 		input != null && typeof input === "object" && Object.keys(input as Record<string, unknown>).length > 0

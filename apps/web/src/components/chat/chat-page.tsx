@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useCallback, useEffect } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { SidebarInset, SidebarProvider } from "@maple/ui/components/ui/sidebar"
@@ -13,19 +13,19 @@ import {
 } from "./widget-fix-context"
 
 interface ChatPageProps {
-	initialTabId?: string
+	urlTabId?: string
 	mode?: "alert" | "widget-fix"
 	alertContext?: AlertContext
 	widgetFixContext?: WidgetFixContext
 }
 
-export function ChatPage({ initialTabId, mode, alertContext, widgetFixContext }: ChatPageProps) {
+export function ChatPage({ urlTabId, mode, alertContext, widgetFixContext }: ChatPageProps) {
 	const { orgId } = useAuth()
 	if (!orgId) return null
 	return (
 		<ChatPageInner
 			orgId={orgId}
-			initialTabId={initialTabId}
+			urlTabId={urlTabId}
 			mode={mode}
 			alertContext={alertContext}
 			widgetFixContext={widgetFixContext}
@@ -39,13 +39,42 @@ interface ChatPageInnerProps extends ChatPageProps {
 
 function ChatPageInner({
 	orgId,
-	initialTabId,
+	urlTabId,
 	mode,
 	alertContext,
 	widgetFixContext,
 }: ChatPageInnerProps) {
 	const { tabs, activeTabId, createTab, closeTab, setActiveTab, renameTab, ensureTab } =
-		useChatTabs(orgId, initialTabId)
+		useChatTabs(orgId, urlTabId)
+
+	// state → URL: reflect the current tab in the URL via history.replaceState so
+	// refresh / bookmark works without re-rendering the route tree (using TanStack
+	// Router's navigate here caused React DOM cleanup crashes when switching tabs).
+	const writeTabToUrl = useCallback((id: string) => {
+		if (typeof window === "undefined") return
+		const url = new URL(window.location.href)
+		if (url.searchParams.get("tab") === id) return
+		url.searchParams.set("tab", id)
+		window.history.replaceState(window.history.state, "", url.toString())
+	}, [])
+
+	useEffect(() => {
+		if (!activeTabId) return
+		writeTabToUrl(activeTabId)
+	}, [activeTabId, writeTabToUrl])
+
+	// URL → state: pick up browser back/forward via popstate. Direct user clicks
+	// flow through setActiveTab/writeTabToUrl above; only history navigation needs
+	// this pull direction.
+	useEffect(() => {
+		const onPopState = () => {
+			const tab = new URL(window.location.href).searchParams.get("tab")
+			if (!tab) return
+			setActiveTab(tab)
+		}
+		window.addEventListener("popstate", onPopState)
+		return () => window.removeEventListener("popstate", onPopState)
+	}, [setActiveTab])
 
 	useEffect(() => {
 		if (mode !== "alert" || !alertContext) return

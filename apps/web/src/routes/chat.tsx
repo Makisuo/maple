@@ -28,7 +28,7 @@ function ChatRoute() {
 		mode === "widget-fix" && widget ? decodeWidgetFixContextFromSearchParam(widget) : undefined
 	return (
 		<ChatPage
-			initialTabId={tab}
+			urlTabId={tab}
 			mode={mode}
 			alertContext={alertContext}
 			widgetFixContext={widgetFixContext}
