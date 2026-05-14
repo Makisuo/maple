@@ -46,7 +46,13 @@ function getHttpStatusColor(code: number): string | null {
 }
 
 function statusOklch(base: { l: number; c: number; h: number }, offset: number): string {
-	// Shift lightness ±0.06 and hue ±12° based on the last two digits
+	// offset === 0 means the literal class label (e.g. "200" or "2xx") — use the
+	// base color directly so it matches its --severity-* CSS variable exactly.
+	// Otherwise shift lightness ±0.06 and hue ±12° based on the last two digits
+	// to keep individual codes within a class visually distinct.
+	if (offset === 0) {
+		return `oklch(${base.l.toFixed(3)} ${base.c} ${base.h.toFixed(1)})`
+	}
 	const lShift = (((offset * 7) % 13) - 6) * 0.01 // -0.06 to +0.06
 	const hShift = ((offset * 11) % 25) - 12 // -12 to +12 degrees
 	const l = Math.min(0.85, Math.max(0.45, base.l + lShift))
