@@ -1,0 +1,62 @@
+name: Ingest Load Tests
+
+on:
+    workflow_dispatch:
+        inputs:
+            requests:
+                description: Total OTLP requests to send
+                required: true
+                default: "10000"
+            concurrency:
+                description: Concurrent request workers
+                required: true
+                default: "128"
+            batch_logs:
+                description: Log records per OTLP request
+                required: true
+                default: "10"
+            target_rps:
+                description: Optional target request rate. Leave empty for unbounded.
+                required: false
+                default: ""
+            min_rps:
+                description: Optional minimum accepted request/sec threshold
+                required: false
+                default: ""
+            max_rss_mb:
+                description: Optional max ingest process RSS threshold in MiB
+                required: false
+                default: ""
+
+permissions:
+    contents: read
+
+jobs:
+    load:
+        name: OTLP protobuf load test
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: apps/ingest
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+            - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+              with:
+                  workspaces: apps/ingest
+
+            - name: Build ingest and load-test binaries
+              run: cargo build --release --bin maple-ingest --bin load_test
+
+            - name: Run load test
+              env:
+                  LOAD_TEST_INGEST_BIN: target/release/maple-ingest
+                  LOAD_TEST_REQUESTS: ${{ inputs.requests }}
+                  LOAD_TEST_CONCURRENCY: ${{ inputs.concurrency }}
+                  LOAD_TEST_BATCH_LOGS: ${{ inputs.batch_logs }}
+                  LOAD_TEST_TARGET_RPS: ${{ inputs.target_rps }}
+                  LOAD_TEST_MIN_RPS: ${{ inputs.min_rps }}
+                  LOAD_TEST_MAX_RSS_MB: ${{ inputs.max_rss_mb }}
+              run: target/release/load_test

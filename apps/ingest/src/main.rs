@@ -4,6 +4,8 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 mod autumn;
 
 use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,16 +23,17 @@ use axum::Router;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::DateTime;
+use dashmap::DashMap;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
+use maple_ingest::telemetry::{PipelineError, SamplingPolicy, TelemetryPipeline, TinybirdConfig};
 use metrics::{counter, gauge, histogram};
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue as OtelKeyValue;
 use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
-use tracing::Instrument;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -41,15 +44,16 @@ use opentelemetry_sdk::runtime::Tokio as OtelTokio;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_sdk::trace::{BatchConfigBuilder, SdkTracerProvider};
 use opentelemetry_sdk::Resource as OtelResource;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 use prost::Message;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use sha2::Sha256;
 use tower_http::cors::{Any, CorsLayer};
+use tracing::Instrument;
 use tracing::{debug, error, info, warn, Span};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 const INGEST_SOURCE: &str = "maple-ingest-gateway";
 const CLOUDFLARE_LOGPUSH_SOURCE: &str = "cloudflare-logpush";
@@ -79,10 +83,14 @@ type HmacSha256 = Hmac<Sha256>;
 #[derive(Clone)]
 struct AppConfig {
     port: u16,
+    otlp_grpc_port: Option<u16>,
     forward_endpoint: String,
     forward_self_managed_endpoint: Option<String>,
     forward_timeout: Duration,
+    write_mode: WriteMode,
+    tinybird: TinybirdConfig,
     max_request_body_bytes: usize,
+    org_max_in_flight: u64,
     require_tls: bool,
     key_store_backend: KeyStoreBackend,
     lookup_hmac_key: String,
@@ -91,12 +99,44 @@ struct AppConfig {
     autumn_flush_interval_secs: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WriteMode {
+    Tinybird,
+    Forward,
+    Dual,
+}
+
+impl WriteMode {
+    fn from_env() -> Result<Self, String> {
+        let raw = std::env::var("INGEST_WRITE_MODE")
+            .unwrap_or_else(|_| "tinybird".to_string())
+            .trim()
+            .to_ascii_lowercase();
+        match raw.as_str() {
+            "tinybird" | "native" => Ok(Self::Tinybird),
+            "forward" | "collector" => Ok(Self::Forward),
+            "dual" | "dual_write" => Ok(Self::Dual),
+            _ => Err("INGEST_WRITE_MODE must be tinybird, forward, or dual".to_string()),
+        }
+    }
+
+    fn uses_tinybird(self) -> bool {
+        matches!(self, Self::Tinybird | Self::Dual)
+    }
+
+    fn uses_forward(self) -> bool {
+        matches!(self, Self::Forward | Self::Dual)
+    }
+}
+
 #[derive(Clone)]
 enum KeyStoreBackend {
     // No-DB local backend: every well-formed ingest key resolves to a single
     // override org. Selected for single-tenant local dev so contributors don't
     // need CF D1 credentials to boot the service.
-    Static { org_id: String },
+    Static {
+        org_id: String,
+    },
     // Cloudflare D1 REST backend used in multi-tenant / production deploys.
     D1 {
         cf_account_id: String,
@@ -114,6 +154,11 @@ impl AppConfig {
                 .or_else(|| std::env::var("PORT").ok()),
             3474,
         )?;
+        let otlp_grpc_port = parse_optional_u16(
+            "INGEST_OTLP_GRPC_PORT",
+            std::env::var("INGEST_OTLP_GRPC_PORT").ok(),
+        )?;
+        let write_mode = WriteMode::from_env()?;
 
         let forward_endpoint = std::env::var("INGEST_FORWARD_OTLP_ENDPOINT")
             .unwrap_or_else(|_| "http://127.0.0.1:4318".to_string())
@@ -139,11 +184,94 @@ impl AppConfig {
             10_000,
         )?;
 
+        let tinybird = TinybirdConfig {
+            endpoint: std::env::var("TINYBIRD_HOST")
+                .unwrap_or_default()
+                .trim()
+                .trim_end_matches('/')
+                .to_string(),
+            token: std::env::var("TINYBIRD_TOKEN")
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            queue_dir: PathBuf::from(
+                std::env::var("INGEST_QUEUE_DIR")
+                    .unwrap_or_else(|_| "/var/lib/maple-ingest/wal".to_string()),
+            ),
+            queue_max_bytes: parse_u64(
+                "INGEST_QUEUE_MAX_BYTES",
+                std::env::var("INGEST_QUEUE_MAX_BYTES").ok(),
+                20 * 1024 * 1024 * 1024,
+            )?,
+            org_queue_max_bytes: parse_u64(
+                "INGEST_ORG_QUEUE_MAX_BYTES",
+                std::env::var("INGEST_ORG_QUEUE_MAX_BYTES").ok(),
+                1024 * 1024 * 1024,
+            )?,
+            queue_channel_capacity: parse_usize(
+                "INGEST_QUEUE_CHANNEL_CAPACITY",
+                std::env::var("INGEST_QUEUE_CHANNEL_CAPACITY").ok(),
+                100_000,
+            )?,
+            wal_shards: parse_usize(
+                "INGEST_WAL_SHARDS",
+                std::env::var("INGEST_WAL_SHARDS").ok(),
+                (num_cpus::get().max(1) * 2).max(2),
+            )?,
+            batch_max_rows: parse_usize(
+                "INGEST_BATCH_MAX_ROWS",
+                std::env::var("INGEST_BATCH_MAX_ROWS").ok(),
+                5_000,
+            )?,
+            batch_max_bytes: parse_usize(
+                "INGEST_BATCH_MAX_BYTES",
+                std::env::var("INGEST_BATCH_MAX_BYTES").ok(),
+                4 * 1024 * 1024,
+            )?,
+            batch_max_wait: Duration::from_millis(parse_u64(
+                "INGEST_BATCH_MAX_WAIT_MS",
+                std::env::var("INGEST_BATCH_MAX_WAIT_MS").ok(),
+                100,
+            )?),
+            export_concurrency_per_shard: parse_usize(
+                "INGEST_TINYBIRD_CONCURRENCY_PER_SHARD",
+                std::env::var("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD").ok(),
+                1,
+            )?,
+            datasource_traces: std::env::var("INGEST_TINYBIRD_DATASOURCE_TRACES")
+                .unwrap_or_else(|_| "traces".to_string()),
+            datasource_logs: std::env::var("INGEST_TINYBIRD_DATASOURCE_LOGS")
+                .unwrap_or_else(|_| "logs".to_string()),
+            datasource_metrics_sum: std::env::var("INGEST_TINYBIRD_DATASOURCE_METRICS_SUM")
+                .unwrap_or_else(|_| "metrics_sum".to_string()),
+            datasource_metrics_gauge: std::env::var("INGEST_TINYBIRD_DATASOURCE_METRICS_GAUGE")
+                .unwrap_or_else(|_| "metrics_gauge".to_string()),
+            datasource_metrics_histogram: std::env::var(
+                "INGEST_TINYBIRD_DATASOURCE_METRICS_HISTOGRAM",
+            )
+            .unwrap_or_else(|_| "metrics_histogram".to_string()),
+            datasource_metrics_exponential_histogram: std::env::var(
+                "INGEST_TINYBIRD_DATASOURCE_METRICS_EXPONENTIAL_HISTOGRAM",
+            )
+            .unwrap_or_else(|_| "metrics_exponential_histogram".to_string()),
+        };
+        if write_mode.uses_tinybird() {
+            tinybird.validate()?;
+        }
+
         let max_request_body_bytes = parse_usize(
             "INGEST_MAX_REQUEST_BODY_BYTES",
             std::env::var("INGEST_MAX_REQUEST_BODY_BYTES").ok(),
             20 * 1024 * 1024,
         )?;
+        let org_max_in_flight = parse_u64(
+            "INGEST_ORG_MAX_IN_FLIGHT",
+            std::env::var("INGEST_ORG_MAX_IN_FLIGHT").ok(),
+            1_000,
+        )?;
+        if org_max_in_flight == 0 {
+            return Err("INGEST_ORG_MAX_IN_FLIGHT must be greater than 0".to_string());
+        }
 
         let require_tls = parse_bool(
             "INGEST_REQUIRE_TLS",
@@ -199,10 +327,14 @@ impl AppConfig {
 
         Ok(Self {
             port,
+            otlp_grpc_port,
             forward_endpoint,
             forward_self_managed_endpoint,
             forward_timeout: Duration::from_millis(forward_timeout_ms),
+            write_mode,
+            tinybird,
             max_request_body_bytes,
+            org_max_in_flight,
             require_tls,
             key_store_backend,
             lookup_hmac_key,
@@ -296,6 +428,11 @@ struct CloudflareConnectorResolver {
     cache: Cache<String, ResolvedCloudflareConnector>,
 }
 
+struct SamplingPolicyResolver {
+    store: Arc<dyn KeyStore>,
+    cache: Cache<String, SamplingPolicy>,
+}
+
 /// Database-agnostic surface used by the two resolvers. Implementations:
 /// `LibsqlKeyStore` (local dev / legacy) and `D1KeyStore` (Cloudflare D1 REST
 /// in production, where the API service writes ingest-key rows). Both back
@@ -314,11 +451,13 @@ trait KeyStore: Send + Sync {
         secret_hash: &str,
     ) -> Result<Option<ConnectorRow>, String>;
 
-    async fn record_connector_success(
+    async fn fetch_sampling_policy(
         &self,
-        connector_id: &str,
-        now_ms: i64,
-    ) -> Result<(), String>;
+        org_id: &str,
+    ) -> Result<Option<SamplingPolicyRow>, String>;
+
+    async fn record_connector_success(&self, connector_id: &str, now_ms: i64)
+        -> Result<(), String>;
 
     async fn record_connector_failure(
         &self,
@@ -343,10 +482,20 @@ struct ConnectorRow {
     self_managed: bool,
 }
 
+#[derive(Clone, Debug)]
+struct SamplingPolicyRow {
+    trace_sample_ratio: f64,
+    always_keep_error_spans: bool,
+    always_keep_slow_spans_ms: Option<u64>,
+}
+
 struct AppState {
     config: AppConfig,
     http_client: Client,
+    telemetry_pipeline: Option<TelemetryPipeline>,
     resolver: IngestKeyResolver,
+    org_inflight_limiter: OrgInFlightLimiter,
+    sampling_resolver: SamplingPolicyResolver,
     cloudflare_resolver: CloudflareConnectorResolver,
     metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
     autumn_tracker: Option<AutumnTracker>,
@@ -412,9 +561,34 @@ impl Signal {
     }
 }
 
-struct EnrichResult {
-    payload: Vec<u8>,
-    item_count: usize,
+enum DecodedPayload {
+    Traces(ExportTraceServiceRequest),
+    Logs(ExportLogsServiceRequest),
+    Metrics(ExportMetricsServiceRequest),
+}
+
+impl DecodedPayload {
+    fn item_count(&self) -> usize {
+        match self {
+            Self::Traces(request) => count_trace_items(request),
+            Self::Logs(request) => count_log_items(request),
+            Self::Metrics(request) => count_metric_items(request),
+        }
+    }
+
+    fn encode(&self, payload_format: PayloadFormat) -> Result<Vec<u8>, ApiError> {
+        match (self, payload_format) {
+            (Self::Traces(request), PayloadFormat::Protobuf) => Ok(request.encode_to_vec()),
+            (Self::Logs(request), PayloadFormat::Protobuf) => Ok(request.encode_to_vec()),
+            (Self::Metrics(request), PayloadFormat::Protobuf) => Ok(request.encode_to_vec()),
+            (Self::Traces(request), PayloadFormat::Json) => serde_json::to_vec(request)
+                .map_err(|_| ApiError::service_unavailable("Failed to serialize traces payload")),
+            (Self::Logs(request), PayloadFormat::Json) => serde_json::to_vec(request)
+                .map_err(|_| ApiError::service_unavailable("Failed to serialize logs payload")),
+            (Self::Metrics(request), PayloadFormat::Json) => serde_json::to_vec(request)
+                .map_err(|_| ApiError::service_unavailable("Failed to serialize metrics payload")),
+        }
+    }
 }
 
 struct InFlightGuard;
@@ -422,6 +596,73 @@ struct InFlightGuard;
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
         gauge!("ingest_requests_in_flight").decrement(1.0);
+    }
+}
+
+#[derive(Clone)]
+struct OrgInFlightLimiter {
+    max_per_org: u64,
+    counts: Arc<DashMap<String, Arc<AtomicU64>>>,
+}
+
+struct OrgInFlightPermit {
+    org_id: String,
+    counter: Arc<AtomicU64>,
+}
+
+impl OrgInFlightLimiter {
+    fn new(max_per_org: u64) -> Self {
+        Self {
+            max_per_org,
+            counts: Arc::new(DashMap::new()),
+        }
+    }
+
+    fn try_acquire(&self, org_id: &str) -> Option<OrgInFlightPermit> {
+        let counter = self
+            .counts
+            .entry(org_id.to_string())
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+            .clone();
+
+        loop {
+            let current = counter.load(Ordering::Relaxed);
+            if current >= self.max_per_org {
+                counter!(
+                    "ingest_org_throttled_total",
+                    "org_id" => org_id.to_string(),
+                    "reason" => "in_flight"
+                )
+                .increment(1);
+                return None;
+            }
+            if counter
+                .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                gauge!(
+                    "ingest_org_requests_in_flight",
+                    "org_id" => org_id.to_string()
+                )
+                .set((current + 1) as f64);
+                return Some(OrgInFlightPermit {
+                    org_id: org_id.to_string(),
+                    counter,
+                });
+            }
+        }
+    }
+}
+
+impl Drop for OrgInFlightPermit {
+    fn drop(&mut self) {
+        let current = self.counter.fetch_sub(1, Ordering::AcqRel);
+        let next = current.saturating_sub(1);
+        gauge!(
+            "ingest_org_requests_in_flight",
+            "org_id" => self.org_id.clone()
+        )
+        .set(next as f64);
     }
 }
 
@@ -458,6 +699,10 @@ impl ApiError {
 
     fn payload_too_large(message: impl Into<String>) -> Self {
         Self::new(StatusCode::PAYLOAD_TOO_LARGE, message)
+    }
+
+    fn too_many_requests(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::TOO_MANY_REQUESTS, message)
     }
 
     fn service_unavailable(message: impl Into<String>) -> Self {
@@ -547,7 +792,9 @@ fn init_tracing(forward_endpoint: &str, bind_port: u16) -> Option<SdkTracerProvi
     {
         Ok(exporter) => exporter,
         Err(error) => {
-            eprintln!("Failed to build OTLP span exporter: {error}; falling back to stdout-only tracing");
+            eprintln!(
+                "Failed to build OTLP span exporter: {error}; falling back to stdout-only tracing"
+            );
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(fmt_layer)
@@ -615,8 +862,10 @@ async fn main() {
 
     let http_client = match Client::builder()
         .timeout(config.forward_timeout)
-        .pool_max_idle_per_host(5)
+        .pool_max_idle_per_host(256)
         .pool_idle_timeout(Duration::from_secs(30))
+        .http2_keep_alive_interval(Duration::from_secs(20))
+        .http2_keep_alive_timeout(Duration::from_secs(5))
         .build()
     {
         Ok(client) => client,
@@ -624,6 +873,18 @@ async fn main() {
             eprintln!("HTTP client init error: {error}");
             std::process::exit(1);
         }
+    };
+
+    let telemetry_pipeline = if config.write_mode.uses_tinybird() {
+        match TelemetryPipeline::new(config.tinybird.clone(), http_client.clone()).await {
+            Ok(pipeline) => Some(pipeline),
+            Err(error) => {
+                eprintln!("Telemetry pipeline init error: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
     };
 
     // Cloudflare D1 REST backend — the API writes ingest-key rows to D1, so
@@ -655,6 +916,10 @@ async fn main() {
         .time_to_live(Duration::from_secs(60))
         .max_capacity(1_000)
         .build();
+    let sampling_policy_cache = Cache::builder()
+        .time_to_live(Duration::from_secs(30))
+        .max_capacity(10_000)
+        .build();
 
     let state = Arc::new(AppState {
         resolver: IngestKeyResolver {
@@ -662,11 +927,17 @@ async fn main() {
             lookup_hmac_key: config.lookup_hmac_key.clone(),
             cache: ingest_key_cache,
         },
+        org_inflight_limiter: OrgInFlightLimiter::new(config.org_max_in_flight),
+        sampling_resolver: SamplingPolicyResolver {
+            store: Arc::clone(&store),
+            cache: sampling_policy_cache,
+        },
         cloudflare_resolver: CloudflareConnectorResolver {
             store: Arc::clone(&store),
             lookup_hmac_key: config.lookup_hmac_key.clone(),
             cache: cloudflare_connector_cache,
         },
+        telemetry_pipeline,
         http_client,
         config: config.clone(),
         metrics_handle: prometheus_handle,
@@ -683,6 +954,7 @@ async fn main() {
             HeaderName::from_static("x-maple-ingest-key"),
         ]);
 
+    let grpc_state = Arc::clone(&state);
     let app = Router::new()
         .route("/health", get(health))
         .route("/metrics", get(serve_metrics))
@@ -740,6 +1012,10 @@ async fn main() {
         );
     }
 
+    if let Some(grpc_port) = config.otlp_grpc_port {
+        tokio::spawn(run_grpc_server(grpc_state, grpc_port));
+    }
+
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await;
@@ -777,6 +1053,203 @@ async fn shutdown_signal() {
         _ = ctrl_c => {}
         _ = terminate => {}
     }
+}
+
+async fn run_grpc_server(state: Arc<AppState>, port: u16) {
+    use opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsServiceServer;
+    use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsServiceServer;
+    use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
+
+    let addr = ([0, 0, 0, 0], port).into();
+    let server = tonic::transport::Server::builder()
+        .add_service(TraceServiceServer::new(GrpcTraceService {
+            state: Arc::clone(&state),
+        }))
+        .add_service(LogsServiceServer::new(GrpcLogsService {
+            state: Arc::clone(&state),
+        }))
+        .add_service(MetricsServiceServer::new(GrpcMetricsService { state }));
+
+    info!(port, "Maple OTLP gRPC server listening");
+    if let Err(error) = server.serve_with_shutdown(addr, shutdown_signal()).await {
+        error!(error = %error, "OTLP gRPC server failed");
+    }
+}
+
+#[derive(Clone)]
+struct GrpcTraceService {
+    state: Arc<AppState>,
+}
+
+#[derive(Clone)]
+struct GrpcLogsService {
+    state: Arc<AppState>,
+}
+
+#[derive(Clone)]
+struct GrpcMetricsService {
+    state: Arc<AppState>,
+}
+
+#[tonic::async_trait]
+impl opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceService
+    for GrpcTraceService
+{
+    async fn export(
+        &self,
+        request: tonic::Request<ExportTraceServiceRequest>,
+    ) -> Result<
+        tonic::Response<
+            opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse,
+        >,
+        tonic::Status,
+    > {
+        let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
+        let mut inner = request.into_inner();
+        enrich_trace_request(&mut inner, &resolved);
+        accept_grpc_decoded(
+            &self.state,
+            Signal::Traces,
+            DecodedPayload::Traces(inner),
+            &resolved,
+        )
+        .await?;
+        Ok(tonic::Response::new(
+            opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse {
+                partial_success: None,
+            },
+        ))
+    }
+}
+
+#[tonic::async_trait]
+impl opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsService
+    for GrpcLogsService
+{
+    async fn export(
+        &self,
+        request: tonic::Request<ExportLogsServiceRequest>,
+    ) -> Result<
+        tonic::Response<opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceResponse>,
+        tonic::Status,
+    > {
+        let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
+        let mut inner = request.into_inner();
+        enrich_logs_request(&mut inner, &resolved);
+        accept_grpc_decoded(
+            &self.state,
+            Signal::Logs,
+            DecodedPayload::Logs(inner),
+            &resolved,
+        )
+        .await?;
+        Ok(tonic::Response::new(
+            opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceResponse {
+                partial_success: None,
+            },
+        ))
+    }
+}
+
+#[tonic::async_trait]
+impl opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsService
+    for GrpcMetricsService
+{
+    async fn export(
+        &self,
+        request: tonic::Request<ExportMetricsServiceRequest>,
+    ) -> Result<
+        tonic::Response<
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse,
+        >,
+        tonic::Status,
+    > {
+        let resolved = resolve_grpc_ingest_key(&self.state, request.metadata()).await?;
+        let mut inner = request.into_inner();
+        enrich_metrics_request(&mut inner, &resolved);
+        accept_grpc_decoded(
+            &self.state,
+            Signal::Metrics,
+            DecodedPayload::Metrics(inner),
+            &resolved,
+        )
+        .await?;
+        Ok(tonic::Response::new(
+            opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse {
+                partial_success: None,
+            },
+        ))
+    }
+}
+
+async fn accept_grpc_decoded(
+    state: &AppState,
+    signal: Signal,
+    decoded: DecodedPayload,
+    resolved: &ResolvedIngestKey,
+) -> Result<(), tonic::Status> {
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&resolved.org_id)
+        .ok_or_else(|| tonic::Status::resource_exhausted("Per-org ingest limit exceeded"))?;
+    process_decoded_payload(
+        state,
+        signal,
+        PayloadFormat::Protobuf,
+        None,
+        &decoded,
+        resolved,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| {
+        if error.status == StatusCode::TOO_MANY_REQUESTS {
+            tonic::Status::resource_exhausted(error.message)
+        } else {
+            tonic::Status::unavailable(error.message)
+        }
+    })
+}
+
+async fn resolve_grpc_ingest_key(
+    state: &AppState,
+    metadata: &tonic::metadata::MetadataMap,
+) -> Result<ResolvedIngestKey, tonic::Status> {
+    let token = metadata
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            if value.len() > 7 && value[..7].eq_ignore_ascii_case("Bearer ") {
+                Some(value[7..].trim().to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            metadata
+                .get("x-maple-ingest-key")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .ok_or_else(|| tonic::Status::unauthenticated("Missing ingest key"))?;
+
+    if is_sentinel_token(&token) {
+        return Ok(ResolvedIngestKey {
+            org_id: SENTINEL_ORG_ID.to_string(),
+            key_type: IngestKeyType::Public,
+            key_id: "sentinel".to_string(),
+            self_managed: false,
+        });
+    }
+
+    state
+        .resolver
+        .resolve_ingest_key(&token)
+        .await
+        .map_err(|_| tonic::Status::unavailable("Ingest authentication unavailable"))?
+        .ok_or_else(|| tonic::Status::unauthenticated("Invalid ingest key"))
 }
 
 async fn health() -> &'static str {
@@ -937,9 +1410,10 @@ async fn handle_cloudflare_logpush(
     );
     let span_handle = span.clone();
 
-    let result = handle_cloudflare_logpush_inner(&state, &connector_id, secret.as_deref(), &headers, body)
-        .instrument(span)
-        .await;
+    let result =
+        handle_cloudflare_logpush_inner(&state, &connector_id, secret.as_deref(), &headers, body)
+            .instrument(span)
+            .await;
     let duration = start.elapsed();
 
     match result {
@@ -1045,6 +1519,19 @@ async fn handle_signal_inner(
         resolve_ms = key_resolve_start.elapsed().as_millis() as u64,
         "Authenticated"
     );
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&resolved_key.org_id)
+        .ok_or_else(|| {
+            warn!(
+                org_id = %resolved_key.org_id,
+                "Per-org in-flight ingest limit exceeded"
+            );
+            (
+                ApiError::too_many_requests("Per-org ingest limit exceeded"),
+                "throttle",
+            )
+        })?;
 
     // --- Payload validation ---
     if body.len() > state.config.max_request_body_bytes {
@@ -1100,64 +1587,46 @@ async fn handle_signal_inner(
         .record(decoded_payload.len() as f64);
 
     // --- Enrich ---
-    let enrich_result = enrich_payload(signal, payload_format, &decoded_payload, &resolved_key)
-        .map_err(|e| {
-            warn!(
-                format = payload_format.label(),
-                signal = signal.path(),
-                org_id = resolved_key.org_id.as_str(),
-                key_type = resolved_key.key_type.as_str(),
-                decoded_bytes = decoded_payload.len(),
-                reason = %e.message,
-                "Invalid OTLP payload"
-            );
-            (e, "enrich")
-        })?;
+    let decoded =
+        decode_and_enrich_payload(signal, payload_format, &decoded_payload, &resolved_key)
+            .map_err(|e| {
+                warn!(
+                    format = payload_format.label(),
+                    signal = signal.path(),
+                    org_id = resolved_key.org_id.as_str(),
+                    key_type = resolved_key.key_type.as_str(),
+                    decoded_bytes = decoded_payload.len(),
+                    reason = %e.message,
+                    "Invalid OTLP payload"
+                );
+                (e, "enrich")
+            })?;
+    let item_count = decoded.item_count();
 
-    Span::current().record("maple.ingest.item_count", enrich_result.item_count);
-    debug!(item_count = enrich_result.item_count, "Payload enriched");
+    Span::current().record("maple.ingest.item_count", item_count);
+    debug!(item_count, "Payload enriched");
     counter!(
         "ingest_items_total",
         "signal" => signal.path()
     )
-    .increment(enrich_result.item_count as u64);
+    .increment(item_count as u64);
 
     let decoded_bytes = decoded_payload.len();
 
-    // --- Encode & Forward ---
-    let outbound_body = encode_payload(&enrich_result.payload, content_encoding.as_deref())
-        .map_err(|e| (e, "encode"))?;
-
-    let outbound_bytes = outbound_body.len();
-    let forward_span = tracing::info_span!(
-        "forward",
-        otel.name = "POST",
-        otel.kind = "client",
-        otel.status_code = tracing::field::Empty,
-        "http.request.method" = "POST",
-        "http.request.body.size" = outbound_bytes,
-        "http.response.status_code" = tracing::field::Empty,
-        "url.full" = tracing::field::Empty,
-        "server.address" = tracing::field::Empty,
-        "error.type" = tracing::field::Empty,
-        "maple.signal" = signal.path(),
-        "maple.ingest.upstream_pool" = tracing::field::Empty,
-    );
-    let response = forward_to_collector(
+    let response = process_decoded_payload(
         state,
         signal,
-        payload_format.content_type(),
+        payload_format,
         content_encoding.as_deref(),
-        outbound_body,
+        &decoded,
         &resolved_key,
     )
-    .instrument(forward_span)
     .await
     .map_err(|e| (e, "forward"))?;
 
     Ok((
         response,
-        enrich_result.item_count,
+        item_count,
         resolved_key.org_id.clone(),
         decoded_bytes,
     ))
@@ -1208,6 +1677,20 @@ async fn handle_cloudflare_logpush_inner(
         key_id = %resolved.secret_key_id,
         "Authenticated Cloudflare Logpush connector"
     );
+    let _org_inflight_permit = state
+        .org_inflight_limiter
+        .try_acquire(&resolved.org_id)
+        .ok_or_else(|| {
+            warn!(
+                org_id = %resolved.org_id,
+                connector_id = %resolved.connector_id,
+                "Per-org in-flight ingest limit exceeded"
+            );
+            (
+                ApiError::too_many_requests("Per-org ingest limit exceeded"),
+                "throttle",
+            )
+        })?;
 
     if body.len() > state.config.max_request_body_bytes {
         warn!(
@@ -1292,36 +1775,21 @@ async fn handle_cloudflare_logpush_inner(
             )
             .increment(item_count as u64);
 
-            let outbound = request.encode_to_vec();
-            let outbound_bytes = outbound.len();
-            let forward_span = tracing::info_span!(
-                "forward",
-                otel.name = "POST",
-                otel.kind = "client",
-                otel.status_code = tracing::field::Empty,
-                "http.request.method" = "POST",
-                "http.request.body.size" = outbound_bytes,
-                "http.response.status_code" = tracing::field::Empty,
-                "url.full" = tracing::field::Empty,
-                "server.address" = tracing::field::Empty,
-                "error.type" = tracing::field::Empty,
-                "maple.signal" = Signal::Logs.path(),
-                "maple.ingest.upstream_pool" = tracing::field::Empty,
-            );
-            let response = match forward_to_collector(
+            let resolved_key = ResolvedIngestKey {
+                org_id: resolved.org_id.clone(),
+                key_type: IngestKeyType::Connector,
+                key_id: resolved.secret_key_id.clone(),
+                self_managed: resolved.self_managed,
+            };
+            let decoded = DecodedPayload::Logs(request);
+            let response = match process_decoded_payload(
                 state,
                 Signal::Logs,
-                "application/x-protobuf",
+                PayloadFormat::Protobuf,
                 None,
-                outbound,
-                &ResolvedIngestKey {
-                    org_id: resolved.org_id.clone(),
-                    key_type: IngestKeyType::Connector,
-                    key_id: resolved.secret_key_id.clone(),
-                    self_managed: resolved.self_managed,
-                },
+                &decoded,
+                &resolved_key,
             )
-            .instrument(forward_span)
             .await
             {
                 Ok(response) => response,
@@ -1722,79 +2190,48 @@ fn encode_payload(payload: &[u8], content_encoding: Option<&str>) -> Result<Vec<
     }
 }
 
-fn enrich_payload(
+fn decode_and_enrich_payload(
     signal: Signal,
     payload_format: PayloadFormat,
     payload: &[u8],
     resolved_key: &ResolvedIngestKey,
-) -> Result<EnrichResult, ApiError> {
+) -> Result<DecodedPayload, ApiError> {
     match (signal, payload_format) {
         (Signal::Traces, PayloadFormat::Protobuf) => {
             let mut request = ExportTraceServiceRequest::decode(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP traces protobuf payload"))?;
             enrich_trace_request(&mut request, resolved_key);
-            let item_count = count_trace_items(&request);
-            Ok(EnrichResult {
-                payload: request.encode_to_vec(),
-                item_count,
-            })
+            Ok(DecodedPayload::Traces(request))
         }
         (Signal::Logs, PayloadFormat::Protobuf) => {
             let mut request = ExportLogsServiceRequest::decode(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP logs protobuf payload"))?;
             enrich_logs_request(&mut request, resolved_key);
-            let item_count = count_log_items(&request);
-            Ok(EnrichResult {
-                payload: request.encode_to_vec(),
-                item_count,
-            })
+            Ok(DecodedPayload::Logs(request))
         }
         (Signal::Metrics, PayloadFormat::Protobuf) => {
             let mut request = ExportMetricsServiceRequest::decode(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP metrics protobuf payload"))?;
             enrich_metrics_request(&mut request, resolved_key);
-            let item_count = count_metric_items(&request);
-            Ok(EnrichResult {
-                payload: request.encode_to_vec(),
-                item_count,
-            })
+            Ok(DecodedPayload::Metrics(request))
         }
         (Signal::Traces, PayloadFormat::Json) => {
             let mut request: ExportTraceServiceRequest = serde_json::from_slice(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP traces JSON payload"))?;
             enrich_trace_request(&mut request, resolved_key);
-            let item_count = count_trace_items(&request);
-            let payload = serde_json::to_vec(&request)
-                .map_err(|_| ApiError::service_unavailable("Failed to serialize traces payload"))?;
-            Ok(EnrichResult {
-                payload,
-                item_count,
-            })
+            Ok(DecodedPayload::Traces(request))
         }
         (Signal::Logs, PayloadFormat::Json) => {
             let mut request: ExportLogsServiceRequest = serde_json::from_slice(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP logs JSON payload"))?;
             enrich_logs_request(&mut request, resolved_key);
-            let item_count = count_log_items(&request);
-            let payload = serde_json::to_vec(&request)
-                .map_err(|_| ApiError::service_unavailable("Failed to serialize logs payload"))?;
-            Ok(EnrichResult {
-                payload,
-                item_count,
-            })
+            Ok(DecodedPayload::Logs(request))
         }
         (Signal::Metrics, PayloadFormat::Json) => {
             let mut request: ExportMetricsServiceRequest = serde_json::from_slice(payload)
                 .map_err(|_| ApiError::bad_request("Invalid OTLP metrics JSON payload"))?;
             enrich_metrics_request(&mut request, resolved_key);
-            let item_count = count_metric_items(&request);
-            let payload = serde_json::to_vec(&request).map_err(|_| {
-                ApiError::service_unavailable("Failed to serialize metrics payload")
-            })?;
-            Ok(EnrichResult {
-                payload,
-                item_count,
-            })
+            Ok(DecodedPayload::Metrics(request))
         }
     }
 }
@@ -2040,6 +2477,111 @@ async fn forward_to_collector(
         .map_err(|_| ApiError::service_unavailable("Telemetry backend unavailable"))
 }
 
+async fn process_decoded_payload(
+    state: &AppState,
+    signal: Signal,
+    payload_format: PayloadFormat,
+    content_encoding: Option<&str>,
+    decoded: &DecodedPayload,
+    resolved_key: &ResolvedIngestKey,
+) -> Result<Response, ApiError> {
+    if state.config.write_mode.uses_tinybird() {
+        let pipeline = state
+            .telemetry_pipeline
+            .as_ref()
+            .ok_or_else(|| ApiError::service_unavailable("Telemetry pipeline is not configured"))?;
+        let native_start = Instant::now();
+        let stats = match decoded {
+            DecodedPayload::Traces(request) => {
+                let policy = state
+                    .sampling_resolver
+                    .resolve_policy(&resolved_key.org_id)
+                    .await;
+                pipeline
+                    .accept_traces(&resolved_key.org_id, request, &policy)
+                    .await
+            }
+            DecodedPayload::Logs(request) => {
+                pipeline.accept_logs(&resolved_key.org_id, request).await
+            }
+            DecodedPayload::Metrics(request) => {
+                pipeline.accept_metrics(&resolved_key.org_id, request).await
+            }
+        }
+        .map_err(|error| {
+            let api_error = match &error {
+                PipelineError::Throttled(_) => {
+                    ApiError::too_many_requests("Per-org ingest queue limit exceeded")
+                }
+                PipelineError::Backpressure(_) => {
+                    ApiError::service_unavailable("Telemetry backend unavailable")
+                }
+                PipelineError::QueueUnavailable(_) | PipelineError::Encode(_) => {
+                    ApiError::service_unavailable("Telemetry backend unavailable")
+                }
+            };
+            error!(
+                error = %error,
+                signal = signal.path(),
+                org_id = %resolved_key.org_id,
+                "Native telemetry pipeline rejected payload"
+            );
+            api_error
+        })?;
+        histogram!(
+            "ingest_native_accept_duration_seconds",
+            "signal" => signal.path()
+        )
+        .record(native_start.elapsed().as_secs_f64());
+        counter!(
+            "ingest_native_rows_total",
+            "signal" => signal.path()
+        )
+        .increment(stats.rows as u64);
+        if stats.dropped > 0 {
+            counter!(
+                "ingest_native_sampled_dropped_total",
+                "signal" => signal.path()
+            )
+            .increment(stats.dropped as u64);
+        }
+        Span::current().record("maple.ingest.native_rows", stats.rows as u64);
+        Span::current().record("maple.ingest.sampled_dropped", stats.dropped as u64);
+    }
+
+    if state.config.write_mode.uses_forward() {
+        let outbound_payload = decoded.encode(payload_format)?;
+        let outbound_body = encode_payload(&outbound_payload, content_encoding)?;
+        let outbound_bytes = outbound_body.len();
+        let forward_span = tracing::info_span!(
+            "forward",
+            otel.name = "POST",
+            otel.kind = "client",
+            otel.status_code = tracing::field::Empty,
+            "http.request.method" = "POST",
+            "http.request.body.size" = outbound_bytes,
+            "http.response.status_code" = tracing::field::Empty,
+            "url.full" = tracing::field::Empty,
+            "server.address" = tracing::field::Empty,
+            "error.type" = tracing::field::Empty,
+            "maple.signal" = signal.path(),
+            "maple.ingest.upstream_pool" = tracing::field::Empty,
+        );
+        return forward_to_collector(
+            state,
+            signal,
+            payload_format.content_type(),
+            content_encoding,
+            outbound_body,
+            resolved_key,
+        )
+        .instrument(forward_span)
+        .await;
+    }
+
+    Ok(StatusCode::OK.into_response())
+}
+
 impl IngestKeyResolver {
     async fn resolve_ingest_key(&self, raw_key: &str) -> Result<Option<ResolvedIngestKey>, String> {
         if let Some(cached) = self.cache.get(raw_key).await {
@@ -2123,12 +2665,35 @@ impl CloudflareConnectorResolver {
 
     async fn record_failure(&self, connector_id: &str, error_message: &str) -> Result<(), String> {
         self.store
-            .record_connector_failure(
-                connector_id,
-                error_message,
-                current_time_millis() as i64,
-            )
+            .record_connector_failure(connector_id, error_message, current_time_millis() as i64)
             .await
+    }
+}
+
+impl SamplingPolicyResolver {
+    async fn resolve_policy(&self, org_id: &str) -> SamplingPolicy {
+        if let Some(policy) = self.cache.get(org_id).await {
+            return policy;
+        }
+
+        let policy = match self.store.fetch_sampling_policy(org_id).await {
+            Ok(Some(row)) => SamplingPolicy {
+                trace_sample_ratio: row.trace_sample_ratio,
+                always_keep_error_spans: row.always_keep_error_spans,
+                always_keep_slow_spans_ms: row.always_keep_slow_spans_ms,
+            },
+            Ok(None) => SamplingPolicy::default(),
+            Err(error) => {
+                warn!(
+                    org_id,
+                    error = %error,
+                    "Sampling policy lookup failed; using unsampled default"
+                );
+                SamplingPolicy::default()
+            }
+        };
+        self.cache.insert(org_id.to_string(), policy.clone()).await;
+        policy
     }
 }
 
@@ -2144,12 +2709,7 @@ struct D1KeyStore {
 }
 
 impl D1KeyStore {
-    fn new(
-        http: reqwest::Client,
-        account_id: &str,
-        database_id: &str,
-        api_token: String,
-    ) -> Self {
+    fn new(http: reqwest::Client, account_id: &str, database_id: &str, api_token: String) -> Self {
         Self {
             http,
             endpoint: format!(
@@ -2332,6 +2892,30 @@ impl KeyStore for D1KeyStore {
         }))
     }
 
+    async fn fetch_sampling_policy(
+        &self,
+        org_id: &str,
+    ) -> Result<Option<SamplingPolicyRow>, String> {
+        let sql = "SELECT trace_sample_ratio, always_keep_error_spans, always_keep_slow_spans_ms \
+                   FROM org_ingest_sampling_policies WHERE org_id = ? LIMIT 1";
+        let rows = self
+            .query(sql, vec![serde_json::Value::String(org_id.to_string())])
+            .await?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(None);
+        };
+        Ok(Some(SamplingPolicyRow {
+            trace_sample_ratio: row
+                .get("trace_sample_ratio")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(1.0),
+            always_keep_error_spans: d1_truthy(&row, "always_keep_error_spans"),
+            always_keep_slow_spans_ms: row
+                .get("always_keep_slow_spans_ms")
+                .and_then(serde_json::Value::as_u64),
+        }))
+    }
+
     async fn record_connector_success(
         &self,
         connector_id: &str,
@@ -2391,6 +2975,13 @@ impl KeyStore for StaticKeyStore {
         _connector_id: &str,
         _secret_hash: &str,
     ) -> Result<Option<ConnectorRow>, String> {
+        Ok(None)
+    }
+
+    async fn fetch_sampling_policy(
+        &self,
+        _org_id: &str,
+    ) -> Result<Option<SamplingPolicyRow>, String> {
         Ok(None)
     }
 
@@ -2516,6 +3107,20 @@ fn parse_u16(name: &str, raw: Option<String>, default: u16) -> Result<u16, Strin
 
     value
         .parse::<u16>()
+        .map_err(|_| format!("{name} must be a valid u16"))
+}
+
+fn parse_optional_u16(name: &str, raw: Option<String>) -> Result<Option<u16>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let value = raw.trim();
+    if value.is_empty() || value == "0" {
+        return Ok(None);
+    }
+    value
+        .parse::<u16>()
+        .map(Some)
         .map_err(|_| format!("{name} must be a valid u16"))
 }
 
@@ -2762,11 +3367,8 @@ mod tests {
 
     #[test]
     fn self_managed_goes_to_self_managed_pool_when_configured() {
-        let (endpoint, pool) = select_forward_endpoint(
-            "http://shared:4318",
-            Some("http://self-managed:4318"),
-            true,
-        );
+        let (endpoint, pool) =
+            select_forward_endpoint("http://shared:4318", Some("http://self-managed:4318"), true);
         assert_eq!(endpoint, "http://self-managed:4318");
         assert_eq!(pool, "self_managed");
     }
@@ -2818,6 +3420,12 @@ mod tests {
             _connector_id: &str,
             _secret_hash: &str,
         ) -> Result<Option<ConnectorRow>, String> {
+            Ok(None)
+        }
+        async fn fetch_sampling_policy(
+            &self,
+            _org_id: &str,
+        ) -> Result<Option<SamplingPolicyRow>, String> {
             Ok(None)
         }
         async fn record_connector_success(

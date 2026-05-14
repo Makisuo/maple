@@ -1,0 +1,244 @@
+name: Ingest Rust Tests
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "apps/ingest/**"
+            - "packages/db/drizzle/**"
+            - "packages/db/src/schema/**"
+            - ".github/scripts/format-ingest-benchmark-comment.py"
+            - ".github/workflows/ingest-rust-tests.yml"
+    pull_request:
+        paths:
+            - "apps/ingest/**"
+            - "packages/db/drizzle/**"
+            - "packages/db/src/schema/**"
+            - ".github/scripts/format-ingest-benchmark-comment.py"
+            - ".github/workflows/ingest-rust-tests.yml"
+    workflow_dispatch:
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+    pull-requests: write
+
+env:
+    CARGO_TERM_COLOR: never
+    LOAD_TEST_REQUESTS: "2000"
+    LOAD_TEST_CONCURRENCY: "64"
+    LOAD_TEST_BATCH_LOGS: "10"
+    LOAD_BENCH_ITERATIONS: "3"
+    HEAD_INGEST_MODE: tinybird
+
+jobs:
+    test:
+        name: Cargo test and load benchmark
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: apps/ingest
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+            - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+              with:
+                  workspaces: apps/ingest
+
+            - name: Run ingest unit and fake Tinybird e2e tests
+              run: |
+                  set +e
+                  set -o pipefail
+                  cargo test 2>&1 | tee "$RUNNER_TEMP/ingest-cargo-test.txt"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-cargo-test.exit"
+                  exit 0
+
+            - name: Build PR ingest and benchmark binaries
+              run: |
+                  set +e
+                  cargo build --release --bin maple-ingest --bin load_test 2>&1 | tee "$RUNNER_TEMP/ingest-head-build.txt"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-head-build.exit"
+                  mkdir -p "$RUNNER_TEMP/head"
+                  if [ -x target/release/maple-ingest ]; then
+                    cp target/release/maple-ingest "$RUNNER_TEMP/head/maple-ingest"
+                  fi
+                  if [ -x target/release/load_test ]; then
+                    cp target/release/load_test "$RUNNER_TEMP/head/load_test"
+                  fi
+                  exit 0
+
+            - name: Run PR ingest load benchmark (median of N)
+              run: |
+                  set +e
+                  set -o pipefail
+                  rm -f "$RUNNER_TEMP"/ingest-head-load-*.json
+                  iterations="${LOAD_BENCH_ITERATIONS:-3}"
+                  overall=0
+                  for i in $(seq 1 "$iterations"); do
+                    report="$RUNNER_TEMP/ingest-head-load-$i.json"
+                    queue_dir="$RUNNER_TEMP/head-wal-$i"
+                    LOAD_TEST_INGEST_BIN="$RUNNER_TEMP/head/maple-ingest" \
+                      LOAD_TEST_INGEST_MODE="$HEAD_INGEST_MODE" \
+                      LOAD_TEST_REQUESTS="$LOAD_TEST_REQUESTS" \
+                      LOAD_TEST_CONCURRENCY="$LOAD_TEST_CONCURRENCY" \
+                      LOAD_TEST_BATCH_LOGS="$LOAD_TEST_BATCH_LOGS" \
+                      LOAD_TEST_INGEST_PORT="$((3475 + i))" \
+                      LOAD_TEST_QUEUE_DIR="$queue_dir" \
+                      LOAD_TEST_REPORT_PATH="$report" \
+                      "$RUNNER_TEMP/head/load_test" 2>&1 \
+                      | tee "$RUNNER_TEMP/ingest-head-load-$i.log"
+                    code="${PIPESTATUS[0]}"
+                    if [ "$code" != "0" ]; then
+                      overall="$code"
+                    fi
+                  done
+                  echo "$overall" > "$RUNNER_TEMP/ingest-head-load.exit"
+                  exit 0
+
+            - name: Run Criterion WAL-ack microbench
+              run: |
+                  set +e
+                  set -o pipefail
+                  cargo bench --bench ingest_bench -- --output-format=bencher 2>&1 \
+                    | tee "$RUNNER_TEMP/ingest-criterion.txt"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-criterion.exit"
+                  exit 0
+
+            - name: Build base ingest binary
+              if: ${{ github.event_name == 'pull_request' }}
+              run: |
+                  set +e
+                  git fetch origin "${{ github.base_ref }}" --depth=1
+                  git worktree add "$RUNNER_TEMP/base" FETCH_HEAD
+                  # Only build maple-ingest; load_test may not exist on the base
+                  # branch (it's added by the PR that introduces the harness).
+                  # The probe + benchmark steps always use the head's load_test
+                  # binary pointed at the base's maple-ingest.
+                  (
+                    cd "$RUNNER_TEMP/base/apps/ingest"
+                    cargo build --release --bin maple-ingest
+                  ) 2>&1 | tee "$RUNNER_TEMP/ingest-base-build.txt"
+                  echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/ingest-base-build.exit"
+                  mkdir -p "$RUNNER_TEMP/base-bin"
+                  if [ -x "$RUNNER_TEMP/base/apps/ingest/target/release/maple-ingest" ]; then
+                    cp "$RUNNER_TEMP/base/apps/ingest/target/release/maple-ingest" "$RUNNER_TEMP/base-bin/maple-ingest"
+                  fi
+                  exit 0
+
+            - name: Probe whether base supports head ingest mode
+              if: ${{ github.event_name == 'pull_request' }}
+              run: |
+                  set +e
+                  echo "0" > "$RUNNER_TEMP/base-supports-mode"
+                  if [ ! -x "$RUNNER_TEMP/base-bin/maple-ingest" ] || [ ! -x "$RUNNER_TEMP/head/load_test" ]; then
+                    echo "base binaries missing — skipping probe"
+                    exit 0
+                  fi
+                  probe_dir="$RUNNER_TEMP/base-probe-wal"
+                  rm -rf "$probe_dir"
+                  LOAD_TEST_INGEST_BIN="$RUNNER_TEMP/base-bin/maple-ingest" \
+                    LOAD_TEST_INGEST_MODE="$HEAD_INGEST_MODE" \
+                    LOAD_TEST_REQUESTS=10 \
+                    LOAD_TEST_CONCURRENCY=4 \
+                    LOAD_TEST_BATCH_LOGS=1 \
+                    LOAD_TEST_INGEST_PORT=3490 \
+                    LOAD_TEST_QUEUE_DIR="$probe_dir" \
+                    LOAD_TEST_REPORT_PATH="$RUNNER_TEMP/base-probe.json" \
+                    timeout 60 "$RUNNER_TEMP/head/load_test" >/dev/null 2>&1
+                  if [ -s "$RUNNER_TEMP/base-probe.json" ]; then
+                    echo "1" > "$RUNNER_TEMP/base-supports-mode"
+                  fi
+                  rm -rf "$probe_dir"
+                  exit 0
+
+            - name: Run base ingest load benchmark (median of N)
+              if: ${{ github.event_name == 'pull_request' }}
+              run: |
+                  set +e
+                  set -o pipefail
+                  rm -f "$RUNNER_TEMP"/ingest-base-load-*.json
+                  if [ ! -f "$RUNNER_TEMP/base-supports-mode" ] || [ "$(cat "$RUNNER_TEMP/base-supports-mode")" != "1" ]; then
+                    echo "base does not support $HEAD_INGEST_MODE mode — skipping baseline benchmark"
+                    echo "0" > "$RUNNER_TEMP/ingest-base-load.exit"
+                    exit 0
+                  fi
+                  iterations="${LOAD_BENCH_ITERATIONS:-3}"
+                  overall=0
+                  for i in $(seq 1 "$iterations"); do
+                    report="$RUNNER_TEMP/ingest-base-load-$i.json"
+                    queue_dir="$RUNNER_TEMP/base-wal-$i"
+                    LOAD_TEST_INGEST_BIN="$RUNNER_TEMP/base-bin/maple-ingest" \
+                      LOAD_TEST_INGEST_MODE="$HEAD_INGEST_MODE" \
+                      LOAD_TEST_REQUESTS="$LOAD_TEST_REQUESTS" \
+                      LOAD_TEST_CONCURRENCY="$LOAD_TEST_CONCURRENCY" \
+                      LOAD_TEST_BATCH_LOGS="$LOAD_TEST_BATCH_LOGS" \
+                      LOAD_TEST_INGEST_PORT="$((3500 + i))" \
+                      LOAD_TEST_QUEUE_DIR="$queue_dir" \
+                      LOAD_TEST_REPORT_PATH="$report" \
+                      "$RUNNER_TEMP/head/load_test" 2>&1 \
+                      | tee "$RUNNER_TEMP/ingest-base-load-$i.log"
+                    code="${PIPESTATUS[0]}"
+                    if [ "$code" != "0" ]; then
+                      overall="$code"
+                    fi
+                  done
+                  echo "$overall" > "$RUNNER_TEMP/ingest-base-load.exit"
+                  exit 0
+
+            - name: Render PR comment body
+              if: ${{ always() && github.event_name == 'pull_request' }}
+              env:
+                  TEST_OUTPUT: ${{ runner.temp }}/ingest-cargo-test.txt
+                  CRITERION_OUTPUT: ${{ runner.temp }}/ingest-criterion.txt
+                  COMMENT_OUTPUT: ${{ runner.temp }}/ingest-results-comment.md
+              run: |
+                  set -e
+                  head_json=$(ls "$RUNNER_TEMP"/ingest-head-load-*.json 2>/dev/null | paste -sd, -)
+                  base_json=$(ls "$RUNNER_TEMP"/ingest-base-load-*.json 2>/dev/null | paste -sd, -)
+                  HEAD_LOAD_JSON="$head_json" \
+                    BASE_LOAD_JSON="$base_json" \
+                    python "$GITHUB_WORKSPACE/.github/scripts/format-ingest-benchmark-comment.py"
+
+            - name: Post or update PR comment (sticky)
+              if: ${{ always() && github.event_name == 'pull_request' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  PR_NUMBER: ${{ github.event.pull_request.number }}
+                  COMMENT_OUTPUT: ${{ runner.temp }}/ingest-results-comment.md
+                  REPO: ${{ github.repository }}
+              run: |
+                  set -e
+                  if [ ! -s "$COMMENT_OUTPUT" ]; then
+                    echo "no comment body rendered, skipping"
+                    exit 0
+                  fi
+                  existing=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+                    --jq '[.[] | select(.body | startswith("<!-- ingest-bench-comment -->"))][0].id')
+                  if [ -n "$existing" ] && [ "$existing" != "null" ]; then
+                    payload="$RUNNER_TEMP/ingest-comment-payload.json"
+                    jq -Rs '{body: .}' < "$COMMENT_OUTPUT" > "$payload"
+                    gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
+                      --input "$payload" >/dev/null
+                    echo "updated existing comment $existing"
+                  else
+                    gh pr comment "$PR_NUMBER" --body-file "$COMMENT_OUTPUT"
+                  fi
+
+            - name: Fail if ingest checks failed
+              if: ${{ always() }}
+              run: |
+                  failed=0
+                  for file in "$RUNNER_TEMP"/ingest-*.exit; do
+                    [ -f "$file" ] || continue
+                    code=$(cat "$file")
+                    if [ "$code" != "0" ]; then
+                      echo "::error file=$file::step failed with exit code $code"
+                      failed=1
+                    fi
+                  done
+                  exit "$failed"
