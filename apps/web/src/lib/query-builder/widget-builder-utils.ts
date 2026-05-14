@@ -453,6 +453,21 @@ export function buildWidgetDataSource(
 		}
 	}
 
+	// Pie + histogram render a breakdown (one row per category) — they need the
+	// `breakdown` endpoint that returns `{name, value}[]`, not the timeseries
+	// endpoint that returns `{bucket, series}[]`. Without this, the preview tile
+	// silently calls the wrong endpoint and renders weighted pie/histogram bars
+	// from time-bucket counts (looks like uniform slices because every bucket
+	// has roughly the same count).
+	if (state.visualization === "pie" || state.visualization === "histogram") {
+		const visibleQueries = state.queries.filter(isVisibleQuery)
+		return {
+			endpoint: "custom_query_builder_breakdown",
+			params: { queries: visibleQueries },
+			transform: sharedTransform,
+		}
+	}
+
 	if (state.visualization === "table") {
 		const limit = parsePositiveNumber(state.tableLimit)
 		const visibleQueries = state.queries.filter(isVisibleQuery)
