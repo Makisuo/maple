@@ -465,6 +465,7 @@
   },
   "patchedDependencies": {
     "effect@4.0.0-beta.64": "patches/effect@4.0.0-beta.64.patch",
+    "portless@0.13.0": "patches/portless@0.13.0.patch",
   },
   "catalog": {
     "vite": "^8.0.3",

@@ -15,8 +15,7 @@
 		},
 		"dev": {
 			"cache": false,
-			"persistent": true,
-			"interactive": true
+			"persistent": true
 		},
 		"tinybird:dev": {
 			"cache": false
