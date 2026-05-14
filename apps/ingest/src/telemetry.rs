@@ -2120,4 +2120,660 @@ mod tests {
         assert_eq!(exp["negative_bucket_counts"], json!([1]));
         assert_eq!(exp["aggregation_temporality"], 2);
     }
+
+    // -----------------------------------------------------------------------
+    // Schema-parity contract.
+    //
+    // The lists below are the JSON top-level keys each ingest datasource must
+    // populate. They MUST stay in lockstep with the `jsonPath` declarations in
+    // packages/domain/src/tinybird/datasources.ts — a TS-side test
+    // (`datasources.contract.test.ts`) pins the same lists from the other
+    // direction, so changing either side without updating both will fail CI.
+    //
+    // Keys come from the *roots* of jsonPath strings, deduplicated:
+    //   "$.foo"            -> "foo"
+    //   "$.foo[:]"         -> "foo"
+    //   "$.foo.bar"        -> "foo"     (only the top level)
+    // ResourceAttributes uses `$.resource_attributes.maple_org_id` for OrgId,
+    // which is already covered by the `resource_attributes` map.
+    // -----------------------------------------------------------------------
+    mod schema_contract {
+        pub const LOGS: &[&str] = &[
+            "timestamp",
+            "trace_id",
+            "span_id",
+            "flags",
+            "severity_text",
+            "severity_number",
+            "service_name",
+            "body",
+            "resource_schema_url",
+            "resource_attributes",
+            "scope_schema_url",
+            "scope_name",
+            "scope_version",
+            "scope_attributes",
+            "log_attributes",
+        ];
+
+        pub const TRACES: &[&str] = &[
+            "start_time",
+            "trace_id",
+            "span_id",
+            "parent_span_id",
+            "trace_state",
+            "span_name",
+            "span_kind",
+            "service_name",
+            "resource_schema_url",
+            "resource_attributes",
+            "scope_schema_url",
+            "scope_name",
+            "scope_version",
+            "scope_attributes",
+            "duration",
+            "status_code",
+            "status_message",
+            "span_attributes",
+            "events_timestamp",
+            "events_name",
+            "events_attributes",
+            "links_trace_id",
+            "links_span_id",
+            "links_trace_state",
+            "links_attributes",
+        ];
+
+        const METRIC_COMMON: &[&str] = &[
+            "resource_attributes",
+            "resource_schema_url",
+            "scope_name",
+            "scope_version",
+            "scope_attributes",
+            "scope_schema_url",
+            "service_name",
+            "metric_name",
+            "metric_description",
+            "metric_unit",
+            "metric_attributes",
+            "start_timestamp",
+            "timestamp",
+            "flags",
+            "exemplars_trace_id",
+            "exemplars_span_id",
+            "exemplars_timestamp",
+            "exemplars_value",
+            "exemplars_filtered_attributes",
+        ];
+
+        fn with(extra: &[&'static str]) -> Vec<&'static str> {
+            let mut v: Vec<&'static str> = METRIC_COMMON.to_vec();
+            v.extend(extra.iter().copied());
+            v
+        }
+
+        pub fn metrics_sum() -> Vec<&'static str> {
+            with(&["value", "aggregation_temporality", "is_monotonic"])
+        }
+        pub fn metrics_gauge() -> Vec<&'static str> {
+            with(&["value"])
+        }
+        pub fn metrics_histogram() -> Vec<&'static str> {
+            with(&[
+                "count",
+                "sum",
+                "bucket_counts",
+                "explicit_bounds",
+                "min",
+                "max",
+                "aggregation_temporality",
+            ])
+        }
+        pub fn metrics_exponential_histogram() -> Vec<&'static str> {
+            with(&[
+                "count",
+                "sum",
+                "scale",
+                "zero_count",
+                "positive_offset",
+                "positive_bucket_counts",
+                "negative_offset",
+                "negative_bucket_counts",
+                "min",
+                "max",
+                "aggregation_temporality",
+            ])
+        }
+    }
+
+    fn assert_row_keys_match(row: &Value, expected: &[&str], datasource: &str) {
+        use std::collections::BTreeSet;
+        let obj = row
+            .as_object()
+            .unwrap_or_else(|| panic!("{datasource} row must be a JSON object"));
+        let actual: BTreeSet<&str> = obj.keys().map(String::as_str).collect();
+        let expected: BTreeSet<&str> = expected.iter().copied().collect();
+        let missing: Vec<&&str> = expected.difference(&actual).collect();
+        let extra: Vec<&&str> = actual.difference(&expected).collect();
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "datasource '{datasource}' JSON key mismatch.\n  missing (declared in datasources.ts but not emitted): {missing:?}\n  extra (emitted but not declared in datasources.ts): {extra:?}\n  If you intentionally changed the schema, update packages/domain/src/tinybird/datasources.ts AND the schema_contract module here AND packages/domain/src/tinybird/datasources.contract.test.ts."
+        );
+    }
+
+    fn populated_log() -> LogRecord {
+        LogRecord {
+            time_unix_nano: 1_700_000_001_123_456_789,
+            observed_time_unix_nano: 1_700_000_001_123_456_789,
+            severity_number: 17,
+            severity_text: "ERROR".to_string(),
+            body: Some(AnyValue {
+                value: Some(any_value::Value::StringValue("payment failed".into())),
+            }),
+            attributes: vec![string_kv("component", "billing")],
+            trace_id: vec![0xaa; 16],
+            span_id: vec![0xbb; 8],
+            flags: 1,
+            ..Default::default()
+        }
+    }
+
+    fn populated_log_request() -> ExportLogsServiceRequest {
+        ExportLogsServiceRequest {
+            resource_logs: vec![opentelemetry_proto::tonic::logs::v1::ResourceLogs {
+                resource: Some(Resource {
+                    attributes: vec![
+                        string_kv("service.name", "billing"),
+                        string_kv("maple_org_id", "org_contract"),
+                    ],
+                    dropped_attributes_count: 0,
+                    entity_refs: Vec::new(),
+                }),
+                scope_logs: vec![opentelemetry_proto::tonic::logs::v1::ScopeLogs {
+                    scope: Some(InstrumentationScope {
+                        name: "billing-logger".to_string(),
+                        version: "2.0.1".to_string(),
+                        attributes: vec![string_kv("scope.key", "scope-value")],
+                        dropped_attributes_count: 0,
+                    }),
+                    log_records: vec![populated_log()],
+                    schema_url: "https://scope.schema/logs".to_string(),
+                }],
+                schema_url: "https://resource.schema/logs".to_string(),
+            }],
+        }
+    }
+
+    fn populated_trace_request() -> ExportTraceServiceRequest {
+        ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                resource: Some(Resource {
+                    attributes: vec![
+                        string_kv("service.name", "checkout"),
+                        string_kv("maple_org_id", "org_contract"),
+                    ],
+                    dropped_attributes_count: 0,
+                    entity_refs: Vec::new(),
+                }),
+                scope_spans: vec![ScopeSpans {
+                    scope: Some(InstrumentationScope {
+                        name: "checkout-tracer".to_string(),
+                        version: "3.4.5".to_string(),
+                        attributes: vec![string_kv("scope.key", "scope-value")],
+                        dropped_attributes_count: 0,
+                    }),
+                    spans: vec![Span {
+                        trace_id: vec![0x11; 16],
+                        span_id: vec![0x22; 8],
+                        parent_span_id: vec![0x33; 8],
+                        trace_state: "vendor=foo".to_string(),
+                        name: "POST /checkout".to_string(),
+                        kind: span::SpanKind::Server as i32,
+                        start_time_unix_nano: 1_700_000_000_000_000_000,
+                        end_time_unix_nano: 1_700_000_000_250_000_000,
+                        attributes: vec![string_kv("http.route", "/checkout")],
+                        status: Some(Status {
+                            code: status::StatusCode::Ok as i32,
+                            message: "ok".to_string(),
+                        }),
+                        ..Default::default()
+                    }],
+                    schema_url: "https://scope.schema/traces".to_string(),
+                }],
+                schema_url: "https://resource.schema/traces".to_string(),
+            }],
+        }
+    }
+
+    fn one_of_each_metric_request() -> ExportMetricsServiceRequest {
+        let base = NumberDataPoint {
+            attributes: vec![string_kv("route", "/checkout")],
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            time_unix_nano: 1_700_000_010_000_000_000,
+            flags: 0,
+            value: Some(number_data_point::Value::AsInt(42)),
+            ..Default::default()
+        };
+        ExportMetricsServiceRequest {
+            resource_metrics: vec![opentelemetry_proto::tonic::metrics::v1::ResourceMetrics {
+                resource: Some(Resource {
+                    attributes: vec![
+                        string_kv("service.name", "api"),
+                        string_kv("maple_org_id", "org_contract"),
+                    ],
+                    dropped_attributes_count: 0,
+                    entity_refs: Vec::new(),
+                }),
+                scope_metrics: vec![opentelemetry_proto::tonic::metrics::v1::ScopeMetrics {
+                    scope: Some(InstrumentationScope {
+                        name: "meter".to_string(),
+                        version: "7.8.9".to_string(),
+                        attributes: Vec::new(),
+                        dropped_attributes_count: 0,
+                    }),
+                    metrics: vec![
+                        Metric {
+                            name: "requests_total".to_string(),
+                            description: "requests".to_string(),
+                            unit: "1".to_string(),
+                            data: Some(metric::Data::Sum(Sum {
+                                data_points: vec![base.clone()],
+                                aggregation_temporality: AggregationTemporality::Delta as i32,
+                                is_monotonic: true,
+                            })),
+                            metadata: Vec::new(),
+                        },
+                        Metric {
+                            name: "cpu_ratio".to_string(),
+                            description: "cpu".to_string(),
+                            unit: "1".to_string(),
+                            data: Some(metric::Data::Gauge(Gauge {
+                                data_points: vec![NumberDataPoint {
+                                    value: Some(number_data_point::Value::AsDouble(0.75)),
+                                    ..base.clone()
+                                }],
+                            })),
+                            metadata: Vec::new(),
+                        },
+                        Metric {
+                            name: "request_duration_ms".to_string(),
+                            description: "latency".to_string(),
+                            unit: "ms".to_string(),
+                            data: Some(metric::Data::Histogram(Histogram {
+                                data_points: vec![HistogramDataPoint {
+                                    attributes: vec![string_kv("route", "/checkout")],
+                                    start_time_unix_nano: base.start_time_unix_nano,
+                                    time_unix_nano: base.time_unix_nano,
+                                    count: 3,
+                                    sum: Some(123.0),
+                                    bucket_counts: vec![1, 2],
+                                    explicit_bounds: vec![100.0],
+                                    min: Some(10.0),
+                                    max: Some(90.0),
+                                    ..Default::default()
+                                }],
+                                aggregation_temporality: AggregationTemporality::Delta as i32,
+                            })),
+                            metadata: Vec::new(),
+                        },
+                        Metric {
+                            name: "payload_bytes".to_string(),
+                            description: "payload".to_string(),
+                            unit: "By".to_string(),
+                            data: Some(metric::Data::ExponentialHistogram(ExponentialHistogram {
+                                data_points: vec![ExponentialHistogramDataPoint {
+                                    attributes: vec![string_kv("route", "/checkout")],
+                                    start_time_unix_nano: base.start_time_unix_nano,
+                                    time_unix_nano: base.time_unix_nano,
+                                    count: 5,
+                                    sum: Some(500.0),
+                                    scale: 2,
+                                    zero_count: 1,
+                                    positive: Some(exponential_histogram_data_point::Buckets {
+                                        offset: -1,
+                                        bucket_counts: vec![2, 3],
+                                    }),
+                                    negative: Some(exponential_histogram_data_point::Buckets {
+                                        offset: 0,
+                                        bucket_counts: vec![1],
+                                    }),
+                                    min: Some(1.0),
+                                    max: Some(250.0),
+                                    ..Default::default()
+                                }],
+                                aggregation_temporality: AggregationTemporality::Cumulative as i32,
+                            })),
+                            metadata: Vec::new(),
+                        },
+                    ],
+                    schema_url: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn logs_emit_exactly_the_jsonpaths_declared_in_datasources_ts() {
+        let (frames, _) = encode_logs(&test_cfg(), "org_contract", &populated_log_request()).unwrap();
+        let row = frame_row(&frames[0]);
+        assert_row_keys_match(&row, schema_contract::LOGS, "logs");
+        // Spot-check the resource_attributes carry the org id, since OrgId's
+        // jsonPath in TS is `$.resource_attributes.maple_org_id`.
+        assert_eq!(row["resource_attributes"]["maple_org_id"], "org_contract");
+    }
+
+    #[test]
+    fn traces_emit_exactly_the_jsonpaths_declared_in_datasources_ts() {
+        let (frames, _) =
+            encode_traces(&test_cfg(), "org_contract", &populated_trace_request(), &SamplingPolicy::default())
+                .unwrap();
+        let row = frame_row(&frames[0]);
+        assert_row_keys_match(&row, schema_contract::TRACES, "traces");
+        assert_eq!(row["resource_attributes"]["maple_org_id"], "org_contract");
+    }
+
+    #[test]
+    fn metrics_emit_exactly_the_jsonpaths_declared_in_datasources_ts() {
+        let (frames, _) = encode_metrics(&test_cfg(), "org_contract", &one_of_each_metric_request()).unwrap();
+        let rows = frame_rows_by_datasource(frames);
+        assert_row_keys_match(&rows["metrics_sum"], &schema_contract::metrics_sum(), "metrics_sum");
+        assert_row_keys_match(&rows["metrics_gauge"], &schema_contract::metrics_gauge(), "metrics_gauge");
+        assert_row_keys_match(
+            &rows["metrics_histogram"],
+            &schema_contract::metrics_histogram(),
+            "metrics_histogram",
+        );
+        assert_row_keys_match(
+            &rows["metrics_exponential_histogram"],
+            &schema_contract::metrics_exponential_histogram(),
+            "metrics_exponential_histogram",
+        );
+    }
+
+    #[test]
+    fn timestamps_match_clickhouse_datetime64_nine_format() {
+        // ClickHouse `DateTime64(9)` accepts `YYYY-MM-DD HH:MM:SS.fffffffff`
+        // (nanosecond precision). Every timestamp-bearing column must match.
+        let pattern = |s: &str| {
+            s.len() == 29
+                && &s[4..5] == "-"
+                && &s[7..8] == "-"
+                && &s[10..11] == " "
+                && &s[13..14] == ":"
+                && &s[16..17] == ":"
+                && &s[19..20] == "."
+                && s[..4].chars().all(|c| c.is_ascii_digit())
+                && s[5..7].chars().all(|c| c.is_ascii_digit())
+                && s[8..10].chars().all(|c| c.is_ascii_digit())
+                && s[11..13].chars().all(|c| c.is_ascii_digit())
+                && s[14..16].chars().all(|c| c.is_ascii_digit())
+                && s[17..19].chars().all(|c| c.is_ascii_digit())
+                && s[20..].chars().all(|c| c.is_ascii_digit())
+        };
+
+        let (log_frames, _) =
+            encode_logs(&test_cfg(), "org_contract", &populated_log_request()).unwrap();
+        let log_row = frame_row(&log_frames[0]);
+        let ts = log_row["timestamp"].as_str().unwrap();
+        assert!(pattern(ts), "logs.timestamp not DateTime64(9): {ts:?}");
+
+        let (trace_frames, _) =
+            encode_traces(&test_cfg(), "org_contract", &populated_trace_request(), &SamplingPolicy::default())
+                .unwrap();
+        let trace_row = frame_row(&trace_frames[0]);
+        let ts = trace_row["start_time"].as_str().unwrap();
+        assert!(pattern(ts), "traces.start_time not DateTime64(9): {ts:?}");
+
+        let (metric_frames, _) =
+            encode_metrics(&test_cfg(), "org_contract", &one_of_each_metric_request()).unwrap();
+        for frame in &metric_frames {
+            let row = frame_row(frame);
+            let start_ts = row["start_timestamp"].as_str().unwrap();
+            let ts = row["timestamp"].as_str().unwrap();
+            assert!(
+                pattern(start_ts),
+                "{}.start_timestamp not DateTime64(9): {start_ts:?}",
+                frame.datasource
+            );
+            assert!(
+                pattern(ts),
+                "{}.timestamp not DateTime64(9): {ts:?}",
+                frame.datasource
+            );
+        }
+    }
+
+    #[test]
+    fn custom_datasource_names_propagate_to_frames() {
+        // Operators can rebind each datasource via `INGEST_TINYBIRD_DATASOURCE_*`
+        // env vars. The frames emitted by the encoders must carry the
+        // configured name (which becomes the `name` query parameter on the
+        // Tinybird import call), not the hardcoded default.
+        let mut cfg = test_cfg();
+        cfg.datasource_logs = "tenant_logs_v2".into();
+        cfg.datasource_traces = "tenant_traces_v2".into();
+        cfg.datasource_metrics_sum = "tenant_sum_v2".into();
+        cfg.datasource_metrics_gauge = "tenant_gauge_v2".into();
+        cfg.datasource_metrics_histogram = "tenant_hist_v2".into();
+        cfg.datasource_metrics_exponential_histogram = "tenant_exp_v2".into();
+
+        let (log_frames, _) = encode_logs(&cfg, "org_contract", &populated_log_request()).unwrap();
+        assert_eq!(log_frames[0].datasource, "tenant_logs_v2");
+
+        let (trace_frames, _) =
+            encode_traces(&cfg, "org_contract", &populated_trace_request(), &SamplingPolicy::default())
+                .unwrap();
+        assert_eq!(trace_frames[0].datasource, "tenant_traces_v2");
+
+        let (metric_frames, _) =
+            encode_metrics(&cfg, "org_contract", &one_of_each_metric_request()).unwrap();
+        let datasources: std::collections::BTreeSet<_> =
+            metric_frames.iter().map(|f| f.datasource.as_str()).collect();
+        assert!(datasources.contains("tenant_sum_v2"));
+        assert!(datasources.contains("tenant_gauge_v2"));
+        assert!(datasources.contains("tenant_hist_v2"));
+        assert!(datasources.contains("tenant_exp_v2"));
+    }
+
+    #[test]
+    fn logs_severity_text_falls_back_to_mapped_number() {
+        // Tinybird's `SeverityText` column expects a non-empty string when the
+        // SDK left only a numeric severity; the encoder maps the OTLP severity
+        // number to the canonical text label.
+        let mut request = populated_log_request();
+        request.resource_logs[0].scope_logs[0].log_records[0].severity_text.clear();
+        request.resource_logs[0].scope_logs[0].log_records[0].severity_number = 9; // INFO
+        let (frames, _) = encode_logs(&test_cfg(), "org_contract", &request).unwrap();
+        let row = frame_row(&frames[0]);
+        assert_eq!(row["severity_text"], "INFO");
+    }
+
+    #[test]
+    fn logs_use_observed_time_when_time_unix_nano_is_zero() {
+        // Per OTLP spec the receiver should fall back to observed_time when the
+        // emitter didn't set time_unix_nano. The encoder honors this so that
+        // the `Timestamp` column is never the epoch.
+        let mut request = populated_log_request();
+        request.resource_logs[0].scope_logs[0].log_records[0].time_unix_nano = 0;
+        request.resource_logs[0].scope_logs[0].log_records[0].observed_time_unix_nano =
+            1_700_000_100_000_000_000;
+        let (frames, _) = encode_logs(&test_cfg(), "org_contract", &request).unwrap();
+        let row = frame_row(&frames[0]);
+        assert_eq!(row["timestamp"], "2023-11-14 22:15:00.000000000");
+    }
+
+    #[test]
+    fn metrics_summary_data_points_are_dropped() {
+        // The encoder does not support Summary metrics (no Tinybird datasource);
+        // dropping silently is intentional but worth pinning so an accidental
+        // schema addition is noticed.
+        use opentelemetry_proto::tonic::metrics::v1::{summary_data_point, Summary, SummaryDataPoint};
+        let request = ExportMetricsServiceRequest {
+            resource_metrics: vec![opentelemetry_proto::tonic::metrics::v1::ResourceMetrics {
+                resource: Some(Resource {
+                    attributes: vec![string_kv("service.name", "api")],
+                    dropped_attributes_count: 0,
+                    entity_refs: Vec::new(),
+                }),
+                scope_metrics: vec![opentelemetry_proto::tonic::metrics::v1::ScopeMetrics {
+                    scope: Some(InstrumentationScope {
+                        name: "meter".to_string(),
+                        version: "1.0.0".to_string(),
+                        attributes: Vec::new(),
+                        dropped_attributes_count: 0,
+                    }),
+                    metrics: vec![Metric {
+                        name: "summary_metric".to_string(),
+                        description: "".into(),
+                        unit: "".into(),
+                        data: Some(metric::Data::Summary(Summary {
+                            data_points: vec![SummaryDataPoint {
+                                attributes: vec![],
+                                start_time_unix_nano: 0,
+                                time_unix_nano: 1_700_000_000_000_000_000,
+                                count: 1,
+                                sum: 1.0,
+                                quantile_values: vec![summary_data_point::ValueAtQuantile {
+                                    quantile: 0.5,
+                                    value: 1.0,
+                                }],
+                                flags: 0,
+                            }],
+                        })),
+                        metadata: Vec::new(),
+                    }],
+                    schema_url: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+        };
+        let (frames, stats) = encode_metrics(&test_cfg(), "org_contract", &request).unwrap();
+        assert!(frames.is_empty(), "summary metrics should not produce frames");
+        assert_eq!(stats.rows, 0);
+    }
+
+    #[tokio::test]
+    async fn pipeline_e2e_exports_traces_to_fake_tinybird() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/v0/events", post(fake_tinybird_import))
+            .with_state(tx);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let queue_dir = unique_test_dir("fake-tinybird-traces");
+        let mut cfg = test_cfg();
+        cfg.endpoint = format!("http://{addr}");
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        cfg.batch_max_wait = Duration::from_millis(1);
+
+        let pipeline = TelemetryPipeline::new(
+            cfg,
+            Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let request = populated_trace_request();
+        let stats = pipeline
+            .accept_traces("org_contract", &request, &SamplingPolicy::default())
+            .await
+            .unwrap();
+        assert_eq!(stats.rows, 1);
+
+        let import = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("fake Tinybird should receive a traces import")
+            .expect("fake Tinybird channel should stay open");
+
+        assert_eq!(import.datasource, "traces");
+        assert_eq!(import.authorization, "Bearer token");
+        assert_eq!(import.content_encoding, "gzip");
+
+        let row: Value = serde_json::from_str(import.body.trim()).unwrap();
+        assert_row_keys_match(&row, schema_contract::TRACES, "traces");
+        assert_eq!(row["span_kind"], "Server");
+        assert_eq!(row["status_code"], "Ok");
+
+        assert!(wait_for_cursor(queue_dir.join("shard-000.cursor")).await > 0);
+        let _ = std::fs::remove_dir_all(queue_dir);
+    }
+
+    #[tokio::test]
+    async fn pipeline_e2e_exports_metrics_to_fake_tinybird() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/v0/events", post(fake_tinybird_import))
+            .with_state(tx);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let queue_dir = unique_test_dir("fake-tinybird-metrics");
+        let mut cfg = test_cfg();
+        cfg.endpoint = format!("http://{addr}");
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        cfg.batch_max_wait = Duration::from_millis(1);
+
+        let pipeline = TelemetryPipeline::new(
+            cfg,
+            Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let stats = pipeline
+            .accept_metrics("org_contract", &one_of_each_metric_request())
+            .await
+            .unwrap();
+        assert_eq!(stats.rows, 4);
+
+        // Collect 4 imports — one per metric datasource.
+        let mut by_datasource: BTreeMap<String, FakeTinybirdImport> = BTreeMap::new();
+        for _ in 0..4 {
+            let import = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("fake Tinybird should receive each metric datasource import")
+                .expect("fake Tinybird channel should stay open");
+            by_datasource.insert(import.datasource.clone(), import);
+        }
+
+        for (datasource, expected_keys) in [
+            ("metrics_sum", schema_contract::metrics_sum()),
+            ("metrics_gauge", schema_contract::metrics_gauge()),
+            ("metrics_histogram", schema_contract::metrics_histogram()),
+            (
+                "metrics_exponential_histogram",
+                schema_contract::metrics_exponential_histogram(),
+            ),
+        ] {
+            let import = by_datasource
+                .remove(datasource)
+                .unwrap_or_else(|| panic!("missing import for {datasource}"));
+            assert_eq!(import.authorization, "Bearer token");
+            assert_eq!(import.content_encoding, "gzip");
+            let row: Value = serde_json::from_str(import.body.trim()).unwrap();
+            assert_row_keys_match(&row, &expected_keys, datasource);
+        }
+
+        let _ = std::fs::remove_dir_all(queue_dir);
+    }
 }
