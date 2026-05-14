@@ -28,11 +28,11 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use hmac::{Hmac, Mac};
+use maple_ingest::otel::{build_resource, forward_client_span, ResourceConfig};
 use maple_ingest::telemetry::{PipelineError, SamplingPolicy, TelemetryPipeline, TinybirdConfig};
 use metrics::{counter, gauge, histogram};
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::KeyValue as OtelKeyValue;
 use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
@@ -43,7 +43,6 @@ use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_sdk::runtime::Tokio as OtelTokio;
 use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 use opentelemetry_sdk::trace::{BatchConfigBuilder, SdkTracerProvider};
-use opentelemetry_sdk::Resource as OtelResource;
 use prost::Message;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -758,31 +757,13 @@ fn init_tracing(forward_endpoint: &str, bind_port: u16) -> Option<SdkTracerProvi
         return None;
     }
 
-    let resource = OtelResource::builder()
-        .with_attribute(OtelKeyValue::new("service.name", "ingest"))
-        .with_attribute(OtelKeyValue::new(
-            "service.version",
-            env!("CARGO_PKG_VERSION"),
-        ))
-        .with_attribute(OtelKeyValue::new(
-            "service.instance.id",
-            uuid::Uuid::new_v4().to_string(),
-        ))
-        .with_attribute(OtelKeyValue::new(
-            "deployment.environment.name",
-            deployment_env.clone(),
-        ))
-        // Dual-emit the legacy `deployment.environment` key: every Tinybird MV
-        // (service_overview_spans_mv, service_map_*_mv, error_*_mv,
-        // logs_aggregates_hourly_mv, service_platforms_hourly_mv) still
-        // pre-extracts ResourceAttributes['deployment.environment'] at write
-        // time, so omitting it leaves DeploymentEnv='' for every ingest span
-        // and the services-table badge renders blank. OTel semconv permits
-        // emitting both during the deployment.environment ->
-        // deployment.environment.name transition.
-        .with_attribute(OtelKeyValue::new("deployment.environment", deployment_env))
-        .with_attribute(OtelKeyValue::new("maple_org_id", internal_org_id))
-        .build();
+    let resource = build_resource(ResourceConfig {
+        service_name: "ingest",
+        service_version: env!("CARGO_PKG_VERSION"),
+        service_instance_id: uuid::Uuid::new_v4().to_string(),
+        deployment_env,
+        internal_org_id,
+    });
 
     let exporter = match SpanExporter::builder()
         .with_http()
@@ -2553,20 +2534,7 @@ async fn process_decoded_payload(
         let outbound_payload = decoded.encode(payload_format)?;
         let outbound_body = encode_payload(&outbound_payload, content_encoding)?;
         let outbound_bytes = outbound_body.len();
-        let forward_span = tracing::info_span!(
-            "forward",
-            otel.name = "POST",
-            otel.kind = "client",
-            otel.status_code = tracing::field::Empty,
-            "http.request.method" = "POST",
-            "http.request.body.size" = outbound_bytes,
-            "http.response.status_code" = tracing::field::Empty,
-            "url.full" = tracing::field::Empty,
-            "server.address" = tracing::field::Empty,
-            "error.type" = tracing::field::Empty,
-            "maple.signal" = signal.path(),
-            "maple.ingest.upstream_pool" = tracing::field::Empty,
-        );
+        let forward_span = forward_client_span("collector", outbound_bytes, signal.path());
         return forward_to_collector(
             state,
             signal,

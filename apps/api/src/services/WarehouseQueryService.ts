@@ -470,10 +470,9 @@ export class WarehouseQueryService extends Context.Service<
 				}
 
 				const resolved = yield* resolveSqlConfig(tenant, pipe)
-				yield* Effect.annotateCurrentSpan(
-					"db.system",
-					resolved.config._tag === "clickhouse" ? "clickhouse" : "tinybird",
-				)
+				const peerService = resolved.config._tag === "clickhouse" ? "clickhouse" : "tinybird"
+				yield* Effect.annotateCurrentSpan("db.system", peerService)
+				yield* Effect.annotateCurrentSpan("peer.service", peerService)
 				const settings = resolveSettings(options)
 				const sqlForClient =
 					resolved.config._tag === "clickhouse" ? normalizeSqlForClickHouseClient(sql) : sql
