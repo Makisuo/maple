@@ -2,8 +2,10 @@
 	"name": "@maple/alerting",
 	"private": true,
 	"type": "module",
+	"portless": { "name": "alerting", "script": "dev:app" },
 	"scripts": {
-		"dev": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --persist-to ../api/.wrangler/state --test-scheduled --port ${PORT:-8788} --inspector-port=9231",
+		"dev": "portless",
+		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --persist-to ../api/.wrangler/state --test-scheduled --port ${PORT:-8788} --inspector-port=9231",
 		"deploy": "wrangler deploy",
 		"test": "echo 'No tests yet'",
 		"typecheck": "tsc --noEmit"

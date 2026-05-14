@@ -2,8 +2,10 @@
 	"name": "@maple/chat-agent",
 	"private": true,
 	"type": "module",
+	"portless": { "name": "chat-agent", "script": "dev:app" },
 	"scripts": {
-		"dev": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-8787} --inspector-port=9230",
+		"dev": "portless",
+		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-8787} --inspector-port=9230",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
