@@ -5,7 +5,7 @@ import tanstackRouter from "@tanstack/router-plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import alchemy from "alchemy/cloudflare/vite"
-import { siblingUrl } from "@maple/infra/dev-urls"
+import { siblingUrl } from "../../packages/infra/src/dev-urls.ts"
 
 const envDir = path.resolve(import.meta.dirname, "../..")
 
