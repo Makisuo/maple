@@ -69,10 +69,14 @@ Operators (the only ones): \`=\`, \`>\`, \`<\`, \`>=\`, \`<=\`, \`contains\`, \`
 
 \`rate\`/\`sum\`/\`increase\` are invalid for traces.
 
-### \`groupBy\` prefix conventions
-- traces: unprefixed (\`maple.signal\`, \`service.name\`, \`http.response.status_code\`)
-- logs: unprefixed (\`service.name\`, \`severity\`)
-- metrics: \`attr.\` prefix (\`attr.signal\`, \`attr.org_id\`)
+### \`groupBy\` only accepts a literal allowlist + \`attr.<key>\` (silent drop trap)
+The query-builder does NOT accept arbitrary attribute names directly. Each data source has a small allowlist of named groupings; for anything outside that list you MUST use \`attr.<key>\`. Tokens that aren't recognized are **silently dropped with a warning that never reaches you** — the widget renders as if no groupBy was set (one "all" series), but the legend may still look plausible. This is the single most common reason a "grouped" widget shows a single aggregate bar.
+
+- **traces** — recognized literals: \`service\` / \`service.name\`, \`span\` / \`span.name\`, \`status\` / \`status.code\`, \`http.method\`, \`none\` / \`all\`. Everything else (\`maple.signal\`, \`http.response.status_code\`, \`http.route\`, \`server.address\`, \`error.type\`, \`maple.org_id\`, \`maple.ingest.*\`, etc.) MUST be prefixed: \`attr.maple.signal\`, \`attr.http.response.status_code\`, \`attr.http.route\`, \`attr.server.address\`, \`attr.error.type\`, \`attr.maple.org_id\`, \`attr.maple.ingest.upstream_pool\`, etc.
+- **logs** — recognized literals: \`service\` / \`service.name\`, \`severity\`, \`none\` / \`all\`. **No \`attr.*\` support yet** — grouping by arbitrary log attributes is not supported, the token will be silently dropped.
+- **metrics** — recognized literals: \`service\` / \`service.name\`, \`none\` / \`all\`. Everything else MUST be prefixed: \`attr.signal\`, \`attr.org_id\`, etc.
+
+Verify groupBy actually applied by running \`inspect_chart_data\` after writing the widget: \`seriesCount > 1\` (and names that look like attribute values, not the literal string \`"all"\`) confirms the breakdown landed. If you see \`seriesCount: 1\` with name \`"all"\`, the groupBy was silently dropped — add the \`attr.\` prefix.
 
 ### \`display.unit\` is mandatory
 Always set on chart and stat widgets. Default \`"number"\`. Pick \`duration_ms\` for \`*_duration\`, \`percent\` for \`error_rate\`, \`bytes\`/\`GB\` for sizes.
