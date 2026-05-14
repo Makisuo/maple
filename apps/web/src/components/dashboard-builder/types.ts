@@ -34,6 +34,7 @@ export type DataSourceEndpoint =
 	| "custom_query_builder_timeseries"
 	| "custom_query_builder_breakdown"
 	| "custom_query_builder_list"
+	| "raw_sql_chart"
 	| "markdown_static"
 
 // --- Widget Data Source ---

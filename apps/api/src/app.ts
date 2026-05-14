@@ -42,6 +42,7 @@ import { OrgOpenRouterSettingsService } from "./services/OrgOpenRouterSettingsSe
 import { OrgClickHouseSettingsService } from "./services/OrgClickHouseSettingsService"
 import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
+import { RawSqlChartService } from "./services/RawSqlChartService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { WarehouseQueryService } from "./services/WarehouseQueryService"
 
@@ -112,6 +113,7 @@ export const MainLive = Layer.mergeAll(
 	ErrorsServiceLive,
 	DigestServiceLive,
 	DemoServiceLive,
+	RawSqlChartService.Default,
 )
 
 export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(

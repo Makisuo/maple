@@ -115,7 +115,11 @@ function WidgetConfigurePage() {
 				}
 			>
 				<WidgetBuilderProvider widget={configureWidget}>
-					<WidgetQueryBuilderPage ref={builderRef} widget={configureWidget} onApply={handleApply} />
+					<WidgetQueryBuilderPage
+						ref={builderRef}
+						widget={configureWidget}
+						onApply={handleApply}
+					/>
 				</WidgetBuilderProvider>
 			</DashboardLayout>
 

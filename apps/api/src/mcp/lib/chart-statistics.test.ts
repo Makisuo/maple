@@ -214,5 +214,6 @@ describe("verdictFromFlags", () => {
 		expect(verdictFromFlags(["ALL_ZEROS"])).toBe("suspicious")
 		expect(verdictFromFlags(["FLAT_LINE"])).toBe("suspicious")
 		expect(verdictFromFlags(["SUSPICIOUS_GAP"])).toBe("suspicious")
+		expect(verdictFromFlags(["BUILDER_WARNINGS"])).toBe("suspicious")
 	})
 })

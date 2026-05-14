@@ -3,6 +3,7 @@ import { getChartById, getChartsByCategory } from "@maple/ui/components/charts/r
 import { ChartPreview } from "@/components/dashboard-builder/widgets/chart-preview"
 import type {
 	DashboardWidget,
+	WidgetDataSource,
 	WidgetDisplayConfig,
 	DataSourceEndpoint,
 } from "@/components/dashboard-builder/types"
@@ -21,14 +22,17 @@ const ENDPOINT_OPTIONS: Array<{ value: DataSourceEndpoint; label: string }> = [
 	{ value: "custom_timeseries", label: "Custom Time Series" },
 	{ value: "custom_breakdown", label: "Custom Breakdown" },
 	{ value: "custom_query_builder_timeseries", label: "Query Builder (Multi Query)" },
+	{ value: "raw_sql_chart", label: "Raw SQL" },
 ]
 
 interface WidgetEditPanelProps {
 	widget: DashboardWidget
 	onUpdateDisplay: (updates: Partial<WidgetDisplayConfig>) => void
+	onUpdateDataSource?: (dataSource: WidgetDataSource) => void
 }
 
-export function WidgetEditPanel({ widget, onUpdateDisplay }: WidgetEditPanelProps) {
+export function WidgetEditPanel({ widget, onUpdateDisplay, onUpdateDataSource }: WidgetEditPanelProps) {
+	const isRawSql = widget.dataSource.endpoint === "raw_sql_chart"
 	const isChart = widget.visualization === "chart"
 	const isMarkdown = widget.visualization === "markdown"
 	const isPie = widget.visualization === "pie"
@@ -62,6 +66,10 @@ export function WidgetEditPanel({ widget, onUpdateDisplay }: WidgetEditPanelProp
 							widget.dataSource.endpoint}
 					</div>
 				</div>
+			)}
+
+			{isRawSql && onUpdateDataSource && (
+				<RawSqlEditor widget={widget} onUpdateDataSource={onUpdateDataSource} />
 			)}
 
 			{isMarkdown && (
@@ -296,5 +304,88 @@ export function WidgetEditPanel({ widget, onUpdateDisplay }: WidgetEditPanelProp
 				</div>
 			)}
 		</>
+	)
+}
+
+const MACRO_HINTS: Array<{ token: string; description: string }> = [
+	{ token: "$__orgFilter", description: "Required — expands to OrgId = '<your org>'" },
+	{
+		token: "$__timeFilter(Column)",
+		description: "Expands to Column >= <start> AND Column <= <end>",
+	},
+	{ token: "$__startTime", description: "Dashboard time range start (toDateTime)" },
+	{ token: "$__endTime", description: "Dashboard time range end (toDateTime)" },
+	{ token: "$__interval_s", description: "Auto-bucket size in seconds" },
+]
+
+function RawSqlEditor({
+	widget,
+	onUpdateDataSource,
+}: {
+	widget: DashboardWidget
+	onUpdateDataSource: (dataSource: WidgetDataSource) => void
+}) {
+	const params = (widget.dataSource.params ?? {}) as {
+		sql?: string
+		granularitySeconds?: number
+	}
+	const sql = params.sql ?? ""
+	const granularitySeconds = params.granularitySeconds
+
+	const missingOrgFilter = !sql.includes("$__orgFilter")
+
+	const update = (next: Partial<typeof params>) => {
+		onUpdateDataSource({
+			...widget.dataSource,
+			params: {
+				...(widget.dataSource.params ?? {}),
+				...next,
+			},
+		})
+	}
+
+	return (
+		<div className="flex flex-col gap-1.5">
+			<label className="text-[10px] font-medium text-muted-foreground">ClickHouse SQL</label>
+			<textarea
+				value={sql}
+				onChange={(e) => update({ sql: e.target.value })}
+				spellCheck={false}
+				className="text-[11px] font-mono bg-background border border-border rounded px-2 py-1.5 min-h-[180px] resize-y outline-none focus:ring-1 focus:ring-foreground/20"
+			/>
+			{missingOrgFilter && (
+				<div className="text-[10px] text-destructive">
+					Reference $__orgFilter in your WHERE clause — required for org isolation.
+				</div>
+			)}
+			<div className="flex flex-col gap-1 text-[10px] text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
+				<div className="font-semibold uppercase tracking-wider text-[9px] text-dim">Macros</div>
+				{MACRO_HINTS.map((hint) => (
+					<div key={hint.token} className="flex gap-2">
+						<code className="font-mono text-foreground">{hint.token}</code>
+						<span className="truncate">{hint.description}</span>
+					</div>
+				))}
+			</div>
+
+			<div className="flex flex-col gap-1.5">
+				<label className="text-[10px] font-medium text-muted-foreground">
+					Bucket seconds (optional)
+				</label>
+				<Input
+					type="number"
+					min={1}
+					placeholder="auto"
+					value={granularitySeconds ?? ""}
+					onChange={(e) =>
+						update({
+							granularitySeconds:
+								e.target.value === "" ? undefined : Math.max(1, Number(e.target.value)),
+						})
+					}
+					className="h-7 text-xs"
+				/>
+			</div>
+		</div>
 	)
 }

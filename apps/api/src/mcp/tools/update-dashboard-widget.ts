@@ -2,13 +2,15 @@ import { McpQueryError, requiredStringParam, type McpToolRegistrar } from "./typ
 import { Effect, Schema } from "effect"
 import { createDualContent } from "../lib/structured-output"
 import { decodeWidgetJson, withDashboardMutation } from "../lib/dashboard-mutations"
+import { formatValidationSummary, inspectWidgetsAfterMutation } from "../lib/inspect-widget"
+import { resolveTenant } from "../lib/query-tinybird"
 
 const TOOL = "update_dashboard_widget"
 
 export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 	server.tool(
 		TOOL,
-		"Replace a single widget on an existing dashboard. Pass the full widget JSON (same shape as one entry in `widgets[]` from get_dashboard) for ONLY the widget you want to change. Other widgets and dashboard metadata are left untouched. The stored widget id is always forced to the widget_id parameter, so any id inside widget_json is ignored.\n\nTrace queries MUST include `metricName: \"\"`, `metricType: \"gauge\"` (required by the schema even though they're meaningless for traces). `whereClause` is a custom grammar (`=`, `>`, `<`, `>=`, `<=`, `contains`, `exists` joined by ` AND `) — there is NO SQL `IS NULL`/`IS NOT NULL`; use `<key> exists` to require an attribute. This tool returns success even when the stored shape will fail at query time — verify with inspect_chart_data or by loading the dashboard. See the `maple://instructions` resource for the full widget JSON shape (aggregations per source, groupBy prefixes, units, stat reduceToValue, hideSeries).",
+		"Replace a single widget on an existing dashboard. Pass the full widget JSON (same shape as one entry in `widgets[]` from get_dashboard) for ONLY the widget you want to change. Other widgets and dashboard metadata are left untouched. The stored widget id is always forced to the widget_id parameter, so any id inside widget_json is ignored.\n\nThe response includes an automatic validation summary (verdict, flags). If `verdict` is `suspicious` or `broken`, fix the widget and call this tool again — the chart will not render meaningful data as-is.\n\nTrace queries MUST include `metricName: \"\"`, `metricType: \"gauge\"` (required by the schema even though they're meaningless for traces). `whereClause` is a custom grammar (`=`, `>`, `<`, `>=`, `<=`, `contains`, `exists` joined by ` AND `) — there is NO SQL `IS NULL`/`IS NOT NULL`; use `<key> exists` to require an attribute. See the `maple://instructions` resource for the full widget JSON shape (aggregations per source, groupBy prefixes, units, stat reduceToValue, hideSeries).",
 		Schema.Struct({
 			dashboard_id: requiredStringParam(
 				"ID of the dashboard containing the widget (use list_dashboards to find IDs)",
@@ -53,6 +55,14 @@ export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 			const { dashboard } = result
 			const updated = dashboard.widgets.find((w) => w.id === widget_id)
 
+			const tenant = yield* resolveTenant
+			const validation = yield* inspectWidgetsAfterMutation({
+				tenant,
+				dashboard,
+				widgetIds: [widget_id],
+				validate: true,
+			})
+
 			const lines = [
 				`## Widget Updated`,
 				`Dashboard: ${dashboard.name} (${dashboard.id})`,
@@ -61,6 +71,11 @@ export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 				`Total widgets: ${dashboard.widgets.length}`,
 				`Updated: ${dashboard.updatedAt.slice(0, 19)}`,
 			]
+
+			const validationBlock = formatValidationSummary(validation, true)
+			if (validationBlock) {
+				lines.push("", validationBlock)
+			}
 
 			return {
 				content: createDualContent(lines.join("\n"), {
@@ -76,6 +91,7 @@ export function registerUpdateDashboardWidgetTool(server: McpToolRegistrar) {
 							updatedAt: dashboard.updatedAt,
 						},
 						widgetId: widget_id,
+						...(validation.ran && { validation }),
 					},
 				}),
 			}

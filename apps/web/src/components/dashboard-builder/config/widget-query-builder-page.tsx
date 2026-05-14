@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { Button } from "@maple/ui/components/ui/button"
+import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
@@ -10,6 +11,10 @@ import { QueryPanel } from "@/components/dashboard-builder/config/query-panel"
 import { FormulaPanel } from "@/components/dashboard-builder/config/formula-panel"
 import { WidgetSettingsBar } from "@/components/dashboard-builder/config/widget-settings-bar"
 import { ListConfigPanel } from "@/components/dashboard-builder/config/list-config-panel"
+import {
+	RawSqlEditorPanel,
+	type RawSqlDraft,
+} from "@/components/dashboard-builder/config/raw-sql-editor-panel"
 import type {
 	DashboardWidget,
 	VisualizationType,
@@ -33,6 +38,7 @@ import {
 	buildWidgetDisplay,
 	inferDefaultUnitForQueries,
 } from "@/lib/query-builder/widget-builder-utils"
+import { RAW_SQL_TEMPLATES, visualizationToDisplayType } from "@/lib/raw-sql/templates"
 
 export { type QueryBuilderWidgetState } from "@/lib/query-builder/widget-builder-utils"
 
@@ -67,6 +73,51 @@ const WidgetPreview = React.memo(function WidgetPreview({ widget }: { widget: Da
 	}
 	return <ChartWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
 })
+
+type SourceMode = "builder" | "rawSql"
+
+function readRawSqlDraftFromWidget(widget: DashboardWidget): RawSqlDraft {
+	const params = (widget.dataSource.params ?? {}) as {
+		sql?: unknown
+		granularitySeconds?: unknown
+	}
+	if (widget.dataSource.endpoint === "raw_sql_chart" && typeof params.sql === "string") {
+		return {
+			sql: params.sql,
+			granularitySeconds:
+				typeof params.granularitySeconds === "number" ? params.granularitySeconds : null,
+		}
+	}
+	const displayType = visualizationToDisplayType(widget.visualization, widget.display.chartId)
+	return { sql: RAW_SQL_TEMPLATES[displayType], granularitySeconds: null }
+}
+
+function buildRawSqlDataSource(widget: DashboardWidget, draft: RawSqlDraft): WidgetDataSource {
+	const displayType = visualizationToDisplayType(widget.visualization, widget.display.chartId)
+	// Stat widgets need a reduceToValue transform so the StatWidget reads the
+	// scalar `data[0].value`. If the user already set a transform on the widget,
+	// keep theirs; otherwise inject the default.
+	const existingTransform = widget.dataSource.transform
+	const transform =
+		widget.visualization === "stat" && !existingTransform?.reduceToValue
+			? {
+					...existingTransform,
+					reduceToValue: { field: "value", aggregate: "first" as const },
+				}
+			: existingTransform
+
+	return {
+		endpoint: "raw_sql_chart",
+		params: {
+			sql: draft.sql,
+			displayType,
+			...(draft.granularitySeconds != null
+				? { granularitySeconds: draft.granularitySeconds }
+				: {}),
+		},
+		...(transform ? { transform } : {}),
+	}
+}
 
 export function WidgetQueryBuilderPage({
 	widget,
@@ -103,7 +154,27 @@ export function WidgetQueryBuilderPage({
 		actions: { setTimeRange },
 	} = useDashboardTimeRange()
 
+	const initialMode: SourceMode =
+		widget.dataSource.endpoint === "raw_sql_chart" ? "rawSql" : "builder"
+	const [mode, setMode] = React.useState<SourceMode>(initialMode)
+	const initialModeRef = React.useRef<SourceMode>(initialMode)
+
+	const initialRawSqlDraft = React.useMemo(() => readRawSqlDraftFromWidget(widget), [widget])
+	const [rawSqlDraft, setRawSqlDraft] = React.useState<RawSqlDraft>(initialRawSqlDraft)
+	const initialRawSqlSnapshotRef = React.useRef<RawSqlDraft>(initialRawSqlDraft)
+
+	// In Raw SQL mode the preview is driven by a separate "previewDraft" that
+	// only updates when the user clicks Run Preview — typing in the textarea
+	// shouldn't refire the SQL on every keystroke.
+	const [rawSqlPreviewDraft, setRawSqlPreviewDraft] = React.useState<RawSqlDraft>(initialRawSqlDraft)
+
 	const previewWidget = React.useMemo(() => {
+		if (mode === "rawSql") {
+			return {
+				...widget,
+				dataSource: buildRawSqlDataSource(widget, rawSqlPreviewDraft),
+			}
+		}
 		const previewSeriesOptions = toSeriesFieldOptions(stagedState)
 		return {
 			...widget,
@@ -111,9 +182,18 @@ export function WidgetQueryBuilderPage({
 			dataSource: buildWidgetDataSource(widget, stagedState, previewSeriesOptions),
 			display: buildWidgetDisplay(widget, stagedState),
 		}
-	}, [stagedState, widget])
+	}, [mode, rawSqlPreviewDraft, stagedState, widget])
 
 	const applyChanges = () => {
+		if (mode === "rawSql") {
+			if (!rawSqlDraft.sql.includes("$__orgFilter")) return
+			onApply({
+				visualization: widget.visualization,
+				dataSource: buildRawSqlDataSource(widget, rawSqlDraft),
+				display: widget.display,
+			})
+			return
+		}
 		if (validationError) return
 		onApply({
 			visualization: state.visualization,
@@ -124,7 +204,15 @@ export function WidgetQueryBuilderPage({
 
 	React.useImperativeHandle(ref, () => ({
 		apply: applyChanges,
-		isDirty: () => JSON.stringify(state) !== JSON.stringify(initialSnapshot),
+		isDirty: () => {
+			if (mode !== initialModeRef.current) return true
+			if (mode === "rawSql") {
+				return (
+					JSON.stringify(rawSqlDraft) !== JSON.stringify(initialRawSqlSnapshotRef.current)
+				)
+			}
+			return JSON.stringify(state) !== JSON.stringify(initialSnapshot)
+		},
 	}))
 
 	const handleAggregationChange = React.useCallback(
@@ -200,6 +288,11 @@ export function WidgetQueryBuilderPage({
 		[setState],
 	)
 
+	const isList = widget.visualization === "list"
+	// Lists have their own dedicated config and aren't a sensible target for raw
+	// SQL (no time-series semantics, no scalar) — hide the Source toggle there.
+	const showSourceToggle = !isList
+
 	return (
 		<div className="animate-in fade-in slide-in-from-bottom-2 duration-200 flex flex-1 min-h-0 -m-4">
 			{/* Main content (scrollable) */}
@@ -226,84 +319,122 @@ export function WidgetQueryBuilderPage({
 							}}
 						/>
 					</div>
+					{/* Key on mode forces a full unmount/remount of the preview tree on
+					    Source toggle. Without this, SVG-rendered charts (notably the pie
+					    donut) hold internal state between data swaps and ghost-render
+					    the previous slices on top of the new ones. */}
 					<div className="h-[400px]">
-						<WidgetPreview widget={previewWidget} />
+						<WidgetPreview key={mode} widget={previewWidget} />
 					</div>
 				</div>
 
 				{/* Query configuration */}
 				<div className="p-6 space-y-6" onFocusCapture={activateAutocomplete}>
-					{validationError && (
-						<p className="text-xs text-destructive font-medium">{validationError}</p>
+					{showSourceToggle && (
+						<div className="flex items-center gap-3">
+							<span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+								Source
+							</span>
+							<Tabs
+								value={mode}
+								onValueChange={(value) => setMode(value as SourceMode)}
+							>
+								<TabsList>
+									<TabsTrigger value="builder">Query Builder</TabsTrigger>
+									<TabsTrigger value="rawSql">Raw SQL</TabsTrigger>
+								</TabsList>
+							</Tabs>
+						</div>
 					)}
 
-					{state.visualization === "list" ? (
-						<>
-							<ListConfigPanel />
-							<div className="flex items-center gap-3">
-								<Button size="sm" onClick={runPreview}>
-									Run Preview
-								</Button>
-							</div>
-						</>
+					{mode === "rawSql" ? (
+						<RawSqlEditorPanel
+							widget={widget}
+							draft={rawSqlDraft}
+							onDraftChange={setRawSqlDraft}
+							onRunPreview={() => setRawSqlPreviewDraft(rawSqlDraft)}
+						/>
 					) : (
 						<>
-							{/* Query panels */}
-							<div className="space-y-3">
-								{state.queries.map((query, index) => (
-									<QueryPanel
-										key={query.id}
-										query={query}
-										index={index}
-										canRemove={state.queries.length > 1}
-										metricSelectionOptions={metricSelectionOptions}
-										onMetricSearch={setMetricSearch}
-										autocompleteValues={autocompleteValuesBySource}
-										onUpdate={(updater) => updateQuery(query.id, updater)}
-										onAggregationChange={(aggregation) =>
-											handleAggregationChange(query.id, aggregation)
-										}
-										onMetricSelectionChange={(selection) =>
-											handleMetricSelectionChange(query.id, selection)
-										}
-										onClone={() => cloneQuery(query.id)}
-										onRemove={() => removeQuery(query.id)}
-										onDataSourceChange={(ds) => handleDataSourceChange(query.id, ds)}
-									/>
-								))}
-							</div>
-
-							{/* Formula panels */}
-							{state.formulas.length > 0 && (
-								<div className="space-y-3">
-									{state.formulas.map((formula) => (
-										<FormulaPanel
-											key={formula.id}
-											formula={formula}
-											onUpdate={(updater) => updateFormula(formula.id, updater)}
-											onRemove={() => removeFormula(formula.id)}
-										/>
-									))}
-								</div>
+							{validationError && (
+								<p className="text-xs text-destructive font-medium">{validationError}</p>
 							)}
 
-							{/* Toolbar */}
-							<div className="flex items-center gap-3">
-								<Button variant="outline" size="sm" onClick={addQuery}>
-									+ Query
-								</Button>
-								<Button variant="outline" size="sm" onClick={addFormula}>
-									+ Formula
-								</Button>
-								<Button size="sm" onClick={runPreview} disabled={!!validationError}>
-									Run Preview
-								</Button>
-								<span className="text-[11px] text-muted-foreground ml-auto">
-									{state.queries.map((q) => q.name).join(", ")}
-									{state.formulas.length > 0 &&
-										`, ${state.formulas.map((f) => f.name).join(", ")}`}
-								</span>
-							</div>
+							{state.visualization === "list" ? (
+								<>
+									<ListConfigPanel />
+									<div className="flex items-center gap-3">
+										<Button size="sm" onClick={runPreview}>
+											Run Preview
+										</Button>
+									</div>
+								</>
+							) : (
+								<>
+									{/* Query panels */}
+									<div className="space-y-3">
+										{state.queries.map((query, index) => (
+											<QueryPanel
+												key={query.id}
+												query={query}
+												index={index}
+												canRemove={state.queries.length > 1}
+												metricSelectionOptions={metricSelectionOptions}
+												onMetricSearch={setMetricSearch}
+												autocompleteValues={autocompleteValuesBySource}
+												onUpdate={(updater) => updateQuery(query.id, updater)}
+												onAggregationChange={(aggregation) =>
+													handleAggregationChange(query.id, aggregation)
+												}
+												onMetricSelectionChange={(selection) =>
+													handleMetricSelectionChange(query.id, selection)
+												}
+												onClone={() => cloneQuery(query.id)}
+												onRemove={() => removeQuery(query.id)}
+												onDataSourceChange={(ds) =>
+													handleDataSourceChange(query.id, ds)
+												}
+											/>
+										))}
+									</div>
+
+									{/* Formula panels */}
+									{state.formulas.length > 0 && (
+										<div className="space-y-3">
+											{state.formulas.map((formula) => (
+												<FormulaPanel
+													key={formula.id}
+													formula={formula}
+													onUpdate={(updater) => updateFormula(formula.id, updater)}
+													onRemove={() => removeFormula(formula.id)}
+												/>
+											))}
+										</div>
+									)}
+
+									{/* Toolbar */}
+									<div className="flex items-center gap-3">
+										<Button variant="outline" size="sm" onClick={addQuery}>
+											+ Query
+										</Button>
+										<Button variant="outline" size="sm" onClick={addFormula}>
+											+ Formula
+										</Button>
+										<Button
+											size="sm"
+											onClick={runPreview}
+											disabled={!!validationError}
+										>
+											Run Preview
+										</Button>
+										<span className="text-[11px] text-muted-foreground ml-auto">
+											{state.queries.map((q) => q.name).join(", ")}
+											{state.formulas.length > 0 &&
+												`, ${state.formulas.map((f) => f.name).join(", ")}`}
+										</span>
+									</div>
+								</>
+							)}
 						</>
 					)}
 				</div>

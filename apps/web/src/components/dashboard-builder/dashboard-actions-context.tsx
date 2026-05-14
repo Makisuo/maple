@@ -19,6 +19,7 @@ interface DashboardActionsContextValue {
 	cloneWidget: (widgetId: string) => void
 	configureWidget: (widgetId: string) => void
 	updateWidgetDisplay: (widgetId: string, display: Partial<WidgetDisplayConfig>) => void
+	updateWidgetDataSource: (widgetId: string, dataSource: WidgetDataSource) => void
 	updateWidgetLayouts: (layouts: Array<{ i: string; x: number; y: number; w: number; h: number }>) => void
 	addWidget: (
 		visualization: VisualizationType,
@@ -50,6 +51,11 @@ interface DashboardActionsProviderProps {
 			widgetId: string,
 			display: Partial<WidgetDisplayConfig>,
 		) => void
+		updateWidget: (
+			dashboardId: string,
+			widgetId: string,
+			updates: Partial<Pick<DashboardWidget, "visualization" | "dataSource" | "display" | "layout">>,
+		) => unknown
 		updateWidgetLayouts: (
 			dashboardId: string,
 			layouts: Array<{
@@ -104,6 +110,10 @@ export function DashboardActionsProvider({
 			updateWidgetDisplay: (widgetId, display) => {
 				if (readOnly) return
 				store.updateWidgetDisplay(dashboardId, widgetId, display)
+			},
+			updateWidgetDataSource: (widgetId, dataSource) => {
+				if (readOnly) return
+				store.updateWidget(dashboardId, widgetId, { dataSource })
 			},
 			updateWidgetLayouts: (layouts) => {
 				if (readOnly) return
