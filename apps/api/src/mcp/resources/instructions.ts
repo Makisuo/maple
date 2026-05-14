@@ -96,6 +96,118 @@ Valid aggregates: \`sum | first | count | avg | max | min\`. **No \`last\`.** Wi
 \`baseNames\` matches each hidden query's \`legend || name\`. Otherwise the auxiliary series render at full scale and skew percent-axis charts.
 
 ### Verification
-After submitting widget JSON, do NOT trust the success response — verify by calling \`inspect_chart_data\` against the widget, or by loading the dashboard URL and watching for \`Invalid input for getQueryBuilderTimeseries\`. Note: the schema validates structure (\`metricName\`/\`metricType\`) but \`whereClause\` is treated as opaque \`Schema.String\` and unsupported clauses (e.g. SQL \`IS NOT NULL\`) silently degrade to "no filter" at query time without any visible error. Check both traps in the same pass.`,
+After submitting widget JSON, do NOT trust the success response — verify by calling \`inspect_chart_data\` against the widget, or by loading the dashboard URL and watching for \`Invalid input for getQueryBuilderTimeseries\`. Note: the schema validates structure (\`metricName\`/\`metricType\`) but \`whereClause\` is treated as opaque \`Schema.String\` and unsupported clauses (e.g. SQL \`IS NOT NULL\`) silently degrade to "no filter" at query time without any visible error. Check both traps in the same pass.
+
+## Raw SQL Widgets (\`raw_sql_chart\` endpoint)
+
+When you pass \`sql\` to \`add_dashboard_widget\` (or build a widget with \`dataSource.endpoint: "raw_sql_chart"\`), you author ClickHouse SQL directly. The server expands macros and runs the SQL through the warehouse. Use this path when the structured query builder can't express what you need (window functions, multi-step CTEs, unusual aggregations, joins).
+
+### Macros — what gets substituted
+- \`$__orgFilter\` → \`OrgId = '<your org>'\` — **REQUIRED**; without it the request is rejected before execution. Org isolation depends on this macro appearing in the SQL.
+- \`$__timeFilter(Column)\` → \`Column >= toDateTime('<start>') AND Column <= toDateTime('<end>')\`. \`Column\` must be a bare identifier (letters/digits/underscores/dots) — no expressions. **Prefer this over \`$__startTime\`/\`$__endTime\`** for WHERE clauses.
+- \`$__startTime\` / \`$__endTime\` → \`toDateTime('…')\` literals. Use when you need the bound inline somewhere other than a WHERE comparison.
+- \`$__interval_s\` → integer bucket size in seconds. Resolved from \`granularity_seconds\` (or auto-derived from the dashboard time range when omitted). **Only interpolate this if your SQL actually buckets time** — otherwise \`granularity_seconds\` is a no-op.
+
+### Safety rules (server-enforced)
+- One statement only. Multiple statements separated by \`;\` are rejected.
+- Deny-listed keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, RENAME, ATTACH, DETACH, CREATE, GRANT, REVOKE, OPTIMIZE, SYSTEM, KILL) trigger a \`DisallowedStatement\` error. Comments and string literals are masked first so a SELECT containing the word "drop" in a string is fine.
+- \`LIMIT 10000\` is auto-appended when no LIMIT clause is present.
+
+### Tables — discover at call time
+
+Call \`describe_warehouse_tables\` to enumerate every available table; pass \`table: "<name>"\` to get the full column list (with ClickHouse types and jsonPaths), the sorting-key prefix, and curated notes (enum casing, unit warnings, when to use a pre-aggregated table). The tool reads from the live datasource definitions, so it never goes stale.
+
+**Universal conventions that apply to every table**:
+- Column names are PascalCase (\`ServiceName\`, \`Timestamp\`, \`StatusCode\`) — never snake_case.
+- \`StatusCode\` (spans) and \`SeverityText\` (logs) values are **Title Case** (\`'Error'\`, \`'Ok'\`, \`'Unset'\`, \`'Info'\`, \`'Warn'\`, etc.) — uppercase / lowercase strings silently match zero rows.
+- Span \`Duration\` is **nanoseconds** (UInt64). Divide by \`1e6\` for ms, \`1e9\` for seconds.
+- Attribute access on Map columns: \`SpanAttributes['http.method']\` — square brackets, string key. Missing keys return \`''\`, not NULL.
+- Tables are sorted by some prefix of \`(OrgId, ServiceName, Timestamp)\`. Filter on \`ServiceName\` early to keep queries on the sort-key prefix.
+
+### Result shape per \`display_type\` (what to SELECT)
+
+The renderer is opinionated about column names. Get these wrong and the chart shows empty / \`[object Object]\` / mislabeled axes.
+
+- **line / area / bar (timeseries)** — SELECT a time bucket as the first DateTime column (alias \`bucket\` is conventional but any DateTime-typed first column works) plus one or more **numeric** series columns. The column name becomes the legend label. **String columns are silently dropped**, so for multi-series breakdowns (e.g., one line per service) you must pivot in SQL — the renderer does NOT auto-pivot tall form.
+  Single series:
+  \`\`\`sql
+  SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
+         count() AS logs
+  FROM logs
+  WHERE $__orgFilter AND $__timeFilter(Timestamp)
+  GROUP BY bucket
+  ORDER BY bucket
+  \`\`\`
+  Multi-series (wide form via \`countIf\` / \`sumIf\`):
+  \`\`\`sql
+  SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
+         countIf(SeverityText = 'Info')  AS Info,
+         countIf(SeverityText = 'Warn')  AS Warn,
+         countIf(SeverityText = 'Error') AS Error
+  FROM logs
+  WHERE $__orgFilter AND $__timeFilter(Timestamp)
+  GROUP BY bucket
+  ORDER BY bucket
+  \`\`\`
+  **Wrong** (tall form, collapses to a single aggregate line — the \`ServiceName\` string column is dropped):
+  \`\`\`sql
+  SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
+         ServiceName,
+         count() AS requests
+  FROM service_overview_spans
+  WHERE $__orgFilter AND $__timeFilter(Timestamp)
+  GROUP BY bucket, ServiceName
+  \`\`\`
+  For dynamic series labels (when you don't know the values up-front), discover them first via a separate query — e.g., \`SELECT DISTINCT ServiceName FROM service_overview_spans WHERE $__orgFilter AND $__timeFilter(Timestamp) ORDER BY count() DESC LIMIT 10\` — then build the \`countIf\` columns.
+
+- **stat** — SELECT a single scalar aliased \`value\`. The auto-injected \`reduceToValue\` transform reads \`data[0].value\`; any other alias renders \`[object Object]\`.
+  \`\`\`sql
+  SELECT count() AS value
+  FROM error_spans
+  WHERE $__orgFilter AND $__timeFilter(Timestamp)
+  \`\`\`
+
+- **pie** — SELECT a \`name\` (string label) column plus at least one numeric column (first numeric wins as the value). Cap to ≤ ~10 slices for readability.
+  \`\`\`sql
+  SELECT ServiceName AS name, count() AS value
+  FROM service_overview_spans
+  WHERE $__orgFilter AND $__timeFilter(Timestamp)
+  GROUP BY name
+  ORDER BY value DESC
+  LIMIT 8
+  \`\`\`
+
+- **heatmap** — SELECT three columns aliased \`x\`, \`y\`, \`value\`. Cast \`x\`/\`y\` to strings if they're numeric (the renderer treats them as labels).
+  \`\`\`sql
+  SELECT ServiceName AS x,
+         toString(toHour(Timestamp)) AS y,
+         count() AS value
+  FROM service_overview_spans
+  WHERE $__orgFilter AND $__timeFilter(Timestamp)
+  GROUP BY x, y
+  ORDER BY x, y
+  \`\`\`
+
+- **table** — any rows; columns render as-is in the order returned. Use explicit \`AS\` aliases for nice headers.
+
+- **histogram** — SELECT one numeric column aliased \`value\` (one row per observation; the renderer buckets client-side). Cap with a sensible LIMIT.
+  \`\`\`sql
+  SELECT Duration / 1000000 AS value
+  FROM service_overview_spans
+  WHERE $__orgFilter AND $__timeFilter(Timestamp)
+  LIMIT 5000
+  \`\`\`
+
+### \`granularity_seconds\` vs manual bucketing
+\`granularity_seconds\` only matters if your SQL references \`$__interval_s\` somewhere (typically inside \`toStartOfInterval\`). Setting it without using the macro is harmless but pointless. Conversely, manual bucketing like \`toStartOfMinute(Timestamp)\` ignores \`granularity_seconds\` entirely. **Pick one**: either \`toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND)\` + \`granularity_seconds\`, or a fixed \`toStartOf*\` and omit \`granularity_seconds\`.
+
+### Common failure modes
+- **Wrong case on enum values** (\`'ERROR'\` vs \`'Error'\`, \`'Server'\` vs \`'SERVER'\`) → query runs, returns zero rows, widget renders empty. Always Title Case for \`StatusCode\` / \`SpanKind\` / \`SeverityText\`.
+- **Wrong duration unit** → numbers look reasonable but are 1000× off. Span \`Duration\` is **nanoseconds** — divide before showing as ms.
+- **Stat alias wrong** → \`SELECT count()\` without \`AS value\` produces \`[object Object]\`.
+- **Pie missing \`name\` column** → renderer can't label slices.
+- **Timeseries with no DateTime in the first row** → reshape skips and you get raw rows; the chart looks empty. Put the bucket column first OR alias it \`bucket\`.
+- **\`Map\` lookup on missing key** returns empty string, not NULL — use \`SpanAttributes['k'] != ''\` not \`IS NOT NULL\`.
+- **High-cardinality groupBy** without LIMIT → server appends \`LIMIT 10000\` but the chart still struggles. Always add an explicit \`LIMIT\` for pie/table/heatmap.`,
 	),
 })

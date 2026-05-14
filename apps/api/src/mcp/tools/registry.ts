@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { registerAddDashboardWidgetTool } from "./add-dashboard-widget"
+import { registerDescribeWarehouseTablesTool } from "./describe-warehouse-tables"
 import { registerComparePeriodsTool } from "./compare-periods"
 import { registerCreateAlertRuleTool } from "./create-alert-rule"
 import { registerCreateDashboardTool } from "./create-dashboard"
@@ -97,6 +98,7 @@ export const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition
 	registerCreateDashboardTool(registrar)
 	registerUpdateDashboardTool(registrar)
 	registerAddDashboardWidgetTool(registrar)
+	registerDescribeWarehouseTablesTool(registrar)
 	registerUpdateDashboardWidgetTool(registrar)
 	registerRemoveDashboardWidgetTool(registrar)
 	registerReorderDashboardWidgetsTool(registrar)

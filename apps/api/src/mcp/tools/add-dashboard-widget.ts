@@ -1,5 +1,13 @@
-import { McpQueryError, optionalStringParam, requiredStringParam, type McpToolRegistrar } from "./types"
+import {
+	McpQueryError,
+	optionalNumberParam,
+	optionalStringParam,
+	requiredStringParam,
+	validationError,
+	type McpToolRegistrar,
+} from "./types"
 import { Effect, Schema } from "effect"
+import { RawSqlDisplayType } from "@maple/domain/http"
 import { createDualContent } from "../lib/structured-output"
 import {
 	decodeDataSourceJson,
@@ -11,27 +19,55 @@ import {
 	withDashboardMutation,
 	type DashboardWidget,
 } from "../lib/dashboard-mutations"
+import {
+	buildRawSqlDataSource,
+	validateRawSqlMacro,
+	visualizationToDisplayType,
+} from "../lib/raw-sql-widget"
 import { formatValidationSummary, inspectWidgetsAfterMutation } from "../lib/inspect-widget"
 import { resolveTenant } from "../lib/query-tinybird"
 
 const TOOL = "add_dashboard_widget"
 
+// Widget kinds accepted by `visualization`. `markdown` is excluded — markdown
+// widgets don't go through this tool today. Kept in lockstep with
+// `VisualizationType` in apps/web/src/components/dashboard-builder/types.ts.
+const KNOWN_VISUALIZATIONS = [
+	"chart",
+	"stat",
+	"table",
+	"list",
+	"pie",
+	"histogram",
+	"heatmap",
+] as const
+
 export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 	server.tool(
 		TOOL,
-		"Add a single widget to an existing dashboard without re-sending the whole document. Pass the widget's visualization type plus JSON-encoded dataSource and display config. If layout_json is omitted the widget is auto-placed using the same grid logic as the web UI. Returns the new widget id plus an automatic validation summary (verdict, flags). If `verdict` is `suspicious` or `broken`, fix the widget via `update_dashboard_widget` — the chart will not render meaningful data as-is.\n\nTrace queries MUST include `metricName: \"\"`, `metricType: \"gauge\"` (required by the schema even though they're meaningless for traces). `whereClause` is a custom grammar (`=`, `>`, `<`, `>=`, `<=`, `contains`, `exists` joined by ` AND `) — there is NO SQL `IS NULL`/`IS NOT NULL`; use `<key> exists` to require an attribute. See the `maple://instructions` resource for the full widget JSON shape (aggregations per source, groupBy prefixes, units, stat reduceToValue, hideSeries).",
+		"Add a single widget to an existing dashboard without re-sending the whole document. `visualization` MUST be one of: `chart`, `stat`, `table`, `list`, `pie`, `histogram`, `heatmap` — NOT a free-form title. For line/area/bar charts, pass `visualization: \"chart\"` and `display_type: \"line\"`/`\"area\"`/`\"bar\"`. Two creation paths:\n\n1. **Structured query builder** (default): pass `data_source_json` + `display_json` to wire the widget to a specific endpoint (`custom_query_builder_timeseries`, `service_overview`, etc.). Trace queries MUST include `metricName: \"\"`, `metricType: \"gauge\"` (required by the schema even though they're meaningless for traces). `whereClause` is a custom grammar (`=`, `>`, `<`, `>=`, `<=`, `contains`, `exists` joined by ` AND `) — there is NO SQL `IS NULL`/`IS NOT NULL`; use `<key> exists` to require an attribute. See the `maple://instructions` resource for the full widget JSON shape (aggregations per source, groupBy prefixes, units, stat reduceToValue, hideSeries).\n\n2. **Raw ClickHouse SQL**: pass `sql` to create a `raw_sql_chart` widget (the tool builds the dataSource for you — `data_source_json` is ignored). `sql` MUST reference `$__orgFilter`. Macros: `$__orgFilter` (required), `$__timeFilter(Column)`, `$__startTime`, `$__endTime`, `$__interval_s` (only useful when SQL also references it, typically inside `toStartOfInterval(…, INTERVAL $__interval_s SECOND)`).\n\n   **Before writing raw SQL, call `describe_warehouse_tables`** to discover real table and column names (no args → list every table; `table: \"<name>\"` → full column list with types, jsonPaths, sorting key, and curated notes on enum casing, units, sort-key hints). Do not guess table or column names — a hallucinated identifier silently produces an empty chart. Columns are PascalCase; values for `StatusCode`/`SeverityText`/`SpanKind` are Title Case (`'Error'` not `'ERROR'`); span `Duration` is in nanoseconds (divide by 1e6 for ms).\n\n   **SELECT shape per `display_type`** (the renderer is opinionated; wrong aliases → empty or `[object Object]`):\n   - `line`/`area`/`bar`: time bucket as first column (alias `bucket`) + ONE OR MORE numeric series columns. Each numeric column becomes one series; the column name becomes the legend label. **String columns are dropped**, so for multi-series (e.g., per-service breakdown) pivot in SQL with `countIf(...)` — tall form (`bucket, ServiceName, count()`) collapses to a single aggregate line. Single-series: `SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket, count() AS errors FROM ... WHERE $__orgFilter AND $__timeFilter(Timestamp) GROUP BY bucket ORDER BY bucket`. Multi-series wide form: `SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket, countIf(ServiceName='api') AS api, countIf(ServiceName='web') AS web FROM ... GROUP BY bucket ORDER BY bucket`. For dynamic series labels, run a discovery query first (e.g., `query_data` or a quick top-N) and inject the values.\n   - `stat`: one scalar aliased `value` — `SELECT count() AS value FROM ... WHERE $__orgFilter AND $__timeFilter(Timestamp)`\n   - `pie`: `name` (label) + numeric column; cap with `LIMIT 8`-ish\n   - `heatmap`: three columns aliased `x`, `y`, `value` (string-cast numeric x/y)\n   - `table`: any rows; columns render in order\n   - `histogram`: one numeric column aliased `value` (renderer buckets client-side); add `LIMIT 5000`\n\n   If `display_type` is omitted it's derived from `visualization` (chart→line via `display_json.chartId`, stat→stat, table→table, pie→pie, histogram→histogram, heatmap→heatmap). The stat `reduceToValue` transform is auto-injected.\n\n   **See `maple://instructions` for the full table catalog, column lists, and worked examples per display type.**\n\nIf `layout_json` is omitted the widget is auto-placed using the same grid logic as the web UI. Returns the new widget id plus an automatic validation summary (verdict, flags). If `verdict` is `suspicious` or `broken`, fix via `update_dashboard_widget` — the chart will not render meaningful data as-is.",
 		Schema.Struct({
 			dashboard_id: requiredStringParam(
 				"ID of the dashboard to add the widget to (use list_dashboards to find IDs)",
 			),
 			visualization: requiredStringParam(
-				'Widget visualization type: "chart", "stat", "table", or "list"',
+				'MUST be exactly one of: "chart", "stat", "table", "list", "pie", "histogram", "heatmap". This is the widget KIND, not a title — set the title via `display_json.title`. For line/area/bar charts use `"chart"` and set `display_type` to `"line"`/`"area"`/`"bar"`.',
 			),
-			data_source_json: requiredStringParam(
-				"JSON string for the widget's dataSource: { endpoint, params?, transform? }. Use get_dashboard on an existing widget to see the exact shape.",
+			sql: optionalStringParam(
+				"Raw ClickHouse SQL with macros (`$__orgFilter` required). When set, the tool creates a `raw_sql_chart` widget and ignores `data_source_json`.",
 			),
-			display_json: requiredStringParam(
-				"JSON string for the widget's display config: { title?, unit?, thresholds?, chartId?, columns?, ... }. Use get_dashboard on an existing widget to see the exact shape.",
+			display_type: Schema.optional(RawSqlDisplayType).annotate({
+				description:
+					"Raw SQL display type: line/area/bar/table/stat/pie/histogram/heatmap. Only used when `sql` is set. Derived from `visualization` (+ `display_json.chartId`) if omitted.",
+			}),
+			granularity_seconds: optionalNumberParam(
+				"Bucket size in seconds for raw SQL timeseries. Only used when `sql` is set. If omitted the server auto-computes from the dashboard time range.",
+			),
+			data_source_json: optionalStringParam(
+				"JSON string for the widget's dataSource: { endpoint, params?, transform? }. Required for the structured-query path; ignored when `sql` is set. Use get_dashboard on an existing widget to see the exact shape.",
+			),
+			display_json: optionalStringParam(
+				"JSON string for the widget's display config: { title?, unit?, thresholds?, chartId?, columns?, ... }. Required for the structured-query path; defaults to `{}` for the raw-SQL path. Use get_dashboard on an existing widget to see the exact shape.",
 			),
 			layout_json: optionalStringParam(
 				"Optional JSON string for layout { x, y, w, h }. If omitted the widget is auto-placed using a 12-column grid with sensible default sizes per visualization.",
@@ -43,13 +79,54 @@ export function registerAddDashboardWidgetTool(server: McpToolRegistrar) {
 		Effect.fn("McpTool.addDashboardWidget")(function* ({
 			dashboard_id,
 			visualization,
+			sql,
+			display_type,
+			granularity_seconds,
 			data_source_json,
 			display_json,
 			layout_json,
 			widget_id,
 		}) {
-			const dataSource = yield* decodeDataSourceJson(data_source_json, TOOL)
-			const display = yield* decodeDisplayJson(display_json, TOOL)
+			if (!(KNOWN_VISUALIZATIONS as ReadonlyArray<string>).includes(visualization)) {
+				return validationError(
+					`\`visualization\` must be one of: ${KNOWN_VISUALIZATIONS.join(", ")}. Got: ${JSON.stringify(visualization)}. This field is the widget KIND, not a title — set the title via \`display_json.title\`. For line/area/bar charts, use \`visualization: "chart"\` and \`display_type: "line"\`/"area"/"bar".`,
+					'{ "visualization": "chart", "display_type": "line", "sql": "..." }',
+				)
+			}
+
+			const useRawSql = typeof sql === "string" && sql.trim().length > 0
+			if (!useRawSql && (!data_source_json || !display_json)) {
+				return validationError(
+					"add_dashboard_widget requires either `sql` (raw ClickHouse SQL path) or both `data_source_json` and `display_json` (structured-query path).",
+					'{ "sql": "SELECT count() FROM logs WHERE $__orgFilter AND $__timeFilter(Timestamp)" }',
+				)
+			}
+
+			const display: DashboardWidget["display"] = display_json
+				? yield* decodeDisplayJson(display_json, TOOL)
+				: {}
+
+			let dataSource: DashboardWidget["dataSource"]
+			if (useRawSql) {
+				const macroError = validateRawSqlMacro(sql)
+				if (macroError) {
+					return validationError(
+						macroError,
+						"SELECT count() FROM logs WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+					)
+				}
+				const displayType =
+					display_type ?? visualizationToDisplayType(visualization, display.chartId)
+				dataSource = buildRawSqlDataSource({
+					visualization,
+					sql,
+					displayType,
+					granularitySeconds: granularity_seconds,
+				})
+			} else {
+				dataSource = yield* decodeDataSourceJson(data_source_json!, TOOL)
+			}
+
 			const explicitLayout = layout_json ? yield* decodeLayoutJson(layout_json, TOOL) : undefined
 
 			const newId = widget_id && widget_id.length > 0 ? widget_id : generateWidgetId()
