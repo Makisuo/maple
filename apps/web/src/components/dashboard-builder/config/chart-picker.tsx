@@ -51,6 +51,7 @@ type PickerTab =
 	| "pies"
 	| "histograms"
 	| "heatmaps"
+	| "raw-sql"
 	| "notes"
 
 const tabs: { id: PickerTab; label: string }[] = [
@@ -62,7 +63,50 @@ const tabs: { id: PickerTab; label: string }[] = [
 	{ id: "stats", label: "Stats" },
 	{ id: "tables", label: "Tables" },
 	{ id: "lists", label: "Lists" },
+	{ id: "raw-sql", label: "Raw SQL" },
 	{ id: "notes", label: "Notes" },
+]
+
+const RAW_SQL_LINE_TEMPLATE = `SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
+       count() AS logs
+FROM logs
+WHERE $__orgFilter AND $__timeFilter(Timestamp)
+GROUP BY bucket
+ORDER BY bucket`
+
+const RAW_SQL_TABLE_TEMPLATE = `SELECT ServiceName, count() AS spans
+FROM service_overview_spans
+WHERE $__orgFilter AND $__timeFilter(Timestamp)
+GROUP BY ServiceName
+ORDER BY spans DESC
+LIMIT 20`
+
+const rawSqlPresets: Array<{
+	id: string
+	label: string
+	description: string
+	visualization: VisualizationType
+	displayType: "line" | "table"
+	chartId?: string
+	sql: string
+}> = [
+	{
+		id: "raw-sql-line",
+		label: "Raw SQL — Line",
+		description: "Time-series from a custom ClickHouse query.",
+		visualization: "chart",
+		displayType: "line",
+		chartId: "query-builder-line",
+		sql: RAW_SQL_LINE_TEMPLATE,
+	},
+	{
+		id: "raw-sql-table",
+		label: "Raw SQL — Table",
+		description: "Tabular result from a custom ClickHouse query.",
+		visualization: "table",
+		displayType: "table",
+		sql: RAW_SQL_TABLE_TEMPLATE,
+	},
 ]
 
 const chartDescriptions: Record<string, string> = {
@@ -315,6 +359,24 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 		onOpenChange(false)
 	}
 
+	const handleSelectRawSql = (preset: (typeof rawSqlPresets)[number]) => {
+		onSelect(
+			preset.visualization,
+			{
+				endpoint: "raw_sql_chart",
+				params: {
+					sql: preset.sql,
+					displayType: preset.displayType,
+				},
+			},
+			{
+				title: preset.label,
+				...(preset.chartId ? { chartId: preset.chartId } : {}),
+			},
+		)
+		onOpenChange(false)
+	}
+
 	const showCharts = activeTab === "all" || activeTab === "charts"
 	const showStats = activeTab === "all" || activeTab === "stats"
 	const showTables = activeTab === "all" || activeTab === "tables"
@@ -322,6 +384,7 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 	const showPies = activeTab === "all" || activeTab === "pies"
 	const showHistograms = activeTab === "all" || activeTab === "histograms"
 	const showHeatmaps = activeTab === "all" || activeTab === "heatmaps"
+	const showRawSql = activeTab === "all" || activeTab === "raw-sql"
 	const showNotes = activeTab === "all" || activeTab === "notes"
 
 	return (
@@ -469,6 +532,36 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 													{preset.description}
 												</div>
 											)}
+										</div>
+									</button>
+								))}
+							</div>
+						</div>
+					)}
+
+					{showRawSql && (
+						<div className="flex flex-col gap-3">
+							{activeTab === "all" && (
+								<h3 className="text-[10px] font-semibold text-dim uppercase tracking-wider">
+									Raw SQL
+								</h3>
+							)}
+							<div className="grid grid-cols-3 gap-3">
+								{rawSqlPresets.map((preset) => (
+									<button
+										key={preset.id}
+										type="button"
+										onClick={() => handleSelectRawSql(preset)}
+										className="group ring-1 ring-border hover:ring-border-active bg-background p-4 text-left transition-all flex flex-col gap-3 rounded-md"
+									>
+										<div className="aspect-[4/3] flex flex-col gap-1 overflow-hidden p-1 bg-muted/30 rounded">
+											<div className="text-[9px] text-muted-foreground font-mono leading-tight">
+												{preset.sql.split("\n").slice(0, 6).join("\n")}
+											</div>
+										</div>
+										<div className="flex flex-col gap-0.5">
+											<div className="text-xs font-medium">{preset.label}</div>
+											<div className="text-[11px] text-dim">{preset.description}</div>
 										</div>
 									</button>
 								))}

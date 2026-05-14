@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Maple is an OpenTelemetry observability platform built with TanStack Start (React meta-framework) and Tinybird as the backend data platform. It provides real-time visualization of traces, logs, and metrics from distributed systems.
 
+## Local Dev Login
+
+Sign in at `https://web.localhost` with the Clerk test account:
+
+- Email: `david+clerk_test@gmail.com`
+- Password: `password1!`
+
+Use this when you need an authenticated browser session to verify UI flows end-to-end.
+
 ## Commands
 
 ```bash

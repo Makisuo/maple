@@ -6,6 +6,7 @@ import {
 	WidgetQueryBuilderPage,
 	type WidgetQueryBuilderPageHandle,
 } from "@/components/dashboard-builder/config/widget-query-builder-page"
+import { RawSqlConfigPage } from "@/components/dashboard-builder/config/raw-sql-config-page"
 import { WidgetBuilderProvider } from "@/components/dashboard-builder/config/widget-builder-provider"
 import { DashboardTimeRangeWrapper } from "@/components/dashboard-builder/dashboard-providers"
 import type {
@@ -114,9 +115,17 @@ function WidgetConfigurePage() {
 					</div>
 				}
 			>
-				<WidgetBuilderProvider widget={configureWidget}>
-					<WidgetQueryBuilderPage ref={builderRef} widget={configureWidget} onApply={handleApply} />
-				</WidgetBuilderProvider>
+				{configureWidget.dataSource.endpoint === "raw_sql_chart" ? (
+					<RawSqlConfigPage ref={builderRef} widget={configureWidget} onApply={handleApply} />
+				) : (
+					<WidgetBuilderProvider widget={configureWidget}>
+						<WidgetQueryBuilderPage
+							ref={builderRef}
+							widget={configureWidget}
+							onApply={handleApply}
+						/>
+					</WidgetBuilderProvider>
+				)}
 			</DashboardLayout>
 
 			{status === "blocked" && (

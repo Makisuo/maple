@@ -850,6 +850,45 @@ export class ExecuteQueryBuilderResponse extends Schema.Class<ExecuteQueryBuilde
 	warnings: Schema.optional(Schema.Array(Schema.String)),
 }) {}
 
+// ---------------------------------------------------------------------------
+// Raw SQL chart (Hyperdx-style — user-authored ClickHouse SQL with macros)
+// ---------------------------------------------------------------------------
+
+export const RawSqlDisplayType = Schema.Literals(["line", "table"])
+export type RawSqlDisplayType = Schema.Schema.Type<typeof RawSqlDisplayType>
+
+export class RawSqlExecuteRequest extends Schema.Class<RawSqlExecuteRequest>("RawSqlExecuteRequest")({
+	sql: Schema.String,
+	displayType: RawSqlDisplayType,
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	granularitySeconds: Schema.optional(Schema.Number),
+}) {}
+
+export class RawSqlExecuteResponse extends Schema.Class<RawSqlExecuteResponse>("RawSqlExecuteResponse")({
+	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	meta: Schema.Struct({
+		rowCount: Schema.Number,
+		columns: Schema.Array(Schema.String),
+		granularitySeconds: Schema.Number,
+	}),
+}) {}
+
+export class RawSqlValidationError extends Schema.TaggedErrorClass<RawSqlValidationError>()(
+	"@maple/http/errors/RawSqlValidationError",
+	{
+		code: Schema.Literals([
+			"MissingOrgFilter",
+			"InvalidMacro",
+			"DisallowedStatement",
+			"MultipleStatements",
+			"UnresolvedMacro",
+		]),
+		message: Schema.String,
+	},
+	{ httpApiStatus: 400 },
+) {}
+
 export class QueryEngineValidationError extends Schema.TaggedErrorClass<QueryEngineValidationError>()(
 	"@maple/http/errors/QueryEngineValidationError",
 	{
@@ -1140,6 +1179,19 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 			payload: WorkloadFacetsRequest,
 			success: WorkloadFacetsResponse,
 			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("executeRawSql", "/execute-raw-sql", {
+			payload: RawSqlExecuteRequest,
+			success: RawSqlExecuteResponse,
+			error: [
+				RawSqlValidationError,
+				QueryEngineExecutionError,
+				QueryEngineTimeoutError,
+				TinybirdQueryError,
+				TinybirdQuotaExceededError,
+			] as const,
 		}),
 	)
 	.prefix("/api/query-engine")

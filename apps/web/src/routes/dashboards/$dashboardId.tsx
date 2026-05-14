@@ -64,6 +64,7 @@ function DashboardViewPage() {
 		removeWidget,
 		restoreWidget,
 		updateWidgetDisplay,
+		updateWidget,
 		updateWidgetLayouts,
 		autoLayoutWidgets,
 	} = useDashboardStore()
@@ -147,6 +148,7 @@ function DashboardViewPage() {
 					restoreWidget,
 					cloneWidget,
 					updateWidgetDisplay,
+					updateWidget,
 					updateWidgetLayouts,
 					autoLayoutWidgets,
 				}}
