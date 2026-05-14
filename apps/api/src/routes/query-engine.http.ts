@@ -1519,9 +1519,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						granularitySeconds,
 					})
 
+					const profile: "aggregation" | "list" =
+						payload.displayType === "table" ? "list" : "aggregation"
 					const rows = yield* mapExecError(
 						warehouse.sqlQuery(tenant, expanded.sql, {
-							profile: payload.displayType === "line" ? "aggregation" : "list",
+							profile,
 							context: "rawSql",
 						}),
 						"rawSql query failed",

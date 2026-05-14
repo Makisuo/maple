@@ -4,6 +4,10 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
+import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
+import { PieWidget } from "@/components/dashboard-builder/widgets/pie-widget"
+import { HistogramWidget } from "@/components/dashboard-builder/widgets/histogram-widget"
+import { HeatmapWidget } from "@/components/dashboard-builder/widgets/heatmap-widget"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useWidgetData } from "@/hooks/use-widget-data"
@@ -24,7 +28,18 @@ const MACRO_HINTS: Array<{ token: string; description: string }> = [
 	{ token: "$__interval_s", description: "Auto-computed bucket size in seconds" },
 ]
 
-type DisplayType = "line" | "table"
+type DisplayType = "line" | "area" | "bar" | "table" | "stat" | "pie" | "histogram" | "heatmap"
+
+const DISPLAY_OPTIONS: ReadonlyArray<{ value: DisplayType; label: string }> = [
+	{ value: "line", label: "Line" },
+	{ value: "area", label: "Area" },
+	{ value: "bar", label: "Bar" },
+	{ value: "table", label: "Table" },
+	{ value: "stat", label: "Stat" },
+	{ value: "pie", label: "Pie" },
+	{ value: "histogram", label: "Histogram" },
+	{ value: "heatmap", label: "Heatmap" },
+]
 
 interface RawSqlPreviewProps {
 	widget: DashboardWidget
@@ -32,11 +47,48 @@ interface RawSqlPreviewProps {
 
 const RawSqlPreview = React.memo(function RawSqlPreview({ widget }: RawSqlPreviewProps) {
 	const { dataState } = useWidgetData(widget)
-	if (widget.visualization === "table") {
-		return <TableWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
+	const common = { dataState, display: widget.display, mode: "view" as const, onRemove: () => {} }
+	switch (widget.visualization) {
+		case "table":
+			return <TableWidget {...common} />
+		case "stat":
+			return <StatWidget {...common} />
+		case "pie":
+			return <PieWidget {...common} />
+		case "histogram":
+			return <HistogramWidget {...common} />
+		case "heatmap":
+			return <HeatmapWidget {...common} />
+		default:
+			return <ChartWidget {...common} />
 	}
-	return <ChartWidget dataState={dataState} display={widget.display} mode="view" onRemove={() => {}} />
 })
+
+// Maps a Raw SQL displayType to the widget visualization + a sane default
+// chartId so existing renderers pick up the right component.
+function displayTypeToVisualization(displayType: DisplayType): {
+	visualization: VisualizationType
+	defaultChartId?: string
+} {
+	switch (displayType) {
+		case "line":
+			return { visualization: "chart", defaultChartId: "query-builder-line" }
+		case "area":
+			return { visualization: "chart", defaultChartId: "query-builder-area" }
+		case "bar":
+			return { visualization: "chart", defaultChartId: "query-builder-bar" }
+		case "table":
+			return { visualization: "table" }
+		case "stat":
+			return { visualization: "stat" }
+		case "pie":
+			return { visualization: "pie", defaultChartId: "query-builder-pie" }
+		case "histogram":
+			return { visualization: "histogram", defaultChartId: "query-builder-histogram" }
+		case "heatmap":
+			return { visualization: "heatmap", defaultChartId: "query-builder-heatmap" }
+	}
+}
 
 interface RawSqlConfigPageProps {
 	widget: DashboardWidget
@@ -55,16 +107,29 @@ interface RawSqlState {
 	granularitySeconds: number | null
 }
 
+function isDisplayType(value: unknown): value is DisplayType {
+	return (
+		value === "line" ||
+		value === "area" ||
+		value === "bar" ||
+		value === "table" ||
+		value === "stat" ||
+		value === "pie" ||
+		value === "histogram" ||
+		value === "heatmap"
+	)
+}
+
 function widgetToState(widget: DashboardWidget): RawSqlState {
 	const params = (widget.dataSource.params ?? {}) as {
 		sql?: string
-		displayType?: DisplayType
+		displayType?: unknown
 		granularitySeconds?: number
 	}
 	return {
 		title: widget.display.title ?? "Raw SQL",
 		sql: params.sql ?? "",
-		displayType: params.displayType === "table" ? "table" : "line",
+		displayType: isDisplayType(params.displayType) ? params.displayType : "line",
 		granularitySeconds:
 			typeof params.granularitySeconds === "number" ? params.granularitySeconds : null,
 	}
@@ -78,7 +143,19 @@ function stateToUpdates(
 	dataSource: WidgetDataSource
 	display: WidgetDisplayConfig
 } {
-	const visualization: VisualizationType = state.displayType === "table" ? "table" : "chart"
+	const { visualization, defaultChartId } = displayTypeToVisualization(state.displayType)
+	const existingTransform = widget.dataSource.transform
+	// Stat widgets need a reduceToValue transform to extract the scalar — if the
+	// user switches *into* stat from another type and there's no transform yet,
+	// fall back to reading the first numeric column called "value".
+	const transform =
+		state.displayType === "stat" && !existingTransform?.reduceToValue
+			? {
+					...existingTransform,
+					reduceToValue: { field: "value", aggregate: "first" as const },
+				}
+			: existingTransform
+
 	return {
 		visualization,
 		dataSource: {
@@ -88,11 +165,12 @@ function stateToUpdates(
 				displayType: state.displayType,
 				...(state.granularitySeconds != null ? { granularitySeconds: state.granularitySeconds } : {}),
 			},
+			...(transform ? { transform } : {}),
 		},
 		display: {
 			...widget.display,
 			title: state.title,
-			chartId: state.displayType === "line" ? (widget.display.chartId ?? "query-builder-line") : widget.display.chartId,
+			chartId: defaultChartId ?? widget.display.chartId,
 		},
 	}
 }
@@ -207,8 +285,11 @@ export function RawSqlConfigPage({ widget, onApply, ref }: RawSqlConfigPageProps
 								}
 								className="h-8 text-xs bg-background border border-border rounded px-2"
 							>
-								<option value="line">Line / area</option>
-								<option value="table">Table</option>
+								{DISPLAY_OPTIONS.map((opt) => (
+									<option key={opt.value} value={opt.value}>
+										{opt.label}
+									</option>
+								))}
 							</select>
 						</div>
 

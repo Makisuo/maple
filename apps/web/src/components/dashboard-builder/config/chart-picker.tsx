@@ -67,7 +67,7 @@ const tabs: { id: PickerTab; label: string }[] = [
 	{ id: "notes", label: "Notes" },
 ]
 
-const RAW_SQL_LINE_TEMPLATE = `SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
+const RAW_SQL_TIMESERIES_TEMPLATE = `SELECT toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
        count() AS logs
 FROM logs
 WHERE $__orgFilter AND $__timeFilter(Timestamp)
@@ -81,23 +81,69 @@ GROUP BY ServiceName
 ORDER BY spans DESC
 LIMIT 20`
 
+const RAW_SQL_STAT_TEMPLATE = `SELECT count() AS value
+FROM logs
+WHERE $__orgFilter AND $__timeFilter(Timestamp)`
+
+const RAW_SQL_PIE_TEMPLATE = `SELECT ServiceName AS name, count() AS value
+FROM service_overview_spans
+WHERE $__orgFilter AND $__timeFilter(Timestamp)
+GROUP BY name
+ORDER BY value DESC
+LIMIT 8`
+
+const RAW_SQL_HISTOGRAM_TEMPLATE = `SELECT Duration / 1000000 AS value
+FROM service_overview_spans
+WHERE $__orgFilter AND $__timeFilter(Timestamp)
+LIMIT 5000`
+
+const RAW_SQL_HEATMAP_TEMPLATE = `SELECT ServiceName AS x,
+       toString(toHour(Timestamp)) AS y,
+       count() AS value
+FROM service_overview_spans
+WHERE $__orgFilter AND $__timeFilter(Timestamp)
+GROUP BY x, y
+ORDER BY x, y`
+
+type RawSqlDisplayType = "line" | "area" | "bar" | "table" | "stat" | "pie" | "histogram" | "heatmap"
+
 const rawSqlPresets: Array<{
 	id: string
 	label: string
 	description: string
 	visualization: VisualizationType
-	displayType: "line" | "table"
+	displayType: RawSqlDisplayType
 	chartId?: string
 	sql: string
+	display?: Partial<WidgetDisplayConfig>
+	transform?: NonNullable<import("@/components/dashboard-builder/types").WidgetDataSource["transform"]>
 }> = [
 	{
 		id: "raw-sql-line",
 		label: "Raw SQL — Line",
-		description: "Time-series from a custom ClickHouse query.",
+		description: "Time-series line chart from custom SQL.",
 		visualization: "chart",
 		displayType: "line",
 		chartId: "query-builder-line",
-		sql: RAW_SQL_LINE_TEMPLATE,
+		sql: RAW_SQL_TIMESERIES_TEMPLATE,
+	},
+	{
+		id: "raw-sql-area",
+		label: "Raw SQL — Area",
+		description: "Time-series area chart from custom SQL.",
+		visualization: "chart",
+		displayType: "area",
+		chartId: "query-builder-area",
+		sql: RAW_SQL_TIMESERIES_TEMPLATE,
+	},
+	{
+		id: "raw-sql-bar",
+		label: "Raw SQL — Bar",
+		description: "Time-bucketed bar chart from custom SQL.",
+		visualization: "chart",
+		displayType: "bar",
+		chartId: "query-builder-bar",
+		sql: RAW_SQL_TIMESERIES_TEMPLATE,
 	},
 	{
 		id: "raw-sql-table",
@@ -106,6 +152,43 @@ const rawSqlPresets: Array<{
 		visualization: "table",
 		displayType: "table",
 		sql: RAW_SQL_TABLE_TEMPLATE,
+	},
+	{
+		id: "raw-sql-stat",
+		label: "Raw SQL — Stat",
+		description: "Single number from a scalar query.",
+		visualization: "stat",
+		displayType: "stat",
+		sql: RAW_SQL_STAT_TEMPLATE,
+		display: { unit: "number" },
+		transform: { reduceToValue: { field: "value", aggregate: "first" } },
+	},
+	{
+		id: "raw-sql-pie",
+		label: "Raw SQL — Pie",
+		description: "Composition pie chart (name + value rows).",
+		visualization: "pie",
+		displayType: "pie",
+		chartId: "query-builder-pie",
+		sql: RAW_SQL_PIE_TEMPLATE,
+	},
+	{
+		id: "raw-sql-histogram",
+		label: "Raw SQL — Histogram",
+		description: "Distribution histogram from per-row values.",
+		visualization: "histogram",
+		displayType: "histogram",
+		chartId: "query-builder-histogram",
+		sql: RAW_SQL_HISTOGRAM_TEMPLATE,
+	},
+	{
+		id: "raw-sql-heatmap",
+		label: "Raw SQL — Heatmap",
+		description: "2D bucket grid from x / y / value rows.",
+		visualization: "heatmap",
+		displayType: "heatmap",
+		chartId: "query-builder-heatmap",
+		sql: RAW_SQL_HEATMAP_TEMPLATE,
 	},
 ]
 
@@ -368,10 +451,12 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 					sql: preset.sql,
 					displayType: preset.displayType,
 				},
+				...(preset.transform ? { transform: preset.transform } : {}),
 			},
 			{
 				title: preset.label,
 				...(preset.chartId ? { chartId: preset.chartId } : {}),
+				...(preset.display ?? {}),
 			},
 		)
 		onOpenChange(false)

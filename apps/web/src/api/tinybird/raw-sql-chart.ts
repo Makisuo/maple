@@ -7,16 +7,26 @@ import { TinybirdDateTimeString, decodeInput, runTinybirdQuery } from "@/api/tin
 // Raw SQL chart server function (widget data source `raw_sql_chart`).
 //
 // Widget params shape:
-//   { sql, displayType: "line" | "table", granularitySeconds?, startTime, endTime, ... }
+//   { sql, displayType, granularitySeconds?, startTime, endTime, ... }
+//   displayType ∈ "line" | "area" | "bar" | "table" | "stat" | "pie" | "histogram" | "heatmap"
 //
 // Returns rows in a renderer-friendly shape:
-//   - displayType: "table"  → returns raw rows as-is
-//   - displayType: "line"   → flattens to `{ bucket, [seriesName]: number }`
-//     using the first DateTime-like column as `bucket` and the remaining
-//     numeric columns as series values. Mirrors the convention used by
-//     custom_query_builder_timeseries so existing line/area chart renderers
-//     can consume the data without configuration.
+//   - line / area / bar  → flattens to `{ bucket, [series]: number }` using the
+//     first DateTime-like column as `bucket` and the remaining numeric columns
+//     as series values (matches custom_query_builder_timeseries).
+//   - table              → raw rows.
+//   - stat               → raw rows; consumers usually pair with
+//     `transform.reduceToValue: { field, aggregate }` on the widget data source
+//     to extract a scalar value.
+//   - pie                → raw rows; chart picks the first numeric column as
+//     the value field and uses the `name` column for labels.
+//   - histogram          → raw rows; histogram chart accepts a value-per-row
+//     shape and buckets client-side.
+//   - heatmap            → raw rows; chart accepts `{ x, y, value }` or wide
+//     `{ name, …numeric }` formats.
 // ---------------------------------------------------------------------------
+
+const TIME_SERIES_DISPLAY_TYPES: ReadonlyArray<"line" | "area" | "bar"> = ["line", "area", "bar"]
 
 const ISO_OR_TINYBIRD_DATETIME_RE = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}:\d{2})/
 
@@ -36,7 +46,7 @@ export interface RawSqlChartResponse {
 		rowCount: number
 		columns: ReadonlyArray<string>
 		granularitySeconds: number
-		displayType: "line" | "table"
+		displayType: Schema.Schema.Type<typeof RawSqlDisplayType>
 	}
 }
 
@@ -113,8 +123,11 @@ export const getRawSqlChart = Effect.fn("QueryEngine.getRawSqlChart")(function* 
 
 	const rows = result.data as ReadonlyArray<Record<string, unknown>>
 
-	const shaped =
-		input.displayType === "line" ? reshapeForLineChart(rows) : (rows as Array<Record<string, unknown>>)
+	const shaped = TIME_SERIES_DISPLAY_TYPES.includes(
+		input.displayType as (typeof TIME_SERIES_DISPLAY_TYPES)[number],
+	)
+		? reshapeForLineChart(rows)
+		: (rows as Array<Record<string, unknown>>)
 
 	return {
 		data: shaped,

@@ -318,6 +318,18 @@ const MACRO_HINTS: Array<{ token: string; description: string }> = [
 	{ token: "$__interval_s", description: "Auto-bucket size in seconds" },
 ]
 
+type RawSqlDisplayType = "line" | "area" | "bar" | "table" | "stat" | "pie" | "histogram" | "heatmap"
+const RAW_SQL_DISPLAY_OPTIONS: ReadonlyArray<{ value: RawSqlDisplayType; label: string }> = [
+	{ value: "line", label: "Line" },
+	{ value: "area", label: "Area" },
+	{ value: "bar", label: "Bar" },
+	{ value: "table", label: "Table" },
+	{ value: "stat", label: "Stat" },
+	{ value: "pie", label: "Pie" },
+	{ value: "histogram", label: "Histogram" },
+	{ value: "heatmap", label: "Heatmap" },
+]
+
 function RawSqlEditor({
 	widget,
 	onUpdateDataSource,
@@ -327,11 +339,11 @@ function RawSqlEditor({
 }) {
 	const params = (widget.dataSource.params ?? {}) as {
 		sql?: string
-		displayType?: "line" | "table"
+		displayType?: RawSqlDisplayType
 		granularitySeconds?: number
 	}
 	const sql = params.sql ?? ""
-	const displayType: "line" | "table" = params.displayType === "table" ? "table" : "line"
+	const displayType: RawSqlDisplayType = params.displayType ?? "line"
 	const granularitySeconds = params.granularitySeconds
 
 	const missingOrgFilter = !sql.includes("$__orgFilter")
@@ -374,11 +386,14 @@ function RawSqlEditor({
 				<label className="text-[10px] font-medium text-muted-foreground">Display type</label>
 				<select
 					value={displayType}
-					onChange={(e) => update({ displayType: e.target.value as "line" | "table" })}
+					onChange={(e) => update({ displayType: e.target.value as RawSqlDisplayType })}
 					className="h-7 text-xs bg-background border border-border rounded px-2"
 				>
-					<option value="line">Line / area</option>
-					<option value="table">Table</option>
+					{RAW_SQL_DISPLAY_OPTIONS.map((opt) => (
+						<option key={opt.value} value={opt.value}>
+							{opt.label}
+						</option>
+					))}
 				</select>
 			</div>
 

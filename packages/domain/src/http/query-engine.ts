@@ -854,7 +854,16 @@ export class ExecuteQueryBuilderResponse extends Schema.Class<ExecuteQueryBuilde
 // Raw SQL chart (Hyperdx-style — user-authored ClickHouse SQL with macros)
 // ---------------------------------------------------------------------------
 
-export const RawSqlDisplayType = Schema.Literals(["line", "table"])
+export const RawSqlDisplayType = Schema.Literals([
+	"line",
+	"area",
+	"bar",
+	"table",
+	"stat",
+	"pie",
+	"histogram",
+	"heatmap",
+])
 export type RawSqlDisplayType = Schema.Schema.Type<typeof RawSqlDisplayType>
 
 export class RawSqlExecuteRequest extends Schema.Class<RawSqlExecuteRequest>("RawSqlExecuteRequest")({
