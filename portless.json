@@ -1,4 +1,5 @@
 {
+	"turbo": false,
 	"apps": {
 		"apps/web": { "name": "web" },
 		"apps/api": { "name": "api" },
