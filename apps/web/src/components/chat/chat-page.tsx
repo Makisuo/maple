@@ -1,9 +1,9 @@
 import { useEffect } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@maple/ui/components/ui/sidebar"
+import { SidebarInset, SidebarProvider } from "@maple/ui/components/ui/sidebar"
 import { useChatTabs } from "@/hooks/use-chat-tabs"
-import { ChatTabBar } from "./chat-tabs"
+import { ChatSidebar } from "./chat-sidebar"
 import { ChatConversation } from "./chat-conversation"
 import { alertTabId, alertTabTitle, type AlertContext } from "./alert-context"
 import {
@@ -57,44 +57,59 @@ function ChatPageInner({
 		ensureTab(widgetFixTabId(widgetFixContext), widgetFixTabTitle(widgetFixContext))
 	}, [mode, widgetFixContext, ensureTab])
 
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			const mod = e.metaKey || e.ctrlKey
+			if (!mod || !e.shiftKey) return
+			if (e.key === "O" || e.key === "o") {
+				e.preventDefault()
+				createTab()
+			}
+		}
+		window.addEventListener("keydown", onKey)
+		return () => window.removeEventListener("keydown", onKey)
+	}, [createTab])
+
 	const alertTab = mode === "alert" && alertContext ? alertTabId(alertContext) : undefined
 	const widgetFixTab =
 		mode === "widget-fix" && widgetFixContext ? widgetFixTabId(widgetFixContext) : undefined
 
 	return (
-		<SidebarProvider>
+		<SidebarProvider open={false} onOpenChange={() => {}}>
 			<AppSidebar />
 			<SidebarInset>
-				<header className="flex h-12 shrink-0 items-center border-b px-2">
-					<SidebarTrigger className="-ml-0.5" />
-					<ChatTabBar
+				<div className="flex h-full min-h-0 flex-1">
+					<ChatSidebar
 						tabs={tabs}
 						activeTabId={activeTabId}
 						onSelect={setActiveTab}
 						onClose={closeTab}
 						onCreate={createTab}
+						onRename={renameTab}
 					/>
-				</header>
-				<div className="relative min-h-0 flex-1 bg-background">
-					{tabs.map((tab) => {
-						const isAlertTab = tab.id === alertTab
-						const isWidgetFixTab = tab.id === widgetFixTab
-						return (
-							<div
-								key={tab.id}
-								className={tab.id === activeTabId ? "flex h-full flex-col" : "hidden"}
-							>
-								<ChatConversation
-									tabId={tab.id}
-									isActive={tab.id === activeTabId}
-									onFirstMessage={(id, text) => renameTab(id, text)}
-									mode={isAlertTab ? "alert" : isWidgetFixTab ? "widget-fix" : undefined}
-									alertContext={isAlertTab ? alertContext : undefined}
-									widgetFixContext={isWidgetFixTab ? widgetFixContext : undefined}
-								/>
-							</div>
-						)
-					})}
+					<div className="flex min-w-0 flex-1 flex-col">
+						<div className="relative min-h-0 flex-1 bg-background">
+							{tabs.map((tab) => {
+								const isAlertTab = tab.id === alertTab
+								const isWidgetFixTab = tab.id === widgetFixTab
+								return (
+									<div
+										key={tab.id}
+										className={tab.id === activeTabId ? "flex h-full flex-col" : "hidden"}
+									>
+										<ChatConversation
+											tabId={tab.id}
+											isActive={tab.id === activeTabId}
+											onFirstMessage={(id, text) => renameTab(id, text)}
+											mode={isAlertTab ? "alert" : isWidgetFixTab ? "widget-fix" : undefined}
+											alertContext={isAlertTab ? alertContext : undefined}
+											widgetFixContext={isWidgetFixTab ? widgetFixContext : undefined}
+										/>
+									</div>
+								)
+							})}
+						</div>
+					</div>
 				</div>
 			</SidebarInset>
 		</SidebarProvider>

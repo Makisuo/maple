@@ -9,6 +9,7 @@ export interface ChatTab {
 	id: string
 	title: string
 	createdAt: number
+	updatedAt: number
 }
 
 interface ChatTabsState {
@@ -17,9 +18,19 @@ interface ChatTabsState {
 }
 
 function defaultState(): ChatTabsState {
+	const now = Date.now()
 	return {
-		tabs: [{ id: DEFAULT_TAB_ID, title: "New Chat", createdAt: Date.now() }],
+		tabs: [{ id: DEFAULT_TAB_ID, title: "New Chat", createdAt: now, updatedAt: now }],
 		activeTabId: DEFAULT_TAB_ID,
+	}
+}
+
+function migrateTab(tab: ChatTab & { updatedAt?: number }): ChatTab {
+	return {
+		id: tab.id,
+		title: tab.title,
+		createdAt: tab.createdAt,
+		updatedAt: tab.updatedAt ?? tab.createdAt,
 	}
 }
 
@@ -28,7 +39,9 @@ function loadState(orgId: string): ChatTabsState {
 		const raw = localStorage.getItem(storageKey(orgId))
 		if (raw) {
 			const parsed = JSON.parse(raw) as ChatTabsState
-			if (parsed.tabs?.length > 0 && parsed.activeTabId) return parsed
+			if (parsed.tabs?.length > 0 && parsed.activeTabId) {
+				return { ...parsed, tabs: parsed.tabs.map(migrateTab) }
+			}
 		}
 	} catch {
 		// ignore
@@ -62,10 +75,12 @@ export function useChatTabs(orgId: string, initialTabId?: string) {
 	}, [orgId])
 
 	const createTab = useCallback(() => {
+		const now = Date.now()
 		const newTab: ChatTab = {
 			id: crypto.randomUUID(),
 			title: "New Chat",
-			createdAt: Date.now(),
+			createdAt: now,
+			updatedAt: now,
 		}
 		setState((prev) => {
 			const next = { tabs: [...prev.tabs, newTab], activeTabId: newTab.id }
@@ -99,7 +114,11 @@ export function useChatTabs(orgId: string, initialTabId?: string) {
 		(id: string) => {
 			setState((prev) => {
 				if (prev.activeTabId === id) return prev
-				const next = { ...prev, activeTabId: id }
+				const next = {
+					...prev,
+					activeTabId: id,
+					tabs: prev.tabs.map((t) => (t.id === id ? { ...t, updatedAt: Date.now() } : t)),
+				}
 				saveState(orgId, next)
 				return next
 			})
@@ -110,9 +129,10 @@ export function useChatTabs(orgId: string, initialTabId?: string) {
 	const renameTab = useCallback(
 		(id: string, title: string) => {
 			setState((prev) => {
+				const now = Date.now()
 				const next = {
 					...prev,
-					tabs: prev.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
+					tabs: prev.tabs.map((t) => (t.id === id ? { ...t, title, updatedAt: now } : t)),
 				}
 				saveState(orgId, next)
 				return next
@@ -125,13 +145,18 @@ export function useChatTabs(orgId: string, initialTabId?: string) {
 		(id: string, title: string) => {
 			setState((prev) => {
 				const existing = prev.tabs.find((t) => t.id === id)
+				const now = Date.now()
 				if (existing) {
 					if (prev.activeTabId === id) return prev
-					const next = { ...prev, activeTabId: id }
+					const next = {
+						...prev,
+						activeTabId: id,
+						tabs: prev.tabs.map((t) => (t.id === id ? { ...t, updatedAt: now } : t)),
+					}
 					saveState(orgId, next)
 					return next
 				}
-				const newTab: ChatTab = { id, title, createdAt: Date.now() }
+				const newTab: ChatTab = { id, title, createdAt: now, updatedAt: now }
 				const next = { tabs: [...prev.tabs, newTab], activeTabId: id }
 				saveState(orgId, next)
 				return next
