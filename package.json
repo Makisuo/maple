@@ -35,6 +35,9 @@
 		"typecheck": "turbo typecheck"
 	},
 	"dependencies": {},
+	"overrides": {
+		"@durable-streams/state": "npm:@electric-ax/durable-streams-state-beta@^0.3.0"
+	},
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260414.1",
 		"@effect/vitest": "4.0.0-beta.64",

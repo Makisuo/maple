@@ -464,6 +464,9 @@
   "patchedDependencies": {
     "effect@4.0.0-beta.64": "patches/effect@4.0.0-beta.64.patch",
   },
+  "overrides": {
+    "@durable-streams/state": "npm:@electric-ax/durable-streams-state-beta@^0.3.0",
+  },
   "catalog": {
     "vite": "^8.0.3",
     "vitest": "^4.1.2",
@@ -901,7 +904,7 @@
 
     "@durable-streams/client": ["@durable-streams/client@https://pkg.pr.new/durable-streams/durable-streams/@durable-streams/client@350", { "dependencies": { "@microsoft/fetch-event-source": "^2.0.1", "fastq": "^1.19.1" }, "bin": { "intent": "./bin/intent.js" } }, "sha512-MbzGEDd5RgWyxHDzvLojSqN3RSqzO6/Pab0rHvSAsLyzc+okEJi3fJcX6TsaHQZE4kWVuGiINuYbrpMdOO6ZuQ=="],
 
-    "@durable-streams/state": ["@durable-streams/state@https://pkg.pr.new/durable-streams/durable-streams/@durable-streams/state@350", { "dependencies": { "@durable-streams/client": "https://pkg.pr.new/durable-streams/durable-streams/@durable-streams/client@262cb1f", "@standard-schema/spec": "^1.0.0", "@tanstack/db": "^0.6.4" }, "bin": { "intent": "./bin/intent.js" } }, "sha512-aV6BKQ+/rIFgQks1ikp9HTdjDAI03+HpRIkU2EpjgD59/nsl5zpQMKJDg6wVQyoB6sFpnaIgfPz23ajRQGOvzA=="],
+    "@durable-streams/state": ["@electric-ax/durable-streams-state-beta@0.3.1", "", { "dependencies": { "@electric-ax/durable-streams-client-beta": "0.3.1", "@standard-schema/spec": "^1.0.0", "@tanstack/db": "^0.6.4" }, "bin": { "intent": "bin/intent.js" } }, "sha512-84Y3/ERaJgXEtXRqkyK+lML59ABqg/zjsQD3YYR+EWysMsoy6f664GZ5QzTqbuxO/03nP83FuAYFDPw6jgIsCA=="],
 
     "@effect-router/core": ["@effect-router/core@workspace:packages/effect-router"],
 
@@ -922,6 +925,8 @@
     "@electric-ax/agents-mcp": ["@electric-ax/agents-mcp@0.2.2", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.0.0" } }, "sha512-BqbdWsJXoESeLwRpewx9vHAT4I/BexqiE+g/CmP5nkgIS/E2j68AeBnhx5+ahDQX6AqrFLzxKdFSXCLm9L6OeQ=="],
 
     "@electric-ax/agents-runtime": ["@electric-ax/agents-runtime@0.2.1", "", { "dependencies": { "@anthropic-ai/sdk": "^0.78.0", "@durable-streams/client": "https://pkg.pr.new/durable-streams/durable-streams/@durable-streams/client@350", "@durable-streams/state": "https://pkg.pr.new/durable-streams/durable-streams/@durable-streams/state@350", "@electric-ax/agents-mcp": "0.2.2", "@mariozechner/pi-agent-core": "^0.70.2", "@mariozechner/pi-ai": "^0.70.2", "@mozilla/readability": "^0.6.0", "@sinclair/typebox": "^0.34.48", "@standard-schema/spec": "^1.1.0", "@tanstack/db": "^0.6.4", "cron-parser": "^5.5.0", "diff": "^9.0.0", "jsdom": "^28.1.0", "pino": "^10.3.1", "pino-pretty": "^13.0.0", "turndown": "^7.2.2", "turndown-plugin-gfm": "^1.0.2", "zod": "^4.3.6", "zod-to-json-schema": "^3.25.2" }, "peerDependencies": { "@tanstack/react-db": ">=0.1.78", "react": ">=18" }, "optionalPeers": ["@tanstack/react-db", "react"] }, "sha512-Q3tXd0rxiFU2gncmaIumvBN7Ny6JhprM4K+MMnRnHgdAcvTny7UbCKHvdegl8hO0nt17fsFVDxAKXHaUkvTUeQ=="],
+
+    "@electric-ax/durable-streams-client-beta": ["@electric-ax/durable-streams-client-beta@0.3.1", "", { "dependencies": { "@microsoft/fetch-event-source": "^2.0.1", "fastq": "^1.19.1" }, "bin": { "intent": "bin/intent.js" } }, "sha512-smWzyfwrkA5TyRTnyO/HEbElJm54lyifRe6hgQpcfYaW0M3l3jedI5voOEvu2GTHfBKuOsFrFWsbMB0ltGm6qg=="],
 
     "@emmetio/abbreviation": ["@emmetio/abbreviation@2.3.3", "", { "dependencies": { "@emmetio/scanner": "^1.0.4" } }, "sha512-mgv58UrU3rh4YgbE/TzgLQwJ3pFsHHhCLqY20aJq+9comytTXUDNGG/SMtSeMJdkpxgXSXunBGLD8Boka3JyVA=="],
 
@@ -4846,8 +4851,6 @@
     "@coinbase/wallet-sdk/eventemitter3": ["eventemitter3@5.0.4", "", {}, "sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw=="],
 
     "@cspotcode/source-map-support/@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.9", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.0.3", "@jridgewell/sourcemap-codec": "^1.4.10" } }, "sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ=="],
-
-    "@durable-streams/state/@durable-streams/client": ["@durable-streams/client@https://pkg.pr.new/durable-streams/durable-streams/@durable-streams/client@262cb1f", { "dependencies": { "@microsoft/fetch-event-source": "^2.0.1", "fastq": "^1.19.1" }, "bin": { "intent": "./bin/intent.js" } }, "sha512-MbzGEDd5RgWyxHDzvLojSqN3RSqzO6/Pab0rHvSAsLyzc+okEJi3fJcX6TsaHQZE4kWVuGiINuYbrpMdOO6ZuQ=="],
 
     "@electric-ax/agents-runtime/jsdom": ["jsdom@28.1.0", "", { "dependencies": { "@acemir/cssom": "^0.9.31", "@asamuzakjp/dom-selector": "^6.8.1", "@bramus/specificity": "^2.4.2", "@exodus/bytes": "^1.11.0", "cssstyle": "^6.0.1", "data-urls": "^7.0.0", "decimal.js": "^10.6.0", "html-encoding-sniffer": "^6.0.0", "http-proxy-agent": "^7.0.2", "https-proxy-agent": "^7.0.6", "is-potential-custom-element-name": "^1.0.1", "parse5": "^8.0.0", "saxes": "^6.0.0", "symbol-tree": "^3.2.4", "tough-cookie": "^6.0.0", "undici": "^7.21.0", "w3c-xmlserializer": "^5.0.0", "webidl-conversions": "^8.0.1", "whatwg-mimetype": "^5.0.0", "whatwg-url": "^16.0.0", "xml-name-validator": "^5.0.0" }, "peerDependencies": { "canvas": "^3.0.0" }, "optionalPeers": ["canvas"] }, "sha512-0+MoQNYyr2rBHqO1xilltfDjV9G7ymYGlAUazgcDLQaUf8JDHbuGwsxN6U9qWaElZ4w1B2r7yEGIL3GdeW3Rug=="],
 

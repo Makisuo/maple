@@ -2,7 +2,20 @@
  * Subscribe to the assistant entity's stream via `@electric-ax/agents-runtime`.
  * Returns the EntityStreamDB so callers can pass it to `useChat(db)` for a
  * fully-materialized streaming timeline (user messages + agent responses
- * + tool calls, accumulating in real time as text_deltas land).
+ * + tool calls).
+ *
+ * **The `refreshKey` knob:** the bundled `@durable-streams/state@0.2.5`
+ * SSE dispatcher reliably preloads the initial history but stops
+ * propagating new events into the TanStack collections after the first
+ * `upToDate` signal — so `useChat` returns frozen sections even though
+ * raw SSE events keep arriving on the wire (verified via `curl`). Bumping
+ * `refreshKey` re-runs `client.observe(entity(url))`, which does a fresh
+ * `preload()` (catch-up replay of the durable stream) and returns a new
+ * db, so `useChat` re-renders with current data. Callers should bump it
+ * after `POST /message` and again briefly while a run is streaming.
+ *
+ * Drop this knob once the upstream dispatcher bug is fixed (tracked as
+ * upstream-bug-#3 in `docs/electric-agents-upstream-issues.md`).
  */
 import { useEffect, useState } from "react"
 import { createAgentsClient, entity } from "@electric-ax/agents-runtime"
@@ -27,10 +40,10 @@ async function retry<T>(
 	throw lastErr ?? new Error("retry exhausted")
 }
 
-export function useChatroom(entityUrl: string | null): {
-	db: EntityStreamDB | null
-	error: string | null
-} {
+export function useChatroom(
+	entityUrl: string | null,
+	refreshKey: number = 0,
+): { db: EntityStreamDB | null; error: string | null } {
 	const [db, setDb] = useState<EntityStreamDB | null>(null)
 	const [error, setError] = useState<string | null>(null)
 
@@ -50,9 +63,7 @@ export function useChatroom(entityUrl: string | null): {
 					;(handle as unknown as { close?: () => void }).close?.()
 					return
 				}
-				close = () => {
-					;(handle as unknown as { close?: () => void }).close?.()
-				}
+				close = () => (handle as unknown as { close?: () => void }).close?.() ?? undefined
 				setDb(handle as unknown as EntityStreamDB)
 				setError(null)
 			} catch (err) {
@@ -64,7 +75,7 @@ export function useChatroom(entityUrl: string | null): {
 			cancelled = true
 			close()
 		}
-	}, [entityUrl])
+	}, [entityUrl, refreshKey])
 
 	return { db, error }
 }

@@ -42,6 +42,10 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 	const [entityUrl, setEntityUrl] = useState<string | null>(null)
 	const [initError, setInitError] = useState<string | null>(null)
 	const [isSending, setIsSending] = useState(false)
+	// Bumped to force useChatroom to re-`observe(entity(...))` — the only
+	// reliable way to flush new SSE events into TanStack collections in
+	// this version of `@durable-streams/state` (see upstream-bug-#3).
+	const [refreshTick, setRefreshTick] = useState(0)
 
 	const getTokenRef = useRef(getToken)
 	useEffect(() => {
@@ -85,7 +89,7 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 	//    it to `useChat(db)`. The hook returns `sections` that already merge
 	//    user messages + streaming agent responses (text_delta accumulates
 	//    in `items[].text` in real time) + tool calls.
-	const { db, error: subscribeError } = useChatroom(entityUrl)
+	const { db, error: subscribeError } = useChatroom(entityUrl, refreshTick)
 	const { sections, state } = useChat(db)
 
 	const renderableSections = sections.filter((s) => {
@@ -113,6 +117,17 @@ export function ChatConversation({ tabId, isActive, onFirstMessage }: ChatConver
 			setIsSending(false)
 		}
 	}, [lastSection])
+
+	// While we're waiting for a reply (either we just sent and the SSE
+	// stream hasn't surfaced anything yet, or the agent is mid-stream),
+	// re-`observe` the entity every 800ms so the new text_delta events
+	// land in fresh collections that `useChat` can pick up. Stops as soon
+	// as the latest section is a completed `agent_response`.
+	useEffect(() => {
+		if (!isLoading) return
+		const id = setInterval(() => setRefreshTick((t) => t + 1), 800)
+		return () => clearInterval(id)
+	}, [isLoading])
 
 	const sendMessage = useCallback(
 		async (text: string) => {
