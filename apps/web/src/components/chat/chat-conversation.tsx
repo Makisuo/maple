@@ -96,6 +96,7 @@ interface ChatConversationProps {
 	tabId: string
 	isActive: boolean
 	onFirstMessage?: (tabId: string, text: string) => void
+	onLoadingChange?: (tabId: string, loading: boolean) => void
 	mode?: "alert" | "widget-fix"
 	alertContext?: AlertContext
 	widgetFixContext?: WidgetFixContext
@@ -105,6 +106,7 @@ export function ChatConversation({
 	tabId,
 	isActive,
 	onFirstMessage,
+	onLoadingChange,
 	mode,
 	alertContext,
 	widgetFixContext,
@@ -218,6 +220,12 @@ export function ChatConversation({
 	}, [messages.length, agentName])
 
 	const isLoading = status === "streaming" || status === "submitted"
+	useEffect(() => {
+		onLoadingChange?.(tabId, isLoading)
+	}, [tabId, isLoading, onLoadingChange])
+	useEffect(() => {
+		return () => onLoadingChange?.(tabId, false)
+	}, [tabId, onLoadingChange])
 	const isAlertMode = mode === "alert" && !!alertContext
 	const isWidgetFixMode = mode === "widget-fix" && !!widgetFixContext
 	const suggestions = useMemo(() => {

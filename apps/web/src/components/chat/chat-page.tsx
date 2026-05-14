@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { SidebarInset, SidebarProvider } from "@maple/ui/components/ui/sidebar"
@@ -46,6 +46,18 @@ function ChatPageInner({
 }: ChatPageInnerProps) {
 	const { tabs, activeTabId, createTab, closeTab, setActiveTab, renameTab, ensureTab } =
 		useChatTabs(orgId, urlTabId)
+
+	const [loadingTabIds, setLoadingTabIds] = useState<ReadonlySet<string>>(() => new Set())
+	const handleLoadingChange = useCallback((id: string, loading: boolean) => {
+		setLoadingTabIds((prev) => {
+			const has = prev.has(id)
+			if (has === loading) return prev
+			const next = new Set(prev)
+			if (loading) next.add(id)
+			else next.delete(id)
+			return next
+		})
+	}, [])
 
 	// state → URL: reflect the current tab in the URL via history.replaceState so
 	// refresh / bookmark works without re-rendering the route tree (using TanStack
@@ -111,6 +123,7 @@ function ChatPageInner({
 					<ChatSidebar
 						tabs={tabs}
 						activeTabId={activeTabId}
+						loadingTabIds={loadingTabIds}
 						onSelect={setActiveTab}
 						onClose={closeTab}
 						onCreate={createTab}
@@ -130,6 +143,7 @@ function ChatPageInner({
 											tabId={tab.id}
 											isActive={tab.id === activeTabId}
 											onFirstMessage={(id, text) => renameTab(id, text)}
+											onLoadingChange={handleLoadingChange}
 											mode={isAlertTab ? "alert" : isWidgetFixTab ? "widget-fix" : undefined}
 											alertContext={isAlertTab ? alertContext : undefined}
 											widgetFixContext={isWidgetFixTab ? widgetFixContext : undefined}

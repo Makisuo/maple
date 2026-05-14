@@ -16,10 +16,12 @@ import {
 	PlusIcon,
 	TrashIcon,
 } from "@/components/icons"
+import { DotmSquare4 } from "@/components/ui/dotm-square-4"
 
 interface ChatSidebarProps {
 	tabs: ChatTab[]
 	activeTabId: string | null
+	loadingTabIds?: ReadonlySet<string>
 	onSelect: (id: string) => void
 	onClose: (id: string) => void
 	onCreate: () => void
@@ -76,6 +78,7 @@ function tabIcon(tab: ChatTab) {
 export function ChatSidebar({
 	tabs,
 	activeTabId,
+	loadingTabIds,
 	onSelect,
 	onClose,
 	onCreate,
@@ -114,6 +117,7 @@ export function ChatSidebar({
 											key={tab.id}
 											tab={tab}
 											isActive={tab.id === activeTabId}
+											isLoading={loadingTabIds?.has(tab.id) ?? false}
 											isRenaming={renamingId === tab.id}
 											canDelete={canDelete}
 											onSelect={onSelect}
@@ -139,6 +143,7 @@ export function ChatSidebar({
 interface ChatSidebarRowProps {
 	tab: ChatTab
 	isActive: boolean
+	isLoading: boolean
 	isRenaming: boolean
 	canDelete: boolean
 	onSelect: (id: string) => void
@@ -151,6 +156,7 @@ interface ChatSidebarRowProps {
 function ChatSidebarRow({
 	tab,
 	isActive,
+	isLoading,
 	isRenaming,
 	canDelete,
 	onSelect,
@@ -221,7 +227,17 @@ function ChatSidebarRow({
 						: "text-sidebar-foreground/85 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
 				)}
 			>
-				{Icon ? <Icon size={14} className="shrink-0 opacity-70" /> : null}
+				{isLoading ? (
+					<DotmSquare4
+						size={14}
+						dotSize={2}
+						color="var(--primary)"
+						className="shrink-0"
+						ariaLabel="Working"
+					/>
+				) : Icon ? (
+					<Icon size={14} className="shrink-0 opacity-70" />
+				) : null}
 				{isRenaming ? (
 					<input
 						ref={inputRef}

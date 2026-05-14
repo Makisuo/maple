@@ -12,6 +12,8 @@
 	},
 	"iconLibrary": "hugeicons",
 	"rtl": false,
+	"menuColor": "default",
+	"menuAccent": "bold",
 	"aliases": {
 		"components": "@/components",
 		"utils": "@/lib/utils",
@@ -19,7 +21,7 @@
 		"lib": "@/lib",
 		"hooks": "@/hooks"
 	},
-	"menuColor": "default",
-	"menuAccent": "bold",
-	"registries": {}
+	"registries": {
+		"@dotmatrix": "https://dotmatrix.zzzzshawn.cloud/r/{name}.json"
+	}
 }
