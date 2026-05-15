@@ -237,6 +237,11 @@ impl AppConfig {
                 std::env::var("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD").ok(),
                 1,
             )?,
+            export_max_attempts: parse_u32(
+                "INGEST_EXPORT_MAX_ATTEMPTS",
+                std::env::var("INGEST_EXPORT_MAX_ATTEMPTS").ok(),
+                20,
+            )?,
             datasource_traces: std::env::var("INGEST_TINYBIRD_DATASOURCE_TRACES")
                 .unwrap_or_else(|_| "traces".to_string()),
             datasource_logs: std::env::var("INGEST_TINYBIRD_DATASOURCE_LOGS")
@@ -3104,6 +3109,21 @@ fn parse_u64(name: &str, raw: Option<String>, default: u64) -> Result<u64, Strin
 
     value
         .parse::<u64>()
+        .map_err(|_| format!("{name} must be a positive integer"))
+}
+
+fn parse_u32(name: &str, raw: Option<String>, default: u32) -> Result<u32, String> {
+    let Some(raw) = raw else {
+        return Ok(default);
+    };
+
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(default);
+    }
+
+    value
+        .parse::<u32>()
         .map_err(|_| format!("{name} must be a positive integer"))
 }
 

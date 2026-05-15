@@ -104,6 +104,7 @@ impl BenchFixture {
                 batch_max_bytes: 4 * 1024 * 1024,
                 batch_max_wait: Duration::from_millis(10),
                 export_concurrency_per_shard: 1,
+                export_max_attempts: 20,
                 datasource_traces: "traces".to_string(),
                 datasource_logs: "logs".to_string(),
                 datasource_metrics_sum: "metrics_sum".to_string(),

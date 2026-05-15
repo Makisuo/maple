@@ -52,6 +52,7 @@ pub struct TinybirdConfig {
     pub batch_max_bytes: usize,
     pub batch_max_wait: Duration,
     pub export_concurrency_per_shard: usize,
+    pub export_max_attempts: u32,
     pub datasource_traces: String,
     pub datasource_logs: String,
     pub datasource_metrics_sum: String,
@@ -89,6 +90,9 @@ impl TinybirdConfig {
         }
         if self.export_concurrency_per_shard == 0 {
             return Err("INGEST_TINYBIRD_CONCURRENCY_PER_SHARD must be greater than 0".to_string());
+        }
+        if self.export_max_attempts == 0 {
+            return Err("INGEST_EXPORT_MAX_ATTEMPTS must be greater than 0".to_string());
         }
         Ok(())
     }
@@ -416,6 +420,8 @@ impl ShardedWal {
                 .seek(SeekFrom::End(0))
                 .map_err(|error| format!("seek WAL: {error}"))?;
             if start.saturating_add(encoded.len() as u64) > shard_ref.max_bytes {
+                counter!("ingest_wal_shard_full_total", "shard" => shard.to_string())
+                    .increment(1);
                 return Err("Telemetry WAL shard is full".to_string());
             }
             file.write_all(&encoded)
@@ -425,6 +431,7 @@ impl ShardedWal {
             let end = start + encoded.len() as u64;
             histogram!("ingest_wal_commit_bytes", "shard" => shard.to_string())
                 .record(encoded.len() as f64);
+            gauge!("ingest_wal_shard_bytes", "shard" => shard.to_string()).set(end as f64);
             Ok((start, end))
         })
         .await
@@ -449,15 +456,40 @@ impl ShardedWal {
                 .ok_or_else(|| format!("invalid WAL shard {shard}"))?,
         );
         tokio::task::spawn_blocking(move || {
-            let mut file = OpenOptions::new()
+            // If the cursor has caught up to the end of the shard file, free the disk
+            // by truncating the file and resetting the cursor to 0. Holding the
+            // append-side mutex serialises us against concurrent appenders so we
+            // never truncate bytes that a writer just committed.
+            let cursor_value = {
+                let mut file = shard_ref
+                    .file
+                    .lock()
+                    .map_err(|_| "WAL shard mutex poisoned".to_string())?;
+                let size = file
+                    .seek(SeekFrom::End(0))
+                    .map_err(|error| format!("seek WAL: {error}"))?;
+                if offset >= size {
+                    file.set_len(0)
+                        .map_err(|error| format!("truncate WAL: {error}"))?;
+                    file.sync_all()
+                        .map_err(|error| format!("sync WAL truncate: {error}"))?;
+                    gauge!("ingest_wal_shard_bytes", "shard" => shard.to_string()).set(0.0);
+                    0
+                } else {
+                    offset
+                }
+            };
+            let mut cursor_file = OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
                 .open(&shard_ref.cursor_path)
                 .map_err(|error| format!("open WAL cursor: {error}"))?;
-            file.write_all(offset.to_string().as_bytes())
+            cursor_file
+                .write_all(cursor_value.to_string().as_bytes())
                 .map_err(|error| format!("write WAL cursor: {error}"))?;
-            file.sync_data()
+            cursor_file
+                .sync_data()
                 .map_err(|error| format!("sync WAL cursor: {error}"))
         })
         .await
@@ -786,6 +818,7 @@ impl ExportWorker {
             datasource
         );
         let compressed = gzip(body)?;
+        let max_attempts = self.cfg.export_max_attempts;
         let mut attempt = 0u32;
         loop {
             let started = Instant::now();
@@ -799,6 +832,7 @@ impl ExportWorker {
                 .send()
                 .await;
 
+            let last_status: String;
             match response {
                 Ok(response) if response.status().is_success() => {
                     histogram!("ingest_tinybird_export_duration_seconds", "datasource" => datasource.to_string(), "status" => "2xx")
@@ -817,18 +851,36 @@ impl ExportWorker {
                 }
                 Ok(response) => {
                     let status = response.status().as_u16();
-                    counter!("ingest_tinybird_export_retries_total", "datasource" => datasource.to_string(), "status" => status.to_string())
+                    last_status = status.to_string();
+                    counter!("ingest_tinybird_export_retries_total", "datasource" => datasource.to_string(), "status" => last_status.clone())
                         .increment(1);
                     warn!(datasource, status, attempt, "Retrying Tinybird batch");
                 }
                 Err(error) => {
-                    counter!("ingest_tinybird_export_retries_total", "datasource" => datasource.to_string(), "status" => "transport")
+                    last_status = "transport".to_string();
+                    counter!("ingest_tinybird_export_retries_total", "datasource" => datasource.to_string(), "status" => last_status.clone())
                         .increment(1);
                     warn!(datasource, attempt, error = %error, "Retrying Tinybird batch after transport error");
                 }
             }
 
             attempt = attempt.saturating_add(1);
+            if attempt >= max_attempts {
+                counter!(
+                    "ingest_tinybird_export_dropped_total",
+                    "datasource" => datasource.to_string(),
+                    "status" => "retries_exhausted",
+                )
+                .increment(rows as u64);
+                error!(
+                    datasource,
+                    rows,
+                    attempts = attempt,
+                    last_status = %last_status,
+                    "Dropping Tinybird batch after exhausting retry budget"
+                );
+                return Ok(());
+            }
             let backoff_ms = 250u64.saturating_mul(2u64.saturating_pow(attempt.min(6)));
             sleep(Duration::from_millis(backoff_ms.min(30_000))).await;
         }
@@ -1608,6 +1660,7 @@ mod tests {
             batch_max_bytes: 1024 * 1024,
             batch_max_wait: Duration::from_millis(10),
             export_concurrency_per_shard: 1,
+            export_max_attempts: 20,
             datasource_traces: "traces".to_string(),
             datasource_logs: "logs".to_string(),
             datasource_metrics_sum: "metrics_sum".to_string(),
@@ -1661,21 +1714,29 @@ mod tests {
         StatusCode::OK
     }
 
-    async fn wait_for_cursor(cursor_path: PathBuf) -> u64 {
+    async fn wait_for_export_drain(queue_dir: PathBuf, shard: usize) {
+        let cursor_path = queue_dir.join(format!("shard-{shard:03}.cursor"));
+        let shard_path = queue_dir.join(format!("shard-{shard:03}.wal"));
         tokio::time::timeout(Duration::from_secs(2), async move {
             loop {
-                if let Ok(cursor) = std::fs::read_to_string(&cursor_path) {
-                    if let Ok(offset) = cursor.trim().parse::<u64>() {
-                        if offset > 0 {
-                            return offset;
-                        }
-                    }
+                // Success is either (a) cursor ahead of zero while writer is
+                // still ahead of reader, or (b) shard file truncated to zero
+                // because mark_exported() caught up to EOF and reclaimed disk.
+                let cursor_offset = std::fs::read_to_string(&cursor_path)
+                    .ok()
+                    .and_then(|raw| raw.trim().parse::<u64>().ok())
+                    .unwrap_or(0);
+                let shard_size = std::fs::metadata(&shard_path)
+                    .map(|meta| meta.len())
+                    .unwrap_or(u64::MAX);
+                if cursor_offset > 0 || shard_size == 0 {
+                    return;
                 }
                 sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("export worker should commit a WAL cursor after Tinybird success")
+        .expect("export worker should drain the shard (cursor advance or truncation) after Tinybird success")
     }
 
     fn string_kv(key: &str, value: &str) -> KeyValue {
@@ -1966,7 +2027,7 @@ mod tests {
         assert_eq!(row["trace_id"], "cccccccccccccccccccccccccccccccc");
         assert_eq!(row["span_id"], "dddddddddddddddd");
 
-        assert!(wait_for_cursor(queue_dir.join("shard-000.cursor")).await > 0);
+        wait_for_export_drain(queue_dir.clone(), 0).await;
         let _ = std::fs::remove_dir_all(queue_dir);
     }
 
@@ -2705,7 +2766,7 @@ mod tests {
         assert_eq!(row["span_kind"], "Server");
         assert_eq!(row["status_code"], "Ok");
 
-        assert!(wait_for_cursor(queue_dir.join("shard-000.cursor")).await > 0);
+        wait_for_export_drain(queue_dir.clone(), 0).await;
         let _ = std::fs::remove_dir_all(queue_dir);
     }
 
@@ -2773,6 +2834,115 @@ mod tests {
             let row: Value = serde_json::from_str(import.body.trim()).unwrap();
             assert_row_keys_match(&row, &expected_keys, datasource);
         }
+
+        let _ = std::fs::remove_dir_all(queue_dir);
+    }
+
+    #[tokio::test]
+    async fn wal_truncates_after_full_drain_allowing_further_appends() {
+        // Regression: pre-fix, ShardedWal::append() only checked file-size-vs-max
+        // and the file was never truncated. After max_bytes was hit, the shard
+        // refused all further appends — even with every prior frame successfully
+        // exported. Now mark_exported() truncates the data file when the cursor
+        // catches up to EOF, so a steady-state pipeline never wedges.
+        let queue_dir = unique_test_dir("wal-truncates-on-drain");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let mut cfg = test_cfg();
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        cfg.queue_max_bytes = 512;
+
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+
+        let frame = EncodedFrame {
+            routing_key: 0,
+            org_id: "org_contract".to_string(),
+            signal: TelemetrySignal::Traces,
+            datasource: "traces".to_string(),
+            row_count: 1,
+            payload: vec![0u8; 200],
+        };
+
+        // First two appends fit (each ~240 bytes encoded, ≤512 budget).
+        let (start_a, end_a) = wal.append(0, &frame).await.expect("first append");
+        assert_eq!(start_a, 0);
+        let (start_b, end_b) = wal.append(0, &frame).await.expect("second append");
+        assert_eq!(start_b, end_a);
+
+        // Third append would overflow before the fix would let us truncate.
+        wal.append(0, &frame)
+            .await
+            .err()
+            .expect("third append exceeds shard budget");
+
+        // Drain the cursor to EOF — this should truncate the shard file.
+        wal.mark_exported(0, end_b).await.expect("mark_exported");
+
+        let shard_path = queue_dir.join("shard-000.wal");
+        let size_after_drain = std::fs::metadata(&shard_path).unwrap().len();
+        assert_eq!(
+            size_after_drain, 0,
+            "shard file should be truncated to 0 after full drain"
+        );
+
+        let cursor_after_drain =
+            std::fs::read_to_string(queue_dir.join("shard-000.cursor")).unwrap();
+        assert_eq!(
+            cursor_after_drain.trim(),
+            "0",
+            "cursor should reset to 0 after truncate"
+        );
+
+        // The shard accepts new writes again — previously this would still fail
+        // because the file size, not cursor delta, was the gating signal.
+        let (start_c, _end_c) = wal
+            .append(0, &frame)
+            .await
+            .expect("append after drain should succeed");
+        assert_eq!(start_c, 0, "next append starts from a fresh file");
+
+        let _ = std::fs::remove_dir_all(queue_dir);
+    }
+
+    #[tokio::test]
+    async fn wal_partial_drain_advances_cursor_without_truncating() {
+        // When mark_exported() lands while writers are still ahead of the cursor,
+        // we must NOT truncate — that would erase frames that haven't been
+        // exported yet. We only persist the offset.
+        let queue_dir = unique_test_dir("wal-partial-drain");
+        std::fs::create_dir_all(&queue_dir).unwrap();
+        let mut cfg = test_cfg();
+        cfg.queue_dir = queue_dir.clone();
+        cfg.wal_shards = 1;
+        cfg.queue_max_bytes = 4096;
+
+        let wal = ShardedWal::open(&cfg).expect("open WAL");
+        let frame = EncodedFrame {
+            routing_key: 0,
+            org_id: "org_contract".to_string(),
+            signal: TelemetrySignal::Traces,
+            datasource: "traces".to_string(),
+            row_count: 1,
+            payload: vec![0u8; 100],
+        };
+
+        let (_, end_a) = wal.append(0, &frame).await.unwrap();
+        let (_, end_b) = wal.append(0, &frame).await.unwrap();
+        assert!(end_b > end_a);
+
+        // Cursor advances to the first frame's end while frame B is still
+        // unexported (writer is ahead of reader).
+        wal.mark_exported(0, end_a).await.unwrap();
+
+        let shard_path = queue_dir.join("shard-000.wal");
+        let size_after_partial = std::fs::metadata(&shard_path).unwrap().len();
+        assert_eq!(
+            size_after_partial, end_b,
+            "shard file must keep unexported bytes when cursor is behind EOF"
+        );
+        let cursor_after_partial =
+            std::fs::read_to_string(queue_dir.join("shard-000.cursor")).unwrap();
+        assert_eq!(cursor_after_partial.trim(), end_a.to_string());
 
         let _ = std::fs::remove_dir_all(queue_dir);
     }
