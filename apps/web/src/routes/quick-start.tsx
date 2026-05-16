@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { useState } from "react"
+import { createFileRoute, Navigate } from "@tanstack/react-router"
 import { useAuth } from "@clerk/clerk-react"
 import { AnimatePresence, motion } from "motion/react"
 import { useCustomer } from "autumn-js/react"
@@ -27,14 +27,11 @@ export const STEP_MOTION = {
 
 function QuickStartPage() {
 	const { orgId } = useAuth()
-	const navigate = useNavigate()
 	const {
 		activeStep,
 		setActiveStep,
 		completeStep,
-		uncompleteStep,
 		isStepComplete,
-		isComplete,
 		qualifyAnswers,
 		setQualifyAnswers,
 		setDemoDataRequested,
@@ -43,36 +40,29 @@ function QuickStartPage() {
 	const { data: customer } = useCustomer()
 	const planSelected = hasSelectedPlan(customer)
 
-	// The "plan" step's completion must mirror the live Autumn plan state.
-	// If it goes stale (persisted true with no active plan), __root.tsx bounces
-	// the user back here forever — an infinite redirect loop that freezes the tab.
-	useEffect(() => {
-		if (planSelected && !isStepComplete("plan")) {
-			completeStep("plan")
-		} else if (!planSelected && isStepComplete("plan")) {
-			uncompleteStep("plan")
-			if (activeStep !== "plan") {
-				setActiveStep("plan")
-			}
-		}
-	}, [planSelected, activeStep, isStepComplete, completeStep, uncompleteStep, setActiveStep])
-
-	useEffect(() => {
-		if (isComplete) {
-			navigate({ to: "/" })
-		}
-	}, [isComplete, navigate])
+	// "plan" completion is the live Autumn plan state, never a persisted flag.
+	// A stale flag would disagree with __root.tsx's no-plan guard and trap the
+	// user in an infinite /quick-start <-> / redirect loop that freezes the tab.
+	const onboardingComplete =
+		isStepComplete("role") && isStepComplete("demo") && planSelected
 
 	const currentStepNumber = STEP_IDS.indexOf(activeStep as StepId) + 1
 	const stepLabel = `Step ${currentStepNumber} of ${STEP_IDS.length}`
 
-	const previousStepIndexRef = useRef(currentStepNumber)
-	const direction =
-		currentStepNumber >= previousStepIndexRef.current ? 1 : -1
+	// Track the previous step index for slide direction by adjusting state
+	// during render — the documented React pattern for previous-render values.
+	const [stepWindow, setStepWindow] = useState<[number, number]>([
+		currentStepNumber,
+		currentStepNumber,
+	])
+	if (stepWindow[1] !== currentStepNumber) {
+		setStepWindow([stepWindow[1], currentStepNumber])
+	}
+	const direction = currentStepNumber >= stepWindow[0] ? 1 : -1
 
-	useEffect(() => {
-		previousStepIndexRef.current = currentStepNumber
-	}, [currentStepNumber])
+	if (onboardingComplete) {
+		return <Navigate to="/" replace />
+	}
 
 	return (
 		<OnboardingLayout
