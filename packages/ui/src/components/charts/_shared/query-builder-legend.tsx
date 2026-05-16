@@ -57,6 +57,11 @@ interface QueryBuilderLegendProps {
 	onToggle: (key: string) => void
 	unit?: string
 	layout?: "bottom" | "right"
+	/**
+	 * `"compact"` shows only the color swatch + label; `"stats"` adds the
+	 * per-series Min/Max/Mean/Last columns.
+	 */
+	variant?: "compact" | "stats"
 }
 
 const STAT_COLUMNS: ReadonlyArray<{ label: string; field: keyof SeriesStats }> = [
@@ -68,7 +73,8 @@ const STAT_COLUMNS: ReadonlyArray<{ label: string; field: keyof SeriesStats }> =
 
 /**
  * Interactive chart legend rendered inside a Recharts `<Legend content>` slot.
- * Shows per-series Min/Max/Mean/Last and toggles a series on click.
+ * `variant="compact"` is a lightweight color key; `variant="stats"` adds the
+ * per-series Min/Max/Mean/Last table. Clicking a series toggles it.
  */
 export function QueryBuilderLegend({
 	series,
@@ -77,8 +83,43 @@ export function QueryBuilderLegend({
 	onToggle,
 	unit,
 	layout = "bottom",
+	variant = "stats",
 }: QueryBuilderLegendProps) {
 	if (series.length === 0) return null
+
+	if (variant === "compact") {
+		return (
+			<div
+				className={cn(
+					"h-full overflow-auto text-xs",
+					layout === "right"
+						? "flex flex-col gap-0.5 pl-3"
+						: "flex flex-wrap gap-x-3 gap-y-0.5 pt-2",
+				)}
+			>
+				{series.map((entry) => {
+					const isHidden = hidden.has(entry.key)
+					return (
+						<button
+							key={entry.key}
+							type="button"
+							onClick={() => onToggle(entry.key)}
+							className={cn(
+								"hover:bg-muted/50 flex items-center gap-1.5 rounded px-1 py-0.5 select-none",
+								isHidden && "opacity-40",
+							)}
+						>
+							<span
+								className="size-2 shrink-0 rounded-[2px]"
+								style={{ backgroundColor: entry.color }}
+							/>
+							<span className="truncate">{entry.label}</span>
+						</button>
+					)
+				})}
+			</div>
+		)
+	}
 
 	return (
 		<div

@@ -39,6 +39,7 @@ function makeState(): QueryBuilderWidgetState {
 		statValueField: "",
 		unit: "number",
 		legendPosition: "bottom",
+		seriesStatsEnabled: false,
 		tableLimit: "",
 		listDataSource: "traces",
 		listWhereClause: "",

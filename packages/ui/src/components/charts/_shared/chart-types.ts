@@ -20,6 +20,8 @@ export interface BaseChartProps {
 	data?: Record<string, unknown>[]
 	className?: string
 	legend?: ChartLegendMode
+	/** When true, the legend block includes the per-series Min/Max/Mean/Last table. */
+	seriesStats?: boolean
 	tooltip?: ChartTooltipMode
 	rateMode?: "per_second"
 	stacked?: boolean

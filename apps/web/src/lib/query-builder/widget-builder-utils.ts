@@ -47,6 +47,7 @@ export interface QueryBuilderWidgetState {
 	statValueField: string
 	unit: ValueUnit
 	legendPosition: LegendPosition
+	seriesStatsEnabled: boolean
 	tableLimit: string
 	// Threshold lines (chart) / threshold coloring (stat, gauge)
 	thresholds: Array<{ value: number; color: string }>
@@ -252,9 +253,21 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 			: {}
 
 	const listDs = widget.display.listDataSource === "logs" ? ("logs" as const) : ("traces" as const)
-	const legendRaw = widget.display.chartPresentation?.legend
+	const chartPresentation = widget.display.chartPresentation
+	const legendRaw = chartPresentation?.legend
 	const legendPosition: LegendPosition =
-		legendRaw === "hidden" ? "hidden" : legendRaw === "right" ? "right" : "bottom"
+		legendRaw === "hidden"
+			? "hidden"
+			: legendRaw === "right"
+				? "right"
+				: legendRaw === "visible"
+					? "bottom"
+					: "hidden"
+	// Legacy widgets persisted a `legend` value but no `seriesStats`; if they
+	// showed a legend they showed the stats table, so default it on for them.
+	const seriesStatsEnabled =
+		chartPresentation?.seriesStats ??
+		(legendRaw != null && legendRaw !== "hidden")
 
 	const baseFromWidget = {
 		visualization: widget.visualization,
@@ -276,6 +289,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 			inferDefaultUnitForQueries((params.queries as QueryBuilderQueryDraft[] | undefined) ?? []) ??
 			"number",
 		legendPosition,
+		seriesStatsEnabled,
 		tableLimit:
 			typeof widget.dataSource.transform?.limit === "number"
 				? String(widget.dataSource.transform.limit)
@@ -588,6 +602,7 @@ export function buildWidgetDisplay(
 		chartPresentation: {
 			...widget.display.chartPresentation,
 			legend: legendValue,
+			seriesStats: state.seriesStatsEnabled,
 		},
 	}
 	if (state.visualization === "chart") {

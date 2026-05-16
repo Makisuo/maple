@@ -122,6 +122,7 @@ export function WidgetSettingsBar() {
 		unit,
 		tableLimit,
 		legendPosition,
+		seriesStatsEnabled,
 		heatmapColorScale,
 		heatmapScaleType,
 		thresholds,
@@ -424,6 +425,25 @@ export function WidgetSettingsBar() {
 								{pos === "hidden" ? "Hidden" : pos === "right" ? "Right" : "Bottom"}
 							</button>
 						))}
+					</div>
+					<div className="flex items-center gap-2 pt-0.5">
+						<Checkbox
+							id="qb-series-stats"
+							checked={seriesStatsEnabled}
+							onCheckedChange={(checked) =>
+								onChange(
+									// Stats live inside the legend, so enabling them with the
+									// legend hidden would have no visible effect — turn the
+									// legend on (bottom) in the same change.
+									checked === true && legendPosition === "hidden"
+										? { seriesStatsEnabled: true, legendPosition: "bottom" }
+										: { seriesStatsEnabled: checked === true },
+								)
+							}
+						/>
+						<label htmlFor="qb-series-stats" className="text-xs text-muted-foreground">
+							Show Min/Max/Mean/Last stats
+						</label>
 					</div>
 				</div>
 			)}

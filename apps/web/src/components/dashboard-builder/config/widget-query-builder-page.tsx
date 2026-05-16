@@ -176,13 +176,20 @@ export function WidgetQueryBuilderPage({
 			}
 		}
 		const previewSeriesOptions = toSeriesFieldOptions(stagedState)
+		// Legend / series-stats are pure presentation — apply them live from the
+		// editing state so the preview updates without a Run Preview click.
+		const previewState = {
+			...stagedState,
+			legendPosition: state.legendPosition,
+			seriesStatsEnabled: state.seriesStatsEnabled,
+		}
 		return {
 			...widget,
 			visualization: stagedState.visualization,
 			dataSource: buildWidgetDataSource(widget, stagedState, previewSeriesOptions),
-			display: buildWidgetDisplay(widget, stagedState),
+			display: buildWidgetDisplay(widget, previewState),
 		}
-	}, [mode, rawSqlPreviewDraft, stagedState, widget])
+	}, [mode, rawSqlPreviewDraft, stagedState, state.legendPosition, state.seriesStatsEnabled, widget])
 
 	const applyChanges = () => {
 		if (mode === "rawSql") {

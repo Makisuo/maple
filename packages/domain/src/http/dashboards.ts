@@ -89,6 +89,7 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 	chartPresentation: Schema.optional(
 		Schema.Struct({
 			legend: Schema.optional(Schema.Literals(["visible", "hidden", "right"])),
+			seriesStats: Schema.optional(Schema.Boolean),
 			tooltip: Schema.optional(Schema.Literals(["visible", "hidden"])),
 			showPoints: Schema.optional(Schema.Boolean),
 			fillNulls: Schema.optional(Schema.Union([Schema.Number, Schema.Literal(false)])),

@@ -40,6 +40,7 @@ export function QueryBuilderAreaChart({
 	data,
 	className,
 	legend,
+	seriesStats: showStats,
 	tooltip,
 	stacked,
 	curveType,
@@ -159,7 +160,12 @@ export function QueryBuilderAreaChart({
 		[seriesDefinitions, chartConfig],
 	)
 
-	const legendHeight = 30 + Math.min(seriesDefinitions.length, 4) * 22
+	const variant = showStats ? "stats" : "compact"
+	const showLegendBlock = legend === "visible" || legend === "right"
+	const legendPosition = legend === "right" ? "right" : "bottom"
+	const legendHeight = showStats
+		? 30 + Math.min(seriesDefinitions.length, 4) * 22
+		: 28 + Math.ceil(Math.min(seriesDefinitions.length, 12) / 3) * 20
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>
@@ -267,7 +273,7 @@ export function QueryBuilderAreaChart({
 					/>
 				)}
 
-				{legend === "visible" && (
+				{showLegendBlock && legendPosition === "bottom" && (
 					<ChartLegend
 						verticalAlign="bottom"
 						height={legendHeight}
@@ -279,16 +285,17 @@ export function QueryBuilderAreaChart({
 								onToggle={toggleSeries}
 								unit={unit}
 								layout="bottom"
+								variant={variant}
 							/>
 						}
 					/>
 				)}
-				{legend === "right" && (
+				{showLegendBlock && legendPosition === "right" && (
 					<ChartLegend
 						layout="vertical"
 						verticalAlign="middle"
 						align="right"
-						width={224}
+						width={showStats ? 224 : 160}
 						content={
 							<QueryBuilderLegend
 								series={legendSeries}
@@ -297,6 +304,7 @@ export function QueryBuilderAreaChart({
 								onToggle={toggleSeries}
 								unit={unit}
 								layout="right"
+								variant={variant}
 							/>
 						}
 					/>

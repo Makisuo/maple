@@ -33,7 +33,8 @@ export const ChartWidget = memo(function ChartWidget({
 	const ChartComponent = entry.component
 	const chartData =
 		dataState.status === "ready" && Array.isArray(dataState.data) ? dataState.data : undefined
-	const legend = display.chartPresentation?.legend ?? "visible"
+	const legend = display.chartPresentation?.legend ?? "hidden"
+	const seriesStats = display.chartPresentation?.seriesStats ?? legend !== "hidden"
 	const tooltip = display.chartPresentation?.tooltip
 
 	return (
@@ -53,6 +54,7 @@ export const ChartWidget = memo(function ChartWidget({
 					data={chartData}
 					className="h-full w-full aspect-auto"
 					legend={legend}
+					seriesStats={seriesStats}
 					tooltip={tooltip}
 					stacked={display.stacked}
 					curveType={display.curveType}
