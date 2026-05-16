@@ -96,7 +96,18 @@ export interface MetricsRateTimeseriesOutput {
 }
 
 export function metricsTimeseriesRateQuery(opts: MetricsRateTimeseriesOpts) {
-	// CTE: compute deltas using window functions
+	// CTE: compute deltas using window functions.
+	//
+	// The PARTITION BY must isolate each emitting process: a cumulative counter
+	// is monotonic only *within one series of one pod*. `ResourceAttributes`
+	// (carries k8s.pod.name / service.instance.id) separates replicas, and
+	// `StartTimeUnix` separates accumulation epochs (counter resets) within a
+	// pod. Omitting them merges every replica's series into one partition, so
+	// `lagInFrame` computes deltas across interleaved pods — each step from a
+	// low-counter pod to a high-counter one books that pod's entire accumulated
+	// value as a bogus increase, inflating the result by orders of magnitude on
+	// any multi-replica service.
+	const PARTITION = "PARTITION BY ServiceName, MetricName, Attributes, ResourceAttributes, StartTimeUnix"
 	const cteSql = compileCH(
 		from(MetricsSum)
 			.select(($) => ({
@@ -105,10 +116,10 @@ export function metricsTimeseriesRateQuery(opts: MetricsRateTimeseriesOpts) {
 				Attributes: $.Attributes,
 				Value: $.Value,
 				delta: CH.rawExpr<number>(
-					"Value - lagInFrame(Value, 1, Value) OVER (PARTITION BY ServiceName, MetricName, Attributes ORDER BY TimeUnix ASC)",
+					`Value - lagInFrame(Value, 1, Value) OVER (${PARTITION} ORDER BY TimeUnix ASC)`,
 				),
 				time_delta: CH.rawExpr<number>(
-					"toFloat64(toUnixTimestamp64Nano(TimeUnix) - toUnixTimestamp64Nano(lagInFrame(TimeUnix, 1, TimeUnix) OVER (PARTITION BY ServiceName, MetricName, Attributes ORDER BY TimeUnix ASC))) / 1000000000.0",
+					`toFloat64(toUnixTimestamp64Nano(TimeUnix) - toUnixTimestamp64Nano(lagInFrame(TimeUnix, 1, TimeUnix) OVER (${PARTITION} ORDER BY TimeUnix ASC))) / 1000000000.0`,
 				),
 			}))
 			.where(($) => [

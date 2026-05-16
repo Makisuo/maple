@@ -35,7 +35,10 @@ function querySpanMetricsCalls(params: {
 					query: {
 						kind: "timeseries",
 						source: "metrics",
-						metric: "sum",
+						// `calls` is a monotonic cumulative counter — aggregate it as a
+						// per-bucket `increase` (counter-reset safe), not raw `sum`, which
+						// would plot the accumulated total as a linear ramp.
+						metric: "increase",
 						groupBy: ["service"],
 						filters: {
 							metricName,
@@ -545,7 +548,8 @@ interface AllMetricsPoint {
 
 /**
  * Resolve the throughput value for a bucket, in priority order:
- *   1. SpanMetrics Connector (exact pre-sampling counts) — when deployed.
+ *   1. SpanMetrics Connector — per-bucket `increase` of the monotonic `calls`
+ *      counter (see `querySpanMetricsCalls`), exact pre-sampling counts.
  *   2. `sum(SampleRate)` from the query engine (per-row weighted sum).
  *   3. Raw traced count — when neither is available (no sampling configured).
  *

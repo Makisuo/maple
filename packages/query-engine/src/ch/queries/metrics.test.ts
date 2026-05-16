@@ -100,7 +100,12 @@ describe("metricsTimeseriesRateQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("WITH with_deltas AS")
 		expect(sql).toContain("lagInFrame")
-		expect(sql).toContain("PARTITION BY")
+		// Partition must isolate each pod/series (ResourceAttributes) and
+		// accumulation epoch (StartTimeUnix) — otherwise cumulative deltas are
+		// computed across interleaved replicas and inflate by orders of magnitude.
+		expect(sql).toContain(
+			"PARTITION BY ServiceName, MetricName, Attributes, ResourceAttributes, StartTimeUnix",
+		)
 		expect(sql).toContain("rateValue")
 		expect(sql).toContain("increaseValue")
 		expect(sql).toContain("sumIf(")
