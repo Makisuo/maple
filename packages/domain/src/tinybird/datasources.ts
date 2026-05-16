@@ -1026,8 +1026,9 @@ export type AttributeValuesHourlyRow = InferRow<typeof attributeValuesHourly>
  * One row per alert rule evaluation (approximately one per rule per group per minute).
  * Durable audit trail of every check — the underlying signal that incidents are derived from.
  *
- * Enum8 values for Status/IncidentTransition/Comparator/SignalType must stay in sync with
- * the runtime literals in `packages/domain/src/http/alerts.ts` and `NormalizedRule`.
+ * Status/IncidentTransition/Comparator/SignalType are LowCardinality(String); their literal
+ * values must stay in sync with the runtime literals in `packages/domain/src/http/alerts.ts`
+ * and `NormalizedRule`.
  */
 export const alertChecks = defineDatasource("alert_checks", {
 	description:
@@ -1059,30 +1060,6 @@ export const alertChecks = defineDatasource("alert_checks", {
 		IncidentTransition: t.string().lowCardinality(),
 		EvaluationDurationMs: t.uint32(),
 	},
-	// Bridge the legacy Enum8 → LowCardinality(String) migration. Tinybird requires
-	// this for incompatible type changes even on an empty table. Remove in a follow-up
-	// deploy once the new schema is live and no old rows exist.
-	forwardQuery: `
-    SELECT
-      OrgId,
-      RuleId,
-      GroupKey,
-      Timestamp,
-      CAST(Status, 'LowCardinality(String)') AS Status,
-      CAST(SignalType, 'LowCardinality(String)') AS SignalType,
-      CAST(Comparator, 'LowCardinality(String)') AS Comparator,
-      Threshold,
-      ObservedValue,
-      SampleCount,
-      WindowMinutes,
-      WindowStart,
-      WindowEnd,
-      ConsecutiveBreaches,
-      ConsecutiveHealthy,
-      IncidentId,
-      CAST(IncidentTransition, 'LowCardinality(String)') AS IncidentTransition,
-      EvaluationDurationMs
-  `,
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
 		sortingKey: ["OrgId", "RuleId", "GroupKey", "Timestamp"],

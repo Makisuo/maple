@@ -55,15 +55,6 @@ import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 const tabValues = ["monitor", "rules", "settings"] as const
 type AlertsTab = (typeof tabValues)[number]
 
-const legacyTabMap: Record<string, AlertsTab> = {
-	overview: "monitor",
-	monitor: "monitor",
-	incidents: "monitor",
-	rules: "rules",
-	destinations: "settings",
-	settings: "settings",
-}
-
 const AlertsSearch = Schema.Struct({
 	tab: Schema.optional(Schema.String),
 	serviceName: Schema.optional(Schema.String),
@@ -390,7 +381,7 @@ function AlertsPage() {
 		mode: "promiseExit",
 	})
 
-	const activeTab: AlertsTab = legacyTabMap[search.tab ?? ""] ?? "monitor"
+	const activeTab: AlertsTab = tabValues.includes(search.tab as AlertsTab) ? (search.tab as AlertsTab) : "monitor"
 
 	const destinations = Result.builder(destinationsResult)
 		.onSuccess((response) => [...response.destinations] as AlertDestination[])
