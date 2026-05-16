@@ -1,4 +1,5 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
+import { cn } from "@maple/ui/utils"
 import {
 	GripDotsIcon,
 	TrashIcon,
@@ -57,6 +58,7 @@ export function WidgetShell({
 	// The menu is also shown in view mode when "Create alert" is available, so
 	// alerts can be spun off a chart without entering dashboard edit mode.
 	const showMenu = isEditable || createAlert != null
+	const [menuOpen, setMenuOpen] = useState(false)
 
 	return (
 		<Card className="h-full flex flex-col">
@@ -70,8 +72,14 @@ export function WidgetShell({
 					<CardTitle className="flex-1 truncate text-xs">{title}</CardTitle>
 				</div>
 				{showMenu && (
-					<CardAction>
-						<DropdownMenu>
+					<CardAction
+						className={cn(
+							!isEditable &&
+								"opacity-0 transition-opacity focus-within:opacity-100 group-hover/card:opacity-100",
+							!isEditable && menuOpen && "opacity-100",
+						)}
+					>
+						<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
 							<DropdownMenuTrigger
 								render={
 									<Button variant="ghost" size="icon-xs">
