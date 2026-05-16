@@ -1,28 +1,15 @@
-import { useEffect } from "react"
 import { useCustomer } from "autumn-js/react"
-import { hasSelectedPlan } from "@/lib/billing/plan-gating"
 import { TRIAL_DURATION_DAYS } from "@/lib/billing/plans"
 import { PricingCards } from "@/components/settings/pricing-cards"
 import { Button } from "@maple/ui/components/ui/button"
 import { ArrowLeftIcon } from "@/components/icons"
 
 export function StepPlan({
-	isComplete,
-	onComplete,
 	onBack,
 }: {
-	isComplete: boolean
-	onComplete: () => void
 	onBack?: () => void
 }) {
-	const { data: customer, isLoading } = useCustomer()
-	const selectedPlan = hasSelectedPlan(customer)
-
-	useEffect(() => {
-		if (selectedPlan && !isComplete) {
-			onComplete()
-		}
-	}, [selectedPlan, isComplete, onComplete])
+	const { isLoading } = useCustomer()
 
 	return (
 		<div className="flex-1 flex flex-col items-center px-6 py-12 overflow-auto">

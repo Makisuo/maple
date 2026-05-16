@@ -32,6 +32,7 @@ function QuickStartPage() {
 		activeStep,
 		setActiveStep,
 		completeStep,
+		uncompleteStep,
 		isStepComplete,
 		isComplete,
 		qualifyAnswers,
@@ -39,27 +40,28 @@ function QuickStartPage() {
 		setDemoDataRequested,
 	} = useQuickStart(orgId)
 
+	const { data: customer } = useCustomer()
+	const planSelected = hasSelectedPlan(customer)
+
+	// The "plan" step's completion must mirror the live Autumn plan state.
+	// If it goes stale (persisted true with no active plan), __root.tsx bounces
+	// the user back here forever — an infinite redirect loop that freezes the tab.
+	useEffect(() => {
+		if (planSelected && !isStepComplete("plan")) {
+			completeStep("plan")
+		} else if (!planSelected && isStepComplete("plan")) {
+			uncompleteStep("plan")
+			if (activeStep !== "plan") {
+				setActiveStep("plan")
+			}
+		}
+	}, [planSelected, activeStep, isStepComplete, completeStep, uncompleteStep, setActiveStep])
+
 	useEffect(() => {
 		if (isComplete) {
 			navigate({ to: "/" })
 		}
 	}, [isComplete, navigate])
-
-	const { data: customer } = useCustomer()
-	const planSelected = hasSelectedPlan(customer)
-
-	useEffect(() => {
-		if (activeStep !== "plan") return
-		if (!planSelected) return
-		completeStep("plan")
-	}, [activeStep, planSelected, completeStep])
-
-	useEffect(() => {
-		if (activeStep === "plan" || isStepComplete("plan")) return
-		if (planSelected) {
-			completeStep("plan")
-		}
-	}, [activeStep, planSelected, isStepComplete, completeStep])
 
 	const currentStepNumber = STEP_IDS.indexOf(activeStep as StepId) + 1
 	const stepLabel = `Step ${currentStepNumber} of ${STEP_IDS.length}`
@@ -105,11 +107,7 @@ function QuickStartPage() {
 
 				{activeStep === "plan" && (
 					<MotionStep key="plan" direction={direction}>
-						<StepPlan
-							isComplete={isStepComplete("plan")}
-							onComplete={() => completeStep("plan")}
-							onBack={() => setActiveStep("demo")}
-						/>
+						<StepPlan onBack={() => setActiveStep("demo")} />
 					</MotionStep>
 				)}
 			</AnimatePresence>
