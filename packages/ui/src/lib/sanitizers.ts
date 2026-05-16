@@ -6,7 +6,7 @@
  */
 
 const CSS_COLOR_RE =
-	/^(?:#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^()]*\)|hsla?\([^()]*\)|var\(--[a-z0-9_-]+(?:,[^()]*)?\)|currentColor|transparent|inherit|initial|unset|[a-z]+)$/i
+	/^(?:#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^()]*\)|var\(--[a-z0-9_-]+(?:,[^()]*)?\)|currentColor|transparent|inherit|initial|unset|[a-z]+)$/i
 
 const ALLOWED_HREF_SCHEMES = new Set(["http:", "https:", "mailto:"])
 

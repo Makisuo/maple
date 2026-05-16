@@ -19,12 +19,19 @@ describe("sanitizeCssIdentifier", () => {
 })
 
 describe("validateCssColor", () => {
-	it.each(["#fff", "#ffffff", "rgb(0, 0, 0)", "hsl(0 0% 0%)", "var(--color-primary)", "transparent", "currentColor"])(
-		"accepts %s",
-		(value) => {
-			expect(validateCssColor(value)).toBe(value)
-		},
-	)
+	it.each([
+		"#fff",
+		"#ffffff",
+		"rgb(0, 0, 0)",
+		"hsl(0 0% 0%)",
+		"oklch(0.696 0.17 162.48)",
+		"oklab(0.7 0.1 -0.05)",
+		"var(--color-primary)",
+		"transparent",
+		"currentColor",
+	])("accepts %s", (value) => {
+		expect(validateCssColor(value)).toBe(value)
+	})
 
 	it.each(["red; background:url(http://x)", "</style>", "<script>alert(1)</script>", ";"])(
 		"rejects %s",
