@@ -3,7 +3,8 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		"./weekly-digest": "./src/weekly-digest.tsx"
+		"./weekly-digest": "./src/weekly-digest.tsx",
+		"./onboarding": "./src/onboarding.tsx"
 	},
 	"scripts": {
 		"dev:email": "email dev",

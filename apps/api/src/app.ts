@@ -15,6 +15,7 @@ import { HttpDigestLive } from "./routes/digest.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "./routes/integrations.http"
 import { HttpIngestKeysLive } from "./routes/ingest-keys.http"
 import { HttpObservabilityLive } from "./routes/observability.http"
+import { HttpOnboardingLive } from "./routes/onboarding.http"
 import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgOpenRouterSettingsLive } from "./routes/org-openrouter-settings.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
@@ -35,6 +36,7 @@ import { DashboardPersistenceService } from "./services/DashboardPersistenceServ
 import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
 import { EdgeCacheService } from "./services/EdgeCacheService"
+import { OnboardingService } from "./services/OnboardingService"
 import { EmailService } from "./services/EmailService"
 import { Env } from "./services/Env"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
@@ -66,6 +68,7 @@ export const CoreServicesLive = Layer.mergeAll(
 	CloudflareLogpushService.layer,
 	DashboardPersistenceService.layer,
 	HazelOAuthService.layer,
+	OnboardingService.layer,
 	OrgIngestKeysService.layer,
 	OrgOpenRouterSettingsService.layer,
 	OrgClickHouseSettingsService.layer,
@@ -129,6 +132,7 @@ export const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpIngestKeysLive),
 	Layer.provide(HttpIntegrationsLive),
 	Layer.provide(HttpObservabilityLive),
+	Layer.provide(HttpOnboardingLive),
 	Layer.provide(HttpOrgOpenRouterSettingsLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
 	Layer.provide(HttpOrganizationsLive),
