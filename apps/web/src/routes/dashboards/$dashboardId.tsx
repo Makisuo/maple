@@ -19,7 +19,6 @@ import {
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
-import { DashboardAiPanel } from "@/components/dashboard-builder/ai"
 import { DashboardHistoryPanel, PreviewedCanvas } from "@/components/dashboard-builder/history"
 import { historyPanelOpenAtom, previewedVersionAtom } from "@/atoms/dashboard-history-atoms"
 import { useDashboardVersions } from "@/components/dashboard-builder/history/use-dashboard-history"
@@ -28,7 +27,6 @@ import type { ReactNode } from "react"
 
 // Module-level atoms — singleton (only one dashboard page visible at a time)
 const chartPickerOpenAtom = Atom.make(false)
-const aiPanelOpenAtom = Atom.make(false)
 
 const dashboardViewSearchSchema = Schema.Struct({
 	mode: Schema.optional(Schema.Literal("edit")),
@@ -70,7 +68,6 @@ function DashboardViewPage() {
 	} = useDashboardStore()
 
 	const [chartPickerOpen, setChartPickerOpen] = useAtom(chartPickerOpenAtom)
-	const [aiPanelOpen, setAiPanelOpen] = useAtom(aiPanelOpenAtom)
 	const [historyPanelOpen, setHistoryPanelOpen] = useAtom(historyPanelOpenAtom)
 	const [previewed, setPreviewed] = useAtom(previewedVersionAtom)
 
@@ -89,14 +86,7 @@ function DashboardViewPage() {
 	}
 
 	const openHistory = () => {
-		setAiPanelOpen(false)
 		setHistoryPanelOpen(true)
-	}
-
-	const openAi = () => {
-		setHistoryPanelOpen(false)
-		setPreviewed(null)
-		setAiPanelOpen(true)
 	}
 
 	if (!activeDashboard) {
@@ -171,7 +161,6 @@ function DashboardViewPage() {
 								dashboard={activeDashboard}
 								onToggleEdit={handleToggleEdit}
 								onAddWidget={() => setChartPickerOpen(true)}
-								onOpenAi={openAi}
 								onOpenHistory={openHistory}
 							/>
 						}
@@ -183,12 +172,6 @@ function DashboardViewPage() {
 										setHistoryPanelOpen(false)
 										setPreviewed(null)
 									}}
-								/>
-							) : aiPanelOpen ? (
-								<DashboardAiPanel
-									onOpenChange={setAiPanelOpen}
-									dashboardName={activeDashboard.name}
-									widgets={activeDashboard.widgets}
 								/>
 							) : undefined
 						}

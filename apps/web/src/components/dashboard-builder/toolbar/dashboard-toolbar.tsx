@@ -3,7 +3,6 @@ import {
 	PencilIcon,
 	CheckIcon,
 	GridIcon,
-	ChatBubbleSparkleIcon,
 	DotsVerticalIcon,
 	DownloadIcon,
 	HistoryIcon,
@@ -27,7 +26,6 @@ interface DashboardToolbarProps {
 	dashboard: Dashboard
 	onToggleEdit: () => void
 	onAddWidget: () => void
-	onOpenAi?: () => void
 	onOpenHistory?: () => void
 }
 
@@ -35,7 +33,6 @@ export function DashboardToolbar({
 	dashboard,
 	onToggleEdit,
 	onAddWidget,
-	onOpenAi,
 	onOpenHistory,
 }: DashboardToolbarProps) {
 	const { mode, readOnly, autoLayoutWidgets } = useDashboardActions()
@@ -76,12 +73,6 @@ export function DashboardToolbar({
 					<Button variant="outline" size="sm" onClick={onAddWidget} disabled={readOnly}>
 						<PlusIcon size={14} data-icon="inline-start" />
 						Add Widget
-					</Button>
-				)}
-				{onOpenAi && (
-					<Button variant="outline" size="sm" onClick={onOpenAi}>
-						<ChatBubbleSparkleIcon size={14} data-icon="inline-start" />
-						AI
 					</Button>
 				)}
 				<Button
