@@ -6,11 +6,8 @@ import {
 	type BreakdownItem,
 	type TimeseriesPoint,
 } from "@maple/query-engine"
-import {
-	buildBreakdownQuerySpec,
-	buildTimeseriesQuerySpec,
-	type QueryBuilderQueryDraft,
-} from "@maple/query-engine/query-builder"
+import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
+import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import {
 	computeBreakdownStats,
 	computeFlags,
@@ -39,76 +36,13 @@ const MAX_QUERIES = 5
 
 export type DashboardWidget = typeof DashboardWidgetSchema.Type
 
-const QueryDraftSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	enabled: Schema.optional(Schema.Boolean),
-	hidden: Schema.optional(Schema.Boolean),
-	dataSource: Schema.Literals(["traces", "logs", "metrics"]),
-	signalSource: Schema.optional(Schema.Literals(["default", "meter"])),
-	metricName: Schema.optional(Schema.String),
-	metricType: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
-	isMonotonic: Schema.optional(Schema.Boolean),
-	whereClause: Schema.optional(Schema.String),
-	aggregation: Schema.String,
-	stepInterval: Schema.optional(Schema.String),
-	orderByDirection: Schema.optional(Schema.Literals(["desc", "asc"])),
-	addOns: Schema.optional(
-		Schema.Struct({
-			groupBy: Schema.optional(Schema.Boolean),
-			having: Schema.optional(Schema.Boolean),
-			orderBy: Schema.optional(Schema.Boolean),
-			limit: Schema.optional(Schema.Boolean),
-			legend: Schema.optional(Schema.Boolean),
-		}),
-	),
-	groupBy: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
-	having: Schema.optional(Schema.String),
-	orderBy: Schema.optional(Schema.String),
-	limit: Schema.optional(Schema.String),
-	legend: Schema.optional(Schema.String),
-})
-
 const QueryBuilderParamsSchema = Schema.Struct({
-	queries: Schema.mutable(Schema.Array(QueryDraftSchema)),
+	queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
 	formulas: Schema.optional(Schema.mutable(Schema.Array(Schema.Unknown))),
 })
 
 const decodeQueryBuilderParamsSync = Schema.decodeUnknownSync(QueryBuilderParamsSchema)
 const decodeQuerySpecSync = Schema.decodeUnknownSync(QuerySpec)
-
-type RawQueryDraft = Schema.Schema.Type<typeof QueryDraftSchema>
-
-function normalizeDraft(raw: RawQueryDraft): QueryBuilderQueryDraft {
-	const groupByList = raw.groupBy ? [...raw.groupBy] : []
-	return {
-		id: raw.id,
-		name: raw.name,
-		enabled: raw.enabled ?? true,
-		hidden: raw.hidden ?? false,
-		dataSource: raw.dataSource,
-		signalSource: raw.signalSource ?? "default",
-		metricName: raw.metricName ?? "",
-		metricType: raw.metricType ?? "sum",
-		isMonotonic: raw.isMonotonic ?? false,
-		whereClause: raw.whereClause ?? "",
-		aggregation: raw.aggregation,
-		stepInterval: raw.stepInterval ?? "",
-		orderByDirection: raw.orderByDirection ?? "desc",
-		addOns: {
-			groupBy: raw.addOns?.groupBy ?? groupByList.length > 0,
-			having: raw.addOns?.having ?? false,
-			orderBy: raw.addOns?.orderBy ?? false,
-			limit: raw.addOns?.limit ?? false,
-			legend: raw.addOns?.legend ?? false,
-		},
-		groupBy: groupByList,
-		having: raw.having ?? "",
-		orderBy: raw.orderBy ?? "",
-		limit: raw.limit ?? "",
-		legend: raw.legend ?? "",
-	}
-}
 
 function applyReduceToValue(
 	result: QueryEngineResult,
@@ -271,8 +205,7 @@ export const inspectWidget = (input: InspectWidgetInput) => {
 		const queryEngine = yield* QueryEngineService
 		const queryResults: InspectChartQueryResult[] = []
 
-		for (const rawDraft of enabledRawDrafts) {
-			const draft = normalizeDraft(rawDraft)
+		for (const draft of enabledRawDrafts) {
 			const buildResult = isTimeseries
 				? buildTimeseriesQuerySpec(draft)
 				: buildBreakdownQuerySpec(draft)

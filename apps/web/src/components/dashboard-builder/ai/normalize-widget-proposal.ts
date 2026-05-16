@@ -433,7 +433,7 @@ function normalizeQueryEntry(
 	const fallbackFilters = asRecord(queryRecord.filters)
 	const metricTypeInput = queryRecord.metricType ?? fallbackFilters?.metricType
 	const hasInvalidMetricType = dataSource === "metrics" && isExplicitInvalidMetricType(metricTypeInput)
-	const metricType = toMetricType(metricTypeInput, queryBase.metricType)
+	const metricType = toMetricType(metricTypeInput, "gauge")
 	const defaultWhereClause = formatFiltersAsWhereClause({ filters: fallbackFilters })
 	const groupBy = toQueryGroupByArray(queryRecord.groupBy)
 	const addOns = asRecord(queryRecord.addOns)
@@ -443,7 +443,7 @@ function normalizeQueryEntry(
 			: typeof queryRecord.metric === "string" && queryRecord.metric.trim().length > 0
 				? queryRecord.metric
 				: undefined
-	const metricName = toMetricName(queryRecord, dataSource, queryBase.metricName)
+	const metricName = toMetricName(queryRecord, dataSource, "")
 	const isMonotonic =
 		typeof queryRecord.isMonotonic === "boolean" ? queryRecord.isMonotonic : metricType === "sum"
 	const aggregation =
@@ -460,49 +460,57 @@ function normalizeQueryEntry(
 				)
 			: normalizeAggregation(dataSource, rawAggregation, queryBase.aggregation)
 
-	return {
-		hasInvalidMetricType,
-		query: {
-			...queryBase,
-			id: typeof queryRecord.id === "string" ? queryRecord.id : queryBase.id,
-			name:
-				typeof queryRecord.name === "string" && queryRecord.name.trim().length > 0
-					? queryRecord.name
-					: queryLabel(index),
-			enabled: typeof queryRecord.enabled === "boolean" ? queryRecord.enabled : true,
-			dataSource,
-			signalSource:
-				queryRecord.signalSource === "default" || queryRecord.signalSource === "meter"
-					? queryRecord.signalSource
-					: "default",
-			metricName,
-			metricType,
-			isMonotonic,
-			whereClause:
-				typeof queryRecord.whereClause === "string" ? queryRecord.whereClause : defaultWhereClause,
-			aggregation,
-			stepInterval: toStepInterval(queryRecord),
-			orderByDirection:
-				queryRecord.orderByDirection === "asc" || queryRecord.orderByDirection === "desc"
-					? queryRecord.orderByDirection
-					: queryBase.orderByDirection,
-			addOns: {
-				groupBy:
-					typeof addOns?.groupBy === "boolean"
-						? addOns.groupBy
-						: groupBy.length > 0 && !(groupBy.length === 1 && groupBy[0] === "none"),
-				having: typeof addOns?.having === "boolean" ? addOns.having : queryBase.addOns.having,
-				orderBy: typeof addOns?.orderBy === "boolean" ? addOns.orderBy : queryBase.addOns.orderBy,
-				limit: typeof addOns?.limit === "boolean" ? addOns.limit : queryBase.addOns.limit,
-				legend: typeof addOns?.legend === "boolean" ? addOns.legend : queryBase.addOns.legend,
-			},
-			groupBy,
-			having: typeof queryRecord.having === "string" ? queryRecord.having : queryBase.having,
-			orderBy: typeof queryRecord.orderBy === "string" ? queryRecord.orderBy : queryBase.orderBy,
-			limit: typeof queryRecord.limit === "string" ? queryRecord.limit : queryBase.limit,
-			legend: typeof queryRecord.legend === "string" ? queryRecord.legend : queryBase.legend,
+	const sharedFields = {
+		id: typeof queryRecord.id === "string" ? queryRecord.id : queryBase.id,
+		name:
+			typeof queryRecord.name === "string" && queryRecord.name.trim().length > 0
+				? queryRecord.name
+				: queryLabel(index),
+		enabled: typeof queryRecord.enabled === "boolean" ? queryRecord.enabled : true,
+		hidden: queryBase.hidden,
+		whereClause:
+			typeof queryRecord.whereClause === "string" ? queryRecord.whereClause : defaultWhereClause,
+		aggregation,
+		stepInterval: toStepInterval(queryRecord),
+		orderByDirection:
+			queryRecord.orderByDirection === "asc" || queryRecord.orderByDirection === "desc"
+				? queryRecord.orderByDirection
+				: queryBase.orderByDirection,
+		addOns: {
+			groupBy:
+				typeof addOns?.groupBy === "boolean"
+					? addOns.groupBy
+					: groupBy.length > 0 && !(groupBy.length === 1 && groupBy[0] === "none"),
+			having: typeof addOns?.having === "boolean" ? addOns.having : queryBase.addOns.having,
+			orderBy: typeof addOns?.orderBy === "boolean" ? addOns.orderBy : queryBase.addOns.orderBy,
+			limit: typeof addOns?.limit === "boolean" ? addOns.limit : queryBase.addOns.limit,
+			legend: typeof addOns?.legend === "boolean" ? addOns.legend : queryBase.addOns.legend,
 		},
+		groupBy,
+		having: typeof queryRecord.having === "string" ? queryRecord.having : queryBase.having,
+		orderBy: typeof queryRecord.orderBy === "string" ? queryRecord.orderBy : queryBase.orderBy,
+		limit: typeof queryRecord.limit === "string" ? queryRecord.limit : queryBase.limit,
+		legend: typeof queryRecord.legend === "string" ? queryRecord.legend : queryBase.legend,
 	}
+
+	const query: QueryBuilderQueryDraft =
+		dataSource === "metrics"
+			? {
+					...sharedFields,
+					dataSource: "metrics",
+					signalSource:
+						queryRecord.signalSource === "default" || queryRecord.signalSource === "meter"
+							? queryRecord.signalSource
+							: "default",
+					metricName,
+					metricType,
+					isMonotonic,
+				}
+			: dataSource === "logs"
+				? { ...sharedFields, dataSource: "logs" }
+				: { ...sharedFields, dataSource: "traces" }
+
+	return { hasInvalidMetricType, query }
 }
 
 function validateMetricsQueries(

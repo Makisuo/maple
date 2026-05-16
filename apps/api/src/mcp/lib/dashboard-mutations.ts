@@ -145,7 +145,6 @@ export const withDashboardMutation = <E, R>(
 						description: existing.description,
 						tags: existing.tags,
 						timeRange: existing.timeRange,
-						variables: existing.variables,
 						widgets: nextWidgets,
 						createdAt: existing.createdAt,
 						updatedAt: now,

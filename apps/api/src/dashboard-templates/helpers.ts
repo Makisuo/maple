@@ -34,15 +34,11 @@ export function makeQueryDraft(opts: {
 	metricType?: string
 	isMonotonic?: boolean
 }): Record<string, unknown> {
-	return {
+	const draft: Record<string, unknown> = {
 		id: opts.id,
 		name: opts.name,
 		enabled: true,
 		dataSource: opts.dataSource,
-		signalSource: "default",
-		metricName: opts.metricName ?? "",
-		metricType: opts.metricType ?? "sum",
-		...(opts.isMonotonic != null && { isMonotonic: opts.isMonotonic }),
 		whereClause: opts.whereClause ?? "",
 		aggregation: opts.aggregation,
 		stepInterval: "",
@@ -60,6 +56,14 @@ export function makeQueryDraft(opts: {
 		limit: "",
 		legend: "",
 	}
+	// Metric-only fields belong solely to the metrics source.
+	if (opts.dataSource === "metrics") {
+		draft.signalSource = "default"
+		draft.metricName = opts.metricName ?? ""
+		draft.metricType = opts.metricType ?? "gauge"
+		draft.isMonotonic = opts.isMonotonic ?? false
+	}
+	return draft
 }
 
 export function makeQueryBuilderTimeseriesDataSource(queries: Record<string, unknown>[]): {

@@ -552,7 +552,7 @@ function QueryBuilderLabInner({ startTime, endTime }: QueryBuilderLabProps) {
 						{queries.map((query) => {
 							const aggregateOptions = AGGREGATIONS_BY_SOURCE[query.dataSource]
 							const metricValue =
-								query.metricName && query.metricType
+								query.dataSource === "metrics" && query.metricName && query.metricType
 									? `${query.metricName}::${query.metricType}`
 									: undefined
 
@@ -657,11 +657,15 @@ function QueryBuilderLabInner({ startTime, endTime }: QueryBuilderLabProps) {
 																		: null
 																	if (!parsed) return
 
-																	updateQuery(query.id, (current) => ({
-																		...current,
-																		metricName: parsed.metricName,
-																		metricType: parsed.metricType,
-																	}))
+																	updateQuery(query.id, (current) =>
+																		current.dataSource === "metrics"
+																			? {
+																					...current,
+																					metricName: parsed.metricName,
+																					metricType: parsed.metricType,
+																				}
+																			: current,
+																	)
 																}}
 															>
 																<SelectTrigger className="w-full">
@@ -692,14 +696,24 @@ function QueryBuilderLabInner({ startTime, endTime }: QueryBuilderLabProps) {
 															</p>
 															<Select
 																items={SIGNAL_SOURCES}
-																value={query.signalSource}
+																value={
+																	query.dataSource === "metrics"
+																		? query.signalSource
+																		: "default"
+																}
 																onValueChange={(value) =>
-																	updateQuery(query.id, (current) => ({
-																		...current,
-																		signalSource:
-																			(value as "default" | "meter") ??
-																			current.signalSource,
-																	}))
+																	updateQuery(query.id, (current) =>
+																		current.dataSource === "metrics"
+																			? {
+																					...current,
+																					signalSource:
+																						(value as
+																							| "default"
+																							| "meter") ??
+																						current.signalSource,
+																				}
+																			: current,
+																	)
 																}
 															>
 																<SelectTrigger className="w-full">

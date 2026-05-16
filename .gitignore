@@ -33,3 +33,5 @@ apps/chat-agent/.dev.vars
 /bin/
 /apps/agents/logs
 /logs
+/apps/ingest/apps/ingest/.wal
+/apps/ingest/target

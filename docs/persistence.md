@@ -37,6 +37,22 @@ bun run db:studio
 
 `@maple/api` runs `db:migrate` automatically before `dev` and `start` so pending migrations are applied at startup.
 
+## Data Migrations (JSON-column rewrites)
+
+Drizzle migrations are pure DDL. When a stored JSON blob (e.g. `dashboards.payloadJson`,
+`dashboardVersions.snapshotJson`) needs a structural rewrite, a DDL migration cannot express
+it. Those run as TypeScript data-migration scripts in `packages/db/src/migrations/`.
+
+- Each script is **idempotent** and guarded by the `_maple_data_migrations` bookkeeping
+  table (`id`, `applied_at`) — it short-circuits if its id is already recorded.
+- The libSQL path runs them inside `runMigrations()` (`packages/db/src/migrate.ts`), after
+  the DDL `migrate()`.
+- The Cloudflare D1 worker never calls `runMigrations()`, so each data migration is also
+  invoked once on worker boot from `DatabaseD1Live.ts`; the guard table makes every later
+  boot a single `SELECT`.
+
+See `packages/db/src/migrations/0012-dashboard-widget-reshape.ts` for the reference shape.
+
 ## Self-Host Note
 
 For file-based mode, mount/persist `apps/api/.data` in your runtime environment.

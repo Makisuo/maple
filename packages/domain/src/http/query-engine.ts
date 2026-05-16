@@ -793,26 +793,49 @@ const QueryBuilderAddOnsSchema = Schema.Struct({
 	legend: Schema.Boolean,
 })
 
-export const QueryBuilderQueryDraftSchema = Schema.Struct({
+// Fields shared by every query-draft source. Metric-specific fields live only
+// on the metrics variant below — traces/logs queries never carry them.
+const queryDraftBaseFields = {
 	id: Schema.String,
 	name: Schema.String,
-	enabled: Schema.Boolean,
-	dataSource: Schema.Literals(["traces", "logs", "metrics"]),
-	signalSource: Schema.optional(Schema.Literals(["default", "meter"])),
-	metricName: Schema.String,
-	metricType: Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"]),
-	isMonotonic: Schema.optional(Schema.Boolean),
-	whereClause: Schema.String,
+	enabled: Schema.optional(Schema.Boolean),
+	hidden: Schema.optional(Schema.Boolean),
+	whereClause: Schema.optional(Schema.String),
 	aggregation: Schema.String,
-	stepInterval: Schema.String,
+	stepInterval: Schema.optional(Schema.String),
 	orderByDirection: Schema.optional(Schema.Literals(["desc", "asc"])),
-	addOns: QueryBuilderAddOnsSchema,
-	groupBy: Schema.mutable(Schema.Array(Schema.String)),
+	addOns: Schema.optional(QueryBuilderAddOnsSchema),
+	groupBy: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 	having: Schema.optional(Schema.String),
 	orderBy: Schema.optional(Schema.String),
 	limit: Schema.optional(Schema.String),
 	legend: Schema.optional(Schema.String),
+}
+
+export const TracesQueryDraftSchema = Schema.Struct({
+	...queryDraftBaseFields,
+	dataSource: Schema.Literal("traces"),
 })
+
+export const LogsQueryDraftSchema = Schema.Struct({
+	...queryDraftBaseFields,
+	dataSource: Schema.Literal("logs"),
+})
+
+export const MetricsQueryDraftSchema = Schema.Struct({
+	...queryDraftBaseFields,
+	dataSource: Schema.Literal("metrics"),
+	signalSource: Schema.optional(Schema.Literals(["default", "meter"])),
+	metricName: Schema.optional(Schema.String),
+	metricType: Schema.optional(Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])),
+	isMonotonic: Schema.optional(Schema.Boolean),
+})
+
+export const QueryBuilderQueryDraftSchema = Schema.Union([
+	TracesQueryDraftSchema,
+	LogsQueryDraftSchema,
+	MetricsQueryDraftSchema,
+])
 export type QueryBuilderQueryDraftPayload = Schema.Schema.Type<typeof QueryBuilderQueryDraftSchema>
 
 export class ExecuteQueryBuilderRequest extends Schema.Class<ExecuteQueryBuilderRequest>(

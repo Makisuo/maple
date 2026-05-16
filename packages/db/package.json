@@ -11,6 +11,7 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
 		"db:generate": "drizzle-kit generate --config ./drizzle.config.ts",
 		"db:migrate": "drizzle-kit migrate --config ./drizzle.config.ts",
 		"db:push": "drizzle-kit push --config ./drizzle.config.ts",
@@ -26,6 +27,7 @@
 		"@effect/language-service": "catalog:effect",
 		"@types/node": "catalog:tooling",
 		"drizzle-kit": "^0.31.9",
-		"typescript": "catalog:tooling"
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
 	}
 }

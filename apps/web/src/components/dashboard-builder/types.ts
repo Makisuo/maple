@@ -1,6 +1,26 @@
 // ---------------------------------------------------------------------------
 // Dashboard Type System
+//
+// The widget shape is owned by the Effect schemas in @maple/domain. The types
+// below derive from those schemas so the web client cannot drift from the HTTP
+// boundary. Only web-only concerns (data-source endpoint registry keys, render
+// state) are defined here.
 // ---------------------------------------------------------------------------
+
+import type {
+	DashboardWidgetSchema,
+	WidgetDataSourceSchema,
+	WidgetDisplayConfigSchema,
+	WidgetLayoutSchema,
+} from "@maple/domain/http"
+
+// The domain schemas decode to deeply-readonly types; web widgets are mutable
+// React/builder state, so the derived types are unwrapped to mutable form.
+type DeepMutable<T> = T extends ReadonlyArray<infer U>
+	? Array<DeepMutable<U>>
+	: T extends object
+		? { -readonly [K in keyof T]: DeepMutable<T[K]> }
+		: T
 
 // --- Time Range ---
 
@@ -39,28 +59,10 @@ export type DataSourceEndpoint =
 
 // --- Widget Data Source ---
 
-export interface WidgetDataSource {
+// `endpoint` is narrowed to the registry key union so the data-source registry
+// stays statically indexable; everything else comes straight from the schema.
+export type WidgetDataSource = Omit<DeepMutable<typeof WidgetDataSourceSchema.Type>, "endpoint"> & {
 	endpoint: DataSourceEndpoint
-	params?: Record<string, unknown>
-	transform?: {
-		fieldMap?: Record<string, string>
-		hideSeries?: {
-			baseNames: string[]
-		}
-		flattenSeries?: {
-			valueField: string
-		}
-		reduceToValue?: {
-			field: string
-			aggregate?: "sum" | "first" | "count" | "avg" | "max" | "min"
-		}
-		computeRatio?: {
-			numeratorName: string
-			denominatorNames: string[]
-		}
-		limit?: number
-		sortBy?: { field: string; direction: "asc" | "desc" }
-	}
 }
 
 // --- Widget Display ---
@@ -78,98 +80,11 @@ export type ValueUnit =
 	| "short"
 	| (string & {})
 
-export interface WidgetDisplayConfig {
-	title?: string
-	description?: string
-
-	// Chart-specific
-	chartId?: string
-	chartPresentation?: {
-		legend?: "visible" | "hidden" | "right"
-		tooltip?: "visible" | "hidden"
-		showPoints?: boolean
-		fillNulls?: number | false
-		compareToPreviousPeriod?: boolean
-	}
-	xAxis?: { label?: string; unit?: ValueUnit; visible?: boolean }
-	yAxis?: {
-		label?: string
-		unit?: ValueUnit
-		min?: number
-		max?: number
-		softMin?: number
-		softMax?: number
-		logScale?: boolean
-		visible?: boolean
-	}
-	seriesMapping?: Record<string, string>
-	colorOverrides?: Record<string, string>
-	stacked?: boolean
-	curveType?: "linear" | "monotone"
-
-	// Stat-specific
-	unit?: ValueUnit
-	thresholds?: Array<{ value: number; color: string; label?: string }>
-	prefix?: string
-	suffix?: string
-	sparkline?: { enabled: boolean; dataSource?: WidgetDataSource }
-
-	// Table-specific
-	columns?: Array<{
-		field: string
-		header: string
-		unit?: ValueUnit
-		width?: number
-		align?: "left" | "center" | "right"
-		hidden?: boolean
-		thresholds?: Array<{ value: number; color: string }>
-	}>
-
-	// List-specific
-	listDataSource?: "traces" | "logs"
-	listWhereClause?: string
-	listLimit?: number
-	listRootOnly?: boolean
-
-	// Pie-specific
-	pie?: {
-		donut?: boolean
-		innerRadius?: number
-		showLabels?: boolean
-		showPercent?: boolean
-	}
-
-	// Histogram-specific
-	histogram?: {
-		bucketCount?: number
-		bucketWidth?: number
-		logScaleY?: boolean
-	}
-
-	// Heatmap-specific
-	heatmap?: {
-		colorScale?: "viridis" | "magma" | "cividis" | "blues" | "reds"
-		scaleType?: "linear" | "log"
-	}
-
-	// Markdown-specific
-	markdown?: {
-		content: string
-	}
-}
+export type WidgetDisplayConfig = DeepMutable<typeof WidgetDisplayConfigSchema.Type>
 
 // --- Widget Layout ---
 
-export interface WidgetLayout {
-	x: number
-	y: number
-	w: number
-	h: number
-	minW?: number
-	minH?: number
-	maxW?: number
-	maxH?: number
-}
+export type WidgetLayout = DeepMutable<typeof WidgetLayoutSchema.Type>
 
 // --- Visualization ---
 
@@ -192,12 +107,8 @@ export type WidgetDataState =
 
 // --- Dashboard Widget ---
 
-export interface DashboardWidget {
-	id: string
-	visualization: VisualizationType
+export type DashboardWidget = Omit<DeepMutable<typeof DashboardWidgetSchema.Type>, "dataSource"> & {
 	dataSource: WidgetDataSource
-	display: WidgetDisplayConfig
-	layout: WidgetLayout
 }
 
 // --- Dashboard ---

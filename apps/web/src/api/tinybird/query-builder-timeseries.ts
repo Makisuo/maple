@@ -9,13 +9,12 @@ import {
 	type QueryRunResult,
 	type TimeseriesPoint,
 } from "@/components/query-builder/formula-results"
-import { buildTimeseriesQuerySpec, type QueryBuilderMetricType } from "@/lib/query-builder/model"
+import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
+import { buildTimeseriesQuerySpec } from "@/lib/query-builder/model"
 import { decodeInput, TinybirdQueryError } from "@/api/tinybird/effect-utils"
 import { computeBucketSeconds } from "@/api/tinybird/timeseries-utils"
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
-
-const METRIC_TYPES_TUPLE = ["sum", "gauge", "histogram", "exponential_histogram"] as const
 
 const COMPARISON_MODES = ["none", "previous_period"] as const
 
@@ -24,34 +23,6 @@ const DEFAULT_STRATEGY = {
 	fallbackWindowSeconds: [24 * 60 * 60, 7 * 24 * 60 * 60, 31 * 24 * 60 * 60],
 	maxFallbackRangeSeconds: 31 * 24 * 60 * 60,
 } as const
-
-const QueryDraftSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	enabled: Schema.Boolean,
-	hidden: Schema.optionalKey(Schema.Boolean),
-	dataSource: Schema.Literals(["traces", "logs", "metrics"]),
-	signalSource: Schema.Literals(["default", "meter"]),
-	metricName: Schema.String,
-	metricType: Schema.Literals(METRIC_TYPES_TUPLE),
-	isMonotonic: Schema.optionalKey(Schema.Boolean),
-	whereClause: Schema.String,
-	aggregation: Schema.String,
-	stepInterval: Schema.String,
-	orderByDirection: Schema.Literals(["desc", "asc"]),
-	addOns: Schema.Struct({
-		groupBy: Schema.Boolean,
-		having: Schema.Boolean,
-		orderBy: Schema.Boolean,
-		limit: Schema.Boolean,
-		legend: Schema.Boolean,
-	}),
-	groupBy: Schema.mutable(Schema.Array(Schema.String)),
-	having: Schema.String,
-	orderBy: Schema.String,
-	limit: Schema.String,
-	legend: Schema.String,
-})
 
 const FormulaSchema = Schema.Struct({
 	id: Schema.String,
@@ -77,7 +48,7 @@ const StrategySchema = Schema.Struct({
 export const QueryBuilderTimeseriesInputSchema = Schema.Struct({
 	startTime: dateTimeString,
 	endTime: dateTimeString,
-	queries: Schema.mutable(Schema.Array(QueryDraftSchema)),
+	queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
 	formulas: Schema.optional(Schema.mutable(Schema.Array(FormulaSchema))),
 	comparison: Schema.optional(ComparisonSchema),
 	strategy: Schema.optional(StrategySchema),
@@ -395,12 +366,12 @@ async function executeTimeseriesQueryWithFallbackUsing(
 }
 
 function toDisplayNameById(
-	entries: Array<{ id: string; name: string; legend: string }>,
+	entries: Array<{ id: string; name: string; legend?: string }>,
 ): Map<string, string> {
 	const map = new Map<string, string>()
 
 	for (const entry of entries) {
-		const trimmedLegend = entry.legend.trim()
+		const trimmedLegend = (entry.legend ?? "").trim()
 		map.set(entry.id, trimmedLegend || entry.name)
 	}
 
@@ -598,12 +569,7 @@ async function runQueryWindow(
 
 	const queryResults = await Promise.all(
 		enabledQueries.map(async (query): Promise<QueryRunResult> => {
-			const built = buildTimeseriesQuerySpec({
-				...query,
-				hidden: query.hidden ?? false,
-				metricType: query.metricType as QueryBuilderMetricType,
-				isMonotonic: query.isMonotonic ?? query.metricType === "sum",
-			})
+			const built = buildTimeseriesQuerySpec(query)
 
 			if (!built.query) {
 				debug.push({

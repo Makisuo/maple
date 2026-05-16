@@ -50,12 +50,11 @@ export const InstructionsResource = McpServer.resource({
 
 Read this before submitting raw widget JSON to \`create_dashboard\` (with \`dashboard_json\`), \`add_dashboard_widget\`, or \`update_dashboard_widget\`. The MCP call returns success even when the stored shape will fail at query time — it produces \`Invalid input for getQueryBuilderTimeseries\` only when the widget is rendered. Prefer the simplified \`widgets\` array on \`create_dashboard\` (\`{ title, source, metric, group_by?, service_name?, unit? }\`) when possible — it fills these traps for you.
 
-### Trace queries: required-but-vestigial fields
-Every trace query inside \`params.queries[]\` MUST include:
-\`\`\`
-"metricName": "", "metricType": "gauge", "isMonotonic": false
-\`\`\`
-They're meaningless for \`dataSource: "traces"\` but the schema requires them.
+### Query source determines which fields apply
+Query drafts inside \`params.queries[]\` are discriminated by \`dataSource\`. Trace and log
+queries carry ONLY the shared fields. The metric-only fields — \`metricName\`,
+\`metricType\`, \`isMonotonic\`, \`signalSource\` — belong solely to \`dataSource: "metrics"\`
+queries; do not add them to trace or log queries.
 
 ### whereClause is a custom grammar (NOT SQL)
 Operators (the only ones): \`=\`, \`>\`, \`<\`, \`>=\`, \`<=\`, \`contains\`, \`exists\`. Clauses joined by \` AND \` (case-insensitive). Quoted values use double quotes. Keys are lowercased. **There is no \`IS NULL\` / \`IS NOT NULL\`** — use \`<key> exists\` to require an attribute be present.
@@ -96,7 +95,7 @@ Valid aggregates: \`sum | first | count | avg | max | min\`. **No \`last\`.** Wi
 \`baseNames\` matches each hidden query's \`legend || name\`. Otherwise the auxiliary series render at full scale and skew percent-axis charts.
 
 ### Verification
-After submitting widget JSON, do NOT trust the success response — verify by calling \`inspect_chart_data\` against the widget, or by loading the dashboard URL and watching for \`Invalid input for getQueryBuilderTimeseries\`. Note: the schema validates structure (\`metricName\`/\`metricType\`) but \`whereClause\` is treated as opaque \`Schema.String\` and unsupported clauses (e.g. SQL \`IS NOT NULL\`) silently degrade to "no filter" at query time without any visible error. Check both traps in the same pass.
+After submitting widget JSON, do NOT trust the success response — verify by calling \`inspect_chart_data\` against the widget, or by loading the dashboard URL and watching for \`Invalid input for getQueryBuilderTimeseries\`. Note: \`whereClause\` is treated as opaque \`Schema.String\`, so unsupported clauses (e.g. SQL \`IS NOT NULL\`) silently degrade to "no filter" at query time without any visible error.
 
 ## Raw SQL Widgets (\`raw_sql_chart\` endpoint)
 

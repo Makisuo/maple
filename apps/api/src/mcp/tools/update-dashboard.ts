@@ -62,17 +62,12 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 						const now = decodeIsoDateTimeString(new Date().toISOString())
 
 						if (portable) {
-							// Full-replacement path. Variables aren't part of the
-							// portable export schema, so preserve whatever the
-							// stored dashboard already had — otherwise a "rename"
-							// via this branch would silently wipe variables.
 							return new DashboardDocument({
 								id: existing.id,
 								name: portable.name,
 								description: portable.description,
 								tags: portable.tags,
 								timeRange: portable.timeRange,
-								variables: existing.variables,
 								widgets: portable.widgets,
 								createdAt: existing.createdAt,
 								updatedAt: now,
@@ -92,7 +87,6 @@ export function registerUpdateDashboardTool(server: McpToolRegistrar) {
 							description: description ?? existing.description,
 							tags: existing.tags,
 							timeRange,
-							variables: existing.variables,
 							widgets: existing.widgets,
 							createdAt: existing.createdAt,
 							updatedAt: now,

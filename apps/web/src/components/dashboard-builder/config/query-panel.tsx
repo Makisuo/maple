@@ -109,10 +109,12 @@ export function QueryPanel({
 			? getMetricsAggregations(query.metricType || "gauge", query.isMonotonic)
 			: AGGREGATIONS_BY_SOURCE[query.dataSource]
 
-	const metricValue =
-		query.metricName && query.metricType ? `${query.metricName}::${query.metricType}` : undefined
-
 	const isMetrics = query.dataSource === "metrics"
+
+	const metricValue =
+		isMetrics && query.metricName && query.metricType
+			? `${query.metricName}::${query.metricType}`
+			: undefined
 
 	return (
 		<div className="border rounded-md">

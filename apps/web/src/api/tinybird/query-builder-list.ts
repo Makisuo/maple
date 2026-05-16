@@ -1,46 +1,17 @@
 import { Effect, Schema } from "effect"
+import { QueryBuilderQueryDraftSchema } from "@maple/domain/http"
 import { QueryEngineExecuteRequest } from "@maple/query-engine"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { mapleApiClientLayer } from "@/lib/registry"
-import { buildListQuerySpec, type QueryBuilderMetricType } from "@/lib/query-builder/model"
+import { buildListQuerySpec } from "@/lib/query-builder/model"
 import { decodeInput, TinybirdQueryError } from "@/api/tinybird/effect-utils"
 
 const dateTimeString = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))
 
-const METRIC_TYPES_TUPLE = ["sum", "gauge", "histogram", "exponential_histogram"] as const
-
-const QueryDraftSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	enabled: Schema.Boolean,
-	hidden: Schema.optionalKey(Schema.Boolean),
-	dataSource: Schema.Literals(["traces", "logs", "metrics"]),
-	signalSource: Schema.Literals(["default", "meter"]),
-	metricName: Schema.String,
-	metricType: Schema.Literals(METRIC_TYPES_TUPLE),
-	isMonotonic: Schema.optionalKey(Schema.Boolean),
-	whereClause: Schema.String,
-	aggregation: Schema.String,
-	stepInterval: Schema.String,
-	orderByDirection: Schema.Literals(["desc", "asc"]),
-	addOns: Schema.Struct({
-		groupBy: Schema.Boolean,
-		having: Schema.Boolean,
-		orderBy: Schema.Boolean,
-		limit: Schema.Boolean,
-		legend: Schema.Boolean,
-	}),
-	groupBy: Schema.mutable(Schema.Array(Schema.String)),
-	having: Schema.String,
-	orderBy: Schema.String,
-	limit: Schema.String,
-	legend: Schema.String,
-})
-
 const QueryBuilderListInputSchema = Schema.Struct({
 	startTime: dateTimeString,
 	endTime: dateTimeString,
-	queries: Schema.mutable(Schema.Array(QueryDraftSchema)),
+	queries: Schema.mutable(Schema.Array(QueryBuilderQueryDraftSchema)),
 	limit: Schema.optional(Schema.Number),
 	columns: Schema.optional(Schema.Array(Schema.String)),
 })
@@ -70,16 +41,7 @@ async function executeListQueryInternal(input: QueryBuilderListInput): Promise<Q
 
 	// Use the first enabled query for the list
 	const query = enabledQueries[0]
-	const built = buildListQuerySpec(
-		{
-			...query,
-			hidden: false,
-			metricType: query.metricType as QueryBuilderMetricType,
-			isMonotonic: query.isMonotonic ?? query.metricType === "sum",
-		},
-		input.limit,
-		input.columns as string[] | undefined,
-	)
+	const built = buildListQuerySpec(query, input.limit, input.columns as string[] | undefined)
 
 	if (!built.query) {
 		throw new Error(built.error ?? "Failed to build list query")

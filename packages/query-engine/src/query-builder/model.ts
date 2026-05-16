@@ -1,3 +1,4 @@
+import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
 import type { QuerySpec } from "../query-engine"
 import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "../where-clause"
 import { Match } from "effect"
@@ -5,17 +6,13 @@ import { Match } from "effect"
 export type QueryBuilderDataSource = "traces" | "logs" | "metrics"
 export type QueryBuilderAddOnKey = "groupBy" | "having" | "orderBy" | "limit" | "legend"
 export type QueryBuilderMetricType = "sum" | "gauge" | "histogram" | "exponential_histogram"
+export type QueryBuilderSignalSource = "default" | "meter"
 
-export interface QueryBuilderQueryDraft {
+interface QueryBuilderQueryDraftBase {
 	id: string
 	name: string
 	enabled: boolean
 	hidden: boolean
-	dataSource: QueryBuilderDataSource
-	signalSource: "default" | "meter"
-	metricName: string
-	metricType: QueryBuilderMetricType
-	isMonotonic: boolean
 	whereClause: string
 	aggregation: string
 	stepInterval: string
@@ -27,6 +24,24 @@ export interface QueryBuilderQueryDraft {
 	limit: string
 	legend: string
 }
+
+export interface TracesQueryDraft extends QueryBuilderQueryDraftBase {
+	dataSource: "traces"
+}
+
+export interface LogsQueryDraft extends QueryBuilderQueryDraftBase {
+	dataSource: "logs"
+}
+
+export interface MetricsQueryDraft extends QueryBuilderQueryDraftBase {
+	dataSource: "metrics"
+	signalSource: QueryBuilderSignalSource
+	metricName: string
+	metricType: QueryBuilderMetricType
+	isMonotonic: boolean
+}
+
+export type QueryBuilderQueryDraft = TracesQueryDraft | LogsQueryDraft | MetricsQueryDraft
 
 export interface BuildSpecResult {
 	query: QuerySpec | null
@@ -140,7 +155,7 @@ export function formulaLabel(index: number): string {
 	return `F${index + 1}`
 }
 
-export function createQueryDraft(index: number): QueryBuilderQueryDraft {
+export function createQueryDraft(index: number): TracesQueryDraft {
 	const isDefaultErrorRateQuery = index === 0
 
 	return {
@@ -149,10 +164,6 @@ export function createQueryDraft(index: number): QueryBuilderQueryDraft {
 		enabled: true,
 		hidden: false,
 		dataSource: "traces",
-		signalSource: "default",
-		metricName: "",
-		metricType: "gauge",
-		isMonotonic: false,
 		whereClause: defaultWhereClause(),
 		aggregation: isDefaultErrorRateQuery ? "error_rate" : "count",
 		stepInterval: "",
@@ -196,12 +207,36 @@ export function resetQueryForDataSource(
 	query: QueryBuilderQueryDraft,
 	dataSource: QueryBuilderDataSource,
 ): QueryBuilderQueryDraft {
-	return {
-		...query,
-		dataSource,
+	const shared: QueryBuilderQueryDraftBase = {
+		id: query.id,
+		name: query.name,
+		enabled: query.enabled,
+		hidden: query.hidden,
+		whereClause: query.whereClause,
 		aggregation: AGGREGATIONS_BY_SOURCE[dataSource][0].value,
-		metricName: dataSource === "metrics" ? query.metricName : "",
+		stepInterval: query.stepInterval,
+		orderByDirection: query.orderByDirection,
+		addOns: query.addOns,
+		groupBy: query.groupBy,
+		having: query.having,
+		orderBy: query.orderBy,
+		limit: query.limit,
+		legend: query.legend,
 	}
+
+	if (dataSource === "metrics") {
+		const prev = query.dataSource === "metrics" ? query : undefined
+		return {
+			...shared,
+			dataSource: "metrics",
+			signalSource: prev?.signalSource ?? "default",
+			metricName: prev?.metricName ?? "",
+			metricType: prev?.metricType ?? "gauge",
+			isMonotonic: prev?.isMonotonic ?? false,
+		}
+	}
+
+	return { ...shared, dataSource }
 }
 
 function parseBucketSeconds(raw: string): number | undefined {
@@ -631,13 +666,14 @@ function dedupeGroupByKeys<T extends string>(keys: readonly T[]): T[] {
 // Query spec builders
 // ---------------------------------------------------------------------------
 
-export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraft): BuildSpecResult {
+export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): BuildSpecResult {
 	const warnings: string[] = []
-	const { clauses, warnings: parseWarnings } = parseWhereClause(query.whereClause)
+	const { clauses, warnings: parseWarnings } = parseWhereClause(query.whereClause ?? "")
 	for (const w of parseWarnings) warnings.push(w.message)
 
-	const bucketSeconds = parseBucketSeconds(query.stepInterval)
-	if (query.stepInterval.trim() && !bucketSeconds) {
+	const stepInterval = query.stepInterval ?? ""
+	const bucketSeconds = parseBucketSeconds(stepInterval)
+	if (stepInterval.trim() && !bucketSeconds) {
 		warnings.push("Invalid step interval ignored; auto interval will be used")
 	}
 
@@ -665,8 +701,8 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraft): BuildSp
 		)
 
 		const groupByKeys: TracesGroupByKey[] = []
-		if (query.addOns.groupBy && query.groupBy.length > 0) {
-			for (const raw of query.groupBy) {
+		if (query.addOns?.groupBy && (query.groupBy?.length ?? 0) > 0) {
+			for (const raw of query.groupBy ?? []) {
 				const token = raw.trim().toLowerCase()
 				if (!token) continue
 				const resolved = resolveTracesGroupByToken(token, filters, warnings, raw)
@@ -721,8 +757,8 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraft): BuildSp
 		)
 
 		const logsGroupByKeys: LogsGroupByKey[] = []
-		if (query.addOns.groupBy && query.groupBy.length > 0) {
-			for (const raw of query.groupBy) {
+		if (query.addOns?.groupBy && (query.groupBy?.length ?? 0) > 0) {
+			for (const raw of query.groupBy ?? []) {
 				const token = raw.trim().toLowerCase()
 				if (!token) continue
 				const resolved = resolveLogsGroupByToken(token, warnings, raw)
@@ -755,17 +791,17 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraft): BuildSp
 		}
 	}
 
-	if (!query.metricName || !query.metricType) {
+	if (!query.metricName) {
 		return {
 			query: null,
 			warnings,
-			error: "Metric source requires metric name and metric type",
+			error: "Metric source requires a metric name",
 		}
 	}
 
 	const metricsFilters = clauses.reduce((acc, clause) => applyMetricsClause(acc, clause, warnings), {
 		metricName: query.metricName,
-		metricType: query.metricType,
+		metricType: query.metricType ?? "gauge",
 	} as {
 		metricName: string
 		metricType: QueryBuilderMetricType
@@ -774,8 +810,8 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraft): BuildSp
 	})
 
 	const metricsGroupByKeys: MetricsGroupByKey[] = []
-	if (query.addOns.groupBy && query.groupBy.length > 0) {
-		for (const raw of query.groupBy) {
+	if (query.addOns?.groupBy && (query.groupBy?.length ?? 0) > 0) {
+		for (const raw of query.groupBy ?? []) {
 			const token = raw.trim().toLowerCase()
 			if (!token) continue
 			const resolved = resolveMetricsGroupByToken(token, metricsFilters, warnings, raw)
@@ -798,7 +834,7 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraft): BuildSp
 	}
 }
 
-export function buildBreakdownQuerySpec(query: QueryBuilderQueryDraft): BuildSpecResult {
+export function buildBreakdownQuerySpec(query: QueryBuilderQueryDraftPayload): BuildSpecResult {
 	const timeseriesResult = buildTimeseriesQuerySpec(query)
 	if (!timeseriesResult.query) return timeseriesResult
 
@@ -815,7 +851,7 @@ export function buildBreakdownQuerySpec(query: QueryBuilderQueryDraft): BuildSpe
 		}
 	}
 
-	const limitRaw = query.addOns.limit ? query.limit.trim() : ""
+	const limitRaw = query.addOns?.limit ? (query.limit ?? "").trim() : ""
 	const parsedLimit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined
 	const limit =
 		parsedLimit && Number.isFinite(parsedLimit) && parsedLimit > 0 && parsedLimit <= 100
@@ -837,7 +873,7 @@ export function buildBreakdownQuerySpec(query: QueryBuilderQueryDraft): BuildSpe
 }
 
 export function buildListQuerySpec(
-	query: QueryBuilderQueryDraft,
+	query: QueryBuilderQueryDraftPayload,
 	limit?: number,
 	columns?: string[],
 ): BuildSpecResult {

@@ -1017,27 +1017,35 @@ export interface CustomBreakdownItem {
 // them as-is to the new /api/query-engine/execute-query-builder endpoint, which
 // translates each draft into a QuerySpec and merges results.
 
-export interface QueryBuilderQueryDraft {
+interface QueryBuilderQueryDraftBase {
 	id: string
 	name: string
 	enabled: boolean
-	dataSource: "traces" | "logs" | "metrics"
-	metricName: string
-	metricType: "sum" | "gauge" | "histogram" | "exponential_histogram"
 	whereClause: string
 	aggregation: string
 	stepInterval: string
 	addOns: { groupBy: boolean; having: boolean; orderBy: boolean; limit: boolean; legend: boolean }
 	groupBy: string[]
 	// Optional fields — included if present in the saved widget params
-	signalSource?: "default" | "meter"
-	isMonotonic?: boolean
+	hidden?: boolean
 	orderByDirection?: "desc" | "asc"
 	having?: string
 	orderBy?: string
 	limit?: string
 	legend?: string
 }
+
+// Source-discriminated: trace/log queries never carry metric-only fields.
+export type QueryBuilderQueryDraft =
+	| (QueryBuilderQueryDraftBase & { dataSource: "traces" })
+	| (QueryBuilderQueryDraftBase & { dataSource: "logs" })
+	| (QueryBuilderQueryDraftBase & {
+			dataSource: "metrics"
+			signalSource?: "default" | "meter"
+			metricName: string
+			metricType: "sum" | "gauge" | "histogram" | "exponential_histogram"
+			isMonotonic?: boolean
+	  })
 
 export async function fetchQueryBuilderTimeseries(
 	startTime: string,

@@ -1,6 +1,6 @@
 ---
 name: maple-dashboard-widgets
-description: "Build, repair, or review Maple dashboard widgets via the MCP. Triggers on phrases like 'create_dashboard', 'add_dashboard_widget', 'update_dashboard_widget', 'dashboard widget JSON', 'QueryDraft', 'trace dashboard widget', 'Invalid input for getQueryBuilderTimeseries', or any session that submits raw widget JSON to the maple MCP. Covers the trace QueryDraft required-but-vestigial fields, the custom whereClause grammar, valid aggregations per data source, groupBy prefix conventions, the stat-widget `reduceToValue` transform, hiding auxiliary series on formula charts, and the verification step (MCP success ≠ query success)."
+description: "Build, repair, or review Maple dashboard widgets via the MCP. Triggers on phrases like 'create_dashboard', 'add_dashboard_widget', 'update_dashboard_widget', 'dashboard widget JSON', 'QueryDraft', 'trace dashboard widget', 'Invalid input for getQueryBuilderTimeseries', or any session that submits raw widget JSON to the maple MCP. Covers the source-discriminated QueryDraft shape, the custom whereClause grammar, valid aggregations per data source, groupBy prefix conventions, the stat-widget `reduceToValue` transform, hiding auxiliary series on formula charts, and the verification step (MCP success ≠ query success)."
 ---
 
 # Maple dashboard widgets via MCP
@@ -15,19 +15,14 @@ When you are constructing **raw widget JSON** for any of:
 
 If you are creating a fresh dashboard, **prefer the simplified `widgets` array on `create_dashboard`** (`SimpleWidgetSpec` at [apps/api/src/mcp/tools/create-dashboard.ts:94](apps/api/src/mcp/tools/create-dashboard.ts:94)). It side-steps every trap below — fill in `title`, `source`, `metric`, optional `group_by`, optional `service_name`, and the tool builds the full shape for you. Raw JSON is for cases the simplified spec can't express (multi-query charts, formulas, hidden series, non-default transforms).
 
-## Trap 1 — Trace widgets need `metricName` and `metricType` (set `isMonotonic` too)
+## Trap 1 — Query drafts are source-discriminated
 
-The Effect schema at [apps/web/src/api/tinybird/query-builder-timeseries.ts:28](apps/web/src/api/tinybird/query-builder-timeseries.ts:28) marks `metricName` and `metricType` as required fields, even when `dataSource: "traces"` makes them meaningless. Omitting either produces a decode error like `Missing key at ["queries"][0]["metricName"]`. `isMonotonic` is technically `optionalKey` in the schema, but the canonical factory `createQueryDraft` ([packages/query-engine/src/query-builder/model.ts:143](packages/query-engine/src/query-builder/model.ts:143)) always sets it — include it for parity.
+The query draft schema ([packages/domain/src/http/query-engine.ts](packages/domain/src/http/query-engine.ts)) is a union discriminated on `dataSource`. The metric-only fields — `metricName`, `metricType`, `isMonotonic`, `signalSource` — exist **only** on `dataSource: "metrics"` queries.
 
-For trace queries use these exact values:
+- For `dataSource: "traces"` or `"logs"`: **do not** include `metricName`, `metricType`, `isMonotonic`, or `signalSource`. They are not part of the trace/log query shape.
+- For `dataSource: "metrics"`: include `metricName` (the metric to query), `metricType`, and optionally `isMonotonic` / `signalSource`.
 
-```json
-"metricName": "",
-"metricType": "gauge",
-"isMonotonic": false
-```
-
-Omitting them produces `Invalid input for getQueryBuilderTimeseries` in the browser even though the MCP call returned success.
+A trace query that still carries empty `metricName`/`metricType` is legacy shape — stored dashboards were migrated to drop them.
 
 ## Trap 2 — `whereClause` is a custom grammar, not SQL
 
@@ -77,10 +72,6 @@ Use as a template. Fill `whereClause`, `groupBy`, `aggregation`, `display.title`
           "enabled": true,
           "hidden": false,
           "dataSource": "traces",
-          "signalSource": "default",
-          "metricName": "",
-          "metricType": "gauge",
-          "isMonotonic": false,
           "whereClause": "service.name = \"ingest\" AND maple.signal exists",
           "aggregation": "count",
           "stepInterval": "",
@@ -175,13 +166,13 @@ When a chart uses `formulas` and the auxiliary queries shouldn't render on their
 2. Call `mcp__maple__get_dashboard` to read back the stored JSON and confirm shape, **or**
 3. Load the dashboard URL in the browser and watch for `Invalid input for getQueryBuilderTimeseries`.
 
-If you see that error, the culprit is almost always Trap 1 (missing trace required fields) or Trap 2 (SQL `IS NULL` instead of `exists`).
+If you see that error, the culprit is almost always Trap 1 (metric fields on a trace/log query, or a malformed query draft) or Trap 2 (SQL `IS NULL` instead of `exists`).
 
-**Two failure modes, only one is visible to the schema.** The Effect schema validates structure (`metricName`/`metricType` presence) but `whereClause` is just `Schema.String` — the parser ([packages/domain/src/where-clause.ts](packages/domain/src/where-clause.ts)) accepts the field at decode time and silently drops unsupported clauses at query time. So if you fix Trap 1 and re-submit, the missing-key error disappears, but a Trap 2 `IS NOT NULL` will then degrade to "no `maple.signal` filter applied" without producing any error in the UI — just wrong/empty results. Always run `parseWhereClause` on the clause (or eyeball it against the operator table above) in the same pass as the schema fix.
+**`whereClause` failures are invisible to the schema.** `whereClause` is just `Schema.String` — the parser ([packages/domain/src/where-clause.ts](packages/domain/src/where-clause.ts)) accepts the field at decode time and silently drops unsupported clauses at query time. A Trap 2 `IS NOT NULL` degrades to "no `maple.signal` filter applied" without producing any error in the UI — just wrong/empty results. Always run `parseWhereClause` on the clause (or eyeball it against the operator table above).
 
 ## Quick checklist before submitting widget JSON
 
-- [ ] Trace queries include `metricName: ""`, `metricType: "gauge"`, `isMonotonic: false`.
+- [ ] Trace/log queries omit `metricName`/`metricType`/`isMonotonic`/`signalSource`; metrics queries include `metricName` + `metricType`.
 - [ ] `whereClause` uses only `=`, `>`, `<`, `>=`, `<=`, `contains`, `exists`, joined by ` AND `.
 - [ ] `aggregation` is valid for the chosen `dataSource` (no `rate`/`sum` on traces).
 - [ ] `groupBy` uses the right prefix (`attr.` for metrics; unprefixed for traces/logs).

@@ -48,11 +48,7 @@ import { QueryEngineService } from "../services/QueryEngineService"
 import { RawSqlChartService } from "../services/RawSqlChartService"
 import { WarehouseQueryService } from "../services/WarehouseQueryService"
 import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
-import {
-	buildBreakdownQuerySpec,
-	buildTimeseriesQuerySpec,
-	type QueryBuilderQueryDraft,
-} from "@maple/query-engine/query-builder"
+import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 
 const isTaggedHttpError = (value: unknown): value is TinybirdQueryError | TinybirdQuotaExceededError =>
 	value instanceof TinybirdQueryError || value instanceof TinybirdQuotaExceededError
@@ -621,7 +617,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						const perQueryPoints: Array<{ name: string; points: Point[] }> = []
 
 						for (const query of enabledQueries) {
-							const built = buildTimeseriesQuerySpec(query as QueryBuilderQueryDraft)
+							const built = buildTimeseriesQuerySpec(query)
 							for (const w of built.warnings) allWarnings.push(`${query.name}: ${w}`)
 
 							if (!built.query) {
@@ -685,7 +681,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// for single-query breakdown widgets — multi-query breakdowns aren't a thing
 					// in the dashboard builder yet).
 					const primary = enabledQueries[0]
-					const built = buildBreakdownQuerySpec(primary as QueryBuilderQueryDraft)
+					const built = buildBreakdownQuerySpec(primary)
 					for (const w of built.warnings) allWarnings.push(`${primary.name}: ${w}`)
 
 					if (!built.query) {

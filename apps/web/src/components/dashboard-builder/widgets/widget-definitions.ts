@@ -8,7 +8,7 @@ import {
 	ChartLineIcon,
 	type IconComponent,
 } from "@/components/icons"
-import { createQueryDraft } from "@/lib/query-builder/model"
+import { createQueryDraft, type QueryBuilderQueryDraft } from "@/lib/query-builder/model"
 import type {
 	VisualizationType,
 	WidgetDataSource,
@@ -282,15 +282,28 @@ export const listPresets: WidgetPresetDefinition[] = [
 
 function buildBreakdownQuery(
 	index: number,
-	overrides: Partial<ReturnType<typeof createQueryDraft>>,
-): ReturnType<typeof createQueryDraft> {
-	return {
-		...createQueryDraft(index),
+	overrides: {
+		dataSource: "traces" | "logs"
+		whereClause: string
+		aggregation: string
+		groupBy: string[]
+		name?: string
+	},
+): QueryBuilderQueryDraft {
+	const draft = createQueryDraft(index)
+	const base = {
+		...draft,
+		name: overrides.name ?? draft.name,
 		enabled: true,
+		whereClause: overrides.whereClause,
+		aggregation: overrides.aggregation,
+		groupBy: overrides.groupBy,
 		addOns: { groupBy: true, having: false, orderBy: false, limit: true, legend: false },
 		limit: "10",
-		...overrides,
 	}
+	return overrides.dataSource === "logs"
+		? { ...base, dataSource: "logs" }
+		: { ...base, dataSource: "traces" }
 }
 
 export const piePresets: WidgetPresetDefinition[] = [

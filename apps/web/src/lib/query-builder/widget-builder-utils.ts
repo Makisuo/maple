@@ -129,23 +129,33 @@ function toMetricType(input: unknown, fallback: QueryBuilderMetricType): QueryBu
 	return fallback
 }
 
+function toStatAggregate(value: unknown): StatAggregate {
+	return value === "sum" ||
+		value === "first" ||
+		value === "count" ||
+		value === "avg" ||
+		value === "max" ||
+		value === "min"
+		? value
+		: "first"
+}
+
 function normalizeLoadedQuery(raw: QueryBuilderQueryDraft, index: number): QueryBuilderQueryDraft {
 	const base = createQueryDraft(index)
-	return {
-		...base,
-		...raw,
+	const source: QueryBuilderDataSource =
+		raw.dataSource === "traces" || raw.dataSource === "logs" || raw.dataSource === "metrics"
+			? raw.dataSource
+			: base.dataSource
+
+	const shared = {
+		id: raw.id || base.id,
 		name: raw.name || queryLabel(index),
-		dataSource:
-			raw.dataSource === "traces" || raw.dataSource === "logs" || raw.dataSource === "metrics"
-				? raw.dataSource
-				: base.dataSource,
-		signalSource:
-			raw.signalSource === "default" || raw.signalSource === "meter"
-				? raw.signalSource
-				: base.signalSource,
-		metricType: toMetricType(raw.metricType, base.metricType),
-		isMonotonic: raw.isMonotonic ?? raw.metricType === "sum",
-		groupBy: toQueryGroupByArray(raw.groupBy),
+		enabled: raw.enabled ?? base.enabled,
+		hidden: raw.hidden ?? base.hidden,
+		whereClause: raw.whereClause ?? base.whereClause,
+		aggregation: raw.aggregation || base.aggregation,
+		stepInterval: raw.stepInterval ?? base.stepInterval,
+		orderByDirection: raw.orderByDirection ?? base.orderByDirection,
 		addOns: {
 			groupBy: raw.addOns?.groupBy ?? base.addOns.groupBy,
 			having: raw.addOns?.having ?? base.addOns.having,
@@ -153,7 +163,25 @@ function normalizeLoadedQuery(raw: QueryBuilderQueryDraft, index: number): Query
 			limit: raw.addOns?.limit ?? base.addOns.limit,
 			legend: raw.addOns?.legend ?? base.addOns.legend,
 		},
+		groupBy: toQueryGroupByArray(raw.groupBy),
+		having: raw.having ?? base.having,
+		orderBy: raw.orderBy ?? base.orderBy,
+		limit: raw.limit ?? base.limit,
+		legend: raw.legend ?? base.legend,
 	}
+
+	if (source === "metrics") {
+		const metrics = raw.dataSource === "metrics" ? raw : undefined
+		return {
+			...shared,
+			dataSource: "metrics",
+			signalSource: metrics?.signalSource === "meter" ? "meter" : "default",
+			metricName: metrics?.metricName ?? "",
+			metricType: toMetricType(metrics?.metricType, "gauge"),
+			isMonotonic: metrics?.isMonotonic ?? metrics?.metricType === "sum",
+		}
+	}
+	return source === "logs" ? { ...shared, dataSource: "logs" } : { ...shared, dataSource: "traces" }
 }
 
 export function toSeriesFieldOptions(state: QueryBuilderWidgetState): string[] {
@@ -227,7 +255,7 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 				? rawComparison.includePercentChange
 				: true,
 		debug: params.debug === true,
-		statAggregate: widget.dataSource.transform?.reduceToValue?.aggregate ?? "first",
+		statAggregate: toStatAggregate(widget.dataSource.transform?.reduceToValue?.aggregate),
 		statValueField: widget.dataSource.transform?.reduceToValue?.field ?? "",
 		unit:
 			widget.display.unit ??
@@ -296,29 +324,43 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 			? params.source
 			: "traces"
 
-	const fallback: QueryBuilderQueryDraft = {
-		...fallbackQuery,
-		dataSource: source,
+	const fallbackBase = {
+		id: fallbackQuery.id,
+		name: fallbackQuery.name,
+		enabled: fallbackQuery.enabled,
+		hidden: fallbackQuery.hidden,
+		whereClause: formatFiltersAsWhereClause(params),
 		aggregation: typeof params.metric === "string" ? params.metric : fallbackQuery.aggregation,
 		stepInterval:
 			typeof params.bucketSeconds === "number"
 				? String(params.bucketSeconds)
 				: fallbackQuery.stepInterval,
-		whereClause: formatFiltersAsWhereClause(params),
-		groupBy: toQueryGroupByArray(params.groupBy),
-		metricName:
-			typeof (params.filters as Record<string, unknown> | undefined)?.metricName === "string"
-				? ((params.filters as Record<string, unknown>).metricName as string)
-				: fallbackQuery.metricName,
-		metricType: toMetricType(
-			(params.filters as Record<string, unknown> | undefined)?.metricType,
-			fallbackQuery.metricType,
-		),
+		orderByDirection: fallbackQuery.orderByDirection,
 		addOns: {
 			...fallbackQuery.addOns,
 			groupBy: Array.isArray(params.groupBy) ? params.groupBy.length > 0 : false,
 		},
+		groupBy: toQueryGroupByArray(params.groupBy),
+		having: fallbackQuery.having,
+		orderBy: fallbackQuery.orderBy,
+		limit: fallbackQuery.limit,
+		legend: fallbackQuery.legend,
 	}
+
+	const filterRecord = params.filters as Record<string, unknown> | undefined
+	const fallback: QueryBuilderQueryDraft =
+		source === "metrics"
+			? {
+					...fallbackBase,
+					dataSource: "metrics",
+					signalSource: "default",
+					metricName: typeof filterRecord?.metricName === "string" ? filterRecord.metricName : "",
+					metricType: toMetricType(filterRecord?.metricType, "gauge"),
+					isMonotonic: false,
+				}
+			: source === "logs"
+				? { ...fallbackBase, dataSource: "logs" }
+				: { ...fallbackBase, dataSource: "traces" }
 
 	return { ...baseFromWidget, queries: [fallback], formulas: [] }
 }

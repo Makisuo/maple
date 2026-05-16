@@ -70,7 +70,16 @@ const WidgetDisplayColumnSchema = Schema.Struct({
 	header: Schema.String,
 	unit: Schema.optional(Schema.String),
 	width: Schema.optional(Schema.Number),
-	align: Schema.optional(Schema.String),
+	align: Schema.optional(Schema.Literals(["left", "center", "right"])),
+	hidden: Schema.optional(Schema.Boolean),
+	thresholds: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				value: Schema.Number,
+				color: Schema.String,
+			}),
+		),
+	),
 })
 
 export const WidgetDisplayConfigSchema = Schema.Struct({
@@ -79,8 +88,11 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 	chartId: Schema.optional(Schema.String),
 	chartPresentation: Schema.optional(
 		Schema.Struct({
-			legend: Schema.optional(Schema.String),
-			tooltip: Schema.optional(Schema.String),
+			legend: Schema.optional(Schema.Literals(["visible", "hidden", "right"])),
+			tooltip: Schema.optional(Schema.Literals(["visible", "hidden"])),
+			showPoints: Schema.optional(Schema.Boolean),
+			fillNulls: Schema.optional(Schema.Union([Schema.Number, Schema.Literal(false)])),
+			compareToPreviousPeriod: Schema.optional(Schema.Boolean),
 		}),
 	),
 	xAxis: Schema.optional(
@@ -96,13 +108,16 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 			unit: Schema.optional(Schema.String),
 			min: Schema.optional(Schema.Number),
 			max: Schema.optional(Schema.Number),
+			softMin: Schema.optional(Schema.Number),
+			softMax: Schema.optional(Schema.Number),
+			logScale: Schema.optional(Schema.Boolean),
 			visible: Schema.optional(Schema.Boolean),
 		}),
 	),
 	seriesMapping: Schema.optional(StringRecord),
 	colorOverrides: Schema.optional(StringRecord),
 	stacked: Schema.optional(Schema.Boolean),
-	curveType: Schema.optional(Schema.String),
+	curveType: Schema.optional(Schema.Literals(["linear", "monotone"])),
 	unit: Schema.optional(Schema.String),
 	thresholds: Schema.optional(
 		Schema.Array(
@@ -127,12 +142,39 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 	listDataSource: Schema.optional(Schema.String),
 	listWhereClause: Schema.optional(Schema.String),
 	listLimit: Schema.optional(Schema.Number),
+	listRootOnly: Schema.optional(Schema.Boolean),
+
+	// Pie-specific
+	pie: Schema.optional(
+		Schema.Struct({
+			donut: Schema.optional(Schema.Boolean),
+			innerRadius: Schema.optional(Schema.Number),
+			showLabels: Schema.optional(Schema.Boolean),
+			showPercent: Schema.optional(Schema.Boolean),
+		}),
+	),
+
+	// Histogram-specific
+	histogram: Schema.optional(
+		Schema.Struct({
+			bucketCount: Schema.optional(Schema.Number),
+			bucketWidth: Schema.optional(Schema.Number),
+			logScaleY: Schema.optional(Schema.Boolean),
+		}),
+	),
 
 	// Heatmap-specific
 	heatmap: Schema.optional(
 		Schema.Struct({
-			colorScale: Schema.optional(Schema.String),
-			scaleType: Schema.optional(Schema.String),
+			colorScale: Schema.optional(Schema.Literals(["viridis", "magma", "cividis", "blues", "reds"])),
+			scaleType: Schema.optional(Schema.Literals(["linear", "log"])),
+		}),
+	),
+
+	// Markdown-specific
+	markdown: Schema.optional(
+		Schema.Struct({
+			content: Schema.String,
 		}),
 	),
 })
@@ -172,7 +214,6 @@ export class DashboardDocument extends Schema.Class<DashboardDocument>("Dashboar
 	description: Schema.optional(Schema.String),
 	tags: Schema.optional(Schema.Array(Schema.String)),
 	timeRange: TimeRangeSchema,
-	variables: Schema.optional(Schema.Array(Schema.Unknown)),
 	widgets: Schema.Array(DashboardWidgetSchema),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
