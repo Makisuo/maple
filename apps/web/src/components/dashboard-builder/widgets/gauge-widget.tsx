@@ -1,5 +1,5 @@
 import { memo, useId } from "react"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
 import { formatValueByUnit } from "@maple/ui/lib/format"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
@@ -147,7 +147,7 @@ export const GaugeWidget = memo(function GaugeWidget({
 			onConfigure={onConfigure}
 			onFix={onFix}
 			contentClassName="flex-1 min-h-0 flex items-center justify-center p-2"
-			loadingSkeleton={<Skeleton className="h-28 w-44" />}
+			loadingSkeleton={<ChartSkeleton variant="gauge" />}
 		>
 			<svg
 				viewBox="0 0 240 212"

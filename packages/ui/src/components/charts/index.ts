@@ -1,4 +1,5 @@
 export { chartRegistry, getChartById, getChartsByCategory, searchCharts } from "./registry"
+export { ChartSkeleton, type ChartSkeletonVariant } from "./_shared/chart-skeleton"
 export type { BaseChartProps, ChartCategory, ChartRegistryEntry } from "./_shared/chart-types"
 export * from "./_shared/sample-data"
 

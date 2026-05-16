@@ -1,7 +1,7 @@
 import { memo, Suspense } from "react"
 
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { getChartById } from "@maple/ui/components/charts/registry"
+import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
 
@@ -42,9 +42,9 @@ export const PieWidget = memo(function PieWidget({
 			onClone={onClone}
 			onConfigure={onConfigure}
 			onFix={onFix}
-			loadingSkeleton={<Skeleton className="h-full w-full" />}
+			loadingSkeleton={<ChartSkeleton variant="pie" />}
 		>
-			<Suspense fallback={<Skeleton className="h-full w-full" />}>
+			<Suspense fallback={<ChartSkeleton variant="pie" />}>
 				<ChartComponent
 					data={chartData}
 					className="h-full w-full aspect-auto"

@@ -355,6 +355,17 @@
 	.service-map-flowing-dash {
 		animation: none;
 	}
+	.skeleton-draw,
+	.skeleton-spin,
+	.skeleton-bar {
+		animation: none;
+	}
+	.skeleton-draw {
+		stroke-dashoffset: 0;
+	}
+	.skeleton-bar {
+		transform: scaleY(0.85);
+	}
 }
 
 /* Service map flowing dash animation */
@@ -397,6 +408,49 @@
 	to {
 		stroke-dashoffset: 0;
 	}
+}
+
+/* Widget loading skeletons — chart-type-aware ghosts */
+/* A 100-long dash chased by a 100-long gap; sliding the offset sweeps the
+   stroke on then off in one continuous, seam-free motion. */
+@keyframes skeleton-draw {
+	to {
+		stroke-dashoffset: -100;
+	}
+}
+
+@keyframes skeleton-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Height wave for bar / histogram ghosts — scales from a grounded baseline. */
+@keyframes skeleton-bar {
+	0%,
+	100% {
+		transform: scaleY(0.4);
+	}
+	50% {
+		transform: scaleY(1);
+	}
+}
+
+.skeleton-draw {
+	stroke-dasharray: 100 100;
+	stroke-dashoffset: 100;
+	animation: skeleton-draw 2.2s linear infinite;
+}
+
+.skeleton-spin {
+	transform-origin: center;
+	transform-box: view-box;
+	animation: skeleton-spin 1.6s linear infinite;
+}
+
+.skeleton-bar {
+	transform-origin: bottom;
+	animation: skeleton-bar 1.5s ease-in-out infinite;
 }
 
 .infra-pulse {

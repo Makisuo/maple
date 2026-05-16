@@ -4,7 +4,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
 import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
@@ -285,7 +285,14 @@ function StatSparklineScenarioCard({
 				title={display.title || "Untitled"}
 				dataState={{ status: "ready", data: value }}
 				mode={mode}
-				loadingSkeleton={<Skeleton className="h-8 w-24" />}
+				loadingSkeleton={
+					<div className="flex h-full w-full flex-col">
+						<div className="flex flex-1 items-center justify-center">
+							<ChartSkeleton variant="stat" />
+						</div>
+						<ChartSkeleton variant="line" className="h-10 shrink-0" />
+					</div>
+				}
 				contentClassName="flex-1 min-h-0 flex flex-col"
 				{...handlers}
 			>

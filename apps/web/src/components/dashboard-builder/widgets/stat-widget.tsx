@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleton"
 import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
 import { formatValueByUnit } from "@maple/ui/lib/format"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
@@ -99,7 +99,18 @@ export const StatWidget = memo(function StatWidget({
 					? "flex-1 min-h-0 flex flex-col"
 					: "flex-1 min-h-0 flex items-center justify-center p-4"
 			}
-			loadingSkeleton={<Skeleton className="h-8 w-24" />}
+			loadingSkeleton={
+				sparklineSource ? (
+					<div className="flex h-full w-full flex-col">
+						<div className="flex flex-1 items-center justify-center">
+							<ChartSkeleton variant="stat" />
+						</div>
+						<ChartSkeleton variant="line" className="h-10 shrink-0" />
+					</div>
+				) : (
+					<ChartSkeleton variant="stat" />
+				)
+			}
 		>
 			{sparklineSource ? (
 				<>
