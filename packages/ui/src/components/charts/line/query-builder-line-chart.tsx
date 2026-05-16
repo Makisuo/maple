@@ -7,6 +7,7 @@ import {
 	type LegendSeries,
 	QueryBuilderLegend,
 	computeSeriesStats,
+	legendBlockHeight,
 } from "../_shared/query-builder-legend"
 import { thresholdReferenceLines } from "../_shared/threshold-lines"
 import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
@@ -174,9 +175,7 @@ export function QueryBuilderLineChart({
 	const variant = showStats ? "stats" : "compact"
 	const showLegendBlock = legend === "visible" || legend === "right"
 	const legendPosition = legend === "right" ? "right" : "bottom"
-	const legendHeight = showStats
-		? 30 + Math.min(seriesDefinitions.length, 4) * 22
-		: 28 + Math.ceil(Math.min(seriesDefinitions.length, 12) / 3) * 20
+	const legendHeight = legendBlockHeight(variant, seriesDefinitions.length)
 
 	return (
 		<ChartContainer config={chartConfig} className={className}>

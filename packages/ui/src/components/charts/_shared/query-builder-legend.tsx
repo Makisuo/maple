@@ -64,6 +64,20 @@ interface QueryBuilderLegendProps {
 	variant?: "compact" | "stats"
 }
 
+/** Vertical space (px) a bottom-aligned legend block needs. */
+export function legendBlockHeight(
+	variant: "compact" | "stats",
+	seriesCount: number,
+): number {
+	if (variant === "stats") {
+		// pt-2 (8) + header row (20) + capped data rows (20 each)
+		return 28 + Math.min(seriesCount, 4) * 20
+	}
+	// pt-2 (8) + wrapped 20px rows + 2px gap-y between rows
+	const rows = Math.ceil(Math.min(seriesCount, 12) / 3)
+	return 6 + rows * 22
+}
+
 const STAT_COLUMNS: ReadonlyArray<{ label: string; field: keyof SeriesStats }> = [
 	{ label: "Min", field: "min" },
 	{ label: "Max", field: "max" },
