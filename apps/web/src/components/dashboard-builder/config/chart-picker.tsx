@@ -1,5 +1,4 @@
-import { useMemo } from "react"
-import { Atom, useAtom } from "@/lib/effect-atom"
+import { useState } from "react"
 
 import {
 	Dialog,
@@ -287,8 +286,7 @@ interface WidgetPickerProps {
 }
 
 export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps) {
-	const activeTabAtom = useMemo(() => Atom.make<PickerTab>("all"), [])
-	const [activeTab, setActiveTab] = useAtom(activeTabAtom)
+	const [activeTab, setActiveTab] = useState<PickerTab>("all")
 
 	const handleSelectChart = (chartId: string) => {
 		onSelect(

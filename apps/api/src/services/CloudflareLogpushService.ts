@@ -22,7 +22,7 @@ import {
 	parseCloudflareLogpushSecretHmacKey,
 } from "@maple/db"
 import { and, eq } from "drizzle-orm"
-import { Effect, Layer, Option, Redacted, Schema, Context } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "./Crypto"
 import { Database } from "./DatabaseLive"
 import { Env } from "./Env"
@@ -327,7 +327,7 @@ export class CloudflareLogpushService extends Context.Service<
 			const zoneName = yield* cleanRequiredString("Zone name", request.zoneName)
 			const serviceName = yield* cleanOptionalServiceName(request.serviceName, zoneName)
 
-			const now = Date.now()
+			const now = yield* Clock.currentTimeMillis
 			const id = decodeConnectorIdSync(randomUUID())
 			const secret = generateSecret()
 			const secretHash = hashCloudflareLogpushSecret(secret, lookupHmacKey)
@@ -374,7 +374,7 @@ export class CloudflareLogpushService extends Context.Service<
 		) {
 			const existing = yield* requireConnector(orgId, connectorId)
 			const updates: Record<string, unknown> = {
-				updatedAt: Date.now(),
+				updatedAt: yield* Clock.currentTimeMillis,
 				updatedBy: userId,
 			}
 
@@ -460,7 +460,7 @@ export class CloudflareLogpushService extends Context.Service<
 		) {
 			yield* requireConnector(orgId, connectorId)
 
-			const now = Date.now()
+			const now = yield* Clock.currentTimeMillis
 			const secret = generateSecret()
 			const secretHash = hashCloudflareLogpushSecret(secret, lookupHmacKey)
 			const encryptedSecret = yield* encryptSecret(secret, encryptionKey)

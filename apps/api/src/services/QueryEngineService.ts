@@ -15,7 +15,7 @@ import {
 	TinybirdQueryError,
 	TinybirdQuotaExceededError,
 } from "@maple/domain/http"
-import { Array as Arr, Duration, Effect, Layer, Match, Metric, Option, Result, Context } from "effect"
+import { Array as Arr, Clock, Context, Duration, Effect, Layer, Match, Metric, Option, Result } from "effect"
 import type { TenantContext } from "./AuthService"
 import { BucketCacheService } from "./BucketCacheService"
 import { EdgeCacheService } from "./EdgeCacheService"
@@ -1785,7 +1785,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 
 			const legacyBlobCachedExecute = (tenant: TenantContext, request: QueryEngineExecuteRequest) =>
 				Effect.gen(function* () {
-					const startMs = Date.now()
+					const startMs = yield* Clock.currentTimeMillis
 					const key = buildCacheKey(tenant.orgId, request)
 					const ttlSeconds = cacheTtlForQueryKind(request.query.kind)
 					const { value, hit } = yield* edgeCache.getOrCompute(
@@ -1800,7 +1800,10 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 					yield* recordCacheOutcome(hit)
 					yield* Effect.annotateCurrentSpan("cache.hit", hit)
 					yield* Effect.annotateCurrentSpan("cache.ttlSeconds", ttlSeconds)
-					yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
+					yield* Metric.update(
+						QueryEngineMetrics.executeDurationMs,
+						(yield* Clock.currentTimeMillis) - startMs,
+					)
 					return value
 				})
 
@@ -1815,7 +1818,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 						return yield* legacyBlobCachedExecute(tenant, request)
 					}
 					const source = request.query.source
-					const perfStartMs = Date.now()
+					const perfStartMs = yield* Clock.currentTimeMillis
 					// Pin bucketSeconds onto the query so the fan-out's narrowed ranges
 					// don't let validateExecute recompute a smaller step — buckets must
 					// match the outer cache's step exactly.
@@ -1852,7 +1855,10 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 					yield* Effect.annotateCurrentSpan("cache.bucketsHit", outcome.bucketsHit)
 					yield* Effect.annotateCurrentSpan("cache.bucketsMissed", outcome.bucketsMissed)
 					yield* Effect.annotateCurrentSpan("cache.missingRangeCount", outcome.missingRangeCount)
-					yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - perfStartMs)
+					yield* Metric.update(
+						QueryEngineMetrics.executeDurationMs,
+						(yield* Clock.currentTimeMillis) - perfStartMs,
+					)
 
 					return new QueryEngineExecuteResponse({
 						result: {
@@ -1927,7 +1933,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 			): Effect.Effect<A, QueryEngineDirectError> =>
 				withTimeout(
 					Effect.gen(function* () {
-						const startMs = Date.now()
+						const startMs = yield* Clock.currentTimeMillis
 						const key = buildDirectRouteCacheKey(tenant.orgId, routeName, payload)
 						const { value, hit } = yield* edgeCache.getOrCompute(
 							{ bucket: "qe-direct", key, ttlSeconds: 15 },
@@ -1935,7 +1941,10 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 						)
 						yield* recordCacheOutcome(hit)
 						yield* Effect.annotateCurrentSpan("cache.hit", hit)
-						yield* Metric.update(QueryEngineMetrics.executeDurationMs, Date.now() - startMs)
+						yield* Metric.update(
+							QueryEngineMetrics.executeDurationMs,
+							(yield* Clock.currentTimeMillis) - startMs,
+						)
 						return value
 					}).pipe(
 						Effect.withSpan("QueryEngineService.cachedDirect", {

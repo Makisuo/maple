@@ -93,5 +93,6 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 		return { isConfigured, send }
 	}),
 }) {
-	static readonly Default = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make)
+	static readonly Default = this.layer
 }

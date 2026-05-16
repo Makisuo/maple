@@ -121,5 +121,6 @@ const makeEnv = Effect.gen(function* () {
 })
 
 export class Env extends Context.Service<Env, EnvShape>()("Env") {
-	static readonly Default = Layer.effect(this, makeEnv)
+	static readonly layer = Layer.effect(this, makeEnv)
+	static readonly Default = this.layer
 }

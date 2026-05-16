@@ -1,6 +1,6 @@
 import type { OrgId } from "@maple/domain"
 import type { TimeseriesPoint } from "@maple/query-engine"
-import { Array as Arr, Config, Context, Deferred, Effect, Layer, Option } from "effect"
+import { Array as Arr, Clock, Config, Context, Deferred, Effect, Layer, Option } from "effect"
 import { EdgeCacheService } from "./EdgeCacheService"
 
 /**
@@ -304,7 +304,8 @@ export class BucketCacheService extends Context.Service<BucketCacheService, Buck
 			): Effect.Effect<BucketCacheOutcome, E, R> =>
 				Effect.gen(function* () {
 					const bucketMs = request.bucketSeconds * 1000
-					const fluxBoundaryMs = Date.now() - fluxSeconds * 1000
+					const now = yield* Clock.currentTimeMillis
+					const fluxBoundaryMs = now - fluxSeconds * 1000
 
 					const fingerprint = yield* Effect.promise(() =>
 						generateFingerprint(request.orgId, request.query, request.bucketSeconds),

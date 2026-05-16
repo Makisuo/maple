@@ -42,9 +42,11 @@ import {
 	WorkloadDetailSummaryResponse,
 	WorkloadInfraTimeseriesResponse,
 	WorkloadFacetsResponse,
+	SpanId,
+	TraceId,
 } from "@maple/domain/http"
-import { Effect } from "effect"
-import { QueryEngineService } from "../services/QueryEngineService"
+import { Effect, Schema } from "effect"
+import { QueryEngineService, type QueryEngineDirectError } from "../services/QueryEngineService"
 import { RawSqlChartService } from "../services/RawSqlChartService"
 import { WarehouseQueryService } from "../services/WarehouseQueryService"
 import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
@@ -53,8 +55,12 @@ import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-
 const isTaggedHttpError = (value: unknown): value is TinybirdQueryError | TinybirdQuotaExceededError =>
 	value instanceof TinybirdQueryError || value instanceof TinybirdQuotaExceededError
 
+const decodeTraceIdSync = Schema.decodeUnknownSync(TraceId)
+const decodeSpanIdSync = Schema.decodeUnknownSync(SpanId)
+const decodeParentSpanId = (value: string) => (value === "" ? "" : decodeSpanIdSync(value))
+
 const mapExecError = <A, R>(
-	effect: Effect.Effect<A, unknown, R>,
+	effect: Effect.Effect<A, QueryEngineDirectError, R>,
 	context: string,
 ): Effect.Effect<A, QueryEngineExecutionError | TinybirdQueryError | TinybirdQuotaExceededError, R> =>
 	effect.pipe(
@@ -109,7 +115,14 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						),
 					)
 					const typedRows = compiled.castRows(rows)
-					return new SpanHierarchyResponse({ data: typedRows })
+					return new SpanHierarchyResponse({
+						data: typedRows.map((row) => ({
+							...row,
+							traceId: decodeTraceIdSync(row.traceId),
+							spanId: decodeSpanIdSync(row.spanId),
+							parentSpanId: decodeParentSpanId(row.parentSpanId),
+						})),
+					})
 				}),
 			)
 			.handle("errorsByType", ({ payload }) =>
@@ -231,7 +244,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const typedRows = compiled.castRows(rows)
 					return new ErrorDetailTracesResponse({
 						data: typedRows.map((row) => ({
-							traceId: row.traceId,
+							traceId: decodeTraceIdSync(row.traceId),
 							startTime: String(row.startTime),
 							durationMicros: Number(row.durationMicros),
 							spanCount: Number(row.spanCount),

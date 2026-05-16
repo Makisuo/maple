@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
+import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent } from "@maple/ui/components/ui/card"
@@ -14,10 +15,13 @@ import {
 	CheckIcon,
 	ChevronDownIcon,
 	ChevronUpIcon,
+	CircleCheckIcon,
 	CodeIcon,
 	CopyIcon,
 	EyeIcon,
+	PaperPlaneIcon,
 	PulseIcon,
+	RocketIcon,
 	XmarkIcon,
 } from "@/components/icons"
 import { CodeBlock } from "@/components/quick-start/code-block"
@@ -73,6 +77,7 @@ export function SetupChecklist() {
 		checklistExpanded,
 		setChecklistExpanded,
 		qualifyAnswers,
+		demoDataRequested,
 	} = useQuickStart(orgId)
 
 	const roleDefault = qualifyAnswers.role ? ROLE_DEFAULT_FRAMEWORK[qualifyAnswers.role] : "nodejs"
@@ -80,6 +85,9 @@ export function SetupChecklist() {
 
 	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "1h")
 	const [pollCount, setPollCount] = useState(0)
+
+	const keysResult = useAtomValue(MapleApiAtomClient.query("ingestKeys", "get", {}))
+	const apiKey = Result.isSuccess(keysResult) ? keysResult.value.publicKey : ""
 
 	const overviewResult = useAtomValue(
 		getServiceOverviewResultAtom({
@@ -99,14 +107,16 @@ export function SetupChecklist() {
 		(s) => !(typeof s.serviceName === "string" && s.serviceName.startsWith("demo-")),
 	)
 	const hasRealData = realServices.length > 0
+	const firstRealService =
+		typeof realServices[0]?.serviceName === "string"
+			? (realServices[0].serviceName as string)
+			: undefined
 
-	useEffect(() => {
-		if (hasRealData && !checklistDismissed) {
-			dismissChecklist()
-		}
-	}, [hasRealData, checklistDismissed, dismissChecklist])
+	if (checklistDismissed) return null
 
-	if (checklistDismissed || hasRealData) return null
+	if (hasRealData) {
+		return <FirstTraceCelebration serviceName={firstRealService} onDismiss={dismissChecklist} />
+	}
 
 	return (
 		<Card className="mb-4 shrink-0 border-primary/30 bg-primary/[0.02] overflow-hidden">
@@ -120,9 +130,15 @@ export function SetupChecklist() {
 						<CodeIcon size={16} />
 					</div>
 					<div className="min-w-0">
-						<p className="text-sm font-medium">Connect your app to see real data</p>
+						<p className="text-sm font-medium">
+							{demoDataRequested
+								? "Demo data is in — now connect your real app"
+								: "Connect your app to see real data"}
+						</p>
 						<p className="text-xs text-muted-foreground">
-							Drop in the snippet and we'll auto-detect your first traces.
+							{demoDataRequested
+								? "You're exploring sample services. Send your own telemetry to see your real stack."
+								: "Drop in the snippet and we'll auto-detect your first traces."}
 						</p>
 					</div>
 				</button>
@@ -162,8 +178,11 @@ export function SetupChecklist() {
 				<div className="overflow-hidden">
 					<CardContent className="border-t border-primary/20 p-5 space-y-5">
 						<FrameworkPicker selected={framework} onSelect={setSelectedFramework} />
-						<ConnectInstructions framework={framework} />
-						<ListeningStatus pollCount={pollCount} />
+						<ConnectInstructions framework={framework} apiKey={apiKey} />
+						<ListeningStatus
+							apiKey={apiKey}
+							onTestSent={() => setPollCount((c) => c + 1)}
+						/>
 					</CardContent>
 				</div>
 			</div>
@@ -209,10 +228,8 @@ function FrameworkPicker({
 	)
 }
 
-function ConnectInstructions({ framework }: { framework: FrameworkId }) {
+function ConnectInstructions({ framework, apiKey }: { framework: FrameworkId; apiKey: string }) {
 	const snippet = sdkSnippets.find((s) => s.language === framework)
-	const keysResult = useAtomValue(MapleApiAtomClient.query("ingestKeys", "get", {}))
-	const apiKey = Result.isSuccess(keysResult) ? keysResult.value.publicKey : "Loading..."
 
 	if (!snippet) return null
 
@@ -229,7 +246,7 @@ function ConnectInstructions({ framework }: { framework: FrameworkId }) {
 					Credentials
 				</span>
 				<CopyableInput value={ingestUrl} label="Ingest endpoint" />
-				<CopyableInput value={apiKey} label="API key" masked />
+				<CopyableInput value={apiKey || "Loading…"} label="API key" masked />
 			</div>
 
 			<div className="rounded-lg border bg-card overflow-hidden">
@@ -275,13 +292,165 @@ function ConnectInstructions({ framework }: { framework: FrameworkId }) {
 	)
 }
 
-function ListeningStatus({ pollCount: _pollCount }: { pollCount: number }) {
+function ListeningStatus({
+	apiKey,
+	onTestSent,
+}: {
+	apiKey: string
+	onTestSent: () => void
+}) {
+	const [sending, setSending] = useState(false)
+
+	async function handleSendTest() {
+		if (!apiKey || sending) return
+		setSending(true)
+		try {
+			await sendTestEvent(apiKey)
+			toast.success("Test event sent — watch for it to land below")
+			onTestSent()
+		} catch {
+			toast.error("Couldn't reach the ingest endpoint — double-check your API key")
+		} finally {
+			setSending(false)
+		}
+	}
+
 	return (
-		<div className="flex items-center gap-2.5 rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-3">
-			<PulseIcon size={14} className="text-primary animate-pulse" />
-			<span className="text-xs text-muted-foreground">Watching for your first trace…</span>
+		<div className="flex flex-col gap-3 rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+			<div className="flex items-center gap-2.5">
+				<PulseIcon size={14} className="text-primary animate-pulse" />
+				<span className="text-xs text-muted-foreground">
+					Watching for your first trace…
+				</span>
+			</div>
+			<div className="flex items-center gap-2">
+				<span className="hidden text-[11px] text-muted-foreground sm:inline">
+					Not ready to instrument?
+				</span>
+				<Button
+					variant="outline"
+					size="sm"
+					onClick={handleSendTest}
+					disabled={sending || !apiKey}
+					className="gap-2 shrink-0"
+				>
+					<PaperPlaneIcon size={13} />
+					{sending ? "Sending…" : "Send a test event"}
+				</Button>
+			</div>
 		</div>
 	)
+}
+
+function FirstTraceCelebration({
+	serviceName,
+	onDismiss,
+}: {
+	serviceName?: string
+	onDismiss: () => void
+}) {
+	const navigate = useNavigate()
+
+	function handleExplore() {
+		onDismiss()
+		if (serviceName) {
+			navigate({ to: "/traces", search: { services: [serviceName] } })
+		} else {
+			navigate({ to: "/traces" })
+		}
+	}
+
+	return (
+		<Card className="mb-4 shrink-0 border-primary/40 bg-primary/[0.04] overflow-hidden">
+			<CardContent className="flex items-center gap-4 p-5">
+				<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+					<CircleCheckIcon size={20} />
+				</div>
+				<div className="flex-1 min-w-0">
+					<p className="text-sm font-semibold tracking-tight">
+						First trace received — you're live
+					</p>
+					<p className="text-xs text-muted-foreground mt-0.5">
+						{serviceName
+							? `We're seeing telemetry from ${serviceName}. Open it to explore.`
+							: "We're seeing your telemetry. Jump in to explore."}
+					</p>
+				</div>
+				<Button size="sm" onClick={handleExplore} className="gap-2 shrink-0">
+					Explore your traces
+					<RocketIcon size={14} />
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					aria-label="Dismiss"
+					className="size-8 p-0 shrink-0"
+					onClick={onDismiss}
+				>
+					<XmarkIcon size={14} />
+				</Button>
+			</CardContent>
+		</Card>
+	)
+}
+
+function randomHex(byteLength: number): string {
+	const bytes = new Uint8Array(byteLength)
+	crypto.getRandomValues(bytes)
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+const TEST_EVENT_SERVICE = "maple-onboarding-test"
+
+async function sendTestEvent(apiKey: string): Promise<void> {
+	const now = Date.now()
+	const endNano = `${now}000000`
+	const startNano = `${now - 87}000000`
+	const payload = {
+		resourceSpans: [
+			{
+				resource: {
+					attributes: [
+						{ key: "service.name", value: { stringValue: TEST_EVENT_SERVICE } },
+						{ key: "deployment.environment", value: { stringValue: "development" } },
+					],
+				},
+				scopeSpans: [
+					{
+						scope: { name: "maple-onboarding" },
+						spans: [
+							{
+								traceId: randomHex(16),
+								spanId: randomHex(8),
+								name: "GET /maple/test-event",
+								kind: 2,
+								startTimeUnixNano: startNano,
+								endTimeUnixNano: endNano,
+								attributes: [
+									{ key: "http.request.method", value: { stringValue: "GET" } },
+									{ key: "http.route", value: { stringValue: "/maple/test-event" } },
+									{ key: "http.response.status_code", value: { intValue: 200 } },
+								],
+								status: { code: 1 },
+							},
+						],
+					},
+				],
+			},
+		],
+	}
+
+	const response = await fetch(`${ingestUrl}/v1/traces`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${apiKey}`,
+		},
+		body: JSON.stringify(payload),
+	})
+	if (!response.ok) {
+		throw new Error(`Ingest gateway returned ${response.status}`)
+	}
 }
 
 function CopyableInput({ value, label, masked }: { value: string; label: string; masked?: boolean }) {

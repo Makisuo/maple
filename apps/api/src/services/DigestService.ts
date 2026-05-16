@@ -709,7 +709,8 @@ export class DigestService extends Context.Service<DigestService>()("DigestServi
 		}
 	}),
 }) {
-	static readonly Default = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make)
+	static readonly Default = this.layer
 }
 
 function rowToResponse(row: typeof digestSubscriptions.$inferSelect): DigestSubscriptionResponse {

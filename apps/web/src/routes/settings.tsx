@@ -229,6 +229,20 @@ export function SettingsPage() {
 		)
 	}
 
+	if (Result.isFailure(sessionResult)) {
+		return (
+			<DashboardLayout
+				breadcrumbs={[{ label: "Settings" }]}
+				title="Settings"
+				description="Manage your workspace settings."
+			>
+				<p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+					Unable to load your session. Reload the page before changing workspace settings.
+				</p>
+			</DashboardLayout>
+		)
+	}
+
 	if (visibleItems.length === 0) {
 		return (
 			<DashboardLayout

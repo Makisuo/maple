@@ -1652,15 +1652,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				request.type === "hazel-oauth"
 					? yield* hazelOAuth
 							.createChannelWebhook(orgId, {
-								channelId: request.hazelChannelId.trim(),
+								channelId: request.hazelChannelId,
 								name: request.name.trim(),
 							})
 							.pipe(
 								Effect.map((webhook) => ({
 									type: "hazel-oauth" as const,
-									hazelOrganizationId: request.hazelOrganizationId.trim(),
+									hazelOrganizationId: request.hazelOrganizationId,
 									hazelOrganizationName: request.hazelOrganizationName.trim(),
-									hazelChannelId: request.hazelChannelId.trim(),
+									hazelChannelId: request.hazelChannelId,
 									hazelChannelName: request.hazelChannelName.trim(),
 									webhookId: webhook.id,
 									webhookUrl: webhook.webhookUrl,
@@ -1800,9 +1800,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					const previousSecret =
 						hydrated.secretConfig.type === "hazel-oauth" ? hydrated.secretConfig : null
 					const nextOrganizationId =
-						normalizeOptionalString(request.hazelOrganizationId) ??
-						previousSecret?.hazelOrganizationId ??
-						""
+						request.hazelOrganizationId ?? previousSecret?.hazelOrganizationId
 					const nextOrganizationName =
 						normalizeOptionalString(request.hazelOrganizationName) ??
 						previousSecret?.hazelOrganizationName ??
@@ -1812,15 +1810,22 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						requestLogoUrl === undefined
 							? (hydrated.publicConfig.hazelOrganizationLogoUrl ?? null)
 							: requestLogoUrl
-					const nextChannelId =
-						normalizeOptionalString(request.hazelChannelId) ??
-						previousSecret?.hazelChannelId ??
-						""
+					const nextChannelId = request.hazelChannelId ?? previousSecret?.hazelChannelId
 					const nextChannelName =
 						normalizeOptionalString(request.hazelChannelName) ??
 						previousSecret?.hazelChannelName ??
 						""
 					const nextName = normalizeOptionalString(request.name) ?? existing.name
+					if (
+						nextOrganizationId == null ||
+						nextChannelId == null ||
+						nextOrganizationName.length === 0 ||
+						nextChannelName.length === 0
+					) {
+						return yield* Effect.fail(
+							makeValidationError("Hazel organization and channel are required"),
+						)
+					}
 					const channelChanged =
 						previousSecret == null || previousSecret.hazelChannelId !== nextChannelId
 
@@ -1841,9 +1846,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								)
 						: null
 
-					const webhookId = provisioned?.id ?? previousSecret!.webhookId
-					const webhookUrl = provisioned?.webhookUrl ?? previousSecret!.webhookUrl
-					const webhookToken = provisioned?.token ?? previousSecret!.webhookToken
+					const webhookId = provisioned?.id ?? previousSecret?.webhookId
+					const webhookUrl = provisioned?.webhookUrl ?? previousSecret?.webhookUrl
+					const webhookToken = provisioned?.token ?? previousSecret?.webhookToken
+					if (webhookId == null || webhookUrl == null || webhookToken == null) {
+						return yield* Effect.fail(
+							makeValidationError("Hazel channel webhook is required"),
+						)
+					}
 
 					nextPublicConfig = {
 						summary: `${nextOrganizationName} · #${nextChannelName}`,

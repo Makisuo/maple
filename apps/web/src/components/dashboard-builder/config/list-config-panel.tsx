@@ -1,6 +1,5 @@
 import * as React from "react"
 import { Reorder, useDragControls } from "motion/react"
-import { Atom, useAtom } from "@/lib/effect-atom"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
@@ -220,8 +219,7 @@ export function ListConfigPanel() {
 		listRootOnly?: boolean
 		listColumns?: ListColumnDraft[]
 	}) => setState((current) => ({ ...current, ...updates }))
-	const showFieldSuggestionsAtom = React.useMemo(() => Atom.make<number | null>(null), [])
-	const [showFieldSuggestions, setShowFieldSuggestions] = useAtom(showFieldSuggestionsAtom)
+	const [showFieldSuggestions, setShowFieldSuggestions] = React.useState<number | null>(null)
 
 	// Stable IDs for Reorder — kept in sync with columns array.
 	// addColumn/removeColumn/reorderColumns update the ref before calling onChange,

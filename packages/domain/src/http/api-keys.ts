@@ -43,9 +43,9 @@ export class ApiKeysListResponse extends Schema.Class<ApiKeysListResponse>("ApiK
 
 export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("CreateApiKeyRequest")({
 	name: Schema.String,
-	description: Schema.optional(Schema.String),
-	expiresInSeconds: Schema.optional(Schema.Number),
-	kind: Schema.optional(ApiKeyKind),
+	description: Schema.optionalKey(Schema.String),
+	expiresInSeconds: Schema.optionalKey(Schema.Number),
+	kind: Schema.optionalKey(ApiKeyKind),
 }) {}
 
 export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersistenceError>()(

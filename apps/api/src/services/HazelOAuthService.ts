@@ -5,6 +5,9 @@ import {
 	IntegrationsRevokedError,
 	IntegrationsUpstreamError,
 	IntegrationsValidationError,
+	HazelChannelId,
+	HazelOrganizationId,
+	HazelWebhookId,
 	type HazelChannelSummary,
 	type HazelOrganizationSummary,
 	type OrgId,
@@ -12,7 +15,7 @@ import {
 } from "@maple/domain/http"
 import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthConnectionRow } from "@maple/db"
 import { and, eq, lt } from "drizzle-orm"
-import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "./Crypto"
 import { Database, type DatabaseClient } from "./DatabaseLive"
 import { Env, type EnvShape } from "./Env"
@@ -23,24 +26,24 @@ const REFRESH_LEEWAY_MS = 60_000 // 1 minute
 
 const TokenResponseSchema = Schema.Struct({
 	access_token: Schema.String,
-	token_type: Schema.optional(Schema.String),
-	expires_in: Schema.optional(Schema.Number),
-	refresh_token: Schema.optional(Schema.String),
-	scope: Schema.optional(Schema.String),
-	id_token: Schema.optional(Schema.String),
+	token_type: Schema.optionalKey(Schema.String),
+	expires_in: Schema.optionalKey(Schema.Number),
+	refresh_token: Schema.optionalKey(Schema.String),
+	scope: Schema.optionalKey(Schema.String),
+	id_token: Schema.optionalKey(Schema.String),
 })
 
 const UserInfoSchema = Schema.Struct({
 	sub: Schema.String,
-	email: Schema.optional(Schema.String),
-	email_verified: Schema.optional(Schema.Boolean),
-	name: Schema.optional(Schema.String),
+	email: Schema.optionalKey(Schema.String),
+	email_verified: Schema.optionalKey(Schema.Boolean),
+	name: Schema.optionalKey(Schema.String),
 })
 
 const HazelOrganizationsResponseSchema = Schema.Struct({
 	data: Schema.Array(
 		Schema.Struct({
-			id: Schema.String,
+				id: HazelOrganizationId,
 			name: Schema.String,
 			slug: Schema.NullOr(Schema.String),
 			logoUrl: Schema.NullOr(Schema.String),
@@ -51,18 +54,18 @@ const HazelOrganizationsResponseSchema = Schema.Struct({
 const HazelChannelsResponseSchema = Schema.Struct({
 	data: Schema.Array(
 		Schema.Struct({
-			id: Schema.String,
+				id: HazelChannelId,
 			name: Schema.String,
 			type: Schema.Literals(["public", "private"]),
-			organizationId: Schema.String,
+				organizationId: HazelOrganizationId,
 		}),
 	),
 })
 
 const HazelChannelWebhookResponseSchema = Schema.Struct({
-	id: Schema.String,
-	channelId: Schema.String,
-	organizationId: Schema.String,
+	id: HazelWebhookId,
+	channelId: HazelChannelId,
+	organizationId: HazelOrganizationId,
 	name: Schema.String,
 	webhookUrl: Schema.String,
 	token: Schema.String,
@@ -71,7 +74,7 @@ const HazelChannelWebhookResponseSchema = Schema.Struct({
 const DiscoveryDocumentSchema = Schema.Struct({
 	authorization_endpoint: Schema.String,
 	token_endpoint: Schema.String,
-	userinfo_endpoint: Schema.optional(Schema.String),
+	userinfo_endpoint: Schema.optionalKey(Schema.String),
 })
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponseSchema)
@@ -191,7 +194,7 @@ export interface HazelOAuthServiceShape {
 	>
 	readonly listChannels: (
 		orgId: OrgId,
-		hazelOrganizationId: string,
+		hazelOrganizationId: HazelOrganizationId,
 	) => Effect.Effect<
 		ReadonlyArray<HazelChannelSummary>,
 		| IntegrationsNotConnectedError
@@ -203,15 +206,15 @@ export interface HazelOAuthServiceShape {
 	readonly createChannelWebhook: (
 		orgId: OrgId,
 		options: {
-			readonly channelId: string
+			readonly channelId: HazelChannelId
 			readonly name: string
 			readonly description?: string
 		},
 	) => Effect.Effect<
 		{
-			readonly id: string
-			readonly channelId: string
-			readonly organizationId: string
+			readonly id: HazelWebhookId
+			readonly channelId: HazelChannelId
+			readonly organizationId: HazelOrganizationId
 			readonly name: string
 			readonly webhookUrl: string
 			readonly token: string
@@ -345,7 +348,7 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 			) {
 				const config = yield* resolveConfig
 				const state = randomBytes(24).toString("base64url")
-				const currentTime = Date.now()
+				const currentTime = yield* Clock.currentTimeMillis
 				const callbackUrl = options.callbackUrl
 
 				yield* purgeExpiredStates(currentTime)
@@ -388,7 +391,7 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 							}),
 						)
 					}
-					if (row.expiresAt < Date.now()) {
+					if (row.expiresAt < (yield* Clock.currentTimeMillis)) {
 						yield* dbExecute((db) =>
 							db.delete(oauthAuthStates).where(eq(oauthAuthStates.state, state)),
 						)
@@ -548,9 +551,11 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 				const refreshEnc = tokenResponse.refresh_token
 					? yield* encryptValue(tokenResponse.refresh_token)
 					: null
+				const currentTime = yield* Clock.currentTimeMillis
 				const expiresAt =
-					tokenResponse.expires_in != null ? Date.now() + tokenResponse.expires_in * 1000 : null
-				const currentTime = Date.now()
+					tokenResponse.expires_in != null
+						? currentTime + tokenResponse.expires_in * 1000
+						: null
 				const orgId = stateRow.orgId as OrgId
 
 				const existing = yield* dbExecute((db) =>
@@ -648,9 +653,11 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 					const refreshEnc = tokenResponse.refresh_token
 						? yield* encryptValue(tokenResponse.refresh_token)
 						: null
+					const currentTime = yield* Clock.currentTimeMillis
 					const expiresAt =
-						tokenResponse.expires_in != null ? Date.now() + tokenResponse.expires_in * 1000 : null
-					const currentTime = Date.now()
+						tokenResponse.expires_in != null
+							? currentTime + tokenResponse.expires_in * 1000
+							: null
 					yield* dbExecute((db) =>
 						db
 							.update(oauthConnections)
@@ -674,7 +681,8 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 			) {
 				const config = yield* resolveConfig
 				const row = yield* requireConnection(orgId)
-				const isValid = row.expiresAt == null || row.expiresAt - Date.now() > REFRESH_LEEWAY_MS
+				const now = yield* Clock.currentTimeMillis
+				const isValid = row.expiresAt == null || row.expiresAt - now > REFRESH_LEEWAY_MS
 
 				if (isValid) {
 					const accessToken = yield* decryptValue({
@@ -832,7 +840,7 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 			const createChannelWebhook = Effect.fn("HazelOAuthService.createChannelWebhook")(function* (
 				orgId: OrgId,
 				options: {
-					readonly channelId: string
+					readonly channelId: HazelChannelId
 					readonly name: string
 					readonly description?: string
 				},

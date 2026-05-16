@@ -43,7 +43,7 @@ const ADMIN_ROLES = new Set(["root", "org:admin"])
 const requireAdmin = (roles: ReadonlyArray<string>) =>
 	Effect.gen(function* () {
 		if (roles.some((role) => ADMIN_ROLES.has(role))) return
-		yield* Effect.fail(
+		return yield* Effect.fail(
 			new IntegrationsForbiddenError({
 				message: "Only org admins can manage integrations",
 			}),

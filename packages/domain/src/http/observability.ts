@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
+import { SpanId, TraceId } from "../primitives"
 
 export { UnauthorizedError } from "./current-tenant"
 
@@ -49,7 +50,7 @@ const SearchTracesRequest = Schema.Struct({
 	minDurationMs: Schema.optionalKey(Schema.Number),
 	maxDurationMs: Schema.optionalKey(Schema.Number),
 	httpMethod: Schema.optionalKey(Schema.String),
-	traceId: Schema.optionalKey(Schema.String),
+	traceId: Schema.optionalKey(TraceId),
 	attributeFilters: Schema.optionalKey(Schema.Array(AttributeFilter)),
 	rootOnly: Schema.optionalKey(Schema.Boolean),
 	limit: Schema.optionalKey(Schema.Number),
@@ -57,8 +58,8 @@ const SearchTracesRequest = Schema.Struct({
 })
 
 const SpanResult = Schema.Struct({
-	traceId: Schema.String,
-	spanId: Schema.NullOr(Schema.String),
+	traceId: TraceId,
+	spanId: Schema.NullOr(SpanId),
 	spanName: Schema.String,
 	serviceName: Schema.String,
 	durationMs: Schema.Number,
@@ -82,7 +83,7 @@ const SearchTracesResponse = Schema.Struct({
 // --- Inspect Trace ---
 
 const InspectTraceRequest = Schema.Struct({
-	traceId: Schema.String,
+	traceId: TraceId,
 })
 
 const LogEntry = Schema.Struct({
@@ -90,8 +91,8 @@ const LogEntry = Schema.Struct({
 	severityText: Schema.String,
 	serviceName: Schema.String,
 	body: Schema.String,
-	spanId: Schema.optionalKey(Schema.String),
-	traceId: Schema.optionalKey(Schema.String),
+	spanId: Schema.optionalKey(SpanId),
+	traceId: Schema.optionalKey(TraceId),
 })
 
 interface SpanNodeResponse {
@@ -108,8 +109,8 @@ interface SpanNodeResponse {
 }
 
 const SpanNode: Schema.Codec<SpanNodeResponse> = Schema.Struct({
-	spanId: Schema.String,
-	parentSpanId: Schema.String,
+	spanId: SpanId,
+	parentSpanId: Schema.Union([SpanId, Schema.Literal("")]),
 	spanName: Schema.String,
 	serviceName: Schema.String,
 	durationMs: Schema.Number,
@@ -121,7 +122,7 @@ const SpanNode: Schema.Codec<SpanNodeResponse> = Schema.Struct({
 })
 
 const InspectTraceResponse = Schema.Struct({
-	traceId: Schema.String,
+	traceId: TraceId,
 	serviceCount: Schema.Number,
 	spanCount: Schema.Number,
 	rootDurationMs: Schema.Number,
@@ -177,7 +178,7 @@ const DiagnoseServiceResponse = Schema.Struct({
 	),
 	recentTraces: Schema.Array(
 		Schema.Struct({
-			traceId: Schema.String,
+			traceId: TraceId,
 			rootSpanName: Schema.String,
 			durationMs: Schema.Number,
 			hasError: Schema.Boolean,
@@ -193,7 +194,7 @@ const SearchLogsRequest = Schema.Struct({
 	service: Schema.optionalKey(Schema.String),
 	severity: Schema.optionalKey(Schema.String),
 	search: Schema.optionalKey(Schema.String),
-	traceId: Schema.optionalKey(Schema.String),
+	traceId: Schema.optionalKey(TraceId),
 	limit: Schema.optionalKey(Schema.Number),
 	offset: Schema.optionalKey(Schema.Number),
 })

@@ -18,6 +18,7 @@
 		"noUncheckedSideEffectImports": true,
 		"paths": {
 			"@/*": ["./src/*"],
+			"@maple-dev/effect-sdk/client": ["../../lib/effect-sdk/src/client/index.ts"],
 			"@maple/ui/*": ["../../packages/ui/src/*"]
 		},
 		"plugins": [

@@ -81,7 +81,10 @@ export const resolveResource = (config: ResourceConfigInput): Effect.Effect<Reso
 		const attributes: Record<string, unknown> = {}
 		Object.assign(attributes, getAutoPlatformAttributes())
 		attributes["maple.sdk.type"] = config.sdkType ?? "server"
-		if (environment) attributes["deployment.environment"] = environment
+		if (environment) {
+			attributes["deployment.environment"] = environment
+			attributes["deployment.environment.name"] = environment
+		}
 		if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
 		Object.assign(attributes, envResourceAttributes)
 		if (config.attributes) Object.assign(attributes, config.attributes)
@@ -148,7 +151,10 @@ export const resolveResourceFromEnv = (
 	const attributes: Record<string, unknown> = {}
 	Object.assign(attributes, getAutoPlatformAttributes())
 	attributes["maple.sdk.type"] = config.sdkType ?? "server"
-	if (environment) attributes["deployment.environment"] = environment
+	if (environment) {
+		attributes["deployment.environment"] = environment
+		attributes["deployment.environment.name"] = environment
+	}
 	if (serviceVersion) attributes["deployment.commit_sha"] = serviceVersion
 	Object.assign(attributes, envResourceAttributes)
 	if (config.attributes) Object.assign(attributes, config.attributes)

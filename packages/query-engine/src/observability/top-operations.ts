@@ -19,13 +19,14 @@ const METRIC_EXPRESSIONS: Record<string, string> = {
 	apdex: "if(count() > 0, round((countIf(Duration / 1000000 < 500) + countIf(Duration / 1000000 >= 500 AND Duration / 1000000 < 2000) * 0.5) / count(), 4), 0)",
 }
 
-export const topOperations = (input: {
+export const topOperations: (input: {
 	readonly serviceName: string
 	readonly metric: TracesMetric
 	readonly timeRange: TimeRange
 	readonly limit?: number
-}): Effect.Effect<ReadonlyArray<TopOperation>, ObservabilityError, TinybirdExecutor> =>
-	Effect.gen(function* () {
+}) => Effect.Effect<ReadonlyArray<TopOperation>, ObservabilityError, TinybirdExecutor> = Effect.fn(
+	"Observability.topOperations",
+)(function* (input) {
 		const executor = yield* TinybirdExecutor
 		const limit = input.limit ?? 20
 		const esc = escapeForSQL
@@ -55,4 +56,4 @@ export const topOperations = (input: {
 			rows,
 			Arr.map((r): TopOperation => ({ name: r.name, value: Number(r.value) })),
 		)
-	})
+})

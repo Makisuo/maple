@@ -1,4 +1,9 @@
-import { HazelStartConnectRequest, type AlertDestinationType } from "@maple/domain/http"
+import {
+	HazelOrganizationId,
+	HazelStartConnectRequest,
+	type AlertDestinationType,
+	type HazelChannelsListResponse,
+} from "@maple/domain/http"
 import { type DestinationFormState, defaultDestinationForm } from "@/lib/alerts/form-utils"
 import {
 	DESTINATION_TYPES,
@@ -10,8 +15,7 @@ import { HazelIcon, LoaderIcon } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import type { HazelChannelsListResponse } from "@maple/domain/http"
-import { Exit } from "effect"
+import { Exit, Schema } from "effect"
 import { useEffect, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -34,6 +38,8 @@ import {
 } from "@maple/ui/components/ui/select"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { cn } from "@maple/ui/utils"
+
+const decodeHazelOrganizationIdSync = Schema.decodeSync(HazelOrganizationId)
 
 interface DestinationDialogProps {
 	open: boolean
@@ -164,7 +170,7 @@ function HazelOAuthFields({
 	const channelsAtom =
 		orgIdForChannels.length > 0
 			? MapleApiAtomClient.query("integrations", "hazelChannels", {
-					params: { organizationId: orgIdForChannels },
+					params: { organizationId: decodeHazelOrganizationIdSync(orgIdForChannels) },
 					reactivityKeys: ["hazelIntegrationStatus", "hazelChannels", orgIdForChannels],
 				})
 			: disabledResultAtom<HazelChannelsListResponse>()

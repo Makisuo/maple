@@ -3,12 +3,13 @@ import type { ServiceDependenciesOutput } from "@maple/domain/tinybird"
 import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { TimeRange, ServiceEdge } from "./types"
 
-export const serviceMap = (input: {
+export const serviceMap: (input: {
 	readonly timeRange: TimeRange
 	readonly service?: string
 	readonly environment?: string
-}): Effect.Effect<ReadonlyArray<ServiceEdge>, ObservabilityError, TinybirdExecutor> =>
-	Effect.gen(function* () {
+}) => Effect.Effect<ReadonlyArray<ServiceEdge>, ObservabilityError, TinybirdExecutor> = Effect.fn(
+	"Observability.serviceMap",
+)(function* (input) {
 		const executor = yield* TinybirdExecutor
 
 		const result = yield* executor.query<ServiceDependenciesOutput>(
@@ -35,4 +36,4 @@ export const serviceMap = (input: {
 				}),
 			),
 		)
-	})
+})

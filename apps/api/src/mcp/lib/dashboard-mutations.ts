@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import {
 	DashboardDocument,
@@ -139,7 +139,8 @@ export const withDashboardMutation = <E, R>(
 			.mutate(tenant.orgId, tenant.userId, dashboardIdBranded, (existing) =>
 				Effect.gen(function* () {
 					const nextWidgets = yield* transform(existing.widgets)
-					const now = decodeIsoDateTimeString(new Date().toISOString())
+					const nowMs = yield* Clock.currentTimeMillis
+					const now = decodeIsoDateTimeString(new Date(nowMs).toISOString())
 
 					return new DashboardDocument({
 						id: existing.id,

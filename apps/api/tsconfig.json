@@ -19,7 +19,8 @@
 		"noFallthroughCasesInSwitch": true,
 		"noUncheckedSideEffectImports": true,
 		"paths": {
-			"@/*": ["./src/*"]
+			"@/*": ["./src/*"],
+			"@maple-dev/effect-sdk/cloudflare": ["../../lib/effect-sdk/src/cloudflare/index.ts"]
 		},
 		"plugins": [
 			{

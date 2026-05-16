@@ -60,7 +60,10 @@ export const layer = (config: MapleClientConfig) => {
 			attributes["browser.timezone"] = Intl.DateTimeFormat().resolvedOptions().timeZone
 		} catch {}
 	}
-	if (config.environment) attributes["deployment.environment"] = config.environment
+	if (config.environment) {
+		attributes["deployment.environment"] = config.environment
+		attributes["deployment.environment.name"] = config.environment
+	}
 	if (config.serviceVersion) attributes["deployment.commit_sha"] = config.serviceVersion
 	if (config.attributes) Object.assign(attributes, config.attributes)
 
